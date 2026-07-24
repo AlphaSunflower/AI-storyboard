@@ -74,6 +74,15 @@ public class FileStorageService {
      * @return local relative path like /api/files/videos/xxx.mp4
      */
     public String saveVideo(String sourceUrl) {
+        // Handle non-http sources (e.g., raw base64 or data URI)
+        if (sourceUrl == null || sourceUrl.isBlank()) {
+            throw new RuntimeException("Empty video URL");
+        }
+        if (sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://")) {
+            return downloadAndSave(sourceUrl, VIDEOS_DIR, "/api/files/videos/", "video/mp4");
+        }
+        // Might be a data URI or raw base64 — log and try direct URI as fallback
+        log.warn("saveVideo received non-HTTP source (len={}), attempting direct URI", sourceUrl.length());
         return downloadAndSave(sourceUrl, VIDEOS_DIR, "/api/files/videos/", "video/mp4");
     }
 

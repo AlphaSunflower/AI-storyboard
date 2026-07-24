@@ -116,8 +116,17 @@ public class VideoGenerationService {
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
                 String videoUrl = root.path("url").asText();
+                log.info("Video completed, URL: {}", videoUrl);
                 // Download and save locally
-                String localPath = fileStorageService.saveVideo(videoUrl);
+                String localPath;
+                try {
+                    localPath = fileStorageService.saveVideo(videoUrl);
+                } catch (Exception e) {
+                    log.error("Failed to save video from URL: {}", videoUrl, e);
+                    result.put("status", "failed");
+                    result.put("error", "下载视频失败: " + e.getMessage());
+                    return result;
+                }
                 result.put("status", "completed");
                 result.put("videoUrl", localPath);
 
