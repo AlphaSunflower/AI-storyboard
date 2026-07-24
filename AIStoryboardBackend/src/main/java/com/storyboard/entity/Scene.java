@@ -3,7 +3,7 @@ package com.storyboard.entity;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @TableName(value = "scenes", schema = "public")
@@ -29,7 +29,7 @@ public class Scene {
     private String imageTaskId;
     private String videoTaskId;
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 }

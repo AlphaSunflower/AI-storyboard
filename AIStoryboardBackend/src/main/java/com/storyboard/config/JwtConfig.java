@@ -4,8 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "jwt")
 public class JwtConfig {
-    private String accessSecret;
-    private String refreshSecret;
+    private String accessSecret = "dev-access-secret-key-change-in-production!!";
+    private String refreshSecret = "dev-refresh-secret-key-change-in-prod!!";
     private String issuer = "newworkflow-backend";
     private long accessTokenTtl = 3600;
     private long refreshTokenTtl = 2592000;

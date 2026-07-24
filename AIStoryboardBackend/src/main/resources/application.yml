@@ -10,7 +10,7 @@ spring:
     active: local
 
 server:
-  port: ${SERVER_PORT:8081}
+  port: ${SERVER_PORT:8082}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

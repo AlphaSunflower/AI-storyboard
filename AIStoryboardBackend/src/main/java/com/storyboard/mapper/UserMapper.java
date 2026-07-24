@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Mapper
 public interface UserMapper extends BaseMapper<User> {
@@ -16,5 +16,5 @@ public interface UserMapper extends BaseMapper<User> {
     User findByEmail(@Param("email") String email);
 
     @Update("UPDATE public.users SET last_login_at = #{now} WHERE id = #{id}")
-    int updateLastLoginAt(@Param("id") String id, @Param("now") LocalDateTime now);
+    int updateLastLoginAt(@Param("id") String id, @Param("now") OffsetDateTime now);
 }

@@ -10,7 +10,7 @@ import com.storyboard.security.JwtTokenProvider;
 import com.storyboard.security.ScryptPasswordService;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Service
 public class AuthService {
@@ -33,7 +33,7 @@ public class AuthService {
         if (!passwordService.verifyPassword(request.password(), user.getPasswordHash())) {
             throw new BusinessException(40102, "用户名或密码错误");
         }
-        userMapper.updateLastLoginAt(user.getId(), LocalDateTime.now());
+        userMapper.updateLastLoginAt(user.getId(), OffsetDateTime.now());
 
         String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
         String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());

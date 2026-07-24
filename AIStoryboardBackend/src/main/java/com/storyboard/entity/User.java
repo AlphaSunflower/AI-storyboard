@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @TableName(value = "users", schema = "public")
@@ -16,7 +16,7 @@ public class User {
     private String displayName;
     private String role;
     private String status;
-    private LocalDateTime lastLoginAt;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private OffsetDateTime lastLoginAt;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
 }

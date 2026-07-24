@@ -1,6 +1,6 @@
 package com.storyboard.dto.response;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public record ProjectResponse(
@@ -15,7 +15,7 @@ public record ProjectResponse(
     String scriptText,
     String aiModel,
     String status,
-    LocalDateTime createdAt,
-    LocalDateTime updatedAt,
+    OffsetDateTime createdAt,
+    OffsetDateTime updatedAt,
     List<SceneResponse> scenes
 ) {}

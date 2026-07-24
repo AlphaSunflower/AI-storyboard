@@ -1,6 +1,6 @@
 package com.storyboard.dto.response;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 public record SceneResponse(
     String id,
@@ -20,6 +20,6 @@ public record SceneResponse(
     String videoUrl,
     String imageStatus,
     String videoStatus,
-    LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    OffsetDateTime createdAt,
+    OffsetDateTime updatedAt
 ) {}
