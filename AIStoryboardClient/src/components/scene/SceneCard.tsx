@@ -84,6 +84,8 @@ export function SceneCard({
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [sceneName, setSceneName] = useState(scene.scriptContent || '');
 
   const imageLabel = getImageLabel(scene.imageStatus, !!generatingImage);
   const videoLabel = getVideoLabel(scene.videoStatus, !!generatingVideo);
@@ -112,6 +114,20 @@ export function SceneCard({
     setExpanded(!expanded);
   };
 
+  const handleSaveRename = async () => {
+    const trimmed = sceneName.trim();
+    if (trimmed) {
+      await sceneApi.update(scene.id, { scriptContent: trimmed });
+    }
+    setIsRenaming(false);
+  };
+
+  const handleStartRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSceneName(scene.scriptContent || '');
+    setIsRenaming(true);
+  };
+
   return (
     <div
       onClick={onSelect}
@@ -135,14 +151,62 @@ export function SceneCard({
           marginBottom: 4,
         }}
       >
-        <div
-          style={{
-            fontWeight: 600,
-            fontSize: 13,
-            color: 'var(--color-ink)',
-          }}
-        >
-          分镜 {scene.sceneNumber}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isRenaming ? (
+            <input
+              value={sceneName}
+              onChange={(e) => setSceneName(e.target.value)}
+              onBlur={handleSaveRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveRename();
+                } else if (e.key === 'Escape') {
+                  setIsRenaming(false);
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              autoFocus
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                padding: '2px 6px',
+                borderRadius: 'var(--rounded-sm)',
+                border: '1px solid var(--color-primary)',
+                outline: 'none',
+                fontFamily: 'inherit',
+                width: 160,
+              }}
+            />
+          ) : (
+            <>
+              <div
+                style={{
+                  fontWeight: 600,
+                  fontSize: 13,
+                  color: 'var(--color-ink)',
+                }}
+              >
+                分镜 {scene.sceneNumber}
+              </div>
+              <button
+                onClick={handleStartRename}
+                title="重命名"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  padding: '0 2px',
+                  color: 'var(--color-muted)',
+                  lineHeight: 1,
+                  opacity: 0.6,
+                }}
+              >
+                ✏️
+              </button>
+            </>
+          )}
         </div>
         <button
           onClick={handleDelete}
