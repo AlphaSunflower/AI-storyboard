@@ -153,7 +153,7 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
               <div style={{ flex: 1 }}>
                 <span style={labelStyle}>当前图片</span>
                 <img
-                  src={scene.imageUrl}
+                  src={assetUrl(scene.imageUrl)}
                   alt={`分镜 ${scene.sceneNumber} 图片`}
                   style={{
                     width: '100%',
@@ -170,7 +170,7 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
               <div style={{ flex: 1 }}>
                 <span style={labelStyle}>当前视频预览</span>
                 <video
-                  src={scene.videoUrl}
+                  src={assetUrl(scene.videoUrl)}
                   controls
                   muted
                   style={{

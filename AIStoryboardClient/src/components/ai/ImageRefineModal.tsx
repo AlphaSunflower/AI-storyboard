@@ -148,7 +148,7 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
             <div>
               <span style={labelStyle}>当前生成图</span>
               <img
-                src={scene.imageUrl}
+                src={assetUrl(scene.imageUrl)}
                 alt={`分镜 ${scene.sceneNumber} 已生成图片`}
                 style={{
                   width: '100%',

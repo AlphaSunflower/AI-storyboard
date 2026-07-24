@@ -1,5 +1,13 @@
 import { useProjectStore } from '../../stores/projectStore';
 
+const BACKEND = 'http://localhost:8082';
+
+function assetUrl(path: string | null) {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return BACKEND + path;
+}
+
 export function PreviewPanel() {
   const { scenes, selectedSceneId } = useProjectStore();
   const scene = scenes.find((s) => s.id === selectedSceneId);
@@ -76,7 +84,7 @@ export function PreviewPanel() {
         </p>
         {scene.imageUrl ? (
           <img
-            src={scene.imageUrl}
+            src={assetUrl(scene.imageUrl)}
             alt={`分镜 ${scene.sceneNumber} 预览`}
             style={{
               width: '100%',
@@ -121,7 +129,7 @@ export function PreviewPanel() {
             视频预览
           </p>
           <video
-            src={scene.videoUrl}
+            src={assetUrl(scene.videoUrl)}
             controls
             style={{
               width: '100%',
