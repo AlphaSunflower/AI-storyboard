@@ -21,7 +21,9 @@ public class ScriptGenerationService {
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(30))
+            .build();
 
     public ScriptGenerationService(AiConfigProperties config, ProjectMapper projectMapper, SceneMapper sceneMapper) {
         this.config = config;
@@ -67,7 +69,8 @@ public class ScriptGenerationService {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlVision()))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .timeout(java.time.Duration.ofSeconds(180))
+            .header("Authorization", "Bearer " + config.getApiKey())
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
 

@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +21,9 @@ public class ImageGenerationService {
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
 
     public ImageGenerationService(AiConfigProperties config, SceneMapper sceneMapper) {
         this.config = config;
@@ -35,6 +38,10 @@ public class ImageGenerationService {
 
         String effectiveModel = model != null ? model : config.getDefaultImageModel();
 
+        // 标记为生成中
+        scene.setImageStatus("generating");
+        sceneMapper.updateById(scene);
+
         try {
             String imageUrl;
             if ("gemini-3-pro-image-preview".equals(effectiveModel)) {
@@ -43,11 +50,9 @@ public class ImageGenerationService {
                 imageUrl = callOpenAIImage(effectiveModel, prompt, size, aspectRatio, referenceImages);
             }
 
-            // 更新 scene
             scene.setImageUrl(imageUrl);
             scene.setImageStatus("completed");
             sceneMapper.updateById(scene);
-
             return imageUrl;
         } catch (Exception e) {
             scene.setImageStatus("failed");
@@ -67,11 +72,13 @@ public class ImageGenerationService {
             body.put("reference_images", referenceImages);
         }
 
+        String requestBody = objectMapper.writeValueAsString(body);
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(config.getBaseUrlOpenai() + "/images/generations"))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer " + ("gpt-image-2-official".equals(model) ? config.getSora2OfficialApiKey() : config.getApiKey()))
-            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+            .timeout(Duration.ofSeconds(120))
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build();
 
         HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -94,6 +101,7 @@ public class ImageGenerationService {
             .uri(URI.create(config.getBaseUrlGemini()))
             .header("Content-Type", "application/json")
             .header("x-goog-api-key", config.getApiKey())
+            .timeout(Duration.ofSeconds(120))
             .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
             .build();
 
@@ -102,7 +110,6 @@ public class ImageGenerationService {
             throw new RuntimeException("Gemini API returned " + resp.statusCode() + ": " + resp.body());
         }
         JsonNode root = objectMapper.readTree(resp.body());
-        // 提取图片 URL（根据 Gemini 响应格式调整）
         return root.path("candidates").get(0).path("content").path("parts").get(0).path("inlineData").path("data").asText();
     }
 }

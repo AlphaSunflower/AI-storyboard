@@ -21,7 +21,9 @@ public class VideoGenerationService {
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(30))
+            .build();
 
     private static final Map<String, String> MODEL_ALIAS = Map.of(
         "veo-3.1-fast", "veo-3.1-fast-generate-preview",
@@ -68,7 +70,8 @@ public class VideoGenerationService {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlOpenai() + "/videos"))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .timeout(java.time.Duration.ofSeconds(180))
+            .header("Authorization", "Bearer " + config.getApiKey())
                 .POST(HttpRequest.BodyPublishers.ofString(sb.toString()))
                 .build();
 
@@ -95,7 +98,8 @@ public class VideoGenerationService {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId))
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .timeout(java.time.Duration.ofSeconds(180))
+            .header("Authorization", "Bearer " + config.getApiKey())
                 .GET()
                 .build();
 
