@@ -56,6 +56,7 @@ export function LeftSidebar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleRefImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     const file = e.target.files?.[0];
     if (file) {
       setRefImageFile(file);
@@ -78,6 +79,7 @@ export function LeftSidebar() {
         const p = await createProject('未命名项目', creationType, aspectRatio);
         projectId = p.id;
       } catch {
+        alert('创建项目失败，请重试');
         return;
       }
     }
@@ -252,16 +254,13 @@ export function LeftSidebar() {
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleRefImage} />
         {refImagePreview && (
-          <img
-            src={refImagePreview}
-            style={{
-              width: '100%',
-              maxHeight: 100,
-              objectFit: 'cover',
-              borderRadius: 8,
-              marginTop: 8,
-            }}
-          />
+          <div style={{ position: 'relative', marginTop: 8 }}>
+            <img src={refImagePreview} style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8 }} />
+            <span onClick={(e) => { e.stopPropagation(); setRefImagePreview(''); setRefImageFile(null); }}
+              style={{ position: 'absolute', top: -4, right: -4, background: 'var(--color-error)', color: 'white',
+                borderRadius: '50%', width: 18, height: 18, fontSize: 12, display: 'flex',
+                alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</span>
+          </div>
         )}
       </div>
 

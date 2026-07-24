@@ -97,15 +97,23 @@ export function SceneCard({
   const handleGenerateImage = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!imagePrompt.trim()) return;
-    await sceneApi.update(scene.id, { imagePrompt });
-    await generateImage(scene.id, imagePrompt, imageModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+    try {
+      await sceneApi.update(scene.id, { imagePrompt });
+      await generateImage(scene.id, imagePrompt, imageModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+    } catch (err) {
+      alert('生成图片失败，请检查网络连接');
+    }
   };
 
   const handleGenerateVideo = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!videoPrompt.trim()) return;
-    await sceneApi.update(scene.id, { videoPrompt });
-    await generateVideo(scene.id, videoPrompt, videoModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+    try {
+      await sceneApi.update(scene.id, { videoPrompt });
+      await generateVideo(scene.id, videoPrompt, videoModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+    } catch (err) {
+      alert('生成视频失败，请检查网络连接');
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -317,12 +325,9 @@ export function SceneCard({
 
           {/* Reference image upload */}
           <div style={{ marginTop: 8 }}>
-            <label style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 3, display: 'block' }}>
-              参考图（可选，最多3张）
-            </label>
             <button onClick={() => refInputRef.current?.click()}
               style={{ padding:'4px 10px',fontSize:11,borderRadius:'var(--rounded-sm)',border:'1px solid var(--color-hairline)',background:'white',cursor:'pointer' }}>
-              + 添加参考图
+              + 添加参考图（可选，最多3张）
             </button>
             <input ref={refInputRef} type="file" accept="image/*" multiple hidden
               onChange={(e) => {
