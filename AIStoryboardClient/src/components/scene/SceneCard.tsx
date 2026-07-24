@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
@@ -88,6 +88,8 @@ export function SceneCard({
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneName, setSceneName] = useState(scene.scriptContent || '');
+  const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
+  const refInputRef = useRef<HTMLInputElement>(null);
 
   const imageLabel = getImageLabel(scene.imageStatus, !!generatingImage);
   const videoLabel = getVideoLabel(scene.videoStatus, !!generatingVideo);
@@ -96,14 +98,14 @@ export function SceneCard({
     e.stopPropagation();
     if (!imagePrompt.trim()) return;
     await sceneApi.update(scene.id, { imagePrompt });
-    await generateImage(scene.id, imagePrompt, imageModel);
+    await generateImage(scene.id, imagePrompt, imageModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
   };
 
   const handleGenerateVideo = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!videoPrompt.trim()) return;
     await sceneApi.update(scene.id, { videoPrompt });
-    await generateVideo(scene.id, videoPrompt, videoModel);
+    await generateVideo(scene.id, videoPrompt, videoModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -311,6 +313,38 @@ export function SceneCard({
               fontFamily: 'inherit',
             }}
           />
+
+          {/* Reference image upload */}
+          <div style={{ marginTop: 8 }}>
+            <label style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 3, display: 'block' }}>
+              参考图（可选，最多3张）
+            </label>
+            <button onClick={() => refInputRef.current?.click()}
+              style={{ padding:'4px 10px',fontSize:11,borderRadius:'var(--rounded-sm)',border:'1px solid var(--color-hairline)',background:'white',cursor:'pointer' }}>
+              + 添加参考图
+            </button>
+            <input ref={refInputRef} type="file" accept="image/*" multiple hidden
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (sceneRefImages.length + files.length > 3) { alert('最多3张参考图'); return; }
+                files.forEach(f => {
+                  const reader = new FileReader();
+                  reader.onload = () => setSceneRefImages(prev => [...prev, reader.result as string]);
+                  reader.readAsDataURL(f);
+                });
+              }} />
+            {sceneRefImages.length > 0 && (
+              <div style={{ display:'flex',gap:4,marginTop:6,flexWrap:'wrap' }}>
+                {sceneRefImages.map((url,i) => (
+                  <div key={i} style={{position:'relative'}}>
+                    <img src={url} style={{width:48,height:48,borderRadius:4,objectFit:'cover'}} />
+                    <span onClick={() => setSceneRefImages(prev => prev.filter((_,j) => j!==i))}
+                      style={{position:'absolute',top:-4,right:-4,background:'var(--color-error)',color:'white',borderRadius:'50%',width:16,height:16,fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>×</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
