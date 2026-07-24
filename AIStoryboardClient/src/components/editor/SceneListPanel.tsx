@@ -1,7 +1,7 @@
 import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
 
-const middlePanelWidth = 340;
+const middlePanelWidth = 380;
 
 export function SceneListPanel() {
   const { scenes, selectedSceneId, selectScene, addScene, currentProject } =

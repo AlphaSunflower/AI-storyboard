@@ -91,6 +91,8 @@ export function SceneCard({
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
+  const [useRefForImage, setUseRefForImage] = useState(false);
+  const [useRefForVideo, setUseRefForVideo] = useState(false);
   const refInputRef = useRef<HTMLInputElement>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -110,7 +112,7 @@ export function SceneCard({
 
     try {
       await sceneApi.update(scene.id, { imagePrompt });
-      await generateImage(scene.id, imagePrompt, imageModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+      await generateImage(scene.id, imagePrompt, imageModel, useRefForImage && sceneRefImages.length > 0 ? sceneRefImages : undefined);
     } catch (err) {
       alert('生成图片失败，请检查网络连接');
     }
@@ -137,7 +139,7 @@ export function SceneCard({
 
     try {
       await sceneApi.update(scene.id, { videoPrompt });
-      await generateVideo(scene.id, videoPrompt, videoModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
+      await generateVideo(scene.id, videoPrompt, videoModel, useRefForVideo && sceneRefImages.length > 0 ? sceneRefImages : undefined);
     } catch (err) {
       alert('生成视频失败，请检查网络连接');
     }
@@ -395,6 +397,20 @@ export function SceneCard({
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Toggle ref-image usage */}
+          <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={useRefForImage} onChange={e => setUseRefForImage(e.target.checked)}
+                style={{ margin: 0, cursor: 'pointer' }} />
+              参考图生图
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={useRefForVideo} onChange={e => setUseRefForVideo(e.target.checked)}
+                style={{ margin: 0, cursor: 'pointer' }} />
+              参考图生视频
+            </label>
           </div>
         </div>
       )}
