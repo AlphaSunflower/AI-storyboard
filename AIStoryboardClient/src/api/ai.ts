@@ -40,4 +40,7 @@ export const aiApi = {
 
   pollTask: (taskId: string) =>
     client.get<ApiResponse<TaskStatusResponse>>(`/ai/task/${taskId}`),
+
+  getTaskStatus: (taskId: string) =>
+    client.get<ApiResponse<TaskStatusResponse>>(`/ai/task/${taskId}`),
 };

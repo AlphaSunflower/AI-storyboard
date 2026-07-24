@@ -143,7 +143,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const res = await aiApi.generateVideo({
         sceneId, prompt, model, referenceImages,
       });
-      return res.data.data.taskId;
+      const taskId = res.data.data.taskId;
+      // 轮询直到完成
+      let attempts = 0;
+      const poll = async () => {
+        attempts++;
+        const statusRes = await aiApi.getTaskStatus(taskId);
+        const status = statusRes.data.data;
+        if (status.status === 'completed') {
+          if (get().currentProject) await get().loadProject(get().currentProject!.id);
+        } else if (status.status === 'failed') {
+          // failed, do nothing special
+        } else if (attempts < 60) {
+          await new Promise(r => setTimeout(r, 5000));
+          await poll();
+        }
+      };
+      await poll();
+      return taskId;
     } finally {
       set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: false } }));
     }

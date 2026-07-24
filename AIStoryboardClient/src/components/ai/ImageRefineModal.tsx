@@ -105,9 +105,10 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
     });
   };
 
-  const handleSubmit = () => {
+  const handleConfirm = async () => {
     if (!prompt.trim()) return;
-    onGenerate({ prompt: prompt.trim(), model, referenceImages: allRefImages });
+    await onGenerate({ prompt: prompt.trim(), model, referenceImages: allRefImages });
+    onClose();
   };
 
   return (
@@ -315,7 +316,7 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
             取消
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={handleConfirm}
             disabled={!prompt.trim()}
             style={{
               padding: '7px 18px',

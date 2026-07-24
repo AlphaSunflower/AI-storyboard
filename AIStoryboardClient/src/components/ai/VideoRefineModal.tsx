@@ -108,9 +108,10 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
     });
   };
 
-  const handleSubmit = () => {
+  const handleConfirm = async () => {
     if (!prompt.trim()) return;
-    onGenerate({ prompt: prompt.trim(), model, referenceImages: allRefImages });
+    await onGenerate({ prompt: prompt.trim(), model, referenceImages: allRefImages });
+    onClose();
   };
 
   return (
@@ -353,7 +354,7 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
             取消
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={handleConfirm}
             disabled={!prompt.trim()}
             style={{
               padding: '7px 18px',

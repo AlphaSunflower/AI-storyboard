@@ -83,18 +83,33 @@ export function PreviewPanel() {
           图片预览
         </p>
         {scene.imageUrl ? (
-          <img
-            src={assetUrl(scene.imageUrl)}
-            alt={`分镜 ${scene.sceneNumber} 预览`}
-            style={{
-              width: '100%',
-              maxHeight: 400,
-              objectFit: 'contain',
-              borderRadius: 'var(--rounded-md)',
-              border: '1px solid var(--color-hairline)',
-              background: 'var(--color-canvas)',
-            }}
-          />
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <img
+              src={assetUrl(scene.imageUrl)}
+              alt={`分镜 ${scene.sceneNumber} 预览`}
+              style={{
+                flex: 1,
+                maxHeight: 400,
+                objectFit: 'contain',
+                borderRadius: 'var(--rounded-md)',
+                border: '1px solid var(--color-hairline)',
+                background: 'var(--color-canvas)',
+              }}
+            />
+            <a
+              href={assetUrl(scene.imageUrl)}
+              download
+              style={{
+                fontSize: 12,
+                color: 'var(--color-primary)',
+                cursor: 'pointer',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              [下载]
+            </a>
+          </div>
         ) : (
           <div
             style={{
@@ -128,17 +143,32 @@ export function PreviewPanel() {
           >
             视频预览
           </p>
-          <video
-            src={assetUrl(scene.videoUrl)}
-            controls
-            style={{
-              width: '100%',
-              maxHeight: 400,
-              borderRadius: 'var(--rounded-md)',
-              border: '1px solid var(--color-hairline)',
-              background: '#000',
-            }}
-          />
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <video
+              src={assetUrl(scene.videoUrl)}
+              controls
+              style={{
+                flex: 1,
+                maxHeight: 400,
+                borderRadius: 'var(--rounded-md)',
+                border: '1px solid var(--color-hairline)',
+                background: '#000',
+              }}
+            />
+            <a
+              href={assetUrl(scene.videoUrl)}
+              download
+              style={{
+                fontSize: 12,
+                color: 'var(--color-primary)',
+                cursor: 'pointer',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              [下载]
+            </a>
+          </div>
         </div>
       )}
 
