@@ -52,7 +52,12 @@ public class FileStorageService {
      */
     public String saveImageFromBase64(String base64Data) {
         try {
-            byte[] bytes = Base64.getDecoder().decode(base64Data);
+            // Strip data URI prefix if present (e.g. "data:image/png;base64,")
+            String clean = base64Data;
+            if (clean.contains(",") && clean.contains("base64")) {
+                clean = clean.substring(clean.indexOf(",") + 1);
+            }
+            byte[] bytes = Base64.getDecoder().decode(clean);
             String extension = "png"; // Gemini returns PNG by default
             String filename = UUID.randomUUID().toString() + "." + extension;
             Path target = IMAGES_DIR.resolve(filename);

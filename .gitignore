@@ -20,6 +20,8 @@ dist/
 Thumbs.db
 
 # Uploads (keep dirs)
-uploads/*
+uploads/**
+!uploads/images/
+!uploads/videos/
 !uploads/images/.gitkeep
 !uploads/videos/.gitkeep

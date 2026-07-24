@@ -99,7 +99,13 @@ public class ImageGenerationService {
             throw new RuntimeException("Image API returned " + resp.statusCode() + ": " + resp.body());
         }
         JsonNode root = objectMapper.readTree(resp.body());
-        return root.path("data").get(0).path("url").asText();
+        JsonNode data = root.path("data").get(0);
+        // Prefer b64_json (base64), fall back to url
+        String url = data.path("b64_json").asText();
+        if (url == null || url.isEmpty()) {
+            url = data.path("url").asText();
+        }
+        return url;
     }
 
     private String callGeminiImage(String prompt, String aspectRatio,
