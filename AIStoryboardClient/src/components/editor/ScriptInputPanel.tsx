@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { AspectRatioSelector } from '../common/AspectRatioSelector';
+import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -215,6 +216,9 @@ export function ScriptInputPanel() {
       >
         {isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
+
+      {/* Project history — vertical compact list, only when expanded */}
+      {!collapsed && <ProjectHistoryPanel />}
     </div>
   );
 }

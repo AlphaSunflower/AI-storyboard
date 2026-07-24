@@ -1,6 +1,5 @@
 import { useProjectStore } from '../../stores/projectStore';
 
-const barHeight = 40;
 const coralColor = '#FF6B6B';
 
 export function ProjectHistoryPanel() {
@@ -13,61 +12,70 @@ export function ProjectHistoryPanel() {
   return (
     <div
       style={{
-        height: barHeight,
-        minHeight: barHeight,
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 var(--space-md)',
-        borderBottom: '1px solid var(--color-hairline)',
-        background: 'var(--color-canvas)',
-        gap: 8,
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        whiteSpace: 'nowrap',
-        scrollbarWidth: 'none',
+        maxHeight: 150,
+        overflowY: 'auto',
+        borderTop: '1px solid var(--color-hairline)',
+        paddingTop: 8,
       }}
     >
+      <div
+        style={{
+          font: 'var(--text-caption-upper)',
+          fontSize: 11,
+          color: 'var(--color-muted)',
+          marginBottom: 6,
+        }}
+      >
+        历史项目
+      </div>
       {projects.map((p) => {
         const isActive = currentProject?.id === p.id;
 
         return (
-          <button
+          <div
             key={p.id}
             onClick={() => loadProject(p.id)}
             style={{
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              padding: '4px 14px',
-              height: 28,
-              borderRadius: 14,
-              border: isActive ? `1.5px solid ${coralColor}` : '1px solid var(--color-hairline)',
-              background: isActive ? `${coralColor}15` : 'white',
-              font: 'var(--text-caption)',
-              color: isActive ? coralColor : 'var(--color-muted)',
-              fontWeight: isActive ? 600 : 400,
+              justifyContent: 'space-between',
+              padding: '6px 8px',
+              borderRadius: 'var(--rounded-sm)',
+              background: isActive ? `${coralColor}12` : 'transparent',
               cursor: 'pointer',
-              flexShrink: 0,
-              transition: 'all 0.15s ease',
-              whiteSpace: 'nowrap',
+              fontSize: 13,
+              color: isActive ? coralColor : 'var(--color-body)',
+              fontWeight: isActive ? 600 : 400,
+              borderLeft: isActive ? `3px solid ${coralColor}` : '3px solid transparent',
+              transition: 'background 0.12s ease',
             }}
           >
             <span
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: isActive ? coralColor : 'var(--color-hairline)',
-                flexShrink: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+                marginRight: 8,
               }}
-            />
-            {p.name}
+            >
+              {p.name}
+            </span>
             {p.status === 'draft' && (
-              <span style={{ fontSize: 10, opacity: 0.6, marginLeft: 2 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: 'var(--color-muted)',
+                  background: 'var(--color-canvas-muted)',
+                  padding: '1px 6px',
+                  borderRadius: 8,
+                  flexShrink: 0,
+                }}
+              >
                 草稿
               </span>
             )}
-          </button>
+          </div>
         );
       })}
     </div>

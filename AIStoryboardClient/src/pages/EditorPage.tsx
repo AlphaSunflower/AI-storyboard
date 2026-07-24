@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AppHeader } from '../components/layout/AppHeader';
 import { GenerationProgress } from '../components/common/GenerationProgress';
-import { ProjectHistoryPanel } from '../components/editor/ProjectHistoryPanel';
 import { ScriptInputPanel } from '../components/editor/ScriptInputPanel';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
@@ -53,9 +52,6 @@ export function EditorPage() {
 
       {/* Generation progress indicator */}
       <GenerationProgress />
-
-      {/* Project history bar */}
-      <ProjectHistoryPanel />
 
       {/* Draft recovery banner */}
       {showDraftBanner && draftProject && (
