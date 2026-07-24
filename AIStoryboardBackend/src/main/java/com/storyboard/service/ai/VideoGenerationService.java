@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.FileStorageService;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -20,6 +21,7 @@ public class VideoGenerationService {
 
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofSeconds(30))
@@ -32,9 +34,11 @@ public class VideoGenerationService {
         "veo-3.1-fl", "veo-3.1-generate-preview"
     );
 
-    public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper) {
+    public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
+                                   FileStorageService fileStorageService) {
         this.config = config;
         this.sceneMapper = sceneMapper;
+        this.fileStorageService = fileStorageService;
     }
 
     public String createVideoTask(String sceneId, String prompt, String alias,
@@ -112,8 +116,10 @@ public class VideoGenerationService {
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
                 String videoUrl = root.path("url").asText();
+                // Download and save locally
+                String localPath = fileStorageService.saveVideo(videoUrl);
                 result.put("status", "completed");
-                result.put("videoUrl", videoUrl);
+                result.put("videoUrl", localPath);
 
                 // 更新 scene
                 var scenes = sceneMapper.selectList(
@@ -122,7 +128,7 @@ public class VideoGenerationService {
                 );
                 if (!scenes.isEmpty()) {
                     Scene scene = scenes.get(0);
-                    scene.setVideoUrl(videoUrl);
+                    scene.setVideoUrl(localPath);
                     scene.setVideoStatus("completed");
                     sceneMapper.updateById(scene);
                 }

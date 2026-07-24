@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.FileStorageService;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -20,14 +21,17 @@ public class ImageGenerationService {
 
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
-    public ImageGenerationService(AiConfigProperties config, SceneMapper sceneMapper) {
+    public ImageGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
+                                   FileStorageService fileStorageService) {
         this.config = config;
         this.sceneMapper = sceneMapper;
+        this.fileStorageService = fileStorageService;
     }
 
     public String generateImage(String sceneId, String prompt, String model,
@@ -43,17 +47,26 @@ public class ImageGenerationService {
         sceneMapper.updateById(scene);
 
         try {
-            String imageUrl;
+            String result;
             if ("gemini-3-pro-image-preview".equals(effectiveModel)) {
-                imageUrl = callGeminiImage(prompt, aspectRatio, referenceImages);
+                result = callGeminiImage(prompt, aspectRatio, referenceImages);
+                String localPath = fileStorageService.saveImageFromBase64(result);
+                scene.setImageUrl(localPath);
             } else {
-                imageUrl = callOpenAIImage(effectiveModel, prompt, size, aspectRatio, referenceImages);
+                result = callOpenAIImage(effectiveModel, prompt, size, aspectRatio, referenceImages);
+                // gpt-image-2 可能返回 URL 或 base64
+                String localPath;
+                if (result.startsWith("http://") || result.startsWith("https://")) {
+                    localPath = fileStorageService.saveImage(result);
+                } else {
+                    localPath = fileStorageService.saveImageFromBase64(result);
+                }
+                scene.setImageUrl(localPath);
             }
 
-            scene.setImageUrl(imageUrl);
             scene.setImageStatus("completed");
             sceneMapper.updateById(scene);
-            return imageUrl;
+            return scene.getImageUrl();
         } catch (Exception e) {
             scene.setImageStatus("failed");
             sceneMapper.updateById(scene);
