@@ -51,7 +51,7 @@ export function ScriptInputPanel() {
   const [customTypeDesc, setCustomTypeDesc] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [scriptText, setScriptText] = useState('');
-  const [refImageFile, setRefImageFile] = useState<File | null>(null);
+  const [_refImageFile, setRefImageFile] = useState<File | null>(null);
   const [refImagePreview, setRefImagePreview] = useState('');
 
   const handleRefImage = (e: React.ChangeEvent<HTMLInputElement>) => {
