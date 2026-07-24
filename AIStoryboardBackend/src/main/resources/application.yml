@@ -37,7 +37,7 @@ ai:
     base-url-openai: https://api2.laozhang.ai/v1
     base-url-gemini: https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent
     base-url-vision: https://api2.laozhang.ai/v1/chat/completions
-    default-image-model: gpt-image-2
+    default-image-model: gpt-4o-image
     default-vision-model: gemini-3-flash-preview
     poll-interval-ms: 5000
     poll-timeout-ms: 600000

@@ -201,7 +201,7 @@ export function LeftSidebar() {
           onChange={(e) => setImageModel(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
-          <option value="gpt-image-2">GPT Image 2</option>
+          <option value="gpt-4o-image">GPT-4o Image</option>
           <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image</option>
         </select>
       </div>
