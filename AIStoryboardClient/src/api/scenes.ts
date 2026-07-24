@@ -1,5 +1,6 @@
 import client from './client';
-import type { ApiResponse, SceneResponse } from './projects';
+import type { ApiResponse } from './auth';
+import type { SceneResponse } from './projects';
 
 export const sceneApi = {
   add: (projectId: string, data: Record<string, unknown>) =>
