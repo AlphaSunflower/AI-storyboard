@@ -69,7 +69,7 @@ public class ScriptGenerationService {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlVision()))
                 .header("Content-Type", "application/json")
-                .timeout(java.time.Duration.ofSeconds(180))
+                .timeout(java.time.Duration.ofSeconds(120))
             .header("Authorization", "Bearer " + config.getApiKey())
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();

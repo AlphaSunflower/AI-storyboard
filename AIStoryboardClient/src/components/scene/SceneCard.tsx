@@ -2,6 +2,8 @@ import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
+import { ImageRefineModal } from '../ai/ImageRefineModal';
+import { VideoRefineModal } from '../ai/VideoRefineModal';
 
 function Tag({ children }: { children: string }) {
   return (
@@ -90,6 +92,8 @@ export function SceneCard({
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
   const refInputRef = useRef<HTMLInputElement>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
 
   const imageLabel = getImageLabel(scene.imageStatus, !!generatingImage);
   const videoLabel = getVideoLabel(scene.videoStatus, !!generatingVideo);
@@ -97,6 +101,13 @@ export function SceneCard({
   const handleGenerateImage = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!imagePrompt.trim()) return;
+
+    // When already completed, open refine modal instead of direct re-generation
+    if (scene.imageStatus === 'completed') {
+      setShowImageModal(true);
+      return;
+    }
+
     try {
       await sceneApi.update(scene.id, { imagePrompt });
       await generateImage(scene.id, imagePrompt, imageModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
@@ -105,14 +116,39 @@ export function SceneCard({
     }
   };
 
+  const handleImageRefineConfirm = async (params: { prompt: string; model: string; referenceImages: string[] }) => {
+    try {
+      await sceneApi.update(scene.id, { imagePrompt: params.prompt });
+      await generateImage(scene.id, params.prompt, params.model, params.referenceImages);
+    } catch (err) {
+      alert('完善图片失败，请检查网络连接');
+    }
+  };
+
   const handleGenerateVideo = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!videoPrompt.trim()) return;
+
+    // When already completed, open refine modal instead of direct re-generation
+    if (scene.videoStatus === 'completed') {
+      setShowVideoModal(true);
+      return;
+    }
+
     try {
       await sceneApi.update(scene.id, { videoPrompt });
       await generateVideo(scene.id, videoPrompt, videoModel, sceneRefImages.length > 0 ? sceneRefImages : undefined);
     } catch (err) {
       alert('生成视频失败，请检查网络连接');
+    }
+  };
+
+  const handleVideoRefineConfirm = async (params: { prompt: string; model: string; referenceImages: string[] }) => {
+    try {
+      await sceneApi.update(scene.id, { videoPrompt: params.prompt });
+      await generateVideo(scene.id, params.prompt, params.model, params.referenceImages);
+    } catch (err) {
+      alert('完善视频失败，请检查网络连接');
     }
   };
 
@@ -377,6 +413,22 @@ export function SceneCard({
           {videoLabel}
         </button>
       </div>
+
+      {/* Refine modals */}
+      {showImageModal && (
+        <ImageRefineModal
+          scene={scene}
+          onClose={() => setShowImageModal(false)}
+          onGenerate={handleImageRefineConfirm}
+        />
+      )}
+      {showVideoModal && (
+        <VideoRefineModal
+          scene={scene}
+          onClose={() => setShowVideoModal(false)}
+          onGenerate={handleVideoRefineConfirm}
+        />
+      )}
     </div>
   );
 }

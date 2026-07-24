@@ -70,7 +70,7 @@ public class VideoGenerationService {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlOpenai() + "/videos"))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .timeout(java.time.Duration.ofSeconds(180))
+                .timeout(java.time.Duration.ofSeconds(120))
             .header("Authorization", "Bearer " + config.getApiKey())
                 .POST(HttpRequest.BodyPublishers.ofString(sb.toString()))
                 .build();
@@ -98,7 +98,7 @@ public class VideoGenerationService {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId))
-                .timeout(java.time.Duration.ofSeconds(180))
+                .timeout(java.time.Duration.ofSeconds(120))
             .header("Authorization", "Bearer " + config.getApiKey())
                 .GET()
                 .build();
