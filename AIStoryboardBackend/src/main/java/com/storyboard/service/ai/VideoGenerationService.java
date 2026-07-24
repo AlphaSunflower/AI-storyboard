@@ -14,9 +14,15 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class VideoGenerationService {
@@ -121,18 +127,27 @@ public class VideoGenerationService {
             result.put("taskId", taskId);
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
-                String videoUrl = root.path("url").asText();
-                log.info("Video completed, URL: {}", videoUrl);
-                // Download and save locally
-                String localPath;
-                try {
-                    localPath = fileStorageService.saveVideo(videoUrl);
-                } catch (Exception e) {
-                    log.error("Failed to save video from URL: {}", videoUrl, e);
-                    result.put("status", "failed");
-                    result.put("error", "下载视频失败: " + e.getMessage());
-                    return result;
+                // Download video content directly with auth
+                HttpRequest contentReq = HttpRequest.newBuilder()
+                    .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId + "/content"))
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .timeout(java.time.Duration.ofSeconds(180))
+                    .GET()
+                    .build();
+                HttpResponse<InputStream> contentResp = httpClient.send(contentReq,
+                    HttpResponse.BodyHandlers.ofInputStream());
+                if (contentResp.statusCode() != 200) {
+                    throw new RuntimeException("Video content download failed, status: " + contentResp.statusCode());
                 }
+
+                String filename = UUID.randomUUID().toString() + ".mp4";
+                Path target = Paths.get("uploads/videos").resolve(filename);
+                Files.createDirectories(target.getParent());
+                try (InputStream in = contentResp.body()) {
+                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+                String localPath = "/api/files/videos/" + filename;
+                log.info("Video downloaded and saved: {}", target);
                 result.put("status", "completed");
                 result.put("videoUrl", localPath);
 
