@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AppHeader } from '../components/layout/AppHeader';
 import { GenerationProgress } from '../components/common/GenerationProgress';
-import { ScriptInputPanel } from '../components/editor/ScriptInputPanel';
+import { LeftSidebar } from '../components/editor/LeftSidebar';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
@@ -70,7 +70,7 @@ export function EditorPage() {
           overflow: 'hidden',
         }}
       >
-        <ScriptInputPanel />
+        <LeftSidebar />
         <SceneListPanel />
         <PreviewPanel />
       </div>
