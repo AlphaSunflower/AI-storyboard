@@ -14,6 +14,10 @@ interface ProjectState {
   generatingVideo: Record<string, boolean>;
   scriptGenerationStatus: 'idle' | 'generating' | 'done' | 'error';
   scriptGenerationMessage: string;
+  imageModel: string;
+  videoModel: string;
+  setImageModel: (m: string) => void;
+  setVideoModel: (m: string) => void;
 
   loadProjects: () => Promise<void>;
   createProject: (name: string, creationType: string, aspectRatio: string) => Promise<ProjectResponse>;
@@ -41,6 +45,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generatingVideo: {},
   scriptGenerationStatus: 'idle',
   scriptGenerationMessage: '',
+  imageModel: 'gpt-image-2',
+  videoModel: 'veo-3.1-fast',
 
   loadProjects: async () => {
     set({ isLoading: true });
@@ -147,6 +153,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: v } })),
   setGeneratingVideo: (sceneId, v) =>
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: v } })),
+
+  setImageModel: (m) => set({ imageModel: m }),
+  setVideoModel: (m) => set({ videoModel: m }),
 
   addScene: async (projectId) => {
     await sceneApi.add(projectId, { scriptContent: '' });

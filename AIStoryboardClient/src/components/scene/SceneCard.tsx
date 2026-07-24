@@ -80,6 +80,8 @@ export function SceneCard({
   const generateImage = useProjectStore((s) => s.generateImage);
   const generateVideo = useProjectStore((s) => s.generateVideo);
   const deleteScene = useProjectStore((s) => s.deleteScene);
+  const imageModel = useProjectStore((s) => s.imageModel);
+  const videoModel = useProjectStore((s) => s.videoModel);
 
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
@@ -94,14 +96,14 @@ export function SceneCard({
     e.stopPropagation();
     if (!imagePrompt.trim()) return;
     await sceneApi.update(scene.id, { imagePrompt });
-    await generateImage(scene.id, imagePrompt);
+    await generateImage(scene.id, imagePrompt, imageModel);
   };
 
   const handleGenerateVideo = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!videoPrompt.trim()) return;
     await sceneApi.update(scene.id, { videoPrompt });
-    await generateVideo(scene.id, videoPrompt);
+    await generateVideo(scene.id, videoPrompt, videoModel);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {

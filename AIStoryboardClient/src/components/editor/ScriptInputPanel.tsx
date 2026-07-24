@@ -40,6 +40,10 @@ export function ScriptInputPanel() {
     isLoading,
     generateScript,
     createProject,
+    imageModel,
+    videoModel,
+    setImageModel,
+    setVideoModel,
   } = useProjectStore();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -47,6 +51,20 @@ export function ScriptInputPanel() {
   const [customTypeDesc, setCustomTypeDesc] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [scriptText, setScriptText] = useState('');
+  const [refImageFile, setRefImageFile] = useState<File | null>(null);
+  const [refImagePreview, setRefImagePreview] = useState('');
+
+  const handleRefImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setRefImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setRefImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!scriptText.trim()) return;
@@ -171,10 +189,52 @@ export function ScriptInputPanel() {
         </div>
       )}
 
+      {/* Model selectors */}
+      <div>
+        <label style={labelStyle}>生图模型</label>
+        <select
+          value={imageModel}
+          onChange={(e) => setImageModel(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          <option value="gpt-image-2">GPT Image 2</option>
+          <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image</option>
+        </select>
+      </div>
+      <div>
+        <label style={labelStyle}>生视频模型</label>
+        <select
+          value={videoModel}
+          onChange={(e) => setVideoModel(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          <option value="veo-3.1-fast">Veo 3.1 Fast</option>
+          <option value="veo-3.1">Veo 3.1</option>
+        </select>
+      </div>
+
       {/* Aspect ratio */}
       <div>
         <label style={labelStyle}>画幅比例</label>
         <AspectRatioSelector value={aspectRatio} onChange={setAspectRatio} />
+      </div>
+
+      {/* Reference image upload */}
+      <div>
+        <label style={labelStyle}>风格参考图（可选）</label>
+        <input type="file" accept="image/*" onChange={handleRefImage} />
+        {refImagePreview && (
+          <img
+            src={refImagePreview}
+            style={{
+              width: '100%',
+              maxHeight: 120,
+              objectFit: 'cover',
+              borderRadius: 'var(--rounded-md)',
+              marginTop: 8,
+            }}
+          />
+        )}
       </div>
 
       {/* Script textarea */}
