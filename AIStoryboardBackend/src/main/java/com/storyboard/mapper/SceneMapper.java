@@ -13,4 +13,7 @@ public interface SceneMapper extends BaseMapper<Scene> {
 
     @Select("SELECT * FROM public.scenes WHERE project_id = #{projectId} ORDER BY scene_number")
     List<Scene> findByProjectIdOrdered(@Param("projectId") String projectId);
+
+    @Select("SELECT COALESCE(MAX(scene_number), 0) FROM public.scenes WHERE project_id = #{projectId}")
+    int maxSceneNumber(@Param("projectId") String projectId);
 }
