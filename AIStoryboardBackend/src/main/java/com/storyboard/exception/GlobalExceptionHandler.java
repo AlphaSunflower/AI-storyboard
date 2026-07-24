@@ -36,7 +36,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception e) {
         log.error("Unhandled exception", e);
+        String message = e.getMessage();
+        if (message == null || message.isBlank()) {
+            message = "服务器内部错误";
+        } else if (message.length() > 200) {
+            message = message.substring(0, 200);
+        }
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(ApiResponse.error(50000, "服务器内部错误"));
+            .body(ApiResponse.error(50000, message));
     }
 }
