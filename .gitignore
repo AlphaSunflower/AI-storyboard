@@ -19,10 +19,3 @@ uploads/
 # OS
 .DS_Store
 Thumbs.db
-
-# Uploads (keep dirs)
-uploads/**
-!uploads/images/
-!uploads/videos/
-!uploads/images/.gitkeep
-!uploads/videos/.gitkeep
