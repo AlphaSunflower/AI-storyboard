@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { SceneResponse } from '../../api/projects';
+import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
 
 function Tag({ children }: { children: string }) {
@@ -75,9 +77,40 @@ export function SceneCard({
 }) {
   const generatingImage = useProjectStore((s) => s.generatingImage[scene.id]);
   const generatingVideo = useProjectStore((s) => s.generatingVideo[scene.id]);
+  const generateImage = useProjectStore((s) => s.generateImage);
+  const generateVideo = useProjectStore((s) => s.generateVideo);
+  const deleteScene = useProjectStore((s) => s.deleteScene);
+
+  const [expanded, setExpanded] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
+  const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
 
   const imageLabel = getImageLabel(scene.imageStatus, !!generatingImage);
   const videoLabel = getVideoLabel(scene.videoStatus, !!generatingVideo);
+
+  const handleGenerateImage = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!imagePrompt.trim()) return;
+    await sceneApi.update(scene.id, { imagePrompt });
+    await generateImage(scene.id, imagePrompt);
+  };
+
+  const handleGenerateVideo = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoPrompt.trim()) return;
+    await sceneApi.update(scene.id, { videoPrompt });
+    await generateVideo(scene.id, videoPrompt);
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await deleteScene(scene.id);
+  };
+
+  const handleToggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(!expanded);
+  };
 
   return (
     <div
@@ -93,17 +126,42 @@ export function SceneCard({
         transition: 'border-color 0.15s',
       }}
     >
-      {/* Scene number + summary */}
+      {/* Header row: scene number + delete button */}
       <div
         style={{
-          fontWeight: 600,
-          fontSize: 13,
-          color: 'var(--color-ink)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
           marginBottom: 4,
         }}
       >
-        分镜 {scene.sceneNumber}
+        <div
+          style={{
+            fontWeight: 600,
+            fontSize: 13,
+            color: 'var(--color-ink)',
+          }}
+        >
+          分镜 {scene.sceneNumber}
+        </div>
+        <button
+          onClick={handleDelete}
+          title="删除分镜"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 14,
+            padding: '1px 4px',
+            borderRadius: 'var(--rounded-sm)',
+            color: 'var(--color-muted)',
+            lineHeight: 1,
+          }}
+        >
+          🗑️
+        </button>
       </div>
+
       <div
         style={{
           fontSize: 12,
@@ -122,17 +180,93 @@ export function SceneCard({
         {scene.soundDesign && <Tag>{scene.soundDesign}</Tag>}
       </div>
 
+      {/* Expand/collapse toggle */}
+      <button
+        onClick={handleToggleExpand}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 11,
+          color: 'var(--color-primary)',
+          padding: 0,
+          marginBottom: expanded ? 8 : 6,
+        }}
+      >
+        {expanded ? '▲ 收起提示词' : '▼ 编辑提示词'}
+      </button>
+
+      {/* Prompt editor (collapsible) */}
+      {expanded && (
+        <div style={{ marginBottom: 8 }}>
+          <label
+            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
+          >
+            生图提示词
+          </label>
+          <textarea
+            value={imagePrompt}
+            onChange={(e) => setImagePrompt(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="输入生图提示词..."
+            rows={3}
+            style={{
+              width: '100%',
+              fontSize: 11,
+              padding: '6px 8px',
+              borderRadius: 'var(--rounded-sm)',
+              border: '1px solid var(--color-hairline)',
+              resize: 'vertical',
+              marginBottom: 8,
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+          />
+          <label
+            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
+          >
+            生视频提示词
+          </label>
+          <textarea
+            value={videoPrompt}
+            onChange={(e) => setVideoPrompt(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="输入生视频提示词..."
+            rows={3}
+            style={{
+              width: '100%',
+              fontSize: 11,
+              padding: '6px 8px',
+              borderRadius: 'var(--rounded-sm)',
+              border: '1px solid var(--color-hairline)',
+              resize: 'vertical',
+              marginBottom: 8,
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+          />
+        </div>
+      )}
+
       {/* Image + Video action buttons */}
       <div style={{ display: 'flex', gap: 6 }}>
         <button
-          disabled={!!generatingImage}
-          style={actionBtnStyle(scene.imageStatus, generatingImage)}
+          disabled={!!generatingImage || !imagePrompt.trim()}
+          onClick={handleGenerateImage}
+          style={{
+            ...actionBtnStyle(scene.imageStatus, generatingImage),
+            ...(imagePrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
+          }}
         >
           {imageLabel}
         </button>
         <button
-          disabled={!!generatingVideo}
-          style={actionBtnStyle(scene.videoStatus, generatingVideo)}
+          disabled={!!generatingVideo || !videoPrompt.trim()}
+          onClick={handleGenerateVideo}
+          style={{
+            ...actionBtnStyle(scene.videoStatus, generatingVideo),
+            ...(videoPrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
+          }}
         >
           {videoLabel}
         </button>
