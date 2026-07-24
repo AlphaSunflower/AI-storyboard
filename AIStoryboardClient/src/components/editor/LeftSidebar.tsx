@@ -2,7 +2,6 @@ import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { AspectRatioSelector } from '../common/AspectRatioSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { Button } from '@/components/ui/button';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -123,13 +122,14 @@ export function LeftSidebar() {
       style={{
         width: expandedWidth,
         minWidth: expandedWidth,
+        height: '100%',
         borderRight: '1px solid var(--color-hairline)',
         background: 'var(--color-canvas)',
         padding: 'var(--space-md)',
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
-        overflowY: 'auto',
+        overflow: 'hidden',
       }}
     >
       {/* Section title with collapse button */}
@@ -162,7 +162,7 @@ export function LeftSidebar() {
       </div>
 
       {/* Creation type */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>创作类型</label>
         <select
           value={creationType}
@@ -192,7 +192,7 @@ export function LeftSidebar() {
       )}
 
       {/* Model selectors */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>生图模型</label>
         <select
           value={imageModel}
@@ -203,7 +203,7 @@ export function LeftSidebar() {
           <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image</option>
         </select>
       </div>
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>生视频模型</label>
         <select
           value={videoModel}
@@ -216,7 +216,7 @@ export function LeftSidebar() {
       </div>
 
       {/* Aspect ratio */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>画幅比例</label>
         <AspectRatioSelector value={aspectRatio} onChange={setAspectRatio} />
       </div>
@@ -238,12 +238,19 @@ export function LeftSidebar() {
         />
       </div>
 
-      {/* Reference image upload — shadcn Button + hidden file input */}
-      <div>
+      {/* Reference image upload — custom styled */}
+      <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>风格参考图（可选）</label>
-        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-          选择参考图
-        </Button>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 10px', borderRadius: 'var(--rounded-md)',
+          border: '1px dashed var(--color-hairline)', cursor: 'pointer',
+          background: 'var(--color-canvas)',
+        }} onClick={() => fileInputRef.current?.click()}>
+          <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
+            {refImagePreview ? '更换参考图' : '📎 上传风格参考图（可选）'}
+          </span>
+        </div>
         <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleRefImage} />
         {refImagePreview && (
           <img
@@ -264,6 +271,7 @@ export function LeftSidebar() {
         onClick={handleGenerate}
         disabled={isLoading || !scriptText.trim()}
         style={{
+          flexShrink: 0,
           width: '100%',
           padding: '10px',
           height: 40,
@@ -282,11 +290,20 @@ export function LeftSidebar() {
         {isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
 
-      {/* Divider */}
-      <div style={{ borderTop: '1px solid var(--color-hairline)' }} />
-
-      {/* Project history */}
-      <ProjectHistoryPanel />
+      {/* Divider + project history — independently scrollable */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+        <div style={{ borderTop: '1px solid var(--color-hairline)', marginBottom: 8 }} />
+        <div style={{
+          font: 'var(--text-caption-upper)',
+          fontSize: 11,
+          color: 'var(--color-muted)',
+          marginBottom: 6,
+          flexShrink: 0,
+        }}>
+          历史项目
+        </div>
+        <ProjectHistoryPanel />
+      </div>
     </div>
   );
 }

@@ -12,22 +12,11 @@ export function ProjectHistoryPanel() {
   return (
     <div
       style={{
-        maxHeight: 150,
         overflowY: 'auto',
-        borderTop: '1px solid var(--color-hairline)',
-        paddingTop: 8,
+        flex: 1,
+        minHeight: 0,
       }}
     >
-      <div
-        style={{
-          font: 'var(--text-caption-upper)',
-          fontSize: 11,
-          color: 'var(--color-muted)',
-          marginBottom: 6,
-        }}
-      >
-        历史项目
-      </div>
       {projects.map((p) => {
         const isActive = currentProject?.id === p.id;
 
