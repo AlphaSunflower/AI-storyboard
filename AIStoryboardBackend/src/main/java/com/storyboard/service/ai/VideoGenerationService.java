@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -18,6 +20,8 @@ import java.util.Map;
 
 @Service
 public class VideoGenerationService {
+
+    private static final Logger log = LoggerFactory.getLogger(VideoGenerationService.class);
 
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
