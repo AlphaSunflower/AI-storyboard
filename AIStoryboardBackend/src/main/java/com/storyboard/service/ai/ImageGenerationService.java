@@ -62,7 +62,7 @@ public class ImageGenerationService {
         body.put("model", model);
         body.put("prompt", prompt);
         body.put("n", 1);
-        body.put("size", size != null ? size : "2K");
+        body.put("size", "1024x1024");
         if (referenceImages != null && !referenceImages.isEmpty()) {
             body.put("reference_images", referenceImages);
         }

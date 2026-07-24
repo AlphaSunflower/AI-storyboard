@@ -126,7 +126,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: true } }));
     try {
       const res = await aiApi.generateImage({
-        sceneId, prompt, model, size: '2K', aspectRatio: '16:9', referenceImages,
+        sceneId, prompt, model, aspectRatio: '16:9', referenceImages,
       });
       if (get().currentProject) {
         await get().loadProject(get().currentProject!.id);
