@@ -34,9 +34,9 @@ ai:
   laozhang:
     api-key: ${LAOZHANG_API_KEY:sk-bQfq7Zzf9OZ5XkdPCf3254E2D3D64673Be76D08f2830EbCd}
     sora2-official-api-key: ${LAOZHANG_SORA2_OFFICIAL_API_KEY:sk-8YBdUaxEHTF1sNAHC50fE6A472Ab4111BeEc018fB3294dAc}
-    base-url-openai: ${LAOZHANG_BASE_URL_OPENAI:https://api.laozhang.ai/v1}
-    base-url-gemini: ${LAOZHANG_BASE_URL_GEMINI:https://api.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent}
-    base-url-vision: ${LAOZHANG_BASE_URL_VISION:https://api.laozhang.ai/v1/chat/completions}
+    base-url-openai: https://api2.laozhang.ai/v1
+    base-url-gemini: https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent
+    base-url-vision: https://api2.laozhang.ai/v1/chat/completions
     default-image-model: gpt-image-2
     default-vision-model: gemini-3-flash-preview
     poll-interval-ms: 5000

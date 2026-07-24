@@ -6,9 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiConfigProperties {
     private String apiKey;
     private String sora2OfficialApiKey;
-    private String baseUrlOpenai = "https://api.laozhang.ai/v1";
-    private String baseUrlGemini = "https://api.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent";
-    private String baseUrlVision = "https://api.laozhang.ai/v1/chat/completions";
+    private String baseUrlOpenai = "https://api2.laozhang.ai/v1";
+    private String baseUrlGemini = "https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent";
+    private String baseUrlVision = "https://api2.laozhang.ai/v1/chat/completions";
     private String defaultImageModel = "gpt-image-2";
     private String defaultVisionModel = "gemini-3-flash-preview";
     private long pollIntervalMs = 5000;
