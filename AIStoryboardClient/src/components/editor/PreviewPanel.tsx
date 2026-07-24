@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 
 const BACKEND = 'http://localhost:8082';
@@ -8,9 +9,38 @@ function assetUrl(path: string | null) {
   return BACKEND + path;
 }
 
+type PreviewTab = 'image' | 'video';
+
 export function PreviewPanel() {
   const { scenes, selectedSceneId } = useProjectStore();
   const scene = scenes.find((s) => s.id === selectedSceneId);
+  const [activeTab, setActiveTab] = useState<PreviewTab>('image');
+
+  // tab button style
+  const tabStyle = (tab: PreviewTab): React.CSSProperties => ({
+    padding: '6px 14px',
+    fontSize: 12,
+    fontWeight: 500,
+    border: 'none',
+    borderRadius: 'var(--rounded-sm)',
+    cursor: 'pointer',
+    background: activeTab === tab ? 'var(--color-surface-card)' : 'transparent',
+    color: activeTab === tab ? 'var(--color-ink)' : 'var(--color-muted)',
+  });
+
+  // download button style
+  const btnDownload: React.CSSProperties = {
+    padding: '5px 12px',
+    fontSize: 11,
+    borderRadius: 'var(--rounded-sm)',
+    border: '1px solid var(--color-hairline)',
+    background: 'var(--color-canvas)',
+    color: 'var(--color-body-strong)',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  };
 
   // Empty selection state
   if (!scene) {
@@ -70,105 +100,98 @@ export function PreviewPanel() {
         </div>
       )}
 
-      {/* Image preview */}
-      <div style={{ marginBottom: 12 }}>
-        <p
-          style={{
-            fontSize: 12,
-            color: 'var(--color-muted)',
-            marginBottom: 6,
-            fontWeight: 500,
-          }}
-        >
-          图片预览
-        </p>
-        {scene.imageUrl ? (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <img
-              src={assetUrl(scene.imageUrl)}
-              alt={`分镜 ${scene.sceneNumber} 预览`}
-              style={{
-                flex: 1,
-                maxHeight: 400,
-                objectFit: 'contain',
-                borderRadius: 'var(--rounded-md)',
-                border: '1px solid var(--color-hairline)',
-                background: 'var(--color-canvas)',
-              }}
-            />
-            <a
-              href={assetUrl(scene.imageUrl)}
-              download
-              style={{
-                fontSize: 12,
-                color: 'var(--color-primary)',
-                cursor: 'pointer',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              [下载]
-            </a>
-          </div>
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: 200,
-              borderRadius: 'var(--rounded-md)',
-              background: 'var(--color-surface-soft)',
-              color: 'var(--color-muted-soft)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
-              gap: 6,
-            }}
-          >
-            {scene.imageStatus === 'generating' ? '⏳ 正在生成图片...' : '未生成图片'}
-          </div>
-        )}
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        <button onClick={() => setActiveTab('image')} style={tabStyle('image')}>
+          🖼️ 图片预览
+        </button>
+        <button onClick={() => setActiveTab('video')} style={tabStyle('video')}>
+          🎬 视频预览
+        </button>
       </div>
 
-      {/* Video preview */}
-      {scene.videoUrl && (
+      {/* Image tab */}
+      {activeTab === 'image' && (
         <div style={{ marginBottom: 12 }}>
-          <p
-            style={{
-              fontSize: 12,
-              color: 'var(--color-muted)',
-              marginBottom: 6,
-              fontWeight: 500,
-            }}
-          >
-            视频预览
-          </p>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <video
-              src={assetUrl(scene.videoUrl)}
-              controls
+          {scene.imageUrl ? (
+            <div>
+              <img
+                src={assetUrl(scene.imageUrl)}
+                alt={`分镜 ${scene.sceneNumber} 预览`}
+                style={{
+                  width: '100%',
+                  maxHeight: 360,
+                  objectFit: 'contain',
+                  borderRadius: 'var(--rounded-md)',
+                  border: '1px solid var(--color-hairline)',
+                  background: 'var(--color-canvas)',
+                  marginBottom: 8,
+                }}
+              />
+              <a href={assetUrl(scene.imageUrl)} download style={{ ...btnDownload, textDecoration: 'none' }}>
+                ⬇ 下载图片
+              </a>
+            </div>
+          ) : (
+            <div
               style={{
-                flex: 1,
-                maxHeight: 400,
+                width: '100%',
+                height: 200,
                 borderRadius: 'var(--rounded-md)',
-                border: '1px solid var(--color-hairline)',
-                background: '#000',
-              }}
-            />
-            <a
-              href={assetUrl(scene.videoUrl)}
-              download
-              style={{
-                fontSize: 12,
-                color: 'var(--color-primary)',
-                cursor: 'pointer',
-                textDecoration: 'none',
-                whiteSpace: 'nowrap',
+                background: 'var(--color-surface-soft)',
+                color: 'var(--color-muted-soft)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 13,
+                gap: 6,
               }}
             >
-              [下载]
-            </a>
-          </div>
+              {scene.imageStatus === 'generating' ? '⏳ 正在生成图片...' : '未生成图片'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Video tab */}
+      {activeTab === 'video' && (
+        <div style={{ marginBottom: 12 }}>
+          {scene.videoUrl ? (
+            <div>
+              <video
+                src={assetUrl(scene.videoUrl)}
+                controls
+                style={{
+                  width: '100%',
+                  maxHeight: 360,
+                  borderRadius: 'var(--rounded-md)',
+                  border: '1px solid var(--color-hairline)',
+                  background: '#000',
+                  marginBottom: 8,
+                }}
+              />
+              <a href={assetUrl(scene.videoUrl)} download style={{ ...btnDownload, textDecoration: 'none' }}>
+                ⬇ 下载视频
+              </a>
+            </div>
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: 200,
+                borderRadius: 'var(--rounded-md)',
+                background: 'var(--color-surface-soft)',
+                color: 'var(--color-muted-soft)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 13,
+                gap: 6,
+              }}
+            >
+              {scene.videoStatus === 'generating' ? '⏳ 正在生成视频...' : '未生成视频'}
+            </div>
+          )}
         </div>
       )}
 
