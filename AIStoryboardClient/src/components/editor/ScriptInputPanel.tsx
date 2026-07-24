@@ -12,6 +12,7 @@ const creationTypes = [
 ];
 
 const leftPanelWidth = 320;
+const collapsedWidth = 36;
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
@@ -40,6 +41,7 @@ export function ScriptInputPanel() {
     createProject,
   } = useProjectStore();
 
+  const [collapsed, setCollapsed] = useState(false);
   const [creationType, setCreationType] = useState('movie');
   const [customTypeDesc, setCustomTypeDesc] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
@@ -63,6 +65,38 @@ export function ScriptInputPanel() {
     await generateScript(projectId, scriptText, creationType, aspectRatio, undefined);
   };
 
+  // ── Collapsed state: vertical tab ──
+  if (collapsed) {
+    return (
+      <div
+        onClick={() => setCollapsed(false)}
+        style={{
+          width: collapsedWidth,
+          minWidth: collapsedWidth,
+          borderRight: '1px solid var(--color-hairline)',
+          background: 'var(--color-canvas)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+        title="展开剧本输入面板"
+      >
+        <span
+          style={{
+            writingMode: 'vertical-rl',
+            fontSize: 13,
+            color: 'var(--color-muted)',
+            letterSpacing: 2,
+          }}
+        >
+          剧本输入 ▶
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -77,16 +111,34 @@ export function ScriptInputPanel() {
         overflowY: 'auto',
       }}
     >
-      {/* Section title */}
-      <h2
-        style={{
-          font: 'var(--text-title-sm)',
-          color: 'var(--color-ink)',
-          margin: 0,
-        }}
-      >
-        剧本输入
-      </h2>
+      {/* Section title with collapse button */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2
+          style={{
+            font: 'var(--text-title-sm)',
+            color: 'var(--color-ink)',
+            margin: 0,
+          }}
+        >
+          剧本输入
+        </h2>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="折叠面板"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 14,
+            color: 'var(--color-muted)',
+            padding: '2px 6px',
+            borderRadius: 'var(--rounded-sm)',
+            lineHeight: 1,
+          }}
+        >
+          ◀
+        </button>
+      </div>
 
       {/* Creation type */}
       <div>
