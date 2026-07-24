@@ -240,7 +240,6 @@ export function LeftSidebar() {
 
       {/* Reference image upload — custom styled */}
       <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>风格参考图（可选）</label>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '8px 10px', borderRadius: 'var(--rounded-md)',
@@ -291,7 +290,7 @@ export function LeftSidebar() {
       </button>
 
       {/* Divider + project history — independently scrollable */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'scroll', minHeight: 120 }}>
         <div style={{ borderTop: '1px solid var(--color-hairline)', marginBottom: 8 }} />
         <div style={{
           font: 'var(--text-caption-upper)',

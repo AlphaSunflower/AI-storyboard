@@ -87,7 +87,7 @@ export function SceneCard({
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
   const [isRenaming, setIsRenaming] = useState(false);
-  const [sceneName, setSceneName] = useState(scene.scriptContent || '');
+  const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
   const refInputRef = useRef<HTMLInputElement>(null);
 
@@ -119,16 +119,17 @@ export function SceneCard({
   };
 
   const handleSaveRename = async () => {
-    const trimmed = sceneName.trim();
+    const trimmed = sceneLabel.trim();
     if (trimmed) {
-      await sceneApi.update(scene.id, { scriptContent: trimmed });
+      await sceneApi.update(scene.id, { soundDesign: trimmed });
     }
     setIsRenaming(false);
   };
 
   const handleStartRename = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setSceneName(scene.scriptContent || '');
+    const customName = scene.soundDesign && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`;
+    setSceneLabel(customName);
     setIsRenaming(true);
   };
 
@@ -158,8 +159,8 @@ export function SceneCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {isRenaming ? (
             <input
-              value={sceneName}
-              onChange={(e) => setSceneName(e.target.value)}
+              value={sceneLabel}
+              onChange={(e) => setSceneLabel(e.target.value)}
               onBlur={handleSaveRename}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -191,7 +192,7 @@ export function SceneCard({
                   color: 'var(--color-ink)',
                 }}
               >
-                分镜 {scene.sceneNumber}
+                {scene.soundDesign && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`}
               </div>
               <button
                 onClick={handleStartRename}
