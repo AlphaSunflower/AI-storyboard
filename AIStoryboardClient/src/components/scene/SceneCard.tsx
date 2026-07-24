@@ -361,10 +361,19 @@ export function SceneCard({
 
           {/* Reference image upload */}
           <div style={{ marginTop: 8 }}>
-            <button onClick={() => refInputRef.current?.click()}
-              style={{ padding:'4px 10px',fontSize:11,borderRadius:'var(--rounded-sm)',border:'1px solid var(--color-hairline)',background:'white',cursor:'pointer' }}>
-              + 添加参考图（可选，最多3张）
-            </button>
+            <div
+              onClick={() => refInputRef.current?.click()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', borderRadius: 'var(--rounded-md)',
+                border: '1px dashed var(--color-hairline)', cursor: 'pointer',
+                background: 'var(--color-canvas)', fontSize: 11,
+                color: 'var(--color-muted)',
+              }}
+            >
+              <span style={{ fontSize: 14 }}>🖼️</span>
+              <span>{sceneRefImages.length > 0 ? `${sceneRefImages.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
+            </div>
             <input ref={refInputRef} type="file" accept="image/*" multiple hidden
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
