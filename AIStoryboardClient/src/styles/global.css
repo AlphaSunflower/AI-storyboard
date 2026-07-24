@@ -1,0 +1,31 @@
+@import './tokens.css';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font: var(--text-body-md);
+  color: var(--color-body);
+  background: var(--color-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  cursor: pointer;
+  font: var(--text-button);
+}
+
+input, textarea, select {
+  font: var(--text-body-md);
+}
+
+a {
+  color: var(--color-primary);
+}
