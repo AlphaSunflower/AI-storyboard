@@ -1,6 +1,13 @@
 import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
 
+const BACKEND = 'http://localhost:8082';
+function assetUrl(path: string | null) {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return BACKEND + path;
+}
+
 const IMAGE_MODELS = [
   { value: 'gpt-image-2', label: 'GPT Image 2' },
   { value: 'dall-e-3', label: 'DALL·E 3' },

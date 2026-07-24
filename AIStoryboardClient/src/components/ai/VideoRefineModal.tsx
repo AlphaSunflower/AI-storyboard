@@ -1,6 +1,13 @@
 import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
 
+const BACKEND = 'http://localhost:8082';
+function assetUrl(path: string | null) {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return BACKEND + path;
+}
+
 const VIDEO_MODELS = [
   { value: 'veo-3.1-fast', label: 'Veo 3.1 Fast' },
   { value: 'veo-3.1', label: 'Veo 3.1' },
