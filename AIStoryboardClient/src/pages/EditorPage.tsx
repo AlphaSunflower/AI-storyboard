@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AppHeader } from '../components/layout/AppHeader';
+import { GenerationProgress } from '../components/common/GenerationProgress';
 import { ProjectHistoryPanel } from '../components/editor/ProjectHistoryPanel';
 import { ScriptInputPanel } from '../components/editor/ScriptInputPanel';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
@@ -49,6 +50,9 @@ export function EditorPage() {
     >
       {/* Top bar */}
       <AppHeader />
+
+      {/* Generation progress indicator */}
+      <GenerationProgress />
 
       {/* Project history bar */}
       <ProjectHistoryPanel />

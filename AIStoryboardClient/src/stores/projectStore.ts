@@ -12,6 +12,8 @@ interface ProjectState {
   isLoading: boolean;
   generatingImage: Record<string, boolean>;
   generatingVideo: Record<string, boolean>;
+  scriptGenerationStatus: 'idle' | 'generating' | 'done' | 'error';
+  scriptGenerationMessage: string;
 
   loadProjects: () => Promise<void>;
   createProject: (name: string, creationType: string, aspectRatio: string) => Promise<ProjectResponse>;
@@ -37,6 +39,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isLoading: false,
   generatingImage: {},
   generatingVideo: {},
+  scriptGenerationStatus: 'idle',
+  scriptGenerationMessage: '',
 
   loadProjects: async () => {
     set({ isLoading: true });
@@ -84,10 +88,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectScene: (sceneId) => set({ selectedSceneId: sceneId }),
 
   generateScript: async (projectId, scriptText, creationType, aspectRatio, model) => {
-    set({ isLoading: true });
-    await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model });
-    await get().loadProject(projectId);
-    set({ isLoading: false });
+    set({
+      isLoading: true,
+      scriptGenerationStatus: 'generating',
+      scriptGenerationMessage: '正在连接 AI...',
+    });
+    try {
+      await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model });
+      set({
+        scriptGenerationStatus: 'generating',
+        scriptGenerationMessage: 'AI 正在分析剧本...',
+      });
+      await get().loadProject(projectId);
+      set({
+        isLoading: false,
+        scriptGenerationStatus: 'done',
+        scriptGenerationMessage: '分镜生成完成',
+      });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : '分镜生成失败，请重试';
+      set({
+        isLoading: false,
+        scriptGenerationStatus: 'error',
+        scriptGenerationMessage: message,
+      });
+    }
   },
 
   generateImage: async (sceneId, prompt, model, referenceImages) => {
