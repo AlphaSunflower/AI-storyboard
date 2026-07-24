@@ -45,7 +45,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generatingVideo: {},
   scriptGenerationStatus: 'idle',
   scriptGenerationMessage: '',
-  imageModel: 'gpt-4o-image',
+  imageModel: 'gpt-image-2',
   videoModel: 'veo-3.1-fast',
 
   loadProjects: async () => {
