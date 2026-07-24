@@ -112,7 +112,9 @@ public class VideoGenerationService {
                 .build();
 
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            JsonNode root = objectMapper.readTree(resp.body());
+            String respBody = resp.body();
+            log.info("Video poll response (status={}): {}", resp.statusCode(), respBody);
+            JsonNode root = objectMapper.readTree(respBody);
             String status = root.path("status").asText();
 
             Map<String, String> result = new HashMap<>();
