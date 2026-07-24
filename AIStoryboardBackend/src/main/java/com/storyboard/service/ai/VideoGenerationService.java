@@ -127,27 +127,32 @@ public class VideoGenerationService {
             result.put("taskId", taskId);
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
-                // Download video content directly with auth
-                HttpRequest contentReq = HttpRequest.newBuilder()
-                    .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId + "/content"))
-                    .header("Authorization", "Bearer " + config.getApiKey())
-                    .timeout(java.time.Duration.ofSeconds(180))
-                    .GET()
-                    .build();
-                HttpResponse<InputStream> contentResp = httpClient.send(contentReq,
-                    HttpResponse.BodyHandlers.ofInputStream());
-                if (contentResp.statusCode() != 200) {
-                    throw new RuntimeException("Video content download failed, status: " + contentResp.statusCode());
+                // Try to download via content endpoint, fall back gracefully
+                String localPath = null;
+                try {
+                    HttpRequest contentReq = HttpRequest.newBuilder()
+                        .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId + "/content"))
+                        .header("Authorization", "Bearer " + config.getApiKey())
+                        .timeout(java.time.Duration.ofSeconds(180))
+                        .GET()
+                        .build();
+                    HttpResponse<InputStream> contentResp = httpClient.send(contentReq,
+                        HttpResponse.BodyHandlers.ofInputStream());
+                    if (contentResp.statusCode() == 200) {
+                        String filename = UUID.randomUUID().toString() + ".mp4";
+                        Path target = Paths.get("uploads/videos").resolve(filename);
+                        Files.createDirectories(target.getParent());
+                        try (InputStream in = contentResp.body()) {
+                            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        localPath = "/api/files/videos/" + filename;
+                        log.info("Video downloaded and saved: {}", target);
+                    } else {
+                        log.warn("Video content endpoint returned {}, async download may be unavailable", contentResp.statusCode());
+                    }
+                } catch (Exception e) {
+                    log.warn("Video content download failed (async may be unavailable): {}", e.getMessage());
                 }
-
-                String filename = UUID.randomUUID().toString() + ".mp4";
-                Path target = Paths.get("uploads/videos").resolve(filename);
-                Files.createDirectories(target.getParent());
-                try (InputStream in = contentResp.body()) {
-                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-                }
-                String localPath = "/api/files/videos/" + filename;
-                log.info("Video downloaded and saved: {}", target);
                 result.put("status", "completed");
                 result.put("videoUrl", localPath);
 
