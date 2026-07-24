@@ -6,6 +6,7 @@ application-local.yml
 target/
 node_modules/
 dist/
+uploads/
 
 # IDE
 .idea/
