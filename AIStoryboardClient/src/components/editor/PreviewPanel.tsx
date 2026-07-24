@@ -9,6 +9,20 @@ function assetUrl(path: string | null) {
   return BACKEND + path;
 }
 
+function downloadAsset(url: string, filename: string) {
+  fetch(url)
+    .then(r => r.blob())
+    .then(blob => {
+      const u = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = u;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(u);
+    })
+    .catch(() => window.open(url, '_blank'));
+}
+
 type PreviewTab = 'image' | 'video';
 
 export function PreviewPanel() {
@@ -128,9 +142,9 @@ export function PreviewPanel() {
                   marginBottom: 8,
                 }}
               />
-              <a href={assetUrl(scene.imageUrl)} download style={{ ...btnDownload, textDecoration: 'none' }}>
+              <button onClick={() => downloadAsset(assetUrl(scene.imageUrl), `scene-${scene.sceneNumber}.png`)} style={btnDownload}>
                 ⬇ 下载图片
-              </a>
+              </button>
             </div>
           ) : (
             <div
@@ -170,9 +184,9 @@ export function PreviewPanel() {
                   marginBottom: 8,
                 }}
               />
-              <a href={assetUrl(scene.videoUrl)} download style={{ ...btnDownload, textDecoration: 'none' }}>
+              <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} style={btnDownload}>
                 ⬇ 下载视频
-              </a>
+              </button>
             </div>
           ) : (
             <div
