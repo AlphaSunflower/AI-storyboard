@@ -18,3 +18,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Uploads (keep dirs)
+uploads/*
+!uploads/images/.gitkeep
+!uploads/videos/.gitkeep
