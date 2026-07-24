@@ -1,9 +1,7 @@
 package com.storyboard.service.ai;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
-@Component
 @ConfigurationProperties(prefix = "ai.laozhang")
 public class AiConfigProperties {
     private String apiKey;

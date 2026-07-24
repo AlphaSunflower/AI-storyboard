@@ -24,16 +24,16 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  access-secret: ${JWT_ACCESS_SECRET}
-  refresh-secret: ${JWT_REFRESH_SECRET}
+  access-secret: ${JWT_ACCESS_SECRET:dev-access-secret-key-change-in-production!!}
+  refresh-secret: ${JWT_REFRESH_SECRET:dev-refresh-secret-key-change-in-prod!!}
   issuer: ${JWT_ISSUER:newworkflow-backend}
   access-token-ttl: 3600
   refresh-token-ttl: 2592000
 
 ai:
   laozhang:
-    api-key: ${LAOZHANG_API_KEY}
-    sora2-official-api-key: ${LAOZHANG_SORA2_OFFICIAL_API_KEY}
+    api-key: ${LAOZHANG_API_KEY:dev-key}
+    sora2-official-api-key: ${LAOZHANG_SORA2_OFFICIAL_API_KEY:dev-key}
     base-url-openai: ${LAOZHANG_BASE_URL_OPENAI:https://api.laozhang.ai/v1}
     base-url-gemini: ${LAOZHANG_BASE_URL_GEMINI:https://api.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent}
     base-url-vision: ${LAOZHANG_BASE_URL_VISION:https://api.laozhang.ai/v1/chat/completions}

@@ -3,6 +3,8 @@ package com.storyboard.security;
 import com.storyboard.config.JwtConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
@@ -10,6 +12,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.util.Date;
 import java.util.UUID;
 
+@Slf4j
 @Component
 public class JwtTokenProvider {
 
@@ -19,10 +22,9 @@ public class JwtTokenProvider {
     private final long accessTokenTtl;
     private final long refreshTokenTtl;
 
-    /**
-     * Spring constructor — reads configuration from JwtConfig.
-     */
+    @Autowired
     public JwtTokenProvider(JwtConfig config) {
+
         this.accessKey = new SecretKeySpec(config.getAccessSecret().getBytes(), "HmacSHA256");
         this.refreshKey = new SecretKeySpec(config.getRefreshSecret().getBytes(), "HmacSHA256");
         this.issuer = config.getIssuer();
