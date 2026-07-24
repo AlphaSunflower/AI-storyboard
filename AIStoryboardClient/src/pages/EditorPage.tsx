@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AppHeader } from '../components/layout/AppHeader';
+import { ProjectHistoryPanel } from '../components/editor/ProjectHistoryPanel';
 import { ScriptInputPanel } from '../components/editor/ScriptInputPanel';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
@@ -48,6 +49,9 @@ export function EditorPage() {
     >
       {/* Top bar */}
       <AppHeader />
+
+      {/* Project history bar */}
+      <ProjectHistoryPanel />
 
       {/* Draft recovery banner */}
       {showDraftBanner && draftProject && (
