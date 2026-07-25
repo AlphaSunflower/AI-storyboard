@@ -180,7 +180,7 @@ export function AppHeader() {
               marginRight: 4,
             }}
           >
-            🎬
+            AlphaSunflower AI分镜
           </span>
 
           {/* Save button */}
