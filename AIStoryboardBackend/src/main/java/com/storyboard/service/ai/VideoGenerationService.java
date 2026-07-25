@@ -19,11 +19,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.time.Duration;
+import java.util.*;
 
+/**
+ * 视频生成服务 —— 调用 Laozhang API v1/videos multipart 接口。
+ */
 @Service
 public class VideoGenerationService {
 
@@ -34,15 +35,8 @@ public class VideoGenerationService {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(30))
+            .connectTimeout(Duration.ofSeconds(30))
             .build();
-
-    private static final Map<String, String> MODEL_ALIAS = Map.of(
-        "veo-3.1-fast", "veo-3.1-fast-generate-preview",
-        "veo-3.1-fast-fl", "veo-3.1-fast-generate-preview",
-        "veo-3.1", "veo-3.1-generate-preview",
-        "veo-3.1-fl", "veo-3.1-generate-preview"
-    );
 
     public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
                                    FileStorageService fileStorageService) {
@@ -52,37 +46,73 @@ public class VideoGenerationService {
     }
 
     /**
-     * Create a video generation task via JSON body (not multipart).
+     * 创建视频生成任务（multipart/form-data）。
      */
     public String createVideoTask(String sceneId, String prompt, String alias,
-                                   String resolution, Integer duration,
+                                   String resolution, String size, String aspectRatio,
+                                   Integer duration, String negativePrompt, Long seed,
                                    List<String> referenceImages, String generatedImageUrl) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
-        String actualModel = MODEL_ALIAS.getOrDefault(alias, alias);
+        String actualModel = config.getVideoModelAliasMap().getOrDefault(alias, alias);
+
+        // 使用请求参数或配置默认值
+        String effSize = size != null ? size : config.getDefaultVideoSize();
+        String effResolution = resolution != null ? resolution : config.getDefaultVideoResolution();
+        String effAspectRatio = aspectRatio != null ? aspectRatio : config.getDefaultVideoAspectRatio();
+        int effDuration = duration != null ? duration : Integer.parseInt(config.getDefaultVideoDuration());
 
         try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", actualModel);
-            body.put("prompt", prompt);
-            body.put("duration", "8");  // 必须是字符串
-            body.put("n", 1);
+            // 构建 multipart 请求体
+            MultipartBuilder mp = new MultipartBuilder()
+                .field("model", actualModel)
+                .field("prompt", prompt)
+                .field("seconds", String.valueOf(effDuration))
+                .field("duration", String.valueOf(effDuration))
+                .field("size", effSize)
+                .field("resolution", effResolution)
+                .field("aspectRatio", effAspectRatio);
 
-            // 图生视频：优先用已生成的图片
-            String refImage = generatedImageUrl != null ? generatedImageUrl
-                : (referenceImages != null && !referenceImages.isEmpty() ? referenceImages.get(0) : null);
-            if (refImage != null) {
-                body.put("input_reference", refImage);
+            // metadata JSON
+            String metadata = objectMapper.writeValueAsString(Map.of(
+                "durationSeconds", effDuration,
+                "resolution", effResolution,
+                "aspectRatio", effAspectRatio
+            ));
+            mp.field("metadata", metadata);
+
+            if (negativePrompt != null && !negativePrompt.isEmpty()) {
+                mp.field("negativePrompt", negativePrompt);
+            }
+            if (seed != null) {
+                mp.field("seed", String.valueOf(seed));
             }
 
-            String requestBody = objectMapper.writeValueAsString(body);
+            // 参考图片：优先使用已生成图片，其次使用第一张参考图
+            if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
+                String filename = extractFilename(generatedImageUrl);
+                Path localFile = fileStorageService.resolveImage(filename);
+                if (Files.exists(localFile)) {
+                    byte[] bytes = Files.readAllBytes(localFile);
+                    mp.file("input_reference", filename, fileStorageService.contentType(filename), bytes);
+                } else {
+                    log.warn("Reference image not found: {}", localFile);
+                }
+            } else if (referenceImages != null && !referenceImages.isEmpty()) {
+                String base64 = referenceImages.get(0);
+                byte[] bytes = decodeBase64Image(base64);
+                mp.file("input_reference", "reference.png", "image/png", bytes);
+            }
+
+            byte[] body = mp.build();
+
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrlOpenai() + "/videos"))
-                .header("Content-Type", "application/json")
+                .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointVideoCreate()))
+                .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
                 .header("Authorization", "Bearer " + config.getApiKey())
-                .timeout(java.time.Duration.ofSeconds(120))
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .timeout(Duration.ofSeconds(120))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -105,21 +135,17 @@ public class VideoGenerationService {
     }
 
     /**
-     * Poll video task status.
-     * Tries /videos/{id} first, falls back to /video/generations/{id}.
+     * 轮询视频任务状态，完成后自动下载视频文件。
      */
     public Map<String, String> pollVideoTask(String taskId) {
         try {
             String baseUrl = config.getBaseUrlOpenai();
-            String respBody = callGet(baseUrl + "/videos/" + taskId);
+            String respBody = callGet(baseUrl + config.getEndpointVideoStatus() + taskId);
             if (respBody == null) {
-                respBody = callGet(baseUrl + "/video/generations/" + taskId);
+                respBody = callGet(baseUrl + config.getEndpointVideoStatusFallback() + taskId);
             }
             if (respBody == null) {
-                Map<String, String> error = new HashMap<>();
-                error.put("status", "failed");
-                error.put("error", "All polling endpoints failed for taskId=" + taskId);
-                return error;
+                return Map.of("status", "failed", "error", "All polling endpoints failed for taskId=" + taskId);
             }
 
             log.info("Video poll response: {}", respBody);
@@ -130,40 +156,12 @@ public class VideoGenerationService {
             result.put("taskId", taskId);
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
-                // Try to download via content endpoint
-                String localPath = null;
-                try {
-                    HttpRequest contentReq = HttpRequest.newBuilder()
-                        .uri(URI.create(baseUrl + "/videos/" + taskId + "/content"))
-                        .header("Authorization", "Bearer " + config.getApiKey())
-                        .timeout(java.time.Duration.ofSeconds(180))
-                        .GET()
-                        .build();
-                    HttpResponse<InputStream> contentResp = httpClient.send(contentReq,
-                        HttpResponse.BodyHandlers.ofInputStream());
-                    if (contentResp.statusCode() == 200) {
-                        String filename = UUID.randomUUID().toString() + ".mp4";
-                        Path target = Paths.get("uploads/videos").resolve(filename);
-                        Files.createDirectories(target.getParent());
-                        try (InputStream in = contentResp.body()) {
-                            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-                        }
-                        localPath = "/api/files/videos/" + filename;
-                        log.info("Video downloaded and saved: {}", target);
-                    } else {
-                        log.warn("Video content endpoint returned {}, async download may be unavailable", contentResp.statusCode());
-                    }
-                } catch (Exception e) {
-                    log.warn("Video content download failed (async may be unavailable): {}", e.getMessage());
-                }
+                String localPath = downloadVideoContent(baseUrl, taskId);
                 result.put("status", "completed");
                 result.put("videoUrl", localPath);
 
-                // 更新 scene
                 var scenes = sceneMapper.selectList(
-                    new LambdaQueryWrapper<Scene>()
-                        .eq(Scene::getVideoTaskId, taskId)
-                );
+                    new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
                 if (!scenes.isEmpty()) {
                     Scene scene = scenes.get(0);
                     scene.setVideoUrl(localPath);
@@ -172,11 +170,8 @@ public class VideoGenerationService {
                 }
             } else if ("failed".equals(status) || "error".equals(status)) {
                 result.put("status", "failed");
-                // 更新失败的 scene
                 var scenes = sceneMapper.selectList(
-                    new LambdaQueryWrapper<Scene>()
-                        .eq(Scene::getVideoTaskId, taskId)
-                );
+                    new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
                 if (!scenes.isEmpty()) {
                     Scene scene = scenes.get(0);
                     scene.setVideoStatus("failed");
@@ -188,29 +183,82 @@ public class VideoGenerationService {
             }
             return result;
         } catch (Exception e) {
-            Map<String, String> error = new HashMap<>();
-            error.put("status", "failed");
-            error.put("error", e.getMessage());
-            return error;
+            return Map.of("status", "failed", "error", e.getMessage());
         }
+    }
+
+    private String downloadVideoContent(String baseUrl, String taskId) {
+        int maxRetries = 3;
+        long retryDelayMs = 15_000; // 15 秒等待落盘
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + config.getEndpointVideoContent() + taskId + "/content"))
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .timeout(Duration.ofSeconds(180))
+                    .GET().build();
+                HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+
+                if (resp.statusCode() == 200) {
+                    String filename = UUID.randomUUID() + config.getVideoFileExtension();
+                    Path target = Paths.get(config.getVideoUploadDir()).resolve(filename);
+                    Files.createDirectories(target.getParent());
+                    try (InputStream in = resp.body()) {
+                        Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    log.info("Video downloaded: {} (attempt {}/{})", target, attempt, maxRetries);
+                    return config.getVideoUrlPrefix() + filename;
+                }
+
+                // 400 可能是"task status is IN_PROGRESS"等短暂状态
+                String respBody = "";
+                try { respBody = new String(resp.body().readAllBytes()); } catch (Exception ignored) {}
+                log.warn("Video content download returned {} on attempt {}/{}: {}",
+                    resp.statusCode(), attempt, maxRetries,
+                    respBody.length() > 200 ? respBody.substring(0, 200) : respBody);
+
+            } catch (Exception e) {
+                log.warn("Video content download failed on attempt {}/{}: {}",
+                    attempt, maxRetries, e.getMessage());
+            }
+
+            // 非最后一次则等待重试
+            if (attempt < maxRetries) {
+                try { Thread.sleep(retryDelayMs); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+            }
+        }
+
+        log.error("Video content download failed after {} attempts for taskId={}", maxRetries, taskId);
+        return null;
     }
 
     private String callGet(String url) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Authorization", "Bearer " + config.getApiKey())
-                .timeout(java.time.Duration.ofSeconds(120))
-                .GET()
-                .build();
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return resp.body();
-            }
+                .timeout(Duration.ofSeconds(120))
+                .GET().build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) return resp.body();
             log.warn("GET {} returned {}", url, resp.statusCode());
         } catch (Exception e) {
             log.warn("GET {} failed: {}", url, e.getMessage());
         }
         return null;
+    }
+
+    private String extractFilename(String urlPath) {
+        int idx = urlPath.lastIndexOf('/');
+        return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
+    }
+
+    private byte[] decodeBase64Image(String base64Data) {
+        String clean = base64Data;
+        if (clean.contains(",") && clean.contains("base64")) {
+            clean = clean.substring(clean.indexOf(",") + 1);
+        }
+        return Base64.getDecoder().decode(clean);
     }
 }

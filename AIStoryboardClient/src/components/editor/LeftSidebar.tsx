@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
-import { AspectRatioSelector } from '../common/AspectRatioSelector';
+import { VideoPresetSelector } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
+import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -34,6 +35,16 @@ const sharedInputStyle: React.CSSProperties = {
   outline: 'none',
 };
 
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--color-muted)',
+  textTransform: 'uppercase' as React.CSSProperties['textTransform'],
+  letterSpacing: '.5px',
+  paddingTop: 4,
+  borderTop: '1px solid var(--color-hairline)',
+};
+
 export function LeftSidebar() {
   const {
     currentProject,
@@ -42,14 +53,19 @@ export function LeftSidebar() {
     createProject,
     imageModel,
     videoModel,
+    videoPreset,
+    imageSize,
+    imageQuality,
     setImageModel,
     setVideoModel,
+    setVideoPreset,
+    setImageSize,
+    setImageQuality,
   } = useProjectStore();
 
   const [collapsed, setCollapsed] = useState(false);
   const [creationType, setCreationType] = useState('movie');
   const [customTypeDesc, setCustomTypeDesc] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('16:9');
   const [scriptText, setScriptText] = useState('');
   const [_refImageFile, setRefImageFile] = useState<File | null>(null);
   const [refImagePreview, setRefImagePreview] = useState('');
@@ -76,7 +92,8 @@ export function LeftSidebar() {
     // If no current project, create one first
     if (!projectId) {
       try {
-        const p = await createProject('未命名项目', creationType, aspectRatio);
+        const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS[1];
+        const p = await createProject('未命名项目', creationType, preset.aspectRatio);
         projectId = p.id;
       } catch {
         alert('创建项目失败，请重试');
@@ -84,7 +101,8 @@ export function LeftSidebar() {
       }
     }
 
-    await generateScript(projectId, scriptText, creationType, aspectRatio, undefined);
+    const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS[1];
+    await generateScript(projectId, scriptText, creationType, preset.aspectRatio, undefined);
   };
 
   // ── Collapsed state: vertical tab ──
@@ -131,7 +149,7 @@ export function LeftSidebar() {
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
-        overflow: 'hidden',
+        overflowY: 'auto',
       }}
     >
       {/* Section title with collapse button */}
@@ -163,6 +181,9 @@ export function LeftSidebar() {
         </button>
       </div>
 
+      {/* ═══════════ 剧本输入区域 ═══════════ */}
+
+
       {/* Creation type */}
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>创作类型</label>
@@ -193,38 +214,8 @@ export function LeftSidebar() {
         </div>
       )}
 
-      {/* Model selectors */}
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生图模型</label>
-        <select
-          value={imageModel}
-          onChange={(e) => setImageModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          <option value="gpt-image-2">GPT Image 2</option>
-          <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image</option>
-        </select>
-      </div>
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生视频模型</label>
-        <select
-          value={videoModel}
-          onChange={(e) => setVideoModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          <option value="veo-3.1-fast">Veo 3.1 Fast</option>
-          <option value="veo-3.1">Veo 3.1</option>
-        </select>
-      </div>
-
-      {/* Aspect ratio */}
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>画幅比例</label>
-        <AspectRatioSelector value={aspectRatio} onChange={setAspectRatio} />
-      </div>
-
       {/* Script textarea */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <label style={labelStyle}>剧本 / 描述</label>
         <textarea
           value={scriptText}
@@ -232,15 +223,14 @@ export function LeftSidebar() {
           placeholder="输入剧本或创作描述，AI 将自动拆解为分镜..."
           style={{
             ...sharedInputStyle,
-            flex: 1,
-            minHeight: 120,
-            resize: 'none',
+            minHeight: 100,
+            resize: 'vertical',
             lineHeight: 1.55,
           }}
         />
       </div>
 
-      {/* Reference image upload — custom styled */}
+      {/* Reference image upload */}
       <div style={{ flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -262,6 +252,60 @@ export function LeftSidebar() {
                 alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</span>
           </div>
         )}
+      </div>
+
+      {/* ═══════════ 生图区域 ═══════════ */}
+      <div style={sectionHeaderStyle}>🎨 生图设置</div>
+
+      <div style={{ flexShrink: 0 }}>
+        <label style={labelStyle}>生图模型</label>
+        <select
+          value={imageModel}
+          onChange={(e) => setImageModel(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          {IMAGE_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+      <div style={{ flexShrink: 0 }}>
+        <label style={labelStyle}>生图尺寸</label>
+        <select
+          value={imageSize}
+          onChange={(e) => setImageSize(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div style={{ flexShrink: 0 }}>
+        <label style={labelStyle}>生图质量</label>
+        <select
+          value={imageQuality}
+          onChange={(e) => setImageQuality(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          {IMAGE_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
+        </select>
+      </div>
+
+      {/* ═══════════ 生视频区域 ═══════════ */}
+      <div style={sectionHeaderStyle}>🎬 生视频设置</div>
+
+      <div style={{ flexShrink: 0 }}>
+        <label style={labelStyle}>生视频模型</label>
+        <select
+          value={videoModel}
+          onChange={(e) => setVideoModel(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          {VIDEO_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+
+      {/* Video preset — duration + resolution */}
+      <div style={{ flexShrink: 0 }}>
+        <label style={labelStyle}>时长和分辨率</label>
+        <VideoPresetSelector value={videoPreset} onChange={setVideoPreset} />
       </div>
 
       {/* Generate button */}

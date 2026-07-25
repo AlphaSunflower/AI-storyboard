@@ -1,13 +1,6 @@
 import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
-
-const BACKEND = 'http://localhost:8082';
-
-function assetUrl(path: string | null) {
-  if (!path) return '';
-  if (path.startsWith('http')) return path;
-  return BACKEND + path;
-}
+import { assetUrl } from '../../config';
 
 function downloadAsset(url: string, filename: string) {
   fetch(url)

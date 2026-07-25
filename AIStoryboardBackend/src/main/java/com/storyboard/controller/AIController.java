@@ -65,7 +65,9 @@ public class AIController {
     public ApiResponse<Map<String, String>> generateImage(@RequestBody GenerateImageRequest request) {
         String imageUrl = imageService.generateImage(
             request.sceneId(), request.prompt(), request.model(),
-            request.size(), request.aspectRatio(), request.referenceImages()
+            request.size(), request.quality(), request.aspectRatio(),
+            request.referenceImages(),
+            request.mode(), request.generatedImageUrl()
         );
         return ApiResponse.ok(Map.of("imageUrl", imageUrl, "sceneId", request.sceneId()));
     }
@@ -74,7 +76,8 @@ public class AIController {
     public ApiResponse<Map<String, String>> generateVideo(@RequestBody GenerateVideoRequest request) {
         String taskId = videoService.createVideoTask(
             request.sceneId(), request.prompt(), request.model(),
-            request.resolution(), request.duration(),
+            request.resolution(), request.size(), request.aspectRatio(),
+            request.duration(), request.negativePrompt(), request.seed(),
             request.referenceImages(), request.generatedImageUrl()
         );
         return ApiResponse.ok(Map.of("taskId", taskId, "sceneId", request.sceneId()));

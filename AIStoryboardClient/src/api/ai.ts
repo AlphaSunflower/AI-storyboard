@@ -25,8 +25,11 @@ export const aiApi = {
     prompt: string;
     model?: string;
     size?: string;
+    quality?: string;
     aspectRatio?: string;
     referenceImages?: string[];
+    mode?: string;
+    generatedImageUrl?: string;
   }) => client.post<ApiResponse<{ imageUrl: string }>>('/ai/generate-image', data),
 
   generateVideo: (data: {
@@ -34,7 +37,11 @@ export const aiApi = {
     prompt: string;
     model?: string;
     resolution?: string;
+    size?: string;
+    aspectRatio?: string;
     duration?: number;
+    negativePrompt?: string;
+    seed?: number;
     referenceImages?: string[];
     generatedImageUrl?: string;
   }) => client.post<ApiResponse<{ taskId: string; sceneId: string }>>('/ai/generate-video', data),

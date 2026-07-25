@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { BACKEND_URL } from '../config';
 
 const client = axios.create({
-  baseURL: 'http://localhost:8082/api',
+  baseURL: BACKEND_URL + '/api',
   timeout: 120000,
   headers: { 'Content-Type': 'application/json' },
 });

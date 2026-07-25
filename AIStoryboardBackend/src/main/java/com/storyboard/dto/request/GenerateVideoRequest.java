@@ -7,7 +7,11 @@ public record GenerateVideoRequest(
     String prompt,
     String model,
     String resolution,
+    String size,
+    String aspectRatio,
     Integer duration,
+    String negativePrompt,
+    Long seed,
     List<String> referenceImages,
-    String generatedImageUrl    // 新增：已生成的图片URL
+    String generatedImageUrl
 ) {}

@@ -120,16 +120,28 @@ export function SceneCard({
     // Retry / first generation
     try {
       await sceneApi.update(scene.id, { imagePrompt });
-      await generateImage(scene.id, imagePrompt, imageModel, refs.useForImage && refs.images.length > 0 ? refs.images : undefined);
+      // 勾选了参考图生图且有参考图时 → 图改图模式
+      const useEdit = refs.useForImage && refs.images.length > 0;
+      await generateImage(
+        scene.id, imagePrompt, imageModel,
+        useEdit ? refs.images : undefined,
+        useEdit ? 'edit' : undefined,
+      );
     } catch (err) {
       alert('生成图片失败，请检查网络连接');
     }
   };
 
-  const handleImageRefineConfirm = async (params: { prompt: string; model: string; referenceImages: string[] }) => {
+  const handleImageRefineConfirm = async (params: { prompt: string; model: string }) => {
     try {
       await sceneApi.update(scene.id, { imagePrompt: params.prompt });
-      await generateImage(scene.id, params.prompt, params.model, params.referenceImages);
+      // 完善图片 → 图改图模式，传入当前生图作为源图
+      await generateImage(
+        scene.id, params.prompt, params.model,
+        undefined,
+        'edit',
+        scene.imageUrl || undefined,
+      );
     } catch (err) {
       alert('完善图片失败，请检查网络连接');
     }
@@ -148,7 +160,13 @@ export function SceneCard({
     // Retry / first generation
     try {
       await sceneApi.update(scene.id, { videoPrompt });
-      await generateVideo(scene.id, videoPrompt, videoModel, refs.useForVideo && refs.images.length > 0 ? refs.images : undefined);
+      // 只有勾选"参考图生视频"时才传参考图；只允许一张
+      const useRef = refs.useForVideo && (refs.images.length > 0 || !!scene.imageUrl);
+      await generateVideo(
+        scene.id, videoPrompt, videoModel,
+        useRef && refs.images.length > 0 ? refs.images : undefined,
+        useRef && scene.imageUrl ? scene.imageUrl : undefined,
+      );
     } catch (err) {
       alert('生成视频失败，请检查网络连接');
     }
@@ -157,7 +175,7 @@ export function SceneCard({
   const handleVideoRefineConfirm = async (params: { prompt: string; model: string; referenceImages: string[] }) => {
     try {
       await sceneApi.update(scene.id, { videoPrompt: params.prompt });
-      await generateVideo(scene.id, params.prompt, params.model, params.referenceImages);
+      await generateVideo(scene.id, params.prompt, params.model, params.referenceImages, scene.imageUrl || undefined);
     } catch (err) {
       alert('完善视频失败，请检查网络连接');
     }
@@ -384,12 +402,12 @@ export function SceneCard({
               }}
             >
               <span style={{ fontSize: 14 }}>🖼️</span>
-              <span>{refs.images.length > 0 ? `${refs.images.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
+              <span>{refs.images.length > 0 ? `${refs.images.length}/1 张参考图` : '添加参考图（可选，仅1张）'}</span>
             </div>
-            <input ref={refInputRef} type="file" accept="image/*" multiple hidden
+            <input ref={refInputRef} type="file" accept="image/*" hidden
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
-                if (refs.images.length + files.length > 3) { alert('最多3张参考图'); return; }
+                if (refs.images.length + files.length > 1) { alert('最多1张参考图'); return; }
                 files.forEach(f => {
                   const reader = new FileReader();
                   reader.onload = () => setSceneRefs(scene.id, { ...refs, images: [...refs.images, reader.result as string] });

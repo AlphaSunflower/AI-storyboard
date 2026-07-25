@@ -1,10 +1,17 @@
+# =============================================================================
+# SECRETS POLICY
+# Secrets (DB password, JWT keys, API keys) MUST be set via environment
+# variables or application-local.yml.  No defaults are committed.
+# The app will fail fast at startup if any secret is missing.
+# =============================================================================
+
 spring:
   application:
     name: ai-storyboard
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:newworkflow}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:123456}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   profiles:
     active: local
@@ -24,20 +31,50 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  access-secret: ${JWT_ACCESS_SECRET:dev-access-secret-key-change-in-production!!}
-  refresh-secret: ${JWT_REFRESH_SECRET:dev-refresh-secret-key-change-in-prod!!}
+  access-secret: ${JWT_ACCESS_SECRET}
+  refresh-secret: ${JWT_REFRESH_SECRET}
   issuer: ${JWT_ISSUER:newworkflow-backend}
   access-token-ttl: 3600
   refresh-token-ttl: 2592000
 
+# ═══════════════════════════════════════════════════════
+# AI / Laozhang configuration
+# Model names and API paths live here — change once, not in code.
+# ═══════════════════════════════════════════════════════
 ai:
   laozhang:
-    api-key: ${LAOZHANG_API_KEY:sk-bQfq7Zzf9OZ5XkdPCf3254E2D3D64673Be76D08f2830EbCd}
-    sora2-official-api-key: ${LAOZHANG_SORA2_OFFICIAL_API_KEY:sk-8YBdUaxEHTF1sNAHC50fE6A472Ab4111BeEc018fB3294dAc}
+    # ── Secrets (override in env or application-local.yml) ──
+    api-key: ${LAOZHANG_API_KEY}
+    sora2-official-api-key: ${LAOZHANG_SORA2_API_KEY}
+
+    # ── Base URLs ──
     base-url-openai: https://api2.laozhang.ai/v1
     base-url-gemini: https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent
     base-url-vision: https://api2.laozhang.ai/v1/chat/completions
+
+    # ── API endpoint paths (relative to base-url-openai) ──
+    endpoint-image-generations: /images/generations
+    endpoint-video-create: /videos
+    endpoint-video-status: /videos/
+    endpoint-video-status-fallback: /video/generations/
+    endpoint-video-content: /videos/
+
+    # ── Model routing ──
+    gemini-image-models: gemini-3-pro-image-preview
+    sora2-models: gpt-image-2-official
+    video-model-aliases: '{"veo-3.1-fast":"veo-3.1-fast-generate-preview","veo-3.1-fast-fl":"veo-3.1-fast-generate-preview","veo-3.1":"veo-3.1-generate-preview","veo-3.1-fl":"veo-3.1-generate-preview"}'
+
+    # ── Defaults ──
     default-image-model: gpt-image-2
     default-vision-model: gemini-3-flash-preview
+    default-image-size: "1024x1024"
+    default-video-duration: "8"
+
+    # ── File storage ──
+    video-upload-dir: uploads/videos
+    video-file-extension: .mp4
+    video-url-prefix: /api/files/videos/
+
+    # ── Polling ──
     poll-interval-ms: 5000
     poll-timeout-ms: 600000

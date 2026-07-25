@@ -1,25 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import type { SceneResponse } from '../../api/projects';
-
-const BACKEND = 'http://localhost:8082';
-function assetUrl(path: string | null) {
-  if (!path) return '';
-  if (path.startsWith('http')) return path;
-  return BACKEND + path;
-}
-
-const IMAGE_MODELS = [
-  { value: 'gpt-image-2', label: 'GPT Image 2' },
-  { value: 'dall-e-3', label: 'DALL·E 3' },
-  { value: 'sdxl', label: 'Stable Diffusion XL' },
-  { value: 'midjourney-v6', label: 'Midjourney V6' },
-  { value: 'flux-pro', label: 'FLUX Pro' },
-];
+import { assetUrl, IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../../config';
 
 interface ImageRefineModalProps {
   scene: SceneResponse;
   onClose: () => void;
-  onGenerate: (params: { prompt: string; model: string; referenceImages: string[] }) => void;
+  onGenerate: (params: { prompt: string; model: string }) => void;
 }
 
 /* ── overlay / backdrop ── */
@@ -78,36 +64,13 @@ const selectStyle: React.CSSProperties = {
 
 export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModalProps) {
   const [prompt, setPrompt] = useState(scene.imagePrompt || '');
-  const [model, setModel] = useState('gpt-image-2');
-  const [extraRefs, setExtraRefs] = useState<string[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [model, setModel] = useState(DEFAULT_IMAGE_MODEL);
 
   const hasCurrentImage = !!scene.imageUrl;
-  const maxExtra = hasCurrentImage ? 3 : 4;
-
-  const allRefImages: string[] = [
-    ...(hasCurrentImage ? [scene.imageUrl] : []),
-    ...extraRefs,
-  ];
-  const totalRefs = allRefImages.length;
-
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (extraRefs.length + files.length > maxExtra) {
-      alert(`最多再添加 ${maxExtra} 张参考图`);
-      return;
-    }
-    files.forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () =>
-        setExtraRefs((prev) => [...prev, reader.result as string]);
-      reader.readAsDataURL(f);
-    });
-  };
 
   const handleConfirm = async () => {
     if (!prompt.trim()) return;
-    await onGenerate({ prompt: prompt.trim(), model, referenceImages: allRefImages });
+    await onGenerate({ prompt: prompt.trim(), model });
     onClose();
   };
 
@@ -154,7 +117,7 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
           {/* Current image preview */}
           {hasCurrentImage && (
             <div>
-              <span style={labelStyle}>当前生成图</span>
+              <span style={labelStyle}>当前生成图（作为改图源图）</span>
               <img
                 src={assetUrl(scene.imageUrl)}
                 alt={`分镜 ${scene.sceneNumber} 已生成图片`}
@@ -172,7 +135,7 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
 
           {/* Prompt */}
           <div>
-            <span style={labelStyle}>生图提示词</span>
+            <span style={labelStyle}>改图提示词</span>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -182,95 +145,8 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
                 resize: 'vertical',
                 minHeight: 72,
               }}
-              placeholder="输入生图提示词…"
+              placeholder="描述你希望对当前图片做出的修改…"
             />
-          </div>
-
-          {/* Extra reference images */}
-          {maxExtra > 0 && (
-            <div>
-              <span style={labelStyle}>
-                额外参考图（最多{maxExtra}张，已选{extraRefs.length}/{maxExtra}）— 当前图将自动作为参考
-              </span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: extraRefs.length > 0 ? 8 : 0 }}>
-                {extraRefs.map((url, i) => (
-                  <div key={i} style={{ position: 'relative' }}>
-                    <img
-                      src={url}
-                      style={{
-                        width: 56,
-                        height: 56,
-                        borderRadius: 4,
-                        objectFit: 'cover',
-                        border: '1px solid var(--color-hairline)',
-                      }}
-                    />
-                    <span
-                      onClick={() =>
-                        setExtraRefs((prev) => prev.filter((_, j) => j !== i))
-                      }
-                      style={{
-                        position: 'absolute',
-                        top: -6,
-                        right: -6,
-                        background: 'var(--color-error)',
-                        color: 'white',
-                        borderRadius: '50%',
-                        width: 18,
-                        height: 18,
-                        fontSize: 11,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        lineHeight: 1,
-                      }}
-                    >
-                      ×
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {extraRefs.length < maxExtra && (
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  style={{
-                    padding: '5px 12px',
-                    fontSize: 11,
-                    borderRadius: 'var(--rounded-sm)',
-                    border: '1px dashed var(--color-hairline)',
-                    background: 'white',
-                    cursor: 'pointer',
-                    color: 'var(--color-muted)',
-                  }}
-                >
-                  + 上传参考图
-                </button>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                onChange={handleUpload}
-              />
-            </div>
-          )}
-
-          {/* Reference summary (always show, since current image is auto-included) */}
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--color-muted)',
-              background: 'var(--color-surface-card)',
-              padding: '6px 10px',
-              borderRadius: 'var(--rounded-sm)',
-            }}
-          >
-            📎 参考图共 {totalRefs} 张
-            {hasCurrentImage ? '（含当前生成图）' : ''}
-            {extraRefs.length > 0 ? ` + ${extraRefs.length} 张额外上传` : ''}
           </div>
 
           {/* Model selector */}

@@ -1,20 +1,6 @@
 import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
-
-const BACKEND = 'http://localhost:8082';
-function assetUrl(path: string | null) {
-  if (!path) return '';
-  if (path.startsWith('http')) return path;
-  return BACKEND + path;
-}
-
-const VIDEO_MODELS = [
-  { value: 'veo-3.1-fast', label: 'Veo 3.1 Fast' },
-  { value: 'veo-3.1', label: 'Veo 3.1' },
-  { value: 'runway-gen3', label: 'Runway Gen-3' },
-  { value: 'kling-2', label: 'Kling 2' },
-  { value: 'sora', label: 'Sora' },
-];
+import { assetUrl, VIDEO_MODELS, DEFAULT_VIDEO_MODEL } from '../../config';
 
 interface VideoRefineModalProps {
   scene: SceneResponse;
@@ -78,7 +64,7 @@ const selectStyle: React.CSSProperties = {
 
 export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModalProps) {
   const [prompt, setPrompt] = useState(scene.videoPrompt || '');
-  const [model, setModel] = useState('veo-3.1-fast');
+  const [model, setModel] = useState(DEFAULT_VIDEO_MODEL);
   const [extraRefs, setExtraRefs] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 

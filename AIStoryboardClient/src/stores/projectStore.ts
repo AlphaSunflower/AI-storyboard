@@ -3,6 +3,7 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY } from '../config';
 
 interface ProjectState {
   projects: ProjectResponse[];
@@ -17,8 +18,14 @@ interface ProjectState {
   scriptGenerationMessage: string;
   imageModel: string;
   videoModel: string;
+  videoPreset: string;
+  imageSize: string;
+  imageQuality: string;
   setImageModel: (m: string) => void;
   setVideoModel: (m: string) => void;
+  setVideoPreset: (p: string) => void;
+  setImageSize: (s: string) => void;
+  setImageQuality: (q: string) => void;
 
   // scene ref state — stored as JSON in soundDesign field
   getSceneRefs: (sceneId: string) => { images: string[]; useForImage: boolean; useForVideo: boolean };
@@ -32,8 +39,8 @@ interface ProjectState {
   checkDraft: () => Promise<ProjectResponse | null>;
   selectScene: (sceneId: string) => void;
   generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string) => Promise<void>;
-  generateImage: (sceneId: string, prompt: string, model?: string, referenceImages?: string[]) => Promise<string>;
-  generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[]) => Promise<string>;
+  generateImage: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], mode?: string, generatedImageUrl?: string) => Promise<string>;
+  generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], generatedImageUrl?: string) => Promise<string>;
   setGeneratingImage: (sceneId: string, v: boolean) => void;
   setGeneratingVideo: (sceneId: string, v: boolean) => void;
   addScene: (projectId: string) => Promise<void>;
@@ -53,8 +60,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   videoProgress: {},
   scriptGenerationStatus: 'idle',
   scriptGenerationMessage: '',
-  imageModel: 'gpt-image-2',
-  videoModel: 'veo-3.1-fast',
+  imageModel: DEFAULT_IMAGE_MODEL,
+  videoModel: DEFAULT_VIDEO_MODEL,
+  videoPreset: DEFAULT_VIDEO_PRESET,
+  imageSize: DEFAULT_IMAGE_SIZE,
+  imageQuality: DEFAULT_IMAGE_QUALITY,
 
   loadProjects: async () => {
     set({ isLoading: true });
@@ -138,11 +148,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  generateImage: async (sceneId, prompt, model, referenceImages) => {
+  generateImage: async (sceneId, prompt, model, referenceImages, mode, generatedImageUrl) => {
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: true } }));
     try {
+      const { imageSize, imageQuality } = get();
       const res = await aiApi.generateImage({
-        sceneId, prompt, model, aspectRatio: '16:9', referenceImages,
+        sceneId, prompt, model, referenceImages, mode, generatedImageUrl,
+        size: imageSize,
+        quality: imageQuality,
       });
       if (get().currentProject) {
         await get().loadProject(get().currentProject!.id);
@@ -154,14 +167,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  generateVideo: async (sceneId, prompt, model, referenceImages) => {
+  generateVideo: async (sceneId, prompt, model, referenceImages, generatedImageUrl) => {
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: true } }));
     try {
-      // 传入当前 scene 的 imageUrl 作为 generatedImageUrl
-      const scene = get().scenes.find(s => s.id === sceneId);
-      const generatedImageUrl = scene?.imageUrl || undefined;
+      const preset = VIDEO_PRESETS.find(p => p.value === get().videoPreset) || VIDEO_PRESETS[1];
       const res = await aiApi.generateVideo({
         sceneId, prompt, model, referenceImages, generatedImageUrl,
+        resolution: preset.resolution,
+        size: preset.size,
+        aspectRatio: preset.aspectRatio,
+        duration: parseInt(preset.duration),
       });
       const taskId = res.data.data.taskId;
       // 轮询直到完成
@@ -200,6 +215,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setImageModel: (m) => set({ imageModel: m }),
   setVideoModel: (m) => set({ videoModel: m }),
+  setVideoPreset: (p) => set({ videoPreset: p }),
+  setImageSize: (s) => set({ imageSize: s }),
+  setImageQuality: (q) => set({ imageQuality: q }),
 
   markDirty: () => {
     const { currentProject, updateProject } = get();
