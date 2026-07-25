@@ -89,15 +89,16 @@ export function SceneCard({
   const imageModel = useProjectStore((s) => s.imageModel);
   const videoModel = useProjectStore((s) => s.videoModel);
   const videoProgress = useProjectStore((s) => s.videoProgress[scene.id]) || 0;
+  const getSceneRefs = useProjectStore((s) => s.getSceneRefs);
+  const setSceneRefs = useProjectStore((s) => s.setSceneRefs);
+
+  const refs = getSceneRefs(scene.id);
 
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
-  const [sceneRefImages, setSceneRefImages] = useState<string[]>([]);
-  const [useRefForImage, setUseRefForImage] = useState(false);
-  const [useRefForVideo, setUseRefForVideo] = useState(false);
   const refInputRef = useRef<HTMLInputElement>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -118,7 +119,7 @@ export function SceneCard({
     // Retry / first generation
     try {
       await sceneApi.update(scene.id, { imagePrompt });
-      await generateImage(scene.id, imagePrompt, imageModel, useRefForImage && sceneRefImages.length > 0 ? sceneRefImages : undefined);
+      await generateImage(scene.id, imagePrompt, imageModel, refs.useForImage && refs.images.length > 0 ? refs.images : undefined);
     } catch (err) {
       alert('生成图片失败，请检查网络连接');
     }
@@ -146,7 +147,7 @@ export function SceneCard({
     // Retry / first generation
     try {
       await sceneApi.update(scene.id, { videoPrompt });
-      await generateVideo(scene.id, videoPrompt, videoModel, useRefForVideo && sceneRefImages.length > 0 ? sceneRefImages : undefined);
+      await generateVideo(scene.id, videoPrompt, videoModel, refs.useForVideo && refs.images.length > 0 ? refs.images : undefined);
     } catch (err) {
       alert('生成视频失败，请检查网络连接');
     }
@@ -381,24 +382,24 @@ export function SceneCard({
               }}
             >
               <span style={{ fontSize: 14 }}>🖼️</span>
-              <span>{sceneRefImages.length > 0 ? `${sceneRefImages.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
+              <span>{refs.images.length > 0 ? `${refs.images.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
             </div>
             <input ref={refInputRef} type="file" accept="image/*" multiple hidden
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
-                if (sceneRefImages.length + files.length > 3) { alert('最多3张参考图'); return; }
+                if (refs.images.length + files.length > 3) { alert('最多3张参考图'); return; }
                 files.forEach(f => {
                   const reader = new FileReader();
-                  reader.onload = () => setSceneRefImages(prev => [...prev, reader.result as string]);
+                  reader.onload = () => setSceneRefs(scene.id, { ...refs, images: [...refs.images, reader.result as string] });
                   reader.readAsDataURL(f);
                 });
               }} />
-            {sceneRefImages.length > 0 && (
+            {refs.images.length > 0 && (
               <div style={{ display:'flex',gap:4,marginTop:6,flexWrap:'wrap' }}>
-                {sceneRefImages.map((url,i) => (
+                {refs.images.map((url,i) => (
                   <div key={i} style={{position:'relative'}}>
                     <img src={url} style={{width:48,height:48,borderRadius:4,objectFit:'cover'}} />
-                    <span onClick={() => setSceneRefImages(prev => prev.filter((_,j) => j!==i))}
+                    <span onClick={() => setSceneRefs(scene.id, { ...refs, images: refs.images.filter((_,j) => j!==i) })}
                       style={{position:'absolute',top:-4,right:-4,background:'var(--color-error)',color:'white',borderRadius:'50%',width:16,height:16,fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>×</span>
                   </div>
                 ))}
@@ -409,12 +410,12 @@ export function SceneCard({
           {/* Toggle ref-image usage */}
           <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={useRefForImage} onChange={e => setUseRefForImage(e.target.checked)}
+              <input type="checkbox" checked={refs.useForImage} onChange={e => setSceneRefs(scene.id, { ...refs, useForImage: e.target.checked })}
                 style={{ margin: 0, cursor: 'pointer' }} />
               参考图生图
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={useRefForVideo} onChange={e => setUseRefForVideo(e.target.checked)}
+              <input type="checkbox" checked={refs.useForVideo} onChange={e => setSceneRefs(scene.id, { ...refs, useForVideo: e.target.checked })}
                 style={{ margin: 0, cursor: 'pointer' }} />
               参考图生视频
             </label>

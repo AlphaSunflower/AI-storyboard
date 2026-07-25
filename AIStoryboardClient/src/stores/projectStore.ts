@@ -20,6 +20,10 @@ interface ProjectState {
   setImageModel: (m: string) => void;
   setVideoModel: (m: string) => void;
 
+  // scene ref state — stored as JSON in soundDesign field
+  getSceneRefs: (sceneId: string) => { images: string[]; useForImage: boolean; useForVideo: boolean };
+  setSceneRefs: (sceneId: string, refs: { images: string[]; useForImage: boolean; useForVideo: boolean }) => Promise<void>;
+
   loadProjects: () => Promise<void>;
   createProject: (name: string, creationType: string, aspectRatio: string) => Promise<ProjectResponse>;
   loadProject: (id: string) => Promise<void>;
@@ -198,6 +202,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (currentProject && currentProject.status === 'active') {
       updateProject(currentProject.id, { status: 'draft' });
     }
+  },
+
+  // scene ref state — stored as JSON in soundDesign field
+  getSceneRefs: (sceneId) => {
+    const scene = get().scenes.find(s => s.id === sceneId);
+    if (!scene || !scene.soundDesign) return { images: [], useForImage: true, useForVideo: true };
+    try { return JSON.parse(scene.soundDesign); } catch { return { images: [], useForImage: true, useForVideo: true }; }
+  },
+  setSceneRefs: async (sceneId, refs) => {
+    await sceneApi.update(sceneId, { soundDesign: JSON.stringify(refs) });
+    set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? { ...sc, soundDesign: JSON.stringify(refs) } : sc) }));
   },
 
   addScene: async (projectId) => {

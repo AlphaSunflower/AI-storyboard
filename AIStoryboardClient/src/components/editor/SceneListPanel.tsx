@@ -1,17 +1,15 @@
 import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
 
-const middlePanelWidth = 380;
-
-export function SceneListPanel() {
+export function SceneListPanel({ width }: { width: number }) {
   const { scenes, selectedSceneId, selectScene, addScene, currentProject } =
     useProjectStore();
 
   return (
     <div
       style={{
-        width: middlePanelWidth,
-        minWidth: middlePanelWidth,
+        width: `${width}px`,
+        minWidth: `${width}px`,
         borderRight: '1px solid var(--color-hairline)',
         background: 'white',
         padding: 'var(--space-md)',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { AppHeader } from '../components/layout/AppHeader';
 import { GenerationProgress } from '../components/common/GenerationProgress';
 import { LeftSidebar } from '../components/editor/LeftSidebar';
@@ -12,6 +12,7 @@ export function EditorPage() {
   const { loadProjects, checkDraft, loadProject } = useProjectStore();
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [draftProject, setDraftProject] = useState<ProjectResponse | null>(null);
+  const [middleWidth, setMiddleWidth] = useState(380);
 
   useEffect(() => {
     loadProjects();
@@ -37,6 +38,25 @@ export function EditorPage() {
   const handleDismissDraft = () => {
     setShowDraftBanner(false);
   };
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = middleWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = startWidth + ev.clientX - startX;
+      setMiddleWidth(Math.min(600, Math.max(380, newWidth)));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [middleWidth]);
 
   return (
     <div
@@ -71,7 +91,19 @@ export function EditorPage() {
         }}
       >
         <LeftSidebar />
-        <SceneListPanel />
+        <SceneListPanel width={middleWidth} />
+        <div
+          onMouseDown={handleDragStart}
+          style={{
+            width: '4px',
+            cursor: 'col-resize',
+            background: 'transparent',
+            transition: 'background 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'var(--color-primary)'; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+        />
         <PreviewPanel />
       </div>
     </div>

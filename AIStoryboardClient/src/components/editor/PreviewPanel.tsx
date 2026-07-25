@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 
 const BACKEND = 'http://localhost:8082';
@@ -28,6 +28,10 @@ type PreviewTab = 'image' | 'video';
 export function PreviewPanel() {
   const { scenes, selectedSceneId } = useProjectStore();
   const scene = scenes.find((s) => s.id === selectedSceneId);
+  const getSceneRefs = useProjectStore((s) => s.getSceneRefs);
+  const setSceneRefs = useProjectStore((s) => s.setSceneRefs);
+  const refs = scene ? getSceneRefs(scene.id) : { images: [] as string[], useForImage: true, useForVideo: true };
+  const refInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<PreviewTab>('image');
 
   // tab button style
@@ -206,6 +210,59 @@ export function PreviewPanel() {
               {scene.videoStatus === 'generating' ? '⏳ 正在生成视频...' : '未生成视频'}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Reference image controls */}
+      {scene && (
+        <div style={{ marginBottom: 12, padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', marginBottom: 8 }}>🖼️ 参考图</div>
+          <div
+            onClick={() => refInputRef.current?.click()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 10px', borderRadius: 'var(--rounded-md)',
+              border: '1px dashed var(--color-hairline)', cursor: 'pointer',
+              background: 'var(--color-surface-card)', fontSize: 11,
+              color: 'var(--color-muted)',
+            }}
+          >
+            <span style={{ fontSize: 14 }}>🖼️</span>
+            <span>{refs.images.length > 0 ? `${refs.images.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
+          </div>
+          <input ref={refInputRef} type="file" accept="image/*" multiple hidden
+            onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              if (refs.images.length + files.length > 3) { alert('最多3张参考图'); return; }
+              files.forEach(f => {
+                const reader = new FileReader();
+                reader.onload = () => setSceneRefs(scene.id, { ...refs, images: [...refs.images, reader.result as string] });
+                reader.readAsDataURL(f);
+              });
+            }} />
+          {refs.images.length > 0 && (
+            <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+              {refs.images.map((url, i) => (
+                <div key={i} style={{ position: 'relative' }}>
+                  <img src={url} style={{ width: 48, height: 48, borderRadius: 4, objectFit: 'cover' }} />
+                  <span onClick={() => setSceneRefs(scene.id, { ...refs, images: refs.images.filter((_, j) => j !== i) })}
+                    style={{ position: 'absolute', top: -4, right: -4, background: 'var(--color-error)', color: 'white', borderRadius: '50%', width: 16, height: 16, fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={refs.useForImage} onChange={e => setSceneRefs(scene.id, { ...refs, useForImage: e.target.checked })}
+                style={{ margin: 0, cursor: 'pointer' }} />
+              参考图生图
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={refs.useForVideo} onChange={e => setSceneRefs(scene.id, { ...refs, useForVideo: e.target.checked })}
+                style={{ margin: 0, cursor: 'pointer' }} />
+              参考图生视频
+            </label>
+          </div>
         </div>
       )}
 
