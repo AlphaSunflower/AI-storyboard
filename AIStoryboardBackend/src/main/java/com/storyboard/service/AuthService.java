@@ -2,6 +2,8 @@ package com.storyboard.service;
 
 import com.storyboard.dto.request.LoginRequest;
 import com.storyboard.dto.request.RegisterRequest;
+import com.storyboard.dto.request.UnloginRequest;
+import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.dto.response.LoginResponse;
 import com.storyboard.entity.User;
 import com.storyboard.exception.BusinessException;
@@ -11,6 +13,7 @@ import com.storyboard.security.ScryptPasswordService;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 @Service
 public class AuthService {
@@ -80,5 +83,27 @@ public class AuthService {
         } catch (Exception e) {
             throw new BusinessException(40101, "Token 无效或已过期");
         }
+    }
+
+    public ApiResponse<Map<String, Object>> handleUnlogin(UnloginRequest req) {
+        // 解析系统一的 JWT
+        String userId = jwtTokenProvider.tokenToUserId(req.jwt());
+
+        // 查用户
+        User user = userMapper.selectById(userId);
+        if (user == null || !"enabled".equals(user.getStatus())) {
+            throw new BusinessException(40101, "登录校验错误");
+        }
+
+        // 签发当前系统 JWT
+        String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
+        String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());
+
+        return ApiResponse.ok(Map.of(
+            "accessToken", accessToken,
+            "refreshToken", refreshToken,
+            "userId", user.getId(),
+            "displayName", user.getDisplayName()
+        ));
     }
 }

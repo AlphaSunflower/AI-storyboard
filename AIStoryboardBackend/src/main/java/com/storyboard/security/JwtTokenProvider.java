@@ -94,6 +94,19 @@ public class JwtTokenProvider {
     // ==================== Verification ====================
 
     /**
+     * Parse a JWT token and extract the user ID (subject) from it.
+     * Used for cross-system JWT exchange where only user identity is needed.
+     */
+    public String tokenToUserId(String token) {
+        return Jwts.parser()
+                .verifyWith(accessKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getSubject();
+    }
+
+    /**
      * Verify an access token and validate its claims.
      *
      * @return parsed claims

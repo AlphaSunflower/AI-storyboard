@@ -2,6 +2,7 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.LoginRequest;
 import com.storyboard.dto.request.RegisterRequest;
+import com.storyboard.dto.request.UnloginRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.dto.response.LoginResponse;
 import com.storyboard.service.AuthService;
@@ -34,5 +35,10 @@ public class AuthController {
     public ApiResponse<LoginResponse> refresh(@RequestBody Map<String, String> body) {
         String refreshToken = body.get("refreshToken");
         return ApiResponse.ok(authService.refresh(refreshToken));
+    }
+
+    @PostMapping("/unlogin")
+    public ApiResponse<Map<String, Object>> unlogin(@RequestBody UnloginRequest req) {
+        return authService.handleUnlogin(req);
     }
 }
