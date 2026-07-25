@@ -34,6 +34,7 @@ interface ProjectState {
   setGeneratingVideo: (sceneId: string, v: boolean) => void;
   addScene: (projectId: string) => Promise<void>;
   deleteScene: (sceneId: string) => Promise<void>;
+  markDirty: () => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -77,7 +78,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateProject: async (id, data) => {
     const res = await projectApi.update(id, data);
-    set({ currentProject: res.data.data });
+    const updated = res.data.data;
+    set((s) => ({
+      currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+      projects: s.projects.map(p => p.id === id ? updated : p),
+    }));
   },
 
   deleteProject: async (id) => {
@@ -116,6 +121,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         scriptGenerationStatus: 'done',
         scriptGenerationMessage: '分镜生成完成',
       });
+      get().markDirty();
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : '分镜生成失败，请重试';
@@ -136,6 +142,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (get().currentProject) {
         await get().loadProject(get().currentProject!.id);
       }
+      get().markDirty();
       return res.data.data.imageUrl;
     } finally {
       set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: false } }));
@@ -168,6 +175,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       };
       await poll();
+      get().markDirty();
       return taskId;
     } finally {
       set((s) => ({ 
@@ -185,11 +193,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setImageModel: (m) => set({ imageModel: m }),
   setVideoModel: (m) => set({ videoModel: m }),
 
+  markDirty: () => {
+    const { currentProject, updateProject } = get();
+    if (currentProject && currentProject.status === 'active') {
+      updateProject(currentProject.id, { status: 'draft' });
+    }
+  },
+
   addScene: async (projectId) => {
     await sceneApi.add(projectId, { scriptContent: '' });
     if (get().currentProject?.id === projectId) {
       await get().loadProject(projectId);
     }
+    get().markDirty();
   },
 
   deleteScene: async (sceneId) => {
@@ -197,5 +213,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().currentProject) {
       await get().loadProject(get().currentProject!.id);
     }
+    get().markDirty();
   },
 }));
