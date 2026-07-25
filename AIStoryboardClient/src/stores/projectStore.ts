@@ -12,6 +12,7 @@ interface ProjectState {
   isLoading: boolean;
   generatingImage: Record<string, boolean>;
   generatingVideo: Record<string, boolean>;
+  videoProgress: Record<string, number>; // sceneId -> progress (0-100)
   scriptGenerationStatus: 'idle' | 'generating' | 'done' | 'error';
   scriptGenerationMessage: string;
   imageModel: string;
@@ -43,6 +44,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isLoading: false,
   generatingImage: {},
   generatingVideo: {},
+  videoProgress: {},
   scriptGenerationStatus: 'idle',
   scriptGenerationMessage: '',
   imageModel: 'gpt-image-2',
@@ -150,6 +152,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         attempts++;
         const statusRes = await aiApi.getTaskStatus(taskId);
         const status = statusRes.data.data;
+        if (status.progress) {
+          set((s) => ({ videoProgress: { ...s.videoProgress, [sceneId]: parseInt(status.progress!) } }));
+        }
         if (status.status === 'completed') {
           if (get().currentProject) await get().loadProject(get().currentProject!.id);
         } else if (status.status === 'failed') {
@@ -162,7 +167,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await poll();
       return taskId;
     } finally {
-      set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: false } }));
+      set((s) => ({ 
+        generatingVideo: { ...s.generatingVideo, [sceneId]: false },
+        videoProgress: { ...s.videoProgress, [sceneId]: 0 },
+      }));
     }
   },
 

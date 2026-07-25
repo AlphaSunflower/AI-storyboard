@@ -22,9 +22,11 @@ function Tag({ children }: { children: string }) {
   );
 }
 
-function getImageLabel(status: string, generating: boolean): string {
+function getImageLabel(scene: SceneResponse, generating: boolean): string {
   if (generating) return '⏳生成中';
-  switch (status) {
+  if (scene.imageStatus === 'completed' && !scene.imageUrl) return '重试';
+  if (scene.imageStatus === 'generating' && !generating) return '重试';
+  switch (scene.imageStatus) {
     case 'pending':
       return '生成图片';
     case 'generating':
@@ -38,9 +40,11 @@ function getImageLabel(status: string, generating: boolean): string {
   }
 }
 
-function getVideoLabel(status: string, generating: boolean): string {
+function getVideoLabel(scene: SceneResponse, generating: boolean): string {
   if (generating) return '⏳生成中';
-  switch (status) {
+  if (scene.videoStatus === 'completed' && !scene.videoUrl) return '重试';
+  if (scene.videoStatus === 'generating' && !generating) return '重试';
+  switch (scene.videoStatus) {
     case 'pending':
       return '生成视频';
     case 'generating':
@@ -54,8 +58,8 @@ function getVideoLabel(status: string, generating: boolean): string {
   }
 }
 
-function actionBtnStyle(status: string, generating?: boolean): React.CSSProperties {
-  const isDone = status === 'completed';
+function actionBtnStyle(status: string, url?: string, generating?: boolean): React.CSSProperties {
+  const isDone = status === 'completed' && !!url;
   return {
     padding: '4px 8px',
     fontSize: 10,
@@ -84,6 +88,7 @@ export function SceneCard({
   const deleteScene = useProjectStore((s) => s.deleteScene);
   const imageModel = useProjectStore((s) => s.imageModel);
   const videoModel = useProjectStore((s) => s.videoModel);
+  const videoProgress = useProjectStore((s) => s.videoProgress[scene.id]) || 0;
 
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
@@ -97,19 +102,20 @@ export function SceneCard({
   const [showImageModal, setShowImageModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
 
-  const imageLabel = getImageLabel(scene.imageStatus, !!generatingImage);
-  const videoLabel = getVideoLabel(scene.videoStatus, !!generatingVideo);
+  const imageLabel = getImageLabel(scene, !!generatingImage);
+  const videoLabel = getVideoLabel(scene, !!generatingVideo);
 
   const handleGenerateImage = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!imagePrompt.trim()) return;
 
-    // When already completed, open refine modal instead of direct re-generation
-    if (scene.imageStatus === 'completed') {
+    // When already completed AND has URL, open refine modal instead of direct re-generation
+    if (scene.imageStatus === 'completed' && scene.imageUrl) {
       setShowImageModal(true);
       return;
     }
 
+    // Retry / first generation
     try {
       await sceneApi.update(scene.id, { imagePrompt });
       await generateImage(scene.id, imagePrompt, imageModel, useRefForImage && sceneRefImages.length > 0 ? sceneRefImages : undefined);
@@ -131,12 +137,13 @@ export function SceneCard({
     e.stopPropagation();
     if (!videoPrompt.trim()) return;
 
-    // When already completed, open refine modal instead of direct re-generation
-    if (scene.videoStatus === 'completed') {
+    // When already completed AND has URL, open refine modal instead of direct re-generation
+    if (scene.videoStatus === 'completed' && scene.videoUrl) {
       setShowVideoModal(true);
       return;
     }
 
+    // Retry / first generation
     try {
       await sceneApi.update(scene.id, { videoPrompt });
       await generateVideo(scene.id, videoPrompt, videoModel, useRefForVideo && sceneRefImages.length > 0 ? sceneRefImages : undefined);
@@ -415,13 +422,26 @@ export function SceneCard({
         </div>
       )}
 
+      {/* Video progress bar */}
+      {generatingVideo && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>视频生成中</span>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>{videoProgress}%</span>
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: 'var(--color-surface-soft)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${videoProgress}%`, borderRadius: 2, background: 'var(--color-primary)', transition: 'width 0.3s ease' }} />
+          </div>
+        </div>
+      )}
+
       {/* Image + Video action buttons */}
       <div style={{ display: 'flex', gap: 6 }}>
         <button
           disabled={!!generatingImage || !imagePrompt.trim()}
           onClick={handleGenerateImage}
           style={{
-            ...actionBtnStyle(scene.imageStatus, generatingImage),
+            ...actionBtnStyle(scene.imageStatus, scene.imageUrl, generatingImage),
             ...(imagePrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
           }}
         >
@@ -431,7 +451,7 @@ export function SceneCard({
           disabled={!!generatingVideo || !videoPrompt.trim()}
           onClick={handleGenerateVideo}
           style={{
-            ...actionBtnStyle(scene.videoStatus, generatingVideo),
+            ...actionBtnStyle(scene.videoStatus, scene.videoUrl, generatingVideo),
             ...(videoPrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
           }}
         >
