@@ -301,7 +301,7 @@ export function PreviewPanel() {
       )}
 
       {/* Camera / shot metadata */}
-      {(scene.cameraMovement || scene.shotType || scene.soundDesign) && (
+      {(scene.cameraMovement || scene.shotType || (scene.soundDesign && !scene.soundDesign.startsWith('{'))) && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
           {scene.cameraMovement && (
             <span
@@ -329,7 +329,7 @@ export function PreviewPanel() {
               📐 {scene.shotType}
             </span>
           )}
-          {scene.soundDesign && (
+          {scene.soundDesign && !scene.soundDesign.startsWith('{') && (
             <span
               style={{
                 fontSize: 11,

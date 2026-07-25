@@ -182,7 +182,7 @@ export function SceneCard({
 
   const handleStartRename = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const customName = scene.soundDesign && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`;
+    const customName = scene.soundDesign && !scene.soundDesign.startsWith('{') && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`;
     setSceneLabel(customName);
     setIsRenaming(true);
   };
@@ -246,7 +246,7 @@ export function SceneCard({
                   color: 'var(--color-ink)',
                 }}
               >
-                {scene.soundDesign && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`}
+                {scene.soundDesign && !scene.soundDesign.startsWith('{') && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`}
               </div>
               <button
                 onClick={handleStartRename}
@@ -300,7 +300,7 @@ export function SceneCard({
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
         {scene.cameraMovement && <Tag>{scene.cameraMovement}</Tag>}
         {scene.shotType && <Tag>{scene.shotType}</Tag>}
-        {scene.soundDesign && <Tag>{scene.soundDesign}</Tag>}
+        {scene.soundDesign && !scene.soundDesign.startsWith('{') && <Tag>{scene.soundDesign}</Tag>}
       </div>
 
       {/* Expand/collapse toggle */}
