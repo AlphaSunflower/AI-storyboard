@@ -90,7 +90,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   checkDraft: async () => {
     const res = await projectApi.getDraft();
-    return res.data.data;
+    const draft = res.data.data;
+    // Only treat as draft if status is 'draft'
+    if (draft && draft.status === 'draft') return draft;
+    return null;
   },
 
   selectScene: (sceneId) => set({ selectedSceneId: sceneId }),

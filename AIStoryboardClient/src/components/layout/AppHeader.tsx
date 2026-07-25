@@ -183,6 +183,24 @@ export function AppHeader() {
             🎬
           </span>
 
+          {/* Save button */}
+          {currentProject && (
+            <button
+              onClick={() => updateProject(currentProject.id, { status: 'active' })}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                background: 'transparent',
+                border: '1px solid var(--color-primary)',
+                color: 'var(--color-primary)',
+                borderRadius: 'var(--rounded-sm)',
+                cursor: 'pointer',
+              }}
+            >
+              💾 保存
+            </button>
+          )}
+
           {/* Project dropdown */}
           <div ref={dropdownRef} style={{ position: 'relative' }}>
             <button

@@ -39,6 +39,7 @@ public class ProjectService {
         project.setDescription(request.description());
         project.setCreationType(request.creationType() != null ? request.creationType() : "movie");
         project.setAspectRatio(request.aspectRatio() != null ? request.aspectRatio() : "16:9");
+        project.setStatus("draft");
         projectMapper.insert(project);
         return toResponse(project);
     }
