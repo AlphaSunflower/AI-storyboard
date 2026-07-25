@@ -39,6 +39,7 @@ interface ProjectState {
   addScene: (projectId: string) => Promise<void>;
   deleteScene: (sceneId: string) => Promise<void>;
   markDirty: () => void;
+  updateSceneInStore: (sceneId: string, data: Record<string, unknown>) => void;
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -214,6 +215,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await sceneApi.update(sceneId, { soundDesign: JSON.stringify(refs) });
     set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? { ...sc, soundDesign: JSON.stringify(refs) } : sc) }));
   },
+
+  updateSceneInStore: (sceneId: string, data: Record<string, unknown>) =>
+    set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? { ...sc, ...data } : sc) })),
 
   addScene: async (projectId) => {
     await sceneApi.add(projectId, { scriptContent: '' });

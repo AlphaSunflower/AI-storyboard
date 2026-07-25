@@ -88,6 +88,7 @@ export function SceneCard({
   const deleteScene = useProjectStore((s) => s.deleteScene);
   const imageModel = useProjectStore((s) => s.imageModel);
   const videoModel = useProjectStore((s) => s.videoModel);
+  const updateSceneInStore = useProjectStore((s) => s.updateSceneInStore);
   const videoProgress = useProjectStore((s) => s.videoProgress[scene.id]) || 0;
   const getSceneRefs = useProjectStore((s) => s.getSceneRefs);
   const setSceneRefs = useProjectStore((s) => s.setSceneRefs);
@@ -176,6 +177,7 @@ export function SceneCard({
     const trimmed = sceneLabel.trim();
     if (trimmed) {
       await sceneApi.update(scene.id, { soundDesign: trimmed });
+      updateSceneInStore(scene.id, { soundDesign: trimmed });
     }
     setIsRenaming(false);
   };
