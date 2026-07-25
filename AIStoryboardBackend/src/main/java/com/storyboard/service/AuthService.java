@@ -86,17 +86,12 @@ public class AuthService {
     }
 
     public ApiResponse<Map<String, Object>> handleUnlogin(UnloginRequest req, String authHeader) {
-
         String userIdFromHeader = null;
-
-        // 1. 检查请求头已有 token → 解析 userId
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            try {
-                userIdFromHeader = jwtTokenProvider.tokenToUserId(authHeader.substring(7));
-            } catch (Exception ignored) {}
+            try { userIdFromHeader = jwtTokenProvider.tokenToUserId(authHeader.substring(7)); } catch (Exception ignored) {}
         }
 
-        // 2. 解析系统一传来的 JWT → userId_b
+        // 解析 JWT → userId
         String userIdFromJwt;
         try {
             userIdFromJwt = jwtTokenProvider.tokenToUserId(req.jwt());
@@ -104,38 +99,25 @@ public class AuthService {
             throw new BusinessException(40101, "JWT 无效");
         }
 
-        // 3. 校验账号密码
+        // 查用户
         User user = userMapper.findByEmail(req.account());
         if (user == null) {
             throw new BusinessException(40101, "账号不存在");
         }
-        if (!passwordService.verifyPassword(req.password(), user.getPasswordHash())) {
-            throw new BusinessException(40101, "密码错误");
-        }
 
-        // 4. 校验 userId 匹配
+        // 验证 account 和 jwt 指向同一用户
         if (!user.getId().equals(userIdFromJwt)) {
             throw new BusinessException(40101, "账号与JWT不匹配");
         }
 
-        // 5. 已有 token 且同一用户 → alreadyLoggedIn
+        // 已有 token 且同一用户
         if (userIdFromHeader != null && userIdFromHeader.equals(userIdFromJwt)) {
-            return ApiResponse.ok(Map.of(
-                "alreadyLoggedIn", true,
-                "userId", user.getId(),
-                "displayName", user.getDisplayName()
-            ));
+            return ApiResponse.ok(Map.of("alreadyLoggedIn", true, "userId", user.getId(), "displayName", user.getDisplayName()));
         }
 
-        // 6. 签发新 token
+        // 签发新 token
         String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
         String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());
-
-        return ApiResponse.ok(Map.of(
-            "accessToken", accessToken,
-            "refreshToken", refreshToken,
-            "userId", user.getId(),
-            "displayName", user.getDisplayName()
-        ));
+        return ApiResponse.ok(Map.of("accessToken", accessToken, "refreshToken", refreshToken, "userId", user.getId(), "displayName", user.getDisplayName()));
     }
 }
