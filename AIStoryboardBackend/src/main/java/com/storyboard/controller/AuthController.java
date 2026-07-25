@@ -38,7 +38,9 @@ public class AuthController {
     }
 
     @PostMapping("/unlogin")
-    public ApiResponse<Map<String, Object>> unlogin(@RequestBody UnloginRequest req) {
-        return authService.handleUnlogin(req);
+    public ApiResponse<Map<String, Object>> unlogin(
+            @RequestBody UnloginRequest req,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        return authService.handleUnlogin(req, authHeader);
     }
 }
