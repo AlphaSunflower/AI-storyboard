@@ -8,5 +8,6 @@ public record GenerateVideoRequest(
     String model,
     String resolution,
     Integer duration,
-    List<String> referenceImages
+    List<String> referenceImages,
+    String generatedImageUrl    // 新增：已生成的图片URL
 ) {}

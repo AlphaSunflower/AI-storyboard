@@ -36,6 +36,7 @@ export const aiApi = {
     resolution?: string;
     duration?: number;
     referenceImages?: string[];
+    generatedImageUrl?: string;
   }) => client.post<ApiResponse<{ taskId: string; sceneId: string }>>('/ai/generate-video', data),
 
   pollTask: (taskId: string) =>

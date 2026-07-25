@@ -51,42 +51,38 @@ public class VideoGenerationService {
         this.fileStorageService = fileStorageService;
     }
 
+    /**
+     * Create a video generation task via JSON body (not multipart).
+     */
     public String createVideoTask(String sceneId, String prompt, String alias,
                                    String resolution, Integer duration,
-                                   List<String> referenceImages) {
+                                   List<String> referenceImages, String generatedImageUrl) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
         String actualModel = MODEL_ALIAS.getOrDefault(alias, alias);
 
         try {
-            // POST /v1/videos (multipart)
-            String boundary = "----FormBoundary" + System.currentTimeMillis();
-            StringBuilder sb = new StringBuilder();
-            sb.append("--").append(boundary).append("\r\n");
-            sb.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n");
-            sb.append(actualModel).append("\r\n");
-            sb.append("--").append(boundary).append("\r\n");
-            sb.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
-            sb.append(prompt).append("\r\n");
-            if (resolution != null) {
-                sb.append("--").append(boundary).append("\r\n");
-                sb.append("Content-Disposition: form-data; name=\"resolution\"\r\n\r\n");
-                sb.append(resolution).append("\r\n");
-            }
-            if (duration != null) {
-                sb.append("--").append(boundary).append("\r\n");
-                sb.append("Content-Disposition: form-data; name=\"duration\"\r\n\r\n");
-                sb.append(duration).append("\r\n");
-            }
-            sb.append("--").append(boundary).append("--\r\n");
+            Map<String, Object> body = new HashMap<>();
+            body.put("model", actualModel);
+            body.put("prompt", prompt);
+            body.put("duration", "8");  // 必须是字符串
+            body.put("n", 1);
 
+            // 图生视频：优先用已生成的图片
+            String refImage = generatedImageUrl != null ? generatedImageUrl
+                : (referenceImages != null && !referenceImages.isEmpty() ? referenceImages.get(0) : null);
+            if (refImage != null) {
+                body.put("input_reference", refImage);
+            }
+
+            String requestBody = objectMapper.writeValueAsString(body);
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getBaseUrlOpenai() + "/videos"))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.getApiKey())
                 .timeout(java.time.Duration.ofSeconds(120))
-            .header("Authorization", "Bearer " + config.getApiKey())
-                .POST(HttpRequest.BodyPublishers.ofString(sb.toString()))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -108,18 +104,25 @@ public class VideoGenerationService {
         }
     }
 
+    /**
+     * Poll video task status.
+     * Tries /videos/{id} first, falls back to /video/generations/{id}.
+     */
     public Map<String, String> pollVideoTask(String taskId) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId))
-                .timeout(java.time.Duration.ofSeconds(120))
-            .header("Authorization", "Bearer " + config.getApiKey())
-                .GET()
-                .build();
+            String baseUrl = config.getBaseUrlOpenai();
+            String respBody = callGet(baseUrl + "/videos/" + taskId);
+            if (respBody == null) {
+                respBody = callGet(baseUrl + "/video/generations/" + taskId);
+            }
+            if (respBody == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("status", "failed");
+                error.put("error", "All polling endpoints failed for taskId=" + taskId);
+                return error;
+            }
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            String respBody = resp.body();
-            log.info("Video poll response (status={}): {}", resp.statusCode(), respBody);
+            log.info("Video poll response: {}", respBody);
             JsonNode root = objectMapper.readTree(respBody);
             String status = root.path("status").asText();
 
@@ -127,11 +130,11 @@ public class VideoGenerationService {
             result.put("taskId", taskId);
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
-                // Try to download via content endpoint, fall back gracefully
+                // Try to download via content endpoint
                 String localPath = null;
                 try {
                     HttpRequest contentReq = HttpRequest.newBuilder()
-                        .uri(URI.create(config.getBaseUrlOpenai() + "/videos/" + taskId + "/content"))
+                        .uri(URI.create(baseUrl + "/videos/" + taskId + "/content"))
                         .header("Authorization", "Bearer " + config.getApiKey())
                         .timeout(java.time.Duration.ofSeconds(180))
                         .GET()
@@ -190,5 +193,24 @@ public class VideoGenerationService {
             error.put("error", e.getMessage());
             return error;
         }
+    }
+
+    private String callGet(String url) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer " + config.getApiKey())
+                .timeout(java.time.Duration.ofSeconds(120))
+                .GET()
+                .build();
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return resp.body();
+            }
+            log.warn("GET {} returned {}", url, resp.statusCode());
+        } catch (Exception e) {
+            log.warn("GET {} failed: {}", url, e.getMessage());
+        }
+        return null;
     }
 }

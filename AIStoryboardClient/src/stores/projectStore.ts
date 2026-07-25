@@ -157,8 +157,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateVideo: async (sceneId, prompt, model, referenceImages) => {
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: true } }));
     try {
+      // 传入当前 scene 的 imageUrl 作为 generatedImageUrl
+      const scene = get().scenes.find(s => s.id === sceneId);
+      const generatedImageUrl = scene?.imageUrl || undefined;
       const res = await aiApi.generateVideo({
-        sceneId, prompt, model, referenceImages,
+        sceneId, prompt, model, referenceImages, generatedImageUrl,
       });
       const taskId = res.data.data.taskId;
       // 轮询直到完成

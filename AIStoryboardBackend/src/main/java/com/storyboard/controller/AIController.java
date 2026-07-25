@@ -74,7 +74,8 @@ public class AIController {
     public ApiResponse<Map<String, String>> generateVideo(@RequestBody GenerateVideoRequest request) {
         String taskId = videoService.createVideoTask(
             request.sceneId(), request.prompt(), request.model(),
-            request.resolution(), request.duration(), request.referenceImages()
+            request.resolution(), request.duration(),
+            request.referenceImages(), request.generatedImageUrl()
         );
         return ApiResponse.ok(Map.of("taskId", taskId, "sceneId", request.sceneId()));
     }
