@@ -281,21 +281,9 @@ workflow:
         isInIteration: false
         isInLoop: false
         sourceType: llm
-        targetType: code
-      id: json-llm-to-format-adapter
-      source: storyboard-json-llm
-      sourceHandle: source
-      target: format-adapter
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
         targetType: http-request
-      id: format-adapter-to-post-script
-      source: format-adapter
+      id: json-llm-to-post-script
+      source: storyboard-json-llm
       sourceHandle: source
       target: post-script-http
       targetHandle: target
@@ -1167,51 +1155,6 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        code: |
-          // 将 LLM 输出的 JSON 适配为后端 DifyGenerateScriptRequest 格式
-          const llmOutput = {{#storyboard-json-llm.structured_output#}};
-          const scenes = (llmOutput.items || []).map(item => ({
-              sceneNumber: item.sceneNumber,
-              scriptContent: item.scriptContent || "",
-              imagePrompt: item.imagePrompt || "",
-              videoPrompt: item.videoPrompt || "",
-              negativePrompt: item.negativePrompt || "",
-              cameraMovement: item.cameraMovement || "",
-              shotType: item.shotType || "",
-              soundDesign: item.soundDesign || ""
-          }));
-          return { scenes: scenes };
-        code_language: javascript
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        outputs:
-          scenes:
-            type: array[object]
-            children: null
-        selected: false
-        title: 格式适配
-        type: code
-        variables:
-        - value_selector:
-          - storyboard-json-llm
-          - structured_output
-          variable: storyboard_json
-      height: 53
-      id: format-adapter
-      position:
-        x: 2940
-        y: -50
-      positionAbsolute:
-        x: 2940
-        y: -50
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
         authorization:
           type: bearer
           bearer_token: '{{env:DIFY_KEY}}'
@@ -1219,7 +1162,7 @@ workflow:
           data: |
             {
               "projectId": "{{#conversation.currentProjectId#}}",
-              "scenes": {{#format-adapter.scenes#}},
+              "scenes": {{#storyboard-json-llm.structured_output.items#}},
               "aspectRatio": "16:9"
             }
           type: json
