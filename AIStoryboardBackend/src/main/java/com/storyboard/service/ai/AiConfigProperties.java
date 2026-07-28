@@ -28,6 +28,8 @@ public class AiConfigProperties {
     private String apiKey;
     /** Sora2 专用 API 密钥（某些模型需要独立计费） */
     private String sora2OfficialApiKey;
+    /** Dify Agent API 密钥 */
+    private String difyApiKey;
 
     // ═══════════════════════════════════════════════════════════
     //  API 基础地址
@@ -121,6 +123,9 @@ public class AiConfigProperties {
 
     public String getSora2OfficialApiKey() { return sora2OfficialApiKey; }
     public void setSora2OfficialApiKey(String s) { this.sora2OfficialApiKey = s; }
+
+    public String getDifyApiKey() { return difyApiKey; }
+    public void setDifyApiKey(String s) { this.difyApiKey = s; }
 
     // ── 基础地址 ──
     public String getBaseUrlOpenai() { return baseUrlOpenai; }
