@@ -1156,8 +1156,7 @@ workflow:
       zIndex: 0
     - data:
         authorization:
-          type: bearer
-          bearer_token: '{{env:DIFY_KEY}}'
+          type: no-auth
         body:
           data: |
             {
@@ -1381,8 +1380,10 @@ workflow:
       zIndex: 0
     - data:
         authorization:
-          type: bearer
-          bearer_token: '{{env:LAOZHANG_KEY}}'
+          type: api-key
+          config:
+            type: bearer
+            api_key: '{{env:LAOZHANG_KEY}}'
         body:
           data: |
             {
@@ -1610,8 +1611,7 @@ workflow:
       zIndex: 0
     - data:
         authorization:
-          type: bearer
-          bearer_token: '{{env:DIFY_KEY}}'
+          type: no-auth
         body:
           data: |
             {
