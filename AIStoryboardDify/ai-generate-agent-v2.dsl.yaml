@@ -1,0 +1,1740 @@
+app:
+  description: 通过AI Agent实现一个AI分镜的效果
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: advanced-chat
+  name: AiGenerateAgent
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@5b68617c637b62d31e7f33a9f5677b76e88f81868fb04a728e208588564b72ea
+    version: null
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables:
+  - description: |
+      -1: 初始/意图识别
+      1: 分镜方案设计（循环完善）
+      2: 分镜JSON生成+写入后端
+      3: 图片方案设计（循环完善）
+      4: 视频方案设计（循环完善）
+      5: 调用后端生图API
+      6: 调用后端生视频API
+    id: c9bdcb92-9108-4344-9e27-6312dd5b3a6f
+    name: step
+    selector:
+    - conversation
+    - step
+    value: -1
+    value_type: integer
+  - description: 最近20轮对话历史
+    id: 7cec17de-0d11-4407-a6c9-2164390d36ac
+    name: historytalk
+    selector:
+    - conversation
+    - historytalk
+    value: []
+    value_type: array[string]
+  - description: 当前操作的项目ID
+    id: new-project-id-var
+    name: currentProjectId
+    selector:
+    - conversation
+    - currentProjectId
+    value: ''
+    value_type: string
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 50
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: if-else
+      id: start-to-step-router
+      source: start
+      sourceHandle: source
+      target: step-router
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: step-router-neg1-to-append-history
+      source: step-router
+      sourceHandle: 'true'
+      target: append-history
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: append-history-to-intent-llm
+      source: append-history
+      sourceHandle: source
+      target: intent-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: if-else
+      id: intent-llm-to-intent-router
+      source: intent-llm
+      sourceHandle: source
+      target: intent-router
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: intent-router-aisplit-to-set-step1
+      source: intent-router
+      sourceHandle: intent-aisplit
+      target: set-step1
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: intent-router-pic-to-set-step3
+      source: intent-router
+      sourceHandle: intent-pic
+      target: set-step3
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: intent-router-video-to-set-step4
+      source: intent-router
+      sourceHandle: intent-video
+      target: set-step4
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: intent-router-other-to-guide-reply
+      source: intent-router
+      sourceHandle: intent-other
+      target: guide-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: set-step1-to-storyboard-design
+      source: set-step1
+      sourceHandle: source
+      target: storyboard-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: step-router-1-to-storyboard-design
+      source: step-router
+      sourceHandle: step-1
+      target: storyboard-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: if-else
+      id: storyboard-design-to-confirm
+      source: storyboard-design-llm
+      sourceHandle: source
+      target: storyboard-confirm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: storyboard-confirm-yes-to-set-step2
+      source: storyboard-confirm
+      sourceHandle: 'true'
+      target: set-step2
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: storyboard-confirm-no-to-design-reply
+      source: storyboard-confirm
+      sourceHandle: 'false'
+      target: storyboard-design-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: step-router-2-to-json-llm
+      source: step-router
+      sourceHandle: step-2
+      target: storyboard-json-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: set-step2-to-json-llm
+      source: set-step2
+      sourceHandle: source
+      target: storyboard-json-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: json-llm-to-format-adapter
+      source: storyboard-json-llm
+      sourceHandle: source
+      target: format-adapter
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: format-adapter-to-post-script
+      source: format-adapter
+      sourceHandle: source
+      target: post-script-http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: post-script-to-script-result
+      source: post-script-http
+      sourceHandle: source
+      target: script-result-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: step-router-3-to-image-design
+      source: step-router
+      sourceHandle: step-3
+      target: image-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: set-step3-to-image-design
+      source: set-step3
+      sourceHandle: source
+      target: image-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: if-else
+      id: image-design-to-confirm
+      source: image-design-llm
+      sourceHandle: source
+      target: image-confirm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: image-confirm-yes-to-set-step5
+      source: image-confirm
+      sourceHandle: 'true'
+      target: set-step5
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: image-confirm-no-to-design-reply
+      source: image-confirm
+      sourceHandle: 'false'
+      target: image-design-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: step-router-5-to-post-image
+      source: step-router
+      sourceHandle: step-5
+      target: post-image-http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: http-request
+      id: set-step5-to-post-image
+      source: set-step5
+      sourceHandle: source
+      target: post-image-http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: post-image-to-result
+      source: post-image-http
+      sourceHandle: source
+      target: image-result-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: step-router-4-to-video-design
+      source: step-router
+      sourceHandle: step-4
+      target: video-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: set-step4-to-video-design
+      source: set-step4
+      sourceHandle: source
+      target: video-design-llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: if-else
+      id: video-design-to-confirm
+      source: video-design-llm
+      sourceHandle: source
+      target: video-confirm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: video-confirm-yes-to-set-step6
+      source: video-confirm
+      sourceHandle: 'true'
+      target: set-step6
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: video-confirm-no-to-design-reply
+      source: video-confirm
+      sourceHandle: 'false'
+      target: video-design-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: step-router-6-to-post-video
+      source: step-router
+      sourceHandle: step-6
+      target: post-video-http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: http-request
+      id: set-step6-to-post-video
+      source: set-step6
+      sourceHandle: source
+      target: post-video-http
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: post-video-to-result
+      source: post-video-http
+      sourceHandle: source
+      target: video-result-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: intent-router-false-to-guide-reply
+      source: intent-router
+      sourceHandle: 'false'
+      target: guide-reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables: []
+      height: 72
+      id: start
+      position:
+        x: 100
+        y: 300
+      positionAbsolute:
+        x: 100
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: step-neg1-cond
+            value: '-1'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 'true'
+          logical_operator: and
+        - case_id: step-1
+          conditions:
+          - comparison_operator: '='
+            id: step-1-cond
+            value: '1'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-1
+          logical_operator: and
+        - case_id: step-2
+          conditions:
+          - comparison_operator: '='
+            id: step-2-cond
+            value: '2'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-2
+          logical_operator: and
+        - case_id: step-3
+          conditions:
+          - comparison_operator: '='
+            id: step-3-cond
+            value: '3'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-3
+          logical_operator: and
+        - case_id: step-4
+          conditions:
+          - comparison_operator: '='
+            id: step-4-cond
+            value: '4'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-4
+          logical_operator: and
+        - case_id: step-5
+          conditions:
+          - comparison_operator: '='
+            id: step-5-cond
+            value: '5'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-5
+          logical_operator: and
+        - case_id: step-6
+          conditions:
+          - comparison_operator: '='
+            id: step-6-cond
+            value: '6'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: step-6
+          logical_operator: and
+        selected: false
+        title: Step路由
+        type: if-else
+      height: 363
+      id: step-router
+      position:
+        x: 380
+        y: 300
+      positionAbsolute:
+        x: 380
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: append
+          value:
+          - sys
+          - query
+          variable_selector:
+          - conversation
+          - historytalk
+        selected: false
+        title: 追加对话历史
+        type: assigner
+        version: '2'
+      height: 83
+      id: append-history
+      position:
+        x: 680
+        y: 100
+      positionAbsolute:
+        x: 680
+        y: 100
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - conversation
+          - historytalk
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#conversation.historytalk#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+            thinking: false
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: intent-system-prompt
+          role: system
+          text: |
+            结合用户当前输入 + 全部历史对话记录，识别用户意图归属四类：
+              ai_split = AI 分镜制作（故事板/分镜脚本）
+              pic = 图片生成（单张插图/海报/角色设计）
+              video = 视频生成（短视频/动画片段）
+              other = 打招呼、闲聊、询问功能等
+
+            规则：
+            - 若无法明确区分，message 引导用户："你希望 AI 分镜还是视频生成或者图片生成呢？"
+            - 最终只输出纯 JSON 结构，无额外解释
+
+            输出格式：
+            {"type":"ai_split|pic|video|other","message":"回复内容"}
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 回复用户的内容
+                type: string
+              type:
+                description: 意图类型
+                enum:
+                - ai_split
+                - pic
+                - video
+                - other
+                type: string
+            required:
+            - message
+            - type
+            type: object
+        structured_output_enabled: true
+        title: 意图识别
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: intent-llm
+      position:
+        x: 960
+        y: 100
+      positionAbsolute:
+        x: 960
+        y: 100
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: intent-aisplit
+          conditions:
+          - comparison_operator: contains
+            id: intent-aisplit-cond
+            value: ai_split
+            varType: string
+            variable_selector:
+            - intent-llm
+            - structured_output
+            - type
+          id: intent-aisplit
+          logical_operator: and
+        - case_id: intent-pic
+          conditions:
+          - comparison_operator: contains
+            id: intent-pic-cond
+            value: pic
+            varType: string
+            variable_selector:
+            - intent-llm
+            - structured_output
+            - type
+          id: intent-pic
+          logical_operator: and
+        - case_id: intent-video
+          conditions:
+          - comparison_operator: contains
+            id: intent-video-cond
+            value: video
+            varType: string
+            variable_selector:
+            - intent-llm
+            - structured_output
+            - type
+          id: intent-video
+          logical_operator: and
+        - case_id: intent-other
+          conditions:
+          - comparison_operator: contains
+            id: intent-other-cond
+            value: other
+            varType: string
+            variable_selector:
+            - intent-llm
+            - structured_output
+            - type
+          id: intent-other
+          logical_operator: and
+        selected: false
+        title: 意图路由
+        type: if-else
+      height: 291
+      id: intent-router
+      position:
+        x: 1240
+        y: 100
+      positionAbsolute:
+        x: 1240
+        y: 100
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 1
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=1(分镜方案)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step1
+      position:
+        x: 1540
+        y: -50
+      positionAbsolute:
+        x: 1540
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 3
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=3(图片方案)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step3
+      position:
+        x: 1540
+        y: 350
+      positionAbsolute:
+        x: 1540
+        y: 350
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 4
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=4(视频方案)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step4
+      position:
+        x: 1540
+        y: 550
+      positionAbsolute:
+        x: 1540
+        y: 550
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#intent-llm.structured_output.message#}}'
+        selected: false
+        title: 引导回复
+        type: answer
+        variables: []
+      height: 101
+      id: guide-reply
+      position:
+        x: 1540
+        y: 750
+      positionAbsolute:
+        x: 1540
+        y: 750
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - conversation
+          - historytalk
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#conversation.historytalk#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 20
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: storyboard-design-prompt
+          role: system
+          text: |
+            你是一个专业的AI分镜设计师。根据用户提供的剧本内容，设计分镜方案。
+
+            方案需包含：
+            1. 整体创作风格（写实/动漫/水墨/赛博朋克/胶片等）
+            2. 画幅比例（16:9 横屏 / 9:16 竖屏 / 1:1 方形）
+            3. 分镜数量建议
+            4. 每个分镜的简要描述（镜头内容、人物动作、场景切换）
+
+            展示方案后询问用户是否认可。
+
+            输出格式：
+            {"type":1|0,"message":"完整方案文本"}
+            type=1 表示用户认可方案，type=0 表示需要继续修改
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 完整方案文本
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            type: object
+        structured_output_enabled: true
+        title: 分镜方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 115
+      id: storyboard-design-llm
+      position:
+        x: 1820
+        y: -50
+      positionAbsolute:
+        x: 1820
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: storyboard-confirm-yes
+            value: '1'
+            numberVarType: constant
+            varType: number
+            variable_selector:
+            - storyboard-design-llm
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 分镜确认
+        type: if-else
+      height: 147
+      id: storyboard-confirm
+      position:
+        x: 2100
+        y: -50
+      positionAbsolute:
+        x: 2100
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#storyboard-design-llm.structured_output.message#}}'
+        selected: false
+        title: 分镜方案回复
+        type: answer
+        variables: []
+      height: 101
+      id: storyboard-design-reply
+      position:
+        x: 2380
+        y: 100
+      positionAbsolute:
+        x: 2380
+        y: 100
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 2
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=2(JSON生成)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step2
+      position:
+        x: 2380
+        y: -100
+      positionAbsolute:
+        x: 2380
+        y: -100
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 20
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: storyboard-json-prompt
+          role: system
+          text: |
+            根据已确认的分镜方案，以 JSON 数组格式返回分镜列表。
+
+            每个分镜对象包含：
+            - sceneNumber(整数): 分镜序号
+            - scriptContent: 镜头剧本、剧情台词
+            - imagePrompt: 生图提示词，格式：【镜头构图】→【场景主体】→【环境细节/道具】→【光线与色彩】→【氛围情绪】→【画质/风格】
+            - videoPrompt: 视频动态提示词
+            - negativePrompt: 负面规避提示词
+            - cameraMovement: 镜头运镜方式
+            - shotType: 镜头景别（特写/近景/中景/全景/远景）
+            - soundDesign: 音效与声音设计
+
+            输出格式：
+            {"items":[{"sceneNumber":1,"scriptContent":"...","imagePrompt":"...","videoPrompt":"...","negativePrompt":"...","cameraMovement":"...","shotType":"...","soundDesign":"..."}]}
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              items:
+                items:
+                  additionalProperties: false
+                  properties:
+                    cameraMovement:
+                      description: 镜头运镜方式
+                      type: string
+                    imagePrompt:
+                      description: 图片生成正向提示词
+                      type: string
+                    negativePrompt:
+                      description: 负面规避提示词
+                      type: string
+                    sceneNumber:
+                      description: 分镜序号，正整数
+                      type: integer
+                    scriptContent:
+                      description: 镜头剧本、剧情台词
+                      type: string
+                    shotType:
+                      description: 镜头景别
+                      type: string
+                    soundDesign:
+                      description: 音效与声音设计
+                      type: string
+                    videoPrompt:
+                      description: 视频动态提示词
+                      type: string
+                  required:
+                  - sceneNumber
+                  - scriptContent
+                  - imagePrompt
+                  - videoPrompt
+                  - negativePrompt
+                  - cameraMovement
+                  - shotType
+                  - soundDesign
+                  type: object
+                type: array
+            required:
+            - items
+            type: object
+        structured_output_enabled: true
+        title: 分镜JSON生成
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: storyboard-json-llm
+      position:
+        x: 2660
+        y: -50
+      positionAbsolute:
+        x: 2660
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: |
+          // 将 LLM 输出的 JSON 适配为后端 DifyGenerateScriptRequest 格式
+          const llmOutput = {{#storyboard-json-llm.structured_output#}};
+          const scenes = (llmOutput.items || []).map(item => ({
+              sceneNumber: item.sceneNumber,
+              scriptContent: item.scriptContent || "",
+              imagePrompt: item.imagePrompt || "",
+              videoPrompt: item.videoPrompt || "",
+              negativePrompt: item.negativePrompt || "",
+              cameraMovement: item.cameraMovement || "",
+              shotType: item.shotType || "",
+              soundDesign: item.soundDesign || ""
+          }));
+          return { scenes: scenes };
+        code_language: javascript
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        outputs: {}
+        selected: false
+        title: 格式适配
+        type: code
+        variables:
+        - value_selector:
+          - storyboard-json-llm
+          - structured_output
+          variable: storyboard_json
+      height: 53
+      id: format-adapter
+      position:
+        x: 2940
+        y: -50
+      positionAbsolute:
+        x: 2940
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          type: bearer
+          bearer_token: '{{env:DIFY_KEY}}'
+        body:
+          data: |
+            {
+              "projectId": "{{#conversation.currentProjectId#}}",
+              "scenes": {{#format-adapter.scenes#}},
+              "aspectRatio": "16:9"
+            }
+          type: json
+        desc: ''
+        headers: |-
+          Content-Type: application/json
+          X-Dify-Key: {{env:DIFY_KEY}}
+        isInIteration: false
+        isInLoop: false
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 2
+          retry_enabled: true
+          retry_interval: 2000
+        selected: false
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: POST分镜脚本
+        type: http-request
+        url: http://host.docker.internal:8082/api/ai/dify/generate-script
+      height: 155
+      id: post-script-http
+      position:
+        x: 3220
+        y: -50
+      positionAbsolute:
+        x: 3220
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '✅ 分镜脚本已生成！共 {{#post-script-http.body.sceneCount#}} 个分镜已写入项目 {{#conversation.currentProjectId#}}'
+        selected: false
+        title: 分镜结果回复
+        type: answer
+        variables: []
+      height: 101
+      id: script-result-reply
+      position:
+        x: 3500
+        y: -50
+      positionAbsolute:
+        x: 3500
+        y: -50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 20
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: image-design-prompt
+          role: system
+          text: |
+            根据用户需求设计图片生成方案。
+
+            方案需包含：
+            1. 画面风格（写实/二次元/油画/水彩/3D渲染/摄影等）
+            2. 画幅尺寸（1024x1024方形 / 1536x1024横屏 / 1024x1536竖屏）
+            3. 画面构图描述（主体位置、视角、景深）
+            4. 色调与光线设计（暖色/冷色、自然光/戏剧光）
+            5. 关键元素说明
+
+            展示方案后询问用户是否认可。
+
+            输出格式：
+            {"type":1|0,"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1536x1024|1024x1536"}
+            type=1 表示用户认可方案
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 完整方案文本
+                type: string
+              size:
+                description: 画幅尺寸
+                type: string
+              style:
+                description: 风格关键词
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            type: object
+        structured_output_enabled: true
+        title: 图片方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 115
+      id: image-design-llm
+      position:
+        x: 1820
+        y: 350
+      positionAbsolute:
+        x: 1820
+        y: 350
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: image-confirm-yes
+            value: '1'
+            numberVarType: constant
+            varType: number
+            variable_selector:
+            - image-design-llm
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 图片确认
+        type: if-else
+      height: 147
+      id: image-confirm
+      position:
+        x: 2100
+        y: 350
+      positionAbsolute:
+        x: 2100
+        y: 350
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#image-design-llm.structured_output.message#}}'
+        selected: false
+        title: 图片方案回复
+        type: answer
+        variables: []
+      height: 101
+      id: image-design-reply
+      position:
+        x: 2380
+        y: 450
+      positionAbsolute:
+        x: 2380
+        y: 450
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 5
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=5(生图)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step5
+      position:
+        x: 2380
+        y: 300
+      positionAbsolute:
+        x: 2380
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          type: bearer
+          bearer_token: '{{env:LAOZHANG_KEY}}'
+        body:
+          data: |
+            {
+              "model": "gpt-image-2",
+              "prompt": "{{#image-design-llm.structured_output.style#}} {{#image-design-llm.structured_output.message#}}",
+              "size": "{{#image-design-llm.structured_output.size#}}",
+              "n": 1
+            }
+          type: json
+        desc: 调用Laozhang API生成图片
+        headers: |-
+          Content-Type: application/json
+          Authorization: Bearer {{env:LAOZHANG_KEY}}
+        isInIteration: false
+        isInLoop: false
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: true
+          retry_interval: 5000
+        selected: false
+        timeout:
+          max_connect_timeout: 30
+          max_read_timeout: 120
+          max_write_timeout: 30
+        title: POST生图
+        type: http-request
+        url: https://api2.laozhang.ai/v1/images/generations
+      height: 155
+      id: post-image-http
+      position:
+        x: 2660
+        y: 350
+      positionAbsolute:
+        x: 2660
+        y: 350
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '✅ 图片已生成！{{#post-image-http.body#}}'
+        selected: false
+        title: 图片结果回复
+        type: answer
+        variables: []
+      height: 101
+      id: image-result-reply
+      position:
+        x: 2940
+        y: 350
+      positionAbsolute:
+        x: 2940
+        y: 350
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 20
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: video-design-prompt
+          role: system
+          text: |
+            根据用户需求设计视频生成方案。
+
+            方案需包含：
+            1. 视频时长（4秒 或 8秒）
+            2. 分辨率预设（720p / 1080p / 4K）— 4K 仅与 8s 组合
+            3. 画幅（横屏 16:9 / 竖屏 9:16）
+            4. 运镜方式（推/拉/摇/移/跟/升/降）
+            5. 画面内容详细描述
+            6. 可选负面提示词（不希望出现的元素）
+
+            展示方案后询问用户是否认可。
+
+            输出格式：
+            {"type":1|0,"message":"完整方案文本","duration":"4|8","resolution":"720p|1080p|4k","aspectRatio":"16:9|9:16"}
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              aspectRatio:
+                description: 画幅比例
+                type: string
+              duration:
+                description: 视频时长(秒)
+                type: string
+              message:
+                description: 完整方案文本
+                type: string
+              resolution:
+                description: 分辨率
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            type: object
+        structured_output_enabled: true
+        title: 视频方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 115
+      id: video-design-llm
+      position:
+        x: 1820
+        y: 550
+      positionAbsolute:
+        x: 1820
+        y: 550
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: video-confirm-yes
+            value: '1'
+            numberVarType: constant
+            varType: number
+            variable_selector:
+            - video-design-llm
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 视频确认
+        type: if-else
+      height: 147
+      id: video-confirm
+      position:
+        x: 2100
+        y: 550
+      positionAbsolute:
+        x: 2100
+        y: 550
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#video-design-llm.structured_output.message#}}'
+        selected: false
+        title: 视频方案回复
+        type: answer
+        variables: []
+      height: 101
+      id: video-design-reply
+      position:
+        x: 2380
+        y: 650
+      positionAbsolute:
+        x: 2380
+        y: 650
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 6
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=6(生视频)
+        type: assigner
+        version: '2'
+      height: 83
+      id: set-step6
+      position:
+        x: 2380
+        y: 500
+      positionAbsolute:
+        x: 2380
+        y: 500
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          type: bearer
+          bearer_token: '{{env:DIFY_KEY}}'
+        body:
+          data: |
+            {
+              "projectId": "{{#conversation.currentProjectId#}}",
+              "prompt": "{{#video-design-llm.structured_output.message#}}",
+              "model": "veo-3.1-fast",
+              "resolution": "{{#video-design-llm.structured_output.resolution#}}",
+              "size": "1920x1080",
+              "aspectRatio": "{{#video-design-llm.structured_output.aspectRatio#}}",
+              "duration": {{#video-design-llm.structured_output.duration#}},
+              "negativePrompt": ""
+            }
+          type: json
+        desc: 调用后端视频代理端点(后端负责轮询Laozhang)
+        headers: |-
+          Content-Type: application/json
+          X-Dify-Key: {{env:DIFY_KEY}}
+        isInIteration: false
+        isInLoop: false
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 2
+          retry_enabled: true
+          retry_interval: 5000
+        selected: false
+        timeout:
+          max_connect_timeout: 30
+          max_read_timeout: 360
+          max_write_timeout: 30
+        title: POST生视频
+        type: http-request
+        url: http://host.docker.internal:8082/api/ai/dify/generate-video
+      height: 155
+      id: post-video-http
+      position:
+        x: 2660
+        y: 550
+      positionAbsolute:
+        x: 2660
+        y: 550
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '✅ 视频已生成！{{#post-video-http.body#}}'
+        selected: false
+        title: 视频结果回复
+        type: answer
+        variables: []
+      height: 101
+      id: video-result-reply
+      position:
+        x: 2940
+        y: 550
+      positionAbsolute:
+        x: 2940
+        y: 550
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.8
+  rag_pipeline_variables: []
