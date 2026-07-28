@@ -618,12 +618,12 @@ workflow:
       height: 101
       id: guide-reply
       position:
-        x: 1540
-        y: 750
+        x: 1689.2664225907884
+        y: 817.7343430243915
       positionAbsolute:
-        x: 1540
-        y: 750
-      selected: false
+        x: 1689.2664225907884
+        y: 817.7343430243915
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -754,12 +754,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#image-design-llm.structured_output.message#}}'
+        answer: '{{image-design-llm.structured_output.message}}'
         selected: false
         title: 图片方案回复
         type: answer
         variables: []
-      height: 101
+      height: 115
       id: image-design-reply
       position:
         x: 2380
@@ -774,12 +774,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 图片已生成！{{#post-image-http.body#}}
+        answer: ✅ 图片已生成！{{post-image-http.body}}
         selected: false
         title: 图片结果回复
         type: answer
         variables: []
-      height: 117
+      height: 115
       id: image-result-reply
       position:
         x: 2940
@@ -934,10 +934,10 @@ workflow:
       zIndex: 0
     - data:
         authorization:
-          type: api-key
           config:
-            type: bearer
             api_key: '{{env:LAOZHANG_KEY}}'
+            type: bearer
+          type: api-key
         body:
           data:
           - type: text
@@ -974,7 +974,7 @@ workflow:
       positionAbsolute:
         x: 2660
         y: 350
-      selected: true
+      selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1068,12 +1068,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 分镜脚本已生成！共 {{#post-script-http.body.sceneCount#}} 个分镜已写入项目 {{#conversation.currentProjectId#}}
+        answer: ✅ 分镜脚本已生成！共 {{post-script-http.body.sceneCount}} 个分镜已写入项目 {{conversation.currentProjectId}}
         selected: false
         title: 分镜结果回复
         type: answer
         variables: []
-      height: 136
+      height: 131
       id: script-result-reply
       position:
         x: 3500
@@ -1479,12 +1479,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#storyboard-design-llm.structured_output.message#}}'
+        answer: '{{storyboard-design-llm.structured_output.message}}'
         selected: false
         title: 分镜方案回复
         type: answer
         variables: []
-      height: 101
+      height: 115
       id: storyboard-design-reply
       position:
         x: 2380
@@ -1742,12 +1742,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#video-design-llm.structured_output.message#}}'
+        answer: '{{video-design-llm.structured_output.message}}'
         selected: false
         title: 视频方案回复
         type: answer
         variables: []
-      height: 101
+      height: 115
       id: video-design-reply
       position:
         x: 2380
@@ -1762,12 +1762,12 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 视频已生成！{{#post-video-http.body#}}
+        answer: ✅ 视频已生成！{{post-video-http.body}}
         selected: false
         title: 视频结果回复
         type: answer
         variables: []
-      height: 117
+      height: 115
       id: video-result-reply
       position:
         x: 2940
@@ -1782,7 +1782,7 @@ workflow:
       width: 241
       zIndex: 0
     viewport:
-      x: -2863.8042905109814
-      y: 586.9753739680336
-      zoom: 1.5944644205245886
+      x: -1630.177242359986
+      y: -467.83846630325434
+      zoom: 1.4256962722660689
   rag_pipeline_variables: []

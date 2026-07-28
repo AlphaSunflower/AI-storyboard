@@ -111,10 +111,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: llm
-      id: 1785139528153-to-1785139955672
-      source: 1785139528153
+      id: append-history-to-intent-llm
+      source: append-history
       sourceHandle: source
-      target: 1785139955672
+      target: intent-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -125,10 +125,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 17852072628941-no-to-design-reply
-      source: 17852072628941
+      id: image-confirm-no-to-design-reply
+      source: image-confirm
       sourceHandle: 'false'
-      target: 1785207229944
+      target: image-design-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -139,10 +139,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 17852072628941-yes-to-17852019521105
-      source: 17852072628941
+      id: image-confirm-yes-to-set-step5
+      source: image-confirm
       sourceHandle: 'true'
-      target: 17852019521105
+      target: set-step5
       targetHandle: target
       type: custom
       zIndex: 0
@@ -154,9 +154,9 @@ workflow:
         sourceType: llm
         targetType: if-else
       id: image-design-to-confirm
-      source: 17852071381371
+      source: image-design-llm
       sourceHandle: source
-      target: 17852072628941
+      target: image-confirm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -167,10 +167,10 @@ workflow:
         loop_id: null
         sourceType: llm
         targetType: if-else
-      id: 1785139955672-to-1785141564962
-      source: 1785139955672
+      id: intent-llm-to-intent-router
+      source: intent-llm
       sourceHandle: source
-      target: 1785141564962
+      target: intent-router
       targetHandle: target
       type: custom
       zIndex: 0
@@ -181,10 +181,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 1785141564962-aisplit-to-17852019521101
-      source: 1785141564962
+      id: intent-router-aisplit-to-set-step1
+      source: intent-router
       sourceHandle: intent-aisplit
-      target: 17852019521101
+      target: set-step1
       targetHandle: target
       type: custom
       zIndex: 0
@@ -195,10 +195,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 1785141564962-false-to-1785142049988
-      source: 1785141564962
+      id: intent-router-false-to-guide-reply
+      source: intent-router
       sourceHandle: 'false'
-      target: 1785142049988
+      target: guide-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -209,10 +209,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 1785141564962-other-to-1785142049988
-      source: 1785141564962
+      id: intent-router-other-to-guide-reply
+      source: intent-router
       sourceHandle: intent-other
-      target: 1785142049988
+      target: guide-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -223,10 +223,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 1785141564962-pic-to-17852019521103
-      source: 1785141564962
+      id: intent-router-pic-to-set-step3
+      source: intent-router
       sourceHandle: intent-pic
-      target: 17852019521103
+      target: set-step3
       targetHandle: target
       type: custom
       zIndex: 0
@@ -237,10 +237,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 1785141564962-video-to-17852019521104
-      source: 1785141564962
+      id: intent-router-video-to-set-step4
+      source: intent-router
       sourceHandle: intent-video
-      target: 17852019521104
+      target: set-step4
       targetHandle: target
       type: custom
       zIndex: 0
@@ -252,9 +252,9 @@ workflow:
         sourceType: llm
         targetType: http-request
       id: json-llm-to-post-script
-      source: 1785146373798
+      source: storyboard-json-llm
       sourceHandle: source
-      target: 17852071381379
+      target: post-script-http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -266,9 +266,9 @@ workflow:
         sourceType: http-request
         targetType: answer
       id: post-image-to-result
-      source: 17852071381372
+      source: post-image-http
       sourceHandle: source
-      target: 17852071381373
+      target: image-result-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -280,9 +280,9 @@ workflow:
         sourceType: http-request
         targetType: answer
       id: post-script-to-script-result
-      source: 17852071381379
+      source: post-script-http
       sourceHandle: source
-      target: 1785202933361
+      target: script-result-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -294,9 +294,9 @@ workflow:
         sourceType: http-request
         targetType: answer
       id: post-video-to-result
-      source: 17852071381377
+      source: post-video-http
       sourceHandle: source
-      target: 17852071381378
+      target: video-result-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -307,10 +307,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: llm
-      id: 17852019521101-to-storyboard-design
-      source: 17852019521101
+      id: set-step1-to-storyboard-design
+      source: set-step1
       sourceHandle: source
-      target: 1785142550989
+      target: storyboard-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -321,10 +321,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: llm
-      id: 17852019521102-to-json-llm
-      source: 17852019521102
+      id: set-step2-to-json-llm
+      source: set-step2
       sourceHandle: source
-      target: 1785146373798
+      target: storyboard-json-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -335,10 +335,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: llm
-      id: 17852019521103-to-image-design
-      source: 17852019521103
+      id: set-step3-to-image-design
+      source: set-step3
       sourceHandle: source
-      target: 17852071381371
+      target: image-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -349,10 +349,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: llm
-      id: 17852019521104-to-video-design
-      source: 17852019521104
+      id: set-step4-to-video-design
+      source: set-step4
       sourceHandle: source
-      target: 17852071381374
+      target: video-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -363,10 +363,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: http-request
-      id: 17852019521105-to-post-image
-      source: 17852019521105
+      id: set-step5-to-post-image
+      source: set-step5
       sourceHandle: source
-      target: 17852071381372
+      target: post-image-http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -377,10 +377,10 @@ workflow:
         loop_id: null
         sourceType: assigner
         targetType: http-request
-      id: 17852019521106-to-post-video
-      source: 17852019521106
+      id: set-step6-to-post-video
+      source: set-step6
       sourceHandle: source
-      target: 17852071381377
+      target: post-video-http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -391,10 +391,10 @@ workflow:
         loop_id: null
         sourceType: start
         targetType: if-else
-      id: start-to-1785201739907
+      id: start-to-step-router
       source: start
       sourceHandle: source
-      target: 1785201739907
+      target: step-router
       targetHandle: target
       type: custom
       zIndex: 0
@@ -405,10 +405,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 1785201739907-1-to-storyboard-design
-      source: 1785201739907
+      id: step-router-1-to-storyboard-design
+      source: step-router
       sourceHandle: step-1
-      target: 1785142550989
+      target: storyboard-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -419,10 +419,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: llm
-      id: 1785201739907-2-to-json-llm
-      source: 1785201739907
+      id: step-router-2-to-json-llm
+      source: step-router
       sourceHandle: step-2
-      target: 1785146373798
+      target: storyboard-json-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -433,10 +433,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: llm
-      id: 1785201739907-3-to-image-design
-      source: 1785201739907
+      id: step-router-3-to-image-design
+      source: step-router
       sourceHandle: step-3
-      target: 17852071381371
+      target: image-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -447,10 +447,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: llm
-      id: 1785201739907-4-to-video-design
-      source: 1785201739907
+      id: step-router-4-to-video-design
+      source: step-router
       sourceHandle: step-4
-      target: 17852071381374
+      target: video-design-llm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -461,10 +461,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: http-request
-      id: 1785201739907-5-to-post-image
-      source: 1785201739907
+      id: step-router-5-to-post-image
+      source: step-router
       sourceHandle: step-5
-      target: 17852071381372
+      target: post-image-http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -475,10 +475,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: http-request
-      id: 1785201739907-6-to-post-video
-      source: 1785201739907
+      id: step-router-6-to-post-video
+      source: step-router
       sourceHandle: step-6
-      target: 17852071381377
+      target: post-video-http
       targetHandle: target
       type: custom
       zIndex: 0
@@ -489,10 +489,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 1785201739907-neg1-to-1785139528153
-      source: 1785201739907
+      id: step-router-neg1-to-append-history
+      source: step-router
       sourceHandle: 'true'
-      target: 1785139528153
+      target: append-history
       targetHandle: target
       type: custom
       zIndex: 0
@@ -503,10 +503,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 1785201972645-no-to-design-reply
-      source: 1785201972645
+      id: storyboard-confirm-no-to-design-reply
+      source: storyboard-confirm
       sourceHandle: 'false'
-      target: 1785202313118
+      target: storyboard-design-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -517,10 +517,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 1785201972645-yes-to-17852019521102
-      source: 1785201972645
+      id: storyboard-confirm-yes-to-set-step2
+      source: storyboard-confirm
       sourceHandle: 'true'
-      target: 17852019521102
+      target: set-step2
       targetHandle: target
       type: custom
       zIndex: 0
@@ -532,9 +532,9 @@ workflow:
         sourceType: llm
         targetType: if-else
       id: storyboard-design-to-confirm
-      source: 1785142550989
+      source: storyboard-design-llm
       sourceHandle: source
-      target: 1785201972645
+      target: storyboard-confirm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -545,10 +545,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: answer
-      id: 17852071381375-no-to-design-reply
-      source: 17852071381375
+      id: video-confirm-no-to-design-reply
+      source: video-confirm
       sourceHandle: 'false'
-      target: 17852071381376
+      target: video-design-reply
       targetHandle: target
       type: custom
       zIndex: 0
@@ -559,10 +559,10 @@ workflow:
         loop_id: null
         sourceType: if-else
         targetType: assigner
-      id: 17852071381375-yes-to-17852019521106
-      source: 17852071381375
+      id: video-confirm-yes-to-set-step6
+      source: video-confirm
       sourceHandle: 'true'
-      target: 17852019521106
+      target: set-step6
       targetHandle: target
       type: custom
       zIndex: 0
@@ -574,9 +574,9 @@ workflow:
         sourceType: llm
         targetType: if-else
       id: video-design-to-confirm
-      source: 17852071381374
+      source: video-design-llm
       sourceHandle: source
-      target: 17852071381375
+      target: video-confirm
       targetHandle: target
       type: custom
       zIndex: 0
@@ -596,7 +596,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 1785139528153
+      id: append-history
       position:
         x: 680
         y: 100
@@ -610,20 +610,20 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#1785139955672.structured_output.message#}}'
+        answer: '{{#intent-llm.structured_output.message#}}'
         selected: false
         title: 引导回复
         type: answer
         variables: []
       height: 101
-      id: 1785142049988
+      id: guide-reply
       position:
-        x: 1540
-        y: 750
+        x: 1689.2664225907884
+        y: 817.7343430243915
       positionAbsolute:
-        x: 1540
-        y: 750
-      selected: false
+        x: 1689.2664225907884
+        y: 817.7343430243915
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -634,12 +634,12 @@ workflow:
         - case_id: 'true'
           conditions:
           - comparison_operator: '='
-            id: 17852072628941-yes
+            id: image-confirm-yes
             numberVarType: constant
             value: '1'
             varType: number
             variable_selector:
-            - 17852071381371
+            - image-design-llm
             - structured_output
             - type
           id: 'true'
@@ -648,7 +648,7 @@ workflow:
         title: 图片确认
         type: if-else
       height: 147
-      id: 17852072628941
+      id: image-confirm
       position:
         x: 2100
         y: 350
@@ -740,7 +740,7 @@ workflow:
         vision:
           enabled: false
       height: 87
-      id: 17852071381371
+      id: image-design-llm
       position:
         x: 1820
         y: 350
@@ -754,13 +754,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#17852071381371.structured_output.message#}}'
+        answer: '{{#image-design-llm.structured_output.message#}}'
         selected: false
         title: 图片方案回复
         type: answer
         variables: []
       height: 101
-      id: 1785207229944
+      id: image-design-reply
       position:
         x: 2380
         y: 450
@@ -774,13 +774,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 图片已生成！{{#17852071381372.body#}}
+        answer: ✅ 图片已生成！{{#post-image-http.body#}}
         selected: false
         title: 图片结果回复
         type: answer
         variables: []
       height: 117
-      id: 17852071381373
+      id: image-result-reply
       position:
         x: 2940
         y: 350
@@ -852,7 +852,7 @@ workflow:
         vision:
           enabled: false
       height: 87
-      id: 1785139955672
+      id: intent-llm
       position:
         x: 960
         y: 100
@@ -874,7 +874,7 @@ workflow:
             value: ai_split
             varType: string
             variable_selector:
-            - 1785139955672
+            - intent-llm
             - structured_output
             - type
           id: intent-aisplit
@@ -886,7 +886,7 @@ workflow:
             value: pic
             varType: string
             variable_selector:
-            - 1785139955672
+            - intent-llm
             - structured_output
             - type
           id: intent-pic
@@ -898,7 +898,7 @@ workflow:
             value: video
             varType: string
             variable_selector:
-            - 1785139955672
+            - intent-llm
             - structured_output
             - type
           id: intent-video
@@ -910,7 +910,7 @@ workflow:
             value: other
             varType: string
             variable_selector:
-            - 1785139955672
+            - intent-llm
             - structured_output
             - type
           id: intent-other
@@ -919,7 +919,7 @@ workflow:
         title: 意图路由
         type: if-else
       height: 363
-      id: 1785141564962
+      id: intent-router
       position:
         x: 1240
         y: 100
@@ -934,16 +934,16 @@ workflow:
       zIndex: 0
     - data:
         authorization:
-          type: api-key
           config:
-            type: bearer
             api_key: '{{env:LAOZHANG_KEY}}'
+            type: bearer
+          type: api-key
         body:
           data:
           - type: text
-            value: "{\n  \"model\": \"gpt-image-2\",\n  \"prompt\": \"{{#17852071381371.structured_output.style#}}\
-              \ {{#17852071381371.structured_output.message#}}\",\n  \"size\": \"\
-              {{#17852071381371.structured_output.size#}}\",\n  \"n\": 1\n}\n"
+            value: "{\n  \"model\": \"gpt-image-2\",\n  \"prompt\": \"{{#image-design-llm.structured_output.style#}}\
+              \ {{#image-design-llm.structured_output.message#}}\",\n  \"size\": \"\
+              {{#image-design-llm.structured_output.size#}}\",\n  \"n\": 1\n}\n"
           type: json
         desc: 调用Laozhang API生成图片
         headers: 'Content-Type:application/json
@@ -967,14 +967,14 @@ workflow:
         type: http-request
         url: https://api2.laozhang.ai/v1/images/generations
       height: 164
-      id: 17852071381372
+      id: post-image-http
       position:
         x: 2660
         y: 350
       positionAbsolute:
         x: 2660
         y: 350
-      selected: true
+      selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -985,7 +985,7 @@ workflow:
           type: no-auth
         body:
           data: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n  \"\
-            scenes\": {{#1785146373798.structured_output.items#}},\n  \"aspectRatio\"\
+            scenes\": {{#storyboard-json-llm.structured_output.items#}},\n  \"aspectRatio\"\
             : \"16:9\"\n}\n"
           type: json
         desc: ''
@@ -1009,7 +1009,7 @@ workflow:
         type: http-request
         url: http://host.docker.internal:8082/api/ai/dify/generate-script
       height: 136
-      id: 17852071381379
+      id: post-script-http
       position:
         x: 3220
         y: -50
@@ -1027,10 +1027,10 @@ workflow:
           type: no-auth
         body:
           data: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n  \"\
-            prompt\": \"{{#17852071381374.structured_output.message#}}\",\n  \"\
-            model\": \"veo-3.1-fast\",\n  \"resolution\": \"{{#17852071381374.structured_output.resolution#}}\"\
-            ,\n  \"size\": \"1920x1080\",\n  \"aspectRatio\": \"{{#17852071381374.structured_output.aspectRatio#}}\"\
-            ,\n  \"duration\": {{#17852071381374.structured_output.duration#}},\n\
+            prompt\": \"{{#video-design-llm.structured_output.message#}}\",\n  \"\
+            model\": \"veo-3.1-fast\",\n  \"resolution\": \"{{#video-design-llm.structured_output.resolution#}}\"\
+            ,\n  \"size\": \"1920x1080\",\n  \"aspectRatio\": \"{{#video-design-llm.structured_output.aspectRatio#}}\"\
+            ,\n  \"duration\": {{#video-design-llm.structured_output.duration#}},\n\
             \  \"negativePrompt\": \"\"\n}\n"
           type: json
         desc: 调用后端视频代理端点(后端负责轮询Laozhang)
@@ -1054,7 +1054,7 @@ workflow:
         type: http-request
         url: http://host.docker.internal:8082/api/ai/dify/generate-video
       height: 180
-      id: 17852071381377
+      id: post-video-http
       position:
         x: 2660
         y: 550
@@ -1068,13 +1068,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 分镜脚本已生成！共 {{#17852071381379.body.sceneCount#}} 个分镜已写入项目 {{#conversation.currentProjectId#}}
+        answer: ✅ 分镜脚本已生成！共 {{#post-script-http.body.sceneCount#}} 个分镜已写入项目 {{#conversation.currentProjectId#}}
         selected: false
         title: 分镜结果回复
         type: answer
         variables: []
       height: 136
-      id: 1785202933361
+      id: script-result-reply
       position:
         x: 3500
         y: -50
@@ -1100,7 +1100,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521101
+      id: set-step1
       position:
         x: 1540
         y: -50
@@ -1126,7 +1126,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521102
+      id: set-step2
       position:
         x: 2380
         y: -100
@@ -1152,7 +1152,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521103
+      id: set-step3
       position:
         x: 1540
         y: 350
@@ -1178,7 +1178,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521104
+      id: set-step4
       position:
         x: 1540
         y: 550
@@ -1204,7 +1204,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521105
+      id: set-step5
       position:
         x: 2380
         y: 300
@@ -1230,7 +1230,7 @@ workflow:
         type: assigner
         version: '2'
       height: 83
-      id: 17852019521106
+      id: set-step6
       position:
         x: 2380
         y: 500
@@ -1345,7 +1345,7 @@ workflow:
         title: Step路由
         type: if-else
       height: 411
-      id: 1785201739907
+      id: step-router
       position:
         x: 380
         y: 300
@@ -1363,12 +1363,12 @@ workflow:
         - case_id: 'true'
           conditions:
           - comparison_operator: '='
-            id: 1785201972645-yes
+            id: storyboard-confirm-yes
             numberVarType: constant
             value: '1'
             varType: number
             variable_selector:
-            - 1785142550989
+            - storyboard-design-llm
             - structured_output
             - type
           id: 'true'
@@ -1377,7 +1377,7 @@ workflow:
         title: 分镜确认
         type: if-else
       height: 147
-      id: 1785201972645
+      id: storyboard-confirm
       position:
         x: 2100
         y: -50
@@ -1465,7 +1465,7 @@ workflow:
         vision:
           enabled: false
       height: 87
-      id: 1785142550989
+      id: storyboard-design-llm
       position:
         x: 1820
         y: -50
@@ -1479,13 +1479,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#1785142550989.structured_output.message#}}'
+        answer: '{{#storyboard-design-llm.structured_output.message#}}'
         selected: false
         title: 分镜方案回复
         type: answer
         variables: []
       height: 101
-      id: 1785202313118
+      id: storyboard-design-reply
       position:
         x: 2380
         y: 100
@@ -1601,7 +1601,7 @@ workflow:
         vision:
           enabled: false
       height: 87
-      id: 1785146373798
+      id: storyboard-json-llm
       position:
         x: 2660
         y: -50
@@ -1619,12 +1619,12 @@ workflow:
         - case_id: 'true'
           conditions:
           - comparison_operator: '='
-            id: 17852071381375-yes
+            id: video-confirm-yes
             numberVarType: constant
             value: '1'
             varType: number
             variable_selector:
-            - 17852071381374
+            - video-design-llm
             - structured_output
             - type
           id: 'true'
@@ -1633,7 +1633,7 @@ workflow:
         title: 视频确认
         type: if-else
       height: 147
-      id: 17852071381375
+      id: video-confirm
       position:
         x: 2100
         y: 550
@@ -1728,7 +1728,7 @@ workflow:
         vision:
           enabled: false
       height: 87
-      id: 17852071381374
+      id: video-design-llm
       position:
         x: 1820
         y: 550
@@ -1742,13 +1742,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#17852071381374.structured_output.message#}}'
+        answer: '{{#video-design-llm.structured_output.message#}}'
         selected: false
         title: 视频方案回复
         type: answer
         variables: []
       height: 101
-      id: 17852071381376
+      id: video-design-reply
       position:
         x: 2380
         y: 650
@@ -1762,13 +1762,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: ✅ 视频已生成！{{#17852071381377.body#}}
+        answer: ✅ 视频已生成！{{#post-video-http.body#}}
         selected: false
         title: 视频结果回复
         type: answer
         variables: []
       height: 117
-      id: 17852071381378
+      id: video-result-reply
       position:
         x: 2940
         y: 550
@@ -1782,7 +1782,7 @@ workflow:
       width: 241
       zIndex: 0
     viewport:
-      x: -2863.8042905109814
-      y: 586.9753739680336
-      zoom: 1.5944644205245886
+      x: -1841.177242359986
+      y: -591.8384663032543
+      zoom: 1.4256962722660689
   rag_pipeline_variables: []
