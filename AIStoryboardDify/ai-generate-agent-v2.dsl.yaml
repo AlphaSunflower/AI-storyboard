@@ -1185,7 +1185,10 @@ workflow:
         desc: ''
         isInIteration: false
         isInLoop: false
-        outputs: {}
+        outputs:
+          scenes:
+            type: array[object]
+            children: null
         selected: false
         title: 格式适配
         type: code
