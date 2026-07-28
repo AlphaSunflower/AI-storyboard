@@ -10,6 +10,7 @@ import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.VideoGenerationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -49,8 +50,12 @@ public class DifyAgentController {
      * 接收 Agent 生成的 JSON，批量创建 Scene 记录。
      */
     @PostMapping("/generate-script")
+    @Transactional
     public ApiResponse<Map<String, Object>> generateScript(
             @RequestBody DifyGenerateScriptRequest request) {
+        if (request.scenes() == null || request.scenes().isEmpty()) {
+            return ApiResponse.ok(Map.of("projectId", request.projectId(), "sceneCount", 0));
+        }
         int count = 0;
         for (var item : request.scenes()) {
             Scene scene = new Scene();
@@ -77,6 +82,9 @@ public class DifyAgentController {
     @PostMapping("/generate-image")
     public ApiResponse<Map<String, String>> generateImage(
             @RequestBody DifyGenerateImageRequest request) {
+        // TODO: 当前通过创建临时 Scene 记录来满足 ImageGenerationService 对 sceneMapper.selectById
+        // 的依赖（会校验 scene 存在并调用 updateById 更新状态）。未来如果 Dify Agent 场景不需要关联真实 scene，
+        // 可考虑让 ImageGenerationService 支持 sceneId 为 null 的模式，避免产生孤儿临时记录。
         // 创建临时 Scene 记录 — ImageGenerationService 需要通过 sceneMapper.selectById 定位 scene
         String tempSceneId = UUID.randomUUID().toString();
         Scene tempScene = new Scene();
@@ -103,6 +111,16 @@ public class DifyAgentController {
     @PostMapping("/generate-video")
     public ApiResponse<Map<String, String>> generateVideo(
             @RequestBody DifyGenerateVideoRequest request) {
+        log.info("Dify Agent 开始生成视频: projectId={}", request.projectId());
+
+        // duration 为 0（未传默认值）时，使用 service 层默认值（由 config 提供）
+        if (request.duration() <= 0) {
+            log.info("Dify Agent 视频 duration 未设置或无效({}), 将使用 service 默认值", request.duration());
+        }
+
+        // TODO: 当前通过创建临时 Scene 记录来满足 VideoGenerationService 对 sceneMapper.selectById
+        // 的依赖（会校验 scene 存在并调用 updateById 更新状态）。未来如果 Dify Agent 场景不需要关联真实 scene，
+        // 可考虑让 VideoGenerationService 支持 sceneId 为 null 的模式，避免产生孤儿临时记录。
         // 创建临时 Scene 记录 — VideoGenerationService 需要通过 sceneMapper.selectById 定位 scene
         String tempSceneId = UUID.randomUUID().toString();
         Scene tempScene = new Scene();
