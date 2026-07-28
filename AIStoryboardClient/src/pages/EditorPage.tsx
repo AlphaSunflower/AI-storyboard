@@ -5,6 +5,7 @@ import { LeftSidebar } from '../components/editor/LeftSidebar';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
+import { ToastContainer } from '../components/common/Toast';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
@@ -84,6 +85,9 @@ export function EditorPage() {
     >
       {/* Top bar */}
       <AppHeader />
+
+      {/* Toast notifications */}
+      <ToastContainer />
 
       {/* Generation progress indicator */}
       <GenerationProgress />

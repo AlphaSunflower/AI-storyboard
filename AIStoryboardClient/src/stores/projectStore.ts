@@ -5,6 +5,15 @@ import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY } from '../config';
 
+// 生成完成后的 toast 通知
+export interface ToastMessage {
+  id: string;
+  sceneId: string;
+  sceneNumber: number;
+  type: 'success' | 'error';
+  kind: 'image' | 'video';
+}
+
 interface ProjectState {
   projects: ProjectResponse[];
   currentProject: ProjectResponse | null;
@@ -21,6 +30,16 @@ interface ProjectState {
   videoPreset: string;
   imageSize: string;
   imageQuality: string;
+
+  // toast 通知
+  toasts: ToastMessage[];
+  addToast: (toast: Omit<ToastMessage, 'id'>) => void;
+  dismissToast: (id: string) => void;
+
+  // 未读提示（新生成完成的分镜）
+  unreadScenes: Set<string>;
+  markSceneRead: (sceneId: string) => void;
+
   setImageModel: (m: string) => void;
   setVideoModel: (m: string) => void;
   setVideoPreset: (p: string) => void;
@@ -49,6 +68,8 @@ interface ProjectState {
   updateSceneInStore: (sceneId: string, data: Record<string, unknown>) => void;
 }
 
+let toastIdCounter = 0;
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   currentProject: null,
@@ -65,6 +86,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   videoPreset: DEFAULT_VIDEO_PRESET,
   imageSize: DEFAULT_IMAGE_SIZE,
   imageQuality: DEFAULT_IMAGE_QUALITY,
+  toasts: [],
+  unreadScenes: new Set<string>(),
+
+  addToast: (toast) => {
+    const id = `toast-${++toastIdCounter}-${Date.now()}`;
+    set((s) => ({
+      toasts: [...s.toasts, { ...toast, id }],
+      unreadScenes: new Set([...s.unreadScenes, toast.sceneId]),
+    }));
+    // 3秒后自动消失
+    setTimeout(() => get().dismissToast(id), 3000);
+  },
+
+  dismissToast: (id) =>
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  markSceneRead: (sceneId) =>
+    set((s) => {
+      if (!s.unreadScenes.has(sceneId)) return s;
+      const next = new Set(s.unreadScenes);
+      next.delete(sceneId);
+      return { unreadScenes: next };
+    }),
 
   loadProjects: async () => {
     set({ isLoading: true });
@@ -73,7 +117,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (name, creationType, aspectRatio) => {
-    const res = await projectApi.create({ name, creationType, aspectRatio });
+    const res = await projectApi.create({ name, creationType, aspectRatio, status: 'draft' });
     const project = res.data.data;
     set((s) => ({ projects: [project, ...s.projects] }));
     return project;
@@ -111,12 +155,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   checkDraft: async () => {
     const res = await projectApi.getDraft();
     const draft = res.data.data;
-    // Only treat as draft if status is 'draft'
     if (draft && draft.status === 'draft') return draft;
     return null;
   },
 
-  selectScene: (sceneId) => set({ selectedSceneId: sceneId }),
+  selectScene: (sceneId) => {
+    set({ selectedSceneId: sceneId });
+    get().markSceneRead(sceneId);
+  },
 
   generateScript: async (projectId, scriptText, creationType, aspectRatio, model) => {
     set({
@@ -161,7 +207,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         await get().loadProject(get().currentProject!.id);
       }
       get().markDirty();
+      // 生成成功 → toast + 未读
+      const scene = get().scenes.find(s => s.id === sceneId);
+      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'image' });
       return res.data.data.imageUrl;
+    } catch (err: unknown) {
+      // 生成失败 → toast + 未读
+      const scene = get().scenes.find(s => s.id === sceneId);
+      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'image' });
+      throw err;
     } finally {
       set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: false } }));
     }
@@ -179,6 +233,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         duration: parseInt(preset.duration),
       });
       const taskId = res.data.data.taskId;
+      let videoFailed = false;
       // 轮询直到完成
       let attempts = 0;
       const poll = async () => {
@@ -191,7 +246,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (status.status === 'completed') {
           if (get().currentProject) await get().loadProject(get().currentProject!.id);
         } else if (status.status === 'failed') {
-          // failed, do nothing special
+          videoFailed = true;
         } else if (attempts < 60) {
           await new Promise(r => setTimeout(r, 5000));
           await poll();
@@ -199,7 +254,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       };
       await poll();
       get().markDirty();
+      // 生成完成 → toast + 未读
+      const scene = get().scenes.find(s => s.id === sceneId);
+      if (videoFailed) {
+        get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+      } else {
+        get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
+      }
       return taskId;
+    } catch (err: unknown) {
+      const scene = get().scenes.find(s => s.id === sceneId);
+      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+      throw err;
     } finally {
       set((s) => ({ 
         generatingVideo: { ...s.generatingVideo, [sceneId]: false },

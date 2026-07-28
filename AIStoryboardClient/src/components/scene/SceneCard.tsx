@@ -100,6 +100,8 @@ export function SceneCard({
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
+  const unreadScenes = useProjectStore((s) => s.unreadScenes);
+  const isUnread = unreadScenes.has(scene.id);
   const refInputRef = useRef<HTMLInputElement>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -127,8 +129,10 @@ export function SceneCard({
         useEdit ? refs.images : undefined,
         useEdit ? 'edit' : undefined,
       );
-    } catch (err) {
-      alert('生成图片失败，请检查网络连接');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '生成图片失败');
+      alert(msg);
     }
   };
 
@@ -142,8 +146,10 @@ export function SceneCard({
         'edit',
         scene.imageUrl || undefined,
       );
-    } catch (err) {
-      alert('完善图片失败，请检查网络连接');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '完善图片失败');
+      alert(msg);
     }
   };
 
@@ -167,8 +173,10 @@ export function SceneCard({
         useRef && refs.images.length > 0 ? refs.images : undefined,
         useRef && scene.imageUrl ? scene.imageUrl : undefined,
       );
-    } catch (err) {
-      alert('生成视频失败，请检查网络连接');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '生成视频失败');
+      alert(msg);
     }
   };
 
@@ -176,8 +184,10 @@ export function SceneCard({
     try {
       await sceneApi.update(scene.id, { videoPrompt: params.prompt });
       await generateVideo(scene.id, params.prompt, params.model, params.referenceImages, scene.imageUrl || undefined);
-    } catch (err) {
-      alert('完善视频失败，请检查网络连接');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '完善视频失败');
+      alert(msg);
     }
   };
 
@@ -264,9 +274,24 @@ export function SceneCard({
                   fontWeight: 600,
                   fontSize: 13,
                   color: 'var(--color-ink)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
                 }}
               >
                 {scene.soundDesign && !scene.soundDesign.startsWith('{') && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`}
+                {isUnread && (
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: '#e53935',
+                      flexShrink: 0,
+                    }}
+                    title="有新生成结果"
+                  />
+                )}
               </div>
               <button
                 onClick={handleStartRename}

@@ -33,7 +33,7 @@ export interface SceneResponse {
 
 export const projectApi = {
   list: () => client.get<ApiResponse<ProjectResponse[]>>('/projects'),
-  create: (data: { name?: string; creationType?: string; aspectRatio?: string }) =>
+  create: (data: { name?: string; creationType?: string; aspectRatio?: string; status?: string }) =>
     client.post<ApiResponse<ProjectResponse>>('/projects', data),
   get: (id: string) => client.get<ApiResponse<ProjectResponse>>(`/projects/${id}`),
   update: (id: string, data: Record<string, unknown>) =>

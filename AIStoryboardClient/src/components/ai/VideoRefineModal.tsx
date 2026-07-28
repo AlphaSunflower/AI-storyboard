@@ -68,11 +68,11 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
   const [extraRefs, setExtraRefs] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Use scene.imageUrl as the base reference (video generation often uses
-  // the still image as a starting frame).
   const hasCurrentImage = !!scene.imageUrl;
   const hasCurrentVideo = !!scene.videoUrl;
-  const maxExtra = hasCurrentImage ? 3 : 4;
+
+  // 视频只允许一张参考图：已有当前图则不能再额外上传；无当前图可上传1张
+  const maxExtra = hasCurrentImage ? 0 : 1;
 
   const allRefImages: string[] = [
     ...(hasCurrentImage ? [scene.imageUrl] : []),
@@ -211,10 +211,10 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
           </div>
 
           {/* Extra reference images */}
-          {maxExtra > 0 && (
+          {maxExtra > 0 ? (
             <div>
               <span style={labelStyle}>
-                额外参考图（最多{maxExtra}张，已选{extraRefs.length}/{maxExtra}）— 当前图片将自动作为参考
+                额外参考图（最多1张，已选{extraRefs.length}/1）
               </span>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: extraRefs.length > 0 ? 8 : 0 }}>
                 {extraRefs.map((url, i) => (
@@ -255,7 +255,7 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
                   </div>
                 ))}
               </div>
-              {extraRefs.length < maxExtra && (
+              {extraRefs.length < 1 && (
                 <button
                   onClick={() => fileRef.current?.click()}
                   style={{
@@ -275,12 +275,15 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
                 ref={fileRef}
                 type="file"
                 accept="image/*"
-                multiple
                 hidden
                 onChange={handleUpload}
               />
             </div>
-          )}
+          ) : hasCurrentImage ? (
+            <div style={{ fontSize: 11, color: 'var(--color-muted)', padding: '6px 10px', background: 'var(--color-surface-card)', borderRadius: 'var(--rounded-sm)' }}>
+              ⚠️ 生成视频只允许一个参考图，当前图片已占用
+            </div>
+          ) : null}
 
           {/* Reference summary */}
           <div

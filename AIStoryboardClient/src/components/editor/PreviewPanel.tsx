@@ -221,12 +221,12 @@ export function PreviewPanel() {
             }}
           >
             <span style={{ fontSize: 14 }}>🖼️</span>
-            <span>{refs.images.length > 0 ? `${refs.images.length}/3 张参考图` : '添加参考图（可选，最多3张）'}</span>
+            <span>{refs.images.length > 0 ? `${refs.images.length}/1 张参考图` : '添加参考图（可选，仅1张）'}</span>
           </div>
           <input ref={refInputRef} type="file" accept="image/*" multiple hidden
             onChange={(e) => {
               const files = Array.from(e.target.files || []);
-              if (refs.images.length + files.length > 3) { alert('最多3张参考图'); return; }
+              if (refs.images.length + files.length > 1) { alert('最多1张参考图'); return; }
               files.forEach(f => {
                 const reader = new FileReader();
                 reader.onload = () => setSceneRefs(scene.id, { ...refs, images: [...refs.images, reader.result as string] });
