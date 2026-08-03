@@ -1,19 +1,20 @@
 package com.storyboard.controller;
 
+import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.service.FileStorageService;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/files")
@@ -23,6 +24,31 @@ public class FileController {
 
     public FileController(FileStorageService fileStorageService) {
         this.fileStorageService = fileStorageService;
+    }
+
+    /**
+     * 上传图片，返回可访问路径。
+     * 前端上传后，将返回的 url 传入 Dify 作为文本变量，
+     * Dify 再以 generatedImageUrl 传给 /api/ai/dify/generate-image 即可。
+     */
+    @PostMapping("/upload")
+    public ApiResponse<Map<String, String>> upload(@RequestParam MultipartFile file) throws IOException {
+        if (file.isEmpty()) {
+            return ApiResponse.error(400, "文件为空");
+        }
+        String ext = extension(file.getOriginalFilename());
+        String filename = UUID.randomUUID() + ext;
+        Path dest = fileStorageService.resolveImage(filename);
+        Files.createDirectories(dest.getParent());
+        file.transferTo(dest);
+
+        String url = "/api/files/images/" + filename;
+        return ApiResponse.ok(Map.of("url", url, "filename", filename));
+    }
+
+    private String extension(String filename) {
+        if (filename == null || !filename.contains(".")) return ".png";
+        return filename.substring(filename.lastIndexOf('.'));
     }
 
     @GetMapping("/images/{filename}")

@@ -1,0 +1,4003 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: advanced-chat
+  name: Moon智能体
+  use_icon_as_answer_icon: true
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@5b68617c637b62d31e7f33a9f5677b76e88f81868fb04a728e208588564b72ea
+    version: null
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables:
+  - description: ''
+    id: a388f684-6023-4462-b8f5-6948dda4bc8a
+    name: picture
+    selector:
+    - conversation
+    - picture
+    value: ''
+    value_type: string
+  - description: ''
+    id: 4a8a2d3b-c689-4404-92bd-f73b682733e3
+    name: taskId
+    selector:
+    - conversation
+    - taskId
+    value: ed629b3e-5bbb-4468-9e62-4632e778a9d7
+    value_type: string
+  - description: 'pic_generate生成的图案描述
+
+      user_finishing用户希望继续完善的描述
+
+      picture图片地址
+
+      mode(edit为图改图，否则为图生图或者文生图)'
+    id: a572b739-cf63-46b6-8e8f-7a56b9fb4ad9
+    name: storage_pic_talk
+    selector:
+    - conversation
+    - storage_pic_talk
+    value:
+      mode: ' '
+      pic_generate_talk: ' '
+      picture: ' '
+      user_finishing: ' '
+    value_type: object
+  - description: 剧本的设计方案
+    id: 5b6ba34b-113a-4077-8181-2347f11602a0
+    name: script_prompt
+    selector:
+    - conversation
+    - script_prompt
+    value: ''
+    value_type: string
+  - description: 当前操作的项目ID
+    id: 1bf871e2-0b92-4042-a9a9-a7427f3774ee
+    name: currentProjectId
+    selector:
+    - conversation
+    - currentProjectId
+    value: ''
+    value_type: string
+  - description: '-1: 初始/意图识别
+
+      1: 分镜方案设计（循环完善）
+
+      2: 分镜JSON生成+写入后端
+
+      3: 图片方案设计（循环完善）
+
+      4: 视频方案设计（循环完善）
+
+      5: 调用后端生图API
+
+      6: 调用后端生视频API
+
+      '
+    id: a56d8fe5-91e9-46a0-ae23-ffcf38afea44
+    name: step
+    selector:
+    - conversation
+    - step
+    value: -1
+    value_type: integer
+  environment_variables:
+  - description: ''
+    id: 50a67807-b211-4f01-94f1-20320717c214
+    name: GENERATER_PIC_MODEL
+    selector:
+    - env
+    - GENERATER_PIC_MODEL
+    value: gpt-image-2
+    value_type: string
+  - description: ''
+    id: 73e8197b-87b4-4ec7-b99f-2fe8161aff66
+    name: DIFY_KEY
+    selector:
+    - env
+    - DIFY_KEY
+    value: app-Bxte6FsZ9ex82Xd2A5bWSZ1q
+    value_type: string
+  - description: ''
+    id: fe30099e-f827-44d6-ba65-c3e8295a3215
+    name: LAOZHANG_KEY
+    selector:
+    - env
+    - LAOZHANG_KEY
+    value: sk-bQfq7Zzf9OZ5XkdPCf3254E2D3D64673Be76D08f2830EbCd
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - remote_url
+      - local_file
+      enabled: true
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: '你好呀，我是Moon智能体~
+
+      我可以为您解决：
+
+      -AI分镜脚本的生成
+
+      -图片生成
+
+      -视频生成
+
+      '
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: start
+        targetType: if-else
+      id: 1785286288428-source-1785297043496-target
+      selected: false
+      source: '1785286288428'
+      sourceHandle: source
+      target: '1785297043496'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: start
+        targetType: assigner
+      id: 1785286288428-source-1785478874143-target
+      selected: false
+      source: '1785286288428'
+      sourceHandle: source
+      target: '1785478874143'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-1785394677830-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 0c0fe982-6a84-471a-a763-2e88f79fd07d
+      target: '1785394677830'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-17853956637370-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 0c0fe982-6a84-471a-a763-2e88f79fd07d
+      target: '17853956637370'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-244eda5b-3f6f-4769-908f-6d7d917ad769-1785287100384-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 244eda5b-3f6f-4769-908f-6d7d917ad769
+      target: '1785287100384'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: http-request
+      id: 1785286446638-3cc0c62a-46df-4ddd-900f-b2d6bda319eb-17852885655040-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
+      target: '17852885655040'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-5597473c-6c22-4b30-a85d-fc3aefdb66f3-1785289782670-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
+      target: '1785289782670'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-5b059307-e96e-4782-961a-be5c32e55613-1785288460056-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 5b059307-e96e-4782-961a-be5c32e55613
+      target: '1785288460056'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-b678b2a1-5348-4f8d-8bda-aa3e44974b11-1785287847725-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: b678b2a1-5348-4f8d-8bda-aa3e44974b11
+      target: '1785287847725'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-d662ea00-b83f-4c6e-a674-e1a08723fc0c-1785286839392-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: d662ea00-b83f-4c6e-a674-e1a08723fc0c
+      target: '1785286839392'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286446638-true-1785286652605-target
+      selected: false
+      source: '1785286446638'
+      sourceHandle: 'true'
+      target: '1785286652605'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: if-else
+      id: 1785286652605-source-17852867601920-target
+      selected: false
+      source: '1785286652605'
+      sourceHandle: source
+      target: '17852867601920'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 17852867601920-false-1785287790005-target
+      selected: false
+      source: '17852867601920'
+      sourceHandle: 'false'
+      target: '1785287790005'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 17852867601920-intent-aisplit-17852868150330-target
+      selected: false
+      source: '17852867601920'
+      sourceHandle: intent-aisplit
+      target: '17852868150330'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 17852867601920-intent-other-1785287790005-target
+      selected: false
+      source: '17852867601920'
+      sourceHandle: intent-other
+      target: '1785287790005'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 17852867601920-intent-pic-17852877677040-target
+      selected: false
+      source: '17852867601920'
+      sourceHandle: intent-pic
+      target: '17852877677040'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 17852867601920-intent-video-17852877765190-target
+      selected: false
+      source: '17852867601920'
+      sourceHandle: intent-video
+      target: '17852877765190'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: llm
+      id: 17852868150330-source-1785289782670-target
+      selected: false
+      source: '17852868150330'
+      sourceHandle: source
+      target: '1785289782670'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: if-else
+      id: 1785286839392-source-1785286951488-target
+      selected: false
+      source: '1785286839392'
+      sourceHandle: source
+      target: '1785286951488'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: answer
+      id: 1785286839392-source-1785292032956-target
+      selected: false
+      source: '1785286839392'
+      sourceHandle: source
+      target: '1785292032956'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 1785286951488-true-17852870444160-target
+      selected: false
+      source: '1785286951488'
+      sourceHandle: 'true'
+      target: '17852870444160'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1785286951488-true-1785287100384-target
+      selected: false
+      source: '1785286951488'
+      sourceHandle: 'true'
+      target: '1785287100384'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: http-request
+      id: 1785287100384-source-1785287199713-target
+      selected: false
+      source: '1785287100384'
+      sourceHandle: source
+      target: '1785287199713'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: answer
+      id: 1785287100384-source-1785292521655-target
+      selected: false
+      source: '1785287100384'
+      sourceHandle: source
+      target: '1785292521655'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: http-request
+        targetType: assigner
+      id: 1785287199713-source-17852875359270-target
+      selected: false
+      source: '1785287199713'
+      sourceHandle: source
+      target: '17852875359270'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: answer
+      id: 17852875359270-source-1785287560820-target
+      selected: false
+      source: '17852875359270'
+      sourceHandle: source
+      target: '1785287560820'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: llm
+      id: 17852877677040-source-1785287847725-target
+      selected: false
+      source: '17852877677040'
+      sourceHandle: source
+      target: '1785287847725'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: llm
+      id: 17852877765190-source-1785288460056-target
+      selected: false
+      source: '17852877765190'
+      sourceHandle: source
+      target: '1785288460056'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: if-else
+      id: 1785287847725-source-1785287940279-target
+      selected: false
+      source: '1785287847725'
+      sourceHandle: source
+      target: '1785287940279'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 1785287940279-false-1785288047200-target
+      selected: false
+      source: '1785287940279'
+      sourceHandle: 'false'
+      target: '1785288047200'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785287940279-true-17854679129180-target
+      selected: false
+      source: '1785287940279'
+      sourceHandle: 'true'
+      target: '17854679129180'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: http-request
+        targetType: if-else
+      id: 17852882086950-source-1785306788149-target
+      selected: false
+      source: '17852882086950'
+      sourceHandle: source
+      target: '1785306788149'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: human-input
+      id: 1785288460056-source-1785382388334-target
+      selected: false
+      source: '1785288460056'
+      sourceHandle: source
+      target: '1785382388334'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: http-request
+        targetType: if-else
+      id: 17852885655040-source-1785398976593-target
+      selected: false
+      source: '17852885655040'
+      sourceHandle: source
+      target: '1785398976593'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: code
+      id: 1785288670365-source-1785401554825-target
+      selected: false
+      source: '1785288670365'
+      sourceHandle: source
+      target: '1785401554825'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: answer
+      id: 17852888482320-source-1785399995734-target
+      selected: false
+      source: '17852888482320'
+      sourceHandle: source
+      target: '1785399995734'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: human-input
+      id: 1785288919482-source-1785382667730-target
+      selected: false
+      source: '1785288919482'
+      sourceHandle: source
+      target: '1785382667730'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: if-else
+      id: 1785289782670-source-17852900874780-target
+      selected: false
+      source: '1785289782670'
+      sourceHandle: source
+      target: '17852900874780'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 17852900874780-false-1785290593627-target
+      selected: false
+      source: '17852900874780'
+      sourceHandle: 'false'
+      target: '1785290593627'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 17852900874780-true-1785290421184-target
+      selected: false
+      source: '17852900874780'
+      sourceHandle: 'true'
+      target: '1785290421184'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 17852900874780-true-1785290540008-target
+      selected: false
+      source: '17852900874780'
+      sourceHandle: 'true'
+      target: '1785290540008'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 1785297043496-true-1785296001579-target
+      selected: false
+      source: '1785297043496'
+      sourceHandle: 'true'
+      target: '1785296001579'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: assigner
+      id: 1785306788149-false-17852880294000-target
+      selected: false
+      source: '1785306788149'
+      sourceHandle: 'false'
+      target: '17852880294000'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 1785306788149-false-1785306819792-target
+      selected: false
+      source: '1785306788149'
+      sourceHandle: 'false'
+      target: '1785306819792'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785306788149-true-1785461787161-target
+      selected: false
+      source: '1785306788149'
+      sourceHandle: 'true'
+      target: '1785461787161'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: code
+      id: 1785307659567-source-1785464040420-target
+      selected: false
+      source: '1785307659567'
+      sourceHandle: source
+      target: '1785464040420'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: answer
+      id: 1785307777685-source-1785466119606-target
+      selected: false
+      source: '1785307777685'
+      sourceHandle: source
+      target: '1785466119606'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: assigner
+      id: 1785382388334-__timeout-17852888482320-target
+      selected: false
+      source: '1785382388334'
+      sourceHandle: __timeout
+      target: '17852888482320'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: assigner
+      id: 1785382388334-gernerate-17852888482320-target
+      selected: false
+      source: '1785382388334'
+      sourceHandle: gernerate
+      target: '17852888482320'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: answer
+      id: 1785382388334-no_generate-1785288539691-target
+      selected: false
+      source: '1785382388334'
+      sourceHandle: no_generate
+      target: '1785288539691'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: code
+      id: 1785382667730-finish-17854653627910-target
+      selected: false
+      source: '1785382667730'
+      sourceHandle: finish
+      target: '17854653627910'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: code
+      id: 1785382667730-nofinish-1785393819983-target
+      selected: false
+      source: '1785382667730'
+      sourceHandle: nofinish
+      target: '1785393819983'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: answer
+      id: 17853829853480-source-1785383037704-target
+      selected: false
+      source: '17853829853480'
+      sourceHandle: source
+      target: '1785383037704'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 1785393819983-source-17853829853480-target
+      selected: false
+      source: '1785393819983'
+      sourceHandle: source
+      target: '17853829853480'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: llm
+      id: 1785394633075-source-1785307777685-target
+      selected: false
+      source: '1785394633075'
+      sourceHandle: source
+      target: '1785307777685'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 1785394677830-source-1785394633075-target
+      selected: false
+      source: '1785394677830'
+      sourceHandle: source
+      target: '1785394633075'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: llm
+      id: 17853956637370-source-1785307777685-target
+      selected: false
+      source: '17853956637370'
+      sourceHandle: source
+      target: '1785307777685'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 17853966434950-source-1785396877564-target
+      selected: false
+      source: '17853966434950'
+      sourceHandle: source
+      target: '1785396877564'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: code
+      id: 1785396877564-source-1785464040420-target
+      selected: false
+      source: '1785396877564'
+      sourceHandle: source
+      target: '1785464040420'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: answer
+      id: 1785398957380-source-1785288670365-target
+      selected: false
+      source: '1785398957380'
+      sourceHandle: source
+      target: '1785288670365'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785398976593-false-1785403535612-target
+      selected: false
+      source: '1785398976593'
+      sourceHandle: 'false'
+      target: '1785403535612'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1785398976593-true-1785398957380-target
+      selected: false
+      source: '1785398976593'
+      sourceHandle: 'true'
+      target: '1785398957380'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: http-request
+      id: 1785399995734-source-17852885655040-target
+      selected: false
+      source: '1785399995734'
+      sourceHandle: source
+      target: '17852885655040'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: if-else
+      id: 1785401554825-source-1785403027984-target
+      selected: false
+      source: '1785401554825'
+      sourceHandle: source
+      target: '1785403027984'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 1785403027984-false-1785403439529-target
+      selected: false
+      source: '1785403027984'
+      sourceHandle: 'false'
+      target: '1785403439529'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: http-request
+      id: 1785403027984-true-1785485001504-target
+      source: '1785403027984'
+      sourceHandle: 'true'
+      target: '1785485001504'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: assigner
+      id: 1785403055109-source-17852886064230-target
+      selected: false
+      source: '1785403055109'
+      sourceHandle: source
+      target: '17852886064230'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: answer
+      id: 1785403535612-source-1785403670960-target
+      selected: false
+      source: '1785403535612'
+      sourceHandle: source
+      target: '1785403670960'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: http-request
+        targetType: answer
+      id: 1785460955671-source-1785288919482-target
+      selected: false
+      source: '1785460955671'
+      sourceHandle: source
+      target: '1785288919482'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: http-request
+      id: 1785461787161-source-1785460955671-target
+      selected: false
+      source: '1785461787161'
+      sourceHandle: source
+      target: '1785460955671'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: http-request
+      id: 1785464040420-source-17852882086950-target
+      selected: false
+      source: '1785464040420'
+      sourceHandle: source
+      target: '17852882086950'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 17854653627910-source-17852888994950-target
+      selected: false
+      source: '17854653627910'
+      sourceHandle: source
+      target: '17852888994950'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: answer
+        targetType: code
+      id: 1785466119606-source-17853966434950-target
+      selected: false
+      source: '1785466119606'
+      sourceHandle: source
+      target: '17853966434950'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 17854679129180-source-1785468047542-target
+      selected: false
+      source: '17854679129180'
+      sourceHandle: source
+      target: '1785468047542'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: answer
+      id: 1785468047542-source-1785307659567-target
+      source: '1785468047542'
+      sourceHandle: source
+      target: '1785307659567'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: if-else
+      id: 1785478874143-source-1785286446638-target
+      source: '1785478874143'
+      sourceHandle: source
+      target: '1785286446638'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: http-request
+        targetType: answer
+      id: 1785485001504-source-1785403055109-target
+      source: '1785485001504'
+      sourceHandle: source
+      target: '1785403055109'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hide: true
+          hint: ''
+          label: currentProjectId
+          max_length: 50
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: currentProjectId
+        - default: null
+          hide: true
+          hint: ''
+          label: PicUrl
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: PicUrl
+      height: 134
+      id: '1785286288428'
+      position:
+        x: -3.0314331330207835
+        y: 1917.9832080200504
+      positionAbsolute:
+        x: -3.0314331330207835
+        y: 1917.9832080200504
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: cbdd1158-0ad5-492b-8805-91e59c66f29f
+            value: '-1'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 'true'
+          logical_operator: and
+        - case_id: d662ea00-b83f-4c6e-a674-e1a08723fc0c
+          conditions:
+          - comparison_operator: '='
+            id: 0ea573bb-8c90-4264-ac4c-5f167baff385
+            value: '1'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: d662ea00-b83f-4c6e-a674-e1a08723fc0c
+          logical_operator: and
+        - case_id: 244eda5b-3f6f-4769-908f-6d7d917ad769
+          conditions:
+          - comparison_operator: '='
+            id: a3574eb7-f84a-4c9d-be4d-828551b3cf8e
+            value: '2'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 244eda5b-3f6f-4769-908f-6d7d917ad769
+          logical_operator: and
+        - case_id: b678b2a1-5348-4f8d-8bda-aa3e44974b11
+          conditions:
+          - comparison_operator: '='
+            id: bbb7d0b7-2925-4a61-88f5-1efce6527626
+            value: '3'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: b678b2a1-5348-4f8d-8bda-aa3e44974b11
+          logical_operator: and
+        - case_id: 5b059307-e96e-4782-961a-be5c32e55613
+          conditions:
+          - comparison_operator: '='
+            id: 3f061dd3-9cd4-429d-ac0a-09afa221fca9
+            value: '4'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 5b059307-e96e-4782-961a-be5c32e55613
+          logical_operator: and
+        - case_id: 0c0fe982-6a84-471a-a763-2e88f79fd07d
+          conditions:
+          - comparison_operator: '='
+            id: 5563b6b8-7bde-459f-83b0-74f47d93740c
+            value: '5'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 0c0fe982-6a84-471a-a763-2e88f79fd07d
+          logical_operator: and
+        - case_id: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
+          conditions:
+          - comparison_operator: '='
+            id: aa80a224-0be9-4ddd-b048-47525ba77075
+            value: '6'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
+          logical_operator: and
+        - case_id: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
+          conditions:
+          - comparison_operator: '='
+            id: 294091bb-4674-47b6-953a-f4c61ae3bef1
+            value: '7'
+            varType: number
+            variable_selector:
+            - conversation
+            - step
+          id: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
+          logical_operator: and
+        selected: false
+        title: Step路由
+        type: if-else
+      height: 459
+      id: '1785286446638'
+      position:
+        x: 842.6256007269621
+        y: 1247.0752091638249
+      positionAbsolute:
+        x: 842.6256007269621
+        y: 1247.0752091638249
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+            thinking: false
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: c1d23bf5-35ed-4fc0-b5c9-54916957189f
+          role: system
+          text: "结合用户当前输入 + 全部历史对话记录，识别用户意图归属四类：\n  ai_split = AI 分镜制作（故事板/分镜脚本）\n\
+            \  pic = 图片生成（单张插图/海报/角色设计）\n  video = 视频生成（短视频/动画片段）\n  other = 打招呼、闲聊、询问功能等\n\
+            \n规则：\n- 若无法明确区分，message 引导用户：\"你希望 AI 分镜还是视频生成或者图片生成呢？\"\n- 最终只输出纯 JSON\
+            \ 结构，无额外解释\n\n输出格式：\n{\"type\":\"ai_split|pic|video|other\",\"message\"\
+            :\"回复内容\"}"
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 回复用户的内容
+                type: string
+              type:
+                description: 意图类型
+                enum:
+                - ai_split
+                - pic
+                - video
+                - other
+                type: string
+            required:
+            - message
+            - type
+            type: object
+        structured_output_enabled: true
+        title: 意图识别
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785286652605'
+      position:
+        x: 1623
+        y: 594.7088972431078
+      positionAbsolute:
+        x: 1623
+        y: 594.7088972431078
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: intent-aisplit
+          conditions:
+          - comparison_operator: contains
+            id: intent-aisplit-cond
+            value: ai_split
+            varType: string
+            variable_selector:
+            - '1785286652605'
+            - structured_output
+            - type
+          id: intent-aisplit
+          logical_operator: and
+        - case_id: intent-pic
+          conditions:
+          - comparison_operator: contains
+            id: intent-pic-cond
+            value: pic
+            varType: string
+            variable_selector:
+            - '1785286652605'
+            - structured_output
+            - type
+          id: intent-pic
+          logical_operator: and
+        - case_id: intent-video
+          conditions:
+          - comparison_operator: contains
+            id: intent-video-cond
+            value: video
+            varType: string
+            variable_selector:
+            - '1785286652605'
+            - structured_output
+            - type
+          id: intent-video
+          logical_operator: and
+        - case_id: intent-other
+          conditions:
+          - comparison_operator: contains
+            id: intent-other-cond
+            value: other
+            varType: string
+            variable_selector:
+            - '1785286652605'
+            - structured_output
+            - type
+          id: intent-other
+          logical_operator: and
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        selected: false
+        title: 意图路由
+        type: if-else
+      height: 363
+      id: '17852867601920'
+      position:
+        x: 1951.0123022306775
+        y: 594.7088972431078
+      positionAbsolute:
+        x: 1951.0123022306775
+        y: 594.7088972431078
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 7
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=7剧情设计
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852868150330'
+      position:
+        x: 2345
+        y: 215.66666666666669
+      positionAbsolute:
+        x: 2345
+        y: 215.66666666666669
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - conversation
+          - script_prompt
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: c8dc50aa-0554-4c65-973a-c083d22d6623
+          role: system
+          text: "你是一个专业的AI分镜设计师。\n严格按照规则执行任务： \n一、输入参考依据 需要结合用户本次提交的剧本内容，以及上一轮对话中已经生成、优化完毕的完整剧本作为核心蓝本，进行分镜方案设计。\n\
+            \n二、分镜方案强制必须包含4项内容，缺一不可 \n1. 整体创作风格：明确标注写实/二次元动漫/国风水墨/赛博朋克/复古胶片/暗黑悬疑等具体风格；\
+            \ \n2. 画幅比例：选定16:9横屏、9:16竖屏、1:1方形其中一种； \n3. 分镜总数量建议； \n4. 逐条拆解每一个分镜：包含镜头运镜方式、画面内容、人物神态动作、场景环境、转场方式。\n\
+            \n三、判断逻辑重要规则（重点） \n对话中如果出现用户表示认可、满意类表述，优先判定为对上一轮【剧情优化剧本】的确认，**不默认等同于认可本次分镜方案**，分镜方案依旧正常输出，等待用户单独确认。\n\
+            \n目标：\n剧情完整且用户对这个剧本满意\n\n交互优化：\n每次设计出分镜方案都要询问用户哪些方面需要修改，要满足用户的认可\n\n输出格式：\n\
+            {\"type\":1|0,\"message\":\"完整方案文本\"}\ntype=1 表示用户认可方案，type=0 表示需要继续修改"
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 完整方案文本
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            type: object
+        structured_output_enabled: true
+        title: 分镜方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785286839392'
+      position:
+        x: 1607.1659050707253
+        y: 1384.3095238095239
+      positionAbsolute:
+        x: 1607.1659050707253
+        y: 1384.3095238095239
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: 2b9b70c8-a778-45c1-baa1-22624372385a
+            value: '1'
+            varType: number
+            variable_selector:
+            - '1785286839392'
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 分镜确认
+        type: if-else
+      height: 147
+      id: '1785286951488'
+      position:
+        x: 1984
+        y: 1269.709523809524
+      positionAbsolute:
+        x: 1984
+        y: 1269.709523809524
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 2
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=2(JSON生成)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852870444160'
+      position:
+        x: 2345
+        y: 1316.4095238095238
+      positionAbsolute:
+        x: 2345
+        y: 1316.4095238095238
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 20
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 5223d380-28b2-4aae-85c6-e169311771fd
+          role: system
+          text: ''
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              items:
+                items:
+                  additionalProperties: false
+                  properties:
+                    cameraMovement:
+                      description: 镜头运镜方式
+                      type: string
+                    imagePrompt:
+                      description: 图片生成正向提示词
+                      type: string
+                    negativePrompt:
+                      description: 负面规避提示词
+                      type: string
+                    sceneNumber:
+                      description: 分镜序号，正整数
+                      type: integer
+                    scriptContent:
+                      description: 镜头剧本、剧情台词
+                      type: string
+                    shotType:
+                      description: 镜头景别
+                      type: string
+                    soundDesign:
+                      description: 音效与声音设计
+                      type: string
+                    videoPrompt:
+                      description: 视频动态提示词
+                      type: string
+                  required:
+                  - sceneNumber
+                  - scriptContent
+                  - imagePrompt
+                  - videoPrompt
+                  - negativePrompt
+                  - cameraMovement
+                  - shotType
+                  - soundDesign
+                  type: object
+                type: array
+            required:
+            - items
+            type: object
+        structured_output_enabled: true
+        title: 分镜JSON生成
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785287100384'
+      position:
+        x: 2345
+        y: 1589.709523809524
+      positionAbsolute:
+        x: 2345
+        y: 1589.709523809524
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-207
+            key: ''
+            type: text
+            value: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n\
+              \  \"scenes\": {{#1785287100384.structured_output.items#}},\n  \"aspectRatio\"\
+              : \"16:9\"\n}"
+          type: json
+        headers: 'Content-Type:application/json
+
+          X-Dify-Key:{{#env.DIFY_KEY#}}'
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 2
+          retry_enabled: true
+          retry_interval: 2000
+        selected: false
+        ssl_verify: true
+        timeout:
+          connect: 1
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: POST分镜脚本
+        type: http-request
+        url: http://host.docker.internal:8082/api/ai/dify/generate-script
+        variables: []
+      height: 136
+      id: '1785287199713'
+      position:
+        x: 2706
+        y: 1560.2051378446117
+      positionAbsolute:
+        x: 2706
+        y: 1560.2051378446117
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: -1
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 重置step(分镜JSON完成)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852875359270'
+      position:
+        x: 3047
+        y: 1609.3718045112785
+      positionAbsolute:
+        x: 3047
+        y: 1609.3718045112785
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: ✅ 分镜脚本已生成！共 {{#1785287199713.body#}}个分镜已写入项目 {{#conversation.currentProjectId#}}
+        selected: false
+        title: 分镜结果回复
+        type: answer
+        variables: []
+      height: 136
+      id: '1785287560820'
+      position:
+        x: 3388
+        y: 1596.7051378446117
+      positionAbsolute:
+        x: 3388
+        y: 1596.7051378446117
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 3
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=3(图片方案)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852877677040'
+      position:
+        x: 2345
+        y: 592.7666666666667
+      positionAbsolute:
+        x: 2345
+        y: 592.7666666666667
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 4
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=4(视频方案)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852877765190'
+      position:
+        x: 2345
+        y: 949.7261904761906
+      positionAbsolute:
+        x: 2345
+        y: 949.7261904761906
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785286652605.structured_output.message#}}'
+        selected: false
+        title: 引导回复
+        type: answer
+        variables: []
+      height: 101
+      id: '1785287790005'
+      position:
+        x: 2471.3391483081855
+        y: 1199.6993481882234
+      positionAbsolute:
+        x: 2471.3391483081855
+        y: 1199.6993481882234
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 30
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 1d3b6faf-0bb4-4cf4-9b5d-5dba024dbaca
+          role: system
+          text: '根据用户需求设计图片生成方案。
+
+
+            方案需包含：
+
+            1. 画面风格（写实/二次元/油画/水彩/3D渲染/摄影等）
+
+            2. 画幅尺寸（1024x1024方形 / 1536x1024横屏 / 1024x1536竖屏）
+
+            3. 画面构图描述（主体位置、视角、景深）
+
+            4. 色调与光线设计（暖色/冷色、自然光/戏剧光）
+
+            5. 关键元素说明
+
+
+            展示方案后询问用户是否认可。
+
+
+            输出格式：
+
+            {"type":1|0,"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1792x1024|1024x1792"}
+
+            type=1 表示用户认可方案
+
+            '
+        reasoning_format: separated
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 完整方案文本
+                type: string
+              size:
+                description: 画幅尺寸 1024x1024方形 / 1792x1024横屏 / 1024x1792竖屏
+                type: string
+              style:
+                description: 风格关键词
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            type: object
+        structured_output_enabled: true
+        title: 图片方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785287847725'
+      position:
+        x: 2706
+        y: 782.3898496240603
+      positionAbsolute:
+        x: 2706
+        y: 782.3898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: 7b35f8b8-b33a-4739-911a-47c6dc158c9d
+            value: '1'
+            varType: number
+            variable_selector:
+            - '1785287847725'
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 图片确认
+        type: if-else
+      height: 147
+      id: '1785287940279'
+      position:
+        x: 3047
+        y: 766.8898496240603
+      positionAbsolute:
+        x: 3047
+        y: 766.8898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 5
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=5(生图)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852880294000'
+      position:
+        x: 5226.258349586087
+        y: 920.8769849696637
+      positionAbsolute:
+        x: 5226.258349586087
+        y: 920.8769849696637
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785287847725.structured_output.message#}}'
+        selected: false
+        title: 图片方案回复
+        type: answer
+        variables: []
+      height: 101
+      id: '1785288047200'
+      position:
+        x: 3408
+        y: 931.4218045112783
+      positionAbsolute:
+        x: 3408
+        y: 931.4218045112783
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          config:
+            api_key: '{{#env.LAOZHANG_KEY#}}'
+            type: bearer
+          type: no-auth
+        body:
+          data:
+          - id: key-value-1132
+            key: ''
+            type: text
+            value: "{\n \"projectId\":\"{{#conversation.currentProjectId#}}\",\n \
+              \ \"model\": \"{{#env.GENERATER_PIC_MODEL#}}\",\n  \"prompt\": \"{{#1785464040420.style#}}\
+              \ {{#1785464040420.pic_generate_talk#}}\",\n  \"size\": \"{{#1785464040420.size#}}\"\
+              ,\n  \"mode\":{{#1785464040420.mode#}},\n  \"generatedImageUrl\":{{#1785464040420.picture#}}\n\
+              \  \"referenceImageUrls\":[{{#conversation.picture#}}]\n}"
+          type: json
+        desc: 调用Laozhang API生成图片
+        headers: 'Content-Type:application/json
+
+          X-Dify-Key:{{#env.DIFY_KEY#}}'
+        isInIteration: false
+        isInLoop: false
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: true
+          retry_interval: 5000
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 30
+          max_read_timeout: 120
+          max_write_timeout: 30
+        title: POST生图
+        type: http-request
+        url: http://host.docker.internal:8082/api/ai/dify/generate-image
+        variables: []
+      height: 164
+      id: '17852882086950'
+      position:
+        x: 4559.6454088389655
+        y: 909.0014137727077
+      positionAbsolute:
+        x: 4559.6454088389655
+        y: 909.0014137727077
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 05742636-e333-44cd-8cb2-1f65e770bb63
+          role: system
+          text: '根据用户需求设计视频生成方案。
+
+
+            方案需包含：
+
+            1. 视频时长（4秒 或 8秒）
+
+            2. 分辨率预设（720p / 1080p / 4K）— 4K 仅与 8s 组合
+
+            3. 画幅（横屏 16:9 / 竖屏 9:16）
+
+            4. 运镜方式（推/拉/摇/移/跟/升/降）
+
+            5. 画面内容详细描述
+
+            6. 可选负面提示词（不希望出现的元素）
+
+
+            展示方案后询问用户是否认可。
+
+
+            输出格式：
+
+            {"type":1|0,"message":"完整方案文本","duration":"4|8","resolution":"720p|1080p|4k","aspectRatio":"16:9|9:16"}
+
+            '
+        reasoning_format: tagged
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              aspectRatio:
+                description: 画幅比例
+                type: string
+              duration:
+                description: 视频时长(秒)
+                type: integer
+              message:
+                description: 完整方案文本
+                type: string
+              resolution:
+                description: 分辨率
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            - duration
+            - resolution
+            - aspectRatio
+            type: object
+        structured_output_enabled: true
+        title: 视频方案设计
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785288460056'
+      position:
+        x: 2706
+        y: 1111.8241854636594
+      positionAbsolute:
+        x: 2706
+        y: 1111.8241854636594
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 你希望怎么改善？
+        selected: false
+        title: 视频方案回复
+        type: answer
+        variables: []
+      height: 99
+      id: '1785288539691'
+      position:
+        x: 3408
+        y: 1290.9194235588975
+      positionAbsolute:
+        x: 3408
+        y: 1290.9194235588975
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          config:
+            api_key: '{{#env.LAOZHANG_KEY#}}'
+            header: X-Dify-Key
+            type: custom
+          type: no-auth
+        body:
+          data:
+          - type: text
+            value: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n\
+              \  \"prompt\": \"{{#1785288460056.structured_output.message#}}\",\n\
+              \  \"model\": \"veo-3.1-fast\",\n  \"resolution\": \"{{#1785288460056.structured_output.resolution#}}\"\
+              ,\n  \"size\": \"1920x1080\",\n  \"aspectRatio\": \"{{#1785288460056.structured_output.aspectRatio#}}\"\
+              ,\n  \"duration\": {{#1785288460056.structured_output.duration#}},\n\
+              \  \"negativePrompt\": \"\"\n}\n"
+          type: json
+        desc: 调用后端视频代理端点(后端负责轮询Laozhang)
+        headers: 'Content-Type:application/json
+
+          X-Dify-Key:{{#env.DIFY_KEY#}}'
+        isInIteration: false
+        isInLoop: false
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: false
+          retry_interval: 5000
+        selected: false
+        ssl_verify: true
+        timeout:
+          connect: 30
+          max_connect_timeout: 30
+          max_read_timeout: 360
+          max_write_timeout: 30
+          read: 180
+          write: 30
+        title: POST生视频
+        type: http-request
+        url: http://host.docker.internal:8082/api/ai/dify/generate-video
+        variables: []
+      height: 151
+      id: '17852885655040'
+      position:
+        x: 4050.4643330096073
+        y: 1908.1977536684435
+      positionAbsolute:
+        x: 4050.4643330096073
+        y: 1908.1977536684435
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: -1
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 重置step(视频生成完成)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852886064230'
+      position:
+        x: 7087.066080729037
+        y: 1697.7536170817891
+      positionAbsolute:
+        x: 7087.066080729037
+        y: 1697.7536170817891
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '✅ 视频生成中！
+
+          任务ID：{{#1785398957380.taskId#}}'
+        selected: false
+        title: 视频结果回复
+        type: answer
+        variables: []
+      height: 117
+      id: '1785288670365'
+      position:
+        x: 5197.225633722386
+        y: 1715.6453372287917
+      positionAbsolute:
+        x: 5197.225633722386
+        y: 1715.6453372287917
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 6
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 设置step=6(生视频)
+        type: assigner
+        version: '2'
+      height: 83
+      id: '17852888482320'
+      position:
+        x: 3408
+        y: 1127.9194235588975
+      positionAbsolute:
+        x: 3408
+        y: 1127.9194235588975
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: -1
+          variable_selector:
+          - conversation
+          - step
+        - input_type: variable
+          operation: over-write
+          value:
+          - '17854653627910'
+          - lis
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        selected: false
+        title: 重置step、图片公用变量(图片生成完成)
+        type: assigner
+        version: '2'
+      height: 109
+      id: '17852888994950'
+      position:
+        x: 6990.336741245063
+        y: 957.7176693112345
+      positionAbsolute:
+        x: 6990.336741245063
+        y: 957.7176693112345
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: ✅ 图片已生成！{{#1785460955671.files#}}
+        selected: false
+        title: 图片结果回复
+        type: answer
+        variables: []
+      height: 117
+      id: '1785288919482'
+      position:
+        x: 5898.227416224114
+        y: 766.8898496240603
+      positionAbsolute:
+        x: 5898.227416224114
+        y: 766.8898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: true
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 5623fbeb-61ad-432d-8db4-5fb2cca33928
+          role: system
+          text: '你是一个专业的剧情优化设计师，根据用户提供的剧本内容进行详写或者优化。
+
+
+            主要任务：
+
+            1.如果用户的剧情比较模糊，不详细，先为用户生成详细的剧情
+
+            2.如果用户的剧情详细了，就优化这个剧情
+
+            3.剧情完整没问题后，询问用户这个剧本是否满意
+
+
+            目标：
+
+            剧情完整且用户对这个完整的剧本满意
+
+
+            输出格式：
+
+            {"type":1|0,"message":"优化剧本方案","script":"最终的剧本，用户认可了最终的方案才填入，默认不填"}
+
+            type=1 表示用户认可方案，type=0 表示需要继续修改'
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 给用户展示内容
+                enum: null
+                type: string
+              script:
+                description: 最终用户认可的剧本方案，才能填入剧本方案，在完善剧本的情况默认为空
+                enum: null
+                type: string
+              type:
+                description: 用户是否认可(1=认可,0=继续修改)
+                enum:
+                - 1
+                - 0
+                type: number
+            required:
+            - type
+            - message
+            - script
+            type: object
+        structured_output_enabled: true
+        title: 剧本优化设计
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785289782670'
+      position:
+        x: 2706
+        y: 241.99999999999997
+      positionAbsolute:
+        x: 2706
+        y: 241.99999999999997
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: 2b9b70c8-a778-45c1-baa1-22624372385a
+            value: '1'
+            varType: number
+            variable_selector:
+            - '1785289782670'
+            - structured_output
+            - type
+          id: 'true'
+          logical_operator: and
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        selected: false
+        title: 剧情确认
+        type: if-else
+      height: 147
+      id: '17852900874780'
+      position:
+        x: 3047
+        y: 226.49999999999997
+      positionAbsolute:
+        x: 3047
+        y: 226.49999999999997
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 1
+          variable_selector:
+          - conversation
+          - step
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1785289782670'
+          - structured_output
+          - script
+          variable_selector:
+          - conversation
+          - script_prompt
+        selected: false
+        title: 变量赋值
+        type: assigner
+        version: '2'
+      height: 109
+      id: '1785290421184'
+      position:
+        x: 3408
+        y: 0
+      positionAbsolute:
+        x: 3408
+        y: 0
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785289782670.structured_output.message#}}接下来为您生成分镜设计方案可以吗？'
+        selected: false
+        title: 直接回复 8
+        type: answer
+        variables: []
+      height: 117
+      id: '1785290540008'
+      position:
+        x: 3408
+        y: 189
+      positionAbsolute:
+        x: 3408
+        y: 189
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785289782670.structured_output.message#}}'
+        selected: false
+        title: 直接回复 9
+        type: answer
+        variables: []
+      height: 101
+      id: '1785290593627'
+      position:
+        x: 3408
+        y: 386
+      positionAbsolute:
+        x: 3408
+        y: 386
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785286839392.structured_output.message#}}'
+        selected: false
+        title: 分镜方案回复
+        type: answer
+        variables: []
+      height: 101
+      id: '1785292032956'
+      position:
+        x: 1984
+        y: 1496.709523809524
+      positionAbsolute:
+        x: 1984
+        y: 1496.709523809524
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785287100384.structured_output#}}'
+        selected: false
+        title: 直接回复 10
+        type: answer
+        variables: []
+      height: 101
+      id: '1785292521655'
+      position:
+        x: 2677.8302452853345
+        y: 1766.9138542058863
+      positionAbsolute:
+        x: 2677.8302452853345
+        y: 1766.9138542058863
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: constant
+          operation: set
+          value: 8d41dcce4d1c8221503906ab42c2bc87
+          variable_selector:
+          - conversation
+          - currentProjectId
+        selected: false
+        title: 变量赋值 12
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785296001579'
+      position:
+        x: 130.05018405087162
+        y: 2817.626911394133
+      positionAbsolute:
+        x: 130.05018405087162
+        y: 2817.626911394133
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: empty
+            id: 6ade0785-fac7-4b2e-86bf-4be8395ccfe7
+            value: ''
+            varType: string
+            variable_selector:
+            - conversation
+            - currentProjectId
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支 7
+        type: if-else
+      height: 123
+      id: '1785297043496'
+      position:
+        x: 67.65780381393432
+        y: 2397.176591400131
+      positionAbsolute:
+        x: 67.65780381393432
+        y: 2397.176591400131
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: e0256151-170b-4a75-afbf-b3608658f804
+            value: '200'
+            varType: number
+            variable_selector:
+            - '17852882086950'
+            - status_code
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支 8
+        type: if-else
+      height: 147
+      id: '1785306788149'
+      position:
+        x: 4917.200068271201
+        y: 891.8076253883478
+      positionAbsolute:
+        x: 4917.200068271201
+        y: 891.8076253883478
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 生成失败：{{#17852882086950.body#}}，请重新说出你的想法完善生成
+        selected: false
+        title: 直接回复 11
+        type: answer
+        variables: []
+      height: 117
+      id: '1785306819792'
+      position:
+        x: 5349.41616917308
+        y: 1173.1213084488882
+      positionAbsolute:
+        x: 5349.41616917308
+        y: 1173.1213084488882
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 开始生图
+        selected: false
+        title: 直接回复 12
+        type: answer
+        variables: []
+      height: 99
+      id: '1785307659567'
+      position:
+        x: 3937.301290854294
+        y: 746.390280267253
+      positionAbsolute:
+        x: 3937.301290854294
+        y: 746.390280267253
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 31
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: d3c0b588-572a-4a86-ae3c-3d473883ffcd
+          role: system
+          text: '你现在要根据用户完善的需求设计完善图片设计方案
+
+            用户对当前图片不满意：{{#sys.query#}}
+
+            上一个生图的风格：{{#17853956637370.pic_generate_talk#}}
+
+
+            方案需包含：
+
+            1. 画面风格（写实/二次元/油画/水彩/3D渲染/摄影等）
+
+            2. 画幅尺寸（1024x1024方形 / 1536x1024横屏 / 1024x1536竖屏）
+
+            3. 画面构图描述（主体位置、视角、景深）
+
+            4. 色调与光线设计（暖色/冷色、自然光/戏剧光）
+
+            5. 关键元素说明
+
+
+            目标：根据用户想要完善的图片设计方案优化这个生图的风格完整方案文本、风格关键词，然后投喂给生图大模型
+
+
+            输出格式：
+
+            {"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1792x1024|1024x1792"}'
+        reasoning_format: separated
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              message:
+                description: 完整方案文本
+                type: string
+              size:
+                description: 画幅尺寸 1024x1024方形 / 1792x1024横屏 / 1024x1792竖屏
+                type: string
+              style:
+                description: 风格关键词
+                type: string
+            required:
+            - message
+            - size
+            type: object
+        structured_output_enabled: true
+        title: 完善图片设计方案
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: '1785307777685'
+      position:
+        x: 2369.815483051862
+        y: 2013.7652669136646
+      positionAbsolute:
+        x: 2369.815483051862
+        y: 2013.7652669136646
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: 4de9be96-820d-449c-bc9b-9aa5ba4cf440
+          type: webapp
+        form_content: '{{#1785288460056.structured_output.message#}}'
+        inputs: []
+        selected: false
+        timeout: 1
+        timeout_unit: hour
+        title: 人工介入
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: gernerate
+          title: 开始生成视频
+        - button_style: primary
+          id: no_generate
+          title: 不，我还要继续完善
+      height: 188
+      id: '1785382388334'
+      position:
+        x: 3047
+        y: 1075.8241854636594
+      positionAbsolute:
+        x: 3047
+        y: 1075.8241854636594
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: 0fbbe53b-0ef9-4e4e-8990-10258e5dc8c5
+          type: webapp
+        form_content: 基于这图片，您还需要继续完善吗？
+        inputs: []
+        selected: false
+        timeout: 1
+        timeout_unit: hour
+        title: 完善图片
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: nofinish
+          title: 继续完善
+        - button_style: primary
+          id: finish
+          title: 不用了，已完成生图
+      height: 188
+      id: '1785382667730'
+      position:
+        x: 6209.080489861648
+        y: 766.8898496240603
+      positionAbsolute:
+        x: 6209.080489861648
+        y: 766.8898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        items:
+        - input_type: constant
+          operation: set
+          value: 5
+          variable_selector:
+          - conversation
+          - step
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1785393819983'
+          - lis
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        - input_type: variable
+          operation: clear
+          value: []
+          variable_selector:
+          - conversation
+          - picture
+        iteration_id: null
+        loop_id: null
+        selected: false
+        title: '设置step=5(生图) '
+        type: assigner
+        version: '2'
+      height: 135
+      id: '17853829853480'
+      position:
+        x: 7200
+        y: 633.8898496240603
+      positionAbsolute:
+        x: 7200
+        y: 633.8898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 您想怎么完善这个图片呢？
+        selected: false
+        title: 直接回复 13
+        type: answer
+        variables: []
+      height: 99
+      id: '1785383037704'
+      position:
+        x: 7659.9332519531235
+        y: 607.6136591478696
+      positionAbsolute:
+        x: 7659.9332519531235
+        y: 607.6136591478696
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main(pic_generate_talk: str, picture: str, storage_pic_talk:\
+          \ dict,size:str,style:str):\n    stored_talk = storage_pic_talk.get(\"pic_generate_talk\"\
+          , None)\n    if stored_talk is not None and stored_talk != \"\":\n     \
+          \   lis = {\n            \"pic_generate_talk\": stored_talk,\n         \
+          \   \"picture\": picture,\n            \"user_finishing\": \"\",\n     \
+          \       \"size\":size,\n            \"style\":style\n        }\n       \
+          \ return {\"lis\": lis}\n    else:\n        lis = {\n            \"pic_generate_talk\"\
+          : pic_generate_talk,\n            \"picture\": picture,\n            \"\
+          user_finishing\": \"\",\n            \"size\":size,\n            \"style\"\
+          :style\n        }\n        return {\"lis\": lis}\n"
+        code_language: python3
+        outputs:
+          lis:
+            children: null
+            type: object
+        selected: false
+        title: 传到公共变量
+        type: code
+        variables:
+        - value_selector:
+          - '1785287847725'
+          - structured_output
+          - message
+          value_type: object
+          variable: pic_generate_talk
+        - value_selector:
+          - '1785461787161'
+          - imageUrl
+          value_type: string
+          variable: picture
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+        - value_selector:
+          - '1785307777685'
+          - structured_output
+          - size
+          value_type: object
+          variable: size
+        - value_selector:
+          - '1785287847725'
+          - structured_output
+          - style
+          value_type: object
+          variable: style
+      height: 51
+      id: '1785393819983'
+      position:
+        x: 6680.144463688751
+        y: 639.1678812671519
+      positionAbsolute:
+        x: 6680.144463688751
+        y: 639.1678812671519
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1785394677830'
+          - lis
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        selected: false
+        title: 变量赋值 13
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785394633075'
+      position:
+        x: 1964
+        y: 1921.7218045112784
+      positionAbsolute:
+        x: 1964
+        y: 1921.7218045112784
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main(storage_pic_talk: str, user_finishing: str):\n\n    lis\
+          \ = {\n        \"pic_generate_talk\": storage_pic_talk[\"pic_generate_talk\"\
+          ],\n        \"picture\": storage_pic_talk[\"picture\"],\n        \"user_finishing\"\
+          : user_finishing\n    }\n    return {\n        \"lis\":lis\n    }"
+        code_language: python3
+        outputs:
+          lis:
+            children: null
+            type: object
+        selected: false
+        title: 赋全局值
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+        - value_selector:
+          - sys
+          - query
+          value_type: string
+          variable: user_finishing
+      height: 51
+      id: '1785394677830'
+      position:
+        x: 1623
+        y: 1929.2218045112784
+      positionAbsolute:
+        x: 1623
+        y: 1929.2218045112784
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main(storage_pic_talk: dict):\n\n    return {\n        \"pic_generate_talk\"\
+          :storage_pic_talk[\"pic_generate_talk\"],\n        \"picture\":storage_pic_talk[\"\
+          picture\"]\n    }"
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        outputs:
+          pic_generate_talk:
+            children: null
+            type: string
+          picture:
+            children: null
+            type: string
+        selected: false
+        title: 从json抽出值
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+      height: 51
+      id: '17853956637370'
+      position:
+        x: 1579.0468664072584
+        y: 2074.066499397887
+      positionAbsolute:
+        x: 1579.0468664072584
+        y: 2074.066499397887
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main(storage_pic_talk: dict, pic_generate_talk: str,size:str,style:str):\n\
+          \ \n    lis = {\n        \"user_finishing\": \"\",\n        \"pic_generate_talk\"\
+          : pic_generate_talk,\n        \"picture\":storage_pic_talk[\"picture\"],\n\
+          \        \"mode\":\"edit\",\n        \"size\":size,\n        \"style\":style\n\
+          \    }\n    return {\n        \"lis\":lis\n    }"
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        outputs:
+          lis:
+            children: null
+            type: object
+        selected: false
+        title: 赋全局值
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+        - value_selector:
+          - '1785307777685'
+          - structured_output
+          - message
+          value_type: object
+          variable: pic_generate_talk
+        - value_selector:
+          - '1785307777685'
+          - structured_output
+          - size
+          value_type: object
+          variable: size
+        - value_selector:
+          - '1785307777685'
+          - structured_output
+          - style
+          value_type: object
+          variable: style
+      height: 51
+      id: '17853966434950'
+      position:
+        x: 3479.762046383185
+        y: 1938.9832080200504
+      positionAbsolute:
+        x: 3479.762046383185
+        y: 1938.9832080200504
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '17853966434950'
+          - lis
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        selected: false
+        title: 公共变量赋值
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785396877564'
+      position:
+        x: 3749.7415154139885
+        y: 1807.8176095111999
+      positionAbsolute:
+        x: 3749.7415154139885
+        y: 1807.8176095111999
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "import json\n\ndef main(data: str):\n    parsed = json.loads(data)\n\
+          \    taskId = parsed[\"data\"][\"taskId\"]\n    status = parsed[\"data\"\
+          ][\"status\"]\n    return {\"taskId\": taskId,\n            \"status\":\
+          \ status,\n    }"
+        code_language: python3
+        outputs:
+          status:
+            children: null
+            type: string
+          taskId:
+            children: null
+            type: string
+        selected: false
+        title: 代码执行 5
+        type: code
+        variables:
+        - value_selector:
+          - '17852885655040'
+          - body
+          value_type: string
+          variable: data
+      height: 51
+      id: '1785398957380'
+      position:
+        x: 4832
+        y: 1749.2299498746868
+      positionAbsolute:
+        x: 4832
+        y: 1749.2299498746868
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: contains
+            id: 3ccea741-d597-4838-9714-5840b2eff288
+            value: '200'
+            varType: string
+            variable_selector:
+            - '17852885655040'
+            - body
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支 8
+        type: if-else
+      height: 123
+      id: '1785398976593'
+      position:
+        x: 4471
+        y: 1783.1299498746869
+      positionAbsolute:
+        x: 4471
+        y: 1783.1299498746869
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 生成视频中....
+        selected: false
+        title: 生成视频中....
+        type: answer
+        variables: []
+      height: 99
+      id: '1785399995734'
+      position:
+        x: 3769
+        y: 1241.0898496240602
+      positionAbsolute:
+        x: 3769
+        y: 1241.0898496240602
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "def main(taskId: str, DIFY_KEY: str):\n    import time, requests\n\
+          \    max_attempts = 120\n    attempts = 0\n    while attempts < max_attempts:\n\
+          \        try:\n            headers = {'X-Dify-Key': DIFY_KEY}\n        \
+          \    resp = requests.get(f\"http://host.docker.internal:8082/api/ai/dify/generate-video/status?taskId={taskId}\"\
+          , timeout=600, headers=headers)\n            resp.raise_for_status()\n \
+          \           data = resp.json()\n        except Exception as e:\n       \
+          \     return {\"videoUrl\": \"\", \"error\": f\"请求失败: {str(e)}\", \"status\"\
+          : \"failed\"}\n        if 'data' not in data:\n            return {\"videoUrl\"\
+          : \"\", \"error\": \"响应格式错误: 缺少'data'键\", \"status\": \"failed\"}\n    \
+          \    status_data = data['data']\n        status = status_data.get('status')\n\
+          \        if status == \"completed\":\n            video_url = status_data.get('videoUrl',\
+          \ '')\n            return {\"videoUrl\": video_url, \"error\": \"\", \"\
+          status\": \"completed\"}\n        elif status == \"failed\":\n         \
+          \   error = status_data.get('error', '')\n            return {\"videoUrl\"\
+          : \"\", \"error\": error, \"status\": \"failed\"}\n        time.sleep(5)\n\
+          \        attempts += 1\n    return {\"videoUrl\": \"\", \"error\": \"等待超时，任务未完成\"\
+          , \"status\": \"failed\"}"
+        code_language: python3
+        outputs:
+          error:
+            children: null
+            type: string
+          status:
+            children: null
+            type: string
+          videoUrl:
+            children: null
+            type: string
+        retry_config:
+          max_retries: 1
+          retry_enabled: false
+          retry_interval: 1000
+        selected: false
+        title: 代码执行 6
+        type: code
+        variables:
+        - value_selector:
+          - '1785398957380'
+          - taskId
+          value_type: string
+          variable: taskId
+        - value_selector:
+          - env
+          - DIFY_KEY
+          value_type: string
+          variable: DIFY_KEY
+      height: 51
+      id: '1785401554825'
+      position:
+        x: 5512.4842834334895
+        y: 1777.2299498746868
+      positionAbsolute:
+        x: 5512.4842834334895
+        y: 1777.2299498746868
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: d8e61eb2-679b-4adc-9ab8-e35882010e53
+            value: completed
+            varType: string
+            variable_selector:
+            - '1785401554825'
+            - status
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支 9
+        type: if-else
+      height: 147
+      id: '1785403027984'
+      position:
+        x: 5855
+        y: 1737.7299498746868
+      positionAbsolute:
+        x: 5855
+        y: 1737.7299498746868
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '
+
+
+          ✅生成完成！
+
+          {{#1785485001504.files#}}'
+        selected: false
+        title: 直接回复 15
+        type: answer
+        variables: []
+      height: 101
+      id: '1785403055109'
+      position:
+        x: 6644.4639715995245
+        y: 1678.5178233023207
+      positionAbsolute:
+        x: 6644.4639715995245
+        y: 1678.5178233023207
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785401554825.error#}}'
+        selected: false
+        title: 直接回复 16
+        type: answer
+        variables: []
+      height: 101
+      id: '1785403439529'
+      position:
+        x: 6216
+        y: 1880.6299498746869
+      positionAbsolute:
+        x: 6216
+        y: 1880.6299498746869
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "def main(body: str):\n    import json\n    data = json.loads(body)\n\
+          \    return {\n        \"message\": data[\"message\"]\n    }\n"
+        code_language: python3
+        outputs:
+          message:
+            children: null
+            type: string
+        selected: false
+        title: 代码执行 7
+        type: code
+        variables:
+        - value_selector:
+          - '17852885655040'
+          - body
+          value_type: string
+          variable: body
+      height: 51
+      id: '1785403535612'
+      position:
+        x: 4832
+        y: 1938.9832080200504
+      positionAbsolute:
+        x: 4832
+        y: 1938.9832080200504
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785403535612.message#}}'
+        selected: false
+        title: 直接回复 17
+        type: answer
+        variables: []
+      height: 101
+      id: '1785403670960'
+      position:
+        x: 5173
+        y: 1921.7299498746868
+      positionAbsolute:
+        x: 5173
+        y: 1921.7299498746868
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: []
+          type: none
+        headers: X-Dify-Key:{{#env.DIFY_KEY#}}
+        method: get
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: HTTP 请求 4
+        type: http-request
+        url: '{{#1785461787161.imageUrl#}}'
+        variables: []
+      height: 122
+      id: '1785460955671'
+      position:
+        x: 5573.296307103218
+        y: 760.9370083799541
+      positionAbsolute:
+        x: 5573.296307103218
+        y: 760.9370083799541
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "import json\n\ndef main(body: str):\n    data = json.loads(body).get(\"\
+          data\", {})\n    return {\"imageUrl\": data.get(\"imageUrl\")}\n"
+        code_language: python3
+        outputs:
+          imageUrl:
+            children: null
+            type: string
+        selected: false
+        title: 获取imageUrl
+        type: code
+        variables:
+        - value_selector:
+          - '17852882086950'
+          - body
+          value_type: string
+          variable: body
+      height: 51
+      id: '1785461787161'
+      position:
+        x: 5232.5574697824495
+        y: 766.8898496240603
+      positionAbsolute:
+        x: 5232.5574697824495
+        y: 766.8898496240603
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "import json\ndef main(storage_pic_talk: dict):\n    return {\n    \
+          \    \"pic_generate_talk\": storage_pic_talk.get(\"pic_generate_talk\",\
+          \ \"\"),\n        \"user_finishing\": storage_pic_talk.get(\"user_finishing\"\
+          , \"\"),\n        \"picture\": storage_pic_talk.get(\"picture\", \"\"),\n\
+          \        \"mode\": storage_pic_talk.get(\"mode\", \"\"),\n        \"style\"\
+          :storage_pic_talk.get(\"style\", \"\"),\n        \"size\":storage_pic_talk.get(\"\
+          size\", \"\")\n        }\n    \n"
+        code_language: python3
+        outputs:
+          mode:
+            children: null
+            type: string
+          pic_generate_talk:
+            children: null
+            type: string
+          picture:
+            children: null
+            type: string
+          size:
+            children: null
+            type: string
+          style:
+            children: null
+            type: string
+          user_finishing:
+            children: null
+            type: string
+        selected: false
+        title: 提取公共变量转json
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+      height: 51
+      id: '1785464040420'
+      position:
+        x: 4121.717760191344
+        y: 1003.9066672349286
+      positionAbsolute:
+        x: 4121.717760191344
+        y: 1003.9066672349286
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main():\n \n    lis = {\n        \"user_finishing\": \"\",\n\
+          \        \"pic_generate_talk\": \"\",\n        \"picture\":\"\",\n     \
+          \   \"mode\":\"\",\n        \"style\":\"\",\n        \"size\":\"\"\n   \
+          \ }\n    return {\n        \"lis\":lis\n    }"
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        outputs:
+          lis:
+            children: null
+            type: object
+        selected: false
+        title: 赋全局值为空值
+        type: code
+        variables: []
+      height: 51
+      id: '17854653627910'
+      position:
+        x: 6698.434314268964
+        y: 1008.8369656206196
+      positionAbsolute:
+        x: 6698.434314268964
+        y: 1008.8369656206196
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785307777685.structured_output.message#}}'
+        selected: false
+        title: 回答方案
+        type: answer
+        variables: []
+      height: 101
+      id: '1785466119606'
+      position:
+        x: 3310.506129817283
+        y: 2065.218490865244
+      positionAbsolute:
+        x: 3310.506129817283
+        y: 2065.218490865244
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "\ndef main(size:str,style:str,message:str):\n    return{\n        \"\
+          lis\":{\n            \"size\":size,\n            \"style\":style,\n    \
+          \        \"pic_generate_talk\":message\n        }\n    }"
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        outputs:
+          lis:
+            children: null
+            type: object
+        selected: false
+        title: 传到公共变量
+        type: code
+        variables:
+        - value_selector:
+          - '1785287847725'
+          - structured_output
+          - size
+          value_type: object
+          variable: size
+        - value_selector:
+          - '1785287847725'
+          - structured_output
+          - style
+          value_type: object
+          variable: style
+        - value_selector:
+          - '1785287847725'
+          - structured_output
+          - message
+          value_type: object
+          variable: message
+      height: 51
+      id: '17854679129180'
+      position:
+        x: 3363.3141053380423
+        y: 658.7555072805651
+      positionAbsolute:
+        x: 3363.3141053380423
+        y: 658.7555072805651
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '17854679129180'
+          - lis
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        selected: false
+        title: 变量赋值 15
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785468047542'
+      position:
+        x: 3631.0038589697606
+        y: 639.1678812671519
+      positionAbsolute:
+        x: 3631.0038589697606
+        y: 639.1678812671519
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1785286288428'
+          - PicUrl
+          variable_selector:
+          - conversation
+          - picture
+        selected: false
+        title: 变量赋值 16
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785478874143'
+      position:
+        x: 453.8967145426728
+        y: 1486.75079244533
+      positionAbsolute:
+        x: 453.8967145426728
+        y: 1486.75079244533
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: []
+          type: none
+        headers: X-Dify-Key:{{#env.DIFY_KEY#}}
+        method: get
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: false
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 获取视频
+        type: http-request
+        url: '{{#1785401554825.videoUrl#}}'
+        variables: []
+      height: 93
+      id: '1785485001504'
+      position:
+        x: 6261.334973220832
+        y: 1662.6837283730458
+      positionAbsolute:
+        x: 6261.334973220832
+        y: 1662.6837283730458
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    viewport:
+      x: -834.8910407478386
+      y: -537.6223325070711
+      zoom: 0.5000000000000013
+  rag_pipeline_variables: []

@@ -55,7 +55,13 @@ public class VideoGenerationService {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
-        String actualModel = config.getVideoModelAliasMap().getOrDefault(alias, alias);
+        if (prompt == null || prompt.isBlank()) {
+            throw new RuntimeException("视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
+        }
+
+        String actualModel = alias != null
+                ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
+                : "veo-3.1-fast-generate-preview";  // 默认模型
 
         // 使用请求参数或配置默认值
         String effSize = size != null ? size : config.getDefaultVideoSize();

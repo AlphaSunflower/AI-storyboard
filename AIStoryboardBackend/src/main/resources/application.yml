@@ -8,6 +8,10 @@
 spring:
   application:
     name: ai-storyboard
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:newworkflow}
     username: ${DB_USERNAME:postgres}

@@ -21,11 +21,10 @@ import java.util.*;
 /**
  * 图片生成服务 —— 负责调用 Laozhang API 进行生图/改图。
  *
- * 两种模式：
- * 1. "generate"（默认）— 图生图：使用 /v1/images/generations JSON 接口
- *    适用于普通生图、带参考图的生图（reference_images 参数）
- * 2. "edit" — 图改图：使用 /v1/images/edits multipart 接口
- *    适用于完善已有图片（当前生成图为源图）、参考图生图（第一张参考图为源图）
+ * 路由逻辑：
+ * 1. 有参考图（referenceImages 非空）或 mode="edit" → /v1/images/edits multipart
+ * 2. Gemini 模型 → Gemini 原生接口
+ * 3. 其他 → /v1/images/generations JSON（纯文生图，不支持 reference_images）
  */
 @Service
 public class ImageGenerationService {
@@ -64,6 +63,10 @@ public class ImageGenerationService {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
+        if (prompt == null || prompt.isBlank()) {
+            throw new RuntimeException("图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
+        }
+
         String effectiveModel = model != null ? model : config.getDefaultImageModel();
 
         scene.setImageStatus("generating");
@@ -71,9 +74,10 @@ public class ImageGenerationService {
 
         try {
             String result;
+            boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
 
-            // 图改图模式：使用 /v1/images/edits multipart 接口
-            if ("edit".equals(mode)) {
+            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口
+            if (hasReferenceImages || "edit".equals(mode)) {
                 result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
                 String localPath = fileStorageService.saveImageFromBase64(result);
                 scene.setImageUrl(localPath);
@@ -84,9 +88,9 @@ public class ImageGenerationService {
                 String localPath = fileStorageService.saveImageFromBase64(result);
                 scene.setImageUrl(localPath);
 
-            // OpenAI 兼容接口（图生图）
+            // 纯文生图：/v1/images/generations JSON 接口
             } else {
-                result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio, referenceImages);
+                result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio);
                 String localPath;
                 if (result.startsWith("http://") || result.startsWith("https://")) {
                     localPath = fileStorageService.saveImage(result);
@@ -107,11 +111,12 @@ public class ImageGenerationService {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  图生图：OpenAI 兼容 JSON 接口
+    //  纯文生图：/v1/images/generations JSON 接口
+    //  注意：gpt-image-2 的 generations 接口不支持 reference_images
     // ═══════════════════════════════════════════════════════════
 
     private String callOpenAIImage(String model, String prompt, String size, String quality,
-                                    String aspectRatio, List<String> referenceImages) throws Exception {
+                                    String aspectRatio) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("model", model);
         body.put("prompt", prompt);
@@ -119,9 +124,6 @@ public class ImageGenerationService {
         body.put("size", size != null ? size : config.getDefaultImageSize());
         if (quality != null && !quality.isEmpty()) {
             body.put("quality", quality);
-        }
-        if (referenceImages != null && !referenceImages.isEmpty()) {
-            body.put("reference_images", referenceImages);
         }
 
         String apiKey = config.getSora2ModelSet().contains(model)

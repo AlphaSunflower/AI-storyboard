@@ -7,12 +7,13 @@ import java.util.List;
  */
 public record DifyGenerateVideoRequest(
     String projectId,
+    String sceneId,
     String prompt,
     String model,
     String resolution,
     String size,
     String aspectRatio,
-    int duration,
+    String duration,
     String negativePrompt,
     List<String> referenceImageUrls
 ) {}
