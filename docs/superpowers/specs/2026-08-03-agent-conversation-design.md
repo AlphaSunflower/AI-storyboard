@@ -23,6 +23,9 @@
 | DifyAgentController 改造 | 无 sceneId 时不再创建临时 scene，改写入 agent_assets |
 | 无 sceneId 且无 conversationId | 写 agent_assets（conversation_id = NULL，未归属资产），不拒绝调用 |
 | 交付范围 | 设计文档 + 建表 SQL + 实体/Mapper/Controller 全部实现（前端暂不开发） |
+| 图生图/图生视频 | 用户上传图片，Dify 工作流变量名 `PicUrl`（String，存图片访问 URL），后端按路径读文件做源图 |
+| 参考图落库 | 用户上传的参考图也写入 agent_assets（type=reference），关联会话 |
+| 上传端点 | 新增 POST /api/agent/upload（JWT 鉴权，可选 conversationId） |
 
 ## 方案选型
 
@@ -66,14 +69,14 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_conv ON agent_messages(conversation_id, created_at);
 
--- 3. agent_assets — Agent 生成的图片/视频（与分镜无关）
+-- 3. agent_assets — Agent 相关的图片/视频资产（与分镜无关）
 CREATE TABLE IF NOT EXISTS agent_assets (
     id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     conversation_id  TEXT REFERENCES conversations(id) ON DELETE CASCADE,  -- 可空=未归属资产
-    type             TEXT NOT NULL,                              -- image | video
+    type             TEXT NOT NULL,                              -- image | video | reference（reference=用户上传的参考图）
     url              TEXT NOT NULL,                              -- /api/files/xxx（本地存储路径）
-    prompt           TEXT,                                       -- 生成提示词
-    model            TEXT,                                       -- 使用模型
+    prompt           TEXT,                                       -- 生成提示词（reference 类型可为空）
+    model            TEXT,                                       -- 使用模型（reference 类型可为空）
     status           TEXT NOT NULL DEFAULT 'queued',             -- queued | generating | completed | failed
     task_id          TEXT,                                       -- 视频异步任务 ID（反查更新用）
     error            TEXT,                                       -- 失败原因
@@ -103,8 +106,39 @@ CREATE INDEX IF NOT EXISTS idx_agent_assets_conv ON agent_assets(conversation_id
 | GET | `/api/agent/conversations/{id}/messages` | 消息列表（按 created_at 正序） |
 | POST | `/api/agent/conversations/{id}/messages` | 发送消息（代理 Dify chat-messages） |
 | GET | `/api/agent/conversations/{id}/assets` | 该会话的生成资产列表 |
+| POST | `/api/agent/upload` | 上传图片（multipart，可选 conversationId）→ 存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) |
 
-**鉴权规则**：所有端点从 JWT 取 user_id，校验 `conversation.userId == currentUser.id`，否则 403。创建会话时校验 `project.userId == currentUser.id`（不能给别人的项目开对话）。
+**鉴权规则**：所有端点从 JWT 取 user_id，校验 `conversation.userId == currentUser.id`，否则 403。创建会话时校验 `project.userId == currentUser.id`（不能给别人的项目开对话）。`/api/agent/upload` 传了 conversationId 时同样校验归属。
+
+### 图片上传端点（POST /api/agent/upload）
+
+```
+请求：multipart/form-data
+  file            必填，图片文件
+  conversationId  可选，上传到某个会话
+
+处理：
+1. 校验文件类型（image/*），大小上限 20MB（spring.servlet.multipart.max-file-size）
+2. 存入 uploads/images/（FileStorageService 新增 saveUploadedImage(MultipartFile)）
+3. 返回 { url: "/api/files/images/xxx.png" }
+4. 落库 agent_assets：type=reference，status=completed，conversation_id 可空
+```
+
+返回的 URL 即 Dify 工作流的 `PicUrl` 变量值（用户在前端把上传结果填进工作流输入）。
+
+### PicUrl 的消费方式（图生图/图生视频）
+
+Dify 工作流把 `PicUrl`（图片 URL）传给生成端点：
+
+- `DifyGenerateImageRequest` / `DifyGenerateVideoRequest` 各增加 `String picUrl` 字段
+- Controller 层映射：`picUrl` 非空 → 作为 `generatedImageUrl` 传入 Service（`ImageGenerationService.callImageEdit` / `VideoGenerationService.createVideoTask` 已支持从本地 uploads/ 按路径读源图，零额外改造）
+- 优先级：`picUrl`（用户上传的图）> `generatedImageUrl`（完善已有生成图）——前端/Dify 工作流按场景二选一传，后端在 Controller 层合并处理
+
+```
+sceneId 非空 + picUrl → 图生图写 scene（完善/重绘场景图）
+sceneId 空 + picUrl + conversationId → 图生图写 agent_assets
+sceneId 空 + picUrl + 无 conversationId → 图生图写 agent_assets（未归属）
+```
 
 ### AgentChatService（新增）—— Dify 对话代理
 
@@ -128,7 +162,7 @@ Dify baseUrl 和 App API key 走 `AiConfigProperties` 新增的 `difyBaseUrl` + 
 
 ### DifyAgentController 改造（消灭孤儿 scene）
 
-**DTO 变更**：`DifyGenerateImageRequest` / `DifyGenerateVideoRequest` 增加 `String conversationId` 字段。
+**DTO 变更**：`DifyGenerateImageRequest` / `DifyGenerateVideoRequest` 增加 `String conversationId` 和 `String picUrl` 两个字段。
 
 **路由逻辑改为**：
 ```
@@ -137,6 +171,8 @@ sceneId 空 + conversationId 非空   → 写 agent_assets（关联该会话）
 sceneId 空 + conversationId 空     → 写 agent_assets（conversation_id = NULL，未归属）
 [删除] 创建临时 scene（scene_number=0）的逻辑
 ```
+
+**picUrl 合并**：`String effectiveGeneratedImageUrl = picUrl 非空 ? picUrl : generatedImageUrl`，传入 Service 的 generatedImageUrl 参数（本地读文件逻辑已存在）。
 
 ### AI Service 解耦（关键改造）
 
@@ -157,7 +193,8 @@ sceneId 空 + conversationId 空     → 写 agent_assets（conversation_id = NU
 | `dto/request/AgentCreateConversationRequest.java` | record(projectId, title) — userId 由 JWT 取 |
 | `dto/request/AgentSendMessageRequest.java` | record(content) |
 | `service/agent/AgentChatService.java` | Dify 代理 + 消息落库 |
-| `controller/AgentConversationController.java` | `/api/agent/**` 7 端点 |
+| `controller/AgentConversationController.java` | `/api/agent/**` 8 端点（7 个会话/消息/资产 + upload） |
+| `FileStorageService` 扩展 | 新增 `saveUploadedImage(MultipartFile)` |
 
 实体字段命名遵循现状：`@TableId(type = IdType.ASSIGN_UUID)`、时间字段用 `OffsetDateTime` + `@TableField(fill = ...)`。
 
@@ -167,8 +204,8 @@ sceneId 空 + conversationId 空     → 写 agent_assets（conversation_id = NU
 2. **实体 + Mapper** — 6 个新文件（3 entity + 3 mapper）
 3. **AI Service 解耦** — `ImageGenerationService` / `VideoGenerationService` 支持 sceneId 为空；`pollVideoTask` 双通道反查
 4. **DTO + 配置** — Dify DTO 加 conversationId；`AiConfigProperties` 加 `difyBaseUrl` / `difyApiKey`
-5. **DifyAgentController 改造** — 删临时 scene 逻辑，改写 agent_assets（含 multipart 变体）
-6. **AgentConversationController + AgentChatService** — 7 个端点 + Dify chat-messages 代理
+5. **DifyAgentController 改造** — 删临时 scene 逻辑，改写 agent_assets（含 multipart 变体）；DTO 加 conversationId + picUrl
+6. **AgentConversationController + AgentChatService** — 8 个端点（含 upload）+ Dify chat-messages 代理 + FileStorageService.saveUploadedImage
 7. **验证** — `mvn compile`
 
 ## 安全与兼容
