@@ -4,7 +4,9 @@ import com.storyboard.dto.request.DifyGenerateImageRequest;
 import com.storyboard.dto.request.DifyGenerateScriptRequest;
 import com.storyboard.dto.request.DifyGenerateVideoRequest;
 import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
+import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.VideoGenerationService;
@@ -19,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Dify Agent 专用 API 端点。
@@ -39,13 +40,16 @@ public class DifyAgentController {
     private final ImageGenerationService imageService;
     private final VideoGenerationService videoService;
     private final SceneMapper sceneMapper;
+    private final AgentAssetMapper agentAssetMapper;
 
     public DifyAgentController(ImageGenerationService imageService,
                                 VideoGenerationService videoService,
-                                SceneMapper sceneMapper) {
+                                SceneMapper sceneMapper,
+                                AgentAssetMapper agentAssetMapper) {
         this.imageService = imageService;
         this.videoService = videoService;
         this.sceneMapper = sceneMapper;
+        this.agentAssetMapper = agentAssetMapper;
     }
 
     /**
@@ -89,22 +93,19 @@ public class DifyAgentController {
     @PostMapping(value = "/generate-image", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ApiResponse<Map<String, String>> generateImage(
             @RequestBody DifyGenerateImageRequest request) {
-        // sceneId 优先：传了就用真实分镜记录，没传创建临时 Scene（兼容旧行为）
-        String effectiveSceneId;
-        if (request.sceneId() != null && !request.sceneId().isBlank()) {
-            effectiveSceneId = request.sceneId();
+        // sceneId 非空 → 写真实分镜；为空 → 写 agent_assets（不再创建临时 scene）
+        String effectiveSceneId = (request.sceneId() != null && !request.sceneId().isBlank())
+                ? request.sceneId() : null;
+        if (effectiveSceneId != null) {
             log.info("Dify Agent 使用真实分镜 sceneId={} 生成图片, mode={}", effectiveSceneId, request.mode());
-        } else {
-            effectiveSceneId = UUID.randomUUID().toString();
-            Scene tempScene = new Scene();
-            tempScene.setId(effectiveSceneId);
-            tempScene.setProjectId(request.projectId());
-            tempScene.setSceneNumber(0);
-            sceneMapper.insert(tempScene);
         }
 
         // 确定生图模式：显式传 "edit" 走图改图，否则走图生图
         String mode = "edit".equals(request.mode()) ? "edit" : null;
+
+        // picUrl（用户上传图）优先于 generatedImageUrl（完善已有图）
+        String effectiveGeneratedImageUrl = (request.picUrl() != null && !request.picUrl().isBlank())
+                ? request.picUrl() : sanitize(request.generatedImageUrl());
 
         String imageUrl = imageService.generateImage(
             effectiveSceneId,
@@ -112,8 +113,18 @@ public class DifyAgentController {
             sanitize(request.size()), sanitize(request.quality()), null,
             request.referenceImageUrls(),
             mode,
-            sanitize(request.generatedImageUrl())
+            effectiveGeneratedImageUrl
         );
+
+        if (effectiveSceneId == null) {
+            AgentAsset asset = writeAgentImageAsset(
+                request.conversationId(), request.prompt(), request.model(), imageUrl);
+            return ApiResponse.ok(Map.of(
+                "imageUrl", BACKEND_BASE_URL + imageUrl,
+                "filename", imageUrl.substring(imageUrl.lastIndexOf('/') + 1),
+                "assetId", asset.getId()
+            ));
+        }
         return ApiResponse.ok(Map.of(
             "imageUrl", BACKEND_BASE_URL + imageUrl,
             "filename", imageUrl.substring(imageUrl.lastIndexOf('/') + 1)
@@ -143,19 +154,15 @@ public class DifyAgentController {
             log.info("Dify Agent 视频 duration 未设置或无效, 将使用 service 默认值");
         }
 
-        // sceneId 优先：传了就用真实分镜记录，没传创建临时 Scene
-        String effectiveSceneId;
-        if (request.sceneId() != null && !request.sceneId().isBlank()) {
-            effectiveSceneId = request.sceneId();
+        // sceneId 非空 → 写真实分镜；为空 → 写 agent_assets
+        String effectiveSceneId = (request.sceneId() != null && !request.sceneId().isBlank())
+                ? request.sceneId() : null;
+        if (effectiveSceneId != null) {
             log.info("Dify Agent 使用真实分镜 sceneId={} 生成视频", effectiveSceneId);
-        } else {
-            effectiveSceneId = UUID.randomUUID().toString();
-            Scene tempScene = new Scene();
-            tempScene.setId(effectiveSceneId);
-            tempScene.setProjectId(request.projectId());
-            tempScene.setSceneNumber(0);
-            sceneMapper.insert(tempScene);
         }
+
+        String effectiveGeneratedImageUrl = (request.picUrl() != null && !request.picUrl().isBlank())
+                ? request.picUrl() : null;
 
         // 创建视频任务，立即返回 taskId（不阻塞等待）
         String taskId = videoService.createVideoTask(
@@ -163,10 +170,28 @@ public class DifyAgentController {
             sanitize(request.prompt()), sanitize(request.model()),
             sanitize(request.resolution()), sanitize(request.size()), sanitize(request.aspectRatio()),
             duration, sanitize(request.negativePrompt()), null,
-            request.referenceImageUrls(), null
+            request.referenceImageUrls(), effectiveGeneratedImageUrl
         );
 
         log.info("Dify Agent 视频任务已创建: taskId={}, sceneId={}", taskId, effectiveSceneId);
+
+        if (effectiveSceneId == null) {
+            AgentAsset asset = new AgentAsset();
+            asset.setConversationId(sanitize(request.conversationId()));
+            asset.setType("video");
+            asset.setPrompt(sanitize(request.prompt()));
+            asset.setModel(sanitize(request.model()));
+            asset.setStatus("queued");
+            asset.setTaskId(taskId);
+            agentAssetMapper.insert(asset);
+            log.info("Agent 视频资产已落库: assetId={}, taskId={}", asset.getId(), taskId);
+            return ApiResponse.ok(Map.of(
+                "taskId", taskId,
+                "sceneId", effectiveSceneId != null ? effectiveSceneId : asset.getId(),
+                "assetId", asset.getId(),
+                "status", "queued"
+            ));
+        }
         return ApiResponse.ok(Map.of(
             "taskId", taskId,
             "sceneId", effectiveSceneId,
@@ -222,19 +247,11 @@ public class DifyAgentController {
             @RequestParam(required = false) String quality,
             @RequestParam(required = false) String mode,
             @RequestParam(required = false) String generatedImageUrl,
+            @RequestParam(required = false) String conversationId,
+            @RequestParam(required = false) String picUrl,
             @RequestPart(required = false) List<MultipartFile> images) {
 
-        String effectiveSceneId;
-        if (sceneId != null && !sceneId.isBlank()) {
-            effectiveSceneId = sceneId;
-        } else {
-            effectiveSceneId = UUID.randomUUID().toString();
-            Scene tempScene = new Scene();
-            tempScene.setId(effectiveSceneId);
-            tempScene.setProjectId(projectId);
-            tempScene.setSceneNumber(0);
-            sceneMapper.insert(tempScene);
-        }
+        String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
         log.info("Dify Agent multipart 生成图片 sceneId={}, mode={}, files={}",
                 effectiveSceneId, mode, images != null ? images.size() : 0);
 
@@ -243,18 +260,48 @@ public class DifyAgentController {
 
         String effectiveMode = "edit".equals(mode) ? "edit" : null;
 
+        String effectiveGeneratedImageUrl = (picUrl != null && !picUrl.isBlank())
+                ? picUrl : sanitize(generatedImageUrl);
+
         String imageUrl = imageService.generateImage(
             effectiveSceneId,
             sanitize(prompt), sanitize(model),
             sanitize(size), sanitize(quality), null,
             referenceImageUrls.isEmpty() ? null : referenceImageUrls,
             effectiveMode,
-            sanitize(generatedImageUrl)
+            effectiveGeneratedImageUrl
         );
+
+        if (effectiveSceneId == null) {
+            AgentAsset asset = writeAgentImageAsset(conversationId, prompt, model, imageUrl);
+            return ApiResponse.ok(Map.of(
+                "imageUrl", BACKEND_BASE_URL + imageUrl,
+                "filename", imageUrl.substring(imageUrl.lastIndexOf('/') + 1),
+                "assetId", asset.getId()
+            ));
+        }
         return ApiResponse.ok(Map.of(
             "imageUrl", BACKEND_BASE_URL + imageUrl,
             "filename", imageUrl.substring(imageUrl.lastIndexOf('/') + 1)
         ));
+    }
+
+    /**
+     * 将生成结果写入 agent_assets（sceneId 为空时调用）。
+     * conversationId 为空则创建未归属资产（conversation_id = NULL）。
+     */
+    private AgentAsset writeAgentImageAsset(String conversationId, String prompt,
+                                             String model, String imageUrl) {
+        AgentAsset asset = new AgentAsset();
+        asset.setConversationId(sanitize(conversationId));
+        asset.setType("image");
+        asset.setUrl(imageUrl);
+        asset.setPrompt(sanitize(prompt));
+        asset.setModel(sanitize(model));
+        asset.setStatus("completed");
+        agentAssetMapper.insert(asset);
+        log.info("Agent 图片资产已落库: assetId={}, conversationId={}", asset.getId(), asset.getConversationId());
+        return asset;
     }
 
     /**
