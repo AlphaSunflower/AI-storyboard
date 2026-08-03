@@ -9,6 +9,8 @@ import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.AgentMessage;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentConversationMapper;
+import com.storyboard.exception.BusinessException;
+import com.storyboard.service.FileStorageService;
 import com.storyboard.service.agent.AgentChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,12 +34,12 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final AgentConversationMapper conversationMapper;
     private final AgentAssetMapper assetMapper;
-    private final com.storyboard.service.FileStorageService fileStorageService;
+    private final FileStorageService fileStorageService;
 
     public AgentConversationController(AgentChatService chatService,
                                        AgentConversationMapper conversationMapper,
                                        AgentAssetMapper assetMapper,
-                                       com.storyboard.service.FileStorageService fileStorageService) {
+                                       FileStorageService fileStorageService) {
         this.chatService = chatService;
         this.conversationMapper = conversationMapper;
         this.assetMapper = assetMapper;
@@ -117,10 +119,10 @@ public class AgentConversationController {
         if (conversationId != null && !conversationId.isBlank()) {
             chatService.getOwnedConversation(auth.getName(), conversationId);
         }
-        // 校验文件类型
+        // 校验文件类型（I2：模块内校验错误改抛 BusinessException）
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
-            throw new RuntimeException("仅支持上传图片文件");
+            throw new BusinessException(40001, "仅支持上传图片文件");
         }
         String url = fileStorageService.saveUploadedImage(file);
 

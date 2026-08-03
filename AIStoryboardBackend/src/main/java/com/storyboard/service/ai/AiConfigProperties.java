@@ -2,6 +2,9 @@ package com.storyboard.service.ai;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.Collections;
@@ -16,6 +19,8 @@ import java.util.Set;
  */
 @ConfigurationProperties(prefix = "ai.laozhang")
 public class AiConfigProperties {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfigProperties.class);
 
     /** JSON 解析器（用于解析 video-model-aliases 等 JSON 字符串配置） */
     private static final ObjectMapper json = new ObjectMapper();
@@ -220,6 +225,22 @@ public class AiConfigProperties {
     private transient Set<String> sora2ModelSet;
     /** 视频模型别名 Map 缓存（从 JSON 字符串解析） */
     private transient Map<String, String> videoModelAliasMap;
+
+    /**
+     * 启动时校验 Dify 对话模块配置（M9）。
+     * 缺失时只打醒目 WARN 日志，不抛异常中断启动：
+     * difyApiKey/difyBaseUrl 可能只配置在 application-local.yml / .env，
+     * 缺失仅影响 Agent 对话端点（/api/agent），不影响现有 Dify 生成链路。
+     */
+    @PostConstruct
+    public void validateDifyConfig() {
+        if (difyBaseUrl == null || difyBaseUrl.isBlank()) {
+            log.warn("【AI 配置缺失】ai.laozhang.dify-base-url 未配置：Agent 对话模块（/api/agent）将不可用，请检查 .env / application-local.yml");
+        }
+        if (difyApiKey == null || difyApiKey.isBlank()) {
+            log.warn("【AI 配置缺失】ai.laozhang.dify-api-key 未配置：Agent 对话模块（/api/agent）将不可用，请检查 .env / application-local.yml");
+        }
+    }
 
     /**
      * 获取 Gemini 接口生图模型集合。

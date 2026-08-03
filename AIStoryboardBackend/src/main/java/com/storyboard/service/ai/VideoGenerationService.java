@@ -195,6 +195,9 @@ public class VideoGenerationService {
                 }
             } else if ("failed".equals(status) || "error".equals(status)) {
                 result.put("status", "failed");
+                // M2：先把上游错误信息填入 error（message 优先，回退 error 字段），
+                // 避免后续 setError(result.get("error")) 恒为 null
+                result.put("error", root.path("message").asText(root.path("error").asText("")));
                 var scenes = sceneMapper.selectList(
                     new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
                 if (!scenes.isEmpty()) {

@@ -7,6 +7,7 @@ import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.AgentAssetMapper;
+import com.storyboard.mapper.AgentConversationMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.VideoGenerationService;
@@ -41,15 +42,18 @@ public class DifyAgentController {
     private final VideoGenerationService videoService;
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
+    private final AgentConversationMapper conversationMapper;
 
     public DifyAgentController(ImageGenerationService imageService,
                                 VideoGenerationService videoService,
                                 SceneMapper sceneMapper,
-                                AgentAssetMapper agentAssetMapper) {
+                                AgentAssetMapper agentAssetMapper,
+                                AgentConversationMapper conversationMapper) {
         this.imageService = imageService;
         this.videoService = videoService;
         this.sceneMapper = sceneMapper;
         this.agentAssetMapper = agentAssetMapper;
+        this.conversationMapper = conversationMapper;
     }
 
     /**
@@ -177,7 +181,7 @@ public class DifyAgentController {
 
         if (effectiveSceneId == null) {
             AgentAsset asset = new AgentAsset();
-            asset.setConversationId(sanitize(request.conversationId()));
+            asset.setConversationId(sanitizeConversationId(request.conversationId()));
             asset.setType("video");
             asset.setPrompt(sanitize(request.prompt()));
             asset.setModel(sanitize(request.model()));
@@ -185,9 +189,10 @@ public class DifyAgentController {
             asset.setTaskId(taskId);
             agentAssetMapper.insert(asset);
             log.info("Agent 视频资产已落库: assetId={}, taskId={}", asset.getId(), taskId);
+            // I4：无 sceneId 分支不再把 assetId 塞进 sceneId 键，避免 Dify 工作流
+            // 把 asset id 当 sceneId 回传导致"分镜不存在"
             return ApiResponse.ok(Map.of(
                 "taskId", taskId,
-                "sceneId", effectiveSceneId != null ? effectiveSceneId : asset.getId(),
                 "assetId", asset.getId(),
                 "status", "queued"
             ));
@@ -239,7 +244,7 @@ public class DifyAgentController {
      */
     @PostMapping(value = "/generate-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<Map<String, String>> generateImageMultipart(
-            @RequestParam String projectId,
+            @RequestParam(required = false) String projectId,  // 保留以兼容现有 Dify 工作流（方法内未实际使用）
             @RequestParam String prompt,
             @RequestParam(required = false) String sceneId,
             @RequestParam(required = false) String model,
@@ -293,7 +298,7 @@ public class DifyAgentController {
     private AgentAsset writeAgentImageAsset(String conversationId, String prompt,
                                              String model, String imageUrl) {
         AgentAsset asset = new AgentAsset();
-        asset.setConversationId(sanitize(conversationId));
+        asset.setConversationId(sanitizeConversationId(conversationId));
         asset.setType("image");
         asset.setUrl(imageUrl);
         asset.setPrompt(sanitize(prompt));
@@ -302,6 +307,24 @@ public class DifyAgentController {
         agentAssetMapper.insert(asset);
         log.info("Agent 图片资产已落库: assetId={}, conversationId={}", asset.getId(), asset.getConversationId());
         return asset;
+    }
+
+    /**
+     * 清洗并校验 Dify 传入的 conversationId（I3）：
+     * - 空值/未解析变量引用 → null（未归属资产，照存）；
+     * - 非空但 conversations 表中不存在 → 降级为未归属（conversation_id = null 照存），
+     *   避免外键违例导致 500。
+     */
+    private String sanitizeConversationId(String conversationId) {
+        String clean = sanitize(conversationId);
+        if (clean == null) {
+            return null;
+        }
+        if (conversationMapper.selectById(clean) == null) {
+            log.warn("conversationId={} 在 conversations 表中不存在, 资产降级为未归属", clean);
+            return null;
+        }
+        return clean;
     }
 
     /**

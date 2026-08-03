@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @Slf4j
 @RestControllerAdvice
@@ -31,6 +33,18 @@ public class GlobalExceptionHandler {
             .map(f -> f.getField() + ": " + f.getDefaultMessage())
             .findFirst().orElse("参数错误");
         return ResponseEntity.badRequest().body(ApiResponse.error(40001, msg));
+    }
+
+    /** 上传文件超过大小上限（I2：统一返回 40001 业务错误码） */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        return ResponseEntity.badRequest().body(ApiResponse.error(40001, "文件过大或缺少文件参数"));
+    }
+
+    /** multipart 缺少文件参数（I2：统一返回 40001 业务错误码） */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingPart(MissingServletRequestPartException e) {
+        return ResponseEntity.badRequest().body(ApiResponse.error(40001, "文件过大或缺少文件参数"));
     }
 
     @ExceptionHandler(Exception.class)

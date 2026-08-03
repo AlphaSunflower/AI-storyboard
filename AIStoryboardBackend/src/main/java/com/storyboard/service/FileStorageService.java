@@ -16,6 +16,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -69,6 +70,10 @@ public class FileStorageService {
         }
     }
 
+    /** 允许保存的上传图片扩展名白名单（M6），其余一律回退 png */
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS =
+        Set.of("png", "jpg", "jpeg", "webp", "gif");
+
     /**
      * 保存用户上传的图片文件（Agent 对话参考图）。
      * @return local relative path like /api/files/images/xxx.png
@@ -81,8 +86,9 @@ public class FileStorageService {
             String original = file.getOriginalFilename();
             String extension = "png";
             if (original != null && original.contains(".")) {
-                extension = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
-                if (extension.length() > 5) extension = "png"; // 防御异常扩展名
+                String raw = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
+                // M6：扩展名白名单——仅接受常见图片格式，其余回退 png（防御异常扩展名）
+                extension = ALLOWED_IMAGE_EXTENSIONS.contains(raw) ? raw : "png";
             }
             String filename = UUID.randomUUID().toString() + "." + extension;
             Path target = IMAGES_DIR.resolve(filename);
