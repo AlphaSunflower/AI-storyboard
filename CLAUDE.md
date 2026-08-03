@@ -225,6 +225,52 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - Draft detection: `ProjectMapper.findLatestDraft` + `AND status = 'draft'`; frontend `checkDraft` double-checks `draft.status === 'draft'`
 - Draft recovery: `EditorPage` loads → `checkDraft()` → shows `DraftRecoverBanner` if draft exists
 
+## AI Agent 对话模块 (`/api/agent/**`)
+
+### 数据库（V2 migration `V2__agent_conversation.sql`，3 张表，与分镜 scenes 无关）
+
+| 表 | 关键字段 | 说明 |
+|----|---------|------|
+| `conversations` | user_id + project_id（JWT 归属双键）、title、dify_conversation_id、status | 一个项目可多个会话；project 删除级联 |
+| `agent_messages` | conversation_id（CASCADE）、role（user/assistant）、content、dify_message_id | 消息历史 |
+| `agent_assets` | conversation_id（**可空**=未归属）、type（**image/video/reference**）、url、task_id、status | Agent 生成的图/视频 + 用户上传的参考图 |
+
+### 端点（全部 JWT 鉴权，`/api/agent/**` 不在 SecurityConfig 白名单）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/agent/conversations` | 创建会话（校验 project.userId 归属） |
+| GET | `/api/agent/conversations?projectId=` | 会话列表（updated_at 倒序） |
+| GET/DELETE | `/api/agent/conversations/{id}` | 详情（含消息）/ 删除（DB CASCADE 删消息） |
+| GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（代理 Dify） |
+| GET | `/api/agent/conversations/{id}/assets` | 资产列表 |
+| POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
+
+- 归属校验：`AgentChatService.getOwnedConversation(userId, id)`，所有端点复用；会话不存在与无权访问统一 40401 同文案（防 IDOR 枚举）
+- 校验错误用 `BusinessException`（40001/40301/40401），GlobalExceptionHandler 已映射对应 HTTP 状态码
+
+### AgentChatService — Dify 对话代理
+
+- `POST {difyBaseUrl}/v1/chat-messages`，`response_mode: "blocking"`（非流式），`Authorization: Bearer {difyApiKey}`
+- **事务语义**（重要）：user 消息用 `TransactionTemplate` + `PROPAGATION_REQUIRES_NEW` 独立事务立即提交；Dify 调用失败时 **user 消息保留**、抛业务异常；Dify 成功后 `transactionTemplate.execute` 内完成"回填 dify_conversation_id + 保存 assistant 消息"（失败整体回滚）
+- Dify 上游错误完整信息只进日志，抛给客户端的文案脱敏（"Dify 服务异常，请稍后重试"）
+- 配置：`ai.laozhang.dify-base-url`（默认 `http://localhost`）+ `ai.laozhang.dify-api-key`（复用既有字段）
+
+### DifyAgentController 改造（消灭孤儿 scene）
+
+- **无 sceneId 时不再创建临时 scene**（旧 `scene_number=0` 孤儿记录），改写入 `agent_assets`：
+  - `sceneId` 非空 → 写 scene（原行为不变）
+  - `sceneId` 空 + `conversationId` 非空 → 写 agent_assets（关联会话；**先校验 conversation 存在，不存在降级未归属**，避免 FK 违例 500）
+  - `sceneId` 空 + 无 `conversationId` → 写 agent_assets（conversation_id=NULL 未归属）
+- DTO（`DifyGenerateImageRequest`/`DifyGenerateVideoRequest`）新增字段：`conversationId`、`picUrl`
+- **PicUrl 图生图/图生视频**：`picUrl`（用户上传图 URL，来自 `/api/agent/upload`）优先于 `generatedImageUrl`，Controller 合并后作为 `generatedImageUrl` 传入 Service（本地读文件逻辑已存在，零额外改造）
+- generateVideo 无 sceneId 分支响应只返回 `taskId/assetId/status`（**不把 assetId 塞进 sceneId 键**——否则 Dify 工作流回传 assetId 当 sceneId 导致"分镜不存在"）
+
+### AI Service 解耦（sceneId 可空）
+
+- `ImageGenerationService.generateImage`：sceneId 为 null 时不查/不写 scene 表，只用局部变量 `localPath` 返回
+- `VideoGenerationService.createVideoTask`：同样支持 sceneId 为 null；`pollVideoTask` **双通道反查**——先按 `videoTaskId` 查 scene，查不到再按 `taskId` 查 agent_assets 并更新其 url/status/error（failed 分支先解析上游 message/error 再 setError）
+
 ## Verification Commands
 
 ```bash
