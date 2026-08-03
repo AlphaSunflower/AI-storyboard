@@ -70,6 +70,31 @@ public class FileStorageService {
     }
 
     /**
+     * 保存用户上传的图片文件（Agent 对话参考图）。
+     * @return local relative path like /api/files/images/xxx.png
+     */
+    public String saveUploadedImage(org.springframework.web.multipart.MultipartFile file) {
+        try {
+            if (file == null || file.isEmpty()) {
+                throw new RuntimeException("上传文件为空");
+            }
+            String original = file.getOriginalFilename();
+            String extension = "png";
+            if (original != null && original.contains(".")) {
+                extension = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
+                if (extension.length() > 5) extension = "png"; // 防御异常扩展名
+            }
+            String filename = UUID.randomUUID().toString() + "." + extension;
+            Path target = IMAGES_DIR.resolve(filename);
+            Files.write(target, file.getBytes());
+            log.info("Saved uploaded image: {}", target);
+            return "/api/files/images/" + filename;
+        } catch (IOException e) {
+            throw new RuntimeException("保存上传图片失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Download video from URL and save locally.
      * @return local relative path like /api/files/videos/xxx.mp4
      */

@@ -41,6 +41,8 @@ public class AiConfigProperties {
     private String baseUrlGemini;
     /** Chat Completions 接口基础地址（用于脚本生成的 Vision 模型） */
     private String baseUrlVision;
+    /** Dify 自托管基础地址（对话代理 /v1/chat-messages 用） */
+    private String difyBaseUrl;
 
     // ═══════════════════════════════════════════════════════════
     //  API 端点路径（相对于 baseUrlOpenai）
@@ -136,6 +138,9 @@ public class AiConfigProperties {
 
     public String getBaseUrlVision() { return baseUrlVision; }
     public void setBaseUrlVision(String s) { this.baseUrlVision = s; }
+
+    public String getDifyBaseUrl() { return difyBaseUrl; }
+    public void setDifyBaseUrl(String s) { this.difyBaseUrl = s; }
 
     // ── 端点路径 ──
     public String getEndpointImageGenerations() { return endpointImageGenerations; }

@@ -52,6 +52,8 @@ ai:
     sora2-official-api-key: ${LAOZ...KEY}
     # Dify Agent API 密钥
     dify-api-key: ${AI_DIFY_API_KEY:}
+    # Dify 自托管基础地址（默认本机 Docker 部署）
+    dify-base-url: ${DIFY_BASE_URL:http://localhost}
 
     # ── Base URLs ──
     base-url-openai: https://api2.laozhang.ai/v1
