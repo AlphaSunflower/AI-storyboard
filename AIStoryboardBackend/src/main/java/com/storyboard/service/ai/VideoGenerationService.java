@@ -3,7 +3,9 @@ package com.storyboard.service.ai;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
+import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
 import org.slf4j.Logger;
@@ -32,6 +34,7 @@ public class VideoGenerationService {
 
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
+    private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -39,9 +42,11 @@ public class VideoGenerationService {
             .build();
 
     public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
+                                   AgentAssetMapper agentAssetMapper,
                                    FileStorageService fileStorageService) {
         this.config = config;
         this.sceneMapper = sceneMapper;
+        this.agentAssetMapper = agentAssetMapper;
         this.fileStorageService = fileStorageService;
     }
 
@@ -52,8 +57,8 @@ public class VideoGenerationService {
                                    String resolution, String size, String aspectRatio,
                                    Integer duration, String negativePrompt, Long seed,
                                    List<String> referenceImages, String generatedImageUrl) {
-        Scene scene = sceneMapper.selectById(sceneId);
-        if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
+        Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
+        if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
             throw new RuntimeException("视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
@@ -128,14 +133,18 @@ public class VideoGenerationService {
             JsonNode root = objectMapper.readTree(resp.body());
             String taskId = root.path("id").asText();
 
-            scene.setVideoTaskId(taskId);
-            scene.setVideoStatus("generating");
-            sceneMapper.updateById(scene);
+            if (scene != null) {
+                scene.setVideoTaskId(taskId);
+                scene.setVideoStatus("generating");
+                sceneMapper.updateById(scene);
+            }
 
             return taskId;
         } catch (Exception e) {
-            scene.setVideoStatus("failed");
-            sceneMapper.updateById(scene);
+            if (scene != null) {
+                scene.setVideoStatus("failed");
+                sceneMapper.updateById(scene);
+            }
             throw new RuntimeException("AI 视频生成失败: " + e.getMessage(), e);
         }
     }
@@ -173,6 +182,16 @@ public class VideoGenerationService {
                     scene.setVideoUrl(localPath);
                     scene.setVideoStatus("completed");
                     sceneMapper.updateById(scene);
+                } else {
+                    var assets = agentAssetMapper.selectList(
+                        new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
+                    if (!assets.isEmpty()) {
+                        AgentAsset asset = assets.get(0);
+                        asset.setUrl(localPath);
+                        asset.setStatus("completed");
+                        asset.setError(null);
+                        agentAssetMapper.updateById(asset);
+                    }
                 }
             } else if ("failed".equals(status) || "error".equals(status)) {
                 result.put("status", "failed");
@@ -182,6 +201,15 @@ public class VideoGenerationService {
                     Scene scene = scenes.get(0);
                     scene.setVideoStatus("failed");
                     sceneMapper.updateById(scene);
+                } else {
+                    var assets = agentAssetMapper.selectList(
+                        new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
+                    if (!assets.isEmpty()) {
+                        AgentAsset asset = assets.get(0);
+                        asset.setStatus("failed");
+                        asset.setError(result.get("error"));
+                        agentAssetMapper.updateById(asset);
+                    }
                 }
             } else {
                 result.put("status", "processing");
