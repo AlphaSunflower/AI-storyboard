@@ -60,8 +60,9 @@ public class ImageGenerationService {
                                  String size, String quality, String aspectRatio,
                                  List<String> referenceImages,
                                  String mode, String generatedImageUrl) {
-        Scene scene = sceneMapper.selectById(sceneId);
-        if (scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
+        // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
+        Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
+        if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
             throw new RuntimeException("图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
@@ -69,43 +70,47 @@ public class ImageGenerationService {
 
         String effectiveModel = model != null ? model : config.getDefaultImageModel();
 
-        scene.setImageStatus("generating");
-        sceneMapper.updateById(scene);
+        if (scene != null) {
+            scene.setImageStatus("generating");
+            sceneMapper.updateById(scene);
+        }
 
         try {
             String result;
+            String localPath;
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口
             if (hasReferenceImages || "edit".equals(mode)) {
                 result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
-                String localPath = fileStorageService.saveImageFromBase64(result);
-                scene.setImageUrl(localPath);
+                localPath = fileStorageService.saveImageFromBase64(result);
 
             // Gemini 原生接口
             } else if (config.getGeminiImageModelSet().contains(effectiveModel)) {
                 result = callGeminiImage(prompt, aspectRatio, referenceImages);
-                String localPath = fileStorageService.saveImageFromBase64(result);
-                scene.setImageUrl(localPath);
+                localPath = fileStorageService.saveImageFromBase64(result);
 
             // 纯文生图：/v1/images/generations JSON 接口
             } else {
                 result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio);
-                String localPath;
                 if (result.startsWith("http://") || result.startsWith("https://")) {
                     localPath = fileStorageService.saveImage(result);
                 } else {
                     localPath = fileStorageService.saveImageFromBase64(result);
                 }
-                scene.setImageUrl(localPath);
             }
 
-            scene.setImageStatus("completed");
-            sceneMapper.updateById(scene);
-            return scene.getImageUrl();
+            if (scene != null) {
+                scene.setImageUrl(localPath);
+                scene.setImageStatus("completed");
+                sceneMapper.updateById(scene);
+            }
+            return localPath;
         } catch (Exception e) {
-            scene.setImageStatus("failed");
-            sceneMapper.updateById(scene);
+            if (scene != null) {
+                scene.setImageStatus("failed");
+                sceneMapper.updateById(scene);
+            }
             throw new RuntimeException("AI 图片生成失败: " + e.getMessage(), e);
         }
     }
