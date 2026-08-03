@@ -32,13 +32,16 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final AgentConversationMapper conversationMapper;
     private final AgentAssetMapper assetMapper;
+    private final com.storyboard.service.FileStorageService fileStorageService;
 
     public AgentConversationController(AgentChatService chatService,
                                        AgentConversationMapper conversationMapper,
-                                       AgentAssetMapper assetMapper) {
+                                       AgentAssetMapper assetMapper,
+                                       com.storyboard.service.FileStorageService fileStorageService) {
         this.chatService = chatService;
         this.conversationMapper = conversationMapper;
         this.assetMapper = assetMapper;
+        this.fileStorageService = fileStorageService;
     }
 
     /** 创建会话 */
@@ -102,5 +105,37 @@ public class AgentConversationController {
                 .eq(AgentAsset::getConversationId, id)
                 .orderByDesc(AgentAsset::getCreatedAt));
         return ApiResponse.ok(assets);
+    }
+
+    /** 上传图片（参考图）：存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) */
+    @PostMapping("/upload")
+    public ApiResponse<Map<String, String>> uploadImage(
+            Authentication auth,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) String conversationId) {
+        // 校验会话归属（传了 conversationId 时）
+        if (conversationId != null && !conversationId.isBlank()) {
+            chatService.getOwnedConversation(auth.getName(), conversationId);
+        }
+        // 校验文件类型
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new RuntimeException("仅支持上传图片文件");
+        }
+        String url = fileStorageService.saveUploadedImage(file);
+
+        // 落库 agent_assets（type=reference）
+        AgentAsset asset = new AgentAsset();
+        asset.setConversationId(conversationId != null && !conversationId.isBlank() ? conversationId : null);
+        asset.setType("reference");
+        asset.setUrl(url);
+        asset.setStatus("completed");
+        assetMapper.insert(asset);
+        log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
+
+        return ApiResponse.ok(Map.of(
+            "url", url,
+            "assetId", asset.getId()
+        ));
     }
 }
