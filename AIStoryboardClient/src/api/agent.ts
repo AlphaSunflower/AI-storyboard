@@ -150,7 +150,8 @@ async function consumeSse(res: Response, onEvent: (e: SseEvent) => void): Promis
         const eventName = eventLine ? eventLine.slice(6).trim() : '';
         try {
           const data = JSON.parse(dataLine.slice(5).trim()) as SseEvent;
-          onEvent({ type: eventName, ...data } as SseEvent);
+          // 注意展开顺序：data 在前、type 在后（TS2783：避免 SseEvent.type 覆盖 event: 行解析结果）
+          onEvent({ ...data, type: eventName } as SseEvent);
         } catch { /* 忽略坏帧 */ }
       }
     }
