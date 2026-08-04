@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -105,6 +106,8 @@ public class AgentConversationController {
     }
 
     /** 资产列表（分页，手写 LIMIT/OFFSET——项目未装 MyBatis-Plus 分页插件） */
+    // M2：count+list 置于同一只读事务，避免并发写导致的分页总数与记录不一致
+    @Transactional(readOnly = true)
     @GetMapping("/conversations/{id}/assets")
     public ApiResponse<Map<String, Object>> listAssets(
             Authentication auth, @PathVariable String id,

@@ -33,6 +33,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Agent 对话服务 —— 代理 Dify /v1/chat-messages（blocking + streaming）。
@@ -58,6 +61,12 @@ public class AgentChatService {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
+
+    /**
+     * 专用 executor（I6）：SSE 长连接任务不再占用 ForkJoinPool.commonPool，
+     * 避免一条长流拖垮其他并行流。JDK 21 虚拟线程天然 daemon、无池占用，无需手动 shutdown。
+     */
+    private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public AgentChatService(AgentConversationMapper conversationMapper,
                             AgentMessageMapper messageMapper,
@@ -232,6 +241,14 @@ public class AgentChatService {
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
 
+        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开即置取消标志，
+        // forwardDifySse 读循环据此尽早退出并跳过落库，避免对已断开的连接做无效工作。
+        // （若 BufferedReader 阻塞在 readLine 无法立即中断，由 600s 超时兜底）
+        AtomicBoolean cancel = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancel.set(true));
+        emitter.onTimeout(() -> cancel.set(true));
+        emitter.onError(ignored -> cancel.set(true));
+
         // 1. user 消息独立事务立即提交
         AgentMessage userMessage = new AgentMessage();
         userMessage.setConversationId(conversationId);
@@ -239,7 +256,7 @@ public class AgentChatService {
         userMessage.setContent(content);
         transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
-        // 2. 异步代理 Dify（SseEmitter 需异步写，否则阻塞 Controller 返回）
+        // 2. 异步代理 Dify（SseEmitter 需异步写，否则阻塞 Controller 返回；I6 专用 executor）
         CompletableFuture.runAsync(() -> {
             try {
                 Map<String, Object> body = buildChatBody(conversation, content, picUrl);
@@ -260,13 +277,18 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
-                forwardDifySse(resp, emitter, conversation, userId, new StringBuilder());
+                forwardDifySse(resp, emitter, conversation, userId, new StringBuilder(), cancel);
             } catch (Exception e) {
+                // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
+                if (cancel.get()) {
+                    log.debug("SSE 已取消，忽略流式调用异常: conversationId={}", conversationId);
+                    return;
+                }
                 log.error("Dify streaming 调用失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
                 emitter.complete();
             }
-        });
+        }, agentExecutor);
     }
 
     /** 构建 Dify chat-messages 请求体（streaming/blocking 共用） */
@@ -314,10 +336,13 @@ public class AgentChatService {
      *   ping 等其余            → 忽略
      */
     private void forwardDifySse(HttpResponse<java.io.InputStream> resp, SseEmitter emitter,
-                                AgentConversation conversation, String userId, StringBuilder answer) {
+                                AgentConversation conversation, String userId, StringBuilder answer,
+                                AtomicBoolean cancel) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(resp.body()))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                // I1：客户端断开（cancel 置位）时尽早退出读循环，不再转发/落库
+                if (cancel.get()) break;
                 if (!line.startsWith("data:")) continue;
                 JsonNode node;
                 try {
@@ -357,9 +382,16 @@ public class AgentChatService {
                         String difyConvId = node.path("conversation_id").asText("");
                         // Z1：difyConversationId 回填并入 persistAssistant 同一事务，与 assistant 落库原子完成
                         persistAssistant(conversation, answer.toString(), messageId, difyConvId);
-                        long sceneCount = sceneMapper.selectCount(
-                            new LambdaQueryWrapper<com.storyboard.entity.Scene>()
-                                .eq(com.storyboard.entity.Scene::getProjectId, conversation.getProjectId()));
+                        // I4：sceneCount 查询失败降级为 -1，仍照常发送 message_end（不升级为 error）
+                        long sceneCount = -1;
+                        try {
+                            sceneCount = sceneMapper.selectCount(
+                                new LambdaQueryWrapper<com.storyboard.entity.Scene>()
+                                    .eq(com.storyboard.entity.Scene::getProjectId, conversation.getProjectId()));
+                        } catch (Exception e) {
+                            log.warn("查询场景数失败，sceneCount 降级为 -1: conversationId={}, error={}",
+                                    conversation.getId(), e.getMessage());
+                        }
                         sendEvent(emitter, "message_end", Map.of("messageId", messageId, "sceneCount", sceneCount));
                         emitter.complete();
                         return;
@@ -374,10 +406,15 @@ public class AgentChatService {
                     default -> { /* ping 等忽略 */ }
                 }
             }
-            // 流正常 EOF（无 message_end 的兜底）
-            if (answer.length() > 0) persistAssistant(conversation, answer.toString(), null, null);
-            emitter.complete();
+            // 流正常 EOF（无 message_end 的兜底）——取消时不落库（I1）
+            if (!cancel.get() && answer.length() > 0) persistAssistant(conversation, answer.toString(), null, null);
+            if (!cancel.get()) emitter.complete();
         } catch (Exception e) {
+            // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
+            if (cancel.get()) {
+                log.debug("SSE 已取消，忽略读取异常: conversationId={}", conversation.getId());
+                return;
+            }
             log.error("Dify SSE 读取失败: conversationId={}", conversation.getId(), e);
             sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
             emitter.complete();
@@ -388,6 +425,10 @@ public class AgentChatService {
      * 落库 assistant 消息（事务内原子完成：回填 difyConversationId + 保存消息 + 刷新会话 updatedAt）。
      * Z1：difyConversationId 回填必须与 assistant 落库同处一个事务——若分两段，回填事务失败时
      * assistant 已落库而 conversation_id 未更新，下一条消息会错误地开启新的 Dify 会话。
+     *
+     * I2：HITL 续流消息合并——若该会话最后一条 assistant 消息是 HITL 暂停时落库的"未完成"消息
+     * （difyMessageId 为 null），则把续流新内容追加到它上面并回填 messageId，避免同一轮
+     * HITL 对话在数据库里碎成两条记录；否则（上一条已完成/无消息）正常 insert。
      */
     private void persistAssistant(AgentConversation conversation, String content,
                                   String difyMessageId, String difyConversationId) {
@@ -397,12 +438,25 @@ public class AgentChatService {
                     && !difyConversationId.equals(conversation.getDifyConversationId())) {
                 conversation.setDifyConversationId(difyConversationId);
             }
-            AgentMessage assistantMessage = new AgentMessage();
-            assistantMessage.setConversationId(conversation.getId());
-            assistantMessage.setRole("assistant");
-            assistantMessage.setContent(content);
-            assistantMessage.setDifyMessageId(difyMessageId);
-            messageMapper.insert(assistantMessage);
+            // I2：查会话最后一条 assistant 消息（HITL 暂停时落库的"未完成"消息 difyMessageId 为 null）
+            AgentMessage last = messageMapper.selectOne(new LambdaQueryWrapper<AgentMessage>()
+                .eq(AgentMessage::getConversationId, conversation.getId())
+                .eq(AgentMessage::getRole, "assistant")
+                .orderByDesc(AgentMessage::getCreatedAt)
+                .last("LIMIT 1"));
+            if (last != null && last.getDifyMessageId() == null) {
+                // 续流合并：追加内容 + 回填 messageId
+                last.setContent(last.getContent() + content);
+                last.setDifyMessageId(difyMessageId);
+                messageMapper.updateById(last);
+            } else {
+                AgentMessage assistantMessage = new AgentMessage();
+                assistantMessage.setConversationId(conversation.getId());
+                assistantMessage.setRole("assistant");
+                assistantMessage.setContent(content);
+                assistantMessage.setDifyMessageId(difyMessageId);
+                messageMapper.insert(assistantMessage);
+            }
             conversationMapper.updateById(conversation); // 触发 updatedAt fill + 持久化回填
         });
     }
@@ -414,6 +468,11 @@ public class AgentChatService {
      */
     public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage，语义见上）
+        AtomicBoolean cancel = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancel.set(true));
+        emitter.onTimeout(() -> cancel.set(true));
+        emitter.onError(ignored -> cancel.set(true));
         CompletableFuture.runAsync(() -> {
             try {
                 HttpRequest submitReq = HttpRequest.newBuilder()
@@ -451,12 +510,17 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
-                forwardDifySse(eventsResp, emitter, conversation, userId, new StringBuilder());
+                forwardDifySse(eventsResp, emitter, conversation, userId, new StringBuilder(), cancel);
             } catch (Exception e) {
+                // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
+                if (cancel.get()) {
+                    log.debug("SSE 已取消，忽略 HITL 提交/续流异常: conversationId={}", conversationId);
+                    return;
+                }
                 log.error("Dify HITL 提交/续流失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
                 emitter.complete();
             }
-        });
+        }, agentExecutor);
     }
 }

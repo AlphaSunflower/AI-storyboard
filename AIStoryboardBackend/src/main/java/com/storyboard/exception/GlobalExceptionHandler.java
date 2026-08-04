@@ -1,5 +1,7 @@
 package com.storyboard.exception;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -7,12 +9,61 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** JSON 解析器（用于从上游嵌套 JSON 错误中提取可读信息） */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * 从上游（Laozhang / Vertex AI 等）多层嵌套转义 JSON 错误中递归提取最内层可读 message。
+     *
+     * 例：Laozhang 404 错误会层层包裹成
+     *   "AI 视频生成失败: Video API returned 404: {\"message\":\"{\\\"code\\\":\\\"fail_to_fetch_task\\\",...}\"}"
+     * 提取后只剩最内层可读文本：
+     *   "Publisher model `projects/.../veo-3.1-fast-generate-preview` was not found or ..."
+     *
+     * 非 JSON 消息（业务错误、普通异常）原样返回，不受影响。
+     */
+    private static String extractReadableError(String raw) {
+        if (raw == null || raw.isBlank()) return raw;
+        String current = raw.trim();
+        // 最多剥 12 层，防止恶意/异常结构导致死循环
+        for (int i = 0; i < 12; i++) {
+            int start = current.indexOf('{');
+            int end = current.lastIndexOf('}');
+            if (start < 0 || end <= start) break; // 已无可提取的 JSON
+            String jsonCandidate = current.substring(start, end + 1);
+            try {
+                JsonNode node = MAPPER.readTree(jsonCandidate);
+                JsonNode msg = node.path("message");
+                if (!msg.isTextual() || msg.asText().isBlank()) {
+                    JsonNode err = node.path("error");
+                    if (err.isObject() && err.path("message").isTextual()) {
+                        msg = err.path("message");
+                    }
+                }
+                if (msg.isTextual() && !msg.asText().isBlank()) {
+                    String next = msg.asText().trim();
+                    if (next.equals(current)) break; // 无进展，终止
+                    current = next;
+                } else {
+                    // 是 JSON 但没有可读 message，返回精简后的 JSON 本身
+                    return jsonCandidate.length() > 200 ? jsonCandidate.substring(0, 200) : jsonCandidate;
+                }
+            } catch (Exception e) {
+                // JSON 解析失败，保留原始文本
+                break;
+            }
+        }
+        // 清理残留转义符（\n、\" 等），让单行展示更干净
+        return current.replace("\\n", " ").replace("\\\"", "\"").replace("\\\\", "\\");
+    }
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
@@ -47,10 +98,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.error(40001, "文件过大或缺少文件参数"));
     }
 
+    /** 路径/查询参数类型不匹配（如非数值 page/size）（M1：统一返回 40001 业务错误码，替代 500） */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return ResponseEntity.badRequest().body(ApiResponse.error(40001, "参数类型错误：" + e.getName()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception e) {
         log.error("Unhandled exception", e);
-        String message = e.getMessage();
+        String message = extractReadableError(e.getMessage());
         if (message == null || message.isBlank()) {
             message = "服务器内部错误";
         } else if (message.length() > 200) {
