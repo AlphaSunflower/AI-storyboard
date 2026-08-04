@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -118,7 +119,8 @@ public class AgentConversationController {
             new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, id)
                 .orderByDesc(AgentAsset::getCreatedAt)
-                .last("LIMIT " + safeSize + " OFFSET " + ((safePage - 1) * safeSize)));
+                // 先转 long 再乘，避免 (safePage - 1) * safeSize 在 int 域溢出（OFFSET 超出 21 亿行时）
+                .last("LIMIT " + safeSize + " OFFSET " + ((long) (safePage - 1) * safeSize)));
         return ApiResponse.ok(Map.of("records", records, "total", total, "page", safePage, "size", safeSize));
     }
 
@@ -160,6 +162,11 @@ public class AgentConversationController {
                                     @RequestBody AgentSendMessageRequest request) {
         // 同步快速校验归属（失败抛 401/404 而非 SSE）
         chatService.getOwnedConversation(auth.getName(), id);
+        // 同步校验消息内容非空：空内容直接抛 40001（与 blocking sendMessage 语义一致），
+        // 避免 service 在 emitter 未初始化前 sendEvent 抛 IllegalStateException 被吞掉、客户端收到空 200
+        if (request.content() == null || request.content().isBlank()) {
+            throw new BusinessException(40001, "消息内容不能为空");
+        }
         SseEmitter emitter = new SseEmitter(600_000L);
         chatService.streamMessage(auth.getName(), id, request.content(), request.picUrl(), emitter);
         return emitter;
@@ -190,6 +197,9 @@ public class AgentConversationController {
             }
             conversation.setStatus(request.status());
         }
+        // PATCH 后手动刷新 updatedAt：MyBatis-Plus strictUpdateFill 仅在字段为 null 时填充，
+        // 实体加载后 updatedAt 非空会写回旧值，导致列表按 updated_at 倒序时重命名/归档不置顶
+        conversation.setUpdatedAt(OffsetDateTime.now());
         conversationMapper.updateById(conversation);
         return ApiResponse.ok(conversation);
     }
