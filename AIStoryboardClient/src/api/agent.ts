@@ -124,7 +124,7 @@ export async function submitForm(
   await consumeSse(res, onEvent);
 }
 
-/** 通用 SSE 读取：逐行解析 data: {...}，断行缓冲 */
+/** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
 async function consumeSse(res: Response, onEvent: (e: SseEvent) => void): Promise<void> {
   if (!res.ok) {
     let detail = '';
@@ -143,10 +143,14 @@ async function consumeSse(res: Response, onEvent: (e: SseEvent) => void): Promis
       const parts = buffer.split('\n\n');
       buffer = parts.pop() ?? '';
       for (const part of parts) {
-        const dataLine = part.split('\n').find((l) => l.startsWith('data:'));
+        const lines = part.split('\n');
+        const eventLine = lines.find((l) => l.startsWith('event:'));
+        const dataLine = lines.find((l) => l.startsWith('data:'));
         if (!dataLine) continue;
+        const eventName = eventLine ? eventLine.slice(6).trim() : '';
         try {
-          onEvent(JSON.parse(dataLine.slice(5).trim()) as SseEvent);
+          const data = JSON.parse(dataLine.slice(5).trim()) as SseEvent;
+          onEvent({ type: eventName, ...data } as SseEvent);
         } catch { /* 忽略坏帧 */ }
       }
     }
