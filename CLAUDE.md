@@ -142,6 +142,7 @@ HttpRequest request = HttpRequest.newBuilder()
 ### 8. Error messages to frontend
 
 `GlobalExceptionHandler.handleUnknown` returns `e.getMessage()` (not fixed "server internal error") so frontend sees Laozhang API errors (e.g. content moderation rejections).
+`extractReadableError()` recursively unwraps multi-layer nested/escaped JSON errors (Laozhang → Vertex AI) down to the innermost readable `message`, then truncates to 200 chars. Plain business errors pass through untouched.
 
 ## Frontend State Management (Zustand)
 
@@ -245,9 +246,28 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（代理 Dify） |
 | GET | `/api/agent/conversations/{id}/assets` | 资产列表 |
 | POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
+| POST | `/api/agent/conversations/{id}/messages/stream` | SSE 流式发送消息（body `{content, picUrl?}`，`text/event-stream`） |
+| POST | `/api/agent/conversations/{id}/form/submit` | HITL 表单提交并续流（body `{formToken, taskId, action}`），SSE 返回 |
+| PATCH | `/api/agent/conversations/{id}` | 重命名 title / 归档（status: `active`\|`archived`） |
+| GET | `/api/agent/conversations/{id}/assets?page=&size=` | 资产分页（返回 `{records, total, page, size}`） |
+| DELETE | `/api/agent/assets/{id}` | 删除资产（未归属资产拒绝 40401） |
 
 - 归属校验：`AgentChatService.getOwnedConversation(userId, id)`，所有端点复用；会话不存在与无权访问统一 40401 同文案（防 IDOR 枚举）
 - 校验错误用 `BusinessException`（40001/40301/40401），GlobalExceptionHandler 已映射对应 HTTP 状态码
+
+### SSE 事件协议（后端→前端）
+
+事件类型由 SSE `event` 字段承担（转发负载不含 `type` 键），后端裁剪 Dify 原始流后转发；流结束即 `emitter.complete()`：
+
+| event | 负载字段 | 说明 |
+|-------|----------|------|
+| `message` | `content` | 回答增量（前端逐段拼接打字机效果） |
+| `workflow` | `title`, `status` | 节点进度（`node_started` / `node_finished`） |
+| `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机 |
+| `message_end` | `messageId`, `sceneCount` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定 |
+| `error` | `code`, `message` | 失败结束；`message` 已脱敏（"Dify 服务异常，请稍后重试"） |
+
+- Dify 原始流中的 `ping`、`node_started/finished` 内部 `inputs`/`outputs`、`tts_message` 等事件一律过滤，不转发到前端
 
 ### AgentChatService — Dify 对话代理
 
@@ -271,6 +291,14 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - `ImageGenerationService.generateImage`：sceneId 为 null 时不查/不写 scene 表，只用局部变量 `localPath` 返回
 - `VideoGenerationService.createVideoTask`：同样支持 sceneId 为 null；`pollVideoTask` **双通道反查**——先按 `videoTaskId` 查 scene，查不到再按 `taskId` 查 agent_assets 并更新其 url/status/error（failed 分支先解析上游 message/error 再 setError）
 
+### 智能体窗口前端约定
+
+- **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（480px）：左会话栏（138px）+ 右对话区 + 底部资产面板
+- **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
+- **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
+- **参考图**：`POST /api/agent/upload` → 返回 `url` → 作为 `PicUrl` 随消息发送（图生图/图生视频）
+- **配置**：`AI_DIFY_API_KEY`（`AIStoryboardBackend/.env`，不提交）+ `DIFY_BASE_URL`（默认 `http://localhost`）
+
 ## Verification Commands
 
 ```bash
@@ -278,8 +306,8 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 export JAVA_HOME="C:\\Program Files\\Java\\jdk-21"
 "/e/Development/apache-maven-3.9.15/bin/mvn.cmd" -f "E:\\Desktop\\AI-storyboard\\AIStoryboardBackend\\pom.xml" compile -q
 
-# Frontend
-cd AIStoryboardClient && npx tsc --noEmit && npm run build
+# Frontend（tsconfig 为 solution-style，必须 -p tsconfig.app.json 才真正检查；裸 `npx tsc --noEmit` 不检查任何文件）
+cd AIStoryboardClient && npx tsc -p tsconfig.app.json --noEmit && npm run build
 ```
 
 **Maven gotcha**: `JAVA_HOME` must use Windows path format (`C:\\...`), not POSIX (`/c/...`). `mvn.cmd` is a Windows batch file — cmd.exe doesn't understand POSIX paths. Direct invocation (not bash `mvn` alias) required or `ClassNotFoundException: plexus-classworlds`.
