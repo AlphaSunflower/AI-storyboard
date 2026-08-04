@@ -18,7 +18,8 @@ export const BACKEND_URL: string =
  */
 export function assetUrl(path: string | null): string {
   if (!path) return '';
-  if (path.startsWith('http')) return path;
+  // http(s) 绝对 URL 与 data: URI 原样返回（data: 来自 Dify 内联 base64 图片）
+  if (path.startsWith('http') || path.startsWith('data:')) return path;
   return BACKEND_URL + path;
 }
 

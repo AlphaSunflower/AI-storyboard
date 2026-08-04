@@ -28,6 +28,20 @@ function renderContent(content: string) {
         />
       );
     }
+    // 裸图片 URL（整行为 .png/.jpg/.jpeg/.gif/.webp 链接或 data: URI）直接渲染——
+    // Dify 工作流生图节点常直接输出 URL 文本而非 markdown 图片语法
+    const rawImg = line.trim().match(/^(https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|data:image\/[a-z+]+;base64,\S+)$/i);
+    if (rawImg) {
+      const raw = rawImg[0];
+      return (
+        <img
+          key={i}
+          src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
+          alt=""
+          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+        />
+      );
+    }
     // 加粗
     const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, j) =>
       part.startsWith('**') && part.endsWith('**') ? (
