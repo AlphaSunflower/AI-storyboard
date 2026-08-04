@@ -22,9 +22,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -251,6 +253,8 @@ public class AgentChatService {
                     .build();
                 HttpResponse<java.io.InputStream> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
                 if (resp.statusCode() != 200) {
+                    // Z2：非 200 时 InputStream 未被消费，显式关闭避免每次 Dify 错误泄漏一个 HTTP 连接
+                    closeQuietly(resp.body());
                     log.error("Dify chat-messages streaming 非 200: status={}", resp.statusCode());
                     sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
                     emitter.complete();
@@ -289,14 +293,24 @@ public class AgentChatService {
         }
     }
 
+    /** 静默关闭响应流（Z2：非 200 分支的 InputStream 必须关闭，避免 HTTP 连接泄漏） */
+    private static void closeQuietly(java.io.InputStream in) {
+        if (in == null) return;
+        try {
+            in.close();
+        } catch (Exception ignored) {
+            // 关闭失败无补救手段，忽略
+        }
+    }
+
     /**
      * 逐行读取 Dify SSE 流，裁剪转发给前端。
-     * 事件映射：
-     *   message                → 累积 answer，转发 {type:message, content:增量}
-     *   node_started/finished  → 转发 {type:workflow, title, status}（丢弃 inputs/outputs）
-     *   human_input_required   → 转发 {type:human_input, formToken, taskId, formContent, actions, expirationTime}，结束流
-     *   message_end            → 落库 assistant + 回填 + 转发 {type:message_end, messageId, sceneCount}，结束流
-     *   error                  → 转发 {type:error, code, message}，结束流
+     * 事件类型由 SSE event name 承担，转发负载本身不含 type 键。事件映射：
+     *   message                → 累积 answer，转发 {content:增量}
+     *   node_started/finished  → 转发 {title, status}（丢弃 inputs/outputs）
+     *   human_input_required   → 转发 {formToken, taskId, formContent, actions, expirationTime}，结束流
+     *   message_end            → 落库 assistant + 回填 + 转发 {messageId, sceneCount}，结束流
+     *   error                  → 转发 {code, message}，结束流
      *   ping 等其余            → 忽略
      */
     private void forwardDifySse(HttpResponse<java.io.InputStream> resp, SseEmitter emitter,
@@ -334,19 +348,15 @@ public class AgentChatService {
                             "actions", actions,
                             "expirationTime", data.path("expiration_time").asLong(0)));
                         // HITL 暂停：落库已累积的方案文本，结束当前流
-                        persistAssistant(conversation, answer.toString(), null);
+                        persistAssistant(conversation, answer.toString(), null, null);
                         emitter.complete();
                         return;
                     }
                     case "message_end" -> {
                         String messageId = node.path("message_id").asText("");
                         String difyConvId = node.path("conversation_id").asText("");
-                        persistAssistant(conversation, answer.toString(), messageId);
-                        if (difyConvId != null && !difyConvId.isBlank()
-                                && !difyConvId.equals(conversation.getDifyConversationId())) {
-                            conversation.setDifyConversationId(difyConvId);
-                            conversationMapper.updateById(conversation);
-                        }
+                        // Z1：difyConversationId 回填并入 persistAssistant 同一事务，与 assistant 落库原子完成
+                        persistAssistant(conversation, answer.toString(), messageId, difyConvId);
                         long sceneCount = sceneMapper.selectCount(
                             new LambdaQueryWrapper<com.storyboard.entity.Scene>()
                                 .eq(com.storyboard.entity.Scene::getProjectId, conversation.getProjectId()));
@@ -365,7 +375,7 @@ public class AgentChatService {
                 }
             }
             // 流正常 EOF（无 message_end 的兜底）
-            if (answer.length() > 0) persistAssistant(conversation, answer.toString(), null);
+            if (answer.length() > 0) persistAssistant(conversation, answer.toString(), null, null);
             emitter.complete();
         } catch (Exception e) {
             log.error("Dify SSE 读取失败: conversationId={}", conversation.getId(), e);
@@ -374,17 +384,26 @@ public class AgentChatService {
         }
     }
 
-    /** 落库 assistant 消息（事务内：保存消息 + 刷新会话 updatedAt） */
-    private void persistAssistant(AgentConversation conversation, String content, String difyMessageId) {
+    /**
+     * 落库 assistant 消息（事务内原子完成：回填 difyConversationId + 保存消息 + 刷新会话 updatedAt）。
+     * Z1：difyConversationId 回填必须与 assistant 落库同处一个事务——若分两段，回填事务失败时
+     * assistant 已落库而 conversation_id 未更新，下一条消息会错误地开启新的 Dify 会话。
+     */
+    private void persistAssistant(AgentConversation conversation, String content,
+                                  String difyMessageId, String difyConversationId) {
         if (content == null || content.isBlank()) return;
         transactionTemplate.executeWithoutResult(tx -> {
+            if (difyConversationId != null && !difyConversationId.isBlank()
+                    && !difyConversationId.equals(conversation.getDifyConversationId())) {
+                conversation.setDifyConversationId(difyConversationId);
+            }
             AgentMessage assistantMessage = new AgentMessage();
             assistantMessage.setConversationId(conversation.getId());
             assistantMessage.setRole("assistant");
             assistantMessage.setContent(content);
             assistantMessage.setDifyMessageId(difyMessageId);
             messageMapper.insert(assistantMessage);
-            conversationMapper.updateById(conversation); // 触发 updatedAt fill
+            conversationMapper.updateById(conversation); // 触发 updatedAt fill + 持久化回填
         });
     }
 
@@ -398,7 +417,9 @@ public class AgentChatService {
         CompletableFuture.runAsync(() -> {
             try {
                 HttpRequest submitReq = HttpRequest.newBuilder()
-                    .uri(URI.create(config.getDifyBaseUrl() + "/v1/form/human_input/" + formToken))
+                    // C4：formToken 属不可信输入，拼 URL 前做 UTF-8 百分号编码，避免特殊字符破坏路径
+                    .uri(URI.create(config.getDifyBaseUrl() + "/v1/form/human_input/"
+                        + URLEncoder.encode(formToken, StandardCharsets.UTF_8)))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + config.getDifyApiKey())
                     .timeout(Duration.ofSeconds(30))
@@ -414,14 +435,18 @@ public class AgentChatService {
                 }
                 // 续流：workflow events 端点 user 参数必填（已核实 Dify 源码）
                 HttpRequest eventsReq = HttpRequest.newBuilder()
-                    .uri(URI.create(config.getDifyBaseUrl() + "/v1/workflow/" + taskId
-                        + "/events?user=" + userId))
+                    // C4：taskId（路径段）与 userId（query 参数）均做 UTF-8 百分号编码
+                    .uri(URI.create(config.getDifyBaseUrl() + "/v1/workflow/"
+                        + URLEncoder.encode(taskId, StandardCharsets.UTF_8)
+                        + "/events?user=" + URLEncoder.encode(userId, StandardCharsets.UTF_8)))
                     .header("Authorization", "Bearer " + config.getDifyApiKey())
                     .timeout(Duration.ofSeconds(600))
                     .GET()
                     .build();
                 HttpResponse<java.io.InputStream> eventsResp = httpClient.send(eventsReq, HttpResponse.BodyHandlers.ofInputStream());
                 if (eventsResp.statusCode() != 200) {
+                    // Z2：非 200 时 InputStream 未被消费，显式关闭避免 HTTP 连接泄漏
+                    closeQuietly(eventsResp.body());
                     sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
                     emitter.complete();
                     return;
