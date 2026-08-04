@@ -1,7 +1,9 @@
 package com.storyboard.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.storyboard.dto.request.AgentConversationUpdateRequest;
 import com.storyboard.dto.request.AgentCreateConversationRequest;
+import com.storyboard.dto.request.AgentFormSubmitRequest;
 import com.storyboard.dto.request.AgentSendMessageRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.entity.AgentAsset;
@@ -14,9 +16,12 @@ import com.storyboard.service.FileStorageService;
 import com.storyboard.service.agent.AgentChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -98,15 +103,23 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.sendMessage(auth.getName(), id, request.content()));
     }
 
-    /** 会话生成资产列表 */
+    /** 资产列表（分页，手写 LIMIT/OFFSET——项目未装 MyBatis-Plus 分页插件） */
     @GetMapping("/conversations/{id}/assets")
-    public ApiResponse<List<AgentAsset>> listAssets(Authentication auth, @PathVariable String id) {
+    public ApiResponse<Map<String, Object>> listAssets(
+            Authentication auth, @PathVariable String id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
         chatService.getOwnedConversation(auth.getName(), id);
-        List<AgentAsset> assets = assetMapper.selectList(
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(50, Math.max(1, size));
+        long total = assetMapper.selectCount(
+            new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getConversationId, id));
+        List<AgentAsset> records = assetMapper.selectList(
             new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, id)
-                .orderByDesc(AgentAsset::getCreatedAt));
-        return ApiResponse.ok(assets);
+                .orderByDesc(AgentAsset::getCreatedAt)
+                .last("LIMIT " + safeSize + " OFFSET " + ((safePage - 1) * safeSize)));
+        return ApiResponse.ok(Map.of("records", records, "total", total, "page", safePage, "size", safeSize));
     }
 
     /** 上传图片（参考图）：存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) */
@@ -139,5 +152,57 @@ public class AgentConversationController {
             "url", url,
             "assetId", asset.getId()
         ));
+    }
+
+    /** 流式发送消息（SSE） */
+    @PostMapping(value = "/conversations/{id}/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamMessage(Authentication auth, @PathVariable String id,
+                                    @RequestBody AgentSendMessageRequest request) {
+        // 同步快速校验归属（失败抛 401/404 而非 SSE）
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = new SseEmitter(600_000L);
+        chatService.streamMessage(auth.getName(), id, request.content(), request.picUrl(), emitter);
+        return emitter;
+    }
+
+    /** HITL 表单提交并续流（SSE） */
+    @PostMapping(value = "/conversations/{id}/form/submit", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter submitForm(Authentication auth, @PathVariable String id,
+                                 @RequestBody AgentFormSubmitRequest request) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = new SseEmitter(600_000L);
+        chatService.submitFormAndResume(auth.getName(), id,
+            request.formToken(), request.taskId(), request.action(), emitter);
+        return emitter;
+    }
+
+    /** 重命名 / 归档会话 */
+    @PatchMapping("/conversations/{id}")
+    public ApiResponse<AgentConversation> updateConversation(Authentication auth, @PathVariable String id,
+                                                             @RequestBody AgentConversationUpdateRequest request) {
+        AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
+        if (request.title() != null && !request.title().isBlank()) {
+            conversation.setTitle(request.title().trim());
+        }
+        if (request.status() != null && !request.status().isBlank()) {
+            if (!"active".equals(request.status()) && !"archived".equals(request.status())) {
+                throw new BusinessException(40001, "会话状态非法");
+            }
+            conversation.setStatus(request.status());
+        }
+        conversationMapper.updateById(conversation);
+        return ApiResponse.ok(conversation);
+    }
+
+    /** 删除资产（仅限归属本人会话；未归属资产拒绝） */
+    @DeleteMapping("/assets/{id}")
+    public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
+        AgentAsset asset = assetMapper.selectById(id);
+        if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
+            throw new BusinessException(40401, "资产不存在或无权访问");
+        }
+        chatService.getOwnedConversation(auth.getName(), asset.getConversationId());
+        assetMapper.deleteById(id);
+        return ApiResponse.ok("删除成功", null);
     }
 }
