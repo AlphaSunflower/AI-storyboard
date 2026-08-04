@@ -190,6 +190,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           m.id === assistantId ? { ...m, content: m.content + delta } : m),
       }));
 
+    // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
+    const snapshotId = id;
+    // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
+    let receivedMessageEnd = false;
+    let receivedHumanInput = false;
+
     try {
       await streamChat(id, content, get().refImageUrl ?? undefined, (e: SseEvent) => {
         switch (e.type) {
@@ -199,6 +205,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           case 'workflow':
             break; // 进度提示可后续在 UI 展示，本期仅打字机
           case 'human_input':
+            // 跨会话守卫：已切换会话则忽略旧流事件
+            if (get().activeConversationId !== snapshotId) break;
+            receivedHumanInput = true;
             set({
               waitingHumanInput: {
                 formToken: e.formToken ?? '',
@@ -210,11 +219,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             });
             break;
           case 'message_end':
+            receivedMessageEnd = true;
+            // 跨会话守卫：已切换会话则跳过互斥判断与刷新
+            if (get().activeConversationId !== snapshotId) break;
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
-              void useProjectStore.getState().loadProject(
-                useProjectStore.getState().currentProject!.id,
-              );
+              // currentProject 守卫：项目不存在时跳过 loadProject 刷新
+              const currentProject = useProjectStore.getState().currentProject;
+              if (currentProject) {
+                void useProjectStore.getState().loadProject(currentProject.id);
+              }
             }
             break;
           case 'error':
@@ -225,10 +239,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch (err) {
       set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
     } finally {
+      // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
+      // （已切换会话时旧占位消息已被 selectConversation 整组替换）
+      const stillSameConversation = get().activeConversationId === snapshotId;
       set((s) => ({
         streaming: false,
-        messages: s.messages.map((m) =>
-          m.id === assistantId && !m.content ? { ...m, content: '（未收到回复）' } : m),
+        messages: stillSameConversation
+          ? s.messages.map((m) =>
+              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
+                ? { ...m, content: '（未收到回复）' }
+                : m,
+            )
+          : s.messages,
       }));
     }
     // 清空参考图（发送即消费）
@@ -258,6 +280,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           m.id === assistantId ? { ...m, content: m.content + delta } : m),
       }));
 
+    // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
+    const snapshotId = id;
+    // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
+    let receivedMessageEnd = false;
+    let receivedHumanInput = false;
+
     try {
       await submitForm(id, info.formToken, info.taskId, actionId, (e: SseEvent) => {
         switch (e.type) {
@@ -265,6 +293,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             updateAssistant(e.content ?? '');
             break;
           case 'human_input':
+            // 跨会话守卫：已切换会话则忽略旧流事件
+            if (get().activeConversationId !== snapshotId) break;
+            receivedHumanInput = true;
             set({
               waitingHumanInput: {
                 formToken: e.formToken ?? '',
@@ -276,11 +307,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             });
             break;
           case 'message_end':
+            receivedMessageEnd = true;
+            // 跨会话守卫：已切换会话则跳过互斥判断与刷新
+            if (get().activeConversationId !== snapshotId) break;
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
-              void useProjectStore.getState().loadProject(
-                useProjectStore.getState().currentProject!.id,
-              );
+              // currentProject 守卫：项目不存在时跳过 loadProject 刷新
+              const currentProject = useProjectStore.getState().currentProject;
+              if (currentProject) {
+                void useProjectStore.getState().loadProject(currentProject.id);
+              }
             }
             break;
           case 'error':
@@ -291,10 +327,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch (err) {
       set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
     } finally {
+      // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
+      // （已切换会话时旧占位消息已被 selectConversation 整组替换）
+      const stillSameConversation = get().activeConversationId === snapshotId;
       set((s) => ({
         streaming: false,
-        messages: s.messages.map((m) =>
-          m.id === assistantId && !m.content ? { ...m, content: '（未收到回复）' } : m),
+        messages: stillSameConversation
+          ? s.messages.map((m) =>
+              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
+                ? { ...m, content: '（未收到回复）' }
+                : m,
+            )
+          : s.messages,
       }));
     }
   },
