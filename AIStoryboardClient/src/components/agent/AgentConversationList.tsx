@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 
 export function AgentConversationList() {
@@ -10,19 +10,39 @@ export function AgentConversationList() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // renamingId 的同步镜像 ref：闭包捕获的 renamingId 是渲染时刻的旧值，
+  // 竞态守卫需要读取"当前"编辑态（Enter 提交后输入框卸载触发的 blur 仍持有旧闭包）
+  const renamingIdRef = useRef<string | null>(null);
 
   const visible = conversations.filter((c) =>
     showArchived ? c.status === 'archived' : c.status !== 'archived');
 
-  const handleRename = async (id: string) => {
-    const title = renameText.trim();
-    if (title) await renameConversation(id, title);
+  // 进入重命名编辑态（同步维护 ref）
+  const startRename = (id: string, title: string) => {
+    renamingIdRef.current = id;
+    setRenamingId(id);
+    setRenameText(title);
+  };
+
+  // 退出重命名编辑态（同步维护 ref）
+  const cancelRename = () => {
+    renamingIdRef.current = null;
     setRenamingId(null);
+  };
+
+  const handleRename = async (id: string) => {
+    // 竞态守卫：Enter 提交/ Esc 取消后输入框卸载触发的 blur 会再次进入，此时编辑态已退出，直接忽略
+    if (renamingIdRef.current !== id) return;
+    const title = renameText.trim();
+    // 先退出编辑态（卸载输入框）再发起请求，后续 blur 被守卫拦截，避免重复提交
+    cancelRename();
+    if (title) await renameConversation(id, title);
   };
 
   return (
     <div
       style={{
+        position: 'relative',
         width: 138,
         minWidth: 138,
         borderRight: '1px solid var(--color-hairline)',
@@ -72,7 +92,16 @@ export function AgentConversationList() {
               value={renameText}
               onChange={(e) => setRenameText(e.target.value)}
               onBlur={() => handleRename(c.id)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(c.id); if (e.key === 'Escape') setRenamingId(null); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRename(c.id);
+                if (e.key === 'Escape') {
+                  // 阻止 Esc 冒泡到 window/document 的 keydown 监听（AgentDrawer 会据此关闭抽屉）。
+                  // React 19 合成事件的 stopPropagation 会同步调用原生事件 stopPropagation，
+                  // 且事件委托挂载在 #root 容器（位于 document 之前冒泡），可可靠拦截原生监听器。
+                  e.stopPropagation();
+                  cancelRename();
+                }
+              }}
               onClick={(e) => e.stopPropagation()}
               style={{ width: '100%', fontSize: 12, padding: '2px 4px', border: '1px solid var(--color-primary)', borderRadius: 4 }}
             />
@@ -83,7 +112,7 @@ export function AgentConversationList() {
               </div>
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <span
-                  onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameText(c.title); }}
+                  onClick={(e) => { e.stopPropagation(); startRename(c.id, c.title); }}
                   title="重命名" style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-muted)' }}
                 >✏️</span>
                 <span
