@@ -69,6 +69,8 @@ export function MessageBubble({ role, content }: { role: 'user' | 'assistant'; c
           lineHeight: 1.6,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
+          // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
+          textAlign: 'left',
         }}
       >
         {content ? renderContent(content) : <span style={{ opacity: 0.6 }}>…</span>}
