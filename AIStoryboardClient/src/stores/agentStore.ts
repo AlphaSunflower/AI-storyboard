@@ -35,6 +35,8 @@ interface AgentState {
   streaming: boolean;
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
+  // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
+  pendingAssistantId: string | null;
 
   // 输入
   refImageUrl: string | null;
@@ -114,7 +116,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   selectConversation: async (id) => {
-    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null });
+    // I3 store 守卫：HITL 等待期禁止切换会话（UI 层另有禁用，双保险）
+    if (get().waitingHumanInput) return;
+    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null });
     const res = await agentApi.listMessages(id);
     set({ messages: res.data.data ?? [] });
     const conv = get().conversations.find((c) => c.id === id);
@@ -128,6 +132,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streaming: false,
   waitingHumanInput: null,
   streamError: null,
+  pendingAssistantId: null,
 
   refImageUrl: null,
   setRefImageUrl: (v) => set({ refImageUrl: v }),
@@ -141,14 +146,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   assets: null,
   loadAssets: async (page = 1) => {
-    const id = get().activeConversationId;
-    if (!id) return;
-    const res = await agentApi.listAssets(id, page, 20);
+    // M6：请求发起时的会话快照——返回时若已切换会话，丢弃过期分页数据
+    const convId = get().activeConversationId;
+    if (!convId) return;
+    const res = await agentApi.listAssets(convId, page, 20);
+    if (get().activeConversationId !== convId) return;
     set({ assets: res.data.data });
   },
   deleteAsset: async (assetId) => {
     await agentApi.deleteAsset(assetId);
-    void get().loadAssets(get().assets?.page ?? 1);
+    // M10：删除后若当前页只剩 1 条且非第一页，回退一页加载，避免停留在空页
+    const assets = get().assets;
+    const page = assets?.page ?? 1;
+    if ((assets?.records.length ?? 0) === 1 && page > 1) {
+      void get().loadAssets(page - 1);
+    } else {
+      void get().loadAssets(page);
+    }
   },
 
   sendMessage: async (content) => {
@@ -182,7 +196,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       difyMessageId: null,
       createdAt: new Date().toISOString(),
     };
-    set((s) => ({ messages: [...s.messages, optimisticAssistant] }));
+    // I2：记录本轮 assistant 占位 id，HITL 续流时复用同一气泡追加（与后端消息合并对应）
+    set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
 
     const updateAssistant = (delta: string) =>
       set((s) => ({
@@ -232,18 +247,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
           case 'error':
-            set({ streamError: e.message ?? '对话出错，请重试' });
+            // M3：跨会话守卫——已切换会话则忽略旧流错误
+            if (get().activeConversationId === snapshotId) {
+              set({ streamError: e.message ?? '对话出错，请重试' });
+            }
             break;
         }
       });
     } catch (err) {
-      set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      // M3：跨会话守卫——已切换会话则忽略旧流错误
+      if (get().activeConversationId === snapshotId) {
+        set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      }
     } finally {
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       const stillSameConversation = get().activeConversationId === snapshotId;
       set((s) => ({
         streaming: false,
+        pendingAssistantId: null,
         messages: stillSameConversation
           ? s.messages.map((m) =>
               m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
@@ -253,8 +275,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : s.messages,
       }));
     }
-    // 清空参考图（发送即消费）
-    set({ refImageUrl: null });
+    // 清空参考图（M4：仅当仍在原会话时清空，避免切换会话后误清新会话的参考图）
+    if (get().activeConversationId === snapshotId) set({ refImageUrl: null });
   },
 
   submitHumanInput: async (actionId) => {
@@ -263,16 +285,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!id || !info || get().streaming) return;
     set({ streaming: true, waitingHumanInput: null });
 
-    const assistantId = `tmp-assistant-${Date.now()}`;
-    const optimisticAssistant: AgentMessage = {
-      id: assistantId,
-      conversationId: id,
-      role: 'assistant',
-      content: '',
-      difyMessageId: null,
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, optimisticAssistant] }));
+    // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应），
+    // 找不到（如刷新后 pendingAssistantId 丢失）则新建占位兜底
+    let assistantId = get().pendingAssistantId ?? '';
+    if (!assistantId || !get().messages.some((m) => m.id === assistantId)) {
+      assistantId = `tmp-assistant-${Date.now()}`;
+      const optimisticAssistant: AgentMessage = {
+        id: assistantId,
+        conversationId: id,
+        role: 'assistant',
+        content: '',
+        difyMessageId: null,
+        createdAt: new Date().toISOString(),
+      };
+      set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
+    }
 
     const updateAssistant = (delta: string) =>
       set((s) => ({
@@ -320,18 +347,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
           case 'error':
-            set({ streamError: e.message ?? '对话出错，请重试' });
+            // M3：跨会话守卫——已切换会话则忽略旧流错误
+            if (get().activeConversationId === snapshotId) {
+              set({ streamError: e.message ?? '对话出错，请重试' });
+            }
             break;
         }
       });
     } catch (err) {
-      set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      // M3：跨会话守卫——已切换会话则忽略旧流错误
+      if (get().activeConversationId === snapshotId) {
+        set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      }
     } finally {
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       const stillSameConversation = get().activeConversationId === snapshotId;
       set((s) => ({
         streaming: false,
+        pendingAssistantId: null,
         messages: stillSameConversation
           ? s.messages.map((m) =>
               m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
@@ -344,5 +378,5 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null }),
+    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null }),
 }));

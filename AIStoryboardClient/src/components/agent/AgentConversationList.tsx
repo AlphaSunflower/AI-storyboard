@@ -5,6 +5,7 @@ export function AgentConversationList() {
   const {
     conversations, activeConversationId, selectConversation,
     createConversation, renameConversation, setConversationStatus, deleteConversation,
+    waitingHumanInput,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -79,11 +80,14 @@ export function AgentConversationList() {
       {visible.map((c) => (
         <div
           key={c.id}
-          onClick={() => selectConversation(c.id)}
+          onClick={() => { if (waitingHumanInput) return; selectConversation(c.id); }}
+          title={waitingHumanInput && c.id !== activeConversationId ? '请先完成当前确认' : undefined}
           style={{
             padding: '8px 10px', cursor: 'pointer',
             background: c.id === activeConversationId ? 'var(--color-surface-card)' : 'transparent',
             borderBottom: '1px solid var(--color-hairline-soft)',
+            // I3：HITL 等待期未激活会话项置灰，提示先完成当前确认
+            opacity: waitingHumanInput && c.id !== activeConversationId ? 0.5 : 1,
           }}
         >
           {renamingId === c.id ? (

@@ -7,13 +7,15 @@ export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage } = useAgentStore();
   const [text, setText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  // M9：是否处于近底位置（距底部 <80px）；用户上翻查看历史时暂停自动滚底跟随
+  const nearBottomRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
 
-  // 新消息自动滚底
+  // 新消息自动滚底（M9：仅当用户处于近底位置时跟随）
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming, waitingHumanInput]);
 
   // 切换会话清空草稿
@@ -34,6 +36,8 @@ export function AgentChatPanel() {
     } catch {
       setStreamErrorLocal('图片上传失败');
     }
+    // M8：重置 input value，允许连续选择同一文件再次上传
+    e.target.value = '';
   };
 
   const setStreamErrorLocal = (msg: string) => {
@@ -50,7 +54,15 @@ export function AgentChatPanel() {
       </div>
 
       {/* 消息流 */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          // M9：滚动时更新近底状态（距底部 <80px 视为近底）
+          const el = e.target as HTMLElement;
+          nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+        style={{ flex: 1, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}
+      >
         {messages.length === 0 && !streaming && (
           <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
             与 Moon 智能体对话，设计分镜、图片与视频方案
@@ -90,6 +102,8 @@ export function AgentChatPanel() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
+              // I5：中文输入法组合期（选词中）按下 Enter 不发送
+              if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
             placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : '描述你的需求…'}

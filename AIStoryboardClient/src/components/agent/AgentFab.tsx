@@ -27,8 +27,8 @@ export function AgentFab() {
         justifyContent: 'center',
         transition: 'transform 0.15s',
       }}
-      onMouseEnter={(e) => ((e.target as HTMLElement).style.transform = 'scale(1.06)')}
-      onMouseLeave={(e) => ((e.target as HTMLElement).style.transform = 'scale(1)')}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.transform = 'scale(1.06)')}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.transform = 'scale(1)')}
     >
       ☾
     </button>
