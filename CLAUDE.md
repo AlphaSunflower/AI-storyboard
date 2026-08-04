@@ -244,7 +244,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | GET | `/api/agent/conversations?projectId=` | 会话列表（updated_at 倒序） |
 | GET/DELETE | `/api/agent/conversations/{id}` | 详情（含消息）/ 删除（DB CASCADE 删消息） |
 | GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（代理 Dify） |
-| GET | `/api/agent/conversations/{id}/assets` | 资产列表 |
+| GET | `/api/agent/conversations/{id}/assets?page=&size=` | 资产列表（**分页**，page 默认 1 / size 默认 20 / 上限 50，返回 `{records, total, page, size}`） |
 | POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
 | POST | `/api/agent/conversations/{id}/messages/stream` | SSE 流式发送消息（body `{content, picUrl?}`，`text/event-stream`） |
 | POST | `/api/agent/conversations/{id}/form/submit` | HITL 表单提交并续流（body `{formToken, taskId, action}`），SSE 返回 |
