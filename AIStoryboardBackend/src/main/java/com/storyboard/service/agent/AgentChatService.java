@@ -354,6 +354,11 @@ public class AgentChatService {
                 switch (event) {
                     case "message" -> {
                         String delta = node.path("answer").asText("");
+                        // Dify 工具生成的文件（图片/视频）URL 是 /files/tools/ 相对路径，
+                        // 前端访问不到，需拼上 Dify base（负向后顾避免替换已含域名的 URL，如 http://localhost/files/tools/）
+                        if (delta.contains("/files/tools/")) {
+                            delta = delta.replaceAll("(?<![A-Za-z0-9])/files/tools/", config.getDifyBaseUrl() + "/files/tools/");
+                        }
                         answer.append(delta);
                         sendEvent(emitter, "message", Map.of("content", delta));
                     }
@@ -483,7 +488,10 @@ public class AgentChatService {
                     .header("Authorization", "Bearer " + config.getDifyApiKey())
                     .timeout(Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(
-                        objectMapper.writeValueAsString(Map.of("action", action))))
+                        objectMapper.writeValueAsString(Map.of(
+                            "action", action,
+                            // Dify 源码（human_input_form.py:162）：user 从 JSON body 获取且必填（fetch_from=JSON, required=True）
+                            "user", userId))))
                     .build();
                 HttpResponse<String> submitResp = httpClient.send(submitReq, HttpResponse.BodyHandlers.ofString());
                 if (submitResp.statusCode() != 200) {

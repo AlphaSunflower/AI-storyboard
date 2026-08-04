@@ -13,6 +13,11 @@
 export const BACKEND_URL: string =
   (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://localhost:8082';
 
+// Dify 平台地址：工作流工具生成的文件（图片/视频）URL 是 /files/tools/ 相对路径，
+// 需拼 Dify base 才能访问；默认与后端 DIFY_BASE_URL 一致（本机 80 端口）
+export const DIFY_BASE_URL: string =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_DIFY_BASE_URL ?? 'http://localhost';
+
 /**
  * Resolve an asset path (image, video) to a full URL.
  */
@@ -20,6 +25,8 @@ export function assetUrl(path: string | null): string {
   if (!path) return '';
   // http(s) 绝对 URL 与 data: URI 原样返回（data: 来自 Dify 内联 base64 图片）
   if (path.startsWith('http') || path.startsWith('data:')) return path;
+  // Dify 工具文件（/files/tools/ 签名 URL）需拼 Dify 平台地址而非后端地址
+  if (path.startsWith('/files/tools/')) return DIFY_BASE_URL + path;
   return BACKEND_URL + path;
 }
 
