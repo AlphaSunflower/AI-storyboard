@@ -21,7 +21,7 @@
 - 修改 `service/agent/AgentChatService.java` — `streamMessage` / `submitFormAndResume` / Dify SSE 解析转发 / inputs 适配 / sceneCount
 - 修改 `controller/AgentConversationController.java` — 新增 5 个端点（stream、form/submit、PATCH、assets 分页、assets 删除）
 - 修改 `../resources/application.yml` — 无需改动（`ai.laozhang.dify-*` 占位已在）
-- 本地 `.env`（不提交 git）— `AI_DIFY_API_KEY=app-gsYkBxnoGIQV8leBGFzK7v1Y`
+- 本地 `.env`（不提交 git）— `AI_DIFY_API_KEY=<app-key-见本地 .env，不提交>`
 
 **前端（AIStoryboardClient/src/）：**
 - 新增 `api/agent.ts` — axios 封装 + `streamChat`（fetch 流式）+ `submitForm`（fetch 流式）
@@ -513,7 +513,7 @@ git commit -m "feat: Agent 端点扩展（SSE 流式/HITL 提交/会话 PATCH/�
 在 `.env` 追加（若已存在 `AI_DIFY_API_KEY=` 则改为实际值）：
 
 ```
-AI_DIFY_API_KEY=app-gsYkBxnoGIQV8leBGFzK7v1Y
+AI_DIFY_API_KEY=<app-key-见本地 .env，不提交>
 DIFY_BASE_URL=http://localhost
 ```
 
