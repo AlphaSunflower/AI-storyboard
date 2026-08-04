@@ -41,7 +41,7 @@ export function AgentDrawer() {
           top: 0,
           right: 0,
           bottom: 0,
-          width: 480,
+          width: 560,
           maxWidth: '92vw',
           background: 'var(--color-canvas)',
           borderLeft: '1px solid var(--color-hairline)',

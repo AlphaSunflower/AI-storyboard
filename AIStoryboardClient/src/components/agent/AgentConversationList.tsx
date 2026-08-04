@@ -140,13 +140,70 @@ export function AgentConversationList() {
         </p>
       )}
 
-      {/* 删除二次确认 */}
+      {/* 删除二次确认 —— 居中模态（与 AppHeader 弹窗风格一致） */}
       {confirmDeleteId && (
-        <div style={{ position: 'absolute', bottom: 12, left: 10, right: 10, background: 'white', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', padding: 10, boxShadow: '0 4px 12px rgba(20,20,19,0.12)', zIndex: 5 }}>
-          <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--color-ink)' }}>删除该对话？</p>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={() => setConfirmDeleteId(null)} style={{ flex: 1, padding: '4px 0', fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, background: 'white', cursor: 'pointer' }}>取消</button>
-            <button onClick={() => { deleteConversation(confirmDeleteId); setConfirmDeleteId(null); }} style={{ flex: 1, padding: '4px 0', fontSize: 11, border: 'none', borderRadius: 6, background: 'var(--color-error)', color: 'white', cursor: 'pointer' }}>删除</button>
+        <div
+          onClick={() => setConfirmDeleteId(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(20, 20, 19, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              borderRadius: 'var(--rounded-md)',
+              boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)',
+              padding: 24,
+              minWidth: 320,
+              maxWidth: 440,
+            }}
+          >
+            <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>
+              删除对话
+            </h3>
+            <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>
+              确定要删除对话「{conversations.find((c) => c.id === confirmDeleteId)?.title ?? ''}」吗？此操作无法撤销。
+            </p>
+            <div style={{ textAlign: 'right' }}>
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                style={{
+                  padding: '6px 18px',
+                  height: 32,
+                  border: '1px solid var(--color-hairline)',
+                  borderRadius: 'var(--rounded-md)',
+                  background: 'white',
+                  color: 'var(--color-muted)',
+                  font: 'var(--text-caption)',
+                  cursor: 'pointer',
+                  marginRight: 8,
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => { deleteConversation(confirmDeleteId); setConfirmDeleteId(null); }}
+                style={{
+                  padding: '6px 18px',
+                  height: 32,
+                  border: 'none',
+                  borderRadius: 'var(--rounded-md)',
+                  background: 'var(--color-error)',
+                  color: 'white',
+                  font: 'var(--text-caption)',
+                  cursor: 'pointer',
+                }}
+              >
+                删除
+              </button>
+            </div>
           </div>
         </div>
       )}
