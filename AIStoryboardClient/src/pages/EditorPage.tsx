@@ -6,6 +6,8 @@ import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { ToastContainer } from '../components/common/Toast';
+import { AgentFab } from '../components/agent/AgentFab';
+import { AgentDrawer } from '../components/agent/AgentDrawer';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
@@ -125,6 +127,10 @@ export function EditorPage() {
         />
         <PreviewPanel />
       </div>
+
+      {/* 智能体窗口 */}
+      <AgentFab />
+      <AgentDrawer />
     </div>
   );
 }

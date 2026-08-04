@@ -2,7 +2,8 @@ import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { useAgentStore } from '../../stores/agentStore';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -62,6 +63,9 @@ export function LeftSidebar() {
     setImageSize,
     setImageQuality,
   } = useProjectStore();
+
+  // 智能体已生成分镜时，手动剧本输入与生成按钮互斥禁用
+  const agentGeneratedScenes = useAgentStore((s) => s.agentGeneratedScenes);
 
   const [collapsed, setCollapsed] = useState(false);
   const [creationType, setCreationType] = useState('movie');
@@ -220,12 +224,15 @@ export function LeftSidebar() {
         <textarea
           value={scriptText}
           onChange={(e) => setScriptText(e.target.value)}
-          placeholder="输入剧本或创作描述，AI 将自动拆解为分镜..."
+          disabled={agentGeneratedScenes}
+          placeholder={agentGeneratedScenes ? '分镜已由智能体生成，如需手动生成请刷新页面' : '输入剧本或创作描述，AI 将自动拆解为分镜...'}
           style={{
             ...sharedInputStyle,
             minHeight: 100,
             resize: 'vertical',
             lineHeight: 1.55,
+            background: agentGeneratedScenes ? 'var(--color-primary-disabled)' : 'white',
+            cursor: agentGeneratedScenes ? 'not-allowed' : 'text',
           }}
         />
       </div>
@@ -311,7 +318,7 @@ export function LeftSidebar() {
       {/* Generate button */}
       <button
         onClick={handleGenerate}
-        disabled={isLoading || !scriptText.trim()}
+        disabled={isLoading || !scriptText.trim() || agentGeneratedScenes}
         style={{
           flexShrink: 0,
           width: '100%',
@@ -320,16 +327,16 @@ export function LeftSidebar() {
           borderRadius: 'var(--rounded-md)',
           border: 'none',
           background:
-            isLoading || !scriptText.trim()
+            isLoading || !scriptText.trim() || agentGeneratedScenes
               ? 'var(--color-primary-disabled)'
               : 'var(--color-primary)',
           color: 'var(--color-on-primary)',
           fontSize: 14,
           fontWeight: 500,
-          cursor: isLoading || !scriptText.trim() ? 'not-allowed' : 'pointer',
+          cursor: isLoading || !scriptText.trim() || agentGeneratedScenes ? 'not-allowed' : 'pointer',
         }}
       >
-        {isLoading ? '生成中...' : '生成分镜脚本'}
+        {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
 
       {/* Divider + project history — independently scrollable */}

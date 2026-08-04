@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
