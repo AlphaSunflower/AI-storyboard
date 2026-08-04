@@ -26,6 +26,8 @@
 | 参考图 | `/api/agent/upload` 上传 → 发送消息时作为 `PicUrl` 传入工作流 |
 | API 对接 | 后端代理，Dify key 只存后端 `.env`；前端零接触 |
 | Dify 变量 | `inputs = { currentProjectId: <项目ID>, PicUrl: <图片URL或空串> }` |
+| 分镜联动 | **智能体写分镜（generate-script）后，第二栏分镜列表必须自动刷新**：流结束（message_end）比对 sceneCount 与本地 scenes.length，不一致 → 前端 `loadProject(currentProject.id)` 刷新 |
+| 生图/生视频归属 | **已核查满足**：sceneId 为空（选了项目未选分镜）→ 只写 agent_assets（image/video 类型），不映射到分镜——`ImageGenerationService.generateImage` / `VideoGenerationService.createVideoTask` 在 sceneId 为 null 时不查不写 scene 表；DifyAgentController 无 sceneId 分支写 agent_assets（generate-video 返回 `{taskId, status, assetId}`，assetId 不塞 sceneId 键，防工作流误当 sceneId 回传） |
 
 ## 方案选型
 
@@ -112,6 +114,7 @@ api/agent.ts                  axios 封装 + fetch 流式读取（POST 无法用
 要点：
 - **HITL 交互**：收到 `human_input` 事件 → 暂停输入区（发送禁用）→ 渲染确认卡片 → 用户点按钮 → `POST /form/submit` → 后端续接 workflow events，同一响应流继续打字机输出 → 恢复输入区
 - **互斥逻辑**：agentStore 内存标志 `agentGeneratedScenes`（默认 false，刷新即恢复）。触发：`message_end.sceneCount` > 会话开始时缓存值 → true。表现：LeftSidebar 剧本 textarea + 「生成分镜脚本」按钮禁用，提示"分镜已由智能体生成，如需手动生成请刷新页面"
+- **分镜列表联动刷新**：每个 SSE 流开始前缓存 `scenes.length`；`message_end` 收到 `sceneCount` 后与缓存值比对，不一致（智能体经 generate-script 写入新分镜）→ 调 `projectStore.loadProject(currentProject.id)` → SceneListPanel 展示新分镜。注意 loadProject 会重置 selectedSceneId（可接受，用户注意力在对话区；如需要保留选中在实现时再评估）
 - **资产渲染**：回复中 `/api/files/images/*.png` → `<img>`，`/api/files/videos/*.mp4` → `<video controls>`，经 `assetUrl()` 加后端前缀（`http://localhost:8082`）
 - **资产面板**：分页接口（page/size），图片网格 + 视频卡片，hover 删除按钮（二次确认）
 - **会话操作**：重命名弹小输入框；归档从默认列表移入"已归档"筛选；删除二次确认（级联删消息）
@@ -127,7 +130,8 @@ api/agent.ts                  axios 封装 + fetch 流式读取（POST 无法用
 → 点"满意" → POST /form/submit → 后端提交表单 + 续接 workflow events
 → 智能体调 generate-script 写分镜（scenes++）
 → message_end(sceneCount 增加) → agentGeneratedScenes=true → 左侧剧本输入禁用
-→ 图片方案确认 / 视频方案确认（另 2 个 HITL 节点）同理
+→ 同时 sceneCount≠本地 scenes.length → loadProject 刷新第二栏分镜列表
+→ 图片方案确认 / 视频方案确认（另 2 个 HITL 节点）同理；生图/生视频无 sceneId 只存 agent_assets 不映射分镜
 → 关闭抽屉 / 刷新页面 → 状态恢复
 ```
 
