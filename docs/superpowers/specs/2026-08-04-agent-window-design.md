@@ -71,12 +71,14 @@ GET  /v1/workflow/{task_id}/events (SSE)  → 继续接收后续事件
 - `streamMessage(userId, conversationId, content, picUrl)`：
   1. user 消息独立事务（REQUIRES_NEW）立即提交（失败保留，沿用现有语义）
   2. 代理 Dify `chat-messages`（`response_mode=streaming`），逐行解析 SSE 事件，裁剪转发给前端 SseEmitter
-  3. 流正常结束 → 事务内落库 assistant 消息（累积完整 answer）+ 回填 `dify_conversation_id` + 刷新 updatedAt
-  4. 流中断/异常 → 转发 error 事件（脱敏文案，全量日志），assistant 不落库
+  3. **收到 `human_input_required` → 转发精简 `human_input` 事件 → 立即结束本 SSE 流**（Dify 侧 pause 后流自动关闭，不等待）
+  4. 流正常结束（message_end）→ 事务内落库 assistant 消息（累积完整 answer）+ 回填 `dify_conversation_id` + 刷新 updatedAt
+  5. 流中断/异常 → 转发 error 事件（脱敏文案，全量日志），assistant 不落库
 - `submitFormAndResume(userId, conversationId, formToken, taskId, action)`：
   1. POST `{difyBaseUrl}/v1/form/human_input/{formToken}`（`{action}`，Bearer app key）→ 非 200 转发 error
-  2. 成功 → GET `{difyBaseUrl}/v1/workflow/{taskId}/events`（taskId 由前端从 human_input 事件透传）→ 续传 SSE 给前端
+  2. 成功 → GET `{difyBaseUrl}/v1/workflow/{taskId}/events`（**必须带 `user=<conversation.userId>` query 参数**——已核实 Dify 源码该端点 user 必填；同样 Bearer app key）→ 续传 SSE 给前端
   3. 续流结束后同样落库 assistant 消息（若最终输出 message_end）
+  4. 续流中再次遇 `human_input_required`（多级确认）→ 重复第 1-2 步流程（前端可再次渲染确认卡片）
 - `inputs` 构建：`{ currentProjectId: conversation.projectId, PicUrl: picUrl == null ? "" : picUrl }`
 - SseEmitter 超时 10 分钟（生视频最长 2-5 分钟）；前端断开（onCompletion/onTimeout/客户端 abort）清理 Dify 侧连接
 
@@ -86,7 +88,7 @@ GET  /v1/workflow/{task_id}/events (SSE)  → 继续接收后续事件
 |-------|------|------|
 | `message` | `{"content":"增量文本"}` | 打字机增量 |
 | `workflow` | `{"title":"生成图片","status":"node_started"\|"node_finished"}` | 节点进度（过滤 Dify 节点 inputs/outputs 巨量 JSON） |
-| `human_input` | `{"formToken":"...","taskId":"...","formContent":"满意这个分镜设计方案吗","actions":[{"id":"agree","title":"满意"},...]}` | HITL 暂停，前端渲染确认卡片 |
+| `human_input` | `{"formToken":"...","taskId":"...","formContent":"满意这个分镜设计方案吗","actions":[{"id":"agree","title":"满意"},...],"expirationTime":1776000000}` | HITL 暂停，前端渲染确认卡片；**收到后后端立即结束当前 SSE 流**（Dify 侧 pause 后流自动关闭） |
 | `message_end` | `{"messageId":"...","sceneCount":8}` | 流结束；sceneCount = 项目当前场景数（互斥判定信号） |
 | `error` | `{"code":"50202","message":"Dify 服务异常，请稍后重试"}` | 脱敏错误 |
 
