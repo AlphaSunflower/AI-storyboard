@@ -3,6 +3,7 @@ package com.storyboard.service.agent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyboard.dto.request.DifyGenerateScriptRequest;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.AgentMessage;
 import com.storyboard.exception.BusinessException;
@@ -37,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,6 +58,7 @@ public class AgentChatService {
     private static final Logger log = LoggerFactory.getLogger(AgentChatService.class);
 
     private final AgentConversationMapper conversationMapper;
+    private final AgentGenerationService generationService;
     private final AgentMessageMapper messageMapper;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
@@ -81,6 +84,7 @@ public class AgentChatService {
             "(?:https?://[A-Za-z0-9\\-._~:]+)?/files/tools/[A-Za-z0-9\\-._~:/?&=+%]+");
 
     public AgentChatService(AgentConversationMapper conversationMapper,
+                            AgentGenerationService generationService,
                             AgentMessageMapper messageMapper,
                             ProjectMapper projectMapper,
                             SceneMapper sceneMapper,
@@ -88,6 +92,7 @@ public class AgentChatService {
                             AiConfigProperties config,
                             PlatformTransactionManager transactionManager) {
         this.conversationMapper = conversationMapper;
+        this.generationService = generationService;
         this.messageMapper = messageMapper;
         this.projectMapper = projectMapper;
         this.sceneMapper = sceneMapper;
@@ -309,7 +314,7 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
-                forwardDifySse(resp, emitter, conversation, userId, new StringBuilder(), cancel);
+                forwardDifySse(resp, emitter, conversation, userId, new StringBuilder(), cancel, false);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
@@ -369,7 +374,7 @@ public class AgentChatService {
      */
     private void forwardDifySse(HttpResponse<java.io.InputStream> resp, SseEmitter emitter,
                                 AgentConversation conversation, String userId, StringBuilder answer,
-                                AtomicBoolean cancel) {
+                                AtomicBoolean cancel, boolean deferComplete) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(resp.body()))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -425,7 +430,7 @@ public class AgentChatService {
                             "expirationTime", data.path("expiration_time").asLong(0)));
                         // HITL 暂停：落库已累积的方案文本，结束当前流
                         persistAssistant(conversation, answer.toString(), null, null);
-                        emitter.complete();
+                        if (!deferComplete) emitter.complete();
                         return;
                     }
                     case "message_end" -> {
@@ -450,7 +455,7 @@ public class AgentChatService {
                         // 流结束瞬间 UI 即显示永久本地 URL（无需等刷新重拉消息）
                         sendEvent(emitter, "message_end", Map.of(
                             "messageId", messageId, "sceneCount", sceneCount, "content", localized));
-                        emitter.complete();
+                        if (!deferComplete) emitter.complete();
                         return;
                     }
                     // Dify 恢复事件流（/v1/workflow/{taskId}/events）特有事件：与 chat-messages 流
@@ -484,7 +489,7 @@ public class AgentChatService {
                                 "actions", actions,
                                 "expirationTime", reason.path("expiration_time").asLong(0)));
                             persistAssistant(conversation, answer.toString(), null, null);
-                            emitter.complete();
+                            if (!deferComplete) emitter.complete();
                             return;
                         }
                     }
@@ -511,7 +516,7 @@ public class AgentChatService {
                                 ? "Dify 服务异常，请稍后重试"
                                 : "Dify 工作流执行失败：" + (err.length() > 150 ? err.substring(0, 150) + "…" : err);
                             sendEvent(emitter, "error", Map.of("code", "50202", "message", readable));
-                            emitter.complete();
+                            if (!deferComplete) emitter.complete();
                             return;
                         }
                         // succeeded/stopped：本地化 + 落库 + 回填，复用 message_end 语义收尾
@@ -529,14 +534,14 @@ public class AgentChatService {
                         }
                         sendEvent(emitter, "message_end", Map.of(
                             "messageId", finishedMessageId, "sceneCount", sceneCount, "content", localized));
-                        emitter.complete();
+                        if (!deferComplete) emitter.complete();
                         return;
                     }
                     case "error" -> {
                         sendEvent(emitter, "error", Map.of(
                             "code", node.path("code").asText("50202"),
                             "message", "Dify 服务异常，请稍后重试"));
-                        emitter.complete();
+                        if (!deferComplete) emitter.complete();
                         return;
                     }
                     default -> { /* ping 等忽略 */ }
@@ -544,7 +549,7 @@ public class AgentChatService {
             }
             // 流正常 EOF（无 message_end 的兜底）——取消时不落库（I1）
             if (!cancel.get() && answer.length() > 0) persistAssistant(conversation, answer.toString(), null, null);
-            if (!cancel.get()) emitter.complete();
+            if (!cancel.get() && !deferComplete) emitter.complete();
         } catch (Exception e) {
             // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
             if (cancel.get()) {
@@ -553,7 +558,7 @@ public class AgentChatService {
             }
             log.error("Dify SSE 读取失败: conversationId={}", conversation.getId(), e);
             sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
-            emitter.complete();
+            if (!deferComplete) emitter.complete();
         }
     }
 
@@ -632,15 +637,171 @@ public class AgentChatService {
                 conversation.getId(), plan != null ? plan.keySet() : "null");
     }
 
-    /** 取表单快照（惰性 TTL 清理）；无快照返回 null（调用方降级） */
+    /**
+     * 取表单快照（消费即移除）：取到即从缓存删除，防止同一 formToken 重复提交/重放；
+     * 过期快照同样移除并返回 null。无快照返回 null（调用方降级为仅续流不生成）。
+     */
     private FormSnapshot takeFormSnapshot(String formToken) {
-        FormSnapshot snap = formSnapshots.get(formToken);
+        FormSnapshot snap = formSnapshots.remove(formToken);
         if (snap == null) return null;
-        if (snap.expired()) {
-            formSnapshots.remove(formToken);
-            return null;
-        }
+        if (snap.expired()) return null;
         return snap;
+    }
+
+    /** 生成中/完成的工作流进度事件（title 供前端展示生成阶段） */
+    private static final Map<String, String> GENERATION_STAGE_LABELS = Map.of(
+        "script", "正在生成分镜…",
+        "image", "正在生成图片…",
+        "video", "正在生成视频…"
+    );
+
+    /**
+     * 表单提交后按 action 分发生成（生成后端化核心）。
+     * 工作流方案确认节点的 action id 约定：
+     *   agree         → 分镜写库（人工介入 3 的"满意"）
+     *   generate_image → 生图（图片方案确认的"生成图片"）
+     *   generate_video → 生视频（视频方案确认的"开始生成视频"）
+     *   refine        → 不触发生成（前端带 PicUrl 发消息走 Dify 完善分支）
+     * 返回异步任务；调用方 await 后 complete emitter。
+     */
+    private CompletableFuture<Void> dispatchGeneration(FormSnapshot snapshot, String action,
+                                                       SseEmitter emitter) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                Map<String, Object> plan = snapshot.plan() != null ? snapshot.plan() : Map.of();
+                switch (action) {
+                    case "agree" -> {
+                        // 分镜写库：plan 里取 items（宽松：string 形式 JSON 也解析）
+                        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("script"), "status", "node_started"));
+                        List<DifyGenerateScriptRequest.SceneItem> scenes = parseScenes(plan.get("items"));
+                        int count = generationService.writeScript(snapshot.projectId(), scenes);
+                        String msg = count > 0
+                            ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
+                            : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
+                        sendEvent(emitter, "message", Map.of("content", msg));
+                        sendEvent(emitter, "confirm_result", Map.of(
+                            "kind", "script", "sceneCount", count, "url", "", "actions", List.of()));
+                    }
+                    case "generate_image" -> {
+                        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("image"), "status", "node_started"));
+                        // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图
+                        String mode = "edit".equals(plan.get("mode")) ? "edit" : null;
+                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
+                        Map<String, String> result = generationService.generateImage(
+                            conversationOf(snapshot), null,
+                            str(plan.get("message")), str(plan.get("model")), str(plan.get("size")),
+                            mode, null, source);
+                        pushGenerationResult(emitter, "image", result.get("imageUrl"),
+                            result.get("assetId"), 0, true);
+                    }
+                    case "generate_video" -> {
+                        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
+                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
+                        String taskId = generationService.createVideoTask(
+                            conversationOf(snapshot), null,
+                            str(plan.get("message")), str(plan.get("model")), null, null, null,
+                            str(plan.get("duration")), null, null, source);
+                        // 异步轮询：完成/失败推结果
+                        CompletableFuture.runAsync(() -> pollVideoAndPush(taskId, snapshot, emitter), agentExecutor);
+                    }
+                    default -> log.info("action={} 不触发生成（refine/其他），由 Dify 继续完善", action);
+                }
+            } catch (Exception e) {
+                log.error("Agent 生成分发失败: action={}, error={}", action, e.getMessage(), e);
+                sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成失败，请稍后重试"));
+            } finally {
+                // 编排裁定：分发完成后清理该会话的 LLM 节点输出缓存，防止内存滞留
+                lastNodeOutputs.remove(snapshot.conversationId());
+            }
+        }, agentExecutor);
+    }
+
+    /** 取会话（快照仅存 id，重新查库；查不到返回 null 由调用方降级） */
+    private AgentConversation conversationOf(FormSnapshot snapshot) {
+        return conversationMapper.selectById(snapshot.conversationId());
+    }
+
+    /** 推送生成结果：image 完成推图消息 + 看图确认卡片；script 已由调用方推 */
+    private void pushGenerationResult(SseEmitter emitter, String type, String url,
+                                      String assetId, int sceneCount, boolean withConfirmCard) {
+        if (url == null || url.isBlank()) {
+            sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成失败，请稍后重试"));
+            return;
+        }
+        if ("image".equals(type)) {
+            sendEvent(emitter, "message", Map.of("content", "![生成图片](" + url + ")"));
+        } else {
+            sendEvent(emitter, "message", Map.of("content", url));
+        }
+        if (withConfirmCard) {
+            sendEvent(emitter, "confirm_result", Map.of(
+                "kind", type, "url", url, "assetId", assetId == null ? "" : assetId,
+                "sceneCount", sceneCount,
+                "actions", List.of(
+                    Map.of("id", "refine", "title", "继续完善"),
+                    Map.of("id", "done", "title", "满意完成"))));
+        }
+    }
+
+    /** 轮询视频任务直至终态（复用 service 重试逻辑），终态推结果与确认卡片 */
+    private void pollVideoAndPush(String taskId, FormSnapshot snapshot, SseEmitter emitter) {
+        try {
+            for (int i = 0; i < 90; i++) { // 90 * 5s ≈ 7.5min 上限
+                if (Thread.currentThread().isInterrupted()) return;
+                Map<String, String> result = generationService.pollVideoTask(taskId);
+                String status = result.get("status");
+                if ("completed".equals(status)) {
+                    pushGenerationResult(emitter, "video", result.get("videoUrl"), null, 0, true);
+                    return;
+                }
+                if ("failed".equals(status)) {
+                    sendEvent(emitter, "error", Map.of("code", "50202",
+                        "message", "视频生成失败：" + result.getOrDefault("error", "未知错误")));
+                    return;
+                }
+                Thread.sleep(5000);
+            }
+            sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成超时，请重试"));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.error("视频轮询失败: taskId={}, error={}", taskId, e.getMessage(), e);
+            sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
+        }
+    }
+
+    /** 宽松解析 scenes：Map items / List / String 形式 JSON / null → 空列表（绝不抛） */
+    @SuppressWarnings("unchecked")
+    private List<DifyGenerateScriptRequest.SceneItem> parseScenes(Object raw) {
+        if (raw == null) return List.of();
+        try {
+            if (raw instanceof List<?> list) {
+                return objectMapper.convertValue(list,
+                    new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+            }
+            if (raw instanceof String s && !s.isBlank() && !s.contains("{{#")) {
+                Object parsed = objectMapper.readValue(s, Object.class);
+                if (parsed instanceof List<?> list) {
+                    return objectMapper.convertValue(list,
+                        new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                }
+                if (parsed instanceof java.util.Map<?, ?> m && m.get("items") instanceof List<?> items) {
+                    return objectMapper.convertValue(items,
+                        new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                }
+            }
+            return List.of();
+        } catch (Exception e) {
+            log.warn("解析分镜 scenes 失败, 降级为空列表: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 快照 plan 取值辅助：null 安全 + String 化 */
+    private static String str(Object v) {
+        if (v == null) return null;
+        if (v instanceof String s) return s.isBlank() ? null : s;
+        return String.valueOf(v);
     }
 
     /**
@@ -712,6 +873,14 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
+                // 生成后端化：表单提交成功即按快照 + action 分发生成（与 Dify 续流并行）
+                FormSnapshot snapshot = takeFormSnapshot(formToken);
+                CompletableFuture<Void> generationFuture = null;
+                if (snapshot != null) {
+                    generationFuture = dispatchGeneration(snapshot, action, emitter);
+                } else {
+                    log.info("无方案快照(formToken={}), 仅续流不生成", formToken);
+                }
                 // 续流：workflow events 端点 user 参数必填（已核实 Dify 源码）+ continue_on_pause=true
                 // （Dify 文档：设为 true 时流在 workflow_paused 事件之间保持连接，直到 workflow_finished
                 //  才结束；否则遇到第一个暂停事件流即关闭，后续 HITL 节点无法继续订阅）
@@ -733,7 +902,12 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
-                forwardDifySse(eventsResp, emitter, conversation, userId, new StringBuilder(), cancel);
+                forwardDifySse(eventsResp, emitter, conversation, userId, new StringBuilder(), cancel, true);
+                // 等待生成任务完成（图片 30-60s / 视频 2-5min），完成后再关闭 SSE
+                if (generationFuture != null) {
+                    generationFuture.get(8, TimeUnit.MINUTES);
+                }
+                if (!cancel.get()) emitter.complete();
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
