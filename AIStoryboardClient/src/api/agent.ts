@@ -53,6 +53,10 @@ export interface SseEvent {
   expirationTime?: number;
   messageId?: string;
   sceneCount?: number;
+  // confirm_result 事件字段（生成结果看图确认卡片）
+  kind?: 'script' | 'image' | 'video';
+  url?: string;
+  assetId?: string;
   code?: string;
   message?: string;
 }
@@ -71,6 +75,10 @@ export const agentApi = {
 
   deleteConversation: (id: string) =>
     client.delete(`/agent/conversations/${id}`),
+
+  // 清空会话聊天记录（删消息 + 重置 AI 上下文；会话与资产保留）
+  clearMessages: (id: string) =>
+    client.delete(`/agent/conversations/${id}/messages`),
 
   listMessages: (id: string) =>
     client.get<{ data: AgentMessage[] }>(`/agent/conversations/${id}/messages`),

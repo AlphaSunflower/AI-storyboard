@@ -5,6 +5,7 @@ import {
   type AgentPage, type SseEvent,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
+import { assetUrl } from '../config';
 
 export interface HumanInputInfo {
   formToken: string;
@@ -127,6 +128,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
       messages: s.activeConversationId === id ? [] : s.messages,
       waitingHumanInput: s.activeConversationId === id ? null : s.waitingHumanInput,
+      confirmResult: s.activeConversationId === id ? null : s.confirmResult,
     }));
   },
 
@@ -136,7 +138,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 守卫：无会话 / 流式生成中 / HITL 等待期禁止清空（防止删除进行中的上下文导致流事件污染）
     if (!id || get().streaming || get().waitingHumanInput) return;
     await agentApi.clearMessages(id);
-    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null });
+    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null });
   },
 
   selectConversation: async (id) => {
@@ -283,7 +285,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
-            set({ confirmResult: e as unknown as ConfirmResultInfo });
+            set({ confirmResult: e as ConfirmResultInfo });
             break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
@@ -399,7 +401,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
-            set({ confirmResult: e as unknown as ConfirmResultInfo });
+            set({ confirmResult: e as ConfirmResultInfo });
             break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
@@ -440,7 +442,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!confirmResult || confirmResult.kind === 'script') return;
     set({ confirmResult: null });
     const content = '请基于这张图片继续完善';
-    await get().sendMessage(content, { picUrl: confirmResult.url });
+    // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），Dify 容器内无法访问；
+    // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给 Dify
+    const picUrl = assetUrl(confirmResult.url);
+    await get().sendMessage(content, { picUrl });
   },
   /** 看图确认卡片：满意完成 → 收起卡片，刷新资产面板 */
   dismissConfirm: () => {
