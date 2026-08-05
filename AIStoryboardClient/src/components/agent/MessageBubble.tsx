@@ -1,4 +1,22 @@
+import { useState } from 'react';
 import { assetUrl } from '../../config';
+
+/**
+ * 图片加载失败时降级为"（图片已过期）"占位文本：
+ * 防御历史消息里残留的 Dify 签名 URL（/files/tools/ 带 timestamp+sign，过期后 403）
+ * 渲染成裂图 + alt 文件名的难看效果。
+ */
+function ImgWithFallback({ src, alt, style }: { src: string; alt?: string; style?: React.CSSProperties }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span style={{ color: 'var(--color-muted-soft)', fontSize: 12, fontStyle: 'italic', margin: '4px 0' }}>
+        （图片已过期或无法加载）
+      </span>
+    );
+  }
+  return <img src={src} alt={alt ?? ''} style={style} onError={() => setFailed(true)} />;
+}
 
 /** 轻量渲染：**加粗**、换行、![]() 图片、[]() 链接、视频 URL 直接识别 */
 function renderContent(content: string) {
@@ -8,7 +26,7 @@ function renderContent(content: string) {
     const imgMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
     if (imgMatch) {
       return (
-        <img
+        <ImgWithFallback
           key={i}
           src={assetUrl(imgMatch[2])}
           alt={imgMatch[1]}
@@ -16,8 +34,9 @@ function renderContent(content: string) {
         />
       );
     }
-    // 视频 URL（.mp4/.webm 直接渲染）
-    const videoMatch = line.match(/https?:\/\/\S+\.(mp4|webm)(\?\S*)?/i);
+    // 视频 URL（http(s) 绝对地址或后端相对路径 /api/files/videos/ 开头的 .mp4/.webm 直接渲染；
+    // assetUrl() 对 http 原样返回、对相对路径拼 BACKEND 前缀）
+    const videoMatch = line.match(/(?:https?:\/\/|\/api\/files\/videos\/)\S+\.(mp4|webm)(\?\S*)?/i);
     if (videoMatch) {
       return (
         <video
@@ -34,7 +53,7 @@ function renderContent(content: string) {
     if (rawImg) {
       const raw = rawImg[0];
       return (
-        <img
+        <ImgWithFallback
           key={i}
           src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
           alt=""

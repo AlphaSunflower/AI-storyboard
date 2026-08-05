@@ -67,6 +67,9 @@ interface AgentState {
   // 发送
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
   submitHumanInput: (actionId: string) => Promise<void>;
+  // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
+  refineAsset: () => Promise<void>;
+  dismissConfirm: () => void;
   resetChatState: () => void;
 }
 
