@@ -98,6 +98,12 @@ start(assigner: step=-1 强制重置)
 
 ## 4. 后端改动
 
+### 4.0 输入约定（硬性约束，现状已实现，重构保留）
+
+**每次用户消息调用 Dify chat-messages，`inputs` 必带 `currentProjectId`**（值取 `conversation.getProjectId()`，不依赖前端/Dify 传值），随带 `PicUrl`（参考图 URL，无则空串）。现状 `buildChatBody`（streaming）与 `callDifyChat`（blocking）已实现，重构不得移除或改写该字段来源。
+
+后端所有生成/写库的归属校验一律以 `conversation.getProjectId()` 为准：方案快照缓存、提交事件分发、scenes/agent_assets 落库均从 conversation 取 projectId，不信任 Dify 回传值（Dify 回传的 projectId 仅作展示/日志用途）。
+
 ### 4.1 方案快照缓存（AgentChatService）
 
 - `forwardDifySse` 处理 `node_finished` 时**不再丢弃 outputs**：捕获 LLM 节点输出（分镜 JSON / 图片 message+style+size / 视频 prompt），按 conversation 暂存"最近方案"。
