@@ -10,6 +10,7 @@ import com.storyboard.mapper.AgentConversationMapper;
 import com.storyboard.mapper.AgentMessageMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,9 +34,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Agent 对话服务 —— 代理 Dify /v1/chat-messages（blocking + streaming）。
@@ -55,6 +59,7 @@ public class AgentChatService {
     private final AgentMessageMapper messageMapper;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
+    private final FileStorageService fileStorageService;
     private final AiConfigProperties config;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -68,16 +73,25 @@ public class AgentChatService {
      */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+    /**
+     * 匹配 Dify 工具文件 URL：http(s)://host/files/tools/xxx.ext?签名，或裸 /files/tools/xxx.ext?签名。
+     * 字符集限定 RFC 3986 子集，避免 markdown 语法字符（) ] !）与中文标点被吞入。
+     */
+    private static final Pattern DIFY_TOOLS_URL_PATTERN = Pattern.compile(
+            "(?:https?://[A-Za-z0-9\\-._~:]+)?/files/tools/[A-Za-z0-9\\-._~:/?&=+%]+");
+
     public AgentChatService(AgentConversationMapper conversationMapper,
                             AgentMessageMapper messageMapper,
                             ProjectMapper projectMapper,
                             SceneMapper sceneMapper,
+                            FileStorageService fileStorageService,
                             AiConfigProperties config,
                             PlatformTransactionManager transactionManager) {
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
         this.projectMapper = projectMapper;
         this.sceneMapper = sceneMapper;
+        this.fileStorageService = fileStorageService;
         this.config = config;
         // user 消息保存使用独立事务（REQUIRES_NEW）：即使外层存在事务，也单独提交，
         // 保证 Dify 调用失败时 user 消息不被回滚。
@@ -117,6 +131,24 @@ public class AgentChatService {
         return messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
             .eq(AgentMessage::getConversationId, conversationId)
             .orderByAsc(AgentMessage::getCreatedAt));
+    }
+
+    /**
+     * 清空会话聊天记录（上下文重置）：
+     * 删除该会话全部消息 + 清空 difyConversationId —— 下一条消息会开启全新的 Dify 会话，
+     * AI 不再记得任何历史。会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
+     */
+    public void clearMessages(String userId, String conversationId) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        transactionTemplate.executeWithoutResult(tx -> {
+            messageMapper.delete(new LambdaQueryWrapper<AgentMessage>()
+                .eq(AgentMessage::getConversationId, conversationId));
+            if (conversation.getDifyConversationId() != null && !conversation.getDifyConversationId().isBlank()) {
+                conversation.setDifyConversationId(null);
+                conversationMapper.updateById(conversation);
+            }
+        });
+        log.info("已清空会话聊天记录: conversationId={}, userId={}", conversationId, userId);
     }
 
     /**
@@ -362,15 +394,29 @@ public class AgentChatService {
                         answer.append(delta);
                         sendEvent(emitter, "message", Map.of("content", delta));
                     }
-                    case "node_started", "node_finished" -> sendEvent(emitter, "workflow", Map.of(
-                        "title", node.path("data").path("title").asText(""),
-                        "status", "node_started".equals(event) ? "node_started" : "node_finished"));
+                    case "node_started", "node_finished" -> {
+                        // 生成后端化：node_finished 捕获 LLM 方案输出（分镜 items / 图片 message+style+size /
+                        // 视频方案），暂存供表单提交时取用。outputs 仅进内存，绝不转发前端。
+                        if ("node_finished".equals(event)) {
+                            JsonNode outputs = node.path("data").path("outputs");
+                            if (outputs.isObject() && !outputs.isEmpty()) {
+                                lastNodeOutputs.put(conversation.getId(),
+                                        objectMapper.convertValue(outputs, Map.class));
+                            }
+                        }
+                        sendEvent(emitter, "workflow", Map.of(
+                            "title", node.path("data").path("title").asText(""),
+                            "status", "node_started".equals(event) ? "node_started" : "node_finished"));
+                    }
                     case "human_input_required" -> {
                         JsonNode data = node.path("data");
                         List<Map<String, String>> actions = new ArrayList<>();
                         for (JsonNode a : data.path("actions")) {
                             actions.add(Map.of("id", a.path("id").asText(""), "title", a.path("title").asText("")));
                         }
+                        // 生成后端化：转发前缓存方案快照，表单提交时按 formToken 取用
+                        cacheFormSnapshot(data.path("form_token").asText(""),
+                                data.path("form_content").asText(""), actions, conversation);
                         sendEvent(emitter, "human_input", Map.of(
                             "formToken", data.path("form_token").asText(""),
                             "taskId", node.path("task_id").asText(""),
@@ -385,8 +431,11 @@ public class AgentChatService {
                     case "message_end" -> {
                         String messageId = node.path("message_id").asText("");
                         String difyConvId = node.path("conversation_id").asText("");
+                        // 本地化 Dify 工具文件 URL（下载到本地 + 改写消息内容）：签名 URL 有时效，
+                        // 过期后前端刷新即裂图；落库与返回前必须替换为 /api/files/images/ 永久 URL
+                        String localized = localizeDifyFileUrls(answer.toString());
                         // Z1：difyConversationId 回填并入 persistAssistant 同一事务，与 assistant 落库原子完成
-                        persistAssistant(conversation, answer.toString(), messageId, difyConvId);
+                        persistAssistant(conversation, localized, messageId, difyConvId);
                         // I4：sceneCount 查询失败降级为 -1，仍照常发送 message_end（不升级为 error）
                         long sceneCount = -1;
                         try {
@@ -397,7 +446,89 @@ public class AgentChatService {
                             log.warn("查询场景数失败，sceneCount 降级为 -1: conversationId={}, error={}",
                                     conversation.getId(), e.getMessage());
                         }
-                        sendEvent(emitter, "message_end", Map.of("messageId", messageId, "sceneCount", sceneCount));
+                        // content 随 message_end 返回：前端用本地化后的完整文本覆盖流式占位气泡，
+                        // 流结束瞬间 UI 即显示永久本地 URL（无需等刷新重拉消息）
+                        sendEvent(emitter, "message_end", Map.of(
+                            "messageId", messageId, "sceneCount", sceneCount, "content", localized));
+                        emitter.complete();
+                        return;
+                    }
+                    // Dify 恢复事件流（/v1/workflow/{taskId}/events）特有事件：与 chat-messages 流
+                    // （message/message_end/human_input_required）不同，恢复流用 text_chunk 携带文本、
+                    // workflow_paused 表示再次暂停、workflow_finished 收尾（无 message_end）
+                    case "text_chunk" -> {
+                        // 恢复流文本增量（对应 chat-messages 流的 message 事件）
+                        String text = node.path("data").path("text").asText("");
+                        if (!text.isEmpty()) {
+                            answer.append(text);
+                            sendEvent(emitter, "message", Map.of("content", text));
+                        }
+                    }
+                    case "workflow_paused" -> {
+                        // 恢复流中再次遇到 HITL 暂停：表单定义在 data.reasons[0]
+                        // （结构与 chat-messages 流的 human_input_required 不同），
+                        // 转发前端确认卡片后结束本轮流，等待下一次表单提交
+                        JsonNode reasons = node.path("data").path("reasons");
+                        if (reasons.isArray() && !reasons.isEmpty()) {
+                            JsonNode reason = reasons.get(0);
+                            List<Map<String, String>> actions = new ArrayList<>();
+                            for (JsonNode a : reason.path("actions")) {
+                                actions.add(Map.of("id", a.path("id").asText(""), "title", a.path("title").asText("")));
+                            }
+                            cacheFormSnapshot(reason.path("form_token").asText(""),
+                                    reason.path("form_content").asText(""), actions, conversation);
+                            sendEvent(emitter, "human_input", Map.of(
+                                "formToken", reason.path("form_token").asText(""),
+                                "taskId", node.path("task_id").asText(""),
+                                "formContent", reason.path("form_content").asText(""),
+                                "actions", actions,
+                                "expirationTime", reason.path("expiration_time").asLong(0)));
+                            persistAssistant(conversation, answer.toString(), null, null);
+                            emitter.complete();
+                            return;
+                        }
+                    }
+                    case "workflow_finished" -> {
+                        // 恢复流结束事件（无 message_end）：成功/失败统一在此收尾
+                        String finishedStatus = node.path("data").path("status").asText("");
+                        // 最终回答可能只在 data.outputs.answer（text_chunk 未覆盖时补发）
+                        String outputsAnswer = node.path("data").path("outputs").path("answer").asText("");
+                        if (!outputsAnswer.isEmpty() && !answer.toString().endsWith(outputsAnswer)) {
+                            answer.append(outputsAnswer);
+                            sendEvent(emitter, "message", Map.of("content", outputsAnswer));
+                        }
+                        if ("failed".equals(finishedStatus)) {
+                            String err = node.path("data").path("error").asText("");
+                            // 失败也落库已累积的回复文本（用户消息后的部分回答不丢）
+                            if (answer.length() > 0) {
+                                persistAssistant(conversation, localizeDifyFileUrls(answer.toString()), null, null);
+                            }
+                            log.warn("Dify 恢复工作流失败: taskId={}, error={}",
+                                    node.path("task_id").asText(""), err);
+                            // 透传工作流真实错误（截断防刷屏），便于前端/用户定位 Dify 工作流问题
+                            // （LLM structured_output 偶发类型错误等场景，笼统"服务异常"无法排查）
+                            String readable = (err == null || err.isBlank())
+                                ? "Dify 服务异常，请稍后重试"
+                                : "Dify 工作流执行失败：" + (err.length() > 150 ? err.substring(0, 150) + "…" : err);
+                            sendEvent(emitter, "error", Map.of("code", "50202", "message", readable));
+                            emitter.complete();
+                            return;
+                        }
+                        // succeeded/stopped：本地化 + 落库 + 回填，复用 message_end 语义收尾
+                        String finishedMessageId = node.path("task_id").asText("");
+                        String localized = localizeDifyFileUrls(answer.toString());
+                        persistAssistant(conversation, localized, finishedMessageId, null);
+                        long sceneCount = -1;
+                        try {
+                            sceneCount = sceneMapper.selectCount(
+                                new LambdaQueryWrapper<com.storyboard.entity.Scene>()
+                                    .eq(com.storyboard.entity.Scene::getProjectId, conversation.getProjectId()));
+                        } catch (Exception e) {
+                            log.warn("查询场景数失败，sceneCount 降级为 -1: conversationId={}, error={}",
+                                    conversation.getId(), e.getMessage());
+                        }
+                        sendEvent(emitter, "message_end", Map.of(
+                            "messageId", finishedMessageId, "sceneCount", sceneCount, "content", localized));
                         emitter.complete();
                         return;
                     }
@@ -438,6 +569,10 @@ public class AgentChatService {
     private void persistAssistant(AgentConversation conversation, String content,
                                   String difyMessageId, String difyConversationId) {
         if (content == null || content.isBlank()) return;
+        // 幂等本地化：已本地化的 content 不含 /files/tools/，原样返回。
+        // 覆盖 HITL 暂停落库（human_input_required）与流 EOF 兜底两条路径。
+        // 注意：必须用 final 局部变量，否则 lambda 内引用会编译失败（非 effectively final）
+        final String localizedContent = localizeDifyFileUrls(content);
         transactionTemplate.executeWithoutResult(tx -> {
             if (difyConversationId != null && !difyConversationId.isBlank()
                     && !difyConversationId.equals(conversation.getDifyConversationId())) {
@@ -451,19 +586,92 @@ public class AgentChatService {
                 .last("LIMIT 1"));
             if (last != null && last.getDifyMessageId() == null) {
                 // 续流合并：追加内容 + 回填 messageId
-                last.setContent(last.getContent() + content);
+                last.setContent(last.getContent() + localizedContent);
                 last.setDifyMessageId(difyMessageId);
                 messageMapper.updateById(last);
             } else {
                 AgentMessage assistantMessage = new AgentMessage();
                 assistantMessage.setConversationId(conversation.getId());
                 assistantMessage.setRole("assistant");
-                assistantMessage.setContent(content);
+                assistantMessage.setContent(localizedContent);
                 assistantMessage.setDifyMessageId(difyMessageId);
                 messageMapper.insert(assistantMessage);
             }
             conversationMapper.updateById(conversation); // 触发 updatedAt fill + 持久化回填
         });
+    }
+
+    // ============ 智能体生成后端化：HITL 方案快照缓存 ============
+
+    /** 表单快照 TTL（与 Dify form_token 过期时间对齐，30 分钟） */
+    private static final long FORM_SNAPSHOT_TTL_MS = 30 * 60 * 1000L;
+    /** formToken → 表单快照 */
+    private final Map<String, FormSnapshot> formSnapshots = new ConcurrentHashMap<>();
+    /** conversationId → 最近 LLM 节点输出（node_finished 捕获的 outputs） */
+    private final Map<String, Map<String, Object>> lastNodeOutputs = new ConcurrentHashMap<>();
+
+    /**
+     * HITL 表单快照：用户点"确认"时后端需要的一切。
+     * formContent = 确认卡片文案（含完整方案文本）；plan = 最近 LLM 节点结构化输出
+     * （分镜 items / 图片 message+style+size / 视频方案），缺失时降级用 formContent。
+     */
+    public record FormSnapshot(String formContent, List<Map<String, String>> actions,
+                               Map<String, Object> plan, String conversationId,
+                               String projectId, long createdAt) {
+        boolean expired() { return System.currentTimeMillis() - createdAt > FORM_SNAPSHOT_TTL_MS; }
+    }
+
+    /** 缓存表单快照（human_input_required / workflow_paused 转发前调用） */
+    private void cacheFormSnapshot(String formToken, String formContent,
+                                   List<Map<String, String>> actions, AgentConversation conversation) {
+        if (formToken == null || formToken.isBlank()) return;
+        Map<String, Object> plan = lastNodeOutputs.get(conversation.getId());
+        formSnapshots.put(formToken, new FormSnapshot(formContent, actions, plan,
+                conversation.getId(), conversation.getProjectId(), System.currentTimeMillis()));
+        log.info("已缓存 HITL 方案快照: formToken={}, conversationId={}, planKeys={}", formToken,
+                conversation.getId(), plan != null ? plan.keySet() : "null");
+    }
+
+    /** 取表单快照（惰性 TTL 清理）；无快照返回 null（调用方降级） */
+    private FormSnapshot takeFormSnapshot(String formToken) {
+        FormSnapshot snap = formSnapshots.get(formToken);
+        if (snap == null) return null;
+        if (snap.expired()) {
+            formSnapshots.remove(formToken);
+            return null;
+        }
+        return snap;
+    }
+
+    /**
+     * 把消息内容中的 Dify 工具文件 URL（/files/tools/ 签名 URL）下载到本地并改写为
+     * /api/files/images/xxx.png 永久 URL。
+     *
+     * 背景：Dify 工作流 LLM 输出引用的图片/视频 URL 是 Dify 内部文件服务的带时效签名 URL
+     * （?timestamp=...&nonce=...&sign=...），过期后（默认数分钟~数小时）访问返回 403，
+     * 而消息内容已持久化到 agent_messages —— 刷新重放后前端必然裂图。
+     * 必须在生成后（签名仍有效）立即下载落盘，替换为本地永久 URL。
+     *
+     * 下载失败（签名已过期/网络异常）时保留原 URL 不阻塞消息落库，由前端 onError 兜底降级显示。
+     */
+    private String localizeDifyFileUrls(String content) {
+        if (content == null || !content.contains("/files/tools/")) return content;
+        Matcher matcher = DIFY_TOOLS_URL_PATTERN.matcher(content);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String url = matcher.group();
+            try {
+                String local = fileStorageService.saveImage(url);
+                log.info("Dify 工具文件已本地化: {} -> {}", url, local);
+                matcher.appendReplacement(sb, Matcher.quoteReplacement(local));
+            } catch (Exception e) {
+                // 保留原 URL：前端 img onError 会降级为"图片已过期"占位，不阻塞落库
+                log.warn("Dify 工具文件本地化失败(签名可能已过期), 保留原 URL: {}，原因: {}",
+                        url, e.getMessage());
+            }
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
     }
 
     /**
@@ -490,7 +698,11 @@ public class AgentChatService {
                     .POST(HttpRequest.BodyPublishers.ofString(
                         objectMapper.writeValueAsString(Map.of(
                             "action", action,
-                            // Dify 源码（human_input_form.py:162）：user 从 JSON body 获取且必填（fetch_from=JSON, required=True）
+                            // Dify 源码（controllers/common/human_input.py）：HumanInputFormSubmitPayload
+                            // 必填字段为 inputs(dict) + action；Moon 工作流 HITL 表单均为纯按钮型
+                            // （工作流定义 inputs: []），提交空对象即可，缺字段会 400 invalid_param
+                            "inputs", Map.of(),
+                            // user 一并携带：Dify 部分端点从 JSON body 获取且必填（fetch_from=JSON, required=True）
                             "user", userId))))
                     .build();
                 HttpResponse<String> submitResp = httpClient.send(submitReq, HttpResponse.BodyHandlers.ofString());
@@ -500,12 +712,15 @@ public class AgentChatService {
                     emitter.complete();
                     return;
                 }
-                // 续流：workflow events 端点 user 参数必填（已核实 Dify 源码）
+                // 续流：workflow events 端点 user 参数必填（已核实 Dify 源码）+ continue_on_pause=true
+                // （Dify 文档：设为 true 时流在 workflow_paused 事件之间保持连接，直到 workflow_finished
+                //  才结束；否则遇到第一个暂停事件流即关闭，后续 HITL 节点无法继续订阅）
                 HttpRequest eventsReq = HttpRequest.newBuilder()
                     // C4：taskId（路径段）与 userId（query 参数）均做 UTF-8 百分号编码
                     .uri(URI.create(config.getDifyBaseUrl() + "/v1/workflow/"
                         + URLEncoder.encode(taskId, StandardCharsets.UTF_8)
-                        + "/events?user=" + URLEncoder.encode(userId, StandardCharsets.UTF_8)))
+                        + "/events?user=" + URLEncoder.encode(userId, StandardCharsets.UTF_8)
+                        + "&continue_on_pause=true"))
                     .header("Authorization", "Bearer " + config.getDifyApiKey())
                     .timeout(Duration.ofSeconds(600))
                     .GET()
