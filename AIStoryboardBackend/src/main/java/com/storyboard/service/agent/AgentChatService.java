@@ -701,8 +701,8 @@ public class AgentChatService {
                             conversationOf(snapshot), null,
                             str(plan.get("message")), str(plan.get("model")), null, null, null,
                             str(plan.get("duration")), null, null, source);
-                        // 异步轮询：完成/失败推结果
-                        CompletableFuture.runAsync(() -> pollVideoAndPush(taskId, snapshot, emitter), agentExecutor);
+                        // 同步轮询直至终态（dispatchGeneration 运行在虚拟线程，阻塞安全；future 完成即轮询完成，保证 SSE 关闭前推送完成）
+                        pollVideoAndPush(taskId, snapshot, emitter);
                     }
                     default -> log.info("action={} 不触发生成（refine/其他），由 Dify 继续完善", action);
                 }
