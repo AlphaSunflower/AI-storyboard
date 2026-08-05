@@ -424,7 +424,10 @@ public class AgentChatService {
                                 data.path("form_content").asText(""), actions, conversation);
                         sendEvent(emitter, "human_input", Map.of(
                             "formToken", data.path("form_token").asText(""),
-                            "taskId", node.path("task_id").asText(""),
+                            // 续流端点 /v1/workflow/{id}/events 需要 workflow_run_id（源码 doc：
+                            // task_id = "Workflow run ID"）；human_input 事件的顶层 task_id 是消息级
+                            // 任务标识（不存在于 workflow_runs），用它续流必然 404
+                            "taskId", node.path("workflow_run_id").asText(""),
                             "formContent", data.path("form_content").asText(""),
                             "actions", actions,
                             "expirationTime", data.path("expiration_time").asLong(0)));
@@ -484,7 +487,8 @@ public class AgentChatService {
                                     reason.path("form_content").asText(""), actions, conversation);
                             sendEvent(emitter, "human_input", Map.of(
                                 "formToken", reason.path("form_token").asText(""),
-                                "taskId", node.path("task_id").asText(""),
+                                // 同 chat-messages 流：workflow_paused 顶层 workflow_run_id 才是续流所需
+                                "taskId", node.path("workflow_run_id").asText(""),
                                 "formContent", reason.path("form_content").asText(""),
                                 "actions", actions,
                                 "expirationTime", reason.path("expiration_time").asLong(0)));
@@ -685,9 +689,9 @@ public class AgentChatService {
                 Map<String, Object> plan = snapshot.plan() != null ? snapshot.plan() : Map.of();
                 switch (action) {
                     case "agree" -> {
-                        // 分镜写库：plan 里取 items（宽松：string 形式 JSON 也解析）
+                        // 分镜写库：plan 里取 items（宽松：Map 顶层 items / structured_output.items / List / String JSON）
                         sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("script"), "status", "node_started"));
-                        List<DifyGenerateScriptRequest.SceneItem> scenes = parseScenes(plan.get("items"));
+                        List<DifyGenerateScriptRequest.SceneItem> scenes = parseScenes(plan);
                         int count = generationService.writeScript(snapshot.projectId(), scenes);
                         String msg = count > 0
                             ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
@@ -801,7 +805,7 @@ public class AgentChatService {
         }
     }
 
-    /** 宽松解析 scenes：Map items / List / String 形式 JSON / null → 空列表（绝不抛） */
+    /** 宽松解析 scenes：Map（顶层 items / structured_output.items / structured_output 数组）/ List / String JSON / null → 空列表（绝不抛） */
     @SuppressWarnings("unchecked")
     private List<DifyGenerateScriptRequest.SceneItem> parseScenes(Object raw) {
         if (raw == null) return List.of();
@@ -818,6 +822,37 @@ public class AgentChatService {
                 }
                 if (parsed instanceof java.util.Map<?, ?> m && m.get("items") instanceof List<?> items) {
                     return objectMapper.convertValue(items,
+                        new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                }
+            }
+            if (raw instanceof java.util.Map<?, ?> m) {
+                // Dify node_finished outputs 为 LLM 完整输出 {text, structured_output:{items}}——
+                // structured_output 偶发解析坏（=schema/空数组/json_repair 脏 JSON），text 永远干净，
+                // 优先解析 text（LLM 原始 JSON 文本）；其次 structured_output
+                Object text = m.get("text");
+                if (text instanceof String ts && !ts.isBlank() && !ts.contains("{{#")) {
+                    Object parsed = objectMapper.readValue(ts, Object.class);
+                    if (parsed instanceof List<?> list) {
+                        return objectMapper.convertValue(list,
+                            new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                    }
+                    if (parsed instanceof java.util.Map<?, ?> pm && pm.get("items") instanceof List<?> items) {
+                        return objectMapper.convertValue(items,
+                            new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                    }
+                }
+                Object items = m.get("items");
+                if (items instanceof List<?> list) {
+                    return objectMapper.convertValue(list,
+                        new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                }
+                Object so = m.get("structured_output");
+                if (so instanceof java.util.Map<?, ?> som && som.get("items") instanceof List<?> list) {
+                    return objectMapper.convertValue(list,
+                        new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
+                }
+                if (so instanceof List<?> list) {
+                    return objectMapper.convertValue(list,
                         new com.fasterxml.jackson.core.type.TypeReference<List<DifyGenerateScriptRequest.SceneItem>>() {});
                 }
             }
