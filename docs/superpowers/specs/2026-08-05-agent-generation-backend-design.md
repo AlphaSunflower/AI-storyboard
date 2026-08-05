@@ -108,7 +108,7 @@ start(assigner: step=-1 强制重置)
 
 - `forwardDifySse` 处理 `node_finished` 时**不再丢弃 outputs**：捕获 LLM 节点输出（分镜 JSON / 图片 message+style+size / 视频 prompt），按 conversation 暂存"最近方案"。
 - 转发 `human_input_required` / `workflow_paused` 事件时，以 `formToken` 为 key 缓存快照：`{formContent, actions, 最近方案}`，存 `ConcurrentHashMap`，TTL 30 分钟（与 Dify form_token 过期时间对齐）。
-- 快照缺失（重启/超时）降级：用 formContent 方案文本作为生成 prompt 兜底，不中断链路。
+- 快照缺失（重启/超时）→ 图片/视频动作降级用 formContent 方案文本作 prompt 兜底生成（agree 分镜动作无法结构化降级，仅续流不生成），不中断链路。
 
 ### 4.2 表单提交事件分发（submitFormAndResume）
 
@@ -117,10 +117,12 @@ start(assigner: step=-1 强制重置)
 | action | 触发动作 | 复用逻辑 |
 |--------|---------|---------|
 | 人工介入 3 的 `agree` | 快照分镜 JSON 批量写 scenes | `DifyAgentController.generateScript` 的建 scene 逻辑 |
-| 图片方案确认的 `generate` | `imageService.generateImage`（图生图/图改图按快照 mode） | `ImageGenerationService` |
-| 视频方案确认的 `generate` | `videoService.createVideoTask` + 异步轮询 `pollVideoTask` | `VideoGenerationService` |
+| 图片方案确认的 `generate_image` | `imageService.generateImage`（图生图/图改图按快照 mode） | `ImageGenerationService` |
+| 视频方案确认的 `generate_video` | `videoService.createVideoTask` + 异步轮询 `pollVideoTask` | `VideoGenerationService` |
 | 看图确认卡片的 `refine` | 不触发生成（前端发消息带 PicUrl 走 Dify 完善分支） | — |
 | 看图确认卡片的 `done` | 纯收尾，无后端动作 | — |
+
+> **action id 约定（工作流按钮 id 必须与此一致，任务 6 配置时核对）**：图片方案确认节点按钮 id = `generate_image` / `refine`；视频方案确认节点按钮 id = `generate_video` / `refine`；人工介入 3 节点按钮 id = `agree` / `disagree`（现状已有）。id 不匹配时后端分发落入 default 分支，链路静默失效。
 
 - 生成执行在专用虚拟线程 executor（复用 `agentExecutor`），不阻塞 SseEmitter 续流。
 - 生成结果写 `agent_assets`（type=image/video、prompt、model、status），资产面板照常展示。
