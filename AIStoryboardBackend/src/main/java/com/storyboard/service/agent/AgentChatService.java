@@ -614,6 +614,13 @@ public class AgentChatService {
     private final Map<String, FormSnapshot> formSnapshots = new ConcurrentHashMap<>();
     /** conversationId → 最近 LLM 节点输出（node_finished 捕获的 outputs） */
     private final Map<String, Map<String, Object>> lastNodeOutputs = new ConcurrentHashMap<>();
+    /** conversationId → 最近一次 HITL 表单文案（快照缺失时降级生成兜底，TTL 同快照） */
+    private final Map<String, LastFormContent> lastFormContentByConversation = new ConcurrentHashMap<>();
+
+    /** 会话维度 formContent 兜底记录 */
+    private record LastFormContent(String content, long createdAt) {
+        boolean expired() { return System.currentTimeMillis() - createdAt > FORM_SNAPSHOT_TTL_MS; }
+    }
 
     /**
      * HITL 表单快照：用户点"确认"时后端需要的一切。
@@ -630,6 +637,13 @@ public class AgentChatService {
     private void cacheFormSnapshot(String formToken, String formContent,
                                    List<Map<String, String>> actions, AgentConversation conversation) {
         if (formToken == null || formToken.isBlank()) return;
+        // §4.3 快照缺失兜底：formSnapshots 按 formToken 缓存，服务重启/过期都会丢失；额外按会话维度
+        // 冗余记录最近一次 formContent（TTL 同快照），提交时快照缺失可据此构造降级快照（plan=null，
+        // formContent 作 prompt）继续 generate_image/generate_video
+        if (formContent != null && !formContent.isBlank()) {
+            lastFormContentByConversation.put(conversation.getId(),
+                    new LastFormContent(formContent, System.currentTimeMillis()));
+        }
         Map<String, Object> plan = lastNodeOutputs.get(conversation.getId());
         formSnapshots.put(formToken, new FormSnapshot(formContent, actions, plan,
                 conversation.getId(), conversation.getProjectId(), System.currentTimeMillis()));
@@ -679,6 +693,9 @@ public class AgentChatService {
                             ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
                             : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
                         sendEvent(emitter, "message", Map.of("content", msg));
+                        // §4.3：确认结果消息落库（刷新后历史消息不丢）；会话可能已删（conversationOf 为 null），判空
+                        AgentConversation agreeConv = conversationOf(snapshot);
+                        if (agreeConv != null) persistAssistant(agreeConv, msg, null, null);
                         sendEvent(emitter, "confirm_result", Map.of(
                             "kind", "script", "sceneCount", count, "url", "", "actions", List.of()));
                     }
@@ -687,22 +704,28 @@ public class AgentChatService {
                         // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图；缺源图时 mode 置 null 降级文生图
                         String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
                         String mode = "edit".equals(plan.get("mode")) && source != null ? "edit" : null;
+                        // §4.3：降级快照 plan 为 null 时用 formContent 文本兜底作 prompt（快照缺失降级生成）
+                        String prompt = str(plan.get("message"));
+                        if (prompt == null) prompt = snapshot.formContent();
+                        AgentConversation conv = conversationOf(snapshot); // 可能为 null（会话已删），生成服务/落库各自判空
                         Map<String, String> result = generationService.generateImage(
-                            conversationOf(snapshot), null,
-                            str(plan.get("message")), str(plan.get("model")), str(plan.get("size")),
+                            conv, null, prompt, str(plan.get("model")), str(plan.get("size")),
                             mode, null, source);
                         pushGenerationResult(emitter, "image", result.get("imageUrl"),
-                            result.get("assetId"), 0, true);
+                            result.get("assetId"), 0, true, conv);
                     }
                     case "generate_video" -> {
                         sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
                         String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
+                        // §4.3：降级快照 plan 为 null 时用 formContent 文本兜底作 prompt（快照缺失降级生成）
+                        String prompt = str(plan.get("message"));
+                        if (prompt == null) prompt = snapshot.formContent();
+                        AgentConversation conv = conversationOf(snapshot);
                         String taskId = generationService.createVideoTask(
-                            conversationOf(snapshot), null,
-                            str(plan.get("message")), str(plan.get("model")), null, null, null,
+                            conv, null, prompt, str(plan.get("model")), null, null, null,
                             str(plan.get("duration")), null, null, source);
                         // 同步轮询直至终态（dispatchGeneration 运行在虚拟线程，阻塞安全；future 完成即轮询完成，保证 SSE 关闭前推送完成）
-                        pollVideoAndPush(taskId, snapshot, emitter);
+                        pollVideoAndPush(taskId, snapshot, emitter, conv);
                     }
                     default -> log.info("action={} 不触发生成（refine/其他），由 Dify 继续完善", action);
                 }
@@ -710,8 +733,9 @@ public class AgentChatService {
                 log.error("Agent 生成分发失败: action={}, error={}", action, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成失败，请稍后重试"));
             } finally {
-                // 编排裁定：分发完成后清理该会话的 LLM 节点输出缓存，防止内存滞留
+                // 编排裁定：分发完成后清理该会话的 LLM 节点输出缓存与 formContent 兜底缓存，防止内存滞留
                 lastNodeOutputs.remove(snapshot.conversationId());
+                lastFormContentByConversation.remove(snapshot.conversationId());
             }
         }, agentExecutor);
     }
@@ -721,18 +745,24 @@ public class AgentChatService {
         return conversationMapper.selectById(snapshot.conversationId());
     }
 
-    /** 推送生成结果：image 完成推图消息 + 看图确认卡片；script 已由调用方推 */
+    /** 推送生成结果：image 完成推图消息 + 看图确认卡片；script 已由调用方推。
+     *  §4.3：推给前端的生成结果消息同步落库（conversation 由调用方传入，会话已删时为 null，判空跳过） */
     private void pushGenerationResult(SseEmitter emitter, String type, String url,
-                                      String assetId, int sceneCount, boolean withConfirmCard) {
+                                      String assetId, int sceneCount, boolean withConfirmCard,
+                                      AgentConversation conversation) {
         if (url == null || url.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成失败，请稍后重试"));
             return;
         }
+        String content;
         if ("image".equals(type)) {
-            sendEvent(emitter, "message", Map.of("content", "![生成图片](" + url + ")"));
+            content = "![生成图片](" + url + ")";
         } else {
-            sendEvent(emitter, "message", Map.of("content", url));
+            content = url;
         }
+        sendEvent(emitter, "message", Map.of("content", content));
+        // §4.3：生成结果消息落库（刷新后历史消息里生成结果不消失）；会话已删则跳过
+        if (conversation != null) persistAssistant(conversation, content, null, null);
         if (withConfirmCard) {
             sendEvent(emitter, "confirm_result", Map.of(
                 "kind", type, "url", url, "assetId", assetId == null ? "" : assetId,
@@ -744,14 +774,15 @@ public class AgentChatService {
     }
 
     /** 轮询视频任务直至终态（复用 service 重试逻辑），终态推结果与确认卡片 */
-    private void pollVideoAndPush(String taskId, FormSnapshot snapshot, SseEmitter emitter) {
+    private void pollVideoAndPush(String taskId, FormSnapshot snapshot, SseEmitter emitter,
+                                  AgentConversation conversation) {
         try {
             for (int i = 0; i < 90; i++) { // 90 * 5s ≈ 7.5min 上限
                 if (Thread.currentThread().isInterrupted()) return;
                 Map<String, String> result = generationService.pollVideoTask(taskId);
                 String status = result.get("status");
                 if ("completed".equals(status)) {
-                    pushGenerationResult(emitter, "video", result.get("videoUrl"), null, 0, true);
+                    pushGenerationResult(emitter, "video", result.get("videoUrl"), null, 0, true, conversation);
                     return;
                 }
                 if ("failed".equals(status)) {
@@ -878,6 +909,21 @@ public class AgentChatService {
                 CompletableFuture<Void> generationFuture = null;
                 if (snapshot != null) {
                     generationFuture = dispatchGeneration(snapshot, action, emitter);
+                } else if ("generate_image".equals(action) || "generate_video".equals(action)) {
+                    // §4.3 快照缺失兜底：formSnapshots 按 formToken 缓存可能因服务重启/过期丢失，此时用
+                    // 会话维度冗余记录的最近 formContent 构造降级快照（plan=null，formContent 作 prompt
+                    // 由 dispatchGeneration 兜底取用），保证生成类 action 仍能出图/出视频；agree 无法
+                    // 结构化写库（无 items），仍仅续流。降级快照不写入 formSnapshots，仅本次使用。
+                    LastFormContent last = lastFormContentByConversation.get(conversation.getId());
+                    if (last != null && !last.expired()) {
+                        log.info("快照缺失但存在会话 formContent 兜底, 降级生成: conversationId={}, action={}",
+                                conversationId, action);
+                        snapshot = new FormSnapshot(last.content(), List.of(), null,
+                                conversation.getId(), conversation.getProjectId(), System.currentTimeMillis());
+                        generationFuture = dispatchGeneration(snapshot, action, emitter);
+                    } else {
+                        log.info("无方案快照且无 formContent 兜底(formToken={}), 仅续流不生成", formToken);
+                    }
                 } else {
                     log.info("无方案快照(formToken={}), 仅续流不生成", formToken);
                 }
@@ -912,6 +958,13 @@ public class AgentChatService {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
                     log.debug("SSE 已取消，忽略 HITL 提交/续流异常: conversationId={}", conversationId);
+                    return;
+                }
+                // §4.3：generationFuture.get(8min) 超时是预期内失败（视频生成慢），与 Dify 服务异常区分文案
+                if (e instanceof java.util.concurrent.TimeoutException) {
+                    log.warn("Agent 生成超时(8min): conversationId={}", conversationId);
+                    sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成超时，请稍后重试"));
+                    emitter.complete();
                     return;
                 }
                 log.error("Dify HITL 提交/续流失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
