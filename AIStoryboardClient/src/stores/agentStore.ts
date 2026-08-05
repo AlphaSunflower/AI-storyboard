@@ -139,7 +139,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   selectConversation: async (id) => {
     // I3 store 守卫：HITL 等待期禁止切换会话（UI 层另有禁用，双保险）
     if (get().waitingHumanInput) return;
-    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null });
+    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null });
     const res = await agentApi.listMessages(id);
     set({ messages: res.data.data ?? [] });
     const conv = get().conversations.find((c) => c.id === id);
@@ -447,5 +447,5 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null }),
+    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null }),
 }));
