@@ -684,9 +684,9 @@ public class AgentChatService {
                     }
                     case "generate_image" -> {
                         sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("image"), "status", "node_started"));
-                        // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图
-                        String mode = "edit".equals(plan.get("mode")) ? "edit" : null;
+                        // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图；缺源图时 mode 置 null 降级文生图
                         String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
+                        String mode = "edit".equals(plan.get("mode")) && source != null ? "edit" : null;
                         Map<String, String> result = generationService.generateImage(
                             conversationOf(snapshot), null,
                             str(plan.get("message")), str(plan.get("model")), str(plan.get("size")),
