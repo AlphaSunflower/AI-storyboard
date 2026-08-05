@@ -14,6 +14,15 @@ export interface HumanInputInfo {
   expirationTime: number;
 }
 
+/** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
+export interface ConfirmResultInfo {
+  kind: 'script' | 'image' | 'video';
+  url: string;
+  assetId?: string;
+  sceneCount?: number;
+  actions: { id: string; title: string }[];
+}
+
 interface AgentState {
   // 窗口
   windowOpen: boolean;
@@ -28,6 +37,8 @@ interface AgentState {
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationStatus: (id: string, status: 'active' | 'archived') => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  // 清空当前会话聊天记录（删消息 + 重置 AI 上下文；会话与资产保留，其他会话不受影响）
+  clearMessages: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
 
   // 消息
@@ -35,6 +46,7 @@ interface AgentState {
   streaming: boolean;
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
+  confirmResult: ConfirmResultInfo | null;
   // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
   pendingAssistantId: string | null;
 
@@ -53,7 +65,7 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
   submitHumanInput: (actionId: string) => Promise<void>;
   resetChatState: () => void;
 }
@@ -115,6 +127,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }));
   },
 
+  // 清空当前会话聊天记录：删消息 + 重置 AI 上下文（Dify 会话），会话/资产保留
+  clearMessages: async () => {
+    const id = get().activeConversationId;
+    // 守卫：无会话 / 流式生成中 / HITL 等待期禁止清空（防止删除进行中的上下文导致流事件污染）
+    if (!id || get().streaming || get().waitingHumanInput) return;
+    await agentApi.clearMessages(id);
+    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null });
+  },
+
   selectConversation: async (id) => {
     // I3 store 守卫：HITL 等待期禁止切换会话（UI 层另有禁用，双保险）
     if (get().waitingHumanInput) return;
@@ -132,6 +153,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streaming: false,
   waitingHumanInput: null,
   streamError: null,
+  confirmResult: null,
   pendingAssistantId: null,
 
   refImageUrl: null,
@@ -165,7 +187,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content) => {
+  sendMessage: async (content, opts?: { picUrl?: string }) => {
     const id = get().activeConversationId;
     if (!id || get().streaming || !content.trim()) return;
 
@@ -205,6 +227,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           m.id === assistantId ? { ...m, content: m.content + delta } : m),
       }));
 
+    // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
+    // （增量拼接的 Dify 签名 URL 已被后端替换为 /api/files/images/ 永久地址）
+    const updateAssistantFull = (full: string) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === assistantId ? { ...m, content: full } : m),
+      }));
+
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
@@ -212,7 +242,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
 
     try {
-      await streamChat(id, content, get().refImageUrl ?? undefined, (e: SseEvent) => {
+      await streamChat(id, content, opts?.picUrl ?? get().refImageUrl ?? undefined, (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             updateAssistant(e.content ?? '');
@@ -237,6 +267,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换会话则跳过互斥判断与刷新
             if (get().activeConversationId !== snapshotId) break;
+            // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
+            if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
@@ -245,6 +277,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 void useProjectStore.getState().loadProject(currentProject.id);
               }
             }
+            break;
+          case 'confirm_result':
+            if (get().activeConversationId !== snapshotId) break;
+            set({ confirmResult: e as unknown as ConfirmResultInfo });
             break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
@@ -263,13 +299,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       const stillSameConversation = get().activeConversationId === snapshotId;
+      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导
+      const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
       set((s) => ({
         streaming: false,
         pendingAssistantId: null,
         messages: stillSameConversation
           ? s.messages.map((m) =>
               m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
-                ? { ...m, content: '（未收到回复）' }
+                ? { ...m, content: failedText }
                 : m,
             )
           : s.messages,
@@ -283,7 +321,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
-    set({ streaming: true, waitingHumanInput: null });
+    // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
+    set({ streaming: true, waitingHumanInput: null, streamError: null });
 
     // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应），
     // 找不到（如刷新后 pendingAssistantId 丢失）则新建占位兜底
@@ -305,6 +344,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId ? { ...m, content: m.content + delta } : m),
+      }));
+
+    // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
+    const updateAssistantFull = (full: string) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === assistantId ? { ...m, content: full } : m),
       }));
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
@@ -337,6 +383,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换会话则跳过互斥判断与刷新
             if (get().activeConversationId !== snapshotId) break;
+            // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
+            if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
@@ -345,6 +393,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 void useProjectStore.getState().loadProject(currentProject.id);
               }
             }
+            break;
+          case 'confirm_result':
+            if (get().activeConversationId !== snapshotId) break;
+            set({ confirmResult: e as unknown as ConfirmResultInfo });
             break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
@@ -363,18 +415,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       const stillSameConversation = get().activeConversationId === snapshotId;
+      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导
+      const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
       set((s) => ({
         streaming: false,
         pendingAssistantId: null,
         messages: stillSameConversation
           ? s.messages.map((m) =>
               m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
-                ? { ...m, content: '（未收到回复）' }
+                ? { ...m, content: failedText }
                 : m,
             )
           : s.messages,
       }));
     }
+  },
+
+  /** 看图确认卡片：继续完善 → 带当前图作为 PicUrl 发消息（走 Dify 完善分支） */
+  refineAsset: async () => {
+    const { confirmResult } = get();
+    if (!confirmResult || confirmResult.kind === 'script') return;
+    set({ confirmResult: null });
+    const content = '请基于这张图片继续完善';
+    await get().sendMessage(content, { picUrl: confirmResult.url });
+  },
+  /** 看图确认卡片：满意完成 → 收起卡片，刷新资产面板 */
+  dismissConfirm: () => {
+    set({ confirmResult: null });
+    const id = get().activeConversationId;
+    if (id) void get().loadAssets();
   },
 
   resetChatState: () =>

@@ -42,7 +42,7 @@ export interface AgentPage<T> {
 }
 
 export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'error';
+  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'error';
   content?: string;
   title?: string;
   status?: string;
