@@ -6,8 +6,10 @@ import com.storyboard.dto.request.DifyGenerateVideoRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
+import com.storyboard.exception.BusinessException;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentConversationMapper;
+import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.VideoGenerationService;
@@ -20,6 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -43,17 +46,20 @@ public class DifyAgentController {
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final AgentConversationMapper conversationMapper;
+    private final ProjectMapper projectMapper;
 
     public DifyAgentController(ImageGenerationService imageService,
                                 VideoGenerationService videoService,
                                 SceneMapper sceneMapper,
                                 AgentAssetMapper agentAssetMapper,
-                                AgentConversationMapper conversationMapper) {
+                                AgentConversationMapper conversationMapper,
+                                ProjectMapper projectMapper) {
         this.imageService = imageService;
         this.videoService = videoService;
         this.sceneMapper = sceneMapper;
         this.agentAssetMapper = agentAssetMapper;
         this.conversationMapper = conversationMapper;
+        this.projectMapper = projectMapper;
     }
 
     /**
@@ -64,13 +70,24 @@ public class DifyAgentController {
     @Transactional
     public ApiResponse<Map<String, Object>> generateScript(
             @RequestBody DifyGenerateScriptRequest request) {
+        // projectId 防御校验（Dify 工作流 POST 节点变量绑定断开会渲染成空串，
+        // 直接插 scenes 表会外键违例 500；这里明确报业务错误，工作流能拿到可读原因）
+        String projectId = sanitize(request.projectId());
+        if (projectId == null) {
+            log.warn("Dify Agent generate-script 缺少 projectId（工作流 POST 节点变量未绑定），请求拒绝");
+            throw new BusinessException(40001, "generate-script 缺少 projectId：请检查 Dify 工作流 POST分镜脚本 节点的 projectId 变量绑定");
+        }
+        if (projectMapper.selectById(projectId) == null) {
+            log.warn("Dify Agent generate-script projectId={} 在 projects 表中不存在，请求拒绝", projectId);
+            throw new BusinessException(40401, "项目不存在: " + projectId);
+        }
         if (request.scenes() == null || request.scenes().isEmpty()) {
-            return ApiResponse.ok(Map.of("projectId", request.projectId(), "sceneCount", 0));
+            return ApiResponse.ok(Map.of("projectId", projectId, "sceneCount", 0));
         }
         int count = 0;
         for (var item : request.scenes()) {
             Scene scene = new Scene();
-            scene.setProjectId(request.projectId());
+            scene.setProjectId(projectId);
             scene.setSceneNumber(item.sceneNumber());
             scene.setScriptContent(item.scriptContent());
             scene.setImagePrompt(item.imagePrompt());
@@ -82,8 +99,8 @@ public class DifyAgentController {
             sceneMapper.insert(scene);
             count++;
         }
-        log.info("Dify Agent 写入 {} 个分镜到项目 {}", count, request.projectId());
-        return ApiResponse.ok(Map.of("projectId", request.projectId(), "sceneCount", count));
+        log.info("Dify Agent 写入 {} 个分镜到项目 {}", count, projectId);
+        return ApiResponse.ok(Map.of("projectId", projectId, "sceneCount", count));
     }
 
     /**
@@ -187,15 +204,25 @@ public class DifyAgentController {
             asset.setModel(sanitize(request.model()));
             asset.setStatus("queued");
             asset.setTaskId(taskId);
-            agentAssetMapper.insert(asset);
-            log.info("Agent 视频资产已落库: assetId={}, taskId={}", asset.getId(), taskId);
+            String assetId = null;
+            try {
+                agentAssetMapper.insert(asset);
+                assetId = asset.getId();
+                log.info("Agent 视频资产已落库: assetId={}, taskId={}", assetId, taskId);
+            } catch (Exception e) {
+                // 资产落库失败不应丢弃已创建的 Laozhang 任务（避免白扣费）：
+                // 记录错误日志，仍返回 taskId 供 Dify 轮询获取视频结果
+                log.error("Agent 视频资产落库失败(不影响任务执行), taskId={}, 原因: {}", taskId, e.getMessage());
+            }
             // I4：无 sceneId 分支不再把 assetId 塞进 sceneId 键，避免 Dify 工作流
             // 把 asset id 当 sceneId 回传导致"分镜不存在"
-            return ApiResponse.ok(Map.of(
-                "taskId", taskId,
-                "assetId", asset.getId(),
-                "status", "queued"
-            ));
+            Map<String, String> resp = new HashMap<>();
+            resp.put("taskId", taskId);
+            resp.put("status", "queued");
+            if (assetId != null) {
+                resp.put("assetId", assetId);
+            }
+            return ApiResponse.ok(resp);
         }
         return ApiResponse.ok(Map.of(
             "taskId", taskId,
@@ -214,6 +241,19 @@ public class DifyAgentController {
         String status = result.get("status");
         if ("completed".equals(status)) {
             String videoUrl = result.getOrDefault("videoUrl", "");
+            if (videoUrl == null || videoUrl.isEmpty()) {
+                // 防御：上游 completed 但本地下载失败时 videoUrl 可能为 null/空，
+                // 直接 startsWith 会 NPE；转 failed 并把下载错误透出给工作流
+                String err = result.get("error");
+                if (err == null || err.isEmpty()) {
+                    err = "视频已生成但下载失败，请重试";
+                }
+                return ApiResponse.ok(Map.of(
+                    "taskId", taskId,
+                    "status", "failed",
+                    "error", err
+                ));
+            }
             return ApiResponse.ok(Map.of(
                 "taskId", taskId,
                 "status", "completed",
@@ -351,7 +391,7 @@ public class DifyAgentController {
      * 清洗 Dify 传入的字符串值：未解析的 Dify 变量引用（含 structured_output.）
      * 视为无效值，返回 null 让 service 层使用默认值。
      */
-    static String sanitize(String value) {
+    public static String sanitize(String value) {
         if (value == null || value.isBlank()) return null;
         // Dify 未解析变量引用：{nodeId}.structured_output.{field} 或纯数字.nodeId
         if (value.contains("structured_output.")) {
