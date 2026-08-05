@@ -1,6 +1,5 @@
 package com.storyboard.service.agent;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storyboard.controller.DifyAgentController;
 import com.storyboard.dto.request.DifyGenerateScriptRequest;
 import com.storyboard.entity.AgentAsset;
@@ -13,6 +12,7 @@ import com.storyboard.service.ai.VideoGenerationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -44,7 +44,8 @@ public class AgentGenerationService {
         this.agentAssetMapper = agentAssetMapper;
     }
 
-    /** 批量写分镜（原 DifyAgentController.generateScript 逻辑，宽松 items 直接透传） */
+    /** 批量写分镜（原 DifyAgentController.generateScript 逻辑，宽松 items 直接透传）；批量插入需保证原子性 */
+    @Transactional
     public int writeScript(String projectId, List<DifyGenerateScriptRequest.SceneItem> scenes) {
         if (scenes == null || scenes.isEmpty()) return 0;
         int count = 0;
@@ -88,9 +89,15 @@ public class AgentGenerationService {
             asset.setPrompt(DifyAgentController.sanitize(prompt));
             asset.setModel(DifyAgentController.sanitize(model));
             asset.setStatus("completed");
-            agentAssetMapper.insert(asset);
-            log.info("Agent 生成编排：图片资产已落库 assetId={}, conversationId={}", asset.getId(), conversation.getId());
-            return Map.of("imageUrl", imageUrl, "assetId", asset.getId());
+            try {
+                agentAssetMapper.insert(asset);
+                log.info("Agent 生成编排：图片资产已落库 assetId={}, conversationId={}", asset.getId(), conversation.getId());
+                return Map.of("imageUrl", imageUrl, "assetId", asset.getId());
+            } catch (Exception e) {
+                // 图片已生成（已计费），落库失败不能抛异常导致 URL 丢失、重试重复计费
+                log.error("Agent 生成编排：图片资产落库失败(不影响已生成的图片), conversationId={}, 原因: {}", conversation.getId(), e.getMessage());
+                return Map.of("imageUrl", imageUrl);
+            }
         }
         return Map.of("imageUrl", imageUrl);
     }
@@ -138,25 +145,11 @@ public class AgentGenerationService {
         return taskId;
     }
 
-    /** 轮询视频任务；终态时同步更新 agent_assets 的 url/status/error */
+    /**
+     * 轮询视频任务。
+     * 资产更新由上游 VideoGenerationService 在终态时完成，此处只转发轮询结果。
+     */
     public Map<String, String> pollVideoTask(String taskId) {
-        Map<String, String> result = videoService.pollVideoTask(taskId);
-        String status = result.get("status");
-        if ("completed".equals(status) || "failed".equals(status)) {
-            AgentAsset asset = agentAssetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
-                .eq(AgentAsset::getTaskId, taskId)
-                .last("LIMIT 1"));
-            if (asset != null) {
-                asset.setStatus(status);
-                if ("completed".equals(status)) {
-                    asset.setUrl(result.get("videoUrl"));
-                } else {
-                    asset.setError(result.getOrDefault("error", "未知错误"));
-                }
-                agentAssetMapper.updateById(asset);
-                log.info("Agent 生成编排：视频资产已更新 assetId={}, status={}", asset.getId(), status);
-            }
-        }
-        return result;
+        return videoService.pollVideoTask(taskId);
     }
 }
