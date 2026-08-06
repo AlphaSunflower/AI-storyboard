@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -60,6 +61,7 @@ public class AgentChatService {
     private final AgentConversationMapper conversationMapper;
     private final AgentGenerationService generationService;
     private final AgentMessageMapper messageMapper;
+    private final ConversationTitleService titleService;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
@@ -77,6 +79,15 @@ public class AgentChatService {
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     /**
+     * 首条消息异步 AI 重命名标题：
+     * - titleScheduled：并发去重，仅调度一次；任务结束（无论成败）移除，允许清空后重聊再次触发；
+     * - renamedTitleByConversation：重命名落库成功的新标题暂存，随本轮 message_end 一次性下发前端
+     *   （remove 取走即删，绝不重复推送；不做轮询/持续推送）。
+     */
+    private final Set<String> titleScheduled = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> renamedTitleByConversation = new ConcurrentHashMap<>();
+
+    /**
      * 匹配 Dify 工具文件 URL：http(s)://host/files/tools/xxx.ext?签名，或裸 /files/tools/xxx.ext?签名。
      * 字符集限定 RFC 3986 子集，避免 markdown 语法字符（) ] !）与中文标点被吞入。
      */
@@ -86,6 +97,7 @@ public class AgentChatService {
     public AgentChatService(AgentConversationMapper conversationMapper,
                             AgentGenerationService generationService,
                             AgentMessageMapper messageMapper,
+                            ConversationTitleService titleService,
                             ProjectMapper projectMapper,
                             SceneMapper sceneMapper,
                             FileStorageService fileStorageService,
@@ -94,6 +106,7 @@ public class AgentChatService {
         this.conversationMapper = conversationMapper;
         this.generationService = generationService;
         this.messageMapper = messageMapper;
+        this.titleService = titleService;
         this.projectMapper = projectMapper;
         this.sceneMapper = sceneMapper;
         this.fileStorageService = fileStorageService;
@@ -157,6 +170,39 @@ public class AgentChatService {
     }
 
     /**
+     * 首条消息异步 AI 重命名标题：
+     * 判定「该消息是会话第一条消息 + 标题仍为默认值 + 并发去重成功」三条件，
+     * 满足则向 agentExecutor 提交异步任务（不阻塞 Dify 主流程，失败仅日志）；
+     * 落库成功的新标题暂存供 message_end 一次性推送，失败静默降级。
+     */
+    private void maybeScheduleTitleRename(AgentConversation conversation, String content) {
+        try {
+            long msgCount = messageMapper.selectCount(new LambdaQueryWrapper<AgentMessage>()
+                    .eq(AgentMessage::getConversationId, conversation.getId()));
+            boolean defaultTitle = conversation.getTitle() == null
+                    || conversation.getTitle().isBlank()
+                    || "新对话".equals(conversation.getTitle());
+            if (msgCount == 0 && defaultTitle && titleScheduled.add(conversation.getId())) {
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        titleService.renameOnFirstMessage(conversation.getId(), content);
+                        // 落库成功 → 暂存新标题供 message_end 一次性推送；失败则 map 无值，静默降级
+                        AgentConversation fresh = conversationMapper.selectById(conversation.getId());
+                        String t = fresh != null ? fresh.getTitle() : null;
+                        if (t != null && !t.isBlank() && !"新对话".equals(t)) {
+                            renamedTitleByConversation.put(conversation.getId(), t);
+                        }
+                    } finally {
+                        titleScheduled.remove(conversation.getId());
+                    }
+                }, agentExecutor);
+            }
+        } catch (Exception e) {
+            log.debug("标题重命名调度失败(忽略): conversationId={}, error={}", conversation.getId(), e.getMessage());
+        }
+    }
+
+    /**
      * 发送消息：落库 user 消息（独立事务）→ 调 Dify chat-messages → 回填 + 落库 assistant 消息。
      *
      * 事务语义（I1）：
@@ -178,6 +224,9 @@ public class AgentChatService {
         userMessage.setRole("user");
         userMessage.setContent(content);
         transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
+
+        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 调用；blocking 无 SSE 通道，靠前端下次拉取可见）
+        maybeScheduleTitleRename(conversation, content);
 
         // 2. 调 Dify chat-messages
         Map<String, Object> result;
@@ -302,6 +351,9 @@ public class AgentChatService {
         userMessage.setContent(content);
         transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
+        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 主流程；结果随本轮 message_end 一次性推送）
+        maybeScheduleTitleRename(conversation, content);
+
         // 2. 异步代理 Dify（SseEmitter 需异步写，否则阻塞 Controller 返回；I6 专用 executor）
         CompletableFuture.runAsync(() -> {
             try {
@@ -359,6 +411,20 @@ public class AgentChatService {
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
         }
+    }
+
+    /**
+     * 构造 message_end 负载并附带一次性标题：首条消息异步重命名落库成功的新标题，
+     * 随本轮 message_end 推送一次（remove 取走即删，绝不重复推送，不做轮询/持续推送）。
+     * 标题尚未生成完成时 map 无值，该轮不推送，前端下次拉取会话列表自然可见。
+     */
+    private Map<String, Object> messageEndPayload(AgentConversation conversation, String messageId,
+                                                  long sceneCount, String localized) {
+        Map<String, Object> payload = new HashMap<>(Map.of(
+                "messageId", messageId, "sceneCount", sceneCount, "content", localized));
+        String renamed = renamedTitleByConversation.remove(conversation.getId());
+        if (renamed != null) payload.put("title", renamed);
+        return payload;
     }
 
     /** 静默关闭响应流（Z2：非 200 分支的 InputStream 必须关闭，避免 HTTP 连接泄漏） */
@@ -465,8 +531,8 @@ public class AgentChatService {
                         }
                         // content 随 message_end 返回：前端用本地化后的完整文本覆盖流式占位气泡，
                         // 流结束瞬间 UI 即显示永久本地 URL（无需等刷新重拉消息）
-                        sendEvent(emitter, "message_end", Map.of(
-                            "messageId", messageId, "sceneCount", sceneCount, "content", localized));
+                        sendEvent(emitter, "message_end",
+                                messageEndPayload(conversation, messageId, sceneCount, localized));
                         if (!deferComplete) emitter.complete();
                         return;
                     }
@@ -545,8 +611,8 @@ public class AgentChatService {
                             log.warn("查询场景数失败，sceneCount 降级为 -1: conversationId={}, error={}",
                                     conversation.getId(), e.getMessage());
                         }
-                        sendEvent(emitter, "message_end", Map.of(
-                            "messageId", finishedMessageId, "sceneCount", sceneCount, "content", localized));
+                        sendEvent(emitter, "message_end",
+                                messageEndPayload(conversation, finishedMessageId, sceneCount, localized));
                         if (!deferComplete) emitter.complete();
                         return;
                     }
