@@ -72,31 +72,6 @@ export function AgentChatPanel() {
   // 当前会话标题：对话窗口顶部展示；无会话时占位
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
 
-  // 底部输入栏高度（可拖拽上下伸缩，min 90 / max 40vh）
-  const [inputAreaHeight, setInputAreaHeight] = useState(120);
-  const dragStartYRef = useRef<number | null>(null);
-  const dragStartHRef = useRef(0);
-
-  // 拖拽把手：mousedown 记录起点 → mousemove 计算增量（向上拖高度增大）→ clamp 上下限
-  const startInputDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStartYRef.current = e.clientY;
-    dragStartHRef.current = inputAreaHeight;
-    const onMove = (ev: MouseEvent) => {
-      if (dragStartYRef.current === null) return;
-      const next = dragStartHRef.current + (dragStartYRef.current - ev.clientY);
-      const maxH = Math.round(window.innerHeight * 0.4); // 40vh 上限
-      setInputAreaHeight(Math.max(90, Math.min(maxH, next))); // 上下限 clamp
-    };
-    const onUp = () => {
-      dragStartYRef.current = null;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -118,7 +93,7 @@ export function AgentChatPanel() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* 头部 */}
-      <div style={{ padding: '10px 14px', flexShrink: 0, borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* 当前会话标题（☾ Moon 智能体标题已迁移至会话栏顶部） */}
         <span
           title={currentTitle}
@@ -213,17 +188,8 @@ export function AgentChatPanel() {
         )}
       </div>
 
-      {/* 输入区（可拖拽上下伸缩，min 90 / max 40vh） */}
-      <div style={{ padding: '10px 10px 0', flexShrink: 0, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
-        {/* 拖拽把手：上下伸缩 */}
-        <div
-          onMouseDown={startInputDrag}
-          title="拖拽调整输入区高度"
-          style={{ height: 4, margin: '-10px -10px 6px', cursor: 'row-resize', background: 'transparent' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        />
-        <div style={{ height: inputAreaHeight, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* 输入区 */}
+      <div style={{ padding: 10, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
         {optimizeError && (
           <p style={{ margin: '0 0 6px', fontSize: 11, color: 'var(--color-error)' }}>⚠ {optimizeError}</p>
         )}
@@ -253,7 +219,7 @@ export function AgentChatPanel() {
             </button>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <button
             onClick={() => fileRef.current?.click()}
             title="上传参考图"
@@ -271,10 +237,11 @@ export function AgentChatPanel() {
             }}
             placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
             disabled={streaming || !!waitingHumanInput}
+            rows={2}
             style={{
-              flex: 1, minHeight: 0, padding: '8px 10px', border: '1px solid var(--color-hairline)',
+              flex: 1, padding: '8px 10px', border: '1px solid var(--color-hairline)',
               borderRadius: 'var(--rounded-md)', font: 'var(--text-body-sm)', color: 'var(--color-ink)',
-              resize: 'none', outline: 'none', background: 'var(--color-canvas)', overflowY: 'auto',
+              resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />
           {/* 右侧按钮组（纵向）：优化在上、发送在下 */}
@@ -301,8 +268,6 @@ export function AgentChatPanel() {
             >发送</button>
           </div>
         </div>
-        </div>
-        <div style={{ height: 10 }} /> {/* 底部留白 */}
       </div>
 
       {/* 清除聊天记录二次确认模态 */}
