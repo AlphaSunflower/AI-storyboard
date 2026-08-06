@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import gsap from 'gsap';
+import { SplitText } from 'gsap/SplitText';
+import { useGSAP } from '@gsap/react';
 import { useAuthStore } from '../stores/authStore';
+
+// 注册 SplitText 插件（GSAP 3.13+ 全插件免费）
+gsap.registerPlugin(SplitText);
 
 export function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -9,6 +15,41 @@ export function LoginPage() {
   const [displayName, setDisplayName] = useState('');
   const { login, register, isLoading, error } = useAuthStore();
   const navigate = useNavigate();
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // D9: 入场动画——卡片弹性浮入 + 标题逐字淡入（SplitText）+ 表单逐项淡入
+  useGSAP(() => {
+    if (!cardRef.current) return;
+    gsap.fromTo(
+      cardRef.current,
+      { y: 28, opacity: 0, scale: 0.97 },
+      { y: 0, opacity: 1, scale: 1, duration: 0.55, ease: 'back.out(1.4)' }
+    );
+    // 标题逐字动画：每字 y 上浮 + 淡入，完成后还原为纯文本（清理 SplitText 包裹的 span）
+    const title = cardRef.current.querySelector<HTMLElement>('h1');
+    const split = title ? new SplitText(title, { type: 'chars' }) : null;
+    if (split?.chars?.length) {
+      gsap.fromTo(
+        split.chars,
+        { y: 24, opacity: 0, scale: 0.9 },
+        {
+          y: 0, opacity: 1, scale: 1,
+          duration: 0.45,
+          stagger: 0.05,
+          ease: 'power2.out',
+          delay: 0.15,
+          onComplete: () => {
+            split.revert(); // 还原 DOM，避免残留 span
+          },
+        }
+      );
+    }
+    gsap.fromTo(
+      cardRef.current.querySelectorAll('form, p'),
+      { y: 14, opacity: 0 },
+      { y: 0, opacity: 1, duration: 0.4, stagger: 0.08, ease: 'power2.out', delay: 0.15 }
+    );
+  }, { scope: cardRef });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +74,7 @@ export function LoginPage() {
       }}
     >
       <div
+        ref={cardRef}
         style={{
           background: 'white',
           borderRadius: 'var(--rounded-lg)',

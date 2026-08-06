@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -12,6 +14,26 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { assets, loadAssets, deleteAsset } = useAgentStore();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  // B6: 资产网格入场——打开/翻页时缩略图 stagger 浮现
+  useGSAP(() => {
+    const grid = gridRef.current;
+    if (!grid || (assets?.records?.length ?? 0) === 0) return;
+    const tiles = Array.from(grid.children);
+    gsap.from(tiles, {
+      y: 12,
+      opacity: 0,
+      scale: 0.96,
+      duration: 0.3,
+      ease: 'power2.out',
+      stagger: 0.03,
+      onComplete: () => {
+        // 清除残留 transform：网格项含 fixed 灯箱场景（点击预览），需清理避免 containing block
+        tiles.forEach((el) => gsap.set(el, { clearProps: 'transform' }));
+      },
+    });
+  }, { dependencies: [open, assets?.records?.length, assets?.page], scope: gridRef });
 
   // 打开时刷新资产列表
   useEffect(() => {
@@ -71,7 +93,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                 暂无生成资产——生成的图片/视频会出现在这里
               </p>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 10 }}>
+              <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 10 }}>
                 {records.map((a) => (
                   <div
                     key={a.id}

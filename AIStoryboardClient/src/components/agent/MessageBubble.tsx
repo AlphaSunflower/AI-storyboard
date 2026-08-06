@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 
@@ -89,13 +91,31 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
   });
 }
 
-export function MessageBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
+export function MessageBubble({ role, content, streaming }: { role: 'user' | 'assistant'; content: string; streaming?: boolean }) {
   const isUser = role === 'user';
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+
+  // 新消息入场：从下往上轻微浮入（仅挂载时播放一次）
+  useGSAP(() => {
+    if (!bubbleRef.current) return;
+    gsap.fromTo(
+      bubbleRef.current,
+      { y: 12, opacity: 0, scale: 0.98 },
+      {
+        y: 0, opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out',
+        onComplete: () => {
+          // 清除残留 transform：气泡作为 containing block 会让内部 fixed 灯箱（ImagePreviewModal）错位
+          gsap.set(bubbleRef.current, { clearProps: 'transform' });
+        },
+      }
+    );
+  }, { scope: bubbleRef });
+
   return (
     <>
-    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
+    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
       <div
         style={{
           maxWidth: '82%',
@@ -112,6 +132,20 @@ export function MessageBubble({ role, content }: { role: 'user' | 'assistant'; c
         }}
       >
         {content ? renderContent(content, setPreviewUrl) : <span style={{ opacity: 0.6 }}>…</span>}
+        {/* C 组：流式回复中的打字机光标 */}
+        {streaming && content && (
+          <span
+            style={{
+              display: 'inline-block',
+              width: 2, height: 13,
+              marginLeft: 2,
+              verticalAlign: 'text-bottom',
+              background: isUser ? 'white' : 'var(--color-primary)',
+              animation: 'typeCursor 1s steps(1) infinite',
+            }}
+          />
+        )}
+        <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
     </div>
     <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />

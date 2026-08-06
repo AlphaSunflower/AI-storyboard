@@ -14,8 +14,39 @@ function toastStyle(type: ToastMessage['type']): React.CSSProperties {
     fontWeight: 500,
     boxShadow: '0 2px 8px rgba(0,0,0,.12)',
     pointerEvents: 'auto',
-    animation: 'fadeIn 0.2s ease',
   };
+}
+
+/** E12: 成功勾选 SVG——stroke 从 0 画到完整（1s 内的小仪式），失败保持 ✕ 文本 */
+function StatusIcon({ type }: { type: ToastMessage['type'] }) {
+  if (type !== 'success') {
+    return <span style={{ fontSize: 14 }}>❌</span>;
+  }
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#2e7d32"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        d="M4 12.5l5 5L20 6.5"
+        style={{
+          strokeDasharray: 24,
+          strokeDashoffset: 24,
+          animation: 'toastCheckDraw 0.6s ease-out 0.15s forwards',
+        }}
+      />
+      <style>{`
+        @keyframes toastCheckDraw { to { stroke-dashoffset: 0; } }
+      `}</style>
+    </svg>
+  );
 }
 
 export function ToastContainer() {
@@ -50,9 +81,7 @@ export function ToastContainer() {
             }}
             onClick={() => dismissToast(t.id)}
           >
-            <span style={{ fontSize: 14 }}>
-              {t.type === 'success' ? '✅' : '❌'}
-            </span>
+            <StatusIcon type={t.type} />
             <span>
               分镜{t.sceneNumber} {t.kind === 'image' ? '生图' : '生视频'}
               {t.type === 'success' ? '成功' : '失败'}

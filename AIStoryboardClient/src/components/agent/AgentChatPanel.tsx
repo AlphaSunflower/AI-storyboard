@@ -107,10 +107,37 @@ export function AgentChatPanel() {
           </p>
         )}
         {messages.map((m) => (
-          <MessageBubble key={m.id} role={m.role} content={m.content} />
+          <MessageBubble
+            key={m.id}
+            role={m.role}
+            content={m.content}
+            streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+          />
         ))}
         {streaming && !waitingHumanInput && (
-          <div style={{ color: 'var(--color-muted)', fontSize: 12, marginLeft: 4 }}>正在生成…</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-muted)', fontSize: 12, marginLeft: 4 }}>
+            <span>正在生成</span>
+            {/* C 组：思考中三点依次跳动 */}
+            <span style={{ display: 'inline-flex', gap: 2 }}>
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  style={{
+                    width: 3, height: 3, borderRadius: '50%',
+                    background: 'var(--color-muted)',
+                    animation: 'thinkingDot 1.2s ease-in-out infinite',
+                    animationDelay: `${i * 0.18}s`,
+                  }}
+                />
+              ))}
+            </span>
+            <style>{`
+              @keyframes thinkingDot {
+                0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+                30% { transform: translateY(-4px); opacity: 1; }
+              }
+            `}</style>
+          </div>
         )}
         {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
         {confirmResult && <ConfirmResultCard />}

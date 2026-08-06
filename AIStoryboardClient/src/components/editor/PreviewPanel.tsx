@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { ImagePreviewModal } from '../agent/ImagePreviewModal';
 
 function downloadAsset(url: string, filename: string) {
   fetch(url)
@@ -26,6 +29,45 @@ export function PreviewPanel() {
   const refs = scene ? getSceneRefs(scene.id) : { images: [] as string[], useForImage: true, useForVideo: true };
   const refInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<PreviewTab>('image');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null); // 图片点击放大预览（灯箱）
+  const panelRef = useRef<HTMLDivElement>(null);
+  const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
+  // A2 防重放：记录已冲印过的媒体 src，同一张图切 tab/切回不重复播放
+  const animatedSrcRef = useRef<string | null>(null);
+
+  // 稳定的 handler 引用：首帧渲染即挂上，内部转发到 contextSafe 包装的动画（layout effect 后生效）
+  const handleMediaLoaded = (e: React.SyntheticEvent<Element>) => {
+    mediaLoadedRef.current?.(e);
+  };
+
+  // 切换分镜时内容淡入 + 媒体加载完成"冲印"效果（模糊显影 → 清晰）
+  useGSAP((_context, contextSafe) => {
+    if (!panelRef.current || !scene) return;
+    // 整个预览区从下往上淡入
+    gsap.fromTo(
+      panelRef.current,
+      { opacity: 0, y: 12 },
+      {
+        opacity: 1, y: 0, duration: 0.32, ease: 'power2.out',
+        onComplete: () => {
+          // 清除残留 transform：panelRef 作为 containing block 会让内部 fixed 灯箱（ImagePreviewModal）错位
+          gsap.set(panelRef.current, { clearProps: 'transform' });
+        },
+      }
+    );
+    // 媒体加载完成：A2 冲印动画（blur 10px → 0 + 轻微放大归位），contextSafe 保证卸载后不再执行
+    mediaLoadedRef.current = contextSafe?.((e: React.SyntheticEvent<Element>) => {
+      const el = e.currentTarget as HTMLElement;
+      const src = el.getAttribute('src') ?? '';
+      if (animatedSrcRef.current === src) return; // 同一张图不重放
+      animatedSrcRef.current = src;
+      gsap.fromTo(
+        el,
+        { filter: 'blur(10px)', opacity: 0.3, scale: 1.06 },
+        { filter: 'blur(0px)', opacity: 1, scale: 1, duration: 0.7, ease: 'power2.out' }
+      );
+    }) ?? null;
+  }, { dependencies: [scene?.id, activeTab], scope: panelRef });
 
   // tab button style
   const tabStyle = (tab: PreviewTab): React.CSSProperties => ({
@@ -76,6 +118,7 @@ export function PreviewPanel() {
 
   return (
     <div
+      ref={panelRef}
       style={{
         flex: 1,
         padding: 'var(--space-md)',
@@ -129,6 +172,8 @@ export function PreviewPanel() {
               <img
                 src={assetUrl(scene.imageUrl)}
                 alt={`分镜 ${scene.sceneNumber} 预览`}
+                onClick={() => setPreviewUrl(scene.imageUrl)}
+                onLoad={handleMediaLoaded}
                 style={{
                   width: '100%',
                   maxHeight: 360,
@@ -137,6 +182,7 @@ export function PreviewPanel() {
                   border: '1px solid var(--color-hairline)',
                   background: 'var(--color-canvas)',
                   marginBottom: 8,
+                  cursor: 'zoom-in',
                 }}
               />
               <button onClick={() => downloadAsset(assetUrl(scene.imageUrl), `scene-${scene.sceneNumber}.png`)} style={btnDownload}>
@@ -172,6 +218,7 @@ export function PreviewPanel() {
               <video
                 src={assetUrl(scene.videoUrl)}
                 controls
+                onLoadedData={handleMediaLoaded}
                 style={{
                   width: '100%',
                   maxHeight: 360,
@@ -337,6 +384,9 @@ export function PreviewPanel() {
           )}
         </div>
       )}
+
+      {/* 图片点击放大预览（灯箱，与智能体窗口行为一致） */}
+      <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </div>
   );
 }

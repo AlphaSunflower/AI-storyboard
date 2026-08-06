@@ -1,4 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useLayoutEffect } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
@@ -72,6 +74,31 @@ function actionBtnStyle(status: string, url?: string, generating?: boolean): Rea
   };
 }
 
+/** E11: 进度数字滚动——从旧值平滑滚到新值（gsap 数字补间 + 卸载自动清理） */
+function AnimatedProgress({ value }: { value: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const displayRef = useRef(value);
+
+  useGSAP(() => {
+    const el = ref.current;
+    if (!el) return;
+    const from = displayRef.current;
+    const to = value;
+    displayRef.current = to;
+    const obj = { v: from };
+    gsap.to(obj, {
+      v: to,
+      duration: 0.4,
+      ease: 'power1.out',
+      onUpdate: () => {
+        if (el) el.textContent = `${Math.round(obj.v)}%`;
+      },
+    });
+  }, { dependencies: [value] });
+
+  return <span ref={ref}>{Math.round(displayRef.current)}%</span>;
+}
+
 export function SceneCard({
   scene,
   isSelected,
@@ -95,6 +122,11 @@ export function SceneCard({
 
   const refs = getSceneRefs(scene.id);
 
+  // 卡片根节点 ref（删除收起动画用）
+  const cardRef = useRef<HTMLDivElement>(null);
+  // 提示词折叠区 ref（A4 展开/收起高度动画用）
+  const promptPanelRef = useRef<HTMLDivElement>(null);
+
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
@@ -105,6 +137,38 @@ export function SceneCard({
   const refInputRef = useRef<HTMLInputElement>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
+  // A2: 未读红点 ref（生成完成弹入动画用）+ 前一状态记录（只在 false→true 时播）
+  const unreadDotRef = useRef<HTMLSpanElement>(null);
+  const prevUnreadRef = useRef(isUnread);
+
+  // A2: 生成完成通知动画——卡片边框 primary 光晕脉冲 + 红点弹入
+  useGSAP(() => {
+    const prev = prevUnreadRef.current;
+    prevUnreadRef.current = isUnread;
+    if (!isUnread || prev === isUnread || !cardRef.current) return; // 仅 false→true 且卡片在 DOM
+    gsap.fromTo(
+      cardRef.current,
+      { boxShadow: '0 0 0 0 rgba(204, 120, 92, 0.55)' },
+      {
+        boxShadow: '0 0 0 9px rgba(204, 120, 92, 0)',
+        duration: 0.9,
+        ease: 'power2.out',
+        onComplete: () => {
+          // 动画结束后恢复 React 状态对应的 boxShadow，避免残留光晕
+          gsap.set(cardRef.current, {
+            boxShadow: isSelected ? '0 2px 10px rgba(204, 120, 92, 0.18)' : 'none',
+          });
+        },
+      }
+    );
+    if (unreadDotRef.current) {
+      gsap.fromTo(
+        unreadDotRef.current,
+        { scale: 0 },
+        { scale: 1, duration: 0.4, ease: 'back.out(2.5)' }
+      );
+    }
+  }, { dependencies: [isUnread], scope: cardRef });
 
   const imageLabel = getImageLabel(scene, !!generatingImage);
   const videoLabel = getVideoLabel(scene, !!generatingVideo);
@@ -193,13 +257,84 @@ export function SceneCard({
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await deleteScene(scene.id);
+    const el = cardRef.current;
+    if (el) {
+      // 先播收起动画（高度折叠 + 淡出），动画结束后再真正删除
+      gsap.to(el, {
+        height: 0,
+        opacity: 0,
+        scale: 0.96,
+        marginBottom: 0,
+        paddingTop: 0,
+        paddingBottom: 0,
+        duration: 0.28,
+        ease: 'power2.in',
+        onComplete: () => {
+          deleteScene(scene.id);
+        },
+      });
+    } else {
+      await deleteScene(scene.id);
+    }
   };
 
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
     setExpanded(!expanded);
   };
+
+  // A3: 选中弹性脉冲（仅选中瞬间播放一次轻微放大回弹）
+  useGSAP(() => {
+    if (!isSelected || !cardRef.current) return;
+    gsap.fromTo(
+      cardRef.current,
+      { scale: 0.98 },
+      {
+        scale: 1,
+        duration: 0.3,
+        ease: 'back.out(2.5)',
+        onComplete: () => {
+          // 关键：清除残留 transform，否则卡片作为 containing block 会让内部 fixed 弹窗（完善图片/视频）错位被遮挡
+          gsap.set(cardRef.current, { clearProps: 'transform' });
+        },
+      }
+    );
+  }, { dependencies: [isSelected], scope: cardRef });
+
+  // A4: 提示词折叠区展开/收起高度动画（useLayoutEffect 保证首帧前设置初始高度，避免闪动）
+  useLayoutEffect(() => {
+    const panel = promptPanelRef.current;
+    if (!panel) return;
+    const ctx = gsap.context(() => {
+      if (expanded) {
+        // 先置为自然高度量取真实高度，再从未展开状态动画到目标高度
+        gsap.set(panel, { height: 'auto', opacity: 1, visibility: 'visible' });
+        const target = panel.offsetHeight;
+        gsap.fromTo(
+          panel,
+          { height: 0, opacity: 0 },
+          {
+            height: target,
+            opacity: 1,
+            duration: 0.3,
+            ease: 'power2.out',
+            onComplete: () => {
+              // 动画结束后释放内联 height，避免内容变化（如传参考图）后高度不自适应
+              gsap.set(panel, { height: 'auto' });
+            },
+          }
+        );
+      } else {
+        gsap.to(panel, {
+          height: 0,
+          opacity: 0,
+          duration: 0.25,
+          ease: 'power2.in',
+        });
+      }
+    }, panel);
+    return () => ctx.revert();
+  }, [expanded]);
 
   const handleSaveRename = async () => {
     const trimmed = sceneLabel.trim();
@@ -219,6 +354,7 @@ export function SceneCard({
 
   return (
     <div
+      ref={cardRef}
       onClick={onSelect}
       style={{
         padding: 12,
@@ -226,9 +362,11 @@ export function SceneCard({
         border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-hairline)',
         borderLeft: `3px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
         background: isSelected ? 'var(--color-surface-card)' : 'white',
+        boxShadow: isSelected ? '0 2px 10px rgba(204, 120, 92, 0.18)' : 'none',
         cursor: 'pointer',
         marginBottom: 8,
-        transition: 'border-color 0.15s',
+        transition: 'border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
+        transformOrigin: 'center',
       }}
     >
       {/* Header row: scene number + delete button */}
@@ -282,6 +420,7 @@ export function SceneCard({
                 {scene.soundDesign && !scene.soundDesign.startsWith('{') && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`}
                 {isUnread && (
                   <span
+                    ref={unreadDotRef}
                     style={{
                       width: 8,
                       height: 8,
@@ -364,8 +503,16 @@ export function SceneCard({
         {expanded ? '▲ 收起提示词' : '▼ 编辑提示词'}
       </button>
 
-      {/* Prompt editor (collapsible) */}
-      {expanded && (
+      {/* Prompt editor (collapsible) — 常驻 DOM，高度由 gsap 动画控制 */}
+      <div
+        ref={promptPanelRef}
+        style={{
+          overflow: 'hidden',
+          height: 0,
+          visibility: 'hidden',
+          marginBottom: 0,
+        }}
+      >
         <div style={{ marginBottom: 8 }}>
           <label
             style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
@@ -466,14 +613,16 @@ export function SceneCard({
             </label>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Video progress bar */}
       {generatingVideo && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
             <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>视频生成中</span>
-            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>{videoProgress}%</span>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>
+              <AnimatedProgress value={videoProgress} />
+            </span>
           </div>
           <div style={{ height: 4, borderRadius: 2, background: 'var(--color-surface-soft)', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${videoProgress}%`, borderRadius: 2, background: 'var(--color-primary)', transition: 'width 0.3s ease' }} />

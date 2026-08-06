@@ -1,9 +1,36 @@
+import { useRef } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { useProjectStore } from '../../stores/projectStore';
 
 const coralColor = '#FF6B6B';
 
 export function ProjectHistoryPanel() {
   const { projects, currentProject, loadProject } = useProjectStore();
+  const listRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
+
+  // B6: 项目列表入场——首屏/新增项 stagger 浮现（只动画新出现的项，避免全部重播）
+  useGSAP(() => {
+    const prev = prevCountRef.current;
+    const current = projects.length;
+    prevCountRef.current = current;
+    const container = listRef.current;
+    if (!container || current <= prev) return;
+    const items = Array.from(container.children).slice(-(current - prev));
+    if (items.length === 0) return;
+    gsap.from(items, {
+      x: -10,
+      opacity: 0,
+      duration: 0.3,
+      ease: 'power2.out',
+      stagger: 0.04,
+      onComplete: () => {
+        // 清除残留 transform，避免影响内部 fixed 弹窗
+        items.forEach((el) => gsap.set(el, { clearProps: 'transform' }));
+      },
+    });
+  }, { dependencies: [projects.length], scope: listRef });
 
   if (projects.length === 0) {
     return null;
@@ -11,6 +38,7 @@ export function ProjectHistoryPanel() {
 
   return (
     <div
+      ref={listRef}
       style={{
         overflowY: 'auto',
         flex: 1,
