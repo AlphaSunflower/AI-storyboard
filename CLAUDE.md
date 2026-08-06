@@ -94,7 +94,7 @@ private OffsetDateTime createdAt;
   - 创建：`POST {minimax-base-url}/v2/video_generation`，Bearer `MINIMAX_API_KEY`（.env，不提交），JSON body `{model:"MiniMax-H3", content:[{type:text,text:prompt}, {type:image_url,image_url:{url},role:first_frame}], resolution:"768P"|"2K", duration:4-15, ratio}` → `task_id`
   - 轮询：`GET /v2/query/video_generation/{task_id}` → `task.status`（queued/running→processing；succeeded→`content.url` **限时链接须立即转存** uploads/videos；failed→`error.message`）
   - **图生视频**：本地图（`/api/files/images/xxx.png`）读文件转 `data:image/png;base64,...` 内联（无需上传接口；请求体 ≤64MB）；图生视频 ratio 恒 `adaptive`
-  - **分辨率映射**：显式 `2K` 透传，其余统一 `768P`（Laozhang 的 720p 语义）；时长 clamp 4~15
+  - **分辨率**：恒用配置默认档 `minimaxVideoResolution`（默认 **768P** 最低档；用户要求默认最低分辨率，调用方传 720p/1080p/4K/2K 一律忽略，不 2K 透传——省钱且生成更快；换档改配置即可 768P|2K）；时长 clamp 4~15
   - 错误结构 OAI 风格 `{error:{message}}`，透传前端；429/5xx 轻量重试 3 次（无需 Laozhang 的 10 次换池）
 - **配置**：`ai.video-provider`、`ai.laozhang.minimax-api-key`、`ai.laozhang.minimax-base-url`（默认 api.minimaxi.com）、`minimax-video-model`（MiniMax-H3）、`minimax-video-resolution`（768P）；切回 Laozhang 只需 `ai.video-provider=laozhang`
 - **MCP 文档检索**：MiniMax 文档中心 MCP = `https://platform.minimaxi.com/docs/mcp`（HTTP transport，search + 虚拟文件系统查文档/OpenAPI spec），已配置 Hermes `mcp_servers.minimax_docs`
