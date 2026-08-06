@@ -44,8 +44,8 @@ export function AgentConversationList() {
     <div
       style={{
         position: 'relative',
-        width: 138,
-        minWidth: 138,
+        width: 180,
+        minWidth: 180,
         borderRight: '1px solid var(--color-hairline)',
         background: 'var(--color-surface-soft)',
         display: 'flex',
@@ -53,6 +53,19 @@ export function AgentConversationList() {
         overflowY: 'auto',
       }}
     >
+      {/* ☾ Moon 智能体标题（迁移自对话窗口头部） */}
+      <div
+        style={{
+          padding: '12px 12px 8px',
+          borderBottom: '1px solid var(--color-hairline)',
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'var(--color-ink)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        ☾ Moon 智能体
+      </div>
       {/* 新建 */}
       <button
         onClick={() => createConversation()}
