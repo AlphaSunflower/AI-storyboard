@@ -6,7 +6,7 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 
 - **Backend**: Spring Boot 4.0.0, JDK 21, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, JDK HttpClient
 - **Frontend**: React 19 + TypeScript 6 + Vite 8, Zustand 5, Tailwind CSS 4, Axios (timeout 120s), React Router 7
-- **AI**: Laozhang API v2 (`api2.laozhang.ai`), models: `gpt-image-2`, `gemini-3-flash-preview`, `veo-3.1-fast`
+- **AI**: Laozhang API v2 (`api2.laozhang.ai`)，models: `gpt-image-2`, `gemini-3-flash-preview`, `veo-3.1-fast`；视频生成双通道：**MiniMax V2**（默认，`MiniMax-H3`，api.minimaxi.com）+ Laozhang（保留可切回，`ai.video-provider`）
 - **Auth**: JWT (jjwt), scrypt password hashing (lambdaworks 1.4.0), cross-system token exchange via `/api/auth/unlogin`
 - **Ports**: Backend 8082, Frontend 5173
 
@@ -86,6 +86,18 @@ private OffsetDateTime createdAt;
 - **Image size**: OpenAI format `"1024x1024"` (NOT `"2K"`)
 - **Image response**: prefer `data[0].b64_json`, fallback to `data[0].url`. URLs may be `data:image/png;base64,...` — strip prefix before Base64 decode
 - **Video generation**: Async — POST creates task → returns `taskId` → poll `GET /v1/videos/{taskId}` every 5s, timeout 5min
+
+### 3.5 视频生成双通道（MiniMax V2 默认 + Laozhang 保留）
+
+- **分发**：`VideoGenerationService` 为门面，按 `ai.video-provider`（`minimax` 默认 | `laozhang`）分发到 `MinimaxVideoService` 或原 Laozhang 逻辑；**调用方（AIController / DifyAgentController / AgentGenerationService）零改动**
+- **MiniMax V2 链路**（`MinimaxVideoService`，实测 2026-08-06 全通：创建 200 → 轮询 queued/running/succeeded ~2min → 下载 200）：
+  - 创建：`POST {minimax-base-url}/v2/video_generation`，Bearer `MINIMAX_API_KEY`（.env，不提交），JSON body `{model:"MiniMax-H3", content:[{type:text,text:prompt}, {type:image_url,image_url:{url},role:first_frame}], resolution:"768P"|"2K", duration:4-15, ratio}` → `task_id`
+  - 轮询：`GET /v2/query/video_generation/{task_id}` → `task.status`（queued/running→processing；succeeded→`content.url` **限时链接须立即转存** uploads/videos；failed→`error.message`）
+  - **图生视频**：本地图（`/api/files/images/xxx.png`）读文件转 `data:image/png;base64,...` 内联（无需上传接口；请求体 ≤64MB）；图生视频 ratio 恒 `adaptive`
+  - **分辨率映射**：显式 `2K` 透传，其余统一 `768P`（Laozhang 的 720p 语义）；时长 clamp 4~15
+  - 错误结构 OAI 风格 `{error:{message}}`，透传前端；429/5xx 轻量重试 3 次（无需 Laozhang 的 10 次换池）
+- **配置**：`ai.video-provider`、`ai.laozhang.minimax-api-key`、`ai.laozhang.minimax-base-url`（默认 api.minimaxi.com）、`minimax-video-model`（MiniMax-H3）、`minimax-video-resolution`（768P）；切回 Laozhang 只需 `ai.video-provider=laozhang`
+- **MCP 文档检索**：MiniMax 文档中心 MCP = `https://platform.minimaxi.com/docs/mcp`（HTTP transport，search + 虚拟文件系统查文档/OpenAPI spec），已配置 Hermes `mcp_servers.minimax_docs`
 
 ### 4. Image local storage & serving
 
