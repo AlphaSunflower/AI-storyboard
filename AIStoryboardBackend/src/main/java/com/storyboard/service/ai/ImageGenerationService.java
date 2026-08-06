@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -28,6 +30,16 @@ import java.util.*;
  */
 @Service
 public class ImageGenerationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ImageGenerationService.class);
+
+    /**
+     * 合法生图尺寸白名单（OpenAI gpt-image 系列，Laozhang 网关仅认这些）。
+     * Dify 工作流的 LLM 可能输出 DALL-E 3 尺寸（1792x1024 / 1024x1792）或
+     * "2K"/"4K" 等变体，上游返回 400 "不合法的size"（实测 2026-08-04 复现），
+     * 故白名单之外的尺寸一律降级为默认值，保证请求必达。
+     */
+    private static final Set<String> VALID_IMAGE_SIZES = Set.of("1024x1024", "1536x1024", "1024x1536");
 
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
@@ -120,13 +132,31 @@ public class ImageGenerationService {
     //  注意：gpt-image-2 的 generations 接口不支持 reference_images
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * 图片请求带超时重试：Laozhang 偶发响应 >120s（实测 2026-08-06 多次出现），
+     * 直接失败体验差；超时后重建请求重试 1 次（JDK HttpClient 的 HttpRequest 发送后
+     * 不可复用，重试必须由 factory 重建）。仅 HttpTimeoutException 触发重试，
+     * 上游业务错误（4xx/5xx）不重试——重试无意义且会放大费用。
+     */
+    private HttpResponse<String> sendImageWithRetry(java.util.function.Supplier<HttpRequest> requestFactory)
+            throws Exception {
+        try {
+            return httpClient.send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
+        } catch (java.net.http.HttpTimeoutException e) {
+            log.warn("图片请求超时({}), 重建请求重试 1 次", e.getMessage());
+            return httpClient.send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
+        }
+    }
+
     private String callOpenAIImage(String model, String prompt, String size, String quality,
                                     String aspectRatio) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("model", model);
         body.put("prompt", prompt);
         body.put("n", 1);
-        body.put("size", size != null ? size : config.getDefaultImageSize());
+        // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
+        // 避免上游返回 400 "不合法的size"
+        body.put("size", normalizeImageSize(size, config.getDefaultImageSize()));
         if (quality != null && !quality.isEmpty()) {
             body.put("quality", quality);
         }
@@ -136,15 +166,14 @@ public class ImageGenerationService {
                 : config.getApiKey();
 
         String requestBody = objectMapper.writeValueAsString(body);
-        HttpRequest request = HttpRequest.newBuilder()
+        // 超时 180s + 超时重试 1 次（Laozhang 偶发响应 >120s，实测多次出现；重试大概率成功）
+        HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
             .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointImageGenerations()))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer " + apiKey)
-            .timeout(Duration.ofSeconds(120))
+            .timeout(Duration.ofSeconds(180))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build();
-
-        HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            .build());
         if (resp.statusCode() != 200) {
             throw new RuntimeException("Image API returned " + resp.statusCode() + ": " + resp.body());
         }
@@ -201,17 +230,16 @@ public class ImageGenerationService {
             .field("prompt", prompt)
             .file("image", imageFilename, guessImageContentType(imageFilename), imageBytes);
 
-        // 3. 发送请求
+        // 3. 发送请求（multipart body 一次性构建；超时 180s + 重试 1 次）
         String apiKey = config.getApiKey();
-        HttpRequest request = HttpRequest.newBuilder()
+        byte[] bodyBytes = mp.build();
+        HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
             .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointImageEdits()))
             .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
             .header("Authorization", "Bearer " + apiKey)
-            .timeout(Duration.ofSeconds(120))
-            .POST(HttpRequest.BodyPublishers.ofByteArray(mp.build()))
-            .build();
-
-        HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            .timeout(Duration.ofSeconds(180))
+            .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
+            .build());
         if (resp.statusCode() != 200) {
             throw new RuntimeException("Image Edit API returned " + resp.statusCode() + ": " + resp.body());
         }
@@ -238,6 +266,31 @@ public class ImageGenerationService {
     private String extractFilename(String urlPath) {
         int idx = urlPath.lastIndexOf('/');
         return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
+    }
+
+    /**
+     * 生图尺寸白名单归一化（包内静态，便于直接单测）：
+     * 1. 传入值本身在白名单 → 原样返回
+     * 2. 传入值是"多选列表"（LLM 常把模板备选输出成一串，实测 Dify 工作流传出
+     *    "1024x1024 / 1536x1024 / 1024x1536"）→ 按 | / 逗号（含中文）等分隔符
+     *    拆分，取第一个白名单内的值
+     * 3. 拆不出合法值（2K/4K/DALL-E 3 尺寸 1792x1024 等）→ 降级 fallback
+     * 避免上游返回 400/500 "不合法的size"。
+     */
+    static String normalizeImageSize(String size, String fallback) {
+        if (size == null || size.isBlank()) return fallback;
+        String trimmed = size.trim();
+        if (VALID_IMAGE_SIZES.contains(trimmed)) return trimmed;
+        // 多选列表：拆分后取第一个白名单值
+        for (String token : trimmed.split("[|/,，、;；\\s]+")) {
+            String t = token.trim();
+            if (VALID_IMAGE_SIZES.contains(t)) {
+                log.warn("图片生成 size={} 为多选列表, 取第一个合法值 {}", size, t);
+                return t;
+            }
+        }
+        log.warn("图片生成 size={} 上游不支持, 降级为 {}", size, fallback);
+        return fallback;
     }
 
     /** 解码 base64 data URL 为字节数组 */
