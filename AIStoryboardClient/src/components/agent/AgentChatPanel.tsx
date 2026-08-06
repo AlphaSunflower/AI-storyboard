@@ -237,7 +237,7 @@ export function AgentChatPanel() {
             }}
             placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
             disabled={streaming || !!waitingHumanInput}
-            rows={2}
+            rows={3}
             style={{
               flex: 1, padding: '8px 10px', border: '1px solid var(--color-hairline)',
               borderRadius: 'var(--rounded-md)', font: 'var(--text-body-sm)', color: 'var(--color-ink)',
