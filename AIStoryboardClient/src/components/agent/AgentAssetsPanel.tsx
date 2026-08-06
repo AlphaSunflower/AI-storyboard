@@ -1,48 +1,121 @@
+import { useEffect, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
+import { ImagePreviewModal } from './ImagePreviewModal';
 
-export function AgentAssetsPanel() {
+/**
+ * 当前对话的生成资产弹窗（文件夹图标入口，不再常驻底部）：
+ * - 打开时刷新资产列表（loadAssets）
+ * - 网格缩略图 + 删除 + 分页；点击图片可预览大图
+ * - 遮罩点击 / ✕ / ESC 关闭
+ */
+export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { assets, loadAssets, deleteAsset } = useAgentStore();
-  if (!assets || assets.records.length === 0) return null;
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const totalPages = Math.max(1, Math.ceil(assets.total / assets.size));
+  // 打开时刷新资产列表
+  useEffect(() => {
+    if (open) void loadAssets();
+  }, [open, loadAssets]);
+
+  // ESC 关闭
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  const records = assets?.records ?? [];
+  const total = assets?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / (assets?.size ?? 20)));
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-hairline)', background: 'white', maxHeight: 200, overflowY: 'auto', padding: '10px 14px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
-          生成资产（{assets.total}）
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--color-muted-soft)' }}>
-          {assets.page} / {totalPages}
-        </span>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 8 }}>
-        {assets.records.map((a) => (
-          <div key={a.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: 'var(--color-surface-soft)' }}>
-            {a.type === 'video' ? (
-              <video src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
-            ) : (
-              <img src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            )}
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 300,
+          background: 'rgba(20, 20, 19, 0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: 540, maxWidth: '94vw', maxHeight: '72vh',
+            background: 'white', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}
+        >
+          {/* 头部 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--color-hairline)' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+              📁 生成资产（{total}）
+            </span>
             <button
-              onClick={() => { if (window.confirm('删除该资产？')) deleteAsset(a.id); }}
-              title="删除"
-              style={{
-                position: 'absolute', top: 2, right: 2, width: 18, height: 18,
-                border: 'none', borderRadius: '50%', background: 'rgba(198, 69, 69, 0.9)',
-                color: 'white', fontSize: 10, cursor: 'pointer', lineHeight: 1,
-              }}
-            >×</button>
+              onClick={onClose}
+              aria-label="关闭资产面板"
+              style={{ width: 28, height: 28, border: 'none', borderRadius: '50%', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ✕
+            </button>
           </div>
-        ))}
-      </div>
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 8 }}>
-          <button disabled={assets.page <= 1} onClick={() => loadAssets(assets.page - 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>上一页</button>
-          <button disabled={assets.page >= totalPages} onClick={() => loadAssets(assets.page + 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>下一页</button>
+          {/* 网格 */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+            {records.length === 0 ? (
+              <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
+                暂无生成资产——生成的图片/视频会出现在这里
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 10 }}>
+                {records.map((a) => (
+                  <div
+                    key={a.id}
+                    onClick={() => { if (a.type !== 'video') setPreviewUrl(a.url); }}
+                    title={a.type === 'video' ? '视频' : '点击预览大图'}
+                    style={{
+                      position: 'relative', aspectRatio: '1', borderRadius: 10, overflow: 'hidden',
+                      background: 'var(--color-surface-soft)',
+                      cursor: a.type === 'video' ? 'default' : 'zoom-in',
+                    }}
+                  >
+                    {a.type === 'video' ? (
+                      <video src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
+                    ) : (
+                      <img src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (window.confirm('删除该资产？')) void deleteAsset(a.id); }}
+                      title="删除"
+                      style={{
+                        position: 'absolute', top: 4, right: 4, width: 18, height: 18,
+                        border: 'none', borderRadius: '50%', background: 'rgba(198, 69, 69, 0.9)',
+                        color: 'white', fontSize: 10, cursor: 'pointer', lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* 分页 */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '8px 0 12px', borderTop: '1px solid var(--color-hairline)' }}>
+              <button disabled={(assets?.page ?? 1) <= 1} onClick={() => void loadAssets((assets?.page ?? 1) - 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>上一页</button>
+              <span style={{ fontSize: 11, color: 'var(--color-muted)', alignSelf: 'center' }}>{assets?.page ?? 1} / {totalPages}</span>
+              <button disabled={(assets?.page ?? 1) >= totalPages} onClick={() => void loadAssets((assets?.page ?? 1) + 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>下一页</button>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+      {/* 缩略图点击预览大图 */}
+      <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+    </>
   );
 }

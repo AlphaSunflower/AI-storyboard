@@ -3,11 +3,14 @@ import { useAgentStore } from '../../stores/agentStore';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
+import { AgentAssetsModal } from './AgentAssetsPanel';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets } = useAgentStore();
   const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  // 资产弹窗（文件夹图标入口，资产不再常驻底部）
+  const [assetsOpen, setAssetsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // M9：是否处于近底位置（距底部 <80px）；用户上翻查看历史时暂停自动滚底跟随
   const nearBottomRef = useRef(true);
@@ -61,16 +64,31 @@ export function AgentChatPanel() {
       {/* 头部 */}
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-ink)' }}>☾ Moon 智能体</span>
-        <button
-          onClick={() => setConfirmClear(true)}
-          disabled={streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0}
-          title={streaming || waitingHumanInput ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
-          style={{
-            border: 'none', background: 'none', color: 'var(--color-muted)',
-            fontSize: 11, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
-            opacity: streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0 ? 0.4 : 1,
-          }}
-        >🧹 清除聊天记录</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* 文件夹图标：查看当前对话的生成资产（弹窗） */}
+          <button
+            onClick={() => { setAssetsOpen(true); void loadAssets(); }}
+            disabled={!activeConversationId}
+            title="查看当前对话的生成资产"
+            style={{
+              border: 'none', background: 'none', color: 'var(--color-muted)',
+              fontSize: 12, cursor: activeConversationId ? 'pointer' : 'not-allowed',
+              padding: '2px 6px', borderRadius: 4, opacity: activeConversationId ? 1 : 0.4,
+            }}
+          >
+            📁 资产{assets && assets.total > 0 ? ` (${assets.total})` : ''}
+          </button>
+          <button
+            onClick={() => setConfirmClear(true)}
+            disabled={streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0}
+            title={streaming || waitingHumanInput ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
+            style={{
+              border: 'none', background: 'none', color: 'var(--color-muted)',
+              fontSize: 11, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+              opacity: streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0 ? 0.4 : 1,
+            }}
+          >🧹 清除聊天记录</button>
+        </div>
       </div>
 
       {/* 消息流 */}
@@ -221,6 +239,9 @@ export function AgentChatPanel() {
           </div>
         </div>
       )}
+
+      {/* 资产弹窗（文件夹图标入口） */}
+      <AgentAssetsModal open={assetsOpen} onClose={() => setAssetsOpen(false)} />
     </div>
   );
 }

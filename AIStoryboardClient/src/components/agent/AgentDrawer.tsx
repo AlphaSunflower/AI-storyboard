@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { AgentConversationList } from './AgentConversationList';
 import { AgentChatPanel } from './AgentChatPanel';
-import { AgentAssetsPanel } from './AgentAssetsPanel';
 
 export function AgentDrawer() {
   const windowOpen = useAgentStore((s) => s.windowOpen);
@@ -54,7 +53,6 @@ export function AgentDrawer() {
         <AgentConversationList />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <AgentChatPanel />
-          <AgentAssetsPanel />
         </div>
       </div>
     </div>
