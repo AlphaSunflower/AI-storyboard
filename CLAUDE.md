@@ -284,6 +284,13 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **一次性推送**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end`（含 workflow_finished 恢复流）发送时 `remove` 取走并附 `title` 字段；**只推一次**（取走即删），不做轮询/持续推送；极端时序（标题未生成完流已结束）该轮不推送，前端下次拉取会话列表自然可见
 - **前端**：`agentStore.ts` 两个 `message_end` 分支（sendMessage / submitHumanInput）收到 `e.title` 就地更新 `conversations` 列表（守卫 `c.title !== e.title` 防重复 set）；`SseEvent.title` 类型已存在，零类型改动
 
+### 提示词优化（/api/agent/prompt/optimize）
+
+- **端点**：`POST /api/agent/prompt/optimize`，请求 `{content}`，响应 `{optimized: string}`；JWT 鉴权（`/api/agent/**` 非白名单）；**不落库、不关联会话**（纯文本转换工具）
+- **校验**：`content.trim().length < 6` → 40001「内容至少 6 个字符才能优化」（与前端按钮禁用条件一致，防绕过）
+- **实现**：`PromptOptimizeService` 调 Laozhang chat completions（`baseUrlVision` + `defaultVisionModel` 质量优先，不传 thinking_level；超时 60s）；**优化方向由 LLM 自行判断**（草稿可能是剧情/图片/视频或综合需求），单文本输出不强制 JSON——规避解析失败风险
+- **前端交互**（`AgentChatPanel` 组件本地 state，无弹窗）：输入 ≥6 字符 → 点「✨ 优化」→ `optimizing` 置位（**优化按钮与发送按钮同时禁用**，用户明确要求）→ 完成 `setText(optimized)` **自动覆盖输入框原文** → 失败保持原文 + 轻提示「优化失败，请重试」；迭代优化天然支持（再点一次）
+
 ### DifyAgentController 改造（消灭孤儿 scene）
 
 - **无 sceneId 时不再创建临时 scene**（旧 `scene_number=0` 孤儿记录），改写入 `agent_assets`：
