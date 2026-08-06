@@ -35,6 +35,8 @@ public class AiConfigProperties {
     private String sora2OfficialApiKey;
     /** Dify Agent API 密钥 */
     private String difyApiKey;
+    /** MiniMax 视频生成 API 密钥（V2 接口 Bearer 鉴权；.env 提供，不提交） */
+    private String minimaxApiKey;
 
     // ═══════════════════════════════════════════════════════════
     //  API 基础地址
@@ -46,6 +48,8 @@ public class AiConfigProperties {
     private String baseUrlGemini;
     /** Chat Completions 接口基础地址（用于脚本生成的 Vision 模型） */
     private String baseUrlVision;
+    /** MiniMax 视频生成基础地址（V2 接口；国内 api.minimaxi.com，国际 api.minimax.io） */
+    private String minimaxBaseUrl = "https://api.minimaxi.com";
     /** Dify 自托管基础地址（对话代理 /v1/chat-messages 用） */
     private String difyBaseUrl;
 
@@ -100,6 +104,14 @@ public class AiConfigProperties {
     /** 默认生成视频宽高比 */
     private String defaultVideoAspectRatio = "16:9";
 
+    // ── 视频生成 Provider（Laozhang / MiniMax 双通道）──
+    /** 视频生成通道：minimax（默认）| laozhang（保留可切回） */
+    private String videoProvider = "minimax";
+    /** MiniMax 视频生成模型 */
+    private String minimaxVideoModel = "MiniMax-H3";
+    /** MiniMax 视频生成分辨率档（768P | 2K） */
+    private String minimaxVideoResolution = "768P";
+
     // ═══════════════════════════════════════════════════════════
     //  文件存储路径
     // ═══════════════════════════════════════════════════════════
@@ -134,6 +146,9 @@ public class AiConfigProperties {
     public String getDifyApiKey() { return difyApiKey; }
     public void setDifyApiKey(String s) { this.difyApiKey = s; }
 
+    public String getMinimaxApiKey() { return minimaxApiKey; }
+    public void setMinimaxApiKey(String s) { this.minimaxApiKey = s; }
+
     // ── 基础地址 ──
     public String getBaseUrlOpenai() { return baseUrlOpenai; }
     public void setBaseUrlOpenai(String s) { this.baseUrlOpenai = s; }
@@ -146,6 +161,9 @@ public class AiConfigProperties {
 
     public String getDifyBaseUrl() { return difyBaseUrl; }
     public void setDifyBaseUrl(String s) { this.difyBaseUrl = s; }
+
+    public String getMinimaxBaseUrl() { return minimaxBaseUrl; }
+    public void setMinimaxBaseUrl(String s) { this.minimaxBaseUrl = s; }
 
     // ── 端点路径 ──
     public String getEndpointImageGenerations() { return endpointImageGenerations; }
@@ -197,6 +215,16 @@ public class AiConfigProperties {
 
     public String getDefaultVideoAspectRatio() { return defaultVideoAspectRatio; }
     public void setDefaultVideoAspectRatio(String s) { this.defaultVideoAspectRatio = s; }
+
+    // ── 视频 Provider ──
+    public String getVideoProvider() { return videoProvider; }
+    public void setVideoProvider(String s) { this.videoProvider = s; }
+
+    public String getMinimaxVideoModel() { return minimaxVideoModel; }
+    public void setMinimaxVideoModel(String s) { this.minimaxVideoModel = s; }
+
+    public String getMinimaxVideoResolution() { return minimaxVideoResolution; }
+    public void setMinimaxVideoResolution(String s) { this.minimaxVideoResolution = s; }
 
     // ── 文件存储 ──
     public String getVideoUploadDir() { return videoUploadDir; }

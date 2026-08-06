@@ -36,6 +36,7 @@ public class VideoGenerationService {
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
+    private final MinimaxVideoService minimaxVideoService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -43,11 +44,13 @@ public class VideoGenerationService {
 
     public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
                                    AgentAssetMapper agentAssetMapper,
-                                   FileStorageService fileStorageService) {
+                                   FileStorageService fileStorageService,
+                                   MinimaxVideoService minimaxVideoService) {
         this.config = config;
         this.sceneMapper = sceneMapper;
         this.agentAssetMapper = agentAssetMapper;
         this.fileStorageService = fileStorageService;
+        this.minimaxVideoService = minimaxVideoService;
     }
 
     /**
@@ -57,6 +60,11 @@ public class VideoGenerationService {
                                    String resolution, String size, String aspectRatio,
                                    Integer duration, String negativePrompt, Long seed,
                                    List<String> referenceImages, String generatedImageUrl) {
+        // Provider 分发：minimax（默认）走 MiniMax V2 链路，laozhang 走下方原逻辑（保留可切回）
+        if ("minimax".equals(config.getVideoProvider())) {
+            return minimaxVideoService.createVideoTask(sceneId, prompt, alias, resolution, size,
+                    aspectRatio, duration, negativePrompt, seed, referenceImages, generatedImageUrl);
+        }
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
@@ -194,6 +202,10 @@ public class VideoGenerationService {
      * 轮询视频任务状态，完成后自动下载视频文件。
      */
     public Map<String, String> pollVideoTask(String taskId) {
+        // Provider 分发：minimax（默认）走 MiniMax V2 链路，laozhang 走下方原逻辑（保留可切回）
+        if ("minimax".equals(config.getVideoProvider())) {
+            return minimaxVideoService.pollVideoTask(taskId);
+        }
         try {
             String baseUrl = config.getBaseUrlOpenai();
             String respBody = callGet(baseUrl + config.getEndpointVideoStatus() + taskId);
