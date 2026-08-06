@@ -282,6 +282,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
+            // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
+            if (typeof e.title === 'string' && e.title) {
+              set((s) => ({
+                conversations: s.conversations.map((c) =>
+                  c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
+              }));
+            }
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
@@ -398,6 +405,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
+            // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
+            if (typeof e.title === 'string' && e.title) {
+              set((s) => ({
+                conversations: s.conversations.map((c) =>
+                  c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
+              }));
+            }
             if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
               get().setAgentGeneratedScenes(true);
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
