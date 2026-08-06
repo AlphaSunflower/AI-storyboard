@@ -263,7 +263,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | `message` | `content` | 回答增量（前端逐段拼接打字机效果） |
 | `workflow` | `title`, `status` | 节点进度（`node_started` / `node_finished`） |
 | `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机 |
-| `message_end` | `messageId`, `sceneCount` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定 |
+| `message_end` | `messageId`, `sceneCount`, `content`, `title?` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定；`title` 为首条消息异步 AI 重命名的新标题（**一次性**：仅重命名完成的那一轮携带，取走即删，不做轮询） |
 | `error` | `code`, `message` | 失败结束；`message` 已脱敏（"Dify 服务异常，请稍后重试"） |
 
 - Dify 原始流中的 `ping`、`node_started/finished` 内部 `inputs`/`outputs`、`tts_message` 等事件一律过滤，不转发到前端
@@ -274,6 +274,15 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **事务语义**（重要）：user 消息用 `TransactionTemplate` + `PROPAGATION_REQUIRES_NEW` 独立事务立即提交；Dify 调用失败时 **user 消息保留**、抛业务异常；Dify 成功后 `transactionTemplate.execute` 内完成"回填 dify_conversation_id + 保存 assistant 消息"（失败整体回滚）
 - Dify 上游错误完整信息只进日志，抛给客户端的文案脱敏（"Dify 服务异常，请稍后重试"）
 - 配置：`ai.laozhang.dify-base-url`（默认 `http://localhost`）+ `ai.laozhang.dify-api-key`（复用既有字段）
+
+### 首条消息异步 AI 重命名标题
+
+- **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，user 消息落库后调用）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
+- **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞 Dify 主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
+- **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision` + `defaultVisionModel`，超时 30s），请求体带 `thinking_level: minimal`（Flash 系最低思考级别≈不思考；老张网关透传写法以控制台为准，400 时降级 `"thinking": false` 或移除——实际可用写法以该类常量注释为准）
+- **落库（并发坑）**：Dify 线程持有同一 `AgentConversation` 实体并整实体 updateById（回填 difyConversationId），标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉
+- **一次性推送**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end`（含 workflow_finished 恢复流）发送时 `remove` 取走并附 `title` 字段；**只推一次**（取走即删），不做轮询/持续推送；极端时序（标题未生成完流已结束）该轮不推送，前端下次拉取会话列表自然可见
+- **前端**：`agentStore.ts` 两个 `message_end` 分支（sendMessage / submitHumanInput）收到 `e.title` 就地更新 `conversations` 列表（守卫 `c.title !== e.title` 防重复 set）；`SseEvent.title` 类型已存在，零类型改动
 
 ### DifyAgentController 改造（消灭孤儿 scene）
 
