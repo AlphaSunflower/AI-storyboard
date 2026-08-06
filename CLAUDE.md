@@ -279,7 +279,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 - **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，user 消息落库后调用）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
 - **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞 Dify 主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
-- **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision` + `defaultVisionModel`，超时 30s），请求体带 `thinking_level: minimal`（Flash 系最低思考级别≈不思考；老张网关透传写法以控制台为准，400 时降级 `"thinking": false` 或移除——实际可用写法以该类常量注释为准）
+- **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision`，超时 30s），模型固定 `gemini-3.5-flash-lite`（**实测**：老张网关对 preview 系模型的一切思考参数均不透传/拒绝，无法关思考；flash-lite 默认零思考 token，即"不思考模式"），请求体显式带 `thinking_level: minimal`（flash-lite 接受，语义自文档化）
 - **落库（并发坑）**：Dify 线程持有同一 `AgentConversation` 实体并整实体 updateById（回填 difyConversationId），标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉
 - **一次性推送**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end`（含 workflow_finished 恢复流）发送时 `remove` 取走并附 `title` 字段；**只推一次**（取走即删），不做轮询/持续推送；极端时序（标题未生成完流已结束）该轮不推送，前端下次拉取会话列表自然可见
 - **前端**：`agentStore.ts` 两个 `message_end` 分支（sendMessage / submitHumanInput）收到 `e.title` 就地更新 `conversations` 列表（守卫 `c.title !== e.title` 防重复 set）；`SseEvent.title` 类型已存在，零类型改动

@@ -29,8 +29,9 @@ import java.util.Map;
  *
  * 设计要点：
  * - 全程在虚拟线程中异步执行，任何失败只记日志、绝不抛出（不阻塞 Dify 对话主流程）；
- * - 模型固定复用 {@link AiConfigProperties#getDefaultVisionModel()}（gemini flash 系）；
- * - 请求体附带 thinking_level 不思考参数（Flash 系 minimal 为最低思考级别，见常量注释）；
+ * - 模型固定用 {@code TITLE_MODEL}（gemini-3.5-flash-lite，默认零思考 token——实测老张网关
+ *   无法关闭 preview 系模型的思考，故选 flash-lite 实现"不思考模式"，见常量注释）；
+ * - 请求体显式携带 thinking_level 不思考参数（"minimal"，flash-lite 接受，语义自文档化）；
  * - 更新用 LambdaUpdateWrapper 只动 title/updatedAt 两列，并带「仍为默认值」原子条件——
  *   Dify 线程持有同一 AgentConversation 实体实例并会整实体 updateById（回填
  *   difyConversationId），此处若复用该实例整实体更新会把对方刚写的新字段冲掉。
@@ -44,11 +45,16 @@ public class ConversationTitleService {
     private static final String DEFAULT_TITLE = "新对话";
 
     /**
-     * 不思考模式思考级别：minimal 为 Gemini 3 Flash 系独有最低级别（Pro 最低只能 low）。
-     * 老张 OpenAI 兼容网关的透传写法以控制台为准，联调验证时若返回 400，
-     * 改为 "thinking": false（OpenAI 兼容通用写法）重试；仍不接受则移除该字段。
-     * 验证结果出来后把实际可用写法固化到本注释与 CLAUDE.md。
+     * 标题生成专用模型：gemini-3.5-flash-lite（默认零思考 token，即真正的"不思考模式"）。
+     *
+     * 实测结论（2026-08 联调）：
+     * - 老张网关对 gemini-3-flash-preview 的一切思考参数（thinking_level / thinking / thinking_config）
+     *   均不透传或拒绝（reasoning_tokens 仍 500+），preview 上无法关闭思考；
+     * - gemini-3.5-flash-lite 默认 minimal 思考（usage 无 reasoning_tokens），响应极快，
+     *   是老张官方文档推荐给分类/提取/高吞吐低成本任务的模型，标题生成完全匹配；
+     * - thinking_level 参数仍显式携带（"minimal"）：flash-lite 接受该参数，语义自文档化。
      */
+    private static final String TITLE_MODEL = "gemini-3.5-flash-lite";
     private static final String TITLE_THINKING_LEVEL = "minimal";
 
     /** 标题生成 prompt：约束输出为 6-15 字中文（或 3-8 英文词）的纯标题 */
@@ -88,11 +94,11 @@ public class ConversationTitleService {
         }
     }
 
-    /** 调 Laozhang chat completions 生成标题（固定 defaultVisionModel + 不思考模式） */
+    /** 调 Laozhang chat completions 生成标题（固定 TITLE_MODEL 不思考模型 + thinking_level 显式声明） */
     private String generateTitle(String userContent) {
         try {
             Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getDefaultVisionModel());
+            body.put("model", TITLE_MODEL);
             List<Map<String, String>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", TITLE_PROMPT));
             // 首条消息截断到 200 字：标题生成只需要主题线索，避免超长输入拖慢/抬高成本
