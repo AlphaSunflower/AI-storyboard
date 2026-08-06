@@ -6,8 +6,8 @@ import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 
 /**
- * 当前对话的生成资产弹窗（文件夹图标入口，不再常驻底部）：
- * - 打开时刷新资产列表（loadAssets）
+ * 当前对话的产出素材弹窗（文件夹图标入口，不再常驻底部）：
+ * - 打开时刷新素材列表（loadAssets）
  * - 网格缩略图 + 删除 + 分页；点击图片可预览大图
  * - 遮罩点击 / ✕ / ESC 关闭
  */
@@ -16,7 +16,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // B6: 资产网格入场——打开/翻页时缩略图 stagger 浮现
+  // B6: 素材网格入场——打开/翻页时缩略图 stagger 浮现
   useGSAP(() => {
     const grid = gridRef.current;
     if (!grid || (assets?.records?.length ?? 0) === 0) return;
@@ -35,7 +35,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
     });
   }, { dependencies: [open, assets?.records?.length, assets?.page], scope: gridRef });
 
-  // 打开时刷新资产列表
+  // 打开时刷新素材列表
   useEffect(() => {
     if (open) void loadAssets();
   }, [open, loadAssets]);
@@ -76,11 +76,11 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
           {/* 头部 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--color-hairline)' }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
-              📁 生成资产（{total}）
+              📁 产出素材（{total}）
             </span>
             <button
               onClick={onClose}
-              aria-label="关闭资产面板"
+              aria-label="关闭素材面板"
               style={{ width: 28, height: 28, border: 'none', borderRadius: '50%', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               ✕
@@ -90,7 +90,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
           <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
             {records.length === 0 ? (
               <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
-                暂无生成资产——生成的图片/视频会出现在这里
+                暂无产出素材——生成的图片/视频会出现在这里
               </p>
             ) : (
               <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 10 }}>
@@ -111,7 +111,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                       <img src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     )}
                     <button
-                      onClick={(e) => { e.stopPropagation(); if (window.confirm('删除该资产？')) void deleteAsset(a.id); }}
+                      onClick={(e) => { e.stopPropagation(); if (window.confirm('删除该素材？')) void deleteAsset(a.id); }}
                       title="删除"
                       style={{
                         position: 'absolute', top: 4, right: 4, width: 18, height: 18,
