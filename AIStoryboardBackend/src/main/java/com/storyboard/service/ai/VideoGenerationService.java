@@ -74,6 +74,25 @@ public class VideoGenerationService {
         String effAspectRatio = aspectRatio != null ? aspectRatio : config.getDefaultVideoAspectRatio();
         int effDuration = duration != null ? duration : Integer.parseInt(config.getDefaultVideoDuration());
 
+        // ── 上游兼容性兜底（重要）────────────────────────────────────────────
+        // 老张网关按 resolution/size 路由到不同的上游 Google 项目池：
+        //   · 标准小写 "720p" + "1280x720" → 正常池，可用
+        //   · 1080p/4K 档位（含 "1080P"/"4K" 等大小写变体）→ 路由到无模型权限的
+        //     池子（locations/global 下无 veo-3.1-fast-generate-preview），
+        //     返回 404 fail_to_fetch_task（实测 2026-08-03 复现）
+        // 因此在 Laozhang 修复前，统一降级为 720p；竖屏保留 9:16 尺寸。
+        // 待上游修复后可删除本兜底。
+        String safeSize = "9:16".equals(effAspectRatio) ? "720x1280" : "1280x720";
+        String safeResolution = "720p";
+        if (!safeSize.equals(effSize)) {
+            log.warn("视频生成 size={} 上游暂不可用, 降级为 {}", effSize, safeSize);
+            effSize = safeSize;
+        }
+        if (!safeResolution.equalsIgnoreCase(effResolution)) {
+            log.warn("视频生成 resolution={} 上游暂不可用, 降级为 {}", effResolution, safeResolution);
+            effResolution = safeResolution;
+        }
+
         try {
             // 构建 multipart 请求体
             MultipartBuilder mp = new MultipartBuilder()
@@ -126,7 +145,29 @@ public class VideoGenerationService {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = null;
+            // ── 自动重试（重要）──────────────────────────────────────────────
+            // 老张网关将视频请求轮询路由到多个上游 Google 项目，其中大部分项目
+            // 未开通 veo-3.1-fast-generate-preview（locations/global 下无此模型），
+            // 命中即返回 404 fail_to_fetch_task。实测 2026-08-04 成功率仅约 1/8
+            // 且失败集中在 fir-2-80d08，故重试上限提到 10 次（~73% 成功率），
+            // 每次重试会重新路由到不同上游项目。待上游修复后可视情况调回。
+            // 另外部分池子的服务账号已失效，创建返回 500（body 含 do_request_failed
+            // / invalid_grant: account not found，实测 2026-08-04 复现）。该错误发生在
+            // 请求发往 Google 之前的 token 获取阶段，任务必然未创建，可安全重试换池。
+            int maxAttempts = 10;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                int code = resp.statusCode();
+                String respBody = resp.body();
+                if (!isRetryableVideoCreate(code, respBody) || attempt == maxAttempts) {
+                    break;
+                }
+                log.warn("视频任务创建返回 {}(上游项目池故障), 第 {}/{} 次重试, body={}",
+                    code, attempt, maxAttempts,
+                    respBody.length() > 150 ? respBody.substring(0, 150) : respBody);
+                Thread.sleep(500L * attempt);
+            }
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new RuntimeException("Video API returned " + resp.statusCode() + ": " + resp.body());
             }
@@ -172,25 +213,47 @@ public class VideoGenerationService {
 
             if ("completed".equals(status) || "succeeded".equals(status)) {
                 String localPath = downloadVideoContent(baseUrl, taskId);
-                result.put("status", "completed");
-                result.put("videoUrl", localPath);
-
-                var scenes = sceneMapper.selectList(
-                    new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
-                if (!scenes.isEmpty()) {
-                    Scene scene = scenes.get(0);
-                    scene.setVideoUrl(localPath);
-                    scene.setVideoStatus("completed");
-                    sceneMapper.updateById(scene);
+                boolean giveUp = false;
+                if (localPath != null) {
+                    result.put("status", "completed");
+                    result.put("videoUrl", localPath);
                 } else {
-                    var assets = agentAssetMapper.selectList(
-                        new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
-                    if (!assets.isEmpty()) {
-                        AgentAsset asset = assets.get(0);
-                        asset.setUrl(localPath);
-                        asset.setStatus("completed");
-                        asset.setError(null);
-                        agentAssetMapper.updateById(asset);
+                    // 下载失败不立即判死：以 completed_at 为基准，4 分钟内持续返回
+                    // processing 让调用方继续轮询（每次轮询都会重新尝试下载），
+                    // 覆盖上游 "Failed to resolve Gemini video URL" 等短暂故障；
+                    // 超过 4 分钟仍失败才转 failed（避免前端/工作流无限等待或僵尸状态）
+                    long completedAtSec = root.path("completed_at").asLong(0);
+                    giveUp = completedAtSec > 0
+                            && (System.currentTimeMillis() / 1000 - completedAtSec) > 240;
+                    if (giveUp) {
+                        result.put("status", "failed");
+                        result.put("error", "视频已生成但超过4分钟仍无法下载（上游内容服务异常），请重试");
+                    } else {
+                        result.put("status", "processing");
+                        result.put("progress", "99");
+                    }
+                }
+
+                // 仅在终态（下载成功或放弃）时更新 scene/asset；
+                // processing 期间保持原状，等待下次轮询重试下载
+                if (localPath != null || giveUp) {
+                    var scenes = sceneMapper.selectList(
+                        new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
+                    if (!scenes.isEmpty()) {
+                        Scene scene = scenes.get(0);
+                        scene.setVideoUrl(localPath);
+                        scene.setVideoStatus(localPath != null ? "completed" : "failed");
+                        sceneMapper.updateById(scene);
+                    } else {
+                        var assets = agentAssetMapper.selectList(
+                            new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
+                        if (!assets.isEmpty()) {
+                            AgentAsset asset = assets.get(0);
+                            asset.setUrl(localPath);
+                            asset.setStatus(localPath != null ? "completed" : "failed");
+                            asset.setError(localPath != null ? null : result.get("error"));
+                            agentAssetMapper.updateById(asset);
+                        }
                     }
                 }
             } else if ("failed".equals(status) || "error".equals(status)) {
@@ -226,7 +289,7 @@ public class VideoGenerationService {
 
     private String downloadVideoContent(String baseUrl, String taskId) {
         int maxRetries = 3;
-        long retryDelayMs = 15_000; // 15 秒等待落盘
+        long retryDelayMs = 15_000; // 单次轮询内重试窗口约 45s；跨轮询由 pollVideoTask 持续重试
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
@@ -289,6 +352,19 @@ public class VideoGenerationService {
     private String extractFilename(String urlPath) {
         int idx = urlPath.lastIndexOf('/');
         return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
+    }
+
+    /**
+     * 视频任务创建响应是否可安全重试（包内静态，便于直接单测）：
+     * 404 = 上游池无模型权限（fail_to_fetch_task）；5xx 且 body 含
+     * fail_to_fetch_task / do_request_failed（如 invalid_grant 凭据故障，发生在
+     * 请求发往 Google 之前，任务未创建）→ 重试换池。
+     * 其余（400 参数错、401 密钥错、普通 5xx 等）不重试，避免重复创建任务/白扣费。
+     */
+    static boolean isRetryableVideoCreate(int code, String body) {
+        if (code == 404) return true;
+        if (code < 500 || body == null) return false;
+        return body.contains("fail_to_fetch_task") || body.contains("do_request_failed");
     }
 
     private byte[] decodeBase64Image(String base64Data) {

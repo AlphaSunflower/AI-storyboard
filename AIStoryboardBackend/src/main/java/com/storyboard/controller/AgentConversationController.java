@@ -89,6 +89,13 @@ public class AgentConversationController {
         return ApiResponse.ok("删除成功", null);
     }
 
+    /** 清空会话聊天记录（删消息 + 重置 Dify 上下文；会话与生成资产保留，其他会话不受影响） */
+    @DeleteMapping("/conversations/{id}/messages")
+    public ApiResponse<Void> clearMessages(Authentication auth, @PathVariable String id) {
+        chatService.clearMessages(auth.getName(), id);
+        return ApiResponse.ok("已清空", null);
+    }
+
     /** 消息列表 */
     @GetMapping("/conversations/{id}/messages")
     public ApiResponse<List<AgentMessage>> listMessages(

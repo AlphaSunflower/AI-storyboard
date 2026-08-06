@@ -175,8 +175,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: start
         targetType: if-else
       id: 1785286288428-source-1785297043496-target
@@ -190,23 +188,19 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: start
-        targetType: assigner
-      id: 1785286288428-source-1785478874143-target
+        targetType: llm
+      id: 1785286288428-source-1785725021398-target
       selected: false
       source: '1785286288428'
       sourceHandle: source
-      target: '1785478874143'
+      target: '1785725021398'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: code
       id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-1785394677830-target
@@ -220,8 +214,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: code
       id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-17853956637370-target
@@ -235,38 +227,18 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
-        targetType: llm
-      id: 1785286446638-244eda5b-3f6f-4769-908f-6d7d917ad769-1785287100384-target
-      selected: false
+        targetType: answer
+      id: 1785286446638-244eda5b-3f6f-4769-908f-6d7d917ad769-1785823531415-target
       source: '1785286446638'
       sourceHandle: 244eda5b-3f6f-4769-908f-6d7d917ad769
-      target: '1785287100384'
+      target: '1785823531415'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: http-request
-      id: 1785286446638-3cc0c62a-46df-4ddd-900f-b2d6bda319eb-17852885655040-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
-      target: '17852885655040'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1785286446638-5597473c-6c22-4b30-a85d-fc3aefdb66f3-1785289782670-target
@@ -280,8 +252,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1785286446638-5b059307-e96e-4782-961a-be5c32e55613-1785288460056-target
@@ -295,8 +265,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1785286446638-b678b2a1-5348-4f8d-8bda-aa3e44974b11-1785287847725-target
@@ -310,8 +278,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1785286446638-d662ea00-b83f-4c6e-a674-e1a08723fc0c-1785286839392-target
@@ -325,8 +291,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1785286446638-true-1785286652605-target
@@ -340,8 +304,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
         targetType: if-else
       id: 1785286652605-source-17852867601920-target
@@ -355,8 +317,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852867601920-false-1785287790005-target
@@ -370,8 +330,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: assigner
       id: 17852867601920-intent-aisplit-17852868150330-target
@@ -385,8 +343,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852867601920-intent-other-1785287790005-target
@@ -400,8 +356,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: assigner
       id: 17852867601920-intent-pic-17852877677040-target
@@ -415,8 +369,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: assigner
       id: 17852867601920-intent-video-17852877765190-target
@@ -430,8 +382,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: llm
       id: 17852868150330-source-1785289782670-target
@@ -445,68 +395,32 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
-        targetType: if-else
-      id: 1785286839392-source-1785286951488-target
+        targetType: human-input
+      id: 1785286839392-source-1785747933811-target
       selected: false
       source: '1785286839392'
       sourceHandle: source
-      target: '1785286951488'
+      target: '1785747933811'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: llm
+        sourceType: assigner
         targetType: answer
-      id: 1785286839392-source-1785292032956-target
+      id: 17852870444160-source-1785823531415-target
       selected: false
-      source: '1785286839392'
+      source: '17852870444160'
       sourceHandle: source
-      target: '1785292032956'
+      target: '1785823531415'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: assigner
-      id: 1785286951488-true-17852870444160-target
-      selected: false
-      source: '1785286951488'
-      sourceHandle: 'true'
-      target: '17852870444160'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: llm
-      id: 1785286951488-true-1785287100384-target
-      selected: false
-      source: '1785286951488'
-      sourceHandle: 'true'
-      target: '1785287100384'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
         targetType: http-request
       id: 1785287100384-source-1785287199713-target
@@ -520,43 +434,24 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: llm
-        targetType: answer
-      id: 1785287100384-source-1785292521655-target
-      selected: false
-      source: '1785287100384'
-      sourceHandle: source
-      target: '1785292521655'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: http-request
-        targetType: assigner
-      id: 1785287199713-source-17852875359270-target
+        targetType: answer
+      id: 1785287199713-fail-branch-1785746302755-target
       selected: false
       source: '1785287199713'
-      sourceHandle: source
-      target: '17852875359270'
+      sourceHandle: fail-branch
+      target: '1785746302755'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: assigner
+        sourceType: http-request
         targetType: answer
-      id: 17852875359270-source-1785287560820-target
+      id: 1785287199713-source-1785287560820-target
       selected: false
-      source: '17852875359270'
+      source: '1785287199713'
       sourceHandle: source
       target: '1785287560820'
       targetHandle: target
@@ -565,8 +460,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: llm
       id: 17852877677040-source-1785287847725-target
@@ -580,8 +473,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: llm
       id: 17852877765190-source-1785288460056-target
@@ -595,8 +486,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
         targetType: if-else
       id: 1785287847725-source-1785287940279-target
@@ -610,8 +499,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 1785287940279-false-1785288047200-target
@@ -625,8 +512,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: code
       id: 1785287940279-true-17854679129180-target
@@ -640,53 +525,84 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: http-request
-        targetType: if-else
-      id: 17852882086950-source-1785306788149-target
+        targetType: assigner
+      id: 17852882086950-fail-branch-17852880294000-target
+      selected: false
+      source: '17852882086950'
+      sourceHandle: fail-branch
+      target: '17852880294000'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: 17852882086950-fail-branch-1785306819792-target
+      selected: false
+      source: '17852882086950'
+      sourceHandle: fail-branch
+      target: '1785306819792'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 17852882086950-source-1785461787161-target
       selected: false
       source: '17852882086950'
       sourceHandle: source
-      target: '1785306788149'
+      target: '1785461787161'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
         targetType: human-input
-      id: 1785288460056-source-1785382388334-target
+      id: 1785288460056-source-1785728867774-target
       selected: false
       source: '1785288460056'
       sourceHandle: source
-      target: '1785382388334'
+      target: '1785728867774'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: http-request
-        targetType: if-else
-      id: 17852885655040-source-1785398976593-target
+        targetType: code
+      id: 17852885655040-fail-branch-1785403535612-target
+      selected: false
+      source: '17852885655040'
+      sourceHandle: fail-branch
+      target: '1785403535612'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 17852885655040-source-1785398957380-target
       selected: false
       source: '17852885655040'
       sourceHandle: source
-      target: '1785398976593'
+      target: '1785398957380'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: answer
         targetType: code
       id: 1785288670365-source-1785401554825-target
@@ -700,23 +616,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: assigner
-        targetType: answer
-      id: 17852888482320-source-1785399995734-target
-      selected: false
-      source: '17852888482320'
-      sourceHandle: source
-      target: '1785399995734'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: answer
         targetType: human-input
       id: 1785288919482-source-1785382667730-target
@@ -730,8 +629,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: llm
         targetType: if-else
       id: 1785289782670-source-17852900874780-target
@@ -745,8 +642,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852900874780-false-1785290593627-target
@@ -760,8 +655,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: assigner
       id: 17852900874780-true-1785290421184-target
@@ -775,14 +668,12 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
+        sourceType: assigner
         targetType: answer
-      id: 17852900874780-true-1785290540008-target
+      id: 1785290421184-source-1785290540008-target
       selected: false
-      source: '17852900874780'
-      sourceHandle: 'true'
+      source: '1785290421184'
+      sourceHandle: source
       target: '1785290540008'
       targetHandle: target
       type: custom
@@ -790,8 +681,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: assigner
       id: 1785297043496-true-1785296001579-target
@@ -805,53 +694,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: assigner
-      id: 1785306788149-false-17852880294000-target
-      selected: false
-      source: '1785306788149'
-      sourceHandle: 'false'
-      target: '17852880294000'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: answer
-      id: 1785306788149-false-1785306819792-target
-      selected: false
-      source: '1785306788149'
-      sourceHandle: 'false'
-      target: '1785306819792'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: code
-      id: 1785306788149-true-1785461787161-target
-      selected: false
-      source: '1785306788149'
-      sourceHandle: 'true'
-      target: '1785461787161'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: answer
         targetType: code
       id: 1785307659567-source-1785464040420-target
@@ -865,8 +707,19 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
+        sourceType: llm
+        targetType: answer
+      id: 1785307777685-fail-branch-1785745746035-target
+      selected: false
+      source: '1785307777685'
+      sourceHandle: fail-branch
+      target: '1785745746035'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
         sourceType: llm
         targetType: answer
       id: 1785307777685-source-1785466119606-target
@@ -880,53 +733,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: human-input
-        targetType: assigner
-      id: 1785382388334-__timeout-17852888482320-target
-      selected: false
-      source: '1785382388334'
-      sourceHandle: __timeout
-      target: '17852888482320'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: human-input
-        targetType: assigner
-      id: 1785382388334-gernerate-17852888482320-target
-      selected: false
-      source: '1785382388334'
-      sourceHandle: gernerate
-      target: '17852888482320'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: human-input
-        targetType: answer
-      id: 1785382388334-no_generate-1785288539691-target
-      selected: false
-      source: '1785382388334'
-      sourceHandle: no_generate
-      target: '1785288539691'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: human-input
         targetType: code
       id: 1785382667730-finish-17854653627910-target
@@ -940,8 +746,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: human-input
         targetType: code
       id: 1785382667730-nofinish-1785393819983-target
@@ -955,8 +759,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: answer
       id: 17853829853480-source-1785383037704-target
@@ -970,8 +772,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: assigner
       id: 1785393819983-source-17853829853480-target
@@ -985,8 +785,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: llm
       id: 1785394633075-source-1785307777685-target
@@ -1000,8 +798,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: assigner
       id: 1785394677830-source-1785394633075-target
@@ -1015,8 +811,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: llm
       id: 17853956637370-source-1785307777685-target
@@ -1030,8 +824,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: assigner
       id: 17853966434950-source-1785396877564-target
@@ -1045,8 +837,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: code
       id: 1785396877564-source-1785464040420-target
@@ -1060,8 +850,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: answer
       id: 1785398957380-source-1785288670365-target
@@ -1075,38 +863,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: code
-      id: 1785398976593-false-1785403535612-target
-      selected: false
-      source: '1785398976593'
-      sourceHandle: 'false'
-      target: '1785403535612'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: if-else
-        targetType: code
-      id: 1785398976593-true-1785398957380-target
-      selected: false
-      source: '1785398976593'
-      sourceHandle: 'true'
-      target: '1785398957380'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: answer
         targetType: http-request
       id: 1785399995734-source-17852885655040-target
@@ -1120,8 +876,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: if-else
       id: 1785401554825-source-1785403027984-target
@@ -1135,8 +889,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 1785403027984-false-1785403439529-target
@@ -1150,11 +902,10 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: http-request
       id: 1785403027984-true-1785485001504-target
+      selected: false
       source: '1785403027984'
       sourceHandle: 'true'
       target: '1785485001504'
@@ -1164,23 +915,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: answer
-        targetType: assigner
-      id: 1785403055109-source-17852886064230-target
-      selected: false
-      source: '1785403055109'
-      sourceHandle: source
-      target: '17852886064230'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: answer
       id: 1785403535612-source-1785403670960-target
@@ -1194,8 +928,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: http-request
         targetType: answer
       id: 1785460955671-source-1785288919482-target
@@ -1209,8 +941,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: http-request
       id: 1785461787161-source-1785460955671-target
@@ -1224,8 +954,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: http-request
       id: 1785464040420-source-17852882086950-target
@@ -1239,8 +967,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: assigner
       id: 17854653627910-source-17852888994950-target
@@ -1254,8 +980,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: answer
         targetType: code
       id: 1785466119606-source-17853966434950-target
@@ -1269,8 +993,6 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: code
         targetType: assigner
       id: 17854679129180-source-1785468047542-target
@@ -1284,11 +1006,10 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: answer
       id: 1785468047542-source-1785307659567-target
+      selected: false
       source: '1785468047542'
       sourceHandle: source
       target: '1785307659567'
@@ -1298,11 +1019,10 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: assigner
         targetType: if-else
       id: 1785478874143-source-1785286446638-target
+      selected: false
       source: '1785478874143'
       sourceHandle: source
       target: '1785286446638'
@@ -1312,14 +1032,182 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: http-request
         targetType: answer
       id: 1785485001504-source-1785403055109-target
+      selected: false
       source: '1785485001504'
       sourceHandle: source
       target: '1785403055109'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 1785725021398-fail-branch-1785746120817-target
+      selected: false
+      source: '1785725021398'
+      sourceHandle: fail-branch
+      target: '1785746120817'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1785725021398-source-1785749078218-target
+      selected: false
+      source: '1785725021398'
+      sourceHandle: source
+      target: '1785749078218'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1785725499163-false-1785725600058-target
+      selected: false
+      source: '1785725499163'
+      sourceHandle: 'false'
+      target: '1785725600058'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1785725499163-true-1785478874143-target
+      selected: false
+      source: '1785725499163'
+      sourceHandle: 'true'
+      target: '1785478874143'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: assigner
+      id: 1785725600058-source-1785478874143-target
+      selected: false
+      source: '1785725600058'
+      sourceHandle: source
+      target: '1785478874143'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: answer
+      id: 1785728867774-__timeout-1785399995734-target
+      selected: false
+      source: '1785728867774'
+      sourceHandle: __timeout
+      target: '1785399995734'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: answer
+      id: 1785728867774-generate-1785399995734-target
+      selected: false
+      source: '1785728867774'
+      sourceHandle: generate
+      target: '1785399995734'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: answer
+      id: 1785728867774-no_generate-1785288539691-target
+      selected: false
+      source: '1785728867774'
+      sourceHandle: no_generate
+      target: '1785288539691'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: assigner
+      id: 1785747933811-__timeout-17852870444160-target
+      selected: false
+      source: '1785747933811'
+      sourceHandle: __timeout
+      target: '17852870444160'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: assigner
+      id: 1785747933811-agree-17852870444160-target
+      selected: false
+      source: '1785747933811'
+      sourceHandle: agree
+      target: '17852870444160'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: human-input
+        targetType: answer
+      id: 1785747933811-disagree-1785748101848-target
+      selected: false
+      source: '1785747933811'
+      sourceHandle: disagree
+      target: '1785748101848'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: 1785749078218-source-1785725499163-target
+      selected: false
+      source: '1785749078218'
+      sourceHandle: source
+      target: '1785725499163'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: answer
+        targetType: llm
+      id: 1785823531415-source-1785287100384-target
+      selected: false
+      source: '1785823531415'
+      sourceHandle: source
+      target: '1785287100384'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -1339,10 +1227,16 @@ workflow:
           required: false
           type: text-input
           variable: currentProjectId
-        - default: null
+        - allowed_file_extensions: []
+          allowed_file_types: []
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          default: null
           hide: true
           hint: ''
           label: PicUrl
+          max_length: 256
           options: []
           placeholder: ''
           required: false
@@ -1351,12 +1245,12 @@ workflow:
       height: 134
       id: '1785286288428'
       position:
-        x: -3.0314331330207835
-        y: 1917.9832080200504
+        x: 0
+        y: 433.2285714285714
       positionAbsolute:
-        x: -3.0314331330207835
-        y: 1917.9832080200504
-      selected: true
+        x: 0
+        y: 433.2285714285714
+      selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1458,12 +1352,12 @@ workflow:
       height: 459
       id: '1785286446638'
       position:
-        x: 842.6256007269621
-        y: 1247.0752091638249
+        x: 2154.857618025476
+        y: 708.5904761904761
       positionAbsolute:
-        x: 842.6256007269621
-        y: 1247.0752091638249
-      selected: false
+        x: 2154.857618025476
+        y: 708.5904761904761
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1498,7 +1392,8 @@ workflow:
             \  pic = 图片生成（单张插图/海报/角色设计）\n  video = 视频生成（短视频/动画片段）\n  other = 打招呼、闲聊、询问功能等\n\
             \n规则：\n- 若无法明确区分，message 引导用户：\"你希望 AI 分镜还是视频生成或者图片生成呢？\"\n- 最终只输出纯 JSON\
             \ 结构，无额外解释\n\n输出格式：\n{\"type\":\"ai_split|pic|video|other\",\"message\"\
-            :\"回复内容\"}"
+            :\"回复内容\"}\ntype为number值"
+        reasoning_format: separated
         selected: false
         structured_output:
           schema:
@@ -1527,11 +1422,11 @@ workflow:
       height: 87
       id: '1785286652605'
       position:
-        x: 1623
-        y: 594.7088972431078
+        x: 2488
+        y: 572.7785714285714
       positionAbsolute:
-        x: 1623
-        y: 594.7088972431078
+        x: 2488
+        y: 572.7785714285714
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1597,11 +1492,11 @@ workflow:
       height: 363
       id: '17852867601920'
       position:
-        x: 1951.0123022306775
-        y: 594.7088972431078
+        x: 2829
+        y: 449.27857142857135
       positionAbsolute:
-        x: 1951.0123022306775
-        y: 594.7088972431078
+        x: 2829
+        y: 449.27857142857135
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1626,12 +1521,12 @@ workflow:
       height: 83
       id: '17852868150330'
       position:
-        x: 2345
-        y: 215.66666666666669
+        x: 3198.0408884849794
+        y: -9.235172468223602
       positionAbsolute:
-        x: 2345
-        y: 215.66666666666669
-      selected: false
+        x: 3198.0408884849794
+        y: -9.235172468223602
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1655,7 +1550,7 @@ workflow:
             size: 50
         model:
           completion_params:
-            temperature: 0.7
+            temperature: 0.4
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
@@ -1668,6 +1563,7 @@ workflow:
             \n三、判断逻辑重要规则（重点） \n对话中如果出现用户表示认可、满意类表述，优先判定为对上一轮【剧情优化剧本】的确认，**不默认等同于认可本次分镜方案**，分镜方案依旧正常输出，等待用户单独确认。\n\
             \n目标：\n剧情完整且用户对这个剧本满意\n\n交互优化：\n每次设计出分镜方案都要询问用户哪些方面需要修改，要满足用户的认可\n\n输出格式：\n\
             {\"type\":1|0,\"message\":\"完整方案文本\"}\ntype=1 表示用户认可方案，type=0 表示需要继续修改"
+        reasoning_format: separated
         selected: false
         structured_output:
           schema:
@@ -1694,42 +1590,11 @@ workflow:
       height: 87
       id: '1785286839392'
       position:
-        x: 1607.1659050707253
-        y: 1384.3095238095239
+        x: 2488
+        y: 1111.3166666666666
       positionAbsolute:
-        x: 1607.1659050707253
-        y: 1384.3095238095239
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: '='
-            id: 2b9b70c8-a778-45c1-baa1-22624372385a
-            value: '1'
-            varType: number
-            variable_selector:
-            - '1785286839392'
-            - structured_output
-            - type
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 分镜确认
-        type: if-else
-      height: 147
-      id: '1785286951488'
-      position:
-        x: 1984
-        y: 1269.709523809524
-      positionAbsolute:
-        x: 1984
-        y: 1269.709523809524
+        x: 2488
+        y: 1111.3166666666666
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1754,11 +1619,11 @@ workflow:
       height: 83
       id: '17852870444160'
       position:
-        x: 2345
-        y: 1316.4095238095238
+        x: 3190
+        y: 1062.2571428571428
       positionAbsolute:
-        x: 2345
-        y: 1316.4095238095238
+        x: 3190
+        y: 1062.2571428571428
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1779,7 +1644,7 @@ workflow:
             user: ''
           window:
             enabled: true
-            size: 20
+            size: 52
         model:
           completion_params:
             temperature: 0.7
@@ -1789,7 +1654,49 @@ workflow:
         prompt_template:
         - id: 5223d380-28b2-4aae-85c6-e169311771fd
           role: system
-          text: ''
+          text: '你是 AI 分镜脚本生成器。根据上一轮「分镜方案设计」已确认的方案(整体风格、画幅比例、剧情脉络),将其拆解为完整分镜列表,严格按规则输出结构化
+            JSON。
+
+
+            【分镜数量】
+
+            - 按剧情拆分为 6~12 个分镜,按时间顺序排列,sceneNumber 从 1 开始连续递增;同一动作不要拆成多个分镜。
+
+
+            【每个分镜 8 个字段,全部必填】
+
+            1. sceneNumber(整数):分镜序号,从 1 开始。
+
+            2. scriptContent(字符串):镜头剧情与台词,30~80 字,剧本口吻,写清人物动作与对白。
+
+            3. imagePrompt(字符串):图片正向提示词,50~100 字,中文。必须含:画面主体与动作、环境背景、光线色调、构图(主体位置/视角/景深)、整体风格(与已确认方案一致)。可直接用于文生图,不要写画幅尺寸。
+
+            4. videoPrompt(字符串):视频动态提示词,50~120 字,中文。必须含:画面主体与动作、环境、光线氛围、运镜(具体到起幅落幅)、景别视角。可直接用于视频生成,不要写分辨率/时长参数。
+
+            5. negativePrompt(字符串):负面规避词,30~60 字,中文逗号分隔。默认:"文字,水印,logo,模糊,变形,多余肢体,低质量";按画面内容可增删(无文字需求则加"无文字无字幕")。
+
+            6. cameraMovement(字符串):只能从 推/拉/摇/移/跟/升/降 中选择,可组合(如"缓慢推近""从左向右横摇"),禁止笼统写"镜头运动"。
+
+            7. shotType(字符串):只能从 远景/全景/中景/近景/特写/大特写 中选择一个。
+
+            8. soundDesign(字符串):音效与声音设计,20~60 字,含环境音、对白/旁白、关键音效、背景音乐风格。
+
+
+            【硬性约束】
+
+            - 只输出一个 JSON 对象:{"items":[...]},不要输出任何解释、markdown 或多余文字。
+
+            - 字段名严格使用上述英文驼峰命名,禁止改名或翻译。
+
+            - 每个分镜 8 个字段缺一不可。
+
+            - 全部分镜的风格、画幅、色调必须与已确认方案一致。
+
+
+            【输出示例】
+
+            {"items":[{"sceneNumber":1,"scriptContent":"清晨薄雾中,老人独自划船出港,旁白:新的一天开始了。","imagePrompt":"江南水乡清晨,薄雾弥漫,老渔夫坐在乌篷船上划桨,石桥与垂柳,暖金色晨光,水面波光粼粼,中景构图,写实电影感。","videoPrompt":"薄雾中的江南水乡,乌篷船缓缓划过石桥,阳光透过柳枝洒下斑驳光影,镜头从桥上缓慢推近至船头老者,中景,暖金色调,电影感写实风格。","negativePrompt":"文字,水印,logo,模糊,变形,多余肢体,低质量","cameraMovement":"缓慢推近","shotType":"中景","soundDesign":"清晨鸟鸣,划桨水声,轻缓古筝背景音乐"}]}'
+        reasoning_format: separated
         selected: false
         structured_output:
           schema:
@@ -1845,12 +1752,12 @@ workflow:
       height: 87
       id: '1785287100384'
       position:
-        x: 2345
-        y: 1589.709523809524
+        x: 3852.1486983549976
+        y: 1094.305530387481
       positionAbsolute:
-        x: 2345
-        y: 1589.709523809524
-      selected: false
+        x: 3852.1486983549976
+        y: 1094.305530387481
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1869,6 +1776,8 @@ workflow:
               \  \"scenes\": {{#1785287100384.structured_output.items#}},\n  \"aspectRatio\"\
               : \"16:9\"\n}"
           type: json
+        default_value: null
+        error_strategy: fail-branch
         headers: 'Content-Type:application/json
 
           X-Dify-Key:{{#env.DIFY_KEY#}}'
@@ -1889,43 +1798,14 @@ workflow:
         type: http-request
         url: http://host.docker.internal:8082/api/ai/dify/generate-script
         variables: []
-      height: 136
+      height: 172
       id: '1785287199713'
       position:
-        x: 2706
-        y: 1560.2051378446117
+        x: 4212
+        y: 1070.0322540259556
       positionAbsolute:
-        x: 2706
-        y: 1560.2051378446117
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: -1
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 重置step(分镜JSON完成)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852875359270'
-      position:
-        x: 3047
-        y: 1609.3718045112785
-      positionAbsolute:
-        x: 3047
-        y: 1609.3718045112785
+        x: 4212
+        y: 1070.0322540259556
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1941,12 +1821,12 @@ workflow:
       height: 136
       id: '1785287560820'
       position:
-        x: 3388
-        y: 1596.7051378446117
+        x: 4533.944255930101
+        y: 1062.2571428571428
       positionAbsolute:
-        x: 3388
-        y: 1596.7051378446117
-      selected: false
+        x: 4533.944255930101
+        y: 1062.2571428571428
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1970,11 +1850,11 @@ workflow:
       height: 83
       id: '17852877677040'
       position:
-        x: 2345
-        y: 592.7666666666667
+        x: 3190
+        y: 350.29761904761904
       positionAbsolute:
-        x: 2345
-        y: 592.7666666666667
+        x: 3190
+        y: 350.29761904761904
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1999,11 +1879,11 @@ workflow:
       height: 83
       id: '17852877765190'
       position:
-        x: 2345
-        y: 949.7261904761906
+        x: 3190
+        y: 718.2571428571428
       positionAbsolute:
-        x: 2345
-        y: 949.7261904761906
+        x: 3190
+        y: 718.2571428571428
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2019,11 +1899,11 @@ workflow:
       height: 101
       id: '1785287790005'
       position:
-        x: 2471.3391483081855
-        y: 1199.6993481882234
+        x: 3190
+        y: 881.2571428571428
       positionAbsolute:
-        x: 2471.3391483081855
-        y: 1199.6993481882234
+        x: 3190
+        y: 881.2571428571428
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2070,17 +1950,22 @@ workflow:
             5. 关键元素说明
 
 
-            展示方案后询问用户是否认可。
+            展示方案，然后询问用户是否认可。
 
 
             输出格式：
 
-            {"type":1|0,"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1792x1024|1024x1792"}
+            {"type":1|0,"message":"完整方案文本","style":"风格关键词","size":"1024x1024 |1536x1024
+            | 1024x1536"}
 
             type=1 表示用户认可方案
 
-            '
+            size 字段必须输出单个尺寸，从 1024x1024、1536x1024、1024x1536 三选一'
         reasoning_format: separated
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 1000
         selected: false
         structured_output:
           schema:
@@ -2088,12 +1973,15 @@ workflow:
             properties:
               message:
                 description: 完整方案文本
+                enum: null
                 type: string
               size:
-                description: 画幅尺寸 1024x1024方形 / 1792x1024横屏 / 1024x1792竖屏
+                description: 画幅尺寸 1024x1024 / 1536x1024 / 1024x1536
+                enum: null
                 type: string
               style:
                 description: 风格关键词
+                enum: null
                 type: string
               type:
                 description: 用户是否认可(1=认可,0=继续修改)
@@ -2104,20 +1992,22 @@ workflow:
             required:
             - type
             - message
+            - size
+            - style
             type: object
         structured_output_enabled: true
         title: 图片方案设计
         type: llm
         vision:
           enabled: false
-      height: 87
+      height: 116
       id: '1785287847725'
       position:
-        x: 2706
-        y: 782.3898496240603
+        x: 3551
+        y: 366.9642857142858
       positionAbsolute:
-        x: 2706
-        y: 782.3898496240603
+        x: 3551
+        y: 366.9642857142858
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2130,6 +2020,7 @@ workflow:
           conditions:
           - comparison_operator: '='
             id: 7b35f8b8-b33a-4739-911a-47c6dc158c9d
+            numberVarType: constant
             value: '1'
             varType: number
             variable_selector:
@@ -2144,11 +2035,11 @@ workflow:
       height: 147
       id: '1785287940279'
       position:
-        x: 3047
-        y: 766.8898496240603
+        x: 3912
+        y: 370.79761904761904
       positionAbsolute:
-        x: 3047
-        y: 766.8898496240603
+        x: 3912
+        y: 370.79761904761904
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2173,11 +2064,11 @@ workflow:
       height: 83
       id: '17852880294000'
       position:
-        x: 5226.258349586087
-        y: 920.8769849696637
+        x: 6018
+        y: 667.3309523809522
       positionAbsolute:
-        x: 5226.258349586087
-        y: 920.8769849696637
+        x: 6018
+        y: 667.3309523809522
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2193,11 +2084,11 @@ workflow:
       height: 101
       id: '1785288047200'
       position:
-        x: 3408
-        y: 931.4218045112783
+        x: 4273
+        y: 501.1976190476191
       positionAbsolute:
-        x: 3408
-        y: 931.4218045112783
+        x: 4273
+        y: 501.1976190476191
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2218,10 +2109,13 @@ workflow:
             value: "{\n \"projectId\":\"{{#conversation.currentProjectId#}}\",\n \
               \ \"model\": \"{{#env.GENERATER_PIC_MODEL#}}\",\n  \"prompt\": \"{{#1785464040420.style#}}\
               \ {{#1785464040420.pic_generate_talk#}}\",\n  \"size\": \"{{#1785464040420.size#}}\"\
-              ,\n  \"mode\":{{#1785464040420.mode#}},\n  \"generatedImageUrl\":{{#1785464040420.picture#}}\n\
-              \  \"referenceImageUrls\":[{{#conversation.picture#}}]\n}"
+              ,\n  \"mode\":\"{{#1785464040420.mode#}}\",\n  \"generatedImageUrl\"\
+              :\"{{#1785464040420.picture#}}\",\n  \"referenceImageUrls\":[{{#conversation.picture#}}]\n\
+              }"
           type: json
+        default_value: null
         desc: 调用Laozhang API生成图片
+        error_strategy: fail-branch
         headers: 'Content-Type:application/json
 
           X-Dify-Key:{{#env.DIFY_KEY#}}'
@@ -2243,14 +2137,14 @@ workflow:
         type: http-request
         url: http://host.docker.internal:8082/api/ai/dify/generate-image
         variables: []
-      height: 164
+      height: 200
       id: '17852882086950'
       position:
-        x: 4559.6454088389655
-        y: 909.0014137727077
+        x: 5657
+        y: 670.2595238095237
       positionAbsolute:
-        x: 4559.6454088389655
-        y: 909.0014137727077
+        x: 5657
+        y: 670.2595238095237
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2274,40 +2168,45 @@ workflow:
             size: 50
         model:
           completion_params:
-            temperature: 0.7
+            temperature: 0.3
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: 05742636-e333-44cd-8cb2-1f65e770bb63
           role: system
-          text: '根据用户需求设计视频生成方案。
+          text: '你是视频生成方案设计师。根据用户需求为 Veo 3.1 设计视频生成方案,只输出结构化 JSON,不要输出任何其他文字。
 
 
-            方案需包含：
+            【字段规则】
 
-            1. 视频时长（4秒 或 8秒）
+            - type(数字,必填):1=用户已明确认可、可直接生成;0=仅展示方案、等待用户确认或修改。除非用户明确说"直接生成",一律输出 0。
 
-            2. 分辨率预设（720p / 1080p / 4K）— 4K 仅与 8s 组合
+            - message(字符串,必填):完整视频生成 prompt,中文 50~120 字,必须包含:①画面主体与动作 ②环境与背景 ③光线、色调与氛围
+            ④运镜(从推/拉/摇/移/跟/升/降中明确选择,写明起幅到落幅)⑤景别与视角 ⑥风格(电影感/写实/动画等)。该文本将直接作为视频生成提示词。
 
-            3. 画幅（横屏 16:9 / 竖屏 9:16）
+            - duration(数字,必填):只能输出 4 或 8。720p 可选 4 或 8;1080p/4k 只能用 8。
 
-            4. 运镜方式（推/拉/摇/移/跟/升/降）
+            - resolution(字符串,必填):只能输出 "720p"、"1080p"、"4k" 三者之一。默认 720p;仅当用户明确要求高画质时才选
+            1080p/4k,且必须配合 duration=8。当前 1080p/4k 上游暂不稳定,无明确要求一律 720p。
 
-            5. 画面内容详细描述
-
-            6. 可选负面提示词（不希望出现的元素）
-
-
-            展示方案后询问用户是否认可。
+            - aspectRatio(字符串,必填):只能输出 "16:9"(横屏)或 "9:16"(竖屏)。用户未指定时默认 16:9。
 
 
-            输出格式：
+            【组合约束】
 
-            {"type":1|0,"message":"完整方案文本","duration":"4|8","resolution":"720p|1080p|4k","aspectRatio":"16:9|9:16"}
+            - 4k 仅与 8 秒组合;1080p 仅与 8 秒组合;720p 可用 4 秒或 8 秒。
+
+            - 运镜必须具体(如"镜头缓慢推近""从右向左横摇"),禁止笼统写"镜头运动"。
+
+
+            输出示例:
+
+            {"type":0,"message":"清晨薄雾中的江南水乡,乌篷船缓缓划过石桥,阳光透过柳枝洒下斑驳光影,镜头从桥上缓慢推近至船头老者,中景,电影感暖色调,写实风格。","duration":8,"resolution":"720p","aspectRatio":"16:9"}
+
 
             '
-        reasoning_format: tagged
+        reasoning_format: separated
         selected: false
         structured_output:
           schema:
@@ -2315,15 +2214,24 @@ workflow:
             properties:
               aspectRatio:
                 description: 画幅比例
+                enum:
+                - '16:9'
+                - '9:16'
                 type: string
               duration:
                 description: 视频时长(秒)
+                enum: null
                 type: integer
               message:
                 description: 完整方案文本
+                enum: null
                 type: string
               resolution:
                 description: 分辨率
+                enum:
+                - 720p
+                - 1080p
+                - 4k
                 type: string
               type:
                 description: 用户是否认可(1=认可,0=继续修改)
@@ -2346,11 +2254,11 @@ workflow:
       height: 87
       id: '1785288460056'
       position:
-        x: 2706
-        y: 1111.8241854636594
+        x: 3551
+        y: 744.5904761904761
       positionAbsolute:
-        x: 2706
-        y: 1111.8241854636594
+        x: 3551
+        y: 744.5904761904761
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2366,11 +2274,11 @@ workflow:
       height: 99
       id: '1785288539691'
       position:
-        x: 3408
-        y: 1290.9194235588975
+        x: 4253
+        y: 861.197619047619
       positionAbsolute:
-        x: 3408
-        y: 1290.9194235588975
+        x: 4253
+        y: 861.197619047619
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2390,11 +2298,13 @@ workflow:
             value: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n\
               \  \"prompt\": \"{{#1785288460056.structured_output.message#}}\",\n\
               \  \"model\": \"veo-3.1-fast\",\n  \"resolution\": \"{{#1785288460056.structured_output.resolution#}}\"\
-              ,\n  \"size\": \"1920x1080\",\n  \"aspectRatio\": \"{{#1785288460056.structured_output.aspectRatio#}}\"\
+              ,\n  \"size\": \"1280x720\",\n  \"aspectRatio\": \"{{#1785288460056.structured_output.aspectRatio#}}\"\
               ,\n  \"duration\": {{#1785288460056.structured_output.duration#}},\n\
               \  \"negativePrompt\": \"\"\n}\n"
           type: json
+        default_value: null
         desc: 调用后端视频代理端点(后端负责轮询Laozhang)
+        error_strategy: fail-branch
         headers: 'Content-Type:application/json
 
           X-Dify-Key:{{#env.DIFY_KEY#}}'
@@ -2419,43 +2329,14 @@ workflow:
         type: http-request
         url: http://host.docker.internal:8082/api/ai/dify/generate-video
         variables: []
-      height: 151
+      height: 187
       id: '17852885655040'
       position:
-        x: 4050.4643330096073
-        y: 1908.1977536684435
+        x: 4594
+        y: 654.697619047619
       positionAbsolute:
-        x: 4050.4643330096073
-        y: 1908.1977536684435
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: -1
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 重置step(视频生成完成)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852886064230'
-      position:
-        x: 7087.066080729037
-        y: 1697.7536170817891
-      positionAbsolute:
-        x: 7087.066080729037
-        y: 1697.7536170817891
+        x: 4594
+        y: 654.697619047619
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2473,11 +2354,11 @@ workflow:
       height: 117
       id: '1785288670365'
       position:
-        x: 5197.225633722386
-        y: 1715.6453372287917
+        x: 5316
+        y: 1241.6261904761905
       positionAbsolute:
-        x: 5197.225633722386
-        y: 1715.6453372287917
+        x: 5316
+        y: 1241.6261904761905
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2489,41 +2370,6 @@ workflow:
         isInIteration: false
         isInLoop: false
         items:
-        - input_type: constant
-          operation: set
-          value: 6
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=6(生视频)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852888482320'
-      position:
-        x: 3408
-        y: 1127.9194235588975
-      positionAbsolute:
-        x: 3408
-        y: 1127.9194235588975
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: -1
-          variable_selector:
-          - conversation
-          - step
         - input_type: variable
           operation: over-write
           value:
@@ -2536,14 +2382,14 @@ workflow:
         title: 重置step、图片公用变量(图片生成完成)
         type: assigner
         version: '2'
-      height: 109
+      height: 83
       id: '17852888994950'
       position:
-        x: 6990.336741245063
-        y: 957.7176693112345
+        x: 7743
+        y: 1220.5238095238096
       positionAbsolute:
-        x: 6990.336741245063
-        y: 957.7176693112345
+        x: 7743
+        y: 1220.5238095238096
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2559,11 +2405,11 @@ workflow:
       height: 117
       id: '1785288919482'
       position:
-        x: 5898.227416224114
-        y: 766.8898496240603
+        x: 6700
+        y: 1023.1642857142856
       positionAbsolute:
-        x: 5898.227416224114
-        y: 766.8898496240603
+        x: 6700
+        y: 1023.1642857142856
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2587,7 +2433,7 @@ workflow:
             size: 50
         model:
           completion_params:
-            temperature: 0.7
+            temperature: 0.4
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
@@ -2616,13 +2462,14 @@ workflow:
             {"type":1|0,"message":"优化剧本方案","script":"最终的剧本，用户认可了最终的方案才填入，默认不填"}
 
             type=1 表示用户认可方案，type=0 表示需要继续修改'
+        reasoning_format: separated
         selected: false
         structured_output:
           schema:
             additionalProperties: false
             properties:
               message:
-                description: 给用户展示内容
+                description: 给用户展示剧情内容
                 enum: null
                 type: string
               script:
@@ -2648,11 +2495,11 @@ workflow:
       height: 87
       id: '1785289782670'
       position:
-        x: 2706
-        y: 241.99999999999997
+        x: 3551
+        y: 59.59999999999991
       positionAbsolute:
-        x: 2706
-        y: 241.99999999999997
+        x: 3551
+        y: 59.59999999999991
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2682,11 +2529,11 @@ workflow:
       height: 147
       id: '17852900874780'
       position:
-        x: 3047
-        y: 226.49999999999997
+        x: 3892
+        y: 44.09999999999991
       positionAbsolute:
-        x: 3047
-        y: 226.49999999999997
+        x: 3892
+        y: 44.09999999999991
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2717,10 +2564,10 @@ workflow:
       height: 109
       id: '1785290421184'
       position:
-        x: 3408
+        x: 4253
         y: 0
       positionAbsolute:
-        x: 3408
+        x: 4253
         y: 0
       selected: false
       sourcePosition: right
@@ -2729,7 +2576,9 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#1785289782670.structured_output.message#}}接下来为您生成分镜设计方案可以吗？'
+        answer: '{{#1785289782670.structured_output.message#}}
+
+          接下来为您生成分镜设计方案可以吗？'
         selected: false
         title: 直接回复 8
         type: answer
@@ -2737,11 +2586,11 @@ workflow:
       height: 117
       id: '1785290540008'
       position:
-        x: 3408
-        y: 189
+        x: 4594
+        y: 14.166666666666686
       positionAbsolute:
-        x: 3408
-        y: 189
+        x: 4594
+        y: 14.166666666666686
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2757,51 +2606,11 @@ workflow:
       height: 101
       id: '1785290593627'
       position:
-        x: 3408
-        y: 386
+        x: 4253
+        y: 189
       positionAbsolute:
-        x: 3408
-        y: 386
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785286839392.structured_output.message#}}'
-        selected: false
-        title: 分镜方案回复
-        type: answer
-        variables: []
-      height: 101
-      id: '1785292032956'
-      position:
-        x: 1984
-        y: 1496.709523809524
-      positionAbsolute:
-        x: 1984
-        y: 1496.709523809524
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785287100384.structured_output#}}'
-        selected: false
-        title: 直接回复 10
-        type: answer
-        variables: []
-      height: 101
-      id: '1785292521655'
-      position:
-        x: 2677.8302452853345
-        y: 1766.9138542058863
-      positionAbsolute:
-        x: 2677.8302452853345
-        y: 1766.9138542058863
+        x: 4253
+        y: 189
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2823,11 +2632,11 @@ workflow:
       height: 83
       id: '1785296001579'
       position:
-        x: 130.05018405087162
-        y: 2817.626911394133
+        x: 703
+        y: 492.6285714285714
       positionAbsolute:
-        x: 130.05018405087162
-        y: 2817.626911394133
+        x: 703
+        y: 492.6285714285714
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2853,41 +2662,11 @@ workflow:
       height: 123
       id: '1785297043496'
       position:
-        x: 67.65780381393432
-        y: 2397.176591400131
+        x: 362
+        y: 452.1285714285714
       positionAbsolute:
-        x: 67.65780381393432
-        y: 2397.176591400131
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: '='
-            id: e0256151-170b-4a75-afbf-b3608658f804
-            value: '200'
-            varType: number
-            variable_selector:
-            - '17852882086950'
-            - status_code
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 条件分支 8
-        type: if-else
-      height: 147
-      id: '1785306788149'
-      position:
-        x: 4917.200068271201
-        y: 891.8076253883478
-      positionAbsolute:
-        x: 4917.200068271201
-        y: 891.8076253883478
+        x: 362
+        y: 452.1285714285714
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2903,11 +2682,11 @@ workflow:
       height: 117
       id: '1785306819792'
       position:
-        x: 5349.41616917308
-        y: 1173.1213084488882
+        x: 6018
+        y: 830.3309523809522
       positionAbsolute:
-        x: 5349.41616917308
-        y: 1173.1213084488882
+        x: 6018
+        y: 830.3309523809522
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2923,11 +2702,11 @@ workflow:
       height: 99
       id: '1785307659567'
       position:
-        x: 3937.301290854294
-        y: 746.390280267253
+        x: 4955
+        y: 368.33333333333326
       positionAbsolute:
-        x: 3937.301290854294
-        y: 746.390280267253
+        x: 4955
+        y: 368.33333333333326
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2938,6 +2717,8 @@ workflow:
         context:
           enabled: false
           variable_selector: []
+        default_value: null
+        error_strategy: fail-branch
         memory:
           query_prompt_template: '{{#sys.query#}}
 
@@ -2985,6 +2766,10 @@ workflow:
 
             {"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1792x1024|1024x1792"}'
         reasoning_format: separated
+        retry_config:
+          max_retries: 2
+          retry_enabled: true
+          retry_interval: 523
         selected: false
         structured_output:
           schema:
@@ -2998,57 +2783,26 @@ workflow:
                 type: string
               style:
                 description: 风格关键词
+                enum: null
                 type: string
             required:
             - message
             - size
+            - style
             type: object
         structured_output_enabled: true
         title: 完善图片设计方案
         type: llm
         vision:
           enabled: false
-      height: 87
+      height: 152
       id: '1785307777685'
       position:
-        x: 2369.815483051862
-        y: 2013.7652669136646
+        x: 3190
+        y: 1562.5309523809524
       positionAbsolute:
-        x: 2369.815483051862
-        y: 2013.7652669136646
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        delivery_methods:
-        - enabled: true
-          id: 4de9be96-820d-449c-bc9b-9aa5ba4cf440
-          type: webapp
-        form_content: '{{#1785288460056.structured_output.message#}}'
-        inputs: []
-        selected: false
-        timeout: 1
-        timeout_unit: hour
-        title: 人工介入
-        type: human-input
-        user_actions:
-        - button_style: primary
-          id: gernerate
-          title: 开始生成视频
-        - button_style: primary
-          id: no_generate
-          title: 不，我还要继续完善
-      height: 188
-      id: '1785382388334'
-      position:
-        x: 3047
-        y: 1075.8241854636594
-      positionAbsolute:
-        x: 3047
-        y: 1075.8241854636594
+        x: 3190
+        y: 1562.5309523809524
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3073,15 +2827,15 @@ workflow:
           title: 继续完善
         - button_style: primary
           id: finish
-          title: 不用了，已完成生图
+          title: 已完成生图
       height: 188
       id: '1785382667730'
       position:
-        x: 6209.080489861648
-        y: 766.8898496240603
+        x: 7041
+        y: 1007.1642857142855
       positionAbsolute:
-        x: 6209.080489861648
-        y: 766.8898496240603
+        x: 7041
+        y: 1007.1642857142855
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3093,12 +2847,6 @@ workflow:
         isInIteration: false
         isInLoop: false
         items:
-        - input_type: constant
-          operation: set
-          value: 5
-          variable_selector:
-          - conversation
-          - step
         - input_type: variable
           operation: over-write
           value:
@@ -3113,6 +2861,12 @@ workflow:
           variable_selector:
           - conversation
           - picture
+        - input_type: constant
+          operation: set
+          value: 5
+          variable_selector:
+          - conversation
+          - step
         iteration_id: null
         loop_id: null
         selected: false
@@ -3122,11 +2876,11 @@ workflow:
       height: 135
       id: '17853829853480'
       position:
-        x: 7200
-        y: 633.8898496240603
+        x: 7743
+        y: 1005.5238095238095
       positionAbsolute:
-        x: 7200
-        y: 633.8898496240603
+        x: 7743
+        y: 1005.5238095238095
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3142,11 +2896,11 @@ workflow:
       height: 99
       id: '1785383037704'
       position:
-        x: 7659.9332519531235
-        y: 607.6136591478696
+        x: 8084
+        y: 1046.0238095238096
       positionAbsolute:
-        x: 7659.9332519531235
-        y: 607.6136591478696
+        x: 8084
+        y: 1046.0238095238096
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3204,11 +2958,11 @@ workflow:
       height: 51
       id: '1785393819983'
       position:
-        x: 6680.144463688751
-        y: 639.1678812671519
+        x: 7402
+        y: 1039.0238095238096
       positionAbsolute:
-        x: 6680.144463688751
-        y: 639.1678812671519
+        x: 7402
+        y: 1039.0238095238096
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3232,11 +2986,11 @@ workflow:
       height: 83
       id: '1785394633075'
       position:
-        x: 1964
-        y: 1921.7218045112784
+        x: 2829
+        y: 1512.3642857142859
       positionAbsolute:
-        x: 1964
-        y: 1921.7218045112784
+        x: 2829
+        y: 1512.3642857142859
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3270,11 +3024,11 @@ workflow:
       height: 51
       id: '1785394677830'
       position:
-        x: 1623
-        y: 1929.2218045112784
+        x: 2488
+        y: 1519.8642857142859
       positionAbsolute:
-        x: 1623
-        y: 1929.2218045112784
+        x: 2488
+        y: 1519.8642857142859
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3310,11 +3064,11 @@ workflow:
       height: 51
       id: '17853956637370'
       position:
-        x: 1579.0468664072584
-        y: 2074.066499397887
+        x: 2488
+        y: 1675.3642857142859
       positionAbsolute:
-        x: 1579.0468664072584
-        y: 2074.066499397887
+        x: 2488
+        y: 1675.3642857142859
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3367,11 +3121,11 @@ workflow:
       height: 51
       id: '17853966434950'
       position:
-        x: 3479.762046383185
-        y: 1938.9832080200504
+        x: 4614
+        y: 1754.7642857142855
       positionAbsolute:
-        x: 3479.762046383185
-        y: 1938.9832080200504
+        x: 4614
+        y: 1754.7642857142855
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3395,11 +3149,11 @@ workflow:
       height: 83
       id: '1785396877564'
       position:
-        x: 3749.7415154139885
-        y: 1807.8176095111999
+        x: 4955
+        y: 1747.2642857142855
       positionAbsolute:
-        x: 3749.7415154139885
-        y: 1807.8176095111999
+        x: 4955
+        y: 1747.2642857142855
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3431,11 +3185,11 @@ workflow:
       height: 51
       id: '1785398957380'
       position:
-        x: 4832
-        y: 1749.2299498746868
+        x: 4955
+        y: 854.5976190476191
       positionAbsolute:
-        x: 4832
-        y: 1749.2299498746868
+        x: 4955
+        y: 854.5976190476191
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3443,37 +3197,9 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: contains
-            id: 3ccea741-d597-4838-9714-5840b2eff288
-            value: '200'
-            varType: string
-            variable_selector:
-            - '17852885655040'
-            - body
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 条件分支 8
-        type: if-else
-      height: 123
-      id: '1785398976593'
-      position:
-        x: 4471
-        y: 1783.1299498746869
-      positionAbsolute:
-        x: 4471
-        y: 1783.1299498746869
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 生成视频中....
+        answer: '生成视频中....
+
+          '
         selected: false
         title: 生成视频中....
         type: answer
@@ -3481,11 +3207,11 @@ workflow:
       height: 99
       id: '1785399995734'
       position:
-        x: 3769
-        y: 1241.0898496240602
+        x: 4253
+        y: 682.197619047619
       positionAbsolute:
-        x: 3769
-        y: 1241.0898496240602
+        x: 4253
+        y: 682.197619047619
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3542,12 +3268,12 @@ workflow:
       height: 51
       id: '1785401554825'
       position:
-        x: 5512.4842834334895
-        y: 1777.2299498746868
+        x: 5657
+        y: 1294.1261904761905
       positionAbsolute:
-        x: 5512.4842834334895
-        y: 1777.2299498746868
-      selected: true
+        x: 5657
+        y: 1294.1261904761905
+      selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -3572,11 +3298,11 @@ workflow:
       height: 147
       id: '1785403027984'
       position:
-        x: 5855
-        y: 1737.7299498746868
+        x: 5998
+        y: 1254.6261904761905
       positionAbsolute:
-        x: 5855
-        y: 1737.7299498746868
+        x: 5998
+        y: 1254.6261904761905
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3597,12 +3323,12 @@ workflow:
       height: 101
       id: '1785403055109'
       position:
-        x: 6644.4639715995245
-        y: 1678.5178233023207
+        x: 6700
+        y: 1307.8261904761905
       positionAbsolute:
-        x: 6644.4639715995245
-        y: 1678.5178233023207
-      selected: true
+        x: 6700
+        y: 1307.8261904761905
+      selected: false
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -3617,11 +3343,11 @@ workflow:
       height: 101
       id: '1785403439529'
       position:
-        x: 6216
-        y: 1880.6299498746869
+        x: 6359
+        y: 1469.3261904761907
       positionAbsolute:
-        x: 6216
-        y: 1880.6299498746869
+        x: 6359
+        y: 1469.3261904761907
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3648,11 +3374,11 @@ workflow:
       height: 51
       id: '1785403535612'
       position:
-        x: 4832
-        y: 1938.9832080200504
+        x: 4955
+        y: 665.597619047619
       positionAbsolute:
-        x: 4832
-        y: 1938.9832080200504
+        x: 4955
+        y: 665.597619047619
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3668,11 +3394,11 @@ workflow:
       height: 101
       id: '1785403670960'
       position:
-        x: 5173
-        y: 1921.7299498746868
+        x: 5316
+        y: 1060.6261904761905
       positionAbsolute:
-        x: 5173
-        y: 1921.7299498746868
+        x: 5316
+        y: 1060.6261904761905
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3706,11 +3432,11 @@ workflow:
       height: 122
       id: '1785460955671'
       position:
-        x: 5573.296307103218
-        y: 760.9370083799541
+        x: 6359
+        y: 1000.3309523809522
       positionAbsolute:
-        x: 5573.296307103218
-        y: 760.9370083799541
+        x: 6359
+        y: 1000.3309523809522
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3737,11 +3463,11 @@ workflow:
       height: 51
       id: '1785461787161'
       position:
-        x: 5232.5574697824495
-        y: 766.8898496240603
+        x: 6018
+        y: 1027.330952380952
       positionAbsolute:
-        x: 5232.5574697824495
-        y: 766.8898496240603
+        x: 6018
+        y: 1027.330952380952
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3788,11 +3514,11 @@ workflow:
       height: 51
       id: '1785464040420'
       position:
-        x: 4121.717760191344
-        y: 1003.9066672349286
+        x: 5316
+        y: 736.2595238095237
       positionAbsolute:
-        x: 4121.717760191344
-        y: 1003.9066672349286
+        x: 5316
+        y: 736.2595238095237
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3821,11 +3547,11 @@ workflow:
       height: 51
       id: '17854653627910'
       position:
-        x: 6698.434314268964
-        y: 1008.8369656206196
+        x: 7402
+        y: 1228.0238095238096
       positionAbsolute:
-        x: 6698.434314268964
-        y: 1008.8369656206196
+        x: 7402
+        y: 1228.0238095238096
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3841,12 +3567,12 @@ workflow:
       height: 101
       id: '1785466119606'
       position:
-        x: 3310.506129817283
-        y: 2065.218490865244
+        x: 3516.539049350089
+        y: 1457.919917571611
       positionAbsolute:
-        x: 3310.506129817283
-        y: 2065.218490865244
-      selected: false
+        x: 3516.539049350089
+        y: 1457.919917571611
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -3891,11 +3617,11 @@ workflow:
       height: 51
       id: '17854679129180'
       position:
-        x: 3363.3141053380423
-        y: 658.7555072805651
+        x: 4273
+        y: 370
       positionAbsolute:
-        x: 3363.3141053380423
-        y: 658.7555072805651
+        x: 4273
+        y: 370
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3919,11 +3645,11 @@ workflow:
       height: 83
       id: '1785468047542'
       position:
-        x: 3631.0038589697606
-        y: 639.1678812671519
+        x: 4614
+        y: 362.5
       positionAbsolute:
-        x: 3631.0038589697606
-        y: 639.1678812671519
+        x: 4614
+        y: 362.5
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3947,12 +3673,12 @@ workflow:
       height: 83
       id: '1785478874143'
       position:
-        x: 453.8967145426728
-        y: 1486.75079244533
+        x: 1690.658036535246
+        y: 854.5976190476191
       positionAbsolute:
-        x: 453.8967145426728
-        y: 1486.75079244533
-      selected: false
+        x: 1690.658036535246
+        y: 854.5976190476191
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -3985,11 +3711,414 @@ workflow:
       height: 93
       id: '1785485001504'
       position:
-        x: 6261.334973220832
-        y: 1662.6837283730458
+        x: 6359
+        y: 1296.3261904761905
       positionAbsolute:
-        x: 6261.334973220832
-        y: 1662.6837283730458
+        x: 6359
+        y: 1296.3261904761905
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        default_value: null
+        error_strategy: fail-branch
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: true
+            size: 10
+        model:
+          completion_params:
+            temperature: 0.5
+            thinking: false
+          mode: chat
+          name: deepseek-v4-pro
+          provider: langgenius/deepseek/deepseek
+        prompt_config:
+          jinja2_variables: []
+        prompt_template:
+        - edition_type: basic
+          id: 9f9f6892-09c0-4f05-8e2f-f8fb751991b9
+          jinja2_text: ''
+          role: system
+          text: '【最高优先级强制规则，任何情况不可违反】
+
+            你只是一个意图判断检测器！
+
+            禁止和用户对话、禁止生成海报/图片/视频/分镜内容、禁止输出图片链接、禁止解释、禁止续写剧情！
+
+            无论上下文历史是什么，你绝对不能模仿历史对话进行回答！
+
+            任务：读取【当前step】和【用户最新一句话】，判断是否需要切换流程。
+
+            当前流程阶段step = {{#conversation.step#}}
+
+
+            阶段定义
+
+            - step = -1：意图识别初始阶段 → 固定输出{"pointer": -1}
+
+            - step = 1,2,7：AI分镜设计阶段
+
+            - step = 3,5：图片设计阶段
+
+            - step = 4,6：视频设计阶段
+
+
+            pointer可选值：
+
+            7 = 切换AI分镜｜3 = 切换图片设计｜4 = 切换视频设计｜-1 = 不切换
+
+
+            判定规则：
+
+            1. step=1/2/7(分镜阶段)
+
+            想生图→3；想生成视频→4；继续聊分镜→-1
+
+            2. step=3/5(图片阶段)
+
+            想做分镜→7；想生成视频→4；继续聊图片→-1
+
+            3. step=4/6(视频阶段)
+
+            想做分镜→7；想生图/设计图片海报→3；继续聊视频→-1
+
+            4. step=-1 → {"pointer": -1}
+
+
+            硬性原则：
+
+            只有用户明确提出更换模式才切换；模糊、延续当前话题一律-1
+
+
+            输出铁则：
+
+            1. 只输出纯JSON，无```代码块、无注释、无额外文字
+
+            2. 严格格式样例：{"pointer": 3}
+
+            3. pointer只能是数字：-1、3、4、7
+
+            4. 一旦输出任何非JSON文本，视为严重错误！
+
+
+            仅分析【用户最新一条消息】，久远历史对话仅作为参考，不要被大量历史聊天干扰判断！'
+        reasoning_format: separated
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: true
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              pointer:
+                description: '## 可切换的目标模式 - pointer = 7：用户想切换到「AI分镜设计」 - pointer =
+                  3：用户想切换到「图片设计/图片生成」 - pointer = 4：用户想切换到「视频设计/视频生成」 - pointer =
+                  -1：用户没有改变主意，继续当前模式'
+                enum:
+                - -1
+                - 3
+                - 4
+                - 7
+                type: number
+            required:
+            - pointer
+            type: object
+        structured_output_enabled: true
+        title: 意图打断
+        type: llm
+        vision:
+          enabled: false
+      height: 152
+      id: '1785725021398'
+      position:
+        x: 185.10045333045673
+        y: 693.0356171434735
+      positionAbsolute:
+        x: 185.10045333045673
+        y: 693.0356171434735
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: e24f1e03-55a7-4fd8-9c9c-76c32366ab48
+            value: '-1'
+            varType: number
+            variable_selector:
+            - '1785725021398'
+            - structured_output
+            - pointer
+          id: 'true'
+          logical_operator: or
+        selected: false
+        title: 条件分支 10
+        type: if-else
+      height: 147
+      id: '1785725499163'
+      position:
+        x: 1064
+        y: 845.3285714285713
+      positionAbsolute:
+        x: 1064
+        y: 845.3285714285713
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1785725021398'
+          - structured_output
+          - pointer
+          variable_selector:
+          - conversation
+          - step
+        selected: false
+        title: 变量赋值 17
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1785725600058'
+      position:
+        x: 1425
+        y: 984.5285714285714
+      positionAbsolute:
+        x: 1425
+        y: 984.5285714285714
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: b2b940f2-f6fc-4279-8a05-b6ba8a57319f
+          type: webapp
+        form_content: '{{#1785288460056.structured_output.message#}}'
+        inputs: []
+        selected: false
+        timeout: 1
+        timeout_unit: hour
+        title: 生成视频确认
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: generate
+          title: 开始生成视频
+        - button_style: primary
+          id: no_generate
+          title: 继续完善
+      height: 188
+      id: '1785728867774'
+      position:
+        x: 3892
+        y: 708.5904761904761
+      positionAbsolute:
+        x: 3892
+        y: 708.5904761904761
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785307777685.error_message#}}
+
+          生成错误，请联系管理员'
+        selected: false
+        title: 直接回复 19
+        type: answer
+        variables: []
+      height: 117
+      id: '1785745746035'
+      position:
+        x: 3585.460950649911
+        y: 1710.0609743754512
+      positionAbsolute:
+        x: 3585.460950649911
+        y: 1710.0609743754512
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: '{{#1785725021398.error_message#}}
+
+          请联系管理员'
+        selected: false
+        title: 直接回复 20
+        type: answer
+        variables: []
+      height: 117
+      id: '1785746120817'
+      position:
+        x: 549.5465483954479
+        y: 942.8396062379128
+      positionAbsolute:
+        x: 549.5465483954479
+        y: 942.8396062379128
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 分镜生成失败，请联系管理员
+        selected: false
+        title: 直接回复 21
+        type: answer
+        variables: []
+      height: 99
+      id: '1785746302755'
+      position:
+        x: 4507.524193765168
+        y: 1225.2571428571428
+      positionAbsolute:
+        x: 4507.524193765168
+        y: 1225.2571428571428
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: bffc8ec1-808c-4b1d-8e87-cecab48d8f6d
+          type: webapp
+        form_content: '{{#1785286839392.structured_output.message#}}
+
+
+          满意这个分镜设计方案吗'
+        inputs: []
+        selected: false
+        timeout: 1
+        timeout_unit: hour
+        title: 人工介入 3
+        type: human-input
+        user_actions:
+        - button_style: primary
+          id: agree
+          title: 满意
+        - button_style: primary
+          id: disagree
+          title: 不满意
+      height: 188
+      id: '1785747933811'
+      position:
+        x: 2829
+        y: 1075.3166666666666
+      positionAbsolute:
+        x: 2829
+        y: 1075.3166666666666
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 请继续完善分镜设计方案
+        selected: false
+        title: 直接回复 22
+        type: answer
+        variables: []
+      height: 99
+      id: '1785748101848'
+      position:
+        x: 3190
+        y: 1225.2571428571428
+      positionAbsolute:
+        x: 3190
+        y: 1225.2571428571428
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "def main(pointer):\n    valid = {-1, 3, 4, 7}\n    try:\n        p\
+          \ = int(str(pointer).strip().strip('\"'))\n    except Exception:\n     \
+          \   p = -1\n    if p not in valid:\n        p = -1\n    return {\"pointer\"\
+          : p}"
+        code_language: python3
+        outputs:
+          pointer:
+            children: null
+            type: number
+        selected: false
+        title: 代码执行 12
+        type: code
+        variables:
+        - value_selector:
+          - '1785725021398'
+          - structured_output
+          - pointer
+          value_type: object
+          variable: pointer
+      height: 51
+      id: '1785749078218'
+      position:
+        x: 631.7807019901838
+        y: 718.2571428571428
+      positionAbsolute:
+        x: 631.7807019901838
+        y: 718.2571428571428
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 分镜生成中...
+        selected: false
+        title: 直接回复 21
+        type: answer
+        variables: []
+      height: 99
+      id: '1785823531415'
+      position:
+        x: 3575.1226654549378
+        y: 1027.330952380952
+      positionAbsolute:
+        x: 3575.1226654549378
+        y: 1027.330952380952
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3997,7 +4126,7 @@ workflow:
       width: 241
       zIndex: 0
     viewport:
-      x: -834.8910407478386
-      y: -537.6223325070711
-      zoom: 0.5000000000000013
+      x: 510.1052427404038
+      y: 14.65766301645374
+      zoom: 0.574349177498518
   rag_pipeline_variables: []
