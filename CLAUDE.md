@@ -277,7 +277,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 ### 首条消息异步 AI 重命名标题
 
-- **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，user 消息落库后调用）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
+- **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，**必须在 user 消息落库前调用**——落库后 selectCount 已 +1，"首条"判定 count==0 永远不成立，线上实测踩坑）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
 - **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞 Dify 主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
 - **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision`，超时 30s），模型固定 `gemini-3.5-flash-lite`（**实测**：老张网关对 preview 系模型的一切思考参数均不透传/拒绝，无法关思考；flash-lite 默认零思考 token，即"不思考模式"），请求体显式带 `thinking_level: minimal`（flash-lite 接受，语义自文档化）
 - **落库（并发坑）**：Dify 线程持有同一 `AgentConversation` 实体并整实体 updateById（回填 difyConversationId），标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉

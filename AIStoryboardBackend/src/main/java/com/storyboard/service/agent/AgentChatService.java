@@ -174,6 +174,9 @@ public class AgentChatService {
      * 判定「该消息是会话第一条消息 + 标题仍为默认值 + 并发去重成功」三条件，
      * 满足则向 agentExecutor 提交异步任务（不阻塞 Dify 主流程，失败仅日志）；
      * 落库成功的新标题暂存供 message_end 一次性推送，失败静默降级。
+     *
+     * ⚠ 调用时机硬性要求：必须在本次 user 消息【落库前】调用——落库后
+     * selectCount 已 +1，"首条"判定（count==0）永远不成立（线上实测踩坑）。
      */
     private void maybeScheduleTitleRename(AgentConversation conversation, String content) {
         try {
@@ -223,10 +226,12 @@ public class AgentChatService {
         userMessage.setConversationId(conversationId);
         userMessage.setRole("user");
         userMessage.setContent(content);
-        transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
-        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 调用；blocking 无 SSE 通道，靠前端下次拉取可见）
+        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 调用；blocking 无 SSE 通道，靠前端下次拉取可见）。
+        // 注意：必须在 user 消息落库【前】判定"首条"——落库后 selectCount 已 +1，判定永远不成立
         maybeScheduleTitleRename(conversation, content);
+
+        transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
         // 2. 调 Dify chat-messages
         Map<String, Object> result;
@@ -349,10 +354,12 @@ public class AgentChatService {
         userMessage.setConversationId(conversationId);
         userMessage.setRole("user");
         userMessage.setContent(content);
-        transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
-        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 主流程；结果随本轮 message_end 一次性推送）
+        // 1.5 首条消息异步 AI 重命名标题（不阻塞 Dify 主流程；结果随本轮 message_end 一次性推送）。
+        // 注意：必须在 user 消息落库【前】判定"首条"——落库后 selectCount 已 +1，判定永远不成立
         maybeScheduleTitleRename(conversation, content);
+
+        transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
         // 2. 异步代理 Dify（SseEmitter 需异步写，否则阻塞 Controller 返回；I6 专用 executor）
         CompletableFuture.runAsync(() -> {
