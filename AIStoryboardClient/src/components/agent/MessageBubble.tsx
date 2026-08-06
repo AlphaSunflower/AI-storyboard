@@ -1,12 +1,18 @@
 import { useState } from 'react';
 import { assetUrl } from '../../config';
+import { ImagePreviewModal } from './ImagePreviewModal';
 
 /**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
  * 防御历史消息里残留的 Dify 签名 URL（/files/tools/ 带 timestamp+sign，过期后 403）
  * 渲染成裂图 + alt 文件名的难看效果。
+ * onClick 可选：点击图片放大预览（灯箱）。
  */
-function ImgWithFallback({ src, alt, style }: { src: string; alt?: string; style?: React.CSSProperties }) {
+function ImgWithFallback({
+  src, alt, style, onClick,
+}: {
+  src: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
+}) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
@@ -15,11 +21,19 @@ function ImgWithFallback({ src, alt, style }: { src: string; alt?: string; style
       </span>
     );
   }
-  return <img src={src} alt={alt ?? ''} style={style} onError={() => setFailed(true)} />;
+  return (
+    <img
+      src={src}
+      alt={alt ?? ''}
+      style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
+      onClick={onClick}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
-/** 轻量渲染：**加粗**、换行、![]() 图片、[]() 链接、视频 URL 直接识别 */
-function renderContent(content: string) {
+/** 轻量渲染：**加粗**、换行、![]() 图片、[]() 链接、视频 URL 直接识别；onImgClick 为图片点击预览回调 */
+function renderContent(content: string, onImgClick: (url: string) => void) {
   const lines = content.split('\n');
   return lines.map((line, i) => {
     // 图片 ![alt](url)
@@ -30,6 +44,7 @@ function renderContent(content: string) {
           key={i}
           src={assetUrl(imgMatch[2])}
           alt={imgMatch[1]}
+          onClick={() => onImgClick(imgMatch[2])}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
         />
       );
@@ -57,6 +72,7 @@ function renderContent(content: string) {
           key={i}
           src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
           alt=""
+          onClick={() => onImgClick(raw)}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
         />
       );
@@ -75,7 +91,10 @@ function renderContent(content: string) {
 
 export function MessageBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
   const isUser = role === 'user';
+  // 图片点击放大预览（灯箱）
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   return (
+    <>
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
       <div
         style={{
@@ -92,8 +111,10 @@ export function MessageBubble({ role, content }: { role: 'user' | 'assistant'; c
           textAlign: 'left',
         }}
       >
-        {content ? renderContent(content) : <span style={{ opacity: 0.6 }}>…</span>}
+        {content ? renderContent(content, setPreviewUrl) : <span style={{ opacity: 0.6 }}>…</span>}
       </div>
     </div>
+    <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+    </>
   );
 }

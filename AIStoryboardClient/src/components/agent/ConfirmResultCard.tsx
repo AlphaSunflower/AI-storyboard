@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
+import { ImagePreviewModal } from './ImagePreviewModal';
 
 /** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
 export function ConfirmResultCard() {
@@ -7,6 +9,8 @@ export function ConfirmResultCard() {
   const refineAsset = useAgentStore((s) => s.refineAsset);
   const dismissConfirm = useAgentStore((s) => s.dismissConfirm);
   const streaming = useAgentStore((s) => s.streaming);
+  // 图片点击放大预览（灯箱）
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   if (!info) return null;
 
   const isScript = info.kind === 'script';
@@ -34,10 +38,12 @@ export function ConfirmResultCard() {
             <img
               src={assetUrl(info.url)}
               alt="生成结果"
-              style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, margin: '4px 0 8px', display: 'block' }}
+              onClick={() => setPreviewUrl(info.url)}
+              style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, margin: '4px 0 8px', display: 'block', cursor: 'zoom-in' }}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           ))}
+        {!isScript && <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
         {isScript && (
           <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 8 }}>
             {typeof info.sceneCount === 'number' && info.sceneCount > 0
