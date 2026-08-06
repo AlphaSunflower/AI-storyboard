@@ -69,8 +69,11 @@ interface AgentState {
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
   submitHumanInput: (actionId: string) => Promise<void>;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
-  refineAsset: () => Promise<void>;
+  refineAsset: () => void;
   dismissConfirm: () => void;
+  // 继续完善参考图：点"继续完善"后不自动发送，暂存 PicUrl 等待用户输入完善需求（随下一条消息发送并消费）
+  pendingPicUrl: string | null;
+  cancelRefine: () => void;
   resetChatState: () => void;
 }
 
@@ -138,13 +141,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 守卫：无会话 / 流式生成中 / HITL 等待期禁止清空（防止删除进行中的上下文导致流事件污染）
     if (!id || get().streaming || get().waitingHumanInput) return;
     await agentApi.clearMessages(id);
-    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null });
+    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
   },
 
   selectConversation: async (id) => {
     // I3 store 守卫：HITL 等待期禁止切换会话（UI 层另有禁用，双保险）
     if (get().waitingHumanInput) return;
-    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null });
+    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
     const res = await agentApi.listMessages(id);
     set({ messages: res.data.data ?? [] });
     const conv = get().conversations.find((c) => c.id === id);
@@ -159,6 +162,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   waitingHumanInput: null,
   streamError: null,
   confirmResult: null,
+  pendingPicUrl: null,
   pendingAssistantId: null,
 
   refImageUrl: null,
@@ -195,6 +199,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendMessage: async (content, opts?: { picUrl?: string }) => {
     const id = get().activeConversationId;
     if (!id || get().streaming || !content.trim()) return;
+    // 继续完善参考图：点"继续完善"后暂存的 PicUrl，随本条用户消息发送并消费（只带一次，
+    // 避免后续普通消息也误带图片导致 Dify 误判 pic-refine 意图）
+    const pendingPic = get().pendingPicUrl;
+    if (pendingPic) set({ pendingPicUrl: null });
 
     // 追加 user 消息（乐观 UI）
     const optimisticUser: AgentMessage = {
@@ -247,7 +255,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
 
     try {
-      await streamChat(id, content, opts?.picUrl ?? get().refImageUrl ?? undefined, (e: SseEvent) => {
+      await streamChat(id, content, opts?.picUrl ?? pendingPic ?? get().refImageUrl ?? undefined, (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             updateAssistant(e.content ?? '');
@@ -436,17 +444,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  /** 看图确认卡片：继续完善 → 带当前图作为 PicUrl 发消息（走 Dify 完善分支） */
-  refineAsset: async () => {
+  /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */
+  refineAsset: () => {
     const { confirmResult } = get();
     if (!confirmResult || confirmResult.kind === 'script') return;
-    set({ confirmResult: null });
-    const content = '请基于这张图片继续完善';
     // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），Dify 容器内无法访问；
     // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给 Dify
     const picUrl = assetUrl(confirmResult.url);
-    await get().sendMessage(content, { picUrl });
+    set({ confirmResult: null, pendingPicUrl: picUrl });
   },
+  /** 取消继续完善：清空暂存参考图（输入框提示条上的 ✕ 触发） */
+  cancelRefine: () => set({ pendingPicUrl: null }),
   /** 看图确认卡片：满意完成 → 收起卡片，刷新资产面板 */
   dismissConfirm: () => {
     set({ confirmResult: null });
@@ -455,5 +463,5 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null }),
+    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
 }));

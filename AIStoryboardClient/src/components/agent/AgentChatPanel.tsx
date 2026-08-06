@@ -5,13 +5,14 @@ import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine } = useAgentStore();
   const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // M9：是否处于近底位置（距底部 <80px）；用户上翻查看历史时暂停自动滚底跟随
   const nearBottomRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
 
   // 新消息自动滚底（M9：仅当用户处于近底位置时跟随）
@@ -22,6 +23,13 @@ export function AgentChatPanel() {
 
   // 切换会话清空草稿
   useEffect(() => { setText(''); }, [activeConversationId]);
+
+  // 点击"继续完善"后：聚焦输入框，引导用户输入完善需求（不自动发送）
+  useEffect(() => {
+    if (pendingPicUrl) {
+      inputRef.current?.focus();
+    }
+  }, [pendingPicUrl]);
 
   const handleSend = () => {
     const content = text.trim();
@@ -104,6 +112,25 @@ export function AgentChatPanel() {
             <button onClick={() => setRefImageUrl(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 12 }}>移除</button>
           </div>
         )}
+        {/* 继续完善提示条：点击"继续完善"后暂存参考图，等待用户输入完善需求 */}
+        {pendingPicUrl && (
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 10px', marginBottom: 8, borderRadius: 'var(--rounded-md)',
+              background: 'var(--color-primary-soft, #fdf1ec)', border: '1px solid var(--color-hairline)',
+              fontSize: 12, color: 'var(--color-muted)',
+            }}
+          >
+            <span>📎 已选当前图片作为参考，请输入你想完善的地方</span>
+            <button
+              onClick={() => cancelRefine()}
+              style={{ border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 12, marginLeft: 8 }}
+            >
+              ✕ 取消
+            </button>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <button
             onClick={() => fileRef.current?.click()}
@@ -112,6 +139,7 @@ export function AgentChatPanel() {
           >📎</button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
           <textarea
+            ref={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -119,7 +147,7 @@ export function AgentChatPanel() {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : '描述你的需求…'}
+            placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
             disabled={streaming || !!waitingHumanInput}
             rows={2}
             style={{
