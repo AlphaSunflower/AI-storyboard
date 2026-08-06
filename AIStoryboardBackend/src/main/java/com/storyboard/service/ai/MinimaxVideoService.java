@@ -42,7 +42,7 @@ import java.util.UUID;
  * 关键适配（相对 Laozhang）：
  * - 认证：Bearer MiniMax API Key（.env MINIMAX_API_KEY，不提交）；
  * - 图生视频：本地图转 data URI base64 内联（无需上传接口，请求体 ≤64MB 内安全）；
- * - 分辨率：768P / 2K 两档（Laozhang 的 720p/1080p 语义映射到 768P，显式 2K 透传）；
+ * - 分辨率：统一最低档 768P（用户要求默认最低分辨率；档位由配置 minimaxVideoResolution 决定，768P | 2K）；
  * - 宽高比：文生视频 ratio 必填且不可 adaptive；图生视频恒为 adaptive；
  * - 时长：整数 4~15 秒（clamp）；
  * - 错误结构：OAI 风格 {@code {error:{type,message,http_code}}}，取 error.message 透传前端。
@@ -112,9 +112,11 @@ public class MinimaxVideoService {
             }
             body.put("content", content);
 
-            // ── 分辨率映射：显式 2K 透传，其余统一 768P ──
-            String effResolution = resolution != null && resolution.toUpperCase().contains("2K")
-                    ? "2K" : config.getMinimaxVideoResolution();
+            // ── 分辨率：统一使用配置默认档（默认 768P = 最低档）──
+            // 2026-08-06 用户要求"默认使用最低分辨率"：不再透传调用方显式 2K，
+            // 无论调用方传什么（720p/1080p/4k/2K）一律按 minimaxVideoResolution 生成，
+            // 省钱且生成更快。如需切换档位改配置即可（768P | 2K）。
+            String effResolution = config.getMinimaxVideoResolution();
             body.put("resolution", effResolution);
 
             // ── 时长：clamp 4~15，默认 8 ──
