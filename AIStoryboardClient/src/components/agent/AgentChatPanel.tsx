@@ -118,7 +118,7 @@ export function AgentChatPanel() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* 头部 */}
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '10px 14px', flexShrink: 0, borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* 当前会话标题（☾ Moon 智能体标题已迁移至会话栏顶部） */}
         <span
           title={currentTitle}
@@ -164,7 +164,7 @@ export function AgentChatPanel() {
           const el = e.target as HTMLElement;
           nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        style={{ flex: 1, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}
       >
         {messages.length === 0 && !streaming && (
           <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
@@ -214,7 +214,7 @@ export function AgentChatPanel() {
       </div>
 
       {/* 输入区（可拖拽上下伸缩，min 90 / max 40vh） */}
-      <div style={{ padding: '10px 10px 0', borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
+      <div style={{ padding: '10px 10px 0', flexShrink: 0, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
         {/* 拖拽把手：上下伸缩 */}
         <div
           onMouseDown={startInputDrag}
