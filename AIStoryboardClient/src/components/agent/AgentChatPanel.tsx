@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
+import { agentApi } from '../../api/agent';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
@@ -9,6 +10,9 @@ export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets } = useAgentStore();
   const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  // 提示词优化状态（组件本地）：优化中禁发送；完成自动覆盖输入框原文；失败保持原文轻提示
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeError, setOptimizeError] = useState('');
   // 资产弹窗（文件夹图标入口，资产不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,6 +43,31 @@ export function AgentChatPanel() {
     if (!content || streaming || waitingHumanInput) return;
     setText('');
     sendMessage(content);
+  };
+
+  /**
+   * 提示词优化：草稿 → LLM 优化 → 自动覆盖输入框原文。
+   * 优化过程中 optimizing 置位：发送按钮与优化按钮同时禁用（用户明确要求）；
+   * 失败保持原文，仅轻提示，不打断输入。
+   */
+  const handleOptimize = async () => {
+    const content = text.trim();
+    if (content.length < 6 || streaming || waitingHumanInput || optimizing) return;
+    setOptimizing(true);
+    setOptimizeError('');
+    try {
+      const res = await agentApi.optimizePrompt(content);
+      const optimized = res.data.data?.optimized;
+      if (optimized) {
+        setText(optimized); // 优化完成自动覆盖输入框原文
+      } else {
+        setOptimizeError('优化结果为空，请重试');
+      }
+    } catch {
+      setOptimizeError('优化失败，请重试');
+    } finally {
+      setOptimizing(false);
+    }
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,6 +179,9 @@ export function AgentChatPanel() {
 
       {/* 输入区 */}
       <div style={{ padding: 10, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
+        {optimizeError && (
+          <p style={{ margin: '0 0 6px', fontSize: 11, color: 'var(--color-error)' }}>⚠ {optimizeError}</p>
+        )}
         {refImageUrl && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <img src={refImageUrl} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8 }} />
@@ -202,11 +234,22 @@ export function AgentChatPanel() {
             }}
           />
           <button
+            onClick={handleOptimize}
+            disabled={streaming || !!waitingHumanInput || optimizing || text.trim().length < 6}
+            title={optimizing ? '正在优化…' : text.trim().length < 6 ? '至少输入 6 个字符才能优化' : '优化为专业的剧情/图片/视频提示词（自动覆盖输入框）'}
+            style={{
+              height: 32, padding: '0 12px', border: '1px solid var(--color-hairline)',
+              borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)',
+              color: 'var(--color-primary)', fontSize: 12, cursor: 'pointer', flexShrink: 0,
+              opacity: streaming || !!waitingHumanInput || optimizing || text.trim().length < 6 ? 0.45 : 1,
+            }}
+          >{optimizing ? '⏳ 优化中…' : '✨ 优化'}</button>
+          <button
             onClick={handleSend}
-            disabled={streaming || !!waitingHumanInput || !text.trim()}
+            disabled={streaming || !!waitingHumanInput || optimizing || !text.trim()}
             style={{
               height: 32, padding: '0 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-              background: streaming || !text.trim() ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
+              background: streaming || optimizing || !text.trim() ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
               color: 'white', fontSize: 13, cursor: 'pointer', flexShrink: 0,
             }}
           >发送</button>

@@ -97,6 +97,10 @@ export const agentApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  // 提示词优化：草稿 → 优化后的专业提示词（LLM 自判类型，≥6 字符校验由前后端双端把关）
+  optimizePrompt: (content: string) =>
+    client.post<{ data: { optimized: string } }>('/agent/prompt/optimize', { content }),
 };
 
 /** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */
