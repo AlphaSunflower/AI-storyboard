@@ -308,7 +308,9 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 ### 智能体窗口前端约定
 
-- **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（480px）：左会话栏（138px）+ 右对话区 + 底部资产面板
+- **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（62vw，minWidth 480）：左会话栏（180px，顶部为「☾ Moon 智能体」标题）+ 右对话区（顶部显示当前会话标题，无会话占位「未选择对话」；右侧 📁 产出素材 + 🧹 清除聊天记录按钮）
+- **底部输入栏**：可拖拽上下伸缩（min 90 / max 40vh，顶部 4px 把手 hover 变主色）；右侧按钮组纵向——「✨ 优化」在上、「发送」在下；提示词优化 ≥6 字符启用，优化中双按钮禁用，完成自动覆盖输入框
+- **命名**：用户可见文案统一「产出素材」（原「资产」，仅文案，store/字段名 assets/AgentAsset 不变）
 - **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
 - **参考图**：`POST /api/agent/upload` → 返回 `url` → 作为 `PicUrl` 随消息发送（图生图/图生视频）
