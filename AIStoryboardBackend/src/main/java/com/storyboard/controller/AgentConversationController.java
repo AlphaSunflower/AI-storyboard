@@ -5,6 +5,7 @@ import com.storyboard.dto.request.AgentConversationUpdateRequest;
 import com.storyboard.dto.request.AgentCreateConversationRequest;
 import com.storyboard.dto.request.AgentFormSubmitRequest;
 import com.storyboard.dto.request.AgentSendMessageRequest;
+import com.storyboard.dto.request.PromptOptimizeRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentConversation;
@@ -14,6 +15,7 @@ import com.storyboard.mapper.AgentConversationMapper;
 import com.storyboard.exception.BusinessException;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.agent.AgentChatService;
+import com.storyboard.service.agent.PromptOptimizeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -42,15 +44,18 @@ public class AgentConversationController {
     private final AgentConversationMapper conversationMapper;
     private final AgentAssetMapper assetMapper;
     private final FileStorageService fileStorageService;
+    private final PromptOptimizeService optimizeService;
 
     public AgentConversationController(AgentChatService chatService,
                                        AgentConversationMapper conversationMapper,
                                        AgentAssetMapper assetMapper,
-                                       FileStorageService fileStorageService) {
+                                       FileStorageService fileStorageService,
+                                       PromptOptimizeService optimizeService) {
         this.chatService = chatService;
         this.conversationMapper = conversationMapper;
         this.assetMapper = assetMapper;
         this.fileStorageService = fileStorageService;
+        this.optimizeService = optimizeService;
     }
 
     /** 创建会话 */
@@ -164,6 +169,17 @@ public class AgentConversationController {
             "url", url,
             "assetId", asset.getId()
         ));
+    }
+
+    /** 提示词优化：草稿 → 优化后的专业提示词（LLM 自判类型；≥6 字符；不落库、不关联会话） */
+    @PostMapping("/prompt/optimize")
+    public ApiResponse<Map<String, String>> optimizePrompt(
+            Authentication auth, @RequestBody PromptOptimizeRequest request) {
+        // 双端校验：与前端按钮禁用条件一致（<6 字符无法优化），防绕过前端
+        if (request.content() == null || request.content().trim().length() < 6) {
+            throw new BusinessException(40001, "内容至少 6 个字符才能优化");
+        }
+        return ApiResponse.ok(Map.of("optimized", optimizeService.optimize(request.content().trim())));
     }
 
     /** 流式发送消息（SSE） */
