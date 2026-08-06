@@ -278,6 +278,15 @@ public class AgentChatService {
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
 
+        // 图改图参考图兜底：Dify 的 node_finished 事件不带 code 节点 outputs（联调实证 plan 只有
+        // LLM 的 text/structured_output，picture/mode 永远拿不到）→ 后端按会话记录最近一次 PicUrl：
+        // 本条消息带图则更新，不带图则清空（严格限定在"带图的当轮"内生效，防跨轮误用）
+        if (picUrl != null && !picUrl.isBlank()) {
+            lastPicUrlByConversation.put(conversationId, picUrl);
+        } else {
+            lastPicUrlByConversation.remove(conversationId);
+        }
+
         // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开即置取消标志，
         // forwardDifySse 读循环据此尽早退出并跳过落库，避免对已断开的连接做无效工作。
         // （若 BufferedReader 阻塞在 readLine 无法立即中断，由 600s 超时兜底）
@@ -618,6 +627,9 @@ public class AgentChatService {
     private final Map<String, FormSnapshot> formSnapshots = new ConcurrentHashMap<>();
     /** conversationId → 最近 LLM 节点输出（node_finished 捕获的 outputs） */
     private final Map<String, Map<String, Object>> lastNodeOutputs = new ConcurrentHashMap<>();
+    /** conversationId → 最近一次消息携带的 PicUrl（图改图兜底：node_finished 不带 code 节点 outputs，
+     *  plan 无 picture；本字段在 streamMessage 按轮更新/清空，仅当轮生效） */
+    private final Map<String, String> lastPicUrlByConversation = new ConcurrentHashMap<>();
     /** conversationId → 最近一次 HITL 表单文案（快照缺失时降级生成兜底，TTL 同快照） */
     private final Map<String, LastFormContent> lastFormContentByConversation = new ConcurrentHashMap<>();
 
@@ -705,9 +717,13 @@ public class AgentChatService {
                     }
                     case "generate_image" -> {
                         sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("image"), "status", "node_started"));
-                        // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图；缺源图时 mode 置 null 降级文生图
-                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
-                        String mode = "edit".equals(plan.get("mode")) && source != null ? "edit" : null;
+                        // mode/edit 与源图：完善路径（快照有 picture 且 mode=edit）走图改图；缺源图时 mode 置 null 降级文生图。
+                        // 兜底：node_finished 不带 code 节点 outputs（plan 无 picture）——用本消息轮次携带的
+                        // PicUrl（lastPicUrlByConversation，streamMessage 按轮更新）作源图
+                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p
+                                : lastPicUrlByConversation.get(snapshot.conversationId());
+                        String mode = "edit".equals(plan.get("mode")) && source != null ? "edit"
+                                : (source != null ? "edit" : null);
                         // §4.3：降级快照 plan 为 null 时用 formContent 文本兜底作 prompt（快照缺失降级生成）
                         String prompt = str(plan.get("message"));
                         if (prompt == null) prompt = snapshot.formContent();
@@ -720,7 +736,9 @@ public class AgentChatService {
                     }
                     case "generate_video" -> {
                         sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
-                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p : null;
+                        // 源图兜底同 generate_image（图生视频依赖当轮 PicUrl）
+                        String source = plan.get("picture") instanceof String p && !p.isBlank() ? p
+                                : lastPicUrlByConversation.get(snapshot.conversationId());
                         // §4.3：降级快照 plan 为 null 时用 formContent 文本兜底作 prompt（快照缺失降级生成）
                         String prompt = str(plan.get("message"));
                         if (prompt == null) prompt = snapshot.formContent();
