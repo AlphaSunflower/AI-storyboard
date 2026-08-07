@@ -224,7 +224,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateVideo: async (sceneId, prompt, model, referenceImages, generatedImageUrl) => {
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: true } }));
     try {
-      const preset = VIDEO_PRESETS.find(p => p.value === get().videoPreset) || VIDEO_PRESETS[1];
+      const preset = VIDEO_PRESETS.find(p => p.value === get().videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
       const res = await aiApi.generateVideo({
         sceneId, prompt, model, referenceImages, generatedImageUrl,
         resolution: preset.resolution,
@@ -234,7 +234,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       const taskId = res.data.data.taskId;
       let videoFailed = false;
-      // 轮询直到完成
+      let videoDone = false;
+      // 轮询直到完成（上限 120 次 × 5s = 10 分钟：MiniMax 生成 4~15s 视频实测可达 5-10 分钟，
+      // 原 60 次上限（5 分钟）会提前放弃——前端停止轮询后任务无人接管，UI 卡在生成中）
       let attempts = 0;
       const poll = async () => {
         attempts++;
@@ -244,21 +246,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           set((s) => ({ videoProgress: { ...s.videoProgress, [sceneId]: parseInt(status.progress!) } }));
         }
         if (status.status === 'completed') {
+          videoDone = true;
           if (get().currentProject) await get().loadProject(get().currentProject!.id);
         } else if (status.status === 'failed') {
           videoFailed = true;
-        } else if (attempts < 60) {
+        } else if (attempts < 120) {
           await new Promise(r => setTimeout(r, 5000));
           await poll();
         }
       };
       await poll();
       get().markDirty();
-      // 生成完成 → toast + 未读
+      // 生成完成 → toast + 未读（仅在确认终态时发成功/失败；超时未完成不发成功，避免假成功）
       const scene = get().scenes.find(s => s.id === sceneId);
       if (videoFailed) {
         get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
-      } else {
+      } else if (videoDone) {
         get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
       }
       return taskId;

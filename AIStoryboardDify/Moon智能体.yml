@@ -66,29 +66,15 @@ workflow:
     - currentProjectId
     value: ''
     value_type: string
-  - description: '-1: 初始/意图识别
-
-      1: 分镜方案设计（循环完善）
-
-      2: 分镜JSON生成+写入后端
-
-      3: 图片方案设计（循环完善）
-
-      4: 视频方案设计（循环完善）
-
-      5: 调用后端生图API
-
-      6: 调用后端生视频API
-
-      '
-    id: a56d8fe5-91e9-46a0-ae23-ffcf38afea44
-    name: step
-    selector:
-    - conversation
-    - step
-    value: -1
-    value_type: integer
   environment_variables:
+  - description: ''
+    id: 71d88e47-eefd-4637-9e08-ca5147d068f1
+    name: VIDEO_MODEL
+    selector:
+    - env
+    - VIDEO_MODEL
+    value: MiniMax-H3
+    value_type: string
   - description: ''
     id: 50a67807-b211-4f01-94f1-20320717c214
     name: GENERATER_PIC_MODEL
@@ -103,7 +89,7 @@ workflow:
     selector:
     - env
     - DIFY_KEY
-    value: app-Bxte6FsZ9ex82Xd2A5bWSZ1q
+    value: app-gsYkBxnoGIQV8leBGFzK7v1Y
     value_type: string
   - description: ''
     id: fe30099e-f827-44d6-ba65-c3e8295a3215
@@ -175,135 +161,23 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: start
-        targetType: if-else
-      id: 1785286288428-source-1785297043496-target
+        targetType: assigner
+      id: 1785286288428-source-1785478874143-target
       selected: false
       source: '1785286288428'
       sourceHandle: source
-      target: '1785297043496'
+      target: '1785478874143'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: start
-        targetType: llm
-      id: 1785286288428-source-1785725021398-target
-      selected: false
-      source: '1785286288428'
-      sourceHandle: source
-      target: '1785725021398'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: code
-      id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-1785394677830-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 0c0fe982-6a84-471a-a763-2e88f79fd07d
-      target: '1785394677830'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: code
-      id: 1785286446638-0c0fe982-6a84-471a-a763-2e88f79fd07d-17853956637370-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 0c0fe982-6a84-471a-a763-2e88f79fd07d
-      target: '17853956637370'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: answer
-      id: 1785286446638-244eda5b-3f6f-4769-908f-6d7d917ad769-1785823531415-target
-      source: '1785286446638'
-      sourceHandle: 244eda5b-3f6f-4769-908f-6d7d917ad769
-      target: '1785823531415'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: llm
-      id: 1785286446638-5597473c-6c22-4b30-a85d-fc3aefdb66f3-1785289782670-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
-      target: '1785289782670'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: llm
-      id: 1785286446638-5b059307-e96e-4782-961a-be5c32e55613-1785288460056-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 5b059307-e96e-4782-961a-be5c32e55613
-      target: '1785288460056'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: llm
-      id: 1785286446638-b678b2a1-5348-4f8d-8bda-aa3e44974b11-1785287847725-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: b678b2a1-5348-4f8d-8bda-aa3e44974b11
-      target: '1785287847725'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: llm
-      id: 1785286446638-d662ea00-b83f-4c6e-a674-e1a08723fc0c-1785286839392-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: d662ea00-b83f-4c6e-a674-e1a08723fc0c
-      target: '1785286839392'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: llm
-      id: 1785286446638-true-1785286652605-target
-      selected: false
-      source: '1785286446638'
-      sourceHandle: 'true'
-      target: '1785286652605'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: llm
         targetType: if-else
       id: 1785286652605-source-17852867601920-target
@@ -317,6 +191,8 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852867601920-false-1785287790005-target
@@ -330,19 +206,23 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
-        targetType: assigner
-      id: 17852867601920-intent-aisplit-17852868150330-target
+        targetType: llm
+      id: 17852867601920-intent-aisplit-1785289782670-target
       selected: false
       source: '17852867601920'
       sourceHandle: intent-aisplit
-      target: '17852868150330'
+      target: '1785289782670'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852867601920-intent-other-1785287790005-target
@@ -356,50 +236,57 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
-        targetType: assigner
-      id: 17852867601920-intent-pic-17852877677040-target
+        targetType: code
+      id: 17852867601920-intent-pic-17859129841880-target
       selected: false
       source: '17852867601920'
       sourceHandle: intent-pic
-      target: '17852877677040'
+      target: '17859129841880'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
-        targetType: assigner
-      id: 17852867601920-intent-video-17852877765190-target
-      selected: false
+        targetType: if-else
+      id: 17852867601920-intent-video-1786091356243-target
       source: '17852867601920'
       sourceHandle: intent-video
-      target: '17852877765190'
+      target: '1786091356243'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: assigner
-        targetType: llm
-      id: 17852868150330-source-1785289782670-target
-      selected: false
-      source: '17852868150330'
-      sourceHandle: source
-      target: '1785289782670'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: llm
-        targetType: human-input
-      id: 1785286839392-source-1785747933811-target
+        targetType: llm
+      id: 1785286839392-source-1785287100384-target
       selected: false
       source: '1785286839392'
+      sourceHandle: source
+      target: '1785287100384'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: human-input
+      id: 1785287100384-source-1785747933811-target
+      selected: false
+      source: '1785287100384'
       sourceHandle: source
       target: '1785747933811'
       targetHandle: target
@@ -408,116 +295,14 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: assigner
-        targetType: answer
-      id: 17852870444160-source-1785823531415-target
-      selected: false
-      source: '17852870444160'
-      sourceHandle: source
-      target: '1785823531415'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: llm
-        targetType: http-request
-      id: 1785287100384-source-1785287199713-target
-      selected: false
-      source: '1785287100384'
-      sourceHandle: source
-      target: '1785287199713'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: answer
-      id: 1785287199713-fail-branch-1785746302755-target
-      selected: false
-      source: '1785287199713'
-      sourceHandle: fail-branch
-      target: '1785746302755'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: answer
-      id: 1785287199713-source-1785287560820-target
-      selected: false
-      source: '1785287199713'
-      sourceHandle: source
-      target: '1785287560820'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: llm
-      id: 17852877677040-source-1785287847725-target
-      selected: false
-      source: '17852877677040'
-      sourceHandle: source
-      target: '1785287847725'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: llm
-      id: 17852877765190-source-1785288460056-target
-      selected: false
-      source: '17852877765190'
-      sourceHandle: source
-      target: '1785288460056'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: if-else
-      id: 1785287847725-source-1785287940279-target
+        targetType: code
+      id: 1785287847725-source-17854679129180-target
       selected: false
       source: '1785287847725'
       sourceHandle: source
-      target: '1785287940279'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: answer
-      id: 1785287940279-false-1785288047200-target
-      selected: false
-      source: '1785287940279'
-      sourceHandle: 'false'
-      target: '1785288047200'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: code
-      id: 1785287940279-true-17854679129180-target
-      selected: false
-      source: '1785287940279'
-      sourceHandle: 'true'
       target: '17854679129180'
       targetHandle: target
       type: custom
@@ -525,45 +310,8 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: http-request
-        targetType: assigner
-      id: 17852882086950-fail-branch-17852880294000-target
-      selected: false
-      source: '17852882086950'
-      sourceHandle: fail-branch
-      target: '17852880294000'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: answer
-      id: 17852882086950-fail-branch-1785306819792-target
-      selected: false
-      source: '17852882086950'
-      sourceHandle: fail-branch
-      target: '1785306819792'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: code
-      id: 17852882086950-source-1785461787161-target
-      selected: false
-      source: '17852882086950'
-      sourceHandle: source
-      target: '1785461787161'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: llm
         targetType: human-input
       id: 1785288460056-source-1785728867774-target
@@ -577,58 +325,8 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: http-request
-        targetType: code
-      id: 17852885655040-fail-branch-1785403535612-target
-      selected: false
-      source: '17852885655040'
-      sourceHandle: fail-branch
-      target: '1785403535612'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: code
-      id: 17852885655040-source-1785398957380-target
-      selected: false
-      source: '17852885655040'
-      sourceHandle: source
-      target: '1785398957380'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: answer
-        targetType: code
-      id: 1785288670365-source-1785401554825-target
-      selected: false
-      source: '1785288670365'
-      sourceHandle: source
-      target: '1785401554825'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: answer
-        targetType: human-input
-      id: 1785288919482-source-1785382667730-target
-      selected: false
-      source: '1785288919482'
-      sourceHandle: source
-      target: '1785382667730'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: llm
         targetType: if-else
       id: 1785289782670-source-17852900874780-target
@@ -642,6 +340,23 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: llm
+        targetType: assigner
+      id: 1785289782670-source-1785290421184-target
+      selected: false
+      source: '1785289782670'
+      sourceHandle: source
+      target: '1785290421184'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852900874780-false-1785290593627-target
@@ -655,25 +370,14 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: if-else
-        targetType: assigner
-      id: 17852900874780-true-1785290421184-target
+        targetType: answer
+      id: 17852900874780-true-1785290540008-target
       selected: false
       source: '17852900874780'
       sourceHandle: 'true'
-      target: '1785290421184'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: answer
-      id: 1785290421184-source-1785290540008-target
-      selected: false
-      source: '1785290421184'
-      sourceHandle: source
       target: '1785290540008'
       targetHandle: target
       type: custom
@@ -681,318 +385,23 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: if-else
-        targetType: assigner
-      id: 1785297043496-true-1785296001579-target
-      selected: false
-      source: '1785297043496'
-      sourceHandle: 'true'
-      target: '1785296001579'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: answer
-        targetType: code
-      id: 1785307659567-source-1785464040420-target
-      selected: false
-      source: '1785307659567'
-      sourceHandle: source
-      target: '1785464040420'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: answer
-      id: 1785307777685-fail-branch-1785745746035-target
-      selected: false
-      source: '1785307777685'
-      sourceHandle: fail-branch
-      target: '1785745746035'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: answer
-      id: 1785307777685-source-1785466119606-target
-      selected: false
-      source: '1785307777685'
-      sourceHandle: source
-      target: '1785466119606'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: human-input
-        targetType: code
-      id: 1785382667730-finish-17854653627910-target
-      selected: false
-      source: '1785382667730'
-      sourceHandle: finish
-      target: '17854653627910'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: human-input
-        targetType: code
-      id: 1785382667730-nofinish-1785393819983-target
-      selected: false
-      source: '1785382667730'
-      sourceHandle: nofinish
-      target: '1785393819983'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: answer
-      id: 17853829853480-source-1785383037704-target
-      selected: false
-      source: '17853829853480'
-      sourceHandle: source
-      target: '1785383037704'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: assigner
-      id: 1785393819983-source-17853829853480-target
-      selected: false
-      source: '1785393819983'
-      sourceHandle: source
-      target: '17853829853480'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
         targetType: llm
-      id: 1785394633075-source-1785307777685-target
+      id: 1785290540008-source-1785286839392-target
       selected: false
-      source: '1785394633075'
+      source: '1785290540008'
       sourceHandle: source
-      target: '1785307777685'
+      target: '1785286839392'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: code
-        targetType: assigner
-      id: 1785394677830-source-1785394633075-target
-      selected: false
-      source: '1785394677830'
-      sourceHandle: source
-      target: '1785394633075'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: llm
-      id: 17853956637370-source-1785307777685-target
-      selected: false
-      source: '17853956637370'
-      sourceHandle: source
-      target: '1785307777685'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: assigner
-      id: 17853966434950-source-1785396877564-target
-      selected: false
-      source: '17853966434950'
-      sourceHandle: source
-      target: '1785396877564'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: code
-      id: 1785396877564-source-1785464040420-target
-      selected: false
-      source: '1785396877564'
-      sourceHandle: source
-      target: '1785464040420'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: answer
-      id: 1785398957380-source-1785288670365-target
-      selected: false
-      source: '1785398957380'
-      sourceHandle: source
-      target: '1785288670365'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: answer
-        targetType: http-request
-      id: 1785399995734-source-17852885655040-target
-      selected: false
-      source: '1785399995734'
-      sourceHandle: source
-      target: '17852885655040'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: if-else
-      id: 1785401554825-source-1785403027984-target
-      selected: false
-      source: '1785401554825'
-      sourceHandle: source
-      target: '1785403027984'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: answer
-      id: 1785403027984-false-1785403439529-target
-      selected: false
-      source: '1785403027984'
-      sourceHandle: 'false'
-      target: '1785403439529'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: http-request
-      id: 1785403027984-true-1785485001504-target
-      selected: false
-      source: '1785403027984'
-      sourceHandle: 'true'
-      target: '1785485001504'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: answer
-      id: 1785403535612-source-1785403670960-target
-      selected: false
-      source: '1785403535612'
-      sourceHandle: source
-      target: '1785403670960'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: http-request
-        targetType: answer
-      id: 1785460955671-source-1785288919482-target
-      selected: false
-      source: '1785460955671'
-      sourceHandle: source
-      target: '1785288919482'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: http-request
-      id: 1785461787161-source-1785460955671-target
-      selected: false
-      source: '1785461787161'
-      sourceHandle: source
-      target: '1785460955671'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: http-request
-      id: 1785464040420-source-17852882086950-target
-      selected: false
-      source: '1785464040420'
-      sourceHandle: source
-      target: '17852882086950'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: code
-        targetType: assigner
-      id: 17854653627910-source-17852888994950-target
-      selected: false
-      source: '17854653627910'
-      sourceHandle: source
-      target: '17852888994950'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: answer
-        targetType: code
-      id: 1785466119606-source-17853966434950-target
-      selected: false
-      source: '1785466119606'
-      sourceHandle: source
-      target: '17853966434950'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: code
         targetType: assigner
       id: 17854679129180-source-1785468047542-target
@@ -1006,110 +415,38 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: assigner
-        targetType: answer
-      id: 1785468047542-source-1785307659567-target
+        targetType: human-input
+      id: 1785468047542-source-1785910286651-target
       selected: false
       source: '1785468047542'
       sourceHandle: source
-      target: '1785307659567'
+      target: '1785910286651'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: assigner
-        targetType: if-else
-      id: 1785478874143-source-1785286446638-target
+        targetType: llm
+      id: 1785478874143-source-1785286652605-target
       selected: false
       source: '1785478874143'
       sourceHandle: source
-      target: '1785286446638'
+      target: '1785286652605'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: http-request
-        targetType: answer
-      id: 1785485001504-source-1785403055109-target
-      selected: false
-      source: '1785485001504'
-      sourceHandle: source
-      target: '1785403055109'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: answer
-      id: 1785725021398-fail-branch-1785746120817-target
-      selected: false
-      source: '1785725021398'
-      sourceHandle: fail-branch
-      target: '1785746120817'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: llm
-        targetType: code
-      id: 1785725021398-source-1785749078218-target
-      selected: false
-      source: '1785725021398'
-      sourceHandle: source
-      target: '1785749078218'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: assigner
-      id: 1785725499163-false-1785725600058-target
-      selected: false
-      source: '1785725499163'
-      sourceHandle: 'false'
-      target: '1785725600058'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: if-else
-        targetType: assigner
-      id: 1785725499163-true-1785478874143-target
-      selected: false
-      source: '1785725499163'
-      sourceHandle: 'true'
-      target: '1785478874143'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        sourceType: assigner
-        targetType: assigner
-      id: 1785725600058-source-1785478874143-target
-      selected: false
-      source: '1785725600058'
-      sourceHandle: source
-      target: '1785478874143'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
         targetType: answer
       id: 1785728867774-__timeout-1785399995734-target
@@ -1123,12 +460,14 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785728867774-generate-1785399995734-target
+      id: 1785728867774-generate_video-1785399995734-target
       selected: false
       source: '1785728867774'
-      sourceHandle: generate
+      sourceHandle: generate_video
       target: '1785399995734'
       targetHandle: target
       type: custom
@@ -1136,12 +475,14 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785728867774-no_generate-1785288539691-target
+      id: 1785728867774-refine-1785288539691-target
       selected: false
       source: '1785728867774'
-      sourceHandle: no_generate
+      sourceHandle: refine
       target: '1785288539691'
       targetHandle: target
       type: custom
@@ -1149,32 +490,38 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
-        targetType: assigner
-      id: 1785747933811-__timeout-17852870444160-target
+        targetType: answer
+      id: 1785747933811-__timeout-1785891056513-target
       selected: false
       source: '1785747933811'
       sourceHandle: __timeout
-      target: '17852870444160'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
-        targetType: assigner
-      id: 1785747933811-agree-17852870444160-target
+        targetType: answer
+      id: 1785747933811-agree-1785891056513-target
       selected: false
       source: '1785747933811'
       sourceHandle: agree
-      target: '17852870444160'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
+        iteration_id: null
+        loop_id: null
         sourceType: human-input
         targetType: answer
       id: 1785747933811-disagree-1785748101848-target
@@ -1188,26 +535,145 @@ workflow:
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: code
-        targetType: if-else
-      id: 1785749078218-source-1785725499163-target
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: answer
+      id: 1785910286651-__timeout-1785307659567-target
       selected: false
-      source: '1785749078218'
-      sourceHandle: source
-      target: '1785725499163'
+      source: '1785910286651'
+      sourceHandle: __timeout
+      target: '1785307659567'
       targetHandle: target
       type: custom
       zIndex: 0
     - data:
         isInIteration: false
         isInLoop: false
-        sourceType: answer
-        targetType: llm
-      id: 1785823531415-source-1785287100384-target
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: answer
+      id: 1785910286651-generate_image-1785307659567-target
       selected: false
-      source: '1785823531415'
+      source: '1785910286651'
+      sourceHandle: generate_image
+      target: '1785307659567'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: human-input
+        targetType: answer
+      id: 1785910286651-refine-17859168366910-target
+      selected: false
+      source: '1785910286651'
+      sourceHandle: refine
+      target: '17859168366910'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: if-else
+      id: 17859129841880-source-1786068209182-target
+      selected: false
+      source: '17859129841880'
       sourceHandle: source
-      target: '1785287100384'
+      target: '1786068209182'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: code
+      id: 1786068209182-false-1786082824642-target
+      source: '1786068209182'
+      sourceHandle: 'false'
+      target: '1786082824642'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1786068209182-true-1785287847725-target
+      selected: false
+      source: '1786068209182'
+      sourceHandle: 'true'
+      target: '1785287847725'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: code
+        targetType: assigner
+      id: 1786082824642-source-1786082977772-target
+      source: '1786082824642'
+      sourceHandle: source
+      target: '1786082977772'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: answer
+      id: 1786082977772-source-1786086274364-target
+      source: '1786082977772'
+      sourceHandle: source
+      target: '1786086274364'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: answer
+      id: 1786091356243-false-1786091427703-target
+      source: '1786091356243'
+      sourceHandle: 'false'
+      target: '1786091427703'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: null
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: if-else
+        targetType: llm
+      id: 1786091356243-true-1785288460056-target
+      source: '1786091356243'
+      sourceHandle: 'true'
+      target: '1785288460056'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -1246,10 +712,10 @@ workflow:
       id: '1785286288428'
       position:
         x: 0
-        y: 433.2285714285714
+        y: 774.252380952381
       positionAbsolute:
         x: 0
-        y: 433.2285714285714
+        y: 774.252380952381
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1257,115 +723,8 @@ workflow:
       width: 242
       zIndex: 0
     - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: '='
-            id: cbdd1158-0ad5-492b-8805-91e59c66f29f
-            value: '-1'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 'true'
-          logical_operator: and
-        - case_id: d662ea00-b83f-4c6e-a674-e1a08723fc0c
-          conditions:
-          - comparison_operator: '='
-            id: 0ea573bb-8c90-4264-ac4c-5f167baff385
-            value: '1'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: d662ea00-b83f-4c6e-a674-e1a08723fc0c
-          logical_operator: and
-        - case_id: 244eda5b-3f6f-4769-908f-6d7d917ad769
-          conditions:
-          - comparison_operator: '='
-            id: a3574eb7-f84a-4c9d-be4d-828551b3cf8e
-            value: '2'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 244eda5b-3f6f-4769-908f-6d7d917ad769
-          logical_operator: and
-        - case_id: b678b2a1-5348-4f8d-8bda-aa3e44974b11
-          conditions:
-          - comparison_operator: '='
-            id: bbb7d0b7-2925-4a61-88f5-1efce6527626
-            value: '3'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: b678b2a1-5348-4f8d-8bda-aa3e44974b11
-          logical_operator: and
-        - case_id: 5b059307-e96e-4782-961a-be5c32e55613
-          conditions:
-          - comparison_operator: '='
-            id: 3f061dd3-9cd4-429d-ac0a-09afa221fca9
-            value: '4'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 5b059307-e96e-4782-961a-be5c32e55613
-          logical_operator: and
-        - case_id: 0c0fe982-6a84-471a-a763-2e88f79fd07d
-          conditions:
-          - comparison_operator: '='
-            id: 5563b6b8-7bde-459f-83b0-74f47d93740c
-            value: '5'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 0c0fe982-6a84-471a-a763-2e88f79fd07d
-          logical_operator: and
-        - case_id: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
-          conditions:
-          - comparison_operator: '='
-            id: aa80a224-0be9-4ddd-b048-47525ba77075
-            value: '6'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 3cc0c62a-46df-4ddd-900f-b2d6bda319eb
-          logical_operator: and
-        - case_id: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
-          conditions:
-          - comparison_operator: '='
-            id: 294091bb-4674-47b6-953a-f4c61ae3bef1
-            value: '7'
-            varType: number
-            variable_selector:
-            - conversation
-            - step
-          id: 5597473c-6c22-4b30-a85d-fc3aefdb66f3
-          logical_operator: and
-        selected: false
-        title: Step路由
-        type: if-else
-      height: 459
-      id: '1785286446638'
-      position:
-        x: 2154.857618025476
-        y: 708.5904761904761
-      positionAbsolute:
-        x: 2154.857618025476
-        y: 708.5904761904761
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
         context:
-          enabled: true
+          enabled: false
           variable_selector: []
         memory:
           query_prompt_template: '{{#sys.query#}}
@@ -1377,23 +736,56 @@ workflow:
             user: ''
           window:
             enabled: true
-            size: 50
+            size: 30
         model:
           completion_params:
-            temperature: 0.7
+            response_format: json_object
+            temperature: 0.5
             thinking: false
           mode: chat
-          name: deepseek-v4-flash
+          name: deepseek-v4-pro
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: c1d23bf5-35ed-4fc0-b5c9-54916957189f
           role: system
-          text: "结合用户当前输入 + 全部历史对话记录，识别用户意图归属四类：\n  ai_split = AI 分镜制作（故事板/分镜脚本）\n\
-            \  pic = 图片生成（单张插图/海报/角色设计）\n  video = 视频生成（短视频/动画片段）\n  other = 打招呼、闲聊、询问功能等\n\
-            \n规则：\n- 若无法明确区分，message 引导用户：\"你希望 AI 分镜还是视频生成或者图片生成呢？\"\n- 最终只输出纯 JSON\
-            \ 结构，无额外解释\n\n输出格式：\n{\"type\":\"ai_split|pic|video|other\",\"message\"\
-            :\"回复内容\"}\ntype为number值"
-        reasoning_format: separated
+          text: '结合用户当前输入 + 全部历史对话记录 + 是否携带参考图，识别用户意图：
+
+
+            意图分类（四类）：
+
+            - intent-aisplit = 剧本/分镜制作：用户提供剧本、故事、文案，要求生成分镜脚本/故事板，或对剧本、分镜方案进行优化完善
+
+            - intent-pic = 全新图片生成，或对已有图片的修改/完善（更亮/换风格/改构图/去掉某元素/继续完善/不满意等，或携带参考图且内容是修改诉求）
+
+            - intent-video = 视频生成：用户要求生成短视频、动画片段，或设计视频方案
+
+            - intent-other = 打招呼、闲聊、询问功能等非创作需求
+
+
+            判断规则：
+
+            1. 明确意图词优先：剧本/分镜/故事板 → intent-aisplit；视频/动画/短片 → intent-video；图片/海报/插画
+            → intent-pic
+
+            2. 用户说"继续/接着上次"时，结合历史对话判断：在完善分镜 → intent-aisplit；在完善图片 → intent-pic
+
+            3. 分镜相关"优化/完善剧本"也归 intent-aisplit（剧本优化设计分支处理）
+
+            4. 无法明确区分时，message 引导用户："你希望 AI 分镜、图片生成还是视频生成呢？"
+
+            5. message 字段：创作类意图给一句简短执行确认语（如"好的，开始设计分镜方案"）；intent-other 类给自然回复
+
+
+            4种输出格式如下（只输出纯 JSON）：
+
+            {"type":"intent-aisplit","message":"回复内容"}、
+
+            {"type":"intent-pic","message":"回复内容"}、
+
+            {"type":"intent-video","message":"回复内容"}、
+
+            {"type":"intent-other","message":"回复内容"}'
+        reasoning_format: tagged
         selected: false
         structured_output:
           schema:
@@ -1401,14 +793,16 @@ workflow:
             properties:
               message:
                 description: 回复用户的内容
+                enum: null
                 type: string
               type:
-                description: 意图类型
+                description: intent-aisplit → 剧本(分镜)优化设计 intent-pic → 图片方案设计 intent-video
+                  → 视频方案设计  intent-other → 引导回复
                 enum:
-                - ai_split
-                - pic
-                - video
-                - other
+                - intent-aisplit
+                - intent-pic
+                - intent-video
+                - intent-other
                 type: string
             required:
             - message
@@ -1422,12 +816,12 @@ workflow:
       height: 87
       id: '1785286652605'
       position:
-        x: 2488
-        y: 572.7785714285714
+        x: 682.1795011750022
+        y: 836.2880952380954
       positionAbsolute:
-        x: 2488
-        y: 572.7785714285714
-      selected: false
+        x: 682.1795011750022
+        y: 836.2880952380954
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1437,9 +831,9 @@ workflow:
         cases:
         - case_id: intent-aisplit
           conditions:
-          - comparison_operator: contains
+          - comparison_operator: is
             id: intent-aisplit-cond
-            value: ai_split
+            value: intent-aisplit
             varType: string
             variable_selector:
             - '1785286652605'
@@ -1449,9 +843,9 @@ workflow:
           logical_operator: and
         - case_id: intent-pic
           conditions:
-          - comparison_operator: contains
+          - comparison_operator: is
             id: intent-pic-cond
-            value: pic
+            value: intent-pic
             varType: string
             variable_selector:
             - '1785286652605'
@@ -1461,9 +855,9 @@ workflow:
           logical_operator: and
         - case_id: intent-video
           conditions:
-          - comparison_operator: contains
+          - comparison_operator: is
             id: intent-video-cond
-            value: video
+            value: intent-video
             varType: string
             variable_selector:
             - '1785286652605'
@@ -1473,9 +867,9 @@ workflow:
           logical_operator: and
         - case_id: intent-other
           conditions:
-          - comparison_operator: contains
+          - comparison_operator: is
             id: intent-other-cond
-            value: other
+            value: intent-other
             varType: string
             variable_selector:
             - '1785286652605'
@@ -1492,41 +886,12 @@ workflow:
       height: 363
       id: '17852867601920'
       position:
-        x: 2829
-        y: 449.27857142857135
+        x: 1024
+        y: 710.4190476190478
       positionAbsolute:
-        x: 2829
-        y: 449.27857142857135
+        x: 1024
+        y: 710.4190476190478
       selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: 7
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=7剧情设计
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852868150330'
-      position:
-        x: 3198.0408884849794
-        y: -9.235172468223602
-      positionAbsolute:
-        x: 3198.0408884849794
-        y: -9.235172468223602
-      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1552,7 +917,7 @@ workflow:
           completion_params:
             temperature: 0.4
           mode: chat
-          name: deepseek-v4-flash
+          name: deepseek-v4-pro
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: c8dc50aa-0554-4c65-973a-c083d22d6623
@@ -1590,40 +955,11 @@ workflow:
       height: 87
       id: '1785286839392'
       position:
-        x: 2488
-        y: 1111.3166666666666
+        x: 2448
+        y: 22.5
       positionAbsolute:
-        x: 2488
-        y: 1111.3166666666666
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: 2
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=2(JSON生成)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852870444160'
-      position:
-        x: 3190
-        y: 1062.2571428571428
-      positionAbsolute:
-        x: 3190
-        y: 1062.2571428571428
+        x: 2448
+        y: 22.5
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1632,19 +968,11 @@ workflow:
       zIndex: 0
     - data:
         context:
-          enabled: false
-          variable_selector: []
-        memory:
-          query_prompt_template: '{{#sys.query#}}
-
-
-            {{#sys.files#}}'
-          role_prefix:
-            assistant: ''
-            user: ''
-          window:
-            enabled: true
-            size: 52
+          enabled: true
+          variable_selector:
+          - '1785286839392'
+          - structured_output
+          - message
         model:
           completion_params:
             temperature: 0.7
@@ -1658,9 +986,14 @@ workflow:
             JSON。
 
 
+            【分镜方案内容】
+
+            {{#context#}}
+
+
             【分镜数量】
 
-            - 按剧情拆分为 6~12 个分镜,按时间顺序排列,sceneNumber 从 1 开始连续递增;同一动作不要拆成多个分镜。
+            - 按剧情拆分为 6~20 个分镜,按时间顺序排列,sceneNumber 从 1 开始连续递增;同一动作不要拆成多个分镜。
 
 
             【每个分镜 8 个字段,全部必填】
@@ -1752,138 +1085,11 @@ workflow:
       height: 87
       id: '1785287100384'
       position:
-        x: 3852.1486983549976
-        y: 1094.305530387481
+        x: 2789
+        y: 37
       positionAbsolute:
-        x: 3852.1486983549976
-        y: 1094.305530387481
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        authorization:
-          config: null
-          type: no-auth
-        body:
-          data:
-          - id: key-value-207
-            key: ''
-            type: text
-            value: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n\
-              \  \"scenes\": {{#1785287100384.structured_output.items#}},\n  \"aspectRatio\"\
-              : \"16:9\"\n}"
-          type: json
-        default_value: null
-        error_strategy: fail-branch
-        headers: 'Content-Type:application/json
-
-          X-Dify-Key:{{#env.DIFY_KEY#}}'
-        method: post
-        params: ''
-        retry_config:
-          max_retries: 2
-          retry_enabled: true
-          retry_interval: 2000
-        selected: false
-        ssl_verify: true
-        timeout:
-          connect: 1
-          max_connect_timeout: 0
-          max_read_timeout: 0
-          max_write_timeout: 0
-        title: POST分镜脚本
-        type: http-request
-        url: http://host.docker.internal:8082/api/ai/dify/generate-script
-        variables: []
-      height: 172
-      id: '1785287199713'
-      position:
-        x: 4212
-        y: 1070.0322540259556
-      positionAbsolute:
-        x: 4212
-        y: 1070.0322540259556
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: ✅ 分镜脚本已生成！共 {{#1785287199713.body#}}个分镜已写入项目 {{#conversation.currentProjectId#}}
-        selected: false
-        title: 分镜结果回复
-        type: answer
-        variables: []
-      height: 136
-      id: '1785287560820'
-      position:
-        x: 4533.944255930101
-        y: 1062.2571428571428
-      positionAbsolute:
-        x: 4533.944255930101
-        y: 1062.2571428571428
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: 3
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=3(图片方案)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852877677040'
-      position:
-        x: 3190
-        y: 350.29761904761904
-      positionAbsolute:
-        x: 3190
-        y: 350.29761904761904
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: 4
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=4(视频方案)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852877765190'
-      position:
-        x: 3190
-        y: 718.2571428571428
-      positionAbsolute:
-        x: 3190
-        y: 718.2571428571428
+        x: 2789
+        y: 37
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1899,12 +1105,12 @@ workflow:
       height: 101
       id: '1785287790005'
       position:
-        x: 3190
-        y: 881.2571428571428
+        x: 1403.8501130110415
+        y: 1179.7437401730824
       positionAbsolute:
-        x: 3190
-        y: 881.2571428571428
-      selected: false
+        x: 1403.8501130110415
+        y: 1179.7437401730824
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -2003,148 +1209,11 @@ workflow:
       height: 116
       id: '1785287847725'
       position:
-        x: 3551
-        y: 366.9642857142858
+        x: 2087
+        y: 434.95000000000016
       positionAbsolute:
-        x: 3551
-        y: 366.9642857142858
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: '='
-            id: 7b35f8b8-b33a-4739-911a-47c6dc158c9d
-            numberVarType: constant
-            value: '1'
-            varType: number
-            variable_selector:
-            - '1785287847725'
-            - structured_output
-            - type
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 图片确认
-        type: if-else
-      height: 147
-      id: '1785287940279'
-      position:
-        x: 3912
-        y: 370.79761904761904
-      positionAbsolute:
-        x: 3912
-        y: 370.79761904761904
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: constant
-          operation: set
-          value: 5
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 设置step=5(生图)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852880294000'
-      position:
-        x: 6018
-        y: 667.3309523809522
-      positionAbsolute:
-        x: 6018
-        y: 667.3309523809522
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785287847725.structured_output.message#}}'
-        selected: false
-        title: 图片方案回复
-        type: answer
-        variables: []
-      height: 101
-      id: '1785288047200'
-      position:
-        x: 4273
-        y: 501.1976190476191
-      positionAbsolute:
-        x: 4273
-        y: 501.1976190476191
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        authorization:
-          config:
-            api_key: '{{#env.LAOZHANG_KEY#}}'
-            type: bearer
-          type: no-auth
-        body:
-          data:
-          - id: key-value-1132
-            key: ''
-            type: text
-            value: "{\n \"projectId\":\"{{#conversation.currentProjectId#}}\",\n \
-              \ \"model\": \"{{#env.GENERATER_PIC_MODEL#}}\",\n  \"prompt\": \"{{#1785464040420.style#}}\
-              \ {{#1785464040420.pic_generate_talk#}}\",\n  \"size\": \"{{#1785464040420.size#}}\"\
-              ,\n  \"mode\":\"{{#1785464040420.mode#}}\",\n  \"generatedImageUrl\"\
-              :\"{{#1785464040420.picture#}}\",\n  \"referenceImageUrls\":[{{#conversation.picture#}}]\n\
-              }"
-          type: json
-        default_value: null
-        desc: 调用Laozhang API生成图片
-        error_strategy: fail-branch
-        headers: 'Content-Type:application/json
-
-          X-Dify-Key:{{#env.DIFY_KEY#}}'
-        isInIteration: false
-        isInLoop: false
-        method: post
-        params: ''
-        retry_config:
-          max_retries: 1
-          retry_enabled: true
-          retry_interval: 5000
-        selected: false
-        ssl_verify: true
-        timeout:
-          max_connect_timeout: 30
-          max_read_timeout: 120
-          max_write_timeout: 30
-        title: POST生图
-        type: http-request
-        url: http://host.docker.internal:8082/api/ai/dify/generate-image
-        variables: []
-      height: 200
-      id: '17852882086950'
-      position:
-        x: 5657
-        y: 670.2595238095237
-      positionAbsolute:
-        x: 5657
-        y: 670.2595238095237
+        x: 2087
+        y: 434.95000000000016
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2175,37 +1244,36 @@ workflow:
         prompt_template:
         - id: 05742636-e333-44cd-8cb2-1f65e770bb63
           role: system
-          text: '你是视频生成方案设计师。根据用户需求为 Veo 3.1 设计视频生成方案,只输出结构化 JSON,不要输出任何其他文字。
+          text: '你是视频生成方案设计师。根据用户需求为 {{#env.VIDEO_MODEL#}} 设计视频生成方案,只输出结构化 JSON,不要输出任何其他文字。
 
 
             【字段规则】
 
-            - type(数字,必填):1=用户已明确认可、可直接生成;0=仅展示方案、等待用户确认或修改。除非用户明确说"直接生成",一律输出 0。
 
             - message(字符串,必填):完整视频生成 prompt,中文 50~120 字,必须包含:①画面主体与动作 ②环境与背景 ③光线、色调与氛围
-            ④运镜(从推/拉/摇/移/跟/升/降中明确选择,写明起幅到落幅)⑤景别与视角 ⑥风格(电影感/写实/动画等)。该文本将直接作为视频生成提示词。
+            ④运镜(从推/拉/摇/移/跟/升/降中明确选择,写明起幅到落幅)⑤景别与视角 ⑥风格(电影感/写实/动画等)。该文本将直接作为视频生成提示词。不要写入分辨率、时长、画幅等参数(这些由单独字段控制)。
 
-            - duration(数字,必填):只能输出 4 或 8。720p 可选 4 或 8;1080p/4k 只能用 8。
 
-            - resolution(字符串,必填):只能输出 "720p"、"1080p"、"4k" 三者之一。默认 720p;仅当用户明确要求高画质时才选
-            1080p/4k,且必须配合 duration=8。当前 1080p/4k 上游暂不稳定,无明确要求一律 720p。
+            - duration(数字,必填):4~15 之间的整数,常用档位 4/6/8/12/15。用户未指定时默认 8。
 
-            - aspectRatio(字符串,必填):只能输出 "16:9"(横屏)或 "9:16"(竖屏)。用户未指定时默认 16:9。
+
+            - aspectRatio(字符串,必填):只能输出 "16:9"(横屏)或 "9:16"(竖屏)。用户未指定时默认 16:9。(系统内部能力:文生视频支持
+            21:9/16:9/4:3/1:1/3:4/9:16;图生视频画幅自动匹配原图,无需指定)
+
+
+            - resolution:系统已统一使用默认分辨率(768P),不需要也不允许输出该字段。
 
 
             【组合约束】
 
-            - 4k 仅与 8 秒组合;1080p 仅与 8 秒组合;720p 可用 4 秒或 8 秒。
 
             - 运镜必须具体(如"镜头缓慢推近""从右向左横摇"),禁止笼统写"镜头运动"。
 
 
             输出示例:
 
-            {"type":0,"message":"清晨薄雾中的江南水乡,乌篷船缓缓划过石桥,阳光透过柳枝洒下斑驳光影,镜头从桥上缓慢推近至船头老者,中景,电影感暖色调,写实风格。","duration":8,"resolution":"720p","aspectRatio":"16:9"}
 
-
-            '
+            {"message":"清晨薄雾中的江南水乡,乌篷船缓缓划过石桥,阳光透过柳枝洒下斑驳光影,镜头从桥上缓慢推近至船头老者,中景,电影感暖色调,写实风格。","duration":8,"aspectRatio":"16:9"}'
         reasoning_format: separated
         selected: false
         structured_output:
@@ -2226,24 +1294,9 @@ workflow:
                 description: 完整方案文本
                 enum: null
                 type: string
-              resolution:
-                description: 分辨率
-                enum:
-                - 720p
-                - 1080p
-                - 4k
-                type: string
-              type:
-                description: 用户是否认可(1=认可,0=继续修改)
-                enum:
-                - 1
-                - 0
-                type: number
             required:
-            - type
             - message
             - duration
-            - resolution
             - aspectRatio
             type: object
         structured_output_enabled: true
@@ -2254,11 +1307,11 @@ workflow:
       height: 87
       id: '1785288460056'
       position:
-        x: 3551
-        y: 744.5904761904761
+        x: 1713.275169516562
+        y: 918.4931751178758
       positionAbsolute:
-        x: 3551
-        y: 744.5904761904761
+        x: 1713.275169516562
+        y: 918.4931751178758
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2274,143 +1327,12 @@ workflow:
       height: 99
       id: '1785288539691'
       position:
-        x: 4253
-        y: 861.197619047619
+        x: 2543.686417270324
+        y: 1266.4542600238724
       positionAbsolute:
-        x: 4253
-        y: 861.197619047619
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        authorization:
-          config:
-            api_key: '{{#env.LAOZHANG_KEY#}}'
-            header: X-Dify-Key
-            type: custom
-          type: no-auth
-        body:
-          data:
-          - type: text
-            value: "{\n  \"projectId\": \"{{#conversation.currentProjectId#}}\",\n\
-              \  \"prompt\": \"{{#1785288460056.structured_output.message#}}\",\n\
-              \  \"model\": \"veo-3.1-fast\",\n  \"resolution\": \"{{#1785288460056.structured_output.resolution#}}\"\
-              ,\n  \"size\": \"1280x720\",\n  \"aspectRatio\": \"{{#1785288460056.structured_output.aspectRatio#}}\"\
-              ,\n  \"duration\": {{#1785288460056.structured_output.duration#}},\n\
-              \  \"negativePrompt\": \"\"\n}\n"
-          type: json
-        default_value: null
-        desc: 调用后端视频代理端点(后端负责轮询Laozhang)
-        error_strategy: fail-branch
-        headers: 'Content-Type:application/json
-
-          X-Dify-Key:{{#env.DIFY_KEY#}}'
-        isInIteration: false
-        isInLoop: false
-        method: post
-        params: ''
-        retry_config:
-          max_retries: 3
-          retry_enabled: false
-          retry_interval: 5000
-        selected: false
-        ssl_verify: true
-        timeout:
-          connect: 30
-          max_connect_timeout: 30
-          max_read_timeout: 360
-          max_write_timeout: 30
-          read: 180
-          write: 30
-        title: POST生视频
-        type: http-request
-        url: http://host.docker.internal:8082/api/ai/dify/generate-video
-        variables: []
-      height: 187
-      id: '17852885655040'
-      position:
-        x: 4594
-        y: 654.697619047619
-      positionAbsolute:
-        x: 4594
-        y: 654.697619047619
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '✅ 视频生成中！
-
-          任务ID：{{#1785398957380.taskId#}}'
-        selected: false
-        title: 视频结果回复
-        type: answer
-        variables: []
-      height: 117
-      id: '1785288670365'
-      position:
-        x: 5316
-        y: 1241.6261904761905
-      positionAbsolute:
-        x: 5316
-        y: 1241.6261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: variable
-          operation: over-write
-          value:
-          - '17854653627910'
-          - lis
-          variable_selector:
-          - conversation
-          - storage_pic_talk
-        selected: false
-        title: 重置step、图片公用变量(图片生成完成)
-        type: assigner
-        version: '2'
-      height: 83
-      id: '17852888994950'
-      position:
-        x: 7743
-        y: 1220.5238095238096
-      positionAbsolute:
-        x: 7743
-        y: 1220.5238095238096
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: ✅ 图片已生成！{{#1785460955671.files#}}
-        selected: false
-        title: 图片结果回复
-        type: answer
-        variables: []
-      height: 117
-      id: '1785288919482'
-      position:
-        x: 6700
-        y: 1023.1642857142856
-      positionAbsolute:
-        x: 6700
-        y: 1023.1642857142856
-      selected: false
+        x: 2543.686417270324
+        y: 1266.4542600238724
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -2454,14 +1376,14 @@ workflow:
 
             目标：
 
-            剧情完整且用户对这个完整的剧本满意
+            剧情完整且用户对这个完整的剧本满意，每一次回复都要询问对方是否满意，要不要进入分镜阶段
 
 
             输出格式：
 
             {"type":1|0,"message":"优化剧本方案","script":"最终的剧本，用户认可了最终的方案才填入，默认不填"}
 
-            type=1 表示用户认可方案，type=0 表示需要继续修改'
+            type是number类型的，type=1 表示用户认可方案，type=0 表示需要继续修改'
         reasoning_format: separated
         selected: false
         structured_output:
@@ -2470,14 +1392,12 @@ workflow:
             properties:
               message:
                 description: 给用户展示剧情内容
-                enum: null
                 type: string
               script:
                 description: 最终用户认可的剧本方案，才能填入剧本方案，在完善剧本的情况默认为空
-                enum: null
                 type: string
               type:
-                description: 用户是否认可(1=认可,0=继续修改)
+                description: 用户是否认可(1=认可,0=继续修改)，是number类型的而不是Boolean类型的
                 enum:
                 - 1
                 - 0
@@ -2495,11 +1415,11 @@ workflow:
       height: 87
       id: '1785289782670'
       position:
-        x: 3551
-        y: 59.59999999999991
+        x: 1385
+        y: 258.7904761904764
       positionAbsolute:
-        x: 3551
-        y: 59.59999999999991
+        x: 1385
+        y: 258.7904761904764
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2529,11 +1449,11 @@ workflow:
       height: 147
       id: '17852900874780'
       position:
-        x: 3892
-        y: 44.09999999999991
+        x: 1746
+        y: 84.7238095238099
       positionAbsolute:
-        x: 3892
-        y: 44.09999999999991
+        x: 1746
+        y: 84.7238095238099
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2542,12 +1462,6 @@ workflow:
       zIndex: 0
     - data:
         items:
-        - input_type: constant
-          operation: set
-          value: 1
-          variable_selector:
-          - conversation
-          - step
         - input_type: variable
           operation: over-write
           value:
@@ -2561,14 +1475,14 @@ workflow:
         title: 变量赋值
         type: assigner
         version: '2'
-      height: 109
+      height: 83
       id: '1785290421184'
       position:
-        x: 4253
-        y: 0
+        x: 1746
+        y: 375.6904761904765
       positionAbsolute:
-        x: 4253
-        y: 0
+        x: 1746
+        y: 375.6904761904765
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2576,21 +1490,19 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#1785289782670.structured_output.message#}}
-
-          接下来为您生成分镜设计方案可以吗？'
+        answer: 接下来为您生成分镜设计方案
         selected: false
         title: 直接回复 8
         type: answer
         variables: []
-      height: 117
+      height: 99
       id: '1785290540008'
       position:
-        x: 4594
-        y: 14.166666666666686
+        x: 2111.9745746474064
+        y: -29.847447884438544
       positionAbsolute:
-        x: 4594
-        y: 14.166666666666686
+        x: 2111.9745746474064
+        y: -29.847447884438544
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2606,11 +1518,11 @@ workflow:
       height: 101
       id: '1785290593627'
       position:
-        x: 4253
-        y: 189
+        x: 2107
+        y: 179.00000000000023
       positionAbsolute:
-        x: 4253
-        y: 189
+        x: 2107
+        y: 179.00000000000023
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2618,83 +1530,7 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        items:
-        - input_type: constant
-          operation: set
-          value: 8d41dcce4d1c8221503906ab42c2bc87
-          variable_selector:
-          - conversation
-          - currentProjectId
-        selected: false
-        title: 变量赋值 12
-        type: assigner
-        version: '2'
-      height: 83
-      id: '1785296001579'
-      position:
-        x: 703
-        y: 492.6285714285714
-      positionAbsolute:
-        x: 703
-        y: 492.6285714285714
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: empty
-            id: 6ade0785-fac7-4b2e-86bf-4be8395ccfe7
-            value: ''
-            varType: string
-            variable_selector:
-            - conversation
-            - currentProjectId
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 条件分支 7
-        type: if-else
-      height: 123
-      id: '1785297043496'
-      position:
-        x: 362
-        y: 452.1285714285714
-      positionAbsolute:
-        x: 362
-        y: 452.1285714285714
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 生成失败：{{#17852882086950.body#}}，请重新说出你的想法完善生成
-        selected: false
-        title: 直接回复 11
-        type: answer
-        variables: []
-      height: 117
-      id: '1785306819792'
-      position:
-        x: 6018
-        y: 830.3309523809522
-      positionAbsolute:
-        x: 6018
-        y: 830.3309523809522
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 开始生图
+        answer: 正在生成图片…
         selected: false
         title: 直接回复 12
         type: answer
@@ -2702,494 +1538,11 @@ workflow:
       height: 99
       id: '1785307659567'
       position:
-        x: 4955
-        y: 368.33333333333326
+        x: 4130.036949401712
+        y: 554.1169704361763
       positionAbsolute:
-        x: 4955
-        y: 368.33333333333326
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        context:
-          enabled: false
-          variable_selector: []
-        default_value: null
-        error_strategy: fail-branch
-        memory:
-          query_prompt_template: '{{#sys.query#}}
-
-
-            {{#sys.files#}}'
-          role_prefix:
-            assistant: ''
-            user: ''
-          window:
-            enabled: true
-            size: 31
-        model:
-          completion_params:
-            temperature: 0.7
-          mode: chat
-          name: deepseek-v4-flash
-          provider: langgenius/deepseek/deepseek
-        prompt_template:
-        - id: d3c0b588-572a-4a86-ae3c-3d473883ffcd
-          role: system
-          text: '你现在要根据用户完善的需求设计完善图片设计方案
-
-            用户对当前图片不满意：{{#sys.query#}}
-
-            上一个生图的风格：{{#17853956637370.pic_generate_talk#}}
-
-
-            方案需包含：
-
-            1. 画面风格（写实/二次元/油画/水彩/3D渲染/摄影等）
-
-            2. 画幅尺寸（1024x1024方形 / 1536x1024横屏 / 1024x1536竖屏）
-
-            3. 画面构图描述（主体位置、视角、景深）
-
-            4. 色调与光线设计（暖色/冷色、自然光/戏剧光）
-
-            5. 关键元素说明
-
-
-            目标：根据用户想要完善的图片设计方案优化这个生图的风格完整方案文本、风格关键词，然后投喂给生图大模型
-
-
-            输出格式：
-
-            {"message":"完整方案文本","style":"风格关键词","size":"1024x1024|1792x1024|1024x1792"}'
-        reasoning_format: separated
-        retry_config:
-          max_retries: 2
-          retry_enabled: true
-          retry_interval: 523
-        selected: false
-        structured_output:
-          schema:
-            additionalProperties: false
-            properties:
-              message:
-                description: 完整方案文本
-                type: string
-              size:
-                description: 画幅尺寸 1024x1024方形 / 1792x1024横屏 / 1024x1792竖屏
-                type: string
-              style:
-                description: 风格关键词
-                enum: null
-                type: string
-            required:
-            - message
-            - size
-            - style
-            type: object
-        structured_output_enabled: true
-        title: 完善图片设计方案
-        type: llm
-        vision:
-          enabled: false
-      height: 152
-      id: '1785307777685'
-      position:
-        x: 3190
-        y: 1562.5309523809524
-      positionAbsolute:
-        x: 3190
-        y: 1562.5309523809524
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        delivery_methods:
-        - enabled: true
-          id: 0fbbe53b-0ef9-4e4e-8990-10258e5dc8c5
-          type: webapp
-        form_content: 基于这图片，您还需要继续完善吗？
-        inputs: []
-        selected: false
-        timeout: 1
-        timeout_unit: hour
-        title: 完善图片
-        type: human-input
-        user_actions:
-        - button_style: primary
-          id: nofinish
-          title: 继续完善
-        - button_style: primary
-          id: finish
-          title: 已完成生图
-      height: 188
-      id: '1785382667730'
-      position:
-        x: 7041
-        y: 1007.1642857142855
-      positionAbsolute:
-        x: 7041
-        y: 1007.1642857142855
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        items:
-        - input_type: variable
-          operation: over-write
-          value:
-          - '1785393819983'
-          - lis
-          variable_selector:
-          - conversation
-          - storage_pic_talk
-        - input_type: variable
-          operation: clear
-          value: []
-          variable_selector:
-          - conversation
-          - picture
-        - input_type: constant
-          operation: set
-          value: 5
-          variable_selector:
-          - conversation
-          - step
-        iteration_id: null
-        loop_id: null
-        selected: false
-        title: '设置step=5(生图) '
-        type: assigner
-        version: '2'
-      height: 135
-      id: '17853829853480'
-      position:
-        x: 7743
-        y: 1005.5238095238095
-      positionAbsolute:
-        x: 7743
-        y: 1005.5238095238095
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 您想怎么完善这个图片呢？
-        selected: false
-        title: 直接回复 13
-        type: answer
-        variables: []
-      height: 99
-      id: '1785383037704'
-      position:
-        x: 8084
-        y: 1046.0238095238096
-      positionAbsolute:
-        x: 8084
-        y: 1046.0238095238096
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "\ndef main(pic_generate_talk: str, picture: str, storage_pic_talk:\
-          \ dict,size:str,style:str):\n    stored_talk = storage_pic_talk.get(\"pic_generate_talk\"\
-          , None)\n    if stored_talk is not None and stored_talk != \"\":\n     \
-          \   lis = {\n            \"pic_generate_talk\": stored_talk,\n         \
-          \   \"picture\": picture,\n            \"user_finishing\": \"\",\n     \
-          \       \"size\":size,\n            \"style\":style\n        }\n       \
-          \ return {\"lis\": lis}\n    else:\n        lis = {\n            \"pic_generate_talk\"\
-          : pic_generate_talk,\n            \"picture\": picture,\n            \"\
-          user_finishing\": \"\",\n            \"size\":size,\n            \"style\"\
-          :style\n        }\n        return {\"lis\": lis}\n"
-        code_language: python3
-        outputs:
-          lis:
-            children: null
-            type: object
-        selected: false
-        title: 传到公共变量
-        type: code
-        variables:
-        - value_selector:
-          - '1785287847725'
-          - structured_output
-          - message
-          value_type: object
-          variable: pic_generate_talk
-        - value_selector:
-          - '1785461787161'
-          - imageUrl
-          value_type: string
-          variable: picture
-        - value_selector:
-          - conversation
-          - storage_pic_talk
-          value_type: object
-          variable: storage_pic_talk
-        - value_selector:
-          - '1785307777685'
-          - structured_output
-          - size
-          value_type: object
-          variable: size
-        - value_selector:
-          - '1785287847725'
-          - structured_output
-          - style
-          value_type: object
-          variable: style
-      height: 51
-      id: '1785393819983'
-      position:
-        x: 7402
-        y: 1039.0238095238096
-      positionAbsolute:
-        x: 7402
-        y: 1039.0238095238096
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        items:
-        - input_type: variable
-          operation: over-write
-          value:
-          - '1785394677830'
-          - lis
-          variable_selector:
-          - conversation
-          - storage_pic_talk
-        selected: false
-        title: 变量赋值 13
-        type: assigner
-        version: '2'
-      height: 83
-      id: '1785394633075'
-      position:
-        x: 2829
-        y: 1512.3642857142859
-      positionAbsolute:
-        x: 2829
-        y: 1512.3642857142859
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "\ndef main(storage_pic_talk: str, user_finishing: str):\n\n    lis\
-          \ = {\n        \"pic_generate_talk\": storage_pic_talk[\"pic_generate_talk\"\
-          ],\n        \"picture\": storage_pic_talk[\"picture\"],\n        \"user_finishing\"\
-          : user_finishing\n    }\n    return {\n        \"lis\":lis\n    }"
-        code_language: python3
-        outputs:
-          lis:
-            children: null
-            type: object
-        selected: false
-        title: 赋全局值
-        type: code
-        variables:
-        - value_selector:
-          - conversation
-          - storage_pic_talk
-          value_type: object
-          variable: storage_pic_talk
-        - value_selector:
-          - sys
-          - query
-          value_type: string
-          variable: user_finishing
-      height: 51
-      id: '1785394677830'
-      position:
-        x: 2488
-        y: 1519.8642857142859
-      positionAbsolute:
-        x: 2488
-        y: 1519.8642857142859
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "\ndef main(storage_pic_talk: dict):\n\n    return {\n        \"pic_generate_talk\"\
-          :storage_pic_talk[\"pic_generate_talk\"],\n        \"picture\":storage_pic_talk[\"\
-          picture\"]\n    }"
-        code_language: python3
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        outputs:
-          pic_generate_talk:
-            children: null
-            type: string
-          picture:
-            children: null
-            type: string
-        selected: false
-        title: 从json抽出值
-        type: code
-        variables:
-        - value_selector:
-          - conversation
-          - storage_pic_talk
-          value_type: object
-          variable: storage_pic_talk
-      height: 51
-      id: '17853956637370'
-      position:
-        x: 2488
-        y: 1675.3642857142859
-      positionAbsolute:
-        x: 2488
-        y: 1675.3642857142859
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "\ndef main(storage_pic_talk: dict, pic_generate_talk: str,size:str,style:str):\n\
-          \ \n    lis = {\n        \"user_finishing\": \"\",\n        \"pic_generate_talk\"\
-          : pic_generate_talk,\n        \"picture\":storage_pic_talk[\"picture\"],\n\
-          \        \"mode\":\"edit\",\n        \"size\":size,\n        \"style\":style\n\
-          \    }\n    return {\n        \"lis\":lis\n    }"
-        code_language: python3
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        outputs:
-          lis:
-            children: null
-            type: object
-        selected: false
-        title: 赋全局值
-        type: code
-        variables:
-        - value_selector:
-          - conversation
-          - storage_pic_talk
-          value_type: object
-          variable: storage_pic_talk
-        - value_selector:
-          - '1785307777685'
-          - structured_output
-          - message
-          value_type: object
-          variable: pic_generate_talk
-        - value_selector:
-          - '1785307777685'
-          - structured_output
-          - size
-          value_type: object
-          variable: size
-        - value_selector:
-          - '1785307777685'
-          - structured_output
-          - style
-          value_type: object
-          variable: style
-      height: 51
-      id: '17853966434950'
-      position:
-        x: 4614
-        y: 1754.7642857142855
-      positionAbsolute:
-        x: 4614
-        y: 1754.7642857142855
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        items:
-        - input_type: variable
-          operation: over-write
-          value:
-          - '17853966434950'
-          - lis
-          variable_selector:
-          - conversation
-          - storage_pic_talk
-        selected: false
-        title: 公共变量赋值
-        type: assigner
-        version: '2'
-      height: 83
-      id: '1785396877564'
-      position:
-        x: 4955
-        y: 1747.2642857142855
-      positionAbsolute:
-        x: 4955
-        y: 1747.2642857142855
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "import json\n\ndef main(data: str):\n    parsed = json.loads(data)\n\
-          \    taskId = parsed[\"data\"][\"taskId\"]\n    status = parsed[\"data\"\
-          ][\"status\"]\n    return {\"taskId\": taskId,\n            \"status\":\
-          \ status,\n    }"
-        code_language: python3
-        outputs:
-          status:
-            children: null
-            type: string
-          taskId:
-            children: null
-            type: string
-        selected: false
-        title: 代码执行 5
-        type: code
-        variables:
-        - value_selector:
-          - '17852885655040'
-          - body
-          value_type: string
-          variable: data
-      height: 51
-      id: '1785398957380'
-      position:
-        x: 4955
-        y: 854.5976190476191
-      positionAbsolute:
-        x: 4955
-        y: 854.5976190476191
+        x: 4130.036949401712
+        y: 554.1169704361763
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3207,371 +1560,11 @@ workflow:
       height: 99
       id: '1785399995734'
       position:
-        x: 4253
-        y: 682.197619047619
+        x: 2562.3319865759413
+        y: 1055.0960291725276
       positionAbsolute:
-        x: 4253
-        y: 682.197619047619
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "def main(taskId: str, DIFY_KEY: str):\n    import time, requests\n\
-          \    max_attempts = 120\n    attempts = 0\n    while attempts < max_attempts:\n\
-          \        try:\n            headers = {'X-Dify-Key': DIFY_KEY}\n        \
-          \    resp = requests.get(f\"http://host.docker.internal:8082/api/ai/dify/generate-video/status?taskId={taskId}\"\
-          , timeout=600, headers=headers)\n            resp.raise_for_status()\n \
-          \           data = resp.json()\n        except Exception as e:\n       \
-          \     return {\"videoUrl\": \"\", \"error\": f\"请求失败: {str(e)}\", \"status\"\
-          : \"failed\"}\n        if 'data' not in data:\n            return {\"videoUrl\"\
-          : \"\", \"error\": \"响应格式错误: 缺少'data'键\", \"status\": \"failed\"}\n    \
-          \    status_data = data['data']\n        status = status_data.get('status')\n\
-          \        if status == \"completed\":\n            video_url = status_data.get('videoUrl',\
-          \ '')\n            return {\"videoUrl\": video_url, \"error\": \"\", \"\
-          status\": \"completed\"}\n        elif status == \"failed\":\n         \
-          \   error = status_data.get('error', '')\n            return {\"videoUrl\"\
-          : \"\", \"error\": error, \"status\": \"failed\"}\n        time.sleep(5)\n\
-          \        attempts += 1\n    return {\"videoUrl\": \"\", \"error\": \"等待超时，任务未完成\"\
-          , \"status\": \"failed\"}"
-        code_language: python3
-        outputs:
-          error:
-            children: null
-            type: string
-          status:
-            children: null
-            type: string
-          videoUrl:
-            children: null
-            type: string
-        retry_config:
-          max_retries: 1
-          retry_enabled: false
-          retry_interval: 1000
-        selected: false
-        title: 代码执行 6
-        type: code
-        variables:
-        - value_selector:
-          - '1785398957380'
-          - taskId
-          value_type: string
-          variable: taskId
-        - value_selector:
-          - env
-          - DIFY_KEY
-          value_type: string
-          variable: DIFY_KEY
-      height: 51
-      id: '1785401554825'
-      position:
-        x: 5657
-        y: 1294.1261904761905
-      positionAbsolute:
-        x: 5657
-        y: 1294.1261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: is
-            id: d8e61eb2-679b-4adc-9ab8-e35882010e53
-            value: completed
-            varType: string
-            variable_selector:
-            - '1785401554825'
-            - status
-          id: 'true'
-          logical_operator: and
-        selected: false
-        title: 条件分支 9
-        type: if-else
-      height: 147
-      id: '1785403027984'
-      position:
-        x: 5998
-        y: 1254.6261904761905
-      positionAbsolute:
-        x: 5998
-        y: 1254.6261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '
-
-
-          ✅生成完成！
-
-          {{#1785485001504.files#}}'
-        selected: false
-        title: 直接回复 15
-        type: answer
-        variables: []
-      height: 101
-      id: '1785403055109'
-      position:
-        x: 6700
-        y: 1307.8261904761905
-      positionAbsolute:
-        x: 6700
-        y: 1307.8261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785401554825.error#}}'
-        selected: false
-        title: 直接回复 16
-        type: answer
-        variables: []
-      height: 101
-      id: '1785403439529'
-      position:
-        x: 6359
-        y: 1469.3261904761907
-      positionAbsolute:
-        x: 6359
-        y: 1469.3261904761907
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "def main(body: str):\n    import json\n    data = json.loads(body)\n\
-          \    return {\n        \"message\": data[\"message\"]\n    }\n"
-        code_language: python3
-        outputs:
-          message:
-            children: null
-            type: string
-        selected: false
-        title: 代码执行 7
-        type: code
-        variables:
-        - value_selector:
-          - '17852885655040'
-          - body
-          value_type: string
-          variable: body
-      height: 51
-      id: '1785403535612'
-      position:
-        x: 4955
-        y: 665.597619047619
-      positionAbsolute:
-        x: 4955
-        y: 665.597619047619
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785403535612.message#}}'
-        selected: false
-        title: 直接回复 17
-        type: answer
-        variables: []
-      height: 101
-      id: '1785403670960'
-      position:
-        x: 5316
-        y: 1060.6261904761905
-      positionAbsolute:
-        x: 5316
-        y: 1060.6261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        authorization:
-          config: null
-          type: no-auth
-        body:
-          data: []
-          type: none
-        headers: X-Dify-Key:{{#env.DIFY_KEY#}}
-        method: get
-        params: ''
-        retry_config:
-          max_retries: 3
-          retry_enabled: true
-          retry_interval: 100
-        selected: false
-        ssl_verify: true
-        timeout:
-          max_connect_timeout: 0
-          max_read_timeout: 0
-          max_write_timeout: 0
-        title: HTTP 请求 4
-        type: http-request
-        url: '{{#1785461787161.imageUrl#}}'
-        variables: []
-      height: 122
-      id: '1785460955671'
-      position:
-        x: 6359
-        y: 1000.3309523809522
-      positionAbsolute:
-        x: 6359
-        y: 1000.3309523809522
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "import json\n\ndef main(body: str):\n    data = json.loads(body).get(\"\
-          data\", {})\n    return {\"imageUrl\": data.get(\"imageUrl\")}\n"
-        code_language: python3
-        outputs:
-          imageUrl:
-            children: null
-            type: string
-        selected: false
-        title: 获取imageUrl
-        type: code
-        variables:
-        - value_selector:
-          - '17852882086950'
-          - body
-          value_type: string
-          variable: body
-      height: 51
-      id: '1785461787161'
-      position:
-        x: 6018
-        y: 1027.330952380952
-      positionAbsolute:
-        x: 6018
-        y: 1027.330952380952
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "import json\ndef main(storage_pic_talk: dict):\n    return {\n    \
-          \    \"pic_generate_talk\": storage_pic_talk.get(\"pic_generate_talk\",\
-          \ \"\"),\n        \"user_finishing\": storage_pic_talk.get(\"user_finishing\"\
-          , \"\"),\n        \"picture\": storage_pic_talk.get(\"picture\", \"\"),\n\
-          \        \"mode\": storage_pic_talk.get(\"mode\", \"\"),\n        \"style\"\
-          :storage_pic_talk.get(\"style\", \"\"),\n        \"size\":storage_pic_talk.get(\"\
-          size\", \"\")\n        }\n    \n"
-        code_language: python3
-        outputs:
-          mode:
-            children: null
-            type: string
-          pic_generate_talk:
-            children: null
-            type: string
-          picture:
-            children: null
-            type: string
-          size:
-            children: null
-            type: string
-          style:
-            children: null
-            type: string
-          user_finishing:
-            children: null
-            type: string
-        selected: false
-        title: 提取公共变量转json
-        type: code
-        variables:
-        - value_selector:
-          - conversation
-          - storage_pic_talk
-          value_type: object
-          variable: storage_pic_talk
-      height: 51
-      id: '1785464040420'
-      position:
-        x: 5316
-        y: 736.2595238095237
-      positionAbsolute:
-        x: 5316
-        y: 736.2595238095237
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        code: "\ndef main():\n \n    lis = {\n        \"user_finishing\": \"\",\n\
-          \        \"pic_generate_talk\": \"\",\n        \"picture\":\"\",\n     \
-          \   \"mode\":\"\",\n        \"style\":\"\",\n        \"size\":\"\"\n   \
-          \ }\n    return {\n        \"lis\":lis\n    }"
-        code_language: python3
-        desc: ''
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        outputs:
-          lis:
-            children: null
-            type: object
-        selected: false
-        title: 赋全局值为空值
-        type: code
-        variables: []
-      height: 51
-      id: '17854653627910'
-      position:
-        x: 7402
-        y: 1228.0238095238096
-      positionAbsolute:
-        x: 7402
-        y: 1228.0238095238096
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785307777685.structured_output.message#}}'
-        selected: false
-        title: 回答方案
-        type: answer
-        variables: []
-      height: 101
-      id: '1785466119606'
-      position:
-        x: 3516.539049350089
-        y: 1457.919917571611
-      positionAbsolute:
-        x: 3516.539049350089
-        y: 1457.919917571611
+        x: 2562.3319865759413
+        y: 1055.0960291725276
       selected: true
       sourcePosition: right
       targetPosition: left
@@ -3579,9 +1572,13 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        code: "\ndef main(size:str,style:str,message:str):\n    return{\n        \"\
-          lis\":{\n            \"size\":size,\n            \"style\":style,\n    \
-          \        \"pic_generate_talk\":message\n        }\n    }"
+        code: "def main(size: str, style: str, message: str, pic_url: str, storage_pic_talk:\
+          \ dict):\n       # 完善路径（带参考图）→ 图改图；首次生成 → 文生图\n       pic = pic_url if pic_url\
+          \ and pic_url.strip() else storage_pic_talk.get(\"picture\", \"\")\n   \
+          \    mode = \"edit\" if pic else \"\"\n       return {\n           \"lis\"\
+          : {\n               \"size\": size,\n               \"style\": style,\n\
+          \               \"pic_generate_talk\": message,\n               \"picture\"\
+          : pic,\n               \"mode\": mode\n           }\n       }"
         code_language: python3
         desc: ''
         isInIteration: false
@@ -3593,7 +1590,7 @@ workflow:
             children: null
             type: object
         selected: false
-        title: 传到公共变量
+        title: 传到公共变量（图片）
         type: code
         variables:
         - value_selector:
@@ -3614,14 +1611,24 @@ workflow:
           - message
           value_type: object
           variable: message
+        - value_selector:
+          - '1785286288428'
+          - PicUrl
+          value_type: string
+          variable: pic_url
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
       height: 51
       id: '17854679129180'
       position:
-        x: 4273
-        y: 370
+        x: 2448
+        y: 486.78333333333353
       positionAbsolute:
-        x: 4273
-        y: 370
+        x: 2448
+        y: 486.78333333333353
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3645,11 +1652,11 @@ workflow:
       height: 83
       id: '1785468047542'
       position:
-        x: 4614
-        y: 362.5
+        x: 2789
+        y: 479.28333333333353
       positionAbsolute:
-        x: 4614
-        y: 362.5
+        x: 2789
+        y: 479.28333333333353
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3673,245 +1680,11 @@ workflow:
       height: 83
       id: '1785478874143'
       position:
-        x: 1690.658036535246
-        y: 854.5976190476191
+        x: 342
+        y: 822.0857142857144
       positionAbsolute:
-        x: 1690.658036535246
-        y: 854.5976190476191
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        authorization:
-          config: null
-          type: no-auth
-        body:
-          data: []
-          type: none
-        headers: X-Dify-Key:{{#env.DIFY_KEY#}}
-        method: get
-        params: ''
-        retry_config:
-          max_retries: 3
-          retry_enabled: false
-          retry_interval: 100
-        selected: false
-        ssl_verify: true
-        timeout:
-          max_connect_timeout: 0
-          max_read_timeout: 0
-          max_write_timeout: 0
-        title: 获取视频
-        type: http-request
-        url: '{{#1785401554825.videoUrl#}}'
-        variables: []
-      height: 93
-      id: '1785485001504'
-      position:
-        x: 6359
-        y: 1296.3261904761905
-      positionAbsolute:
-        x: 6359
-        y: 1296.3261904761905
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        context:
-          enabled: false
-          variable_selector: []
-        default_value: null
-        error_strategy: fail-branch
-        memory:
-          query_prompt_template: '{{#sys.query#}}
-
-
-            {{#sys.files#}}'
-          role_prefix:
-            assistant: ''
-            user: ''
-          window:
-            enabled: true
-            size: 10
-        model:
-          completion_params:
-            temperature: 0.5
-            thinking: false
-          mode: chat
-          name: deepseek-v4-pro
-          provider: langgenius/deepseek/deepseek
-        prompt_config:
-          jinja2_variables: []
-        prompt_template:
-        - edition_type: basic
-          id: 9f9f6892-09c0-4f05-8e2f-f8fb751991b9
-          jinja2_text: ''
-          role: system
-          text: '【最高优先级强制规则，任何情况不可违反】
-
-            你只是一个意图判断检测器！
-
-            禁止和用户对话、禁止生成海报/图片/视频/分镜内容、禁止输出图片链接、禁止解释、禁止续写剧情！
-
-            无论上下文历史是什么，你绝对不能模仿历史对话进行回答！
-
-            任务：读取【当前step】和【用户最新一句话】，判断是否需要切换流程。
-
-            当前流程阶段step = {{#conversation.step#}}
-
-
-            阶段定义
-
-            - step = -1：意图识别初始阶段 → 固定输出{"pointer": -1}
-
-            - step = 1,2,7：AI分镜设计阶段
-
-            - step = 3,5：图片设计阶段
-
-            - step = 4,6：视频设计阶段
-
-
-            pointer可选值：
-
-            7 = 切换AI分镜｜3 = 切换图片设计｜4 = 切换视频设计｜-1 = 不切换
-
-
-            判定规则：
-
-            1. step=1/2/7(分镜阶段)
-
-            想生图→3；想生成视频→4；继续聊分镜→-1
-
-            2. step=3/5(图片阶段)
-
-            想做分镜→7；想生成视频→4；继续聊图片→-1
-
-            3. step=4/6(视频阶段)
-
-            想做分镜→7；想生图/设计图片海报→3；继续聊视频→-1
-
-            4. step=-1 → {"pointer": -1}
-
-
-            硬性原则：
-
-            只有用户明确提出更换模式才切换；模糊、延续当前话题一律-1
-
-
-            输出铁则：
-
-            1. 只输出纯JSON，无```代码块、无注释、无额外文字
-
-            2. 严格格式样例：{"pointer": 3}
-
-            3. pointer只能是数字：-1、3、4、7
-
-            4. 一旦输出任何非JSON文本，视为严重错误！
-
-
-            仅分析【用户最新一条消息】，久远历史对话仅作为参考，不要被大量历史聊天干扰判断！'
-        reasoning_format: separated
-        retry_config:
-          max_retries: 3
-          retry_enabled: true
-          retry_interval: 100
-        selected: true
-        structured_output:
-          schema:
-            additionalProperties: false
-            properties:
-              pointer:
-                description: '## 可切换的目标模式 - pointer = 7：用户想切换到「AI分镜设计」 - pointer =
-                  3：用户想切换到「图片设计/图片生成」 - pointer = 4：用户想切换到「视频设计/视频生成」 - pointer =
-                  -1：用户没有改变主意，继续当前模式'
-                enum:
-                - -1
-                - 3
-                - 4
-                - 7
-                type: number
-            required:
-            - pointer
-            type: object
-        structured_output_enabled: true
-        title: 意图打断
-        type: llm
-        vision:
-          enabled: false
-      height: 152
-      id: '1785725021398'
-      position:
-        x: 185.10045333045673
-        y: 693.0356171434735
-      positionAbsolute:
-        x: 185.10045333045673
-        y: 693.0356171434735
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        cases:
-        - case_id: 'true'
-          conditions:
-          - comparison_operator: '='
-            id: e24f1e03-55a7-4fd8-9c9c-76c32366ab48
-            value: '-1'
-            varType: number
-            variable_selector:
-            - '1785725021398'
-            - structured_output
-            - pointer
-          id: 'true'
-          logical_operator: or
-        selected: false
-        title: 条件分支 10
-        type: if-else
-      height: 147
-      id: '1785725499163'
-      position:
-        x: 1064
-        y: 845.3285714285713
-      positionAbsolute:
-        x: 1064
-        y: 845.3285714285713
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        items:
-        - input_type: variable
-          operation: over-write
-          value:
-          - '1785725021398'
-          - structured_output
-          - pointer
-          variable_selector:
-          - conversation
-          - step
-        selected: false
-        title: 变量赋值 17
-        type: assigner
-        version: '2'
-      height: 83
-      id: '1785725600058'
-      position:
-        x: 1425
-        y: 984.5285714285714
-      positionAbsolute:
-        x: 1425
-        y: 984.5285714285714
+        x: 342
+        y: 822.0857142857144
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -3932,83 +1705,19 @@ workflow:
         type: human-input
         user_actions:
         - button_style: primary
-          id: generate
+          id: generate_video
           title: 开始生成视频
         - button_style: primary
-          id: no_generate
+          id: refine
           title: 继续完善
       height: 188
       id: '1785728867774'
       position:
-        x: 3892
-        y: 708.5904761904761
+        x: 2091.874466531952
+        y: 1026.8208596559655
       positionAbsolute:
-        x: 3892
-        y: 708.5904761904761
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785307777685.error_message#}}
-
-          生成错误，请联系管理员'
-        selected: false
-        title: 直接回复 19
-        type: answer
-        variables: []
-      height: 117
-      id: '1785745746035'
-      position:
-        x: 3585.460950649911
-        y: 1710.0609743754512
-      positionAbsolute:
-        x: 3585.460950649911
-        y: 1710.0609743754512
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '{{#1785725021398.error_message#}}
-
-          请联系管理员'
-        selected: false
-        title: 直接回复 20
-        type: answer
-        variables: []
-      height: 117
-      id: '1785746120817'
-      position:
-        x: 549.5465483954479
-        y: 942.8396062379128
-      positionAbsolute:
-        x: 549.5465483954479
-        y: 942.8396062379128
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 分镜生成失败，请联系管理员
-        selected: false
-        title: 直接回复 21
-        type: answer
-        variables: []
-      height: 99
-      id: '1785746302755'
-      position:
-        x: 4507.524193765168
-        y: 1225.2571428571428
-      positionAbsolute:
-        x: 4507.524193765168
-        y: 1225.2571428571428
+        x: 2091.874466531952
+        y: 1026.8208596559655
       selected: true
       sourcePosition: right
       targetPosition: left
@@ -4040,11 +1749,11 @@ workflow:
       height: 188
       id: '1785747933811'
       position:
-        x: 2829
-        y: 1075.3166666666666
+        x: 3130
+        y: 1
       positionAbsolute:
-        x: 2829
-        y: 1075.3166666666666
+        x: 3130
+        y: 1
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -4054,17 +1763,17 @@ workflow:
     - data:
         answer: 请继续完善分镜设计方案
         selected: false
-        title: 直接回复 22
+        title: 请继续完善分镜设计方案
         type: answer
         variables: []
       height: 99
       id: '1785748101848'
       position:
-        x: 3190
-        y: 1225.2571428571428
+        x: 3491
+        y: 275.1428571428572
       positionAbsolute:
-        x: 3190
-        y: 1225.2571428571428
+        x: 3491
+        y: 275.1428571428572
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -4072,61 +1781,340 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        code: "def main(pointer):\n    valid = {-1, 3, 4, 7}\n    try:\n        p\
-          \ = int(str(pointer).strip().strip('\"'))\n    except Exception:\n     \
-          \   p = -1\n    if p not in valid:\n        p = -1\n    return {\"pointer\"\
-          : p}"
-        code_language: python3
-        outputs:
-          pointer:
-            children: null
-            type: number
+        answer: 准备为您生成AI分镜
         selected: false
-        title: 代码执行 12
+        title: 准备为您生成AI分镜
+        type: answer
+        variables: []
+      height: 99
+      id: '1785891056513'
+      position:
+        x: 3491
+        y: 96.14285714285734
+      positionAbsolute:
+        x: 3491
+        y: 96.14285714285734
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        delivery_methods:
+        - enabled: true
+          id: fb37095c-882c-4ab5-8915-646099520a71
+          type: webapp
+        form_content: '{{#1785287847725.structured_output.message#}}'
+        inputs: []
+        selected: false
+        timeout: 1
+        timeout_unit: hour
+        title: 确认图片方案
+        type: human-input
+        user_actions:
+        - button_style: default
+          id: generate_image
+          title: 生成图片
+        - button_style: default
+          id: refine
+          title: 继续完善方案
+      height: 188
+      id: '1785910286651'
+      position:
+        x: 3387.9446592493855
+        y: 522.8467710530845
+      positionAbsolute:
+        x: 3387.9446592493855
+        y: 522.8467710530845
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        code: "def main(storage_pic_talk: dict):\n    if isinstance(storage_pic_talk,\
+          \ str):\n        storage_pic_talk = json.loads(storage_pic_talk)\n    pic_generate_talk\
+          \ = storage_pic_talk.get(\"pic_generate_talk\", \"\") or \"\"\n    return\
+          \ {\n        \"pic_generate_talk\": pic_generate_talk.strip()\n    }"
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        outputs:
+          pic_generate_talk:
+            children: null
+            type: string
+        selected: false
+        title: 提取pic_generate_talk (1)
         type: code
         variables:
         - value_selector:
-          - '1785725021398'
-          - structured_output
-          - pointer
+          - conversation
+          - storage_pic_talk
           value_type: object
-          variable: pointer
+          variable: storage_pic_talk
       height: 51
-      id: '1785749078218'
+      id: '17859129841880'
       position:
-        x: 631.7807019901838
-        y: 718.2571428571428
+        x: 1385
+        y: 615.2161452071473
       positionAbsolute:
-        x: 631.7807019901838
-        y: 718.2571428571428
+        x: 1385
+        y: 615.2161452071473
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 请继续完善图片设计方案
+        desc: ''
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        selected: false
+        title: 请继续完善图片设计方案
+        type: answer
+        variables: []
+      height: 99
+      id: '17859168366910'
+      position:
+        x: 4030.5911151502078
+        y: 788.528167469264
+      positionAbsolute:
+        x: 4030.5911151502078
+        y: 788.528167469264
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: empty
+            id: c62ed7fa-9995-4b12-aa01-e8a4a70cbefc
+            value: ''
+            varType: string
+            variable_selector:
+            - '17859129841880'
+            - pic_generate_talk
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 条件分支 3
+        type: if-else
+      height: 139
+      id: '1786068209182'
+      position:
+        x: 1711.2310211500383
+        y: 586.2801358071305
+      positionAbsolute:
+        x: 1711.2310211500383
+        y: 586.2801358071305
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        author: weichenyi
+        desc: ''
+        height: 576
+        selected: false
+        showAuthor: true
+        text: '{"root":{"children":[{"children":[{"detail":0,"format":1,"mode":"normal","style":"font-size:
+          16px;","text":"图片人工介入完，后端会会生成图片，再次进入人工介入，若完成图片生成则会清空上一轮的对话","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"paragraph","version":1,"textFormat":1,"textStyle":"font-size:
+          16px;"}],"direction":null,"format":"","indent":0,"type":"root","version":1}}'
+        theme: pink
+        title: ''
+        type: ''
+        width: 1267
+      height: 576
+      id: '1786073202538'
+      position:
+        x: 3100.511924799864
+        y: 464.5143544833717
+      positionAbsolute:
+        x: 3100.511924799864
+        y: 464.5143544833717
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-note
+      width: 1267
+      zIndex: 0
+    - data:
+        code: "\ndef main(user_finishing: str, storage_pic_talk: dict):\n    storage_pic_talk[\"\
+          user_finishing\"] = user_finishing\n    return {\n        \"result\":storage_pic_talk,\n\
+          \    }\n"
+        code_language: python3
+        outputs:
+          result:
+            children: null
+            type: object
+        selected: false
+        title: user_finishing
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          value_type: string
+          variable: user_finishing
+        - value_selector:
+          - conversation
+          - storage_pic_talk
+          value_type: object
+          variable: storage_pic_talk
+      height: 51
+      id: '1786082824642'
+      position:
+        x: 2037.770070500127
+        y: 674.8166666666668
+      positionAbsolute:
+        x: 2037.770070500127
+        y: 674.8166666666668
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1786082824642'
+          - result
+          variable_selector:
+          - conversation
+          - storage_pic_talk
+        selected: false
+        title: 赋值
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1786082977772'
+      position:
+        x: 2359.103039950072
+        y: 674.8166666666668
+      positionAbsolute:
+        x: 2359.103039950072
+        y: 674.8166666666668
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        answer: 结合用户输入理解图片优化提示词中...
+        selected: false
+        title: 后端执行识别图片加人工介入流程
+        type: answer
+        variables: []
+      height: 99
+      id: '1786086274364'
+      position:
+        x: 2665.0260329000594
+        y: 694.5086384666159
+      positionAbsolute:
+        x: 2665.0260329000594
+        y: 694.5086384666159
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 0
+    - data:
+        author: weichenyi
+        desc: ''
+        height: 500
+        selected: false
+        showAuthor: true
+        text: '{"root":{"children":[{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          16px;","text":"这里图生图走后端，因为图片理解要走大模型，为了职责单一放后端去","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"paragraph","version":1,"textFormat":0,"textStyle":"font-size:
+          16px;"}],"direction":null,"format":"","indent":0,"type":"root","version":1}}'
+        theme: blue
+        title: ''
+        type: ''
+        width: 701
+      height: 500
+      id: '1786089408699'
+      position:
+        x: 2262.3319865759413
+        y: 554.1169704361763
+      positionAbsolute:
+        x: 2262.3319865759413
+        y: 554.1169704361763
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-note
+      width: 701
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: empty
+            id: f7921f84-09e1-49e6-975d-3cb63c76b59c
+            value: ''
+            varType: string
+            variable_selector:
+            - conversation
+            - picture
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: 图片判断
+        type: if-else
+      height: 123
+      id: '1786091356243'
+      position:
+        x: 1369.9199095911672
+        y: 952.4233785377502
+      positionAbsolute:
+        x: 1369.9199095911672
+        y: 952.4233785377502
       selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
-      zIndex: 0
     - data:
-        answer: 分镜生成中...
+        answer: 结合你上传的参考图设计视频方案中...
         selected: false
-        title: 直接回复 21
+        title: 后端执行图生视频方案设计
         type: answer
         variables: []
       height: 99
-      id: '1785823531415'
+      id: '1786091427703'
       position:
-        x: 3575.1226654549378
-        y: 1027.330952380952
+        x: 1731.9661454621837
+        y: 1217.914214819456
       positionAbsolute:
-        x: 3575.1226654549378
-        y: 1027.330952380952
-      selected: false
+        x: 1731.9661454621837
+        y: 1217.914214819456
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
-      zIndex: 0
     viewport:
-      x: 510.1052427404038
-      y: 14.65766301645374
-      zoom: 0.574349177498518
+      x: -11.734378693382268
+      y: -57.68226525593184
+      zoom: 0.5305007982786403
   rag_pipeline_variables: []

@@ -1,0 +1,69 @@
+import { useAgentStore, type VideoPlanInfo } from '../../stores/agentStore';
+import { assetUrl } from '../../config';
+
+/** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
+export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
+  const submitVideoPlan = useAgentStore((s) => s.submitVideoPlan);
+  const streaming = useAgentStore((s) => s.streaming);
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
+      <div
+        style={{
+          maxWidth: '82%', padding: 12, borderRadius: 12,
+          background: 'white', border: '1px solid var(--color-hairline)',
+          boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
+        }}
+      >
+        <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
+          📹 视频方案已生成
+        </div>
+        {/* 参考图缩略图 + 参数行 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          {info.picUrl && (
+            <img
+              src={assetUrl(info.picUrl)}
+              alt="参考图"
+              style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--color-hairline)' }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+          )}
+          <div style={{ fontSize: 11, color: 'var(--color-muted)', lineHeight: 1.6 }}>
+            <div>时长 {info.duration} 秒 · 图生视频</div>
+            <div>（首帧=你上传的参考图）</div>
+          </div>
+        </div>
+        {/* 方案文本：完整展示，超出 8 行截断（50~120 字的视频方案 8 行足够） */}
+        <div
+          style={{
+            fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6,
+            marginBottom: 10, whiteSpace: 'pre-wrap', maxHeight: 208, overflow: 'hidden',
+          }}
+        >
+          {info.message}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {info.actions.map((a) => {
+            const primary = a.id === 'generate_video';
+            return (
+              <button
+                key={a.id}
+                disabled={streaming}
+                onClick={() => submitVideoPlan(a.id)}
+                style={{
+                  padding: '6px 16px', borderRadius: 'var(--rounded-md)', fontSize: 13,
+                  background: primary ? 'var(--color-primary)' : 'white',
+                  color: primary ? 'white' : 'var(--color-muted)',
+                  border: primary ? 'none' : '1px solid var(--color-hairline)',
+                  cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                }}
+              >
+                {a.title}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}

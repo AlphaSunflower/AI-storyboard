@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
-import { agentApi } from '../../api/agent';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
+import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId } = useAgentStore();
   const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
-  // 提示词优化状态（组件本地）：优化中禁发送；完成自动覆盖输入框原文；失败保持原文轻提示
-  const [optimizing, setOptimizing] = useState(false);
-  const [optimizeError, setOptimizeError] = useState('');
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -25,7 +22,7 @@ export function AgentChatPanel() {
   useEffect(() => {
     const el = scrollRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, streaming, waitingHumanInput]);
+  }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
 
   // 切换会话清空草稿
   useEffect(() => { setText(''); }, [activeConversationId]);
@@ -39,34 +36,9 @@ export function AgentChatPanel() {
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || streaming || waitingHumanInput) return;
+    if (!content || streaming || waitingHumanInput || waitingVideoPlan) return;
     setText('');
     sendMessage(content);
-  };
-
-  /**
-   * 提示词优化：草稿 → LLM 优化 → 自动覆盖输入框原文。
-   * 优化过程中 optimizing 置位：发送按钮与优化按钮同时禁用（用户明确要求）；
-   * 失败保持原文，仅轻提示，不打断输入。
-   */
-  const handleOptimize = async () => {
-    const content = text.trim();
-    if (content.length < 6 || streaming || waitingHumanInput || optimizing) return;
-    setOptimizing(true);
-    setOptimizeError('');
-    try {
-      const res = await agentApi.optimizePrompt(content);
-      const optimized = res.data.data?.optimized;
-      if (optimized) {
-        setText(optimized); // 优化完成自动覆盖输入框原文
-      } else {
-        setOptimizeError('优化结果为空，请重试');
-      }
-    } catch {
-      setOptimizeError('优化失败，请重试');
-    } finally {
-      setOptimizing(false);
-    }
   };
 
   // 当前会话标题：对话窗口顶部展示；无会话时占位
@@ -120,12 +92,12 @@ export function AgentChatPanel() {
           </button>
           <button
             onClick={() => setConfirmClear(true)}
-            disabled={streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0}
-            title={streaming || waitingHumanInput ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
+            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan || !activeConversationId || messages.length === 0}
+            title={streaming || waitingHumanInput || waitingVideoPlan ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
             style={{
               border: 'none', background: 'none', color: 'var(--color-muted)',
               fontSize: 11, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
-              opacity: streaming || !!waitingHumanInput || !activeConversationId || messages.length === 0 ? 0.4 : 1,
+              opacity: streaming || !!waitingHumanInput || !!waitingVideoPlan || !activeConversationId || messages.length === 0 ? 0.4 : 1,
             }}
           >🧹 清除聊天记录</button>
         </div>
@@ -180,6 +152,7 @@ export function AgentChatPanel() {
           </div>
         )}
         {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+        {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
         {confirmResult && <ConfirmResultCard />}
         {streamError && (
           <div style={{ color: 'var(--color-error)', fontSize: 12, margin: '8px 4px' }}>
@@ -190,9 +163,6 @@ export function AgentChatPanel() {
 
       {/* 输入区 */}
       <div style={{ padding: 10, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
-        {optimizeError && (
-          <p style={{ margin: '0 0 6px', fontSize: 11, color: 'var(--color-error)' }}>⚠ {optimizeError}</p>
-        )}
         {refImageUrl && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <img src={refImageUrl} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8 }} />
@@ -235,8 +205,8 @@ export function AgentChatPanel() {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={waitingHumanInput ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-            disabled={streaming || !!waitingHumanInput}
+            placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan}
             rows={3}
             style={{
               flex: 1, padding: '8px 10px', border: '1px solid var(--color-hairline)',
@@ -244,29 +214,16 @@ export function AgentChatPanel() {
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />
-          {/* 右侧按钮组（纵向）：优化在上、发送在下 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-            <button
-              onClick={handleOptimize}
-              disabled={streaming || !!waitingHumanInput || optimizing || text.trim().length < 6}
-              title={optimizing ? '正在优化…' : text.trim().length < 6 ? '至少输入 6 个字符才能优化' : '优化为专业的剧情/图片/视频提示词（自动覆盖输入框）'}
-              style={{
-                height: 32, padding: '0 12px', border: '1px solid var(--color-hairline)',
-                borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)',
-                color: 'var(--color-primary)', fontSize: 12, cursor: 'pointer',
-                opacity: streaming || !!waitingHumanInput || optimizing || text.trim().length < 6 ? 0.45 : 1,
-              }}
-            >{optimizing ? '⏳ 优化中…' : '✨ 优化'}</button>
-            <button
-              onClick={handleSend}
-              disabled={streaming || !!waitingHumanInput || optimizing || !text.trim()}
-              style={{
-                height: 32, padding: '0 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-                background: streaming || optimizing || !text.trim() ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
-                color: 'white', fontSize: 13, cursor: 'pointer',
-              }}
-            >发送</button>
-          </div>
+          {/* 右侧发送按钮 */}
+          <button
+            onClick={handleSend}
+            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
+            style={{
+              height: 32, padding: '0 16px', border: 'none', borderRadius: 'var(--rounded-md)',
+              background: streaming || !text.trim() ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
+              color: 'white', fontSize: 13, cursor: 'pointer', flexShrink: 0,
+            }}
+          >发送</button>
         </div>
       </div>
 

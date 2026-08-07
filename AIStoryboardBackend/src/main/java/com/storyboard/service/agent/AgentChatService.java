@@ -13,6 +13,8 @@ import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.ImageRefinePromptService;
+import com.storyboard.service.ai.VideoPlanService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -66,6 +69,8 @@ public class AgentChatService {
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
     private final AiConfigProperties config;
+    private final ImageRefinePromptService imageRefinePromptService;
+    private final VideoPlanService videoPlanService;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -94,6 +99,25 @@ public class AgentChatService {
     private static final Pattern DIFY_TOOLS_URL_PATTERN = Pattern.compile(
             "(?:https?://[A-Za-z0-9\\-._~:]+)?/files/tools/[A-Za-z0-9\\-._~:/?&=+%]+");
 
+    /**
+     * 完善图片自动生成信号节点标题（Dify 工作流 answer 节点）。
+     * 工作流已删除「完善图片设计方案」LLM 与 HITL 人工介入，改为：用户诉求 → user_finishing(code)
+     * → 赋值 → 本 answer 节点（文案"结合用户输入理解图片优化提示词中..."）。后端监听到该节点
+     * node_finished 即自动触发：视觉模型看图 + 用户诉求 → refined_prompt → 图生图 edits。
+     * 必须与 Moon智能体.yml 中该 answer 节点的 title 完全一致。
+     */
+    private static final String AUTO_REFINE_SIGNAL_TITLE = "后端执行识别图片加人工介入流程";
+
+    /**
+     * 图生视频方案设计信号节点标题（Dify 工作流 answer 节点）。
+     * 工作流「视频类型分流」判断携带参考图（conversation.picture 非空）→ 走本 answer 节点
+     * （文案"结合你上传的参考图设计视频方案中..."）。后端监听到该节点 node_finished 即触发：
+     * 视觉模型看图 + 用户诉求 → 视频方案（prompt + 时长）→ 推 video_plan 事件 →
+     * 前端确认卡片 → 「开始生成视频」→ MiniMax 图生视频。
+     * 必须与 Moon智能体.yml 中该 answer 节点的 title 完全一致。
+     */
+    private static final String VIDEO_PLAN_SIGNAL_TITLE = "后端执行图生视频方案设计";
+
     public AgentChatService(AgentConversationMapper conversationMapper,
                             AgentGenerationService generationService,
                             AgentMessageMapper messageMapper,
@@ -102,6 +126,8 @@ public class AgentChatService {
                             SceneMapper sceneMapper,
                             FileStorageService fileStorageService,
                             AiConfigProperties config,
+                            ImageRefinePromptService imageRefinePromptService,
+                            VideoPlanService videoPlanService,
                             PlatformTransactionManager transactionManager) {
         this.conversationMapper = conversationMapper;
         this.generationService = generationService;
@@ -111,6 +137,8 @@ public class AgentChatService {
         this.sceneMapper = sceneMapper;
         this.fileStorageService = fileStorageService;
         this.config = config;
+        this.imageRefinePromptService = imageRefinePromptService;
+        this.videoPlanService = videoPlanService;
         // user 消息保存使用独立事务（REQUIRES_NEW）：即使外层存在事务，也单独提交，
         // 保证 Dify 调用失败时 user 消息不被回滚。
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -167,6 +195,99 @@ public class AgentChatService {
             }
         });
         log.info("已清空会话聊天记录: conversationId={}, userId={}", conversationId, userId);
+    }
+
+    /**
+     * 满意完成：清空 Dify 会话的 storage_pic_talk 变量（图片方案状态重置）。
+     *
+     * 触发点：前端 confirm_result 卡片「满意完成」→ 本方法；生成后的人工介入由后端驱动，
+     * 清空动作也必须在后端做（而非 Dify 工作流 generate_image 分支）——点「生成图片」只是开始
+     * 生成，未确认满意，变量必须保留供「继续完善」走完善路径；确认满意后才清空，下次图片
+     * 需求才走全新设计。
+     *
+     * 实现：GET /v1/conversations/{difyId}/variables（user 走 query 参数）→ 取 variable_id →
+     * PUT .../variables/{variableId}，body {value: 四字段全空, user}（user 走 JSON body；Dify 归属校验
+     * from_end_user_id == user.id，user 必须与建会话时一致，即后端 userId）。
+     *
+     * ⚠ Dify 1.16.1 PG bug：GET 不能带 variable_name 过滤参数——PG 分支用
+     * json_extract_path_text(data,'name') 过滤，但 data 列是 text 类型，PG 不自动 cast，
+     * 必然 500（UndefinedFunction: json_extract_path_text(text, unknown) does not exist，实测）。
+     * 必须不带参数拉全量后本地遍历匹配 name。
+     *
+     * @return true=已清空（含 Dify 变量不存在等视为已完成）；false=Dify 会话未建立（无可清空）
+     */
+    public boolean confirmImageDone(String userId, String conversationId) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        String difyId = conversation.getDifyConversationId();
+        if (difyId == null || difyId.isBlank()) {
+            log.info("满意完成：会话尚无 Dify 会话（difyConversationId 为空），无可清空: conversationId={}", conversationId);
+            return false;
+        }
+        try {
+            // 1. 查变量列表，定位 storage_pic_talk 的 variable_id（GET 的 user 走 query 参数；
+            //    不带 variable_name 过滤——Dify 1.16.1 PG bug，见方法 javadoc）
+            HttpRequest listReq = HttpRequest.newBuilder()
+                .uri(URI.create(config.getDifyBaseUrl() + "/v1/conversations/"
+                    + URLEncoder.encode(difyId, StandardCharsets.UTF_8)
+                    + "/variables?user=" + URLEncoder.encode(userId, StandardCharsets.UTF_8)))
+                .header("Authorization", "Bearer " + config.getDifyApiKey())
+                .timeout(Duration.ofSeconds(30))
+                .GET()
+                .build();
+            HttpResponse<String> listResp = httpClient.send(listReq, HttpResponse.BodyHandlers.ofString());
+            if (listResp.statusCode() != 200) {
+                log.error("Dify 查询会话变量失败: status={}, body={}", listResp.statusCode(), listResp.body());
+                throw new BusinessException(50202, "Dify 服务异常，请稍后重试");
+            }
+            JsonNode root = objectMapper.readTree(listResp.body());
+            JsonNode data = root.path("data");
+            String variableId = null;
+            if (data.isArray()) {
+                for (JsonNode item : data) {
+                    if ("storage_pic_talk".equals(item.path("name").asText())) {
+                        variableId = item.path("id").asText(null);
+                        break;
+                    }
+                }
+            }
+            if (variableId == null || variableId.isBlank()) {
+                // 变量不存在（工作流未部署/变量改名）视为已完成，不阻断满意完成
+                log.info("Dify 会话变量 storage_pic_talk 不存在，视为已清空: difyId={}", difyId);
+                return true;
+            }
+            // 2. 整体重置 storage_pic_talk（四字段全空；必须整体覆盖——「传到公共变量」code 会
+            //    兜底取 picture 走图改图，只清 pic_generate_talk 不清 picture 会让下次全新设计
+            //    意外带旧图）。PUT 的 user 走 JSON body（Dify 源码 WhereisUserArg.JSON）。
+            Map<String, Object> emptyValue = Map.of(
+                "mode", "",
+                "pic_generate_talk", "",
+                "picture", "",
+                "user_finishing", ""
+            );
+            HttpRequest updateReq = HttpRequest.newBuilder()
+                .uri(URI.create(config.getDifyBaseUrl() + "/v1/conversations/"
+                    + URLEncoder.encode(difyId, StandardCharsets.UTF_8)
+                    + "/variables/" + URLEncoder.encode(variableId, StandardCharsets.UTF_8)))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.getDifyApiKey())
+                .timeout(Duration.ofSeconds(30))
+                .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                    "value", emptyValue,
+                    "user", userId))))
+                .build();
+            HttpResponse<String> updateResp = httpClient.send(updateReq, HttpResponse.BodyHandlers.ofString());
+            if (updateResp.statusCode() != 200) {
+                log.error("Dify 清空会话变量失败: status={}, body={}", updateResp.statusCode(), updateResp.body());
+                throw new BusinessException(50202, "Dify 服务异常，请稍后重试");
+            }
+            log.info("满意完成：已清空 Dify storage_pic_talk: conversationId={}, difyId={}", conversationId, difyId);
+            return true;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("满意完成清空 Dify 变量异常: conversationId={}", conversationId, e);
+            throw new BusinessException(50202, "Dify 服务异常，请稍后重试");
+        }
     }
 
     /**
@@ -457,6 +578,9 @@ public class AgentChatService {
     private void forwardDifySse(HttpResponse<java.io.InputStream> resp, SseEmitter emitter,
                                 AgentConversation conversation, String userId, StringBuilder answer,
                                 AtomicBoolean cancel, boolean deferComplete) {
+        // 完善图片自动生成标志：信号节点（answer「后端执行识别图片加人工介入流程」）触发后置位，
+        // 后续 message_end / EOF 等收尾事件不再 complete（等自动生成完成后再 complete）
+        AtomicBoolean autoGenerate = new AtomicBoolean(false);
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(resp.body()))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -485,6 +609,21 @@ public class AgentChatService {
                         // 生成后端化：node_finished 捕获 LLM 方案输出（分镜 items / 图片 message+style+size /
                         // 视频方案），暂存供表单提交时取用。outputs 仅进内存，绝不转发前端。
                         if ("node_finished".equals(event)) {
+                            // 完善图片自动生成信号：answer 节点标题命中 → 无 HITL，直接触发后端生成
+                            // （视觉模型看图 + 用户诉求 → refined_prompt → 图生图 edits）
+                            String nodeTitle = node.path("data").path("title").asText("");
+                            if (AUTO_REFINE_SIGNAL_TITLE.equals(nodeTitle)) {
+                                if (autoGenerate.compareAndSet(false, true)) {
+                                    triggerAutoImageRefine(conversation, emitter, cancel);
+                                }
+                            }
+                            // 图生视频方案设计信号：answer 节点标题命中 → 无 HITL，后端视觉模型
+                            // 看图设计方案 → 推 video_plan 事件（前端确认卡片）→ 确认后生成
+                            if (VIDEO_PLAN_SIGNAL_TITLE.equals(nodeTitle)) {
+                                if (autoGenerate.compareAndSet(false, true)) {
+                                    triggerAutoVideoPlan(conversation, emitter, cancel);
+                                }
+                            }
                             JsonNode outputs = node.path("data").path("outputs");
                             if (outputs.isObject() && !outputs.isEmpty()) {
                                 lastNodeOutputs.put(conversation.getId(),
@@ -513,9 +652,12 @@ public class AgentChatService {
                             "formContent", data.path("form_content").asText(""),
                             "actions", actions,
                             "expirationTime", data.path("expiration_time").asLong(0)));
-                        // HITL 暂停：落库已累积的方案文本，结束当前流
-                        persistAssistant(conversation, answer.toString(), null, null);
-                        if (!deferComplete) emitter.complete();
+                        // HITL 暂停：落库方案文本（formContent 优先——structured_output 节点的
+                        // answer 可能为空，方案文本只在 formContent 中），结束当前流
+                        String hitlFormContent = data.path("form_content").asText("");
+                        persistAssistant(conversation,
+                                !hitlFormContent.isBlank() ? hitlFormContent : answer.toString(), null, null);
+                        if (!deferComplete && !autoGenerate.get()) emitter.complete();
                         return;
                     }
                     case "message_end" -> {
@@ -540,7 +682,7 @@ public class AgentChatService {
                         // 流结束瞬间 UI 即显示永久本地 URL（无需等刷新重拉消息）
                         sendEvent(emitter, "message_end",
                                 messageEndPayload(conversation, messageId, sceneCount, localized));
-                        if (!deferComplete) emitter.complete();
+                        if (!deferComplete && !autoGenerate.get()) emitter.complete();
                         return;
                     }
                     // Dify 恢复事件流（/v1/workflow/{taskId}/events）特有事件：与 chat-messages 流
@@ -574,8 +716,11 @@ public class AgentChatService {
                                 "formContent", reason.path("form_content").asText(""),
                                 "actions", actions,
                                 "expirationTime", reason.path("expiration_time").asLong(0)));
-                            persistAssistant(conversation, answer.toString(), null, null);
-                            if (!deferComplete) emitter.complete();
+                            // HITL 暂停：方案文本落库（formContent 优先，同 chat-messages 流）
+                            String pausedFormContent = reason.path("form_content").asText("");
+                            persistAssistant(conversation,
+                                    !pausedFormContent.isBlank() ? pausedFormContent : answer.toString(), null, null);
+                            if (!deferComplete && !autoGenerate.get()) emitter.complete();
                             return;
                         }
                     }
@@ -602,12 +747,17 @@ public class AgentChatService {
                                 ? "Dify 服务异常，请稍后重试"
                                 : "Dify 工作流执行失败：" + (err.length() > 150 ? err.substring(0, 150) + "…" : err);
                             sendEvent(emitter, "error", Map.of("code", "50202", "message", readable));
-                            if (!deferComplete) emitter.complete();
+                            if (!deferComplete && !autoGenerate.get()) emitter.complete();
                             return;
                         }
                         // succeeded/stopped：本地化 + 落库 + 回填，复用 message_end 语义收尾
                         String finishedMessageId = node.path("task_id").asText("");
                         String localized = localizeDifyFileUrls(answer.toString());
+                        // HITL 方案合并：若存在待合并的 HITL 方案消息（difyMessageId=null，
+                        // human_input_required 时落库的 formContent），message_end 返回「方案 + 最终回答」
+                        // 合并后的完整内容——否则前端用最终回答整体覆盖占位气泡时方案会消失。
+                        // 数据库侧 persistAssistant 的 I2 合并拼出相同结果，两端一致。
+                        String mergedForClient = mergedHitlContent(conversation.getId(), localized);
                         persistAssistant(conversation, localized, finishedMessageId, null);
                         long sceneCount = -1;
                         try {
@@ -619,15 +769,15 @@ public class AgentChatService {
                                     conversation.getId(), e.getMessage());
                         }
                         sendEvent(emitter, "message_end",
-                                messageEndPayload(conversation, finishedMessageId, sceneCount, localized));
-                        if (!deferComplete) emitter.complete();
+                                messageEndPayload(conversation, finishedMessageId, sceneCount, mergedForClient));
+                        if (!deferComplete && !autoGenerate.get()) emitter.complete();
                         return;
                     }
                     case "error" -> {
                         sendEvent(emitter, "error", Map.of(
                             "code", node.path("code").asText("50202"),
                             "message", "Dify 服务异常，请稍后重试"));
-                        if (!deferComplete) emitter.complete();
+                        if (!deferComplete && !autoGenerate.get()) emitter.complete();
                         return;
                     }
                     default -> { /* ping 等忽略 */ }
@@ -635,7 +785,7 @@ public class AgentChatService {
             }
             // 流正常 EOF（无 message_end 的兜底）——取消时不落库（I1）
             if (!cancel.get() && answer.length() > 0) persistAssistant(conversation, answer.toString(), null, null);
-            if (!cancel.get() && !deferComplete) emitter.complete();
+            if (!cancel.get() && !deferComplete && !autoGenerate.get()) emitter.complete();
         } catch (Exception e) {
             // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
             if (cancel.get()) {
@@ -644,8 +794,161 @@ public class AgentChatService {
             }
             log.error("Dify SSE 读取失败: conversationId={}", conversation.getId(), e);
             sendEvent(emitter, "error", Map.of("code", "50202", "message", "Dify 服务异常，请稍后重试"));
-            if (!deferComplete) emitter.complete();
+            if (!deferComplete && !autoGenerate.get()) emitter.complete();
         }
+    }
+
+    /**
+     * 完善图片自动生成（无 HITL 信号触发）。
+     *
+     * 触发点：Dify 工作流「后端执行识别图片加人工介入流程」answer 节点 node_finished。
+     * 流程：视觉模型（gemini-3-flash-preview）看图 + 用户诉求 → refined_prompt →
+     * {@link AgentGenerationService#generateImage}（mode=edit 图生图）→ 推图 + 确认卡片。
+     *
+     * 源图与诉求来源：
+     * - 源图：lastPicUrlByConversation（本轮消息携带的 PicUrl，完善路径必带图）；
+     * - 诉求：最近一条 user 消息内容（streamMessage 已落库，等价 sys.query）。
+     *
+     * 线程模型：运行在 agentExecutor 虚拟线程，不阻塞 Dify SSE 读循环；
+     * 完成后 complete emitter（forwardDifySse 中 autoGenerate 标志已阻止流提前关闭）。
+     */
+    private void triggerAutoImageRefine(AgentConversation conversation, SseEmitter emitter,
+                                        AtomicBoolean cancel) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 1. 源图：本轮 PicUrl（无图则无法图生图，降级为仅提示）
+                String source = lastPicUrlByConversation.get(conversation.getId());
+                if (source == null || source.isBlank()) {
+                    log.warn("完善图片自动生成跳过：无源图 PicUrl, conversationId={}", conversation.getId());
+                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "未检测到参考图片，请重新发送图片后继续"));
+                    return;
+                }
+
+                // 2. 用户诉求：最近一条 user 消息（streamMessage 已落库）
+                String userRequest = "";
+                var lastUser = messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
+                        .eq(AgentMessage::getConversationId, conversation.getId())
+                        .eq(AgentMessage::getRole, "user")
+                        .orderByDesc(AgentMessage::getCreatedAt)
+                        .last("LIMIT 1"));
+                if (lastUser != null && !lastUser.isEmpty()) {
+                    userRequest = lastUser.get(0).getContent();
+                }
+                if (userRequest == null || userRequest.isBlank()) {
+                    log.warn("完善图片自动生成跳过：无用户诉求, conversationId={}", conversation.getId());
+                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "未获取到你的修改诉求，请重新描述后继续"));
+                    return;
+                }
+
+                // 3. 视觉模型看图 + 诉求 → refined_prompt
+                sendEvent(emitter, "workflow", Map.of("title", "视觉理解图片", "status", "node_started"));
+                String refinedPrompt = imageRefinePromptService.buildRefinedPrompt(source, userRequest);
+                if (refinedPrompt == null || refinedPrompt.isBlank()) {
+                    throw new RuntimeException("视觉理解未生成有效的改图提示词");
+                }
+                log.info("完善图片自动生成：refined_prompt 前 120 字: {}", refinedPrompt.length() > 120
+                        ? refinedPrompt.substring(0, 120) + "…" : refinedPrompt);
+
+                // 3.5 把优化后的改图提示词展示到对话（用户可见 AI 理解成什么样、准备怎么改），
+                //     并落库（刷新后不丢）。随后才执行图生图。
+                String promptMsg = "📝 优化后的改图提示词：\n" + refinedPrompt;
+                sendEvent(emitter, "message", Map.of("content", promptMsg));
+                if (conversation != null) {
+                    persistAssistant(conversation, promptMsg, null, null);
+                }
+
+                // 4. 图生图（sceneId=null → 落 agent_assets）
+                Map<String, String> result = generationService.generateImage(
+                        conversation, null, refinedPrompt, null, null, "edit", null, source);
+
+                // 5. 推图 + 看图确认卡片
+                pushGenerationResult(emitter, "image", result.get("imageUrl"),
+                        result.get("assetId"), 0, true, conversation);
+                log.info("完善图片自动生成完成: conversationId={}, imageUrl={}", conversation.getId(), result.get("imageUrl"));
+            } catch (Exception e) {
+                // 客户端已断开则不再补发错误（emitter 已被容器关闭）
+                if (cancel.get()) return;
+                log.error("完善图片自动生成失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
+                sendEvent(emitter, "error", Map.of("code", "50202", "message", "图片完善失败，请稍后重试"));
+            } finally {
+                if (!cancel.get()) emitter.complete();
+            }
+        }, agentExecutor);
+    }
+
+    /**
+     * 图生视频方案自动设计（无 HITL 信号触发）。
+     *
+     * 触发点：Dify 工作流「后端执行图生视频方案设计」answer 节点 node_finished（「视频类型分流」
+     * 判断携带参考图后进入）。流程：视觉模型（gemini-3-flash-preview）看图 + 用户诉求 →
+     * 视频方案（message/duration）→ 缓存 planToken 快照 → 推 video_plan 事件 →
+     * 前端确认卡片「开始生成视频」→ {@link #generateVideoFromPlan} 生成 MiniMax 图生视频。
+     *
+     * 源图与诉求来源（同完善图片路径）：
+     * - 源图：lastPicUrlByConversation（本轮消息携带的 PicUrl，图生视频必带图）；
+     * - 诉求：最近一条 user 消息内容（streamMessage 已落库，等价 sys.query）。
+     *
+     * 线程模型：运行在 agentExecutor 虚拟线程，不阻塞 Dify SSE 读循环；
+     * 完成后 complete emitter（forwardDifySse 中 autoGenerate 标志已阻止流提前关闭）。
+     */
+    private void triggerAutoVideoPlan(AgentConversation conversation, SseEmitter emitter,
+                                      AtomicBoolean cancel) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                // 1. 源图：本轮 PicUrl（无图则无法图生视频，降级为仅提示）
+                String source = lastPicUrlByConversation.get(conversation.getId());
+                if (source == null || source.isBlank()) {
+                    log.warn("图生视频方案设计跳过：无源图 PicUrl, conversationId={}", conversation.getId());
+                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "未检测到参考图片，请重新发送图片后继续"));
+                    return;
+                }
+
+                // 2. 用户诉求：最近一条 user 消息（streamMessage 已落库）
+                String userRequest = "";
+                var lastUser = messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
+                        .eq(AgentMessage::getConversationId, conversation.getId())
+                        .eq(AgentMessage::getRole, "user")
+                        .orderByDesc(AgentMessage::getCreatedAt)
+                        .last("LIMIT 1"));
+                if (lastUser != null && !lastUser.isEmpty()) {
+                    userRequest = lastUser.get(0).getContent();
+                }
+
+                // 3. 视觉模型看图 + 诉求 → 视频方案（prompt + 时长）
+                sendEvent(emitter, "workflow", Map.of("title", "视觉理解图片", "status", "node_started"));
+                VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(source, userRequest);
+
+                // 4. 缓存一次性 planToken 快照（消费即移除，防重放；TTL 30min）
+                String planToken = UUID.randomUUID().toString();
+                videoPlanSnapshots.put(planToken, new VideoPlanSnapshot(
+                        conversation.getId(), conversation.getProjectId(),
+                        plan.message(), plan.duration(), source, System.currentTimeMillis()));
+                log.info("图生视频方案已缓存: planToken={}, conversationId={}, duration={}",
+                        planToken, conversation.getId(), plan.duration());
+
+                // 5. 方案文本落库 + 推 video_plan 事件（前端确认卡片）
+                String planMsg = "📹 结合你上传的参考图，为你设计了视频方案：\n" + plan.message()
+                        + "\n（时长 " + plan.duration() + " 秒）";
+                sendEvent(emitter, "message", Map.of("content", planMsg));
+                persistAssistant(conversation, planMsg, null, null);
+                sendEvent(emitter, "video_plan", Map.of(
+                        "planToken", planToken,
+                        "message", plan.message(),
+                        "duration", plan.duration(),
+                        "picUrl", source,
+                        "actions", List.of(
+                                Map.of("id", "generate_video", "title", "开始生成视频"),
+                                Map.of("id", "refine", "title", "继续完善"))));
+                log.info("图生视频方案设计完成: conversationId={}", conversation.getId());
+            } catch (Exception e) {
+                // 客户端已断开则不再补发错误（emitter 已被容器关闭）
+                if (cancel.get()) return;
+                log.error("图生视频方案设计失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
+                sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频方案设计失败，请稍后重试"));
+            } finally {
+                if (!cancel.get()) emitter.complete();
+            }
+        }, agentExecutor);
     }
 
     /**
@@ -692,6 +995,24 @@ public class AgentChatService {
         });
     }
 
+    /**
+     * 合并 HITL 方案与最终回答：查会话最后一条 difyMessageId 为 null 的 assistant 消息
+     * （human_input_required / workflow_paused 时落库的方案文本），存在则拼「方案 + 新增内容」返回，
+     * 与 persistAssistant 的 I2 合并结果一致；不存在（非 HITL 路径）原样返回新增内容。
+     */
+    private String mergedHitlContent(String conversationId, String additional) {
+        AgentMessage pending = messageMapper.selectOne(new LambdaQueryWrapper<AgentMessage>()
+                .eq(AgentMessage::getConversationId, conversationId)
+                .eq(AgentMessage::getRole, "assistant")
+                .isNull(AgentMessage::getDifyMessageId)
+                .orderByDesc(AgentMessage::getCreatedAt)
+                .last("LIMIT 1"));
+        if (pending != null && pending.getContent() != null && !pending.getContent().isBlank()) {
+            return pending.getContent() + additional;
+        }
+        return additional;
+    }
+
     // ============ 智能体生成后端化：HITL 方案快照缓存 ============
 
     /** 表单快照 TTL（与 Dify form_token 过期时间对齐，30 分钟） */
@@ -709,6 +1030,29 @@ public class AgentChatService {
     /** 会话维度 formContent 兜底记录 */
     private record LastFormContent(String content, long createdAt) {
         boolean expired() { return System.currentTimeMillis() - createdAt > FORM_SNAPSHOT_TTL_MS; }
+    }
+
+    /**
+     * 图生视频方案快照（video_plan 事件的一次性凭据）。
+     * 触发点：Dify 信号节点「后端执行图生视频方案设计」→ 视觉模型设计视频方案 →
+     * 生成 planToken 缓存本快照 → 推 video_plan 事件（携 planToken）→ 前端确认卡片
+     * 「开始生成视频」→ 按 planToken 取用（消费即移除，防重放）。TTL 同表单快照 30min。
+     */
+    private record VideoPlanSnapshot(String conversationId, String projectId, String message,
+                                     Integer duration, String source, long createdAt) {
+        boolean expired() { return System.currentTimeMillis() - createdAt > FORM_SNAPSHOT_TTL_MS; }
+    }
+
+    /** planToken → 图生视频方案快照 */
+    private final Map<String, VideoPlanSnapshot> videoPlanSnapshots = new ConcurrentHashMap<>();
+
+    /** 取图生视频方案快照（消费即移除；过期同样移除返回 null） */
+    private VideoPlanSnapshot takeVideoPlanSnapshot(String planToken) {
+        if (planToken == null || planToken.isBlank()) return null;
+        VideoPlanSnapshot snap = videoPlanSnapshots.remove(planToken);
+        if (snap == null) return null;
+        if (snap.expired()) return null;
+        return snap;
     }
 
     /**
@@ -808,7 +1152,6 @@ public class AgentChatService {
                             result.get("assetId"), 0, true, conv);
                     }
                     case "generate_video" -> {
-                        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
                         // 源图兜底同 generate_image（图生视频依赖当轮 PicUrl）
                         String source = plan.get("picture") instanceof String p && !p.isBlank() ? p
                                 : lastPicUrlByConversation.get(snapshot.conversationId());
@@ -816,11 +1159,10 @@ public class AgentChatService {
                         String prompt = str(plan.get("message"));
                         if (prompt == null) prompt = snapshot.formContent();
                         AgentConversation conv = conversationOf(snapshot);
-                        String taskId = generationService.createVideoTask(
-                            conv, null, prompt, str(plan.get("model")), null, null, null,
-                            str(plan.get("duration")), null, null, source);
-                        // 同步轮询直至终态（dispatchGeneration 运行在虚拟线程，阻塞安全；future 完成即轮询完成，保证 SSE 关闭前推送完成）
-                        pollVideoAndPush(taskId, snapshot, emitter, conv);
+                        // aspectRatio 透传（2026-08-07 修复：此前写死 null，文生视频 9:16/16:9 选择
+                        // 恒被 MiniMax 降级 16:9；图生视频传 null 无妨，恒 adaptive 自动匹配原图）
+                        executeVideoGeneration(conv, prompt, str(plan.get("duration")),
+                                str(plan.get("aspectRatio")), source, emitter);
                     }
                     default -> log.info("action={} 不触发生成（refine/其他），由 Dify 继续完善", action);
                 }
@@ -868,14 +1210,146 @@ public class AgentChatService {
         }
     }
 
+    /**
+     * 执行视频生成（HITL generate_video 与图生视频方案确认两路共用）：
+     * 发送生成进度事件 → 创建 MiniMax 视频任务 → 清空 Dify 会话 picture 变量（生成后）
+     * → 同步轮询直至终态 → 推视频结果 + 确认卡片。
+     *
+     * @param duration 时长字符串（秒，可 null 用默认）；aspectRatio 画幅（可 null；图生视频恒 adaptive）
+     */
+    private void executeVideoGeneration(AgentConversation conv, String prompt, String duration,
+                                        String aspectRatio, String source, SseEmitter emitter) {
+        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
+        String taskId = generationService.createVideoTask(
+            conv, null, prompt, null, null, null, aspectRatio,
+            duration, null, null, source);
+        // 生成视频后清空 Dify 会话 picture 全局变量：图已作为首帧提交，Dify 侧 picture 使命完成。
+        // 否则用户在等待生成期间继续对话，「视频类型分流」会误判旧图仍有效（复用
+        // confirmImageDone 的 GET variables + PUT 模式；失败仅 warn 不影响生成结果）
+        clearDifyVariable(conv, "picture");
+        // 同步轮询直至终态（运行在虚拟线程，阻塞安全；轮询完成即 SSE 关闭前推送完成）
+        pollVideoAndPush(taskId, emitter, conv);
+    }
+
+    /**
+     * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
+     *
+     * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 →
+     * {@link #executeVideoGeneration}（源图=方案快照 source，prompt=视觉模型设计的 message）。
+     */
+    public void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage / submitFormAndResume）
+        AtomicBoolean cancel = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancel.set(true));
+        emitter.onTimeout(() -> cancel.set(true));
+        emitter.onError(ignored -> cancel.set(true));
+        CompletableFuture.runAsync(() -> {
+            try {
+                VideoPlanSnapshot snap = takeVideoPlanSnapshot(planToken);
+                if (snap == null || !conversationId.equals(snap.conversationId())) {
+                    log.warn("图生视频方案快照无效或已过期: conversationId={}, planToken={}", conversationId, planToken);
+                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "视频方案已过期，请重新上传图片生成"));
+                    return;
+                }
+                // 确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
+                persistUserConfirmation(conversation, "开始生成视频", null);
+                executeVideoGeneration(conversation, snap.message(), String.valueOf(snap.duration()),
+                        null, snap.source(), emitter);
+                log.info("图生视频生成完成: conversationId={}, duration={}", conversationId, snap.duration());
+            } catch (Exception e) {
+                // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
+                if (cancel.get()) return;
+                log.error("图生视频生成失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
+                sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
+            } finally {
+                if (!cancel.get()) emitter.complete();
+            }
+        }, agentExecutor);
+    }
+
+    /**
+     * 清空 Dify 会话变量（生成后清理：视频生成后清 picture，防止分流误判旧图）。
+     * 复用 {@link #confirmImageDone} 的 GET variables + PUT 模式；失败仅 warn（清理是附加动作，
+     * 不影响已创建的视频任务与推送结果）。变量不存在（工作流未部署/改名）视为已清空。
+     *
+     * ⚠ Dify 1.16.1 PG bug：GET 不能带 variable_name 过滤参数（PG 分支 json_extract_path_text
+     * 作用于 text 列不 cast 必 500），必须不带参数拉全量后本地遍历匹配 name。
+     */
+    private void clearDifyVariable(AgentConversation conversation, String variableName) {
+        String difyId = conversation.getDifyConversationId();
+        if (difyId == null || difyId.isBlank()) {
+            log.info("清空 Dify 变量跳过：会话尚无 Dify 会话(difyConversationId 为空): conversationId={}",
+                    conversation.getId());
+            return;
+        }
+        try {
+            // 1. 查变量列表，定位 variable_id（GET 的 user 走 query 参数；不带 variable_name 过滤——PG bug）
+            HttpRequest listReq = HttpRequest.newBuilder()
+                .uri(URI.create(config.getDifyBaseUrl() + "/v1/conversations/"
+                    + URLEncoder.encode(difyId, StandardCharsets.UTF_8)
+                    + "/variables?user=" + URLEncoder.encode(conversation.getUserId(), StandardCharsets.UTF_8)))
+                .header("Authorization", "Bearer " + config.getDifyApiKey())
+                .timeout(Duration.ofSeconds(30))
+                .GET()
+                .build();
+            HttpResponse<String> listResp = httpClient.send(listReq, HttpResponse.BodyHandlers.ofString());
+            if (listResp.statusCode() != 200) {
+                log.warn("Dify 查询会话变量失败(忽略): status={}, body={}", listResp.statusCode(), listResp.body());
+                return;
+            }
+            String variableId = null;
+            JsonNode data = objectMapper.readTree(listResp.body()).path("data");
+            if (data.isArray()) {
+                for (JsonNode item : data) {
+                    if (variableName.equals(item.path("name").asText())) {
+                        variableId = item.path("id").asText(null);
+                        break;
+                    }
+                }
+            }
+            if (variableId == null || variableId.isBlank()) {
+                log.info("Dify 会话变量 {} 不存在，视为已清空: difyId={}", variableName, difyId);
+                return;
+            }
+            // 2. 重置为空字符串（PUT 的 user 走 JSON body；Dify 源码 WhereisUserArg.JSON）
+            HttpRequest updateReq = HttpRequest.newBuilder()
+                .uri(URI.create(config.getDifyBaseUrl() + "/v1/conversations/"
+                    + URLEncoder.encode(difyId, StandardCharsets.UTF_8)
+                    + "/variables/" + URLEncoder.encode(variableId, StandardCharsets.UTF_8)))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.getDifyApiKey())
+                .timeout(Duration.ofSeconds(30))
+                .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                    "value", "",
+                    "user", conversation.getUserId()))))
+                .build();
+            HttpResponse<String> updateResp = httpClient.send(updateReq, HttpResponse.BodyHandlers.ofString());
+            if (updateResp.statusCode() != 200) {
+                log.warn("Dify 清空会话变量 {} 失败(忽略): status={}, body={}",
+                        variableName, updateResp.statusCode(), updateResp.body());
+                return;
+            }
+            log.info("已清空 Dify 会话变量 {}: conversationId={}, difyId={}",
+                    variableName, conversation.getId(), difyId);
+        } catch (Exception e) {
+            log.warn("清空 Dify 会话变量 {} 异常(忽略): conversationId={}, error={}",
+                    variableName, conversation.getId(), e.getMessage());
+        }
+    }
+
     /** 轮询视频任务直至终态（复用 service 重试逻辑），终态推结果与确认卡片 */
-    private void pollVideoAndPush(String taskId, FormSnapshot snapshot, SseEmitter emitter,
-                                  AgentConversation conversation) {
+    private void pollVideoAndPush(String taskId, SseEmitter emitter, AgentConversation conversation) {
         try {
             for (int i = 0; i < 90; i++) { // 90 * 5s ≈ 7.5min 上限
                 if (Thread.currentThread().isInterrupted()) return;
                 Map<String, String> result = generationService.pollVideoTask(taskId);
                 String status = result.get("status");
+                // 轮询可见性：每 5s 一次状态查询打 info 日志（含次数/状态/进度），
+                // 便于观察生成进度；约 90 条/任务，视频生成本来就是低频长任务，噪音可接受
+                String progress = result.get("progress");
+                log.info("视频生成轮询: taskId={}, 第 {}/90 次, status={}{}", taskId, i + 1, status,
+                        progress != null && !progress.isBlank() ? ", progress=" + progress : "");
                 if ("completed".equals(status)) {
                     pushGenerationResult(emitter, "video", result.get("videoUrl"), null, 0, true, conversation);
                     return;
@@ -1053,6 +1527,9 @@ public class AgentChatService {
                 } else {
                     log.info("无方案快照(formToken={}), 仅续流不生成", formToken);
                 }
+                // 生成后端化：HITL 人工确认动作落库为用户消息（独立事务立即提交，刷新/历史可见；
+                // 与 sendMessage 的 user 消息同语义——用户操作记录不因后续 Dify 续流/生成成败而丢失）
+                persistUserConfirmation(conversation, action, snapshot);
                 // 续流：workflow events 端点 user 参数必填（已核实 Dify 源码）+ continue_on_pause=true
                 // （Dify 文档：设为 true 时流在 workflow_paused 事件之间保持连接，直到 workflow_finished
                 //  才结束；否则遇到第一个暂停事件流即关闭，后续 HITL 节点无法继续订阅）
@@ -1098,5 +1575,33 @@ public class AgentChatService {
                 emitter.complete();
             }
         }, agentExecutor);
+    }
+
+    /**
+     * HITL 人工确认动作落库为用户消息（如「确认：开始生成视频」）。
+     * 与 sendMessage 的 user 消息同语义：独立事务（REQUIRES_NEW）立即提交，
+     * 不随后续 Dify 续流/生成结果成败而回滚，刷新/历史列表始终可见。
+     * 动作标题从表单快照 actions 中按 action id 解析，快照缺失时回退 action id 原文。
+     */
+    private void persistUserConfirmation(AgentConversation conversation, String action, FormSnapshot snapshot) {
+        String title = action;
+        if (snapshot != null && snapshot.actions() != null) {
+            for (Map<String, String> a : snapshot.actions()) {
+                if (action.equals(a.get("id"))) {
+                    title = a.getOrDefault("title", action);
+                    break;
+                }
+            }
+        }
+        final String content = "确认：" + title;
+        transactionTemplate.executeWithoutResult(tx -> {
+            AgentMessage userMessage = new AgentMessage();
+            userMessage.setConversationId(conversation.getId());
+            userMessage.setRole("user");
+            userMessage.setContent(content);
+            messageMapper.insert(userMessage);
+        });
+        log.info("HITL 确认动作已落库: conversationId={}, action={}, title={}",
+                conversation.getId(), action, title);
     }
 }

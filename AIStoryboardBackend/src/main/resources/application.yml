@@ -55,6 +55,15 @@ ai:
     # Dify 自托管基础地址（默认本机 Docker 部署）
     dify-base-url: ${DIFY_BASE_URL:http://localhost}
 
+    # ── MiniMax 视频通道（V2 接口，默认 provider；密钥来自 .env MINIMAX_API_KEY，不提交）──
+    minimax-api-key: ${MINIMAX_API_KEY:}
+    minimax-base-url: ${MINIMAX_BASE_URL:https://api.minimaxi.com}
+    # 视频生成通道：minimax（默认）| laozhang（保留可切回）
+    video-provider: ${VIDEO_PROVIDER:minimax}
+    # MiniMax 模型与分辨率档位（768P 最低档 | 2K）
+    minimax-video-model: ${MINIMAX_VIDEO_MODEL:MiniMax-H3}
+    minimax-video-resolution: ${MINIMAX_VIDEO_RESOLUTION:768P}
+
     # ── Base URLs ──
     base-url-openai: https://api2.laozhang.ai/v1
     base-url-gemini: https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent

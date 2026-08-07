@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -90,7 +90,7 @@ export function ScriptInputPanel() {
     // If no current project, create one first
     if (!projectId) {
       try {
-        const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS[1];
+        const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
         const p = await createProject('未命名项目', creationType, preset.aspectRatio);
         projectId = p.id;
       } catch {
@@ -98,7 +98,7 @@ export function ScriptInputPanel() {
       }
     }
 
-    const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS[1];
+    const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
     await generateScript(projectId, scriptText, creationType, preset.aspectRatio, undefined);
   };
 
@@ -292,9 +292,9 @@ export function ScriptInputPanel() {
         </select>
       </div>
 
-      {/* Video preset — duration + resolution */}
+      {/* Video preset — duration + aspect ratio */}
       <div>
-        <label style={labelStyle}>时长和分辨率</label>
+        <label style={labelStyle}>时长和画幅</label>
         <VideoPresetSelector value={videoPreset} onChange={setVideoPreset} />
       </div>
 

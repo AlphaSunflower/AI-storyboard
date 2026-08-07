@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import {
-  agentApi, streamChat, submitForm,
+  agentApi, streamChat, submitForm, submitVideoPlan,
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type SseEvent,
 } from '../api/agent';
@@ -21,6 +21,15 @@ export interface ConfirmResultInfo {
   url: string;
   assetId?: string;
   sceneCount?: number;
+  actions: { id: string; title: string }[];
+}
+
+/** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
+export interface VideoPlanInfo {
+  planToken: string;
+  message: string;
+  duration: number;
+  picUrl: string;
   actions: { id: string; title: string }[];
 }
 
@@ -68,6 +77,9 @@ interface AgentState {
   // 发送
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
   submitHumanInput: (actionId: string) => Promise<void>;
+  // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
+  waitingVideoPlan: VideoPlanInfo | null;
+  submitVideoPlan: (actionId: string) => Promise<void>;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
   refineAsset: () => void;
   dismissConfirm: () => void;
@@ -131,6 +143,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
       messages: s.activeConversationId === id ? [] : s.messages,
       waitingHumanInput: s.activeConversationId === id ? null : s.waitingHumanInput,
+      waitingVideoPlan: s.activeConversationId === id ? null : s.waitingVideoPlan,
       confirmResult: s.activeConversationId === id ? null : s.confirmResult,
     }));
   },
@@ -138,16 +151,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 清空当前会话聊天记录：删消息 + 重置 AI 上下文（Dify 会话），会话/资产保留
   clearMessages: async () => {
     const id = get().activeConversationId;
-    // 守卫：无会话 / 流式生成中 / HITL 等待期禁止清空（防止删除进行中的上下文导致流事件污染）
-    if (!id || get().streaming || get().waitingHumanInput) return;
+    // 守卫：无会话 / 流式生成中 / HITL 等待期 / 图生视频方案确认期禁止清空（防止删除进行中的上下文导致流事件污染）
+    if (!id || get().streaming || get().waitingHumanInput || get().waitingVideoPlan) return;
     await agentApi.clearMessages(id);
-    set({ messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
+    set({ messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
   },
 
   selectConversation: async (id) => {
-    // I3 store 守卫：HITL 等待期禁止切换会话（UI 层另有禁用，双保险）
-    if (get().waitingHumanInput) return;
-    set({ activeConversationId: id, messages: [], waitingHumanInput: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
+    // I3 store 守卫：HITL 等待期 / 图生视频方案确认期禁止切换会话（UI 层另有禁用，双保险）
+    if (get().waitingHumanInput || get().waitingVideoPlan) return;
+    set({ activeConversationId: id, messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
     const res = await agentApi.listMessages(id);
     set({ messages: res.data.data ?? [] });
     const conv = get().conversations.find((c) => c.id === id);
@@ -160,6 +173,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [],
   streaming: false,
   waitingHumanInput: null,
+  waitingVideoPlan: null,
   streamError: null,
   confirmResult: null,
   pendingPicUrl: null,
@@ -169,7 +183,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setRefImageUrl: (v) => set({ refImageUrl: v }),
   uploadRefImage: async (file) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined);
-    set({ refImageUrl: res.data.data.url });
+    const url = res.data.data.url;
+    set({ refImageUrl: url });
+    // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）；
+    // 未选会话时后端不落库，前端也不 push（messages 为空）
+    const cid = get().activeConversationId;
+    if (cid) {
+      const refMsg: AgentMessage = {
+        id: `tmp-ref-${Date.now()}`,
+        conversationId: cid,
+        role: 'user',
+        content: url,
+        difyMessageId: null,
+        createdAt: new Date().toISOString(),
+      };
+      set((s) => ({ messages: [...s.messages, refMsg] }));
+    }
   },
 
   agentGeneratedScenes: false,
@@ -302,6 +331,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             set({ confirmResult: e as ConfirmResultInfo });
             break;
+          case 'video_plan':
+            // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
+            if (get().activeConversationId !== snapshotId) break;
+            set({
+              waitingVideoPlan: {
+                planToken: e.planToken ?? '',
+                message: e.message ?? '',
+                duration: e.duration ?? 8,
+                picUrl: e.picUrl ?? '',
+                actions: e.actions ?? [],
+              },
+            });
+            break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
             if (get().activeConversationId === snapshotId) {
@@ -344,20 +386,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
     set({ streaming: true, waitingHumanInput: null, streamError: null });
 
-    // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应），
-    // 找不到（如刷新后 pendingAssistantId 丢失）则新建占位兜底
+    // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应）。
+    // sendMessage 流结束（receivedHumanInput=true）时 pendingAssistantId 已被 finally 清空，
+    // 故需兜底复用「最后一条空内容 assistant 占位」，避免新建重复气泡导致方案填错气泡。
     let assistantId = get().pendingAssistantId ?? '';
     if (!assistantId || !get().messages.some((m) => m.id === assistantId)) {
-      assistantId = `tmp-assistant-${Date.now()}`;
-      const optimisticAssistant: AgentMessage = {
-        id: assistantId,
-        conversationId: id,
-        role: 'assistant',
-        content: '',
-        difyMessageId: null,
-        createdAt: new Date().toISOString(),
-      };
-      set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
+      const lastEmptyAssistant = [...get().messages]
+        .reverse()
+        .find((m) => m.role === 'assistant' && !m.content);
+      assistantId = lastEmptyAssistant?.id ?? `tmp-assistant-${Date.now()}`;
+      if (!lastEmptyAssistant) {
+        const optimisticAssistant: AgentMessage = {
+          id: assistantId,
+          conversationId: id,
+          role: 'assistant',
+          content: '',
+          difyMessageId: null,
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
+      }
     }
 
     const updateAssistant = (delta: string) =>
@@ -372,6 +420,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId ? { ...m, content: full } : m),
       }));
+
+    // HITL 确认动作本地落位（与后端落库对齐，点击按钮后消息不消失）：
+    // 1) 方案文本（formContent）填入 assistant 占位——后端在 HITL 暂停时已将其落库为 assistant 消息；
+    // 2) 用户确认动作 push 为 user 消息——后端 submitFormAndResume 同步落库「确认：{标题}」。
+    // 刷新后由后端持久化的同序消息替换本地临时项，顺序一致（方案在前、确认在后）。
+    const act = info.actions.find((a) => a.id === actionId);
+    const confirmTitle = act?.title ?? actionId;
+    if (info.formContent) updateAssistantFull(info.formContent);
+    const confirmMsg: AgentMessage = {
+      id: `tmp-user-${Date.now()}`,
+      conversationId: id,
+      role: 'user',
+      content: `确认：${confirmTitle}`,
+      difyMessageId: null,
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, confirmMsg] }));
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
@@ -425,6 +490,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             set({ confirmResult: e as ConfirmResultInfo });
             break;
+          case 'video_plan':
+            // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
+            if (get().activeConversationId !== snapshotId) break;
+            set({
+              waitingVideoPlan: {
+                planToken: e.planToken ?? '',
+                message: e.message ?? '',
+                duration: e.duration ?? 8,
+                picUrl: e.picUrl ?? '',
+                actions: e.actions ?? [],
+              },
+            });
+            break;
           case 'error':
             // M3：跨会话守卫——已切换会话则忽略旧流错误
             if (get().activeConversationId === snapshotId) {
@@ -458,6 +536,100 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
+  /**
+   * 图生视频方案确认卡片（video_plan 事件）：
+   * - 开始生成视频：调后端 video/plan/generate（SSE）→ 视频生成 → 结果 + confirm_result 卡片；
+   * - 继续完善：本地关闭卡片，参考图转 pendingPicUrl 保留（与图片完善 refine 同语义），
+   *   用户输入完善需求后随下一条消息发送（Dify 重新分流 → 再设计）。
+   */
+  submitVideoPlan: async (actionId) => {
+    const info = get().waitingVideoPlan;
+    const id = get().activeConversationId;
+    if (!id || !info || get().streaming) return;
+    // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，Dify 容器内可访问）
+    if (actionId === 'refine') {
+      set({ waitingVideoPlan: null, pendingPicUrl: assetUrl(info.picUrl) });
+      return;
+    }
+    // 开始生成视频：与 submitHumanInput 一致——提交时清除上次 streamError
+    set({ streaming: true, waitingVideoPlan: null, streamError: null });
+
+    // 确认动作 push 为 user 消息（与后端 persistUserConfirmation 落库对齐，刷新后同序）
+    const confirmMsg: AgentMessage = {
+      id: `tmp-user-${Date.now()}`,
+      conversationId: id,
+      role: 'user',
+      content: '确认：开始生成视频',
+      difyMessageId: null,
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, confirmMsg] }));
+
+    // 新建 assistant 占位气泡：视频生成期间为空（AgentChatPanel 显示生成中加载条），
+    // 完成后由 message 事件（视频 URL）填充，MessageBubble 渲染 <video> 播放器
+    const assistantId = `tmp-assistant-${Date.now()}`;
+    const optimisticAssistant: AgentMessage = {
+      id: assistantId,
+      conversationId: id,
+      role: 'assistant',
+      content: '',
+      difyMessageId: null,
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
+
+    const updateAssistantFull = (full: string) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === assistantId ? { ...m, content: full } : m),
+      }));
+
+    // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
+    const snapshotId = id;
+    let receivedResult = false;
+    try {
+      await submitVideoPlan(id, info.planToken, (e: SseEvent) => {
+        switch (e.type) {
+          case 'message':
+            if (get().activeConversationId !== snapshotId) break;
+            updateAssistantFull(e.content ?? '');
+            break;
+          case 'confirm_result':
+            if (get().activeConversationId !== snapshotId) break;
+            receivedResult = true;
+            set({ confirmResult: e as ConfirmResultInfo });
+            break;
+          case 'error':
+            // M3：跨会话守卫——已切换会话则忽略旧流错误
+            if (get().activeConversationId === snapshotId) {
+              set({ streamError: e.message ?? '生成出错，请重试' });
+            }
+            break;
+        }
+      });
+    } catch (err) {
+      // M3：跨会话守卫——已切换会话则忽略旧流错误
+      if (get().activeConversationId === snapshotId) {
+        set({ streamError: err instanceof Error ? err.message : '生成出错，请重试' });
+      }
+    } finally {
+      const stillSameConversation = get().activeConversationId === snapshotId;
+      // 失败（streamError 非空）时占位显示"（生成失败）"，避免空气泡误导
+      const failedText = get().streamError ? '（生成失败）' : '（未收到回复）';
+      set((s) => ({
+        streaming: false,
+        pendingAssistantId: null,
+        messages: stillSameConversation
+          ? s.messages.map((m) =>
+              m.id === assistantId && !m.content && !receivedResult
+                ? { ...m, content: failedText }
+                : m,
+            )
+          : s.messages,
+      }));
+    }
+  },
+
   /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */
   refineAsset: () => {
     const { confirmResult } = get();
@@ -469,13 +641,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   /** 取消继续完善：清空暂存参考图（输入框提示条上的 ✕ 触发） */
   cancelRefine: () => set({ pendingPicUrl: null }),
-  /** 看图确认卡片：满意完成 → 收起卡片，刷新资产面板 */
-  dismissConfirm: () => {
-    set({ confirmResult: null });
+  /**
+   * 看图确认卡片：满意完成 → 通知后端清空 Dify storage_pic_talk 变量（下次图片需求走全新设计）。
+   * 成功收起卡片 + 刷新资产；失败保留卡片并提示（可重试）。纯前端收起（旧行为）会让 Dify
+   * 变量残留 → 下次图片需求误走完善路径。
+   */
+  dismissConfirm: async () => {
     const id = get().activeConversationId;
-    if (id) void get().loadAssets();
+    if (!id) {
+      set({ confirmResult: null });
+      return;
+    }
+    try {
+      await agentApi.confirmDone(id);
+      set({ confirmResult: null });
+      void get().loadAssets();
+    } catch {
+      alert('操作失败，请重试');
+    }
   },
 
   resetChatState: () =>
-    set({ messages: [], waitingHumanInput: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
+    set({ messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
 }));

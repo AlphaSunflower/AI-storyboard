@@ -46,11 +46,7 @@ export const IMAGE_MODELS = [
 ] as const;
 
 export const VIDEO_MODELS = [
-  { value: 'veo-3.1-fast', label: 'Veo 3.1 Fast' },
-  { value: 'veo-3.1', label: 'Veo 3.1' },
-  { value: 'runway-gen3', label: 'Runway Gen-3' },
-  { value: 'kling-2', label: 'Kling 2' },
-  { value: 'sora', label: 'Sora' },
+  { value: 'MiniMax-H3', label: 'MiniMax H3' },
 ] as const;
 
 export const DEFAULT_IMAGE_MODEL: string = IMAGE_MODELS[0].value;
@@ -71,14 +67,18 @@ export interface VideoPreset {
 }
 
 export const VIDEO_PRESETS: VideoPreset[] = [
-  { value: '4s-720p',    label: '4秒 横屏 720p',  seconds: '4', duration: '4', size: '1280x720',  resolution: '720p',  aspectRatio: '16:9' },
-  { value: '8s-720p',    label: '8秒 横屏 720p',  seconds: '8', duration: '8', size: '1280x720',  resolution: '720p',  aspectRatio: '16:9' },
-  { value: '8s-1080p',   label: '8秒 横屏 1080p', seconds: '8', duration: '8', size: '1920x1080', resolution: '1080p', aspectRatio: '16:9' },
-  { value: '8s-1080p-v', label: '8秒 竖屏 1080p', seconds: '8', duration: '8', size: '1080x1920', resolution: '1080p', aspectRatio: '9:16' },
-  { value: '8s-4k',      label: '8秒 横屏 4K',    seconds: '8', duration: '8', size: '3840x2160', resolution: '4k',    aspectRatio: '16:9' },
+  // 注意：分辨率由后端统一为配置默认档（768P），size/resolution 字段后端忽略，仅兼容保留；
+  // 真实生效参数 = duration + aspectRatio（MiniMax ratio 白名单 21:9/16:9/4:3/1:1/3:4/9:16；
+  // 官方 duration 合法范围 4~15 整数，此处 UI 提供常用 4/6/8 秒档）
+  { value: '4s-16:9',  label: '4秒 横屏',   seconds: '4', duration: '4',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
+  { value: '6s-16:9',  label: '6秒 横屏',   seconds: '6', duration: '6',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
+  { value: '8s-16:9',  label: '8秒 横屏',   seconds: '8', duration: '8',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
+  { value: '4s-9:16',  label: '4秒 竖屏',   seconds: '4', duration: '4',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
+  { value: '6s-9:16',  label: '6秒 竖屏',   seconds: '6', duration: '6',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
+  { value: '8s-9:16',  label: '8秒 竖屏',   seconds: '8', duration: '8',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
 ];
 
-export const DEFAULT_VIDEO_PRESET: string = VIDEO_PRESETS[1].value; // 8s 720p
+export const DEFAULT_VIDEO_PRESET: string = VIDEO_PRESETS[2].value; // 8秒 横屏（与官方/原系统默认一致）
 
 // ═══════════════════════════════════════════════════
 //  Image generation: size + quality

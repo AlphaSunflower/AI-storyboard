@@ -5,6 +5,7 @@ import com.storyboard.dto.request.AgentConversationUpdateRequest;
 import com.storyboard.dto.request.AgentCreateConversationRequest;
 import com.storyboard.dto.request.AgentFormSubmitRequest;
 import com.storyboard.dto.request.AgentSendMessageRequest;
+import com.storyboard.dto.request.AgentVideoPlanGenerateRequest;
 import com.storyboard.dto.request.PromptOptimizeRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.entity.AgentAsset;
@@ -12,6 +13,7 @@ import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.AgentMessage;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentConversationMapper;
+import com.storyboard.mapper.AgentMessageMapper;
 import com.storyboard.exception.BusinessException;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.agent.AgentChatService;
@@ -43,17 +45,20 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final AgentConversationMapper conversationMapper;
     private final AgentAssetMapper assetMapper;
+    private final AgentMessageMapper messageMapper;
     private final FileStorageService fileStorageService;
     private final PromptOptimizeService optimizeService;
 
     public AgentConversationController(AgentChatService chatService,
                                        AgentConversationMapper conversationMapper,
                                        AgentAssetMapper assetMapper,
+                                       AgentMessageMapper messageMapper,
                                        FileStorageService fileStorageService,
                                        PromptOptimizeService optimizeService) {
         this.chatService = chatService;
         this.conversationMapper = conversationMapper;
         this.assetMapper = assetMapper;
+        this.messageMapper = messageMapper;
         this.fileStorageService = fileStorageService;
         this.optimizeService = optimizeService;
     }
@@ -165,6 +170,17 @@ public class AgentConversationController {
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
 
+        // 参考图消息落库（conversationId 非空时）：上传的参考图作为 user 消息进入对话记录，
+        // 前端对话窗口可见（MessageBubble 渲染层支持裸图片 URL），刷新后记录仍在
+        if (conversationId != null && !conversationId.isBlank()) {
+            AgentMessage refMsg = new AgentMessage();
+            refMsg.setConversationId(conversationId);
+            refMsg.setRole("user");
+            refMsg.setContent(url);
+            messageMapper.insert(refMsg);
+            log.info("参考图 user 消息已落库: conversationId={}, url={}", conversationId, url);
+        }
+
         return ApiResponse.ok(Map.of(
             "url", url,
             "assetId", asset.getId()
@@ -180,6 +196,14 @@ public class AgentConversationController {
             throw new BusinessException(40001, "内容至少 6 个字符才能优化");
         }
         return ApiResponse.ok(Map.of("optimized", optimizeService.optimize(request.content().trim())));
+    }
+
+    /** 满意完成：清空 Dify 会话的 storage_pic_talk 变量（生成结果确认卡片「满意完成」按钮触发） */
+    @PostMapping("/conversations/{id}/confirm-done")
+    public ApiResponse<Boolean> confirmDone(Authentication auth, @PathVariable String id) {
+        // 归属校验（40401）+ 清空 Dify 变量；失败抛 50202，前端保留卡片可重试
+        boolean cleared = chatService.confirmImageDone(auth.getName(), id);
+        return ApiResponse.ok(cleared);
     }
 
     /** 流式发送消息（SSE） */
@@ -206,6 +230,17 @@ public class AgentConversationController {
         SseEmitter emitter = new SseEmitter(600_000L);
         chatService.submitFormAndResume(auth.getName(), id,
             request.formToken(), request.taskId(), request.action(), emitter);
+        return emitter;
+    }
+
+    /** 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE） */
+    @PostMapping(value = "/conversations/{id}/video/plan/generate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter generateVideoFromPlan(Authentication auth, @PathVariable String id,
+                                            @RequestBody AgentVideoPlanGenerateRequest request) {
+        // 同步快速校验归属（失败抛 401/404 而非 SSE）
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = new SseEmitter(600_000L);
+        chatService.generateVideoFromPlan(auth.getName(), id, request.planToken(), emitter);
         return emitter;
     }
 

@@ -299,9 +299,9 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 ### 提示词优化（/api/agent/prompt/optimize）
 
 - **端点**：`POST /api/agent/prompt/optimize`，请求 `{content}`，响应 `{optimized: string}`；JWT 鉴权（`/api/agent/**` 非白名单）；**不落库、不关联会话**（纯文本转换工具）
-- **校验**：`content.trim().length < 6` → 40001「内容至少 6 个字符才能优化」（与前端按钮禁用条件一致，防绕过）
+- **校验**：`content.trim().length < 6` → 40001「内容至少 6 个字符才能优化」
 - **实现**：`PromptOptimizeService` 调 Laozhang chat completions（`baseUrlVision` + `defaultVisionModel` 质量优先，不传 thinking_level；超时 60s）；**优化方向由 LLM 自行判断**（草稿可能是剧情/图片/视频或综合需求），单文本输出不强制 JSON——规避解析失败风险
-- **前端交互**（`AgentChatPanel` 组件本地 state，无弹窗）：输入 ≥6 字符 → 点「✨ 优化」→ `optimizing` 置位（**优化按钮与发送按钮同时禁用**，用户明确要求）→ 完成 `setText(optimized)` **自动覆盖输入框原文** → 失败保持原文 + 轻提示「优化失败，请重试」；迭代优化天然支持（再点一次）
+- **前端**：已取消「✨ 优化」按钮（AgentChatPanel 输入区只保留发送按钮）；接口保留备用，前端不再调用
 
 ### DifyAgentController 改造（消灭孤儿 scene）
 
@@ -318,10 +318,22 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - `ImageGenerationService.generateImage`：sceneId 为 null 时不查/不写 scene 表，只用局部变量 `localPath` 返回
 - `VideoGenerationService.createVideoTask`：同样支持 sceneId 为 null；`pollVideoTask` **双通道反查**——先按 `videoTaskId` 查 scene，查不到再按 `taskId` 查 agent_assets 并更新其 url/status/error（failed 分支先解析上游 message/error 再 setError）
 
+### 完善图片自动生成（无 HITL 信号触发，2026-08-07 重构）
+
+**背景**：旧链路 Dify 用 deepseek（无视觉能力）盲猜改图方案 + HITL 人工确认，方案与实际图片脱节。重构后：
+- **Dify 工作流删掉「完善图片设计方案」LLM 与「人工介入」HITL**，完善路径改为：`user_finishing(code 写 storage_pic_talk)` → `赋值` → answer 节点「后端执行识别图片加人工介入流程」（文案"结合用户输入理解图片优化提示词中..."）即结束（无确认）
+- **后端触发**：`AgentChatService.forwardDifySse` 监听 `node_finished` 事件，`data.title == "后端执行识别图片加人工介入流程"`（常量 `AUTO_REFINE_SIGNAL_TITLE`，**必须与 Moon智能体.yml 该 answer 节点 title 完全一致**）→ `triggerAutoImageRefine` 自动生成：
+  1. `ImageRefinePromptService.buildRefinedPrompt(source, userRequest)`：**视觉模型（gemini-3-flash-preview，baseUrlVision）看图 + 用户诉求 → 结构化 JSON（image_analysis/modifications/refined_prompt）**，源图从本地 uploads 读转 base64 data URI 内联（参照 MiniMax 图生视频）；`refined_prompt` 直接投喂图生图
+  2. `AgentGenerationService.generateImage(sceneId=null, mode=edit, prompt=refined_prompt, generatedImageUrl=source)` → 落 agent_assets
+  3. `pushGenerationResult` 推图 + confirm_result 卡片（「继续完善/满意完成」交互保留）
+- **数据来源**：源图 = `lastPicUrlByConversation`（本轮 PicUrl）；用户诉求 = 最近一条 user 消息（streamMessage 已落库，等价 sys.query）
+- **SSE 时序坑**：信号触发后置 `autoGenerate` 标志，forwardDifySse 内**所有 `!deferComplete` complete 判断都要加 `&& !autoGenerate.get()`**（message_end / EOF / 异常分支），否则 Dify 流一结束 emitter 就被 complete，图片还没生成完
+- **Dify 侧配套**：`storage_pic_talk.user_finishing` 必须由 code 节点写入（sys.query），并确保「传到公共变量」类 code 输出 lis **含 user_finishing**（over-write 整体替换，不加会丢）
+
 ### 智能体窗口前端约定
 
 - **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（62vw，minWidth 480）：左会话栏（180px，顶部为「☾ Moon 智能体」标题）+ 右对话区（顶部显示当前会话标题，无会话占位「未选择对话」；右侧 📁 产出素材 + 🧹 清除聊天记录按钮）
-- **底部输入栏**：可拖拽上下伸缩（min 90 / max 40vh，顶部 4px 把手 hover 变主色）；右侧按钮组纵向——「✨ 优化」在上、「发送」在下；提示词优化 ≥6 字符启用，优化中双按钮禁用，完成自动覆盖输入框
+- **底部输入栏**：可拖拽上下伸缩（min 90 / max 40vh，顶部 4px 把手 hover 变主色）；右侧为「发送」按钮（「✨ 优化」已取消）
 - **命名**：用户可见文案统一「产出素材」（原「资产」，仅文案，store/字段名 assets/AgentAsset 不变）
 - **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
