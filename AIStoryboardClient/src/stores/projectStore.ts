@@ -14,6 +14,16 @@ export interface ToastMessage {
   kind: 'image' | 'video';
 }
 
+/** 解析网关下发的 params JSON 字符串为参数对象（解析失败/非对象返回 null，前端回退静态默认） */
+function safeParseParams(json: string): ModelOption['params'] {
+  try {
+    const obj = JSON.parse(json);
+    return obj && typeof obj === 'object' ? (obj as ModelOption['params']) : null;
+  } catch {
+    return null;
+  }
+}
+
 interface ProjectState {
   projects: ProjectResponse[];
   currentProject: ProjectResponse | null;
@@ -30,6 +40,8 @@ interface ProjectState {
   videoPreset: string;
   imageSize: string;
   imageQuality: string;
+  // 生图数量（默认 1；由生图面板 n 控件调节）
+  imageN: number;
   // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
   imageModelOptions: ModelOption[];
   videoModelOptions: ModelOption[];
@@ -48,6 +60,7 @@ interface ProjectState {
   setVideoPreset: (p: string) => void;
   setImageSize: (s: string) => void;
   setImageQuality: (q: string) => void;
+  setImageN: (n: number) => void;
   /** 从网关拉取生图/生视频模型列表（编辑器挂载时调用；失败静默保持默认） */
   fetchAiModels: () => Promise<void>;
 
@@ -91,7 +104,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   videoPreset: DEFAULT_VIDEO_PRESET,
   imageSize: DEFAULT_IMAGE_SIZE,
   imageQuality: DEFAULT_IMAGE_QUALITY,
-  // 初始 = 静态默认（as const 需展开为可变 ModelOption[]）；网关拉取成功且非空时替换
+  imageN: 1,
+  // 初始 = 静态默认（as const 需展开为可变 ModelOption[]，不带 params）；网关拉取成功且非空时替换
   imageModelOptions: IMAGE_MODELS.map((m) => ({ value: m.value, label: m.label })),
   videoModelOptions: VIDEO_MODELS.map((m) => ({ value: m.value, label: m.label })),
   toasts: [],
@@ -295,15 +309,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setVideoPreset: (p) => set({ videoPreset: p }),
   setImageSize: (s) => set({ imageSize: s }),
   setImageQuality: (q) => set({ imageQuality: q }),
+  setImageN: (n) => set({ imageN: n }),
   // 从网关拉取生图/生视频模型列表：网关返回空数组/失败时保持静态默认（静默，不打扰用户）
   fetchAiModels: async () => {
     try {
       const res = await aiApi.aiModels();
       const imageModels = res.data.data?.imageModels ?? [];
       const videoModels = res.data.data?.videoModels ?? [];
+      // 网关下发的 params 是 JSON 字符串 → 解析为参数对象（解析失败置 null，前端回退静态默认）
+      const parsedImageModels: ModelOption[] = imageModels.map((m) => ({
+        ...m,
+        params: m.params ? safeParseParams(m.params) : null,
+      }));
+      const parsedVideoModels: ModelOption[] = videoModels.map((m) => ({
+        ...m,
+        params: m.params ? safeParseParams(m.params) : null,
+      }));
       set((s) => ({
-        imageModelOptions: imageModels.length ? imageModels : s.imageModelOptions,
-        videoModelOptions: videoModels.length ? videoModels : s.videoModelOptions,
+        imageModelOptions: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
+        videoModelOptions: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
       }));
     } catch {
       // 网关不可达：保持静态默认，模型选择不中断

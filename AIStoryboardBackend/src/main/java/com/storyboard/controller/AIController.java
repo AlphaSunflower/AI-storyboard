@@ -140,6 +140,11 @@ public class AIController {
                         Map<String, String> m = new LinkedHashMap<>();
                         m.put("value", id);
                         m.put("label", id);
+                        // 透传网关下发的模型参数（能力枚举+默认值）：非 null 非空对象时以 JSON 字符串下发，前端 store 解析为对象
+                        JsonNode paramsNode = n.path("params");
+                        if (paramsNode.isObject() && !paramsNode.isEmpty()) {
+                            m.put("params", paramsNode.toString());
+                        }
                         models.add(m);
                     }
                 }

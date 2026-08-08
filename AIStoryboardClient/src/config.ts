@@ -38,10 +38,37 @@ export function assetUrl(path: string | null): string {
 //  这些静态数组作为网关不可用/未配置路由时的兜底默认值。
 // ═══════════════════════════════════════════════════
 
-/** 模型下拉选项（网关下发与静态默认统一结构） */
+/** 图片模型参数能力（images/generations + edits 共用；来自网关 model_params 配置） */
+export interface ImageModelParams {
+  n?: { min?: number; max?: number; default?: number };
+  sizes?: string[];
+  sizeDefault?: string;
+  qualities?: string[];
+  qualityDefault?: string;
+  styles?: string[];
+  styleDefault?: string;
+}
+
+/** 视频模型参数能力（videos 契约） */
+export interface VideoModelParams {
+  durations?: number[];
+  durationDefault?: number;
+  resolutions?: string[];
+  resolutionDefault?: string;
+  aspectRatios?: string[];
+  aspectRatioDefault?: string;
+}
+
+/** 文本模型参数默认值（chat/completions） */
+export interface TextModelParams {
+  defaults?: { temperature?: number; max_tokens?: number; top_p?: number };
+}
+
+/** 模型下拉选项（网关下发与静态默认统一结构；params 为解析后的参数对象，未配置时为 null/undefined） */
 export interface ModelOption {
   value: string;
   label: string;
+  params?: ImageModelParams | VideoModelParams | TextModelParams | null;
 }
 
 export const IMAGE_MODELS = [
