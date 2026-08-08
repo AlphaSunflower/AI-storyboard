@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.Collections;
@@ -59,6 +60,21 @@ public class AiConfigProperties {
 
     /** LLM 网关配置（独立前缀 {@code ai.gateway}，见 {@link Gateway}） */
     private Gateway gateway = new Gateway();
+
+    /**
+     * 构造器注入：接收经 {@code @EnableConfigurationProperties} 注册、已绑定
+     * {@code ai.gateway.*} 的独立 Gateway bean。
+     * 嵌套类上的 {@code @ConfigurationProperties} 注解只在它被独立注册为 bean 时才生效；
+     * 若仅靠字段绑定，Binder 会按父类前缀 {@code ai.laozhang.gateway.*} 查找（yml 不存在）
+     * → 字段保留默认值、apiKey=null → 网关请求发出 "Bearer null"。
+     * <p>
+     * {@code @Autowired} 必须有：Spring Boot 4 会把"唯一构造器"类当作构造器绑定目标，
+     * 若不加 @Autowired，Gateway 参数会被当配置项从父前缀绑定（→ null），而非注入 bean。
+     */
+    @Autowired
+    public AiConfigProperties(Gateway gateway) {
+        this.gateway = gateway;
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  API 端点路径（相对于 baseUrlOpenai）

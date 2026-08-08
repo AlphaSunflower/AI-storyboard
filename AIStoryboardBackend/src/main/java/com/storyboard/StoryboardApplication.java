@@ -13,7 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @SpringBootApplication
-@EnableConfigurationProperties({JwtConfig.class, AiConfigProperties.class})
+@EnableConfigurationProperties({JwtConfig.class, AiConfigProperties.class, AiConfigProperties.Gateway.class})
 @MapperScan("com.storyboard.mapper")
 public class StoryboardApplication {
 
