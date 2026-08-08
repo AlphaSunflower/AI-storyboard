@@ -54,9 +54,10 @@ public class ImageEditService {
      *
      * @param multipartBody  原始 multipart 字节流（含 model/prompt 字段 + image 文件 part）
      * @param contentType    原 Content-Type（含 boundary）
-     * @return 上游响应体（200 时含 data[0].b64_json；非 200 时为错误体）
+     * @return 路由结果（上游状态码 + 响应体），与 GatewayRoutingService.route 语义一致：
+     *         200 时 body 含 data[0].b64_json；4xx 时 body 为上游错误体并透传真实状态码
      */
-    public String edit(byte[] multipartBody, String contentType) {
+    public GatewayRoutingService.RouteResult edit(byte[] multipartBody, String contentType) {
         long start = System.currentTimeMillis();
         String model = null;
         String channelId = null;
@@ -93,17 +94,17 @@ public class ImageEditService {
                     if (status >= 400) {
                         String error = upstreamClient.extractError(resp.body());
                         log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);
-                        // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传
+                        // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传（带上游真实状态码，避免被 200 包装致 Backend 误判成功）
                         if (status != 429 && status < 500) {
                             callLogService.log(model, channelId, "error",
                                     System.currentTimeMillis() - start, error, null, null);
-                            return resp.body();
+                            return new GatewayRoutingService.RouteResult(status, resp.body());
                         }
                         continue;
                     }
                     callLogService.log(model, channelId, "success",
                             System.currentTimeMillis() - start, null, null, null);
-                    return resp.body();
+                    return new GatewayRoutingService.RouteResult(status, resp.body());
                 } catch (BusinessException be) {
                     throw be;
                 } catch (Exception e) {

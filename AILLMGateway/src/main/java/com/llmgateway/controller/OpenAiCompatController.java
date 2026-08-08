@@ -40,7 +40,9 @@ public class OpenAiCompatController {
     public ResponseEntity<String> imageEdits(@RequestBody byte[] body,
                                              @RequestHeader("Content-Type") String contentType) {
         // 图改图：原始 multipart 字节流 + Content-Type（含 boundary）原样透传
-        return ResponseEntity.ok(imageEditService.edit(body, contentType));
+        // 透传上游真实状态码（4xx 错误体不再被 200 包装，对齐 chat/images 端点语义）
+        GatewayRoutingService.RouteResult result = imageEditService.edit(body, contentType);
+        return ResponseEntity.status(result.status()).body(result.body());
     }
 
     @GetMapping(value = "/models", produces = MediaType.APPLICATION_JSON_VALUE)
