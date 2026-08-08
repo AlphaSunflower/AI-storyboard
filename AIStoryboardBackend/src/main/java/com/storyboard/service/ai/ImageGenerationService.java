@@ -225,7 +225,9 @@ public class ImageGenerationService {
         byte[] bodyBytes = mp.build();
         HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
             .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/edits"))   // 改：走网关
-            .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
+            // 用 octet-stream 发送 multipart 字节流：@RequestBody byte[] 收 multipart 会被
+            // Spring 解析器消费 body（实测 500），网关侧从 body 提取 boundary 重建转发头
+            .header("Content-Type", "application/octet-stream")
             .header("Authorization", "Bearer " + config.getGatewayApiKey())      // 改：网关业务 Key
             .timeout(Duration.ofSeconds(180))
             .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))

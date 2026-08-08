@@ -28,8 +28,8 @@ public class ImageEditService {
 
     private static final Logger log = LoggerFactory.getLogger(ImageEditService.class);
 
-    /** 上游 edits 端点路径（openai_compatible 渠道统一使用） */
-    private static final String EDIT_PATH = "/v1/images/edits";
+    /** 上游 edits 端点路径（openai_compatible 渠道统一使用；baseUrl 已含 /v1 前缀，故不带） */
+    private static final String EDIT_PATH = "/images/edits";
 
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
@@ -53,7 +53,8 @@ public class ImageEditService {
      * 转发图改图请求。
      *
      * @param multipartBody  原始 multipart 字节流（含 model/prompt 字段 + image 文件 part）
-     * @param contentType    原 Content-Type（含 boundary）
+     * @param contentType    调用方 Content-Type（仅用于记录；转发头由本方法从 body 提取 boundary 重建——
+     *                       调用方可能用 octet-stream 规避 Spring multipart 解析器）
      * @return 路由结果（上游状态码 + 响应体），与 GatewayRoutingService.route 语义一致：
      *         200 时 body 含 data[0].b64_json；4xx 时 body 为上游错误体并透传真实状态码
      */
@@ -62,6 +63,11 @@ public class ImageEditService {
         String model = null;
         String channelId = null;
         try {
+            // 0. 从 multipart 字节流提取 boundary，重建上游需要的 multipart Content-Type
+            //    （实测 2026-08-08：@RequestBody byte[] 收 multipart 会被 Spring 解析器消费 body → 500，
+            //    调用方改发 octet-stream 后 body 可达，转发头须在此重建）
+            String upstreamContentType = buildMultipartContentType(multipartBody);
+
             // 1. 从 multipart 字节流轻量解析 model 字段（name="model" part 的 body）
             model = parseModelField(multipartBody);
             if (model == null || model.isBlank()) throw new BusinessException(40001, "model 不能为空");
@@ -89,7 +95,7 @@ public class ImageEditService {
                     channelId = channel.getId();
                     String apiKey = keyService.decrypt(channel.getApiKey());
                     HttpResponse<String> resp = upstreamClient.postMultipart(
-                            channel.getBaseUrl(), EDIT_PATH, apiKey, contentType, multipartBody);
+                            channel.getBaseUrl(), EDIT_PATH, apiKey, upstreamContentType, multipartBody);
                     int status = resp.statusCode();
                     if (status >= 400) {
                         String error = upstreamClient.extractError(resp.body());
@@ -121,6 +127,25 @@ public class ImageEditService {
                     System.currentTimeMillis() - start, e.getMessage(), null, null);
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
         }
+    }
+
+    /**
+     * 从 multipart 字节流提取 boundary，重建上游需要的 multipart Content-Type。
+     * body 分隔符为 "--boundary"（前导 --），但 Content-Type 的 boundary 参数不含前导 --（multipart 规范）。
+     */
+    private String buildMultipartContentType(byte[] body) {
+        // 前两个字节必须是 "--"（multipart 规范），否则无 boundary 可提取
+        if (body.length < 2 || body[0] != '-' || body[1] != '-') {
+            throw new BusinessException(40001, "multipart body 必须以 boundary 开头");
+        }
+        for (int i = 2; i < body.length - 1; i++) {
+            if (body[i] == '\r' && body[i + 1] == '\n') {
+                // 跳过前导 "--"，取纯 boundary（Content-Type 参数规范不含 --）
+                String boundary = new String(body, 2, i - 2, StandardCharsets.ISO_8859_1);
+                return "multipart/form-data; boundary=" + boundary;
+            }
+        }
+        throw new BusinessException(40001, "multipart body 缺少 boundary 结束符");
     }
 
     /**
