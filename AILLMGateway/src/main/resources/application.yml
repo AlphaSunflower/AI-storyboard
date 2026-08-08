@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: llm-gateway
+  datasource:
+    url: jdbc:postgresql://${LLM_GATEWAY_DB_HOST:localhost}:${LLM_GATEWAY_DB_PORT:5432}/${LLM_GATEWAY_DB_NAME:llm_gateway}
+    username: ${LLM_GATEWAY_DB_USERNAME:postgres}
+    password: ${LLM_GATEWAY_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+server:
+  port: ${LLM_GATEWAY_PORT:8083}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: assign_uuid
+      logic-delete-field: deleted
+      logic-delete-value: true      # BOOLEAN 列，不能用 1/0（实测踩坑）
+      logic-not-delete-value: false
+
+gateway:
+  jwt:
+    access-secret: ${LLM_GATEWAY_JWT_ACCESS_SECRET}
+    refresh-secret: ${LLM_GATEWAY_JWT_REFRESH_SECRET}
+    issuer: ${LLM_GATEWAY_JWT_ISSUER:llm-gateway}
+    access-token-ttl: 3600
+    refresh-token-ttl: 2592000
+  aes:
+    secret: ${LLM_GATEWAY_AES_SECRET}   # AES-256，需 32 字节
+  upstream:
+    connect-timeout-ms: 30000
+    request-timeout-ms: 120000
+    retry-count: 2
