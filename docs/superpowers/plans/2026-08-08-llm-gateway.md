@@ -1709,17 +1709,19 @@ public class VideoGatewayService {
     private final ChannelMapper channelMapper;
     private final KeyService keyService;
     private final CallLogService callLogService;
+    private final CallLogMapper callLogMapper;
     private final GatewayConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient;
 
     public VideoGatewayService(ModelRouteMapper routeMapper, ChannelMapper channelMapper,
                                KeyService keyService, CallLogService callLogService,
-                               GatewayConfig config) {
+                               CallLogMapper callLogMapper, GatewayConfig config) {
         this.routeMapper = routeMapper;
         this.channelMapper = channelMapper;
         this.keyService = keyService;
         this.callLogService = callLogService;
+        this.callLogMapper = callLogMapper;
         this.config = config;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(config.getUpstream().getConnectTimeoutMs()))
@@ -2378,4 +2380,4 @@ cd "E:\Desktop\AI-storyboard" && git status --short
 
 **2. 占位符扫描：** 无 TODO/待定；所有步骤含代码或精确命令。
 
-**3. 类型一致性：** VideoGatewayService.VideoResult / GatewayRoutingService.RouteResult 命名统一；`videoGatewayService.download` 返回类型与 Controller 一致；GatewayConfig.video.defaultResolution 与 createMinimax 使用一致；任务 8 中 VideoGatewayService 需要注入 CallLogMapper（download 查 video_url）——构造函数已含 callLogService 但 download 需要 mapper 直查，**注意在实现时给 VideoGatewayService 同时注入 CallLogMapper**（步骤 1 构造器漏了，实现时补上）。
+**3. 类型一致性：** VideoGatewayService.VideoResult / GatewayRoutingService.RouteResult 命名统一；`videoGatewayService.download` 返回类型与 Controller 一致；GatewayConfig.video.defaultResolution 与 createMinimax 使用一致；VideoGatewayService 构造器已含 CallLogMapper 注入（download 查 video_url 用，已内联修复）。
