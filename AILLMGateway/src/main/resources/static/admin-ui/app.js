@@ -12,6 +12,7 @@
 const LS_TOKEN_KEY = 'admin_token';          // 登录 token 的 localStorage 键
 let channelMap = {};                          // 渠道 id → {id,name,type,enabled,...} 缓存
 let channelsLoaded = false;                   // 渠道缓存是否已加载
+let routesCache = [];                         // 路由列表缓存（测试弹窗模型候选用）
 let selfUsername = null;                      // 当前登录用户名（JWT sub 解码，用于用户页防自锁）
 let plainKeyCache = null;                     // 一次性 plainKey，关闭弹层即置空
 let modalCloseHandler = null;                 // 弹窗关闭回调（confirm 用）
@@ -447,6 +448,7 @@ function openChannelModal(channel) {
       + '</select>')
     + field('BaseURL', '<input class="input" id="f-baseurl" value="' + esc(channel ? channel.baseUrl : '') + '" placeholder="https://api.openai.com">')
     + field('API Key', passwordField('f-apikey', '', isEdit ? '留空则不修改' : '必填'))
+    + field('模型列表（逗号分隔）', '<input class="input" id="f-models" value="' + esc(channel ? channel.models || '' : '') + '" placeholder="如：deepseek-v4-pro, deepseek-v4-flash（测试弹窗候选用，留空则仅用已配路由模型）">')
     + field('优先级', '<input class="input" id="f-priority" type="number" value="'
       + esc(channel && channel.priority !== null && channel.priority !== undefined ? channel.priority : 0) + '" placeholder="数字越小越优先">')
     + '<div class="field field-inline"><span class="field-label">启用</span>'
@@ -468,7 +470,7 @@ async function submitChannel(id) {
   if (!name || !baseUrl) { toast('名称和 BaseURL 不能为空', 'error'); return; }
   if (!id && !apiKey) { toast('新建渠道必须填写 API Key', 'error'); return; }
 
-  const body = { name, type, baseUrl, enabled, priority: isNaN(priority) ? 0 : priority };
+  const body = { name, type, baseUrl, models: $('#f-models').value.trim(), enabled, priority: isNaN(priority) ? 0 : priority };
   if (apiKey) body.apiKey = apiKey;   // 编辑留空 = 不更换 Key
 
   const btn = $('#form-submit');
@@ -487,17 +489,43 @@ async function submitChannel(id) {
   }
 }
 
-/** 渠道测试：弹窗可选填测试模型名（留空自动用该渠道已配路由的模型），确认后调 test 端点 */
+/** 渠道模型候选：渠道 models 字段拆分（中英文逗号）+ 该渠道已配路由的模型，去重 */
+function channelModelCandidates(channelId) {
+  const ch = channelMap[channelId] || {};
+  const fromField = (ch.models || '').split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  const fromRoutes = routesCache.filter((r) => r.channelId === channelId)
+    .map((r) => r.modelName).filter(Boolean);
+  return [...new Set([...fromField, ...fromRoutes])];
+}
+
+/** 模型输入框 + datalist 候选：可下拉选也可手动输入 */
+function modelField(id, candidates, initial, placeholder) {
+  const opts = (candidates || []).map((m) => '<option value="' + esc(m) + '"></option>').join('');
+  return '<input class="input" id="' + id + '" list="' + id + '-list" value="' + esc(initial || '') + '"'
+    + ' placeholder="' + esc(placeholder || '选择或输入模型名') + '">'
+    + '<datalist id="' + id + '-list">' + opts + '</datalist>';
+}
+
+/** 更新 datalist 候选（渠道切换时刷新模型列表） */
+function updateModelList(inputId, candidates) {
+  const dl = document.getElementById(inputId + '-list');
+  if (dl) dl.innerHTML = (candidates || []).map((m) => '<option value="' + esc(m) + '"></option>').join('');
+}
+
+/** 渠道测试：弹窗列出该渠道模型候选 → 选择（可手动输入）→ 调 test 端点 */
 function testChannel(id, btn) {
+  const candidates = channelModelCandidates(id);
   openModal(
     '测试渠道连通性',
-    field('测试模型（可选）', '<input class="input" id="test-model" placeholder="留空自动选用该渠道已配路由的模型">')
+    field('测试模型', modelField('test-model', candidates, '', candidates.length ? '选择或输入模型名' : '该渠道未配置模型，请手动输入'))
+      + (candidates.length ? '' : '<p class="test-hint">候选为空：可在渠道信息中填写「模型列表」，或先为该渠道配置模型路由</p>')
       + '<p class="test-hint">将以最小请求（max_tokens=1）直连上游验证连通性，不落业务日志</p>',
     footerHtml('开始测试'),
     null
   );
   $('#form-submit').onclick = async () => {
     const model = $('#test-model').value.trim();
+    if (!model) { toast('请选择或输入测试模型', 'error'); return; }
     closeModal();
     const orig = btn.textContent;
     btn.disabled = true;
@@ -505,7 +533,7 @@ function testChannel(id, btn) {
     try {
       const data = await api('/admin/channels/' + id + '/test', {
         method: 'POST',
-        body: JSON.stringify(model ? { modelName: model } : {}),
+        body: JSON.stringify({ modelName: model }),
       });
       showTestResult(data);
     } catch (e) {
@@ -594,6 +622,7 @@ async function loadRoutes() {
   try {
     await ensureChannels();   // 渠道 id→name 映射（停用渠道灰显）
     const routes = await api('/admin/routes');
+    routesCache = routes;     // 缓存供测试弹窗模型候选
     view.innerHTML =
       '<div class="view-head"><h2>模型路由</h2>'
       + '<button type="button" class="btn btn-primary" data-action="new-route">+ 新建路由</button></div>'
@@ -715,20 +744,48 @@ async function loadRoutesForEdit(id) {
   }
 }
 
-/** 路由测试：走真实网关链路（会落一条 CallLog，设计接受） */
-async function testRoute(id, btn) {
-  const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '测试中…';
-  try {
-    const data = await api('/admin/routes/' + id + '/test', { method: 'POST' });
-    showTestResult(data);
-  } catch (e) {
-    handleErr(e);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = orig;
-  }
+/** 路由测试：弹窗选择渠道（默认路由配置的渠道）→ 模型候选跟随渠道 → 选择后直连测试 */
+function testRoute(id, btn) {
+  const route = routesCache.find((r) => r.id === id) || {};
+  const channels = Object.values(channelMap);
+  const selCh = route.channelId || (channels[0] && channels[0].id) || '';
+  const candidates = channelModelCandidates(selCh);
+  const channelOpts = channels.map((c) =>
+    '<option value="' + esc(c.id) + '"' + (c.id === selCh ? ' selected' : '')
+    + '>' + esc(c.name) + (c.enabled ? '' : '（停用）') + '</option>').join('');
+  openModal(
+    '测试模型路由',
+    field('渠道', '<select class="input" id="test-channel">' + channelOpts + '</select>')
+      + field('测试模型', modelField('test-model', candidates, route.modelName || '', candidates.length ? '选择或输入模型名' : '该渠道未配置模型，请手动输入'))
+      + '<p class="test-hint">默认渠道与模型取自该路由配置；切换渠道后模型列表随之刷新。直连验证连通性，不落业务日志</p>',
+    footerHtml('开始测试'),
+    null
+  );
+  // 渠道切换 → 刷新模型候选
+  $('#test-channel').onchange = () => {
+    updateModelList('test-model', channelModelCandidates($('#test-channel').value));
+  };
+  $('#form-submit').onclick = async () => {
+    const cid = $('#test-channel').value;
+    const model = $('#test-model').value.trim();
+    if (!model) { toast('请选择或输入测试模型', 'error'); return; }
+    closeModal();
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    try {
+      const data = await api('/admin/channels/' + cid + '/test', {
+        method: 'POST',
+        body: JSON.stringify({ modelName: model }),
+      });
+      showTestResult(data);
+    } catch (e) {
+      handleErr(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  };
 }
 
 async function deleteRoute(id) {

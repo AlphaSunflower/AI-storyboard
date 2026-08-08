@@ -19,6 +19,8 @@ public class Channel {
     private String baseUrl;
     /** AES 加密密文 */
     private String apiKey;
+    /** 该渠道支持的模型名（逗号分隔，可空；测试弹窗候选与已配路由模型合并去重） */
+    private String models;
     private Boolean enabled;
     /** 同模型多渠道时升序取第一个 */
     private Integer priority;

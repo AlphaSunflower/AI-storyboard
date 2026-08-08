@@ -37,6 +37,7 @@ public class AdminChannelController {
         channel.setType(request.getType() == null ? "openai_compatible" : request.getType());
         channel.setBaseUrl(request.getBaseUrl());
         channel.setApiKey(keyService.encrypt(request.getApiKey()));   // AES 加密存储
+        channel.setModels(request.getModels());
         channel.setEnabled(request.getEnabled() == null ? true : request.getEnabled());
         channel.setPriority(request.getPriority() == null ? 0 : request.getPriority());
         channel.setCreatedAt(OffsetDateTime.now());
@@ -64,6 +65,7 @@ public class AdminChannelController {
         if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
             channel.setApiKey(keyService.encrypt(request.getApiKey()));  // 传新 Key 才重加密
         }
+        if (request.getModels() != null) channel.setModels(request.getModels());  // models 可更新为空串清空
         if (request.getEnabled() != null) channel.setEnabled(request.getEnabled());
         if (request.getPriority() != null) channel.setPriority(request.getPriority());
         channel.setUpdatedAt(OffsetDateTime.now());

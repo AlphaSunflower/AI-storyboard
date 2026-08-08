@@ -11,6 +11,8 @@ public class ChannelRequest {
     private String baseUrl;
     /** 明文 Key，服务端 AES 加密后落库 */
     private String apiKey;
+    /** 该渠道支持的模型名（逗号分隔，可空），测试弹窗下拉候选 */
+    private String models;
     private Boolean enabled;
     private Integer priority;
 }
