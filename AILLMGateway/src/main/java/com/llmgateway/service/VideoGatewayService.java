@@ -23,6 +23,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -120,6 +121,9 @@ public class VideoGatewayService {
         }
     }
 
+    /** MiniMax ratio 可用值白名单（t2v 纯文本场景；i2v 恒 adaptive） */
+    private static final Set<String> RATIOS = Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9");
+
     /** MiniMax 创建：POST {base}/v2/video_generation，content 数组 JSON */
     private HttpResponse<String> createMinimax(Channel channel, String apiKey, JsonNode body) throws Exception {
         ObjectNode payload = objectMapper.createObjectNode();
@@ -143,7 +147,17 @@ public class VideoGatewayService {
         int duration = body.path("duration").asInt(8);
         payload.put("duration", Math.max(4, Math.min(15, duration)));   // clamp 4~15
         String ratio = body.path("aspectRatio").asText("");
-        if (!ratio.isBlank()) payload.put("ratio", ratio);
+        // MiniMax ratio 语义（实测 2026-08-08 联调踩坑）：
+        //   图生视频（i2v）→ 必须显式 "adaptive"；
+        //   纯文本（t2v）→ 必须显式指定可用值（16:9/4:3/1:1/3:4/9:16/21:9），
+        //     缺省/非法值一律回落 16:9（不能不带 ratio——上游 400 invalid params 2013）
+        boolean isImageToVideo = !imageUrl.isBlank();
+        if (isImageToVideo) {
+            payload.put("ratio", "adaptive");
+        } else {
+            String effRatio = RATIOS.contains(ratio) ? ratio : "16:9";
+            payload.put("ratio", effRatio);
+        }
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation"))
@@ -275,16 +289,19 @@ public class VideoGatewayService {
 
                     if (resp.statusCode() == 200) {
                         JsonNode json = objectMapper.readTree(resp.body());
+                        // MiniMax 响应为 {"task":{...}} 包裹结构（实测 2026-08-08 联调踩坑），
+                        // 取 task 子节点作为实际状态载体；Laozhang 无包裹层，直接取顶层
+                        JsonNode task = "minimax".equals(channel.getType()) ? json.path("task") : json;
                         // MiniMax succeeded → 暂存 video_url 供下载端点使用（从原始 JsonNode 提取）
                         if ("minimax".equals(channel.getType())) {
-                            String status = json.path("status").asText("");
-                            String contentUrl = json.path("content").path("url").asText("");
+                            String status = task.path("status").asText("");
+                            String contentUrl = task.path("content").path("url").asText("");
                             if ("succeeded".equals(status) && !contentUrl.isBlank()) {
-                                callLogService.log(json.path("model").asText("video"), channel.getId(), "succeeded",
+                                callLogService.log(task.path("model").asText("video"), channel.getId(), "succeeded",
                                         System.currentTimeMillis() - start, null, contentUrl);
                             } else if ("failed".equals(status)) {
-                                String err = json.path("error").path("message").asText("video generation failed");
-                                callLogService.log(json.path("model").asText("video"), channel.getId(), "failed",
+                                String err = task.path("error").path("message").asText("video generation failed");
+                                callLogService.log(task.path("model").asText("video"), channel.getId(), "failed",
                                         System.currentTimeMillis() - start, err, null);
                             }
                         } else {
@@ -292,7 +309,7 @@ public class VideoGatewayService {
                                     System.currentTimeMillis() - start, null, null);
                         }
                         // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
-                        return new VideoResult(200, normalizePoll(json));
+                        return new VideoResult(200, normalizePoll(task));
                     }
                     // 404 = 该渠道无此任务，尝试下一个
                 } catch (Exception e) {
