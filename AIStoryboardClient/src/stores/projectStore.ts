@@ -3,7 +3,8 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, IMAGE_MODELS, VIDEO_MODELS, type ModelOption } from '../config';
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, IMAGE_MODELS, VIDEO_MODELS, type ModelOption } from '../config';
+import { resolveVideoPreset } from '../components/common/VideoPresetSelector';
 
 // 生成完成后的 toast 通知
 export interface ToastMessage {
@@ -219,11 +220,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateImage: async (sceneId, prompt, model, referenceImages, mode, generatedImageUrl) => {
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: true } }));
     try {
-      const { imageSize, imageQuality } = get();
+      const { imageSize, imageQuality, imageN } = get();
       const res = await aiApi.generateImage({
         sceneId, prompt, model, referenceImages, mode, generatedImageUrl,
         size: imageSize,
         quality: imageQuality,
+        n: imageN,
       });
       if (get().currentProject) {
         await get().loadProject(get().currentProject!.id);
@@ -246,7 +248,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateVideo: async (sceneId, prompt, model, referenceImages, generatedImageUrl) => {
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: true } }));
     try {
-      const preset = VIDEO_PRESETS.find(p => p.value === get().videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
+      // 解析当前 preset（静态 VIDEO_PRESETS 或按模型 params 动态组合的 `${d}s-${a}`）
+      const preset = resolveVideoPreset(get().videoPreset);
       const res = await aiApi.generateVideo({
         sceneId, prompt, model, referenceImages, generatedImageUrl,
         resolution: preset.resolution,

@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
-import { VideoPresetSelector } from '../common/VideoPresetSelector';
+import { VideoPresetSelector, resolveVideoPreset } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { IMAGE_SIZES, IMAGE_QUALITIES, type ImageModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
 
 const creationTypes = [
@@ -59,12 +59,27 @@ export function LeftSidebar() {
     videoPreset,
     imageSize,
     imageQuality,
+    imageN,
     setImageModel,
     setVideoModel,
     setVideoPreset,
     setImageSize,
     setImageQuality,
+    setImageN,
   } = useProjectStore();
+
+  // 当前生图模型的参数能力（网关下发 params；未配置时回退静态 IMAGE_SIZES/IMAGE_QUALITIES）
+  const imageParams = imageModelOptions.find((m) => m.value === imageModel)?.params as ImageModelParams | undefined;
+  const sizeOptions = imageParams?.sizes?.length ? imageParams.sizes : [...IMAGE_SIZES];
+  const qualityOptions = imageParams?.qualities?.length ? imageParams.qualities : [...IMAGE_QUALITIES];
+  // 数量可选值（仅当前模型 params 配置了 n 能力时非空）：min..max 连续整数
+  const nRange = imageParams?.n;
+  const nOptions = nRange
+    ? Array.from(
+        { length: Math.max(0, (nRange.max ?? nRange.min ?? 1) - (nRange.min ?? 1) + 1) },
+        (_, i) => (nRange.min ?? 1) + i
+      )
+    : [];
 
   // 智能体已生成分镜时，手动剧本输入与生成按钮互斥禁用
   const agentGeneratedScenes = useAgentStore((s) => s.agentGeneratedScenes);
@@ -98,7 +113,7 @@ export function LeftSidebar() {
     // If no current project, create one first
     if (!projectId) {
       try {
-        const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
+        const preset = resolveVideoPreset(videoPreset);
         const p = await createProject('未命名项目', creationType, preset.aspectRatio);
         projectId = p.id;
       } catch {
@@ -107,7 +122,7 @@ export function LeftSidebar() {
       }
     }
 
-    const preset = VIDEO_PRESETS.find(p => p.value === videoPreset) || VIDEO_PRESETS.find(p => p.value === DEFAULT_VIDEO_PRESET)!;
+    const preset = resolveVideoPreset(videoPreset);
     await generateScript(projectId, scriptText, creationType, preset.aspectRatio, undefined);
   };
 
@@ -270,7 +285,15 @@ export function LeftSidebar() {
         <label style={labelStyle}>生图模型</label>
         <select
           value={imageModel}
-          onChange={(e) => setImageModel(e.target.value)}
+          onChange={(e) => {
+            const m = e.target.value;
+            setImageModel(m);
+            // 切换模型：按新模型参数能力重置悬空值（尺寸/质量默认值，数量取 n 默认）
+            const p = imageModelOptions.find((o) => o.value === m)?.params as ImageModelParams | undefined;
+            if (p?.sizes?.length) setImageSize(p.sizeDefault && p.sizes.includes(p.sizeDefault) ? p.sizeDefault : p.sizes[0]);
+            if (p?.qualities?.length) setImageQuality(p.qualityDefault && p.qualities.includes(p.qualityDefault) ? p.qualityDefault : p.qualities[0]);
+            if (p?.n) setImageN(p.n.default ?? p.n.min ?? 1);
+          }}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
           {imageModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -283,7 +306,7 @@ export function LeftSidebar() {
           onChange={(e) => setImageSize(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
-          {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+          {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
       <div style={{ flexShrink: 0 }}>
@@ -293,9 +316,24 @@ export function LeftSidebar() {
           onChange={(e) => setImageQuality(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
-          {IMAGE_QUALITIES.map(q => <option key={q} value={q}>{q}</option>)}
+          {qualityOptions.map(q => <option key={q} value={q}>{q}</option>)}
         </select>
       </div>
+      {/* 数量控件：仅当前模型 params 配置了 n 能力时渲染（min..max 范围，默认 n.default） */}
+      {nRange && (
+        <div style={{ flexShrink: 0 }}>
+          <label style={labelStyle}>生成数量</label>
+          <select
+            value={imageN}
+            onChange={(e) => setImageN(Number(e.target.value))}
+            style={{ ...sharedInputStyle, cursor: 'pointer' }}
+          >
+            {nOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* ═══════════ 生视频区域 ═══════════ */}
       <div style={sectionHeaderStyle}>🎬 生视频设置</div>

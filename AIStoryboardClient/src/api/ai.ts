@@ -32,6 +32,7 @@ export const aiApi = {
     model?: string;
     size?: string;
     quality?: string;
+    n?: number;
     aspectRatio?: string;
     referenceImages?: string[];
     mode?: string;

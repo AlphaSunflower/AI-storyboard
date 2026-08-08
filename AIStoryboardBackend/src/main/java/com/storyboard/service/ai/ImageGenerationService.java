@@ -56,6 +56,17 @@ public class ImageGenerationService {
     }
 
     /**
+     * 生成/编辑图片入口方法（旧签名，n 默认 1；Dify 工作流等调用方使用）。
+     */
+    public String generateImage(String sceneId, String prompt, String model,
+                                 String size, String quality, String aspectRatio,
+                                 List<String> referenceImages,
+                                 String mode, String generatedImageUrl) {
+        return generateImage(sceneId, prompt, model, size, quality, aspectRatio,
+                referenceImages, mode, generatedImageUrl, null);
+    }
+
+    /**
      * 生成/编辑图片入口方法。
      *
      * @param sceneId         分镜 ID
@@ -66,11 +77,12 @@ public class ImageGenerationService {
      * @param referenceImages 参考图列表（base64 data URL 数组）
      * @param mode            "edit" 或 null（null 视为 "generate"）
      * @param generatedImageUrl 当前已生成图片的 URL 路径（完善图片时提供，作为 edits 源图）
+     * @param n               生成数量（null 或 <=0 时默认 1）
      */
     public String generateImage(String sceneId, String prompt, String model,
                                  String size, String quality, String aspectRatio,
                                  List<String> referenceImages,
-                                 String mode, String generatedImageUrl) {
+                                 String mode, String generatedImageUrl, Integer n) {
         // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
@@ -98,7 +110,7 @@ public class ImageGenerationService {
 
             // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式）
             } else {
-                result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio);
+                result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio, n);
                 if (result.startsWith("http://") || result.startsWith("https://")) {
                     localPath = fileStorageService.saveImage(result);
                 } else {
@@ -143,11 +155,12 @@ public class ImageGenerationService {
     }
 
     private String callOpenAIImage(String model, String prompt, String size, String quality,
-                                    String aspectRatio) throws Exception {
+                                    String aspectRatio, Integer n) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("model", model);
         body.put("prompt", prompt);
-        body.put("n", 1);
+        // 生成数量：请求显式传入且 >0 时透传，否则默认 1
+        body.put("n", (n != null && n > 0) ? n : 1);
         // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
         // 避免上游返回 400 "不合法的size"
         body.put("size", normalizeImageSize(size, config.getDefaultImageSize()));

@@ -83,7 +83,8 @@ public class AIController {
             request.sceneId(), request.prompt(), request.model(),
             request.size(), request.quality(), request.aspectRatio(),
             request.referenceImages(),
-            request.mode(), request.generatedImageUrl()
+            request.mode(), request.generatedImageUrl(),
+            request.n()
         );
         return ApiResponse.ok(Map.of("imageUrl", imageUrl, "sceneId", request.sceneId()));
     }

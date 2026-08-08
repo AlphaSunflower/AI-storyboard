@@ -11,7 +11,9 @@ public record GenerateImageRequest(
     String aspectRatio,
     List<String> referenceImages,
     String mode,
-    String generatedImageUrl
+    String generatedImageUrl,
+    /** 生成数量（可选；null 或 <=0 时服务端默认 1） */
+    Integer n
 ) {
     /** 是否为图改图模式（使用 /v1/images/edits multipart 接口） */
     public boolean isEditMode() {
