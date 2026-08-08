@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 管理后台用户管理：scrypt 哈希（与 AdminInitRunner 一致 N=16384），列表/响应永不返回 passwordHash。
@@ -82,6 +83,10 @@ public class AdminUserController {
             user.setPasswordHash(SCryptUtil.scrypt(request.password(), 16384, 8, 1));
         }
         if (request.status() != null) {
+            // 校验 status 枚举：脏值会破坏登录判定（"enabled".equals 永假）与最后管理员保护计数
+            if (!Set.of("enabled", "disabled").contains(request.status())) {
+                throw new BusinessException(40001, "status 仅支持 enabled/disabled");
+            }
             user.setStatus(request.status());
         }
         user.setUpdatedAt(OffsetDateTime.now());

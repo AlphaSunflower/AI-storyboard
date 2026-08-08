@@ -86,7 +86,7 @@ public class AdminTestController {
         }
     }
 
-    /** POST /admin/routes/{id}/test：走真实网关链路（渠道选择/格式转换/转发/落 CallLog），200 且含 choices 判成功 */
+    /** POST /admin/routes/{id}/test：走真实网关链路（渠道选择/格式转换/转发/落 CallLog），2xx 判成功（gemini 转换后无 choices 键，不能用 choices 判定） */
     @PostMapping("/routes/{id}/test")
     public ApiResponse<Map<String, Object>> testRoute(@PathVariable String id) {
         ModelRoute route = routeMapper.selectById(id);
@@ -97,7 +97,8 @@ public class AdminTestController {
         try {
             GatewayRoutingService.RouteResult result = gatewayRoutingService.route("/chat/completions", body);
             long durationMs = System.currentTimeMillis() - start;
-            boolean ok = result.status() == 200 && result.body() != null && result.body().contains("choices");
+            // gemini 渠道经 GeminiFormatConverter.toOpenAiResponse 转换后无 choices 键，改用 2xx 状态码判定成功（与 testChannel 一致）
+            boolean ok = result.status() >= 200 && result.status() < 300;
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("ok", ok);
             map.put("status", result.status());
