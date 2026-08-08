@@ -91,8 +91,8 @@ public class GatewayRoutingService {
                     if (status >= 400) {
                         error = upstreamClient.extractError(bodyStr);
                         log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);
-                        // 429/5xx 尝试下一个渠道；4xx 业务错误直接透传
-                        if (status < 500) {
+                        // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传
+                        if (status != 429 && status < 500) {
                             callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, error, null);
                             return new RouteResult(status, bodyStr);
                         }

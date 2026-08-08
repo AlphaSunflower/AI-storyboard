@@ -22,11 +22,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Map<String, Object>> handleBusiness(BusinessException e) {
-        // 40001→400 / 40301→403 / 40401→404 / 其余→500
+        // 40001→400 / 40301→403 / 40401→404 / 50301→503（渠道不可用）/ 其余→500
         int status = switch (e.getCode()) {
             case 40001 -> 400;
             case 40301 -> 403;
             case 40401 -> 404;
+            case 50301 -> 503;
             default -> 500;
         };
         String msg = e.getMessage() == null ? "business error" : e.getMessage();
