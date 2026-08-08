@@ -93,12 +93,12 @@ public class GatewayRoutingService {
                         log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);
                         // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传
                         if (status != 429 && status < 500) {
-                            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, error, null);
+                            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, error, null, null);
                             return new RouteResult(status, bodyStr);
                         }
                         continue;
                     }
-                    callLogService.log(model, channelId, "success", System.currentTimeMillis() - start, null, null);
+                    callLogService.log(model, channelId, "success", System.currentTimeMillis() - start, null, null, null);
                     return new RouteResult(status, bodyStr);
                 } catch (BusinessException be) {
                     throw be;
@@ -109,10 +109,10 @@ public class GatewayRoutingService {
             }
             throw new BusinessException(50301, "all channels failed for model: " + model);
         } catch (BusinessException be) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, be.getMessage(), null);
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, be.getMessage(), null, null);
             throw be;
         } catch (Exception e) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, e.getMessage(), null);
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, e.getMessage(), null, null);
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
         }
     }

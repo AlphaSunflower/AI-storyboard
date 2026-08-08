@@ -19,5 +19,7 @@ public class CallLog {
     private String error;
     /** 视频 succeeded 时暂存 content.url（限时） */
     private String videoUrl;
+    /** 视频任务 ID：下载端点按 taskId+channelId 精确定位限时直链（同渠道并发任务不串号） */
+    private String taskId;
     private OffsetDateTime createdAt;
 }

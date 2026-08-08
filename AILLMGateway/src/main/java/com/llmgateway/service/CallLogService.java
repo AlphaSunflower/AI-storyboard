@@ -22,7 +22,7 @@ public class CallLogService {
     }
 
     @Async
-    public void log(String model, String channelId, String status, long durationMs, String error, String videoUrl) {
+    public void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId) {
         try {
             CallLog record = new CallLog();
             record.setModel(model);
@@ -31,6 +31,7 @@ public class CallLogService {
             record.setDurationMs(durationMs);
             record.setError(error);
             record.setVideoUrl(videoUrl);
+            record.setTaskId(taskId);
             record.setCreatedAt(OffsetDateTime.now());
             callLogMapper.insert(record);
         } catch (Exception e) {

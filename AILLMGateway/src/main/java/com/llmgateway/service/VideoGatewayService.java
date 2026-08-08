@@ -105,14 +105,14 @@ public class VideoGatewayService {
                 JsonNode respJson = objectMapper.readTree(bodyStr);
                 String taskId = respJson.path("task_id").asText(
                         respJson.path("id").asText(respJson.path("taskId").asText("")));
-                callLogService.log(model, channel.getId(), "created", System.currentTimeMillis() - start, null, null);
+                callLogService.log(model, channel.getId(), "created", System.currentTimeMillis() - start, null, null, taskId);
                 if (taskId.isBlank()) {
                     log.warn("视频创建响应无 task_id: {}", bodyStr.length() > 200 ? bodyStr.substring(0, 200) : bodyStr);
                 }
                 return new VideoResult(200, bodyStr);
             }
             String error = bodyStr.length() > 300 ? bodyStr.substring(0, 300) : bodyStr;
-            callLogService.log(model, channel.getId(), "error", System.currentTimeMillis() - start, error, null);
+            callLogService.log(model, channel.getId(), "error", System.currentTimeMillis() - start, error, null, null);
             return new VideoResult(status, bodyStr);
         } catch (BusinessException be) {
             throw be;
@@ -159,14 +159,27 @@ public class VideoGatewayService {
             payload.put("ratio", effRatio);
         }
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
-                .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // 轻量重试（设计 §7）：429 限流/5xx 服务端错误最多重试 2 次（共 3 次请求），退避 500ms*attempt；
+        // 其余状态码（400 参数错/401 密钥错等）直接返回，避免重复创建任务/白扣费
+        HttpResponse<String> resp = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
+                    .build();
+            resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            int code = resp.statusCode();
+            if ((code != 429 && code < 500) || attempt == 3) {
+                break;
+            }
+            log.warn("MiniMax 创建返回 {}（限流/服务端错误），第 {}/3 次重试, body={}",
+                    code, attempt, resp.body().length() > 150 ? resp.body().substring(0, 150) : resp.body());
+            Thread.sleep(500L * attempt);
+        }
+        return resp;
     }
 
     /** Laozhang 创建：POST {base}/videos，multipart 表单（与业务现状一致） */
@@ -298,15 +311,15 @@ public class VideoGatewayService {
                             String contentUrl = task.path("content").path("url").asText("");
                             if ("succeeded".equals(status) && !contentUrl.isBlank()) {
                                 callLogService.log(task.path("model").asText("video"), channel.getId(), "succeeded",
-                                        System.currentTimeMillis() - start, null, contentUrl);
+                                        System.currentTimeMillis() - start, null, contentUrl, taskId);
                             } else if ("failed".equals(status)) {
                                 String err = task.path("error").path("message").asText("video generation failed");
                                 callLogService.log(task.path("model").asText("video"), channel.getId(), "failed",
-                                        System.currentTimeMillis() - start, err, null);
+                                        System.currentTimeMillis() - start, err, null, taskId);
                             }
                         } else {
                             callLogService.log("video", channel.getId(), "polled",
-                                    System.currentTimeMillis() - start, null, null);
+                                    System.currentTimeMillis() - start, null, null, taskId);
                         }
                         // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
                         return new VideoResult(200, normalizePoll(task));
@@ -336,10 +349,12 @@ public class VideoGatewayService {
                 try {
                     String apiKey = keyService.decrypt(channel.getApiKey());
                     if ("minimax".equals(channel.getType())) {
-                        // 从 call_log 取该渠道最近一条限时直链（按 channelId 过滤，防止跨协议错配命中他渠道记录）
+                        // 从 call_log 取该渠道该 taskId 最近一条限时直链
+                        // （taskId+channelId 双条件过滤，同渠道并发任务不串号）
                         com.llmgateway.entity.CallLog latest = callLogMapper.selectOne(
                                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.llmgateway.entity.CallLog>()
                                         .eq(com.llmgateway.entity.CallLog::getChannelId, channel.getId())
+                                        .eq(com.llmgateway.entity.CallLog::getTaskId, taskId)
                                         .isNotNull(com.llmgateway.entity.CallLog::getVideoUrl)
                                         .orderByDesc(com.llmgateway.entity.CallLog::getCreatedAt)
                                         .last("LIMIT 1"));
