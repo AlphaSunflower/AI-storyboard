@@ -71,9 +71,10 @@ public class PromptOptimizeService {
             body.put("messages", messages);
 
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrlVision()))
+                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
+                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Authorization", "Bearer " + config.getGatewayApiKey())
                 // 优化任务用户主动等待，60s 内一次性返回（不做流式）
                 .timeout(Duration.ofSeconds(60))
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))

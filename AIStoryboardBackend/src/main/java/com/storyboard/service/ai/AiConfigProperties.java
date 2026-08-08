@@ -54,6 +54,13 @@ public class AiConfigProperties {
     private String difyBaseUrl;
 
     // ═══════════════════════════════════════════════════════════
+    //  LLM 网关配置（独立前缀 ai.gateway：chat/文生图统一入口）
+    //  ═══════════════════════════════════════════════════════════
+
+    /** LLM 网关配置（独立前缀 {@code ai.gateway}，见 {@link Gateway}） */
+    private Gateway gateway = new Gateway();
+
+    // ═══════════════════════════════════════════════════════════
     //  API 端点路径（相对于 baseUrlOpenai）
     // ═══════════════════════════════════════════════════════════
 
@@ -242,6 +249,36 @@ public class AiConfigProperties {
 
     public long getPollTimeoutMs() { return pollTimeoutMs; }
     public void setPollTimeoutMs(long l) { this.pollTimeoutMs = l; }
+
+    // ── LLM 网关 ──
+    public Gateway getGateway() { return gateway; }
+    public void setGateway(Gateway g) { this.gateway = g; }
+
+    /** 网关基础地址（chat/文生图统一入口；对应 ai.gateway.base-url） */
+    public String getGatewayBaseUrl() { return gateway == null ? null : gateway.getBaseUrl(); }
+
+    /** 网关调用密钥（网关 /admin 签发；对应 ai.gateway.api-key） */
+    public String getGatewayApiKey() { return gateway == null ? null : gateway.getApiKey(); }
+
+    /**
+     * LLM 网关配置 —— 独立前缀 {@code ai.gateway}，与 {@code ai.laozhang} 平级。
+     * chat/文生图调用统一经网关转发（edits 图改图保持直连 Laozhang）。
+     */
+    @ConfigurationProperties(prefix = "ai.gateway")
+    public static class Gateway {
+
+        /** 网关基础地址（chat/文生图统一入口，默认本机网关 8083） */
+        private String baseUrl = "http://localhost:8083";
+
+        /** 网关调用密钥（在网关 /admin 签发） */
+        private String apiKey;
+
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String s) { this.baseUrl = s; }
+
+        public String getApiKey() { return apiKey; }
+        public void setApiKey(String s) { this.apiKey = s; }
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  派生辅助方法（惰性解析，避免每次都重新解析）

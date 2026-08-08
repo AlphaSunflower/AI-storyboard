@@ -24,9 +24,8 @@ import java.util.*;
  * 图片生成服务 —— 负责调用 Laozhang API 进行生图/改图。
  *
  * 路由逻辑：
- * 1. 有参考图（referenceImages 非空）或 mode="edit" → /v1/images/edits multipart
- * 2. Gemini 模型 → Gemini 原生接口
- * 3. 其他 → /v1/images/generations JSON（纯文生图，不支持 reference_images）
+ * 1. 有参考图（referenceImages 非空）或 mode="edit" → /v1/images/edits multipart（保持直连 Laozhang）
+ * 2. 其他 → /v1/images/generations JSON（纯文生图，统一走 LLM 网关；Gemini 模型由网关转原生格式）
  */
 @Service
 public class ImageGenerationService {
@@ -92,17 +91,12 @@ public class ImageGenerationService {
             String localPath;
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
 
-            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口
+            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（保持直连）
             if (hasReferenceImages || "edit".equals(mode)) {
                 result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
                 localPath = fileStorageService.saveImageFromBase64(result);
 
-            // Gemini 原生接口
-            } else if (config.getGeminiImageModelSet().contains(effectiveModel)) {
-                result = callGeminiImage(prompt, aspectRatio, referenceImages);
-                localPath = fileStorageService.saveImageFromBase64(result);
-
-            // 纯文生图：/v1/images/generations JSON 接口
+            // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式）
             } else {
                 result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio);
                 if (result.startsWith("http://") || result.startsWith("https://")) {
@@ -161,16 +155,13 @@ public class ImageGenerationService {
             body.put("quality", quality);
         }
 
-        String apiKey = config.getSora2ModelSet().contains(model)
-                ? config.getSora2OfficialApiKey()
-                : config.getApiKey();
-
         String requestBody = objectMapper.writeValueAsString(body);
         // 超时 180s + 超时重试 1 次（Laozhang 偶发响应 >120s，实测多次出现；重试大概率成功）
         HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
-            .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointImageGenerations()))
+            // 文生图统一走 LLM 网关（/v1/images/generations）；模型→渠道路由与密钥选择下沉网关
+            .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/generations"))
             .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer " + apiKey)
+            .header("Authorization", "Bearer " + config.getGatewayApiKey())
             .timeout(Duration.ofSeconds(180))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build());
@@ -334,31 +325,4 @@ public class ImageGenerationService {
         };
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Gemini 原生接口（保留不变）
-    // ═══════════════════════════════════════════════════════════
-
-    private String callGeminiImage(String prompt, String aspectRatio,
-                                    List<String> referenceImages) throws Exception {
-        Map<String, Object> body = new HashMap<>();
-        Map<String, Object> part = new HashMap<>();
-        part.put("text", prompt);
-        body.put("contents", new Object[]{Map.of("parts", new Object[]{part})});
-        body.put("generationConfig", Map.of("aspectRatio", aspectRatio != null ? aspectRatio : "16:9"));
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(config.getBaseUrlGemini()))
-            .header("Content-Type", "application/json")
-            .header("x-goog-api-key", config.getApiKey())
-            .timeout(Duration.ofSeconds(120))
-            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-            .build();
-
-        HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) {
-            throw new RuntimeException("Gemini API returned " + resp.statusCode() + ": " + resp.body());
-        }
-        JsonNode root = objectMapper.readTree(resp.body());
-        return root.path("candidates").get(0).path("content").path("parts").get(0).path("inlineData").path("data").asText();
-    }
 }

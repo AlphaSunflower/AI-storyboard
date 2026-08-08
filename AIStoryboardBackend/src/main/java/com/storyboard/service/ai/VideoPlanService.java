@@ -118,9 +118,10 @@ public class VideoPlanService {
             body.put("messages", messages);
 
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrlVision()))
+                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
+                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Authorization", "Bearer " + config.getGatewayApiKey())
                 .timeout(Duration.ofSeconds(120))
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();

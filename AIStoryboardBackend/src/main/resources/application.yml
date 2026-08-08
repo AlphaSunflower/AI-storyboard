@@ -95,3 +95,8 @@ ai:
     # ── Polling ──
     poll-interval-ms: 5000
     poll-timeout-ms: 600000
+
+  # ── LLM 网关（chat/文生图统一入口；edits 图改图保持直连）──
+  gateway:
+    base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
+    api-key: ${LLM_GATEWAY_API_KEY:}
