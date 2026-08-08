@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 网关管理后台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== 登录视图（默认隐藏，JS 按登录态切换） ===== -->
+  <div id="login-view" class="login-view">
+    <div class="login-card">
+      <div class="login-brand"><span class="brand-dot"></span><span>LLM 网关</span></div>
+      <h1>管理后台</h1>
+      <form id="login-form" autocomplete="on">
+        <div class="field">
+          <label class="field-label" for="login-username">用户名</label>
+          <input class="input" id="login-username" autocomplete="username" placeholder="请输入用户名">
+        </div>
+        <div class="field">
+          <label class="field-label" for="login-password">密码</label>
+          <input class="input" id="login-password" type="password" autocomplete="current-password" placeholder="请输入密码">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">登 录</button>
+      </form>
+      <p class="login-tip">内部管理工具 · 请妥善保管凭证</p>
+    </div>
+  </div>
+
+  <!-- ===== 主布局：侧边栏 + 内容区（6 个视图容器） ===== -->
+  <div id="main-view" class="main-view">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span class="brand-dot"></span><span>LLM 网关</span></div>
+      <nav class="nav">
+        <a class="nav-item" data-section="dashboard" href="#/dashboard">仪表盘</a>
+        <a class="nav-item" data-section="channels" href="#/channels">渠道管理</a>
+        <a class="nav-item" data-section="routes" href="#/routes">模型路由</a>
+        <a class="nav-item" data-section="api-keys" href="#/api-keys">API Key</a>
+        <a class="nav-item" data-section="logs" href="#/logs">调用日志</a>
+        <a class="nav-item" data-section="users" href="#/users">用户管理</a>
+      </nav>
+      <div class="sidebar-user">
+        <span class="user-name" id="sidebar-username">-</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="logout-btn">退出</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section id="view-dashboard" class="view"></section>
+      <section id="view-channels" class="view"></section>
+      <section id="view-routes" class="view"></section>
+      <section id="view-api-keys" class="view"></section>
+      <section id="view-logs" class="view"></section>
+      <section id="view-users" class="view"></section>
+    </main>
+  </div>
+
+  <!-- ===== 通用弹窗（表单 / 确认 / 测试结果共用） ===== -->
+  <div id="modal" class="modal-mask" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title"></h2>
+        <button type="button" class="modal-close" id="modal-close" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- ===== 一次性 plainKey 全屏弹层（关闭即从内存清除） ===== -->
+  <div id="plainkey-overlay" class="plainkey-overlay" role="dialog" aria-modal="true">
+    <div class="plainkey-panel">
+      <div class="plainkey-head">Key 签发成功</div>
+      <p class="plainkey-name" id="plainkey-name"></p>
+      <div class="plainkey-box"><code id="plainkey-value"></code></div>
+      <button type="button" class="btn btn-primary btn-block" id="plainkey-copy">复制 Key</button>
+      <p class="plainkey-warn">⚠ 该 Key 仅显示这一次，关闭后无法再次查看，请立即复制并妥善保存。</p>
+      <button type="button" class="btn btn-ghost btn-block" id="plainkey-close">我知道了，关闭</button>
+    </div>
+  </div>
+
+  <!-- ===== toast 容器 ===== -->
+  <div id="toast-box" class="toast-box"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
