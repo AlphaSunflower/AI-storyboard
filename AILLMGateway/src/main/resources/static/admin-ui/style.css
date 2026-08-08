@@ -395,6 +395,7 @@ body.main-mode #login-view { display: none; }
 /* 确认弹窗 */
 .confirm-text { font-size: 14px; line-height: 1.7; color: var(--ink); }
 .confirm-text .danger-word { color: var(--danger); font-weight: 600; }
+.test-hint { font-size: 12px; line-height: 1.6; color: var(--ink-muted, #6b675f); margin-top: 8px; }
 
 /* 测试结果弹窗 */
 .test-result { text-align: center; padding: 14px 8px 6px; }

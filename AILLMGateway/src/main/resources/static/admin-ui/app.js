@@ -487,20 +487,34 @@ async function submitChannel(id) {
   }
 }
 
-/** 渠道测试：调 test 端点，结果弹窗 */
-async function testChannel(id, btn) {
-  const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '测试中…';
-  try {
-    const data = await api('/admin/channels/' + id + '/test', { method: 'POST' });
-    showTestResult(data);
-  } catch (e) {
-    handleErr(e);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = orig;
-  }
+/** 渠道测试：弹窗可选填测试模型名（留空自动用该渠道已配路由的模型），确认后调 test 端点 */
+function testChannel(id, btn) {
+  openModal(
+    '测试渠道连通性',
+    field('测试模型（可选）', '<input class="input" id="test-model" placeholder="留空自动选用该渠道已配路由的模型">')
+      + '<p class="test-hint">将以最小请求（max_tokens=1）直连上游验证连通性，不落业务日志</p>',
+    footerHtml('开始测试'),
+    null
+  );
+  $('#form-submit').onclick = async () => {
+    const model = $('#test-model').value.trim();
+    closeModal();
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    try {
+      const data = await api('/admin/channels/' + id + '/test', {
+        method: 'POST',
+        body: JSON.stringify(model ? { modelName: model } : {}),
+      });
+      showTestResult(data);
+    } catch (e) {
+      handleErr(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  };
 }
 
 /** 测试结果弹窗：成功绿勾+耗时；失败红叉+error 文案 */
