@@ -696,11 +696,36 @@ function openRouteModal(route) {
     ['text', '文本模型'], ['image', '生图模型'], ['video', '视频模型（生成视频）'], ['vision', '图片/视频理解模型'],
   ].map(([v, label]) => '<option value="' + v + '"' + ((route ? route.type : 'text') === v ? ' selected' : '') + '>' + label + '</option>').join('');
 
+  // 参数配置区（按类型分组表单）：text/image/video 各一组字段（能力枚举 + 默认值），type 切换联动重建
+  const paramsGroups = {
+    text: '<label>temperature <input class="input" id="p-temperature" placeholder="0.7"></label>'
+        + '<label>max_tokens <input class="input" id="p-maxtokens" type="number" placeholder="1024"></label>'
+        + '<label>top_p <input class="input" id="p-topp" placeholder="0.9"></label>',
+    image: '<label>数量min <input class="input" id="p-nmin" type="number" min="1"></label>'
+         + '<label>数量max <input class="input" id="p-nmax" type="number" min="1"></label>'
+         + '<label>数量默认 <input class="input" id="p-ndefault" type="number" min="1"></label>'
+         + '<label>尺寸(逗号) <input class="input" id="p-sizes" placeholder="1024x1024,1536x1024"></label>'
+         + '<label>尺寸默认 <input class="input" id="p-sizedefault" placeholder="1024x1024"></label>'
+         + '<label>质量(逗号) <input class="input" id="p-qualities" placeholder="standard,hd"></label>'
+         + '<label>质量默认 <input class="input" id="p-qualitydefault" placeholder="hd"></label>'
+         + '<label>风格(逗号) <input class="input" id="p-styles" placeholder="vivid,natural"></label>'
+         + '<label>风格默认 <input class="input" id="p-styledefault" placeholder="vivid"></label>',
+    video: '<label>时长(秒,逗号) <input class="input" id="p-durations" placeholder="4,6,8"></label>'
+         + '<label>时长默认 <input class="input" id="p-durationdefault" placeholder="6"></label>'
+         + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
+         + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
+         + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
+         + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>',
+  };
+  // 当前类型：编辑取路由 type（默认 text），决定初始渲染哪组参数表单
+  const curType = route ? (route.type || 'text') : 'text';
+
   const body =
     field('渠道', '<select class="input" id="r-channel">' + options + '</select>')
     + field('模型类型', '<select class="input" id="r-type">' + typeOpts + '</select>')
     + field('模型', '<input class="input" id="r-model" list="r-model-list" placeholder="加载模型中…">'
       + '<datalist id="r-model-list"></datalist>')
+    + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
       + esc(route ? route.defaultParams || '' : '') + '</textarea>');
 
@@ -712,7 +737,48 @@ function openRouteModal(route) {
     $('#r-model').value = '';
     loadModelsFor($('#r-channel').value, 'r-model');
   };
+  // 模型类型切换 → 重建参数配置组（按新类型显示对应字段组；切换后已填值不保留，先选类型再填）
+  $('#r-type').onchange = () => {
+    const t = $('#r-type').value;
+    $('#params-group').innerHTML = paramsGroups[t] || paramsGroups.text;
+  };
+  // 编辑回显：模型名存在 → 拉取已保存参数填当前类型组（type 与路由一致才填）
+  if (isEdit && route.modelName) {
+    loadModelParamsForEdit(route.modelName, curType);
+  }
   $('#form-submit').onclick = () => submitRoute(isEdit ? route.id : null);
+}
+
+/**
+ * 编辑回显：GET /admin/model-params/{modelName}，type 与路由一致时填当前类型组输入框
+ * 未配置 / 类型不一致 → 不填（提示先选类型）；回显失败不阻塞编辑
+ */
+async function loadModelParamsForEdit(modelName, type) {
+  try {
+    const mp = await api('/admin/model-params/' + encodeURIComponent(modelName));
+    if (!mp || (mp.type && mp.type !== type)) return;
+    const set = (id, v) => { const el = $('#' + id); if (el && v !== null && v !== undefined && v !== '') el.value = v; };
+    set('p-temperature', mp.temperature);
+    set('p-maxtokens', mp.maxTokens);
+    set('p-topp', mp.topP);
+    set('p-nmin', mp.nMin);
+    set('p-nmax', mp.nMax);
+    set('p-ndefault', mp.nDefault);
+    set('p-sizes', mp.sizes);
+    set('p-sizedefault', mp.sizeDefault);
+    set('p-qualities', mp.qualities);
+    set('p-qualitydefault', mp.qualityDefault);
+    set('p-styles', mp.styles);
+    set('p-styledefault', mp.styleDefault);
+    set('p-durations', mp.durations);
+    set('p-durationdefault', mp.durationDefault);
+    set('p-resolutions', mp.resolutions);
+    set('p-resolutiondefault', mp.resolutionDefault);
+    set('p-aspects', mp.aspectRatios);
+    set('p-aspectdefault', mp.aspectRatioDefault);
+  } catch (e) {
+    console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
+  }
 }
 
 async function submitRoute(id) {
@@ -743,6 +809,12 @@ async function submitRoute(id) {
       method: id ? 'PUT' : 'POST',
       body: JSON.stringify(body),
     });
+    // 保存路由成功后并行保存模型参数（upsert）：按当前类型组输入框取值；失败静默跳过不阻塞路由保存
+    try {
+      await saveModelParams(modelName, $('#r-type').value);
+    } catch (pe) {
+      console.warn('模型参数保存失败（已跳过，路由已保存）：', pe && pe.message ? pe.message : pe);
+    }
     closeModal();
     toast(id ? '路由已更新' : '路由已创建', 'success');
     loadRoutes();
@@ -750,6 +822,40 @@ async function submitRoute(id) {
     btn.disabled = false;
     handleErr(e);
   }
+}
+
+/**
+ * 组装 ModelParamsRequest 并 PUT /admin/model-params（upsert）：
+ * 从当前类型组输入框取值（空输入 → null），type 非法/模型名为空时静默跳过
+ */
+async function saveModelParams(modelName, type) {
+  if (!modelName || !paramsGroups[type]) return;
+  const val = (id) => { const el = $('#' + id); const s = el ? el.value.trim() : ''; return s === '' ? null : s; };
+  const num = (id) => { const s = val(id); return s === null ? null : Number(s); };
+  const req = { modelName, type };
+  if (type === 'text') {
+    req.temperature = val('p-temperature');
+    req.maxTokens = num('p-maxtokens');
+    req.topP = val('p-topp');
+  } else if (type === 'image') {
+    req.nMin = num('p-nmin');
+    req.nMax = num('p-nmax');
+    req.nDefault = num('p-ndefault');
+    req.sizes = val('p-sizes');
+    req.sizeDefault = val('p-sizedefault');
+    req.qualities = val('p-qualities');
+    req.qualityDefault = val('p-qualitydefault');
+    req.styles = val('p-styles');
+    req.styleDefault = val('p-styledefault');
+  } else if (type === 'video') {
+    req.durations = val('p-durations');
+    req.durationDefault = val('p-durationdefault');
+    req.resolutions = val('p-resolutions');
+    req.resolutionDefault = val('p-resolutiondefault');
+    req.aspectRatios = val('p-aspects');
+    req.aspectRatioDefault = val('p-aspectdefault');
+  }
+  await api('/admin/model-params', { method: 'PUT', body: JSON.stringify(req) });
 }
 
 /** 路由页按钮委托（新建/编辑/删除/测试） */
