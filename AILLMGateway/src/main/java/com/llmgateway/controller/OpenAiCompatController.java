@@ -1,6 +1,7 @@
 package com.llmgateway.controller;
 
 import com.llmgateway.service.GatewayRoutingService;
+import com.llmgateway.service.ImageEditService;
 import com.llmgateway.service.VideoGatewayService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,10 +14,14 @@ public class OpenAiCompatController {
 
     private final GatewayRoutingService routingService;
     private final VideoGatewayService videoGatewayService;
+    private final ImageEditService imageEditService;
 
-    public OpenAiCompatController(GatewayRoutingService routingService, VideoGatewayService videoGatewayService) {
+    public OpenAiCompatController(GatewayRoutingService routingService,
+                                  VideoGatewayService videoGatewayService,
+                                  ImageEditService imageEditService) {
         this.routingService = routingService;
         this.videoGatewayService = videoGatewayService;
+        this.imageEditService = imageEditService;
     }
 
     @PostMapping(value = "/chat/completions", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -29,6 +34,13 @@ public class OpenAiCompatController {
     public ResponseEntity<String> imageGenerations(@RequestBody String body) {
         GatewayRoutingService.RouteResult result = routingService.route("/images/generations", body);
         return ResponseEntity.status(result.status()).body(result.body());
+    }
+
+    @PostMapping(value = "/images/edits", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> imageEdits(@RequestBody byte[] body,
+                                             @RequestHeader("Content-Type") String contentType) {
+        // 图改图：原始 multipart 字节流 + Content-Type（含 boundary）原样透传
+        return ResponseEntity.ok(imageEditService.edit(body, contentType));
     }
 
     @GetMapping(value = "/models", produces = MediaType.APPLICATION_JSON_VALUE)

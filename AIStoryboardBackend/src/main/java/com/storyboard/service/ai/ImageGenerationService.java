@@ -222,12 +222,11 @@ public class ImageGenerationService {
             .file("image", imageFilename, guessImageContentType(imageFilename), imageBytes);
 
         // 3. 发送请求（multipart body 一次性构建；超时 180s + 重试 1 次）
-        String apiKey = config.getApiKey();
         byte[] bodyBytes = mp.build();
         HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
-            .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointImageEdits()))
+            .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/edits"))   // 改：走网关
             .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
-            .header("Authorization", "Bearer " + apiKey)
+            .header("Authorization", "Bearer " + config.getGatewayApiKey())      // 改：网关业务 Key
             .timeout(Duration.ofSeconds(180))
             .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
             .build());
