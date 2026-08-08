@@ -512,17 +512,29 @@ function updateModelList(inputId, candidates) {
   if (dl) dl.innerHTML = (candidates || []).map((m) => '<option value="' + esc(m) + '"></option>').join('');
 }
 
-/** 渠道测试：弹窗列出该渠道模型候选 → 选择（可手动输入）→ 调 test 端点 */
+/** 渠道测试：弹窗打开时异步拉取该渠道模型列表（上游 /models → 本地候选回退）→ 选择（可手动输入）→ 调 test 端点 */
 function testChannel(id, btn) {
-  const candidates = channelModelCandidates(id);
   openModal(
     '测试渠道连通性',
-    field('测试模型', modelField('test-model', candidates, '', candidates.length ? '选择或输入模型名' : '该渠道未配置模型，请手动输入'))
-      + (candidates.length ? '' : '<p class="test-hint">候选为空：可在渠道信息中填写「模型列表」，或先为该渠道配置模型路由</p>')
+    field('测试模型', '<input class="input" id="test-model" list="test-model-list" placeholder="加载模型中…">'
+      + '<datalist id="test-model-list"></datalist>')
       + '<p class="test-hint">将以最小请求（max_tokens=1）直连上游验证连通性，不落业务日志</p>',
     footerHtml('开始测试'),
     null
   );
+  // 异步拉取模型候选（上游优先，失败回退本地）
+  api('/admin/channels/' + id + '/models')
+    .then((d) => {
+      const models = d.models || [];
+      updateModelList('test-model', models);
+      const el = $('#test-model');
+      el.placeholder = models.length ? '选择或输入模型名' : '未获取到模型列表，请手动输入模型名';
+      if (models.length) el.value = models[0];   // 默认选中第一个
+    })
+    .catch(() => {
+      updateModelList('test-model', channelModelCandidates(id));
+      $('#test-model').placeholder = '选择或输入模型名';
+    });
   $('#form-submit').onclick = async () => {
     const model = $('#test-model').value.trim();
     if (!model) { toast('请选择或输入测试模型', 'error'); return; }
@@ -543,6 +555,24 @@ function testChannel(id, btn) {
       btn.textContent = orig;
     }
   };
+}
+
+/** 拉取渠道模型列表并填充 datalist（测试弹窗用） */
+function loadChannelModels(channelId) {
+  return api('/admin/channels/' + channelId + '/models')
+    .then((d) => {
+      const models = d.models || [];
+      updateModelList('test-model', models);
+      const el = $('#test-model');
+      el.placeholder = models.length ? '选择或输入模型名' : '未获取到模型列表，请手动输入模型名';
+      if (models.length && !el.value) el.value = models[0];
+      return models;
+    })
+    .catch(() => {
+      updateModelList('test-model', channelModelCandidates(channelId));
+      $('#test-model').placeholder = '选择或输入模型名';
+      return channelModelCandidates(channelId);
+    });
 }
 
 /** 测试结果弹窗：成功绿勾+耗时；失败红叉+error 文案 */
@@ -744,26 +774,31 @@ async function loadRoutesForEdit(id) {
   }
 }
 
-/** 路由测试：弹窗选择渠道（默认路由配置的渠道）→ 模型候选跟随渠道 → 选择后直连测试 */
+/** 路由测试：弹窗选择渠道（默认路由配置的渠道）→ 异步拉取该渠道模型列表 → 选择后直连测试 */
 function testRoute(id, btn) {
   const route = routesCache.find((r) => r.id === id) || {};
   const channels = Object.values(channelMap);
   const selCh = route.channelId || (channels[0] && channels[0].id) || '';
-  const candidates = channelModelCandidates(selCh);
   const channelOpts = channels.map((c) =>
     '<option value="' + esc(c.id) + '"' + (c.id === selCh ? ' selected' : '')
     + '>' + esc(c.name) + (c.enabled ? '' : '（停用）') + '</option>').join('');
   openModal(
     '测试模型路由',
     field('渠道', '<select class="input" id="test-channel">' + channelOpts + '</select>')
-      + field('测试模型', modelField('test-model', candidates, route.modelName || '', candidates.length ? '选择或输入模型名' : '该渠道未配置模型，请手动输入'))
-      + '<p class="test-hint">默认渠道与模型取自该路由配置；切换渠道后模型列表随之刷新。直连验证连通性，不落业务日志</p>',
+      + field('测试模型', '<input class="input" id="test-model" list="test-model-list" placeholder="加载模型中…">'
+        + '<datalist id="test-model-list"></datalist>')
+      + '<p class="test-hint">默认渠道取自该路由配置；切换渠道后模型列表随之刷新。直连验证连通性，不落业务日志</p>',
     footerHtml('开始测试'),
     null
   );
-  // 渠道切换 → 刷新模型候选
+  // 初始：默认渠道拉取模型列表，预填路由配置的模型名
+  loadChannelModels(selCh).then(() => {
+    if (route.modelName) $('#test-model').value = route.modelName;
+  });
+  // 渠道切换 → 重新拉取该渠道模型列表
   $('#test-channel').onchange = () => {
-    updateModelList('test-model', channelModelCandidates($('#test-channel').value));
+    $('#test-model').value = '';
+    loadChannelModels($('#test-channel').value);
   };
   $('#form-submit').onclick = async () => {
     const cid = $('#test-channel').value;

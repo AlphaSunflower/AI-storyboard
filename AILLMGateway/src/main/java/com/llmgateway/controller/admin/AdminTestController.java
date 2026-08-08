@@ -10,8 +10,11 @@ import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.UpstreamClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,9 +26,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 连通性测试端点：通道测试直连上游（不落 CallLog）；模型路由测试走完整真实链路（会真实落一条 CallLog，设计接受）。
@@ -48,6 +54,7 @@ public class AdminTestController {
     private final KeyService keyService;
     private final UpstreamClient upstreamClient;
     private final GatewayRoutingService gatewayRoutingService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AdminTestController(ChannelMapper channelMapper, ModelRouteMapper routeMapper,
                                KeyService keyService, UpstreamClient upstreamClient,
@@ -57,6 +64,54 @@ public class AdminTestController {
         this.keyService = keyService;
         this.upstreamClient = upstreamClient;
         this.gatewayRoutingService = gatewayRoutingService;
+    }
+
+    /** GET /admin/channels/{id}/models：获取该渠道可测试的模型列表（测试弹窗候选）。
+     *  优先从上游拉取（openai_compatible：GET {baseUrl}/models 解析 data[].id），失败/非 openai_compatible
+     *  回退本地候选（渠道 models 字段 + 该渠道已配路由模型，去重）；两者合并去重返回。 */
+    @GetMapping("/channels/{id}/models")
+    public ApiResponse<Map<String, Object>> channelModels(@PathVariable String id) {
+        Channel channel = channelMapper.selectById(id);
+        if (channel == null) throw new BusinessException(40401, "渠道不存在");
+        Set<String> merged = new LinkedHashSet<>();
+        // 本地候选：渠道 models 字段（中英文逗号分隔）+ 该渠道已配路由模型
+        if (channel.getModels() != null) {
+            for (String m : channel.getModels().split("[,，]")) {
+                String t = m.trim();
+                if (!t.isEmpty()) merged.add(t);
+            }
+        }
+        routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                        .eq(ModelRoute::getChannelId, id))
+                .forEach(r -> { if (r.getModelName() != null && !r.getModelName().isBlank()) merged.add(r.getModelName()); });
+        // 上游拉取（仅 openai_compatible 有标准 GET /models；gemini/minimax 接口格式不同，不尝试）
+        String source = "local";
+        if (!"gemini".equals(channel.getType()) && !"minimax".equals(channel.getType())) {
+            try {
+                String apiKey = keyService.decrypt(channel.getApiKey());
+                HttpResponse<String> resp = upstreamClient.get(
+                        stripTrailingSlash(channel.getBaseUrl()) + "/models", apiKey);
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    JsonNode data = objectMapper.readTree(resp.body()).path("data");
+                    if (data.isArray()) {
+                        List<String> upstream = new ArrayList<>();
+                        data.forEach(n -> { String mid = n.path("id").asText(""); if (!mid.isEmpty()) upstream.add(mid); });
+                        if (!upstream.isEmpty()) {
+                            source = "upstream";
+                            merged.addAll(upstream);   // 上游优先展示（插入序在前）
+                        }
+                    }
+                } else {
+                    log.warn("【模型列表】上游 GET /models 非 2xx: channel={} http={}", channel.getName(), resp.statusCode());
+                }
+            } catch (Exception e) {
+                log.warn("【模型列表】上游拉取失败: channel={} error={}", channel.getName(), e.getMessage());
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("models", new ArrayList<>(merged));
+        result.put("source", source);
+        return ApiResponse.ok(result);
     }
 
     /** POST /admin/channels/{id}/test：直连上游最小请求探活，HTTP 2xx 即成功，不落 CallLog。
