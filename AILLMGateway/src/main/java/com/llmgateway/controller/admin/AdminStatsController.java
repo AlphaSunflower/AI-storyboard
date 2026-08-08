@@ -87,8 +87,15 @@ public class AdminStatsController {
         }
         result.put("topModels", topModels);
 
-        // 近 7 天趋势：直接透传 Mapper 结果
-        result.put("trend7d", callLogMapper.trend7d());
+        // 近 7 天趋势：cnt → count 字段名对齐前端契约 {date, count}（与 topModels 同样做别名归一）
+        List<Map<String, Object>> trend7d = new ArrayList<>();
+        for (Map<String, Object> row : callLogMapper.trend7d()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("date", row.get("date"));
+            item.put("count", ((Number) row.getOrDefault("cnt", 0L)).longValue());
+            trend7d.add(item);
+        }
+        result.put("trend7d", trend7d);
         return ApiResponse.ok(result);
     }
 
