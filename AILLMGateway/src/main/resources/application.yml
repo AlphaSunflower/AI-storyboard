@@ -33,3 +33,6 @@ gateway:
     connect-timeout-ms: 30000
     request-timeout-ms: 120000
     retry-count: 2
+  video:
+    default-resolution: ${LLM_GATEWAY_VIDEO_RESOLUTION:768P}
+    default-duration: "8"
