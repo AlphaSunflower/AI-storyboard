@@ -53,6 +53,19 @@ public class UpstreamClient {
         return sendWithRetry(request);
     }
 
+    /** POST multipart 到 openai_compatible 渠道（图改图 edits：原样透传 multipart 字节流） */
+    public HttpResponse<String> postMultipart(String baseUrl, String path, String apiKey,
+                                              String contentType, byte[] bodyBytes) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(stripTrailingSlash(baseUrl) + path))
+                .header("Content-Type", contentType)          // 透传上游 Content-Type（含 boundary）
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
+                .build();
+        return sendWithRetry(request);
+    }
+
     /** GET 上游（轮询视频状态等） */
     public HttpResponse<String> get(String url, String apiKey) {
         HttpRequest request = HttpRequest.newBuilder()
