@@ -403,6 +403,19 @@ body.main-mode #login-view { display: none; }
   font-size: 13px;
   padding: 7px 10px;
 }
+/* 滑块控件：值实时显示 + 主色 */
+.params-grid .p-range {
+  width: 100%;
+  margin-top: 6px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.params-grid .p-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
 /* 单列窄屏：参数栅格退化为单列 */
 @media (max-width: 720px) {
   .params-grid { grid-template-columns: 1fr; }

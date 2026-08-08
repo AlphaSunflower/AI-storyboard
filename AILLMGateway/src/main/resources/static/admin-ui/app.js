@@ -696,26 +696,51 @@ function openRouteModal(route) {
     ['text', '文本模型'], ['image', '生图模型'], ['video', '视频模型（生成视频）'], ['vision', '图片/视频理解模型'],
   ].map(([v, label]) => '<option value="' + v + '"' + ((route ? route.type : 'text') === v ? ' selected' : '') + '>' + label + '</option>').join('');
 
-  // 参数配置区（按类型分组表单）：text/image/video 各一组字段（能力枚举 + 默认值），type 切换联动重建
+  // 滑块控件：range input + 实时值显示（数值参数避免手填）
+  const sliderField = (id, label, min, max, step, def) =>
+    '<label>' + label
+    + ' <input type="range" class="p-range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + def + '">'
+    + ' <span class="p-val" id="' + id + '-val">' + def + '</span></label>';
+
+  // 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/temperature/max_tokens/top_p/时长），字符串枚举保持输入框
   const paramsGroups = {
-    text: '<label>temperature <input class="input" id="p-temperature" placeholder="0.7"></label>'
-        + '<label>max_tokens <input class="input" id="p-maxtokens" type="number" placeholder="1024"></label>'
-        + '<label>top_p <input class="input" id="p-topp" placeholder="0.9"></label>',
-    image: '<label>数量min <input class="input" id="p-nmin" type="number" min="1"></label>'
-         + '<label>数量max <input class="input" id="p-nmax" type="number" min="1"></label>'
-         + '<label>数量默认 <input class="input" id="p-ndefault" type="number" min="1"></label>'
+    text: sliderField('p-temperature', 'temperature', '0', '2', '0.1', '0.7')
+        + sliderField('p-maxtokens', 'max_tokens', '100', '8192', '100', '1024')
+        + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9'),
+    image: sliderField('p-nmin', '数量min', '1', '10', '1', '1')
+         + sliderField('p-nmax', '数量max', '1', '10', '1', '4')
+         + sliderField('p-ndefault', '数量默认', '1', '10', '1', '1')
          + '<label>尺寸(逗号) <input class="input" id="p-sizes" placeholder="1024x1024,1536x1024"></label>'
          + '<label>尺寸默认 <input class="input" id="p-sizedefault" placeholder="1024x1024"></label>'
          + '<label>质量(逗号) <input class="input" id="p-qualities" placeholder="standard,hd"></label>'
          + '<label>质量默认 <input class="input" id="p-qualitydefault" placeholder="hd"></label>'
          + '<label>风格(逗号) <input class="input" id="p-styles" placeholder="vivid,natural"></label>'
          + '<label>风格默认 <input class="input" id="p-styledefault" placeholder="vivid"></label>',
-    video: '<label>时长(秒,逗号) <input class="input" id="p-durations" placeholder="4,6,8"></label>'
-         + '<label>时长默认 <input class="input" id="p-durationdefault" placeholder="6"></label>'
+    video: sliderField('p-dmin', '时长min(秒)', '4', '15', '1', '4')
+         + sliderField('p-dmax', '时长max(秒)', '4', '15', '1', '8')
+         + sliderField('p-durationdefault', '时长默认(秒)', '4', '15', '1', '6')
          + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
          + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
          + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
          + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>',
+  };
+
+  // 绑定滑块：input 事件实时刷新值显示；n 范围/时长范围 min<=max 联动（拖动 min 时 max 下限跟随，反之亦然）
+  const bindParamSliders = () => {
+    const bind = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', () => {
+        const v = document.getElementById(id + '-val');
+        if (v) v.textContent = el.value;
+        if (id === 'p-nmin') { const mx = document.getElementById('p-nmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-nmax') { const mn = document.getElementById('p-nmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-dmin') { const mx = document.getElementById('p-dmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-dmax') { const mn = document.getElementById('p-dmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+      });
+    };
+    ['p-temperature', 'p-maxtokens', 'p-topp', 'p-nmin', 'p-nmax', 'p-ndefault', 'p-dmin', 'p-dmax', 'p-durationdefault']
+      .forEach(bind);
   };
   // 当前类型：编辑取路由 type（默认 text），决定初始渲染哪组参数表单
   const curType = route ? (route.type || 'text') : 'text';
@@ -741,7 +766,10 @@ function openRouteModal(route) {
   $('#r-type').onchange = () => {
     const t = $('#r-type').value;
     $('#params-group').innerHTML = paramsGroups[t] || paramsGroups.text;
+    bindParamSliders();
   };
+  // 初始渲染后绑定滑块（input 实时值 + min<=max 联动）
+  bindParamSliders();
   // 编辑回显：模型名存在 → 拉取已保存参数填当前类型组（type 与路由一致才填）
   if (isEdit && route.modelName) {
     loadModelParamsForEdit(route.modelName, curType);
@@ -757,7 +785,15 @@ async function loadModelParamsForEdit(modelName, type) {
   try {
     const mp = await api('/admin/model-params/' + encodeURIComponent(modelName));
     if (!mp || (mp.type && mp.type !== type)) return;
-    const set = (id, v) => { const el = $('#' + id); if (el && v !== null && v !== undefined && v !== '') el.value = v; };
+    // 设置控件值：滑块同时更新右侧值显示；字符串输入直接赋值
+    const set = (id, v) => {
+      if (v === null || v === undefined || v === '') return;
+      const el = $('#' + id);
+      if (!el) return;
+      el.value = v;
+      const span = $(id + '-val');
+      if (span) span.textContent = v;
+    };
     set('p-temperature', mp.temperature);
     set('p-maxtokens', mp.maxTokens);
     set('p-topp', mp.topP);
@@ -770,12 +806,21 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-qualitydefault', mp.qualityDefault);
     set('p-styles', mp.styles);
     set('p-styledefault', mp.styleDefault);
-    set('p-durations', mp.durations);
+    // 时长：存的是逗号分隔档位（如 4,6,8 或滑块展开的连续 4,5,6,7,8）→ 拆出 min/max 设范围滑块
+    if (mp.durations) {
+      const ds = String(mp.durations).split(',').map((s) => Number(s.trim())).filter((n) => !isNaN(n));
+      if (ds.length) {
+        const mn = Math.min(...ds), mx = Math.max(...ds);
+        set('p-dmin', mn);
+        set('p-dmax', mx);
+      }
+    }
     set('p-durationdefault', mp.durationDefault);
     set('p-resolutions', mp.resolutions);
     set('p-resolutiondefault', mp.resolutionDefault);
     set('p-aspects', mp.aspectRatios);
     set('p-aspectdefault', mp.aspectRatioDefault);
+    // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
   } catch (e) {
     console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
   }
@@ -848,8 +893,14 @@ async function saveModelParams(modelName, type) {
     req.styles = val('p-styles');
     req.styleDefault = val('p-styledefault');
   } else if (type === 'video') {
-    req.durations = val('p-durations');
-    req.durationDefault = val('p-durationdefault');
+    // 时长范围滑块（p-dmin/p-dmax）→ 展开连续整数逗号分隔（如 4~8 → "4,5,6,7,8"）
+    const dMin = num('p-dmin'), dMax = num('p-dmax');
+    if (dMin !== null && dMax !== null && dMin <= dMax) {
+      const seq = [];
+      for (let s = dMin; s <= dMax; s++) seq.push(s);
+      req.durations = seq.join(',');
+    }
+    req.durationDefault = num('p-durationdefault') !== null ? String(num('p-durationdefault')) : null;
     req.resolutions = val('p-resolutions');
     req.resolutionDefault = val('p-resolutiondefault');
     req.aspectRatios = val('p-aspects');
