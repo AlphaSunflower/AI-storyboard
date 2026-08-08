@@ -225,9 +225,9 @@ public class VideoGatewayService {
                             .GET().build(), HttpResponse.BodyHandlers.ofString());
 
                     if (resp.statusCode() == 200) {
-                        // MiniMax succeeded → 暂存 video_url 供下载端点使用
+                        JsonNode json = objectMapper.readTree(resp.body());
+                        // MiniMax succeeded → 暂存 video_url 供下载端点使用（从原始 JsonNode 提取）
                         if ("minimax".equals(channel.getType())) {
-                            JsonNode json = objectMapper.readTree(resp.body());
                             String status = json.path("status").asText("");
                             String contentUrl = json.path("content").path("url").asText("");
                             if ("succeeded".equals(status) && !contentUrl.isBlank()) {
@@ -242,7 +242,8 @@ public class VideoGatewayService {
                             callLogService.log("video", channel.getId(), "polled",
                                     System.currentTimeMillis() - start, null, null);
                         }
-                        return new VideoResult(200, resp.body());
+                        // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
+                        return new VideoResult(200, normalizePoll(json));
                     }
                     // 404 = 该渠道无此任务，尝试下一个
                 } catch (Exception e) {
@@ -261,15 +262,18 @@ public class VideoGatewayService {
     public org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             download(String taskId) {
         try {
+            // 按 priority 升序遍历渠道，优先命中高优先级渠道（与 poll 一致）
             List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
-                    .eq(Channel::getEnabled, true));
+                    .eq(Channel::getEnabled, true)
+                    .orderByAsc(Channel::getPriority));
             for (Channel channel : allChannels) {
                 try {
                     String apiKey = keyService.decrypt(channel.getApiKey());
                     if ("minimax".equals(channel.getType())) {
-                        // 从 call_log 取最近一条限时直链
+                        // 从 call_log 取该渠道最近一条限时直链（按 channelId 过滤，防止跨协议错配命中他渠道记录）
                         com.llmgateway.entity.CallLog latest = callLogMapper.selectOne(
                                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.llmgateway.entity.CallLog>()
+                                        .eq(com.llmgateway.entity.CallLog::getChannelId, channel.getId())
                                         .isNotNull(com.llmgateway.entity.CallLog::getVideoUrl)
                                         .orderByDesc(com.llmgateway.entity.CallLog::getCreatedAt)
                                         .last("LIMIT 1"));
@@ -303,6 +307,36 @@ public class VideoGatewayService {
         } catch (Exception e) {
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
         }
+    }
+
+    /** 归一化轮询响应：统一输出 {taskId, status, progress?, error?}（设计 §5.1，兼容 minimax/laozhang 双协议） */
+    private String normalizePoll(JsonNode json) {
+        ObjectNode out = objectMapper.createObjectNode();
+        // taskId 三选一：task_id / id / taskId
+        String taskId = json.path("task_id").asText(json.path("id").asText(json.path("taskId").asText("")));
+        if (!taskId.isBlank()) out.put("taskId", taskId);
+        // status 归一化映射：succeeded/completed→succeeded，failed→failed，queued/running/未知→processing
+        String raw = json.path("status").asText("");
+        String status;
+        switch (raw) {
+            case "succeeded":
+            case "completed": status = "succeeded"; break;
+            case "failed": status = "failed"; break;
+            default: status = "processing"; break;
+        }
+        out.put("status", status);
+        // progress 透传上游（无则省略）
+        JsonNode progress = json.path("progress");
+        if (progress.isNumber() || progress.isTextual()) out.put("progress", progress.asInt());
+        // failed 时带 error：minimax 取 error.message；laozhang 取 error/message
+        if ("failed".equals(status)) {
+            String err = json.path("error").path("message").asText("");
+            if (err.isBlank()) err = json.path("error").asText("");
+            if (err.isBlank()) err = json.path("message").asText("");
+            if (err.isBlank()) err = "video generation failed";
+            out.put("error", err);
+        }
+        return out.toString();
     }
 
     private org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
