@@ -24,7 +24,7 @@ import java.util.*;
  * 图片生成服务 —— 负责调用 Laozhang API 进行生图/改图。
  *
  * 路由逻辑：
- * 1. 有参考图（referenceImages 非空）或 mode="edit" → /v1/images/edits multipart（保持直连 Laozhang）
+ * 1. 有参考图（referenceImages 非空）或 mode="edit" → /v1/images/edits multipart（经 LLM 网关 /v1/images/edits）
  * 2. 其他 → /v1/images/generations JSON（纯文生图，统一走 LLM 网关；Gemini 模型由网关转原生格式）
  */
 @Service
@@ -91,7 +91,7 @@ public class ImageGenerationService {
             String localPath;
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
 
-            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（保持直连）
+            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关）
             if (hasReferenceImages || "edit".equals(mode)) {
                 result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
                 localPath = fileStorageService.saveImageFromBase64(result);

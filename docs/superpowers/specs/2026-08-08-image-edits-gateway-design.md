@@ -43,8 +43,8 @@ public ResponseEntity<String> imageEdits(@RequestBody byte[] body,
                                          @RequestHeader("Content-Type") String contentType)
 ```
 
-- `@RequestBody byte[]`：Spring 直接收原始 multipart 字节流（不解析）
-- Content-Type 头含 boundary，原样转发（替换上游 baseUrl 后同 header 透传）
+- `@RequestBody byte[]`：Spring 直接收原始字节流（不解析）
+- **传输协议（实测修正 2026-08-08）**：调用方用 `application/octet-stream` 发送 multipart 字节流——`@RequestBody byte[]` 收 `multipart/form-data` 会被 Spring multipart 解析器消费 body（实测必 500 "Required request body is missing"）；网关从 body 首行提取 boundary 重建转发头（见 4.2）
 - 构造器注入新增 `ImageEditService`（独立 Service，职责单一；不动 GatewayRoutingService）
 
 ### 4.2 新增 `ImageEditService`（网关侧）
@@ -54,7 +54,7 @@ public ResponseEntity<String> imageEdits(@RequestBody byte[] body,
 1. **解析 model**：从 multipart 字节流中提取 `name="model"` part 的值（字节级轻量解析：定位 `name="model"` 边界 → 读该 part 的 body 直到 `\r\n--`）
    - model 缺失 → `BusinessException(40001, "model is required")`
 2. **查渠道**：`model_route` 按 model_name 查（无 → 40401 "no route for model: X"）→ 候选渠道 enabled + priority 升序（无 → 50301）
-3. **逐渠道转发**：`UpstreamClient.postMultipart(baseUrl, "/v1/images/edits", apiKey, contentType, bodyBytes)`（新增方法，JDK HttpClient 原生支持 `BodyPublishers.ofByteArray` + 自定义 Content-Type）
+3. **逐渠道转发**：`UpstreamClient.postMultipart(baseUrl, "/images/edits", apiKey, upstreamContentType, bodyBytes)`（路径不带 /v1——渠道 baseUrl 已含 /v1，与 GatewayRoutingService 的 path 约定一致；`upstreamContentType` 由 `buildMultipartContentType(body)` 从 body 首行提取 boundary 重建为 `multipart/form-data; boundary=<纯boundary>`——跳过前导 `--`，Content-Type 参数规范不含）
    - 200 → 透传 body + 落 success call_log
    - 429/5xx → log.warn + 切下一渠道
    - 4xx → 透传错误体 + 落 error call_log（不切渠道）
@@ -77,7 +77,7 @@ public HttpResponse<String> postMultipart(String baseUrl, String path, String ap
 
 ## 5. Backend 侧改动（极小）
 
-`ImageGenerationService.callImageEdit` 只改 2 行（第 3 步直连处）：
+`ImageGenerationService.callImageEdit` 只改 3 处（第 3 步直连处，实测修正 2026-08-08：第 3 处 Content-Type 改 octet-stream 是规避 Spring multipart 解析器所必需）：
 
 ```java
 // 改前
@@ -86,22 +86,21 @@ public HttpResponse<String> postMultipart(String baseUrl, String path, String ap
 // 改后
 .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/edits"))
 .header("Authorization", "Bearer " + config.getGatewayApiKey())
+.header("Content-Type", "application/octet-stream")   // octet-stream 发送 multipart 字节流（绕 Spring 解析器，网关重建转发头）
 ```
 
 其余全部不动：源图读取、MultipartBuilder 组装、`sendImageWithRetry`（超时重试保留）、b64_json 解析、cleanBase64、场景状态落库。
 
-**注意**：`config.getApiKey()` 局部变量在 callImageEdit 内仍被引用吗？检查——改后不再需要，删除该局部变量或保留（edits 直连逻辑已不存在）。以实际代码为准，最小改动。
-
 ## 6. 数据流
 
 ```
-Backend callImageEdit（MultipartBuilder 组装 multipart）
-  → POST localhost:8083/v1/images/edits（Bearer 网关 Key + multipart body + Content-Type 含 boundary）
-  → ImageEditService 解析 model → model_route 查渠道（gpt-image-2 → laozhang）
-  → UpstreamClient.postMultipart 原样转发 Laozhang /v1/images/edits（渠道 Key）
+Backend callImageEdit（MultipartBuilder 组装 multipart 字节流）
+  → POST localhost:8083/v1/images/edits（Bearer 网关 Key + octet-stream 传 multipart 字节流）
+  → ImageEditService 解析 model + 从 body 重建 multipart Content-Type → model_route 查渠道（gpt-image-2 → laozhang）
+  → UpstreamClient.postMultipart 原样转发 Laozhang /images/edits（渠道 Key，multipart Content-Type 含重建 boundary）
   → 200：透传 {data:[{b64_json}]} → Backend 解析 b64_json（不变）
   → 429/5xx：切下一渠道 → 全失败 50301
-  → 4xx：透传错误体 → Backend 抛 "Image Edit API returned ..."
+  → 4xx：透传真实状态码 + 错误体 → Backend 抛 "Image Edit API returned ..."
   → call_log 落库（model/channel/status/duration/error）
 ```
 
