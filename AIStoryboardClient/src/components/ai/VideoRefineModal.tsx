@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import type { SceneResponse } from '../../api/projects';
-import { assetUrl, VIDEO_MODELS, DEFAULT_VIDEO_MODEL } from '../../config';
+import { assetUrl, DEFAULT_VIDEO_MODEL } from '../../config';
+import { useProjectStore } from '../../stores/projectStore';
 
 interface VideoRefineModalProps {
   scene: SceneResponse;
@@ -65,6 +66,8 @@ const selectStyle: React.CSSProperties = {
 export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModalProps) {
   const [prompt, setPrompt] = useState(scene.videoPrompt || '');
   const [model, setModel] = useState(DEFAULT_VIDEO_MODEL);
+  // 模型下拉选项：网关下发优先，静态默认兜底（见 projectStore.fetchAiModels）
+  const videoModelOptions = useProjectStore((s) => s.videoModelOptions);
   const [extraRefs, setExtraRefs] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -308,7 +311,7 @@ export function VideoRefineModal({ scene, onClose, onGenerate }: VideoRefineModa
               onChange={(e) => setModel(e.target.value)}
               style={selectStyle}
             >
-              {VIDEO_MODELS.map((m) => (
+              {videoModelOptions.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
                 </option>

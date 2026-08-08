@@ -1,11 +1,22 @@
 package com.llmgateway.controller;
 
+import com.llmgateway.entity.Channel;
+import com.llmgateway.entity.ModelRoute;
+import com.llmgateway.mapper.ChannelMapper;
+import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.ImageEditService;
 import com.llmgateway.service.VideoGatewayService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** OpenAI 兼容对外入口（静态 Key 鉴权由 StaticApiKeyFilter 完成） */
 @RestController
@@ -15,13 +26,20 @@ public class OpenAiCompatController {
     private final GatewayRoutingService routingService;
     private final VideoGatewayService videoGatewayService;
     private final ImageEditService imageEditService;
+    private final ModelRouteMapper routeMapper;
+    private final ChannelMapper channelMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OpenAiCompatController(GatewayRoutingService routingService,
                                   VideoGatewayService videoGatewayService,
-                                  ImageEditService imageEditService) {
+                                  ImageEditService imageEditService,
+                                  ModelRouteMapper routeMapper,
+                                  ChannelMapper channelMapper) {
         this.routingService = routingService;
         this.videoGatewayService = videoGatewayService;
         this.imageEditService = imageEditService;
+        this.routeMapper = routeMapper;
+        this.channelMapper = channelMapper;
     }
 
     @PostMapping(value = "/chat/completions", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -46,8 +64,34 @@ public class OpenAiCompatController {
     }
 
     @GetMapping(value = "/models", produces = MediaType.APPLICATION_JSON_VALUE)
-    public String models() {
-        return "{\"object\":\"list\",\"data\":[]}";
+    public String models(@RequestParam(required = false) String type) throws Exception {
+        // 从 model_route 返回可用模型列表（OpenAI 风格 {data:[{id,type}]}），供调用方（如 AI 分镜前端）动态获取生图/生视频模型
+        // type 过滤（image/video/text/vision）；渠道须启用；同一模型多渠道轮换时去重保留首个
+        List<ModelRoute> routes = routeMapper.selectList(null);
+        Set<String> enabledChannels = channelMapper.selectList(null).stream()
+                .filter(c -> c.getEnabled() == null || c.getEnabled())
+                .map(Channel::getId)
+                .collect(Collectors.toSet());
+        Map<String, String> modelTypeMap = new LinkedHashMap<>();   // modelName -> type
+        for (ModelRoute r : routes) {
+            if (r.getChannelId() == null || !enabledChannels.contains(r.getChannelId())) continue;
+            String t = r.getType() == null || r.getType().isBlank() ? "text" : r.getType();
+            if (type != null && !type.isBlank() && !type.equals(t)) continue;
+            modelTypeMap.putIfAbsent(r.getModelName(), t);
+        }
+        // 组装 OpenAI 风格响应：{"object":"list","data":[{"id":..,"object":"model","type":..}]}
+        List<Map<String, Object>> data = new java.util.ArrayList<>();
+        modelTypeMap.forEach((name, t) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", name);
+            m.put("object", "model");
+            m.put("type", t);
+            data.add(m);
+        });
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("object", "list");
+        result.put("data", data);
+        return objectMapper.writeValueAsString(result);
     }
 
     /** 创建视频任务：按 model 路由（MiniMax-H3→minimax / veo-*→laozhang），上游响应透传 */

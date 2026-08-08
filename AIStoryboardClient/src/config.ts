@@ -34,7 +34,15 @@ export function assetUrl(path: string | null): string {
 //  Model definitions — single source of truth.
 //  Add/remove models here; all <select> pickers
 //  read from these arrays.
+//  运行时优先使用网关下发的模型列表（见 projectStore.fetchAiModels），
+//  这些静态数组作为网关不可用/未配置路由时的兜底默认值。
 // ═══════════════════════════════════════════════════
+
+/** 模型下拉选项（网关下发与静态默认统一结构） */
+export interface ModelOption {
+  value: string;
+  label: string;
+}
 
 export const IMAGE_MODELS = [
   { value: 'gpt-image-2', label: 'GPT Image 2' },

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SceneResponse } from '../../api/projects';
-import { assetUrl, IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../../config';
+import { assetUrl, DEFAULT_IMAGE_MODEL } from '../../config';
+import { useProjectStore } from '../../stores/projectStore';
 
 interface ImageRefineModalProps {
   scene: SceneResponse;
@@ -65,6 +66,8 @@ const selectStyle: React.CSSProperties = {
 export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModalProps) {
   const [prompt, setPrompt] = useState(scene.imagePrompt || '');
   const [model, setModel] = useState(DEFAULT_IMAGE_MODEL);
+  // 模型下拉选项：网关下发优先，静态默认兜底（见 projectStore.fetchAiModels）
+  const imageModelOptions = useProjectStore((s) => s.imageModelOptions);
 
   const hasCurrentImage = !!scene.imageUrl;
 
@@ -157,7 +160,7 @@ export function ImageRefineModal({ scene, onClose, onGenerate }: ImageRefineModa
               onChange={(e) => setModel(e.target.value)}
               style={selectStyle}
             >
-              {IMAGE_MODELS.map((m) => (
+              {imageModelOptions.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
                 </option>

@@ -13,13 +13,14 @@ import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
 
 export function EditorPage() {
-  const { loadProjects, checkDraft, loadProject } = useProjectStore();
+  const { loadProjects, checkDraft, loadProject, fetchAiModels } = useProjectStore();
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [draftProject, setDraftProject] = useState<ProjectResponse | null>(null);
   const [middleWidth, setMiddleWidth] = useState(380);
 
   useEffect(() => {
     loadProjects();
+    fetchAiModels();   // 拉取网关生图/生视频模型列表（失败静默保持默认）
     checkDraft()
       .then((draft) => {
         if (draft) {

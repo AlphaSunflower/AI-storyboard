@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { IMAGE_MODELS, VIDEO_MODELS, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -53,6 +53,8 @@ export function ScriptInputPanel() {
     createProject,
     imageModel,
     videoModel,
+    imageModelOptions,
+    videoModelOptions,
     videoPreset,
     imageSize,
     imageQuality,
@@ -254,7 +256,7 @@ export function ScriptInputPanel() {
           onChange={(e) => setImageModel(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
-          {IMAGE_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          {imageModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
       <div>
@@ -288,7 +290,7 @@ export function ScriptInputPanel() {
           onChange={(e) => setVideoModel(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
-          {VIDEO_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          {videoModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
 

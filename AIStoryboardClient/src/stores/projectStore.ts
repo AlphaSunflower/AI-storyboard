@@ -3,7 +3,7 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY } from '../config';
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, VIDEO_PRESETS, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, IMAGE_MODELS, VIDEO_MODELS, type ModelOption } from '../config';
 
 // 生成完成后的 toast 通知
 export interface ToastMessage {
@@ -30,6 +30,9 @@ interface ProjectState {
   videoPreset: string;
   imageSize: string;
   imageQuality: string;
+  // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
+  imageModelOptions: ModelOption[];
+  videoModelOptions: ModelOption[];
 
   // toast 通知
   toasts: ToastMessage[];
@@ -45,6 +48,8 @@ interface ProjectState {
   setVideoPreset: (p: string) => void;
   setImageSize: (s: string) => void;
   setImageQuality: (q: string) => void;
+  /** 从网关拉取生图/生视频模型列表（编辑器挂载时调用；失败静默保持默认） */
+  fetchAiModels: () => Promise<void>;
 
   // scene ref state — stored as JSON in soundDesign field
   getSceneRefs: (sceneId: string) => { images: string[]; useForImage: boolean; useForVideo: boolean };
@@ -86,6 +91,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   videoPreset: DEFAULT_VIDEO_PRESET,
   imageSize: DEFAULT_IMAGE_SIZE,
   imageQuality: DEFAULT_IMAGE_QUALITY,
+  // 初始 = 静态默认（as const 需展开为可变 ModelOption[]）；网关拉取成功且非空时替换
+  imageModelOptions: IMAGE_MODELS.map((m) => ({ value: m.value, label: m.label })),
+  videoModelOptions: VIDEO_MODELS.map((m) => ({ value: m.value, label: m.label })),
   toasts: [],
   unreadScenes: new Set<string>(),
 
@@ -287,6 +295,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setVideoPreset: (p) => set({ videoPreset: p }),
   setImageSize: (s) => set({ imageSize: s }),
   setImageQuality: (q) => set({ imageQuality: q }),
+  // 从网关拉取生图/生视频模型列表：网关返回空数组/失败时保持静态默认（静默，不打扰用户）
+  fetchAiModels: async () => {
+    try {
+      const res = await aiApi.aiModels();
+      const imageModels = res.data.data?.imageModels ?? [];
+      const videoModels = res.data.data?.videoModels ?? [];
+      set((s) => ({
+        imageModelOptions: imageModels.length ? imageModels : s.imageModelOptions,
+        videoModelOptions: videoModels.length ? videoModels : s.videoModelOptions,
+      }));
+    } catch {
+      // 网关不可达：保持静态默认，模型选择不中断
+    }
+  },
 
   markDirty: () => {
     const { currentProject, updateProject } = get();
