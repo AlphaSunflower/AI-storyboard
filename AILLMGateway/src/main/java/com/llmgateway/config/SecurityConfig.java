@@ -52,6 +52,7 @@ public class SecurityConfig {
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()  // SseEmitter/异步必需
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/admin/login").permitAll()
+                .requestMatchers("/admin-ui/**").permitAll()  // 管理后台静态页放行：AdminJwtFilter.shouldNotFilter 只对 /admin/ 前缀生效，/admin-ui/ 前缀天然不受拦截，安全
                 .requestMatchers("/v1/**").permitAll()           // 静态 Key 由 StaticApiKeyFilter 自校验
                 .requestMatchers("/admin/**").hasRole("ADMIN")  // JWT 过滤器设置 ROLE_ADMIN
                 .anyRequest().permitAll()
