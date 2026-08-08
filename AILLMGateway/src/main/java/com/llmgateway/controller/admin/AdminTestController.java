@@ -9,6 +9,7 @@ import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.UpstreamClient;
+import com.llmgateway.service.VideoGatewayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,16 +55,19 @@ public class AdminTestController {
     private final KeyService keyService;
     private final UpstreamClient upstreamClient;
     private final GatewayRoutingService gatewayRoutingService;
+    private final VideoGatewayService videoGatewayService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AdminTestController(ChannelMapper channelMapper, ModelRouteMapper routeMapper,
                                KeyService keyService, UpstreamClient upstreamClient,
-                               GatewayRoutingService gatewayRoutingService) {
+                               GatewayRoutingService gatewayRoutingService,
+                               VideoGatewayService videoGatewayService) {
         this.channelMapper = channelMapper;
         this.routeMapper = routeMapper;
         this.keyService = keyService;
         this.upstreamClient = upstreamClient;
         this.gatewayRoutingService = gatewayRoutingService;
+        this.videoGatewayService = videoGatewayService;
     }
 
     /** GET /admin/channels/{id}/models：获取该渠道可测试的模型列表（测试弹窗候选）。
@@ -172,35 +176,56 @@ public class AdminTestController {
         }
     }
 
-    /** POST /admin/routes/{id}/test：走真实网关链路（渠道选择/格式转换/转发/落 CallLog），2xx 判成功（gemini 转换后无 choices 键，不能用 choices 判定） */
+    /** POST /admin/routes/{id}/test：按模型类型走真实网关链路。
+     *  text/vision → /chat/completions；image → /images/generations；video → VideoGatewayService.create（创建任务 2xx 即成功，不轮询）。
+     *  均与线上调用同路径（视频会落 created 日志，其余落 success/error 日志，可复核）。 */
     @PostMapping("/routes/{id}/test")
     public ApiResponse<Map<String, Object>> testRoute(@PathVariable String id) {
         ModelRoute route = routeMapper.selectById(id);
         if (route == null) throw new BusinessException(40401, "路由不存在");
-        String body = "{\"model\":\"" + route.getModelName()
-                + "\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}";
-        log.info("【路由测试】发起: model={} channelId={}", route.getModelName(), route.getChannelId());
+        String type = route.getType() == null ? "text" : route.getType();
+        log.info("【路由测试】发起: model={} type={} channelId={}", route.getModelName(), type, route.getChannelId());
         long start = System.currentTimeMillis();
         try {
-            GatewayRoutingService.RouteResult result = gatewayRoutingService.route("/chat/completions", body);
+            int status;
+            String respBody;
+            if ("video".equals(type)) {
+                // 视频：走 VideoGatewayService 创建任务（与 /v1/videos 同链路，按 model 分发 MiniMax/Laozhang）
+                VideoGatewayService.VideoResult vr = videoGatewayService.create(String.format(
+                        "{\"model\":\"%s\",\"prompt\":\"a cat walking\"}", route.getModelName()));
+                status = vr.status();
+                respBody = vr.body();
+            } else if ("image".equals(type)) {
+                // 生图：走通用路由转发 /images/generations（OpenAI 图片格式）
+                GatewayRoutingService.RouteResult rr = gatewayRoutingService.route("/images/generations", String.format(
+                        "{\"model\":\"%s\",\"prompt\":\"a red apple\",\"size\":\"1024x1024\",\"n\":1}", route.getModelName()));
+                status = rr.status();
+                respBody = rr.body();
+            } else {
+                // 文本/理解：走通用路由转发 /chat/completions
+                GatewayRoutingService.RouteResult rr = gatewayRoutingService.route("/chat/completions", String.format(
+                        "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}", route.getModelName()));
+                status = rr.status();
+                respBody = rr.body();
+            }
             long durationMs = System.currentTimeMillis() - start;
-            // gemini 渠道经 GeminiFormatConverter.toOpenAiResponse 转换后无 choices 键，改用 2xx 状态码判定成功（与 testChannel 一致）
-            boolean ok = result.status() >= 200 && result.status() < 300;
-            String error = ok ? null : upstreamClient.extractError(result.body());
-            log.info("【路由测试】完成: model={} ok={} http={} cost={}ms{}", route.getModelName(), ok,
-                    result.status(), durationMs, error == null ? "" : " error=" + error);
+            // 2xx 判成功（gemini 转换后无 choices 键，不能用 choices 判定；视频创建 2xx 即任务创建成功）
+            boolean ok = status >= 200 && status < 300;
+            String error = ok ? null : upstreamClient.extractError(respBody);
+            log.info("【路由测试】完成: model={} type={} ok={} http={} cost={}ms{}", route.getModelName(), type, ok,
+                    status, durationMs, error == null ? "" : " error=" + error);
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("ok", ok);
-            map.put("status", result.status());
+            map.put("status", status);
             map.put("durationMs", durationMs);
             if (!ok) {
                 map.put("error", error);
             }
             return ApiResponse.ok(map);
         } catch (Exception e) {
-            // route() 抛业务异常（无路由/渠道全挂等）也按失败结果返回
+            // route()/videoGatewayService 抛业务异常（无路由/渠道全挂等）也按失败结果返回
             long durationMs = System.currentTimeMillis() - start;
-            log.warn("【路由测试】异常: model={} cost={}ms error={}", route.getModelName(), durationMs, e.getMessage());
+            log.warn("【路由测试】异常: model={} type={} cost={}ms error={}", route.getModelName(), type, durationMs, e.getMessage());
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("ok", false);
             map.put("status", 500);

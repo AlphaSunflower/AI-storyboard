@@ -498,6 +498,13 @@ function channelModelCandidates(channelId) {
   return [...new Set([...fromField, ...fromRoutes])];
 }
 
+/** 模型类型徽标（text/image/video/vision → 中文标签） */
+function typeBadge(type) {
+  const labels = { text: '文本模型', image: '生图模型', video: '视频模型', vision: '理解模型' };
+  const t = labels[type] ? type : 'text';
+  return '<span class="badge badge-type badge-type-' + esc(t) + '">' + esc(labels[t]) + '</span>';
+}
+
 /** 更新 datalist 候选（渠道切换时刷新模型列表） */
 function updateModelList(inputId, candidates) {
   const dl = document.getElementById(inputId + '-list');
@@ -643,13 +650,14 @@ async function loadRoutes() {
       + '<div class="card table-card">'
       + (routes.length
         ? '<table class="table"><thead><tr>'
-          + '<th>模型名</th><th>渠道</th><th>默认参数 (JSON)</th><th>创建时间</th><th class="td-actions">操作</th>'
+          + '<th>模型名</th><th>类型</th><th>渠道</th><th>默认参数 (JSON)</th><th>创建时间</th><th class="td-actions">操作</th>'
           + '</tr></thead><tbody>'
           + routes.map((r) => {
             const ch = channelMap[r.channelId];
             const channelName = ch ? ch.name + (ch.enabled === false ? '（停用）' : '') : '未知渠道';
             return '<tr>'
               + '<td class="td-strong">' + esc(r.modelName) + '</td>'
+              + '<td>' + typeBadge(r.type) + '</td>'
               + '<td class="' + (ch && ch.enabled === false ? 'td-muted' : '') + '">' + esc(channelName) + '</td>'
               + '<td class="td-params" title="' + esc(r.defaultParams || '') + '">'
               + (r.defaultParams ? esc(trunc(r.defaultParams, 48)) : '<span class="td-muted">-</span>') + '</td>'
@@ -683,9 +691,14 @@ function openRouteModal(route) {
     : '<option value="">暂无渠道，请先到渠道管理创建</option>';
   // 默认选中渠道：编辑用路由的 channelId，新建用优先级最高的渠道
   const selCh = route ? route.channelId : (Object.values(channelMap).slice().sort((a, b) => (a.priority || 0) - (b.priority || 0))[0] || {}).id || '';
+  // 模型类型下拉（text 文本 / image 生图 / video 视频生成 / vision 图片视频理解）
+  const typeOpts = [
+    ['text', '文本模型'], ['image', '生图模型'], ['video', '视频模型（生成视频）'], ['vision', '图片/视频理解模型'],
+  ].map(([v, label]) => '<option value="' + v + '"' + ((route ? route.type : 'text') === v ? ' selected' : '') + '>' + label + '</option>').join('');
 
   const body =
     field('渠道', '<select class="input" id="r-channel">' + options + '</select>')
+    + field('模型类型', '<select class="input" id="r-type">' + typeOpts + '</select>')
     + field('模型', '<input class="input" id="r-model" list="r-model-list" placeholder="加载模型中…">'
       + '<datalist id="r-model-list"></datalist>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
@@ -722,7 +735,7 @@ async function submitRoute(id) {
     }
   }
 
-  const body = { modelName, channelId, defaultParams };
+  const body = { modelName, channelId, type: $('#r-type').value, defaultParams };
   const btn = $('#form-submit');
   btn.disabled = true;
   try {

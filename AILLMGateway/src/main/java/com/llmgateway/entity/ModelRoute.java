@@ -15,6 +15,8 @@ public class ModelRoute {
     private String id;
     private String modelName;
     private String channelId;
+    /** 模型类型：text（文本）/ image（生图）/ video（视频生成）/ vision（图片视频理解），默认 text */
+    private String type;
     /** JSON：size/temperature 等默认参数 */
     private String defaultParams;
     private OffsetDateTime createdAt;

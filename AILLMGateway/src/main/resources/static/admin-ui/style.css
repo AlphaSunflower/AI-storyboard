@@ -292,6 +292,11 @@ body.main-mode #login-view { display: none; }
 .badge-danger { background: var(--danger-bg); color: var(--danger); }
 .badge-neutral { background: var(--surface-2); color: var(--ink-soft); }
 .badge-type { background: #fff; border: 1px solid var(--line); color: var(--ink-soft); }
+/* 模型类型徽标色（低饱和，区分四类） */
+.badge-type-text { color: #4a6fa5; border-color: #c9d8ef; background: #f0f5fc; }
+.badge-type-image { color: #a5644a; border-color: #e8d0c5; background: #fcf3ee; }
+.badge-type-video { color: #7a5aa8; border-color: #ddd0ee; background: #f7f2fc; }
+.badge-type-vision { color: #3d8f7d; border-color: #c9e4dd; background: #eff8f5; }
 
 /* ---------- switch ---------- */
 

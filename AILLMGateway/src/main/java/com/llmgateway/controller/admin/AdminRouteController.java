@@ -12,11 +12,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Set;
 
 /** 模型路由管理：模型名 → 渠道映射 CRUD */
 @RestController
 @RequestMapping("/admin/routes")
 public class AdminRouteController {
+
+    /** 合法模型类型（text 文本 / image 生图 / video 视频生成 / vision 图片视频理解） */
+    private static final Set<String> ROUTE_TYPES = Set.of("text", "image", "video", "vision");
 
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
@@ -39,6 +43,7 @@ public class AdminRouteController {
         ModelRoute route = new ModelRoute();
         route.setModelName(request.getModelName());
         route.setChannelId(request.getChannelId());
+        route.setType(normalizeType(request.getType()));   // 默认 text，校验枚举
         route.setDefaultParams(request.getDefaultParams());
         route.setCreatedAt(OffsetDateTime.now());
         route.setUpdatedAt(OffsetDateTime.now());
@@ -67,6 +72,7 @@ public class AdminRouteController {
             route.setChannelId(request.getChannelId());
         }
         if (request.getDefaultParams() != null) route.setDefaultParams(request.getDefaultParams());
+        if (request.getType() != null) route.setType(normalizeType(request.getType()));
         route.setUpdatedAt(OffsetDateTime.now());
         routeMapper.updateById(route);
         return ApiResponse.ok(route);
@@ -76,5 +82,13 @@ public class AdminRouteController {
     public ApiResponse<Void> delete(@PathVariable String id) {
         if (routeMapper.deleteById(id) == 0) throw new BusinessException(40401, "路由不存在");
         return ApiResponse.ok(null);
+    }
+
+    /** 归一化模型类型：空默认 text，非法值抛 40001 */
+    private String normalizeType(String type) {
+        if (type == null || type.isBlank()) return "text";
+        String t = type.trim().toLowerCase();
+        if (!ROUTE_TYPES.contains(t)) throw new BusinessException(40001, "type 仅支持 text/image/video/vision");
+        return t;
     }
 }
