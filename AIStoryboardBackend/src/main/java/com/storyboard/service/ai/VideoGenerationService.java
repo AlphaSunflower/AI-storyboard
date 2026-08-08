@@ -23,9 +23,14 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 视频生成服务 —— 调用 Laozhang API v1/videos multipart 接口。
+ * 视频生成服务 —— 创建/轮询/下载统一走 LLM 网关（/v1/videos）。
+ *
+ * 网关侧已完成协议转换（Laozhang multipart / MiniMax content 数组）与渠道路由，
+ * 业务侧只保留：本地图 → data URI 内联（图生视频）、状态落库、轮询 4 分钟
+ * giveUp 窗口、下载重试 3 次与本地转存 uploads/videos。
  */
 @Service
 public class VideoGenerationService {
@@ -36,35 +41,35 @@ public class VideoGenerationService {
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
-    private final MinimaxVideoService minimaxVideoService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
+    /**
+     * 4 分钟 giveUp 窗口基准：网关统一响应 {taskId,status,progress?,error?} 不含
+     * 上游完成时间戳，故以本地首次观察到 succeeded 且下载失败的时刻为基准计时；
+     * 窗口内每次轮询都重新尝试下载，超过 4 分钟仍失败才转 failed（避免僵尸状态）。
+     */
+    private final Map<String, Long> firstSucceededAt = new ConcurrentHashMap<>();
+
     public VideoGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
                                    AgentAssetMapper agentAssetMapper,
-                                   FileStorageService fileStorageService,
-                                   MinimaxVideoService minimaxVideoService) {
+                                   FileStorageService fileStorageService) {
         this.config = config;
         this.sceneMapper = sceneMapper;
         this.agentAssetMapper = agentAssetMapper;
         this.fileStorageService = fileStorageService;
-        this.minimaxVideoService = minimaxVideoService;
     }
 
     /**
-     * 创建视频生成任务（multipart/form-data）。
+     * 创建视频生成任务（统一走网关 POST /v1/videos，JSON 体，OpenAI 风格格式）。
+     * 响应解析 task_id / id / taskId 任一 → 返回 taskId 落库（scene.videoTaskId 逻辑不变）。
      */
     public String createVideoTask(String sceneId, String prompt, String alias,
                                    String resolution, String size, String aspectRatio,
                                    Integer duration, String negativePrompt, Long seed,
                                    List<String> referenceImages, String generatedImageUrl) {
-        // Provider 分发：minimax（默认）走 MiniMax V2 链路，laozhang 走下方原逻辑（保留可切回）
-        if ("minimax".equals(config.getVideoProvider())) {
-            return minimaxVideoService.createVideoTask(sceneId, prompt, alias, resolution, size,
-                    aspectRatio, duration, negativePrompt, seed, referenceImages, generatedImageUrl);
-        }
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
@@ -82,105 +87,60 @@ public class VideoGenerationService {
         String effAspectRatio = aspectRatio != null ? aspectRatio : config.getDefaultVideoAspectRatio();
         int effDuration = duration != null ? duration : Integer.parseInt(config.getDefaultVideoDuration());
 
-        // ── 上游兼容性兜底（重要）────────────────────────────────────────────
-        // 老张网关按 resolution/size 路由到不同的上游 Google 项目池：
-        //   · 标准小写 "720p" + "1280x720" → 正常池，可用
-        //   · 1080p/4K 档位（含 "1080P"/"4K" 等大小写变体）→ 路由到无模型权限的
-        //     池子（locations/global 下无 veo-3.1-fast-generate-preview），
-        //     返回 404 fail_to_fetch_task（实测 2026-08-03 复现）
-        // 因此在 Laozhang 修复前，统一降级为 720p；竖屏保留 9:16 尺寸。
-        // 待上游修复后可删除本兜底。
-        String safeSize = "9:16".equals(effAspectRatio) ? "720x1280" : "1280x720";
-        String safeResolution = "720p";
-        if (!safeSize.equals(effSize)) {
-            log.warn("视频生成 size={} 上游暂不可用, 降级为 {}", effSize, safeSize);
-            effSize = safeSize;
-        }
-        if (!safeResolution.equalsIgnoreCase(effResolution)) {
-            log.warn("视频生成 resolution={} 上游暂不可用, 降级为 {}", effResolution, safeResolution);
-            effResolution = safeResolution;
-        }
-
         try {
-            // 构建 multipart 请求体
-            MultipartBuilder mp = new MultipartBuilder()
-                .field("model", actualModel)
-                .field("prompt", prompt)
-                .field("seconds", String.valueOf(effDuration))
-                .field("duration", String.valueOf(effDuration))
-                .field("size", effSize)
-                .field("resolution", effResolution)
-                .field("aspectRatio", effAspectRatio);
-
-            // metadata JSON
-            String metadata = objectMapper.writeValueAsString(Map.of(
-                "durationSeconds", effDuration,
-                "resolution", effResolution,
-                "aspectRatio", effAspectRatio
-            ));
-            mp.field("metadata", metadata);
-
+            // 统一 OpenAI 风格 JSON 请求体（模型→渠道路由、协议转换已下沉网关）
+            Map<String, Object> body = new HashMap<>();
+            body.put("model", actualModel);          // alias 映射保留在业务侧
+            body.put("prompt", prompt);
+            body.put("size", effSize);
+            body.put("resolution", effResolution);
+            body.put("aspectRatio", effAspectRatio);
+            body.put("duration", effDuration);
             if (negativePrompt != null && !negativePrompt.isEmpty()) {
-                mp.field("negativePrompt", negativePrompt);
+                body.put("negativePrompt", negativePrompt);
             }
             if (seed != null) {
-                mp.field("seed", String.valueOf(seed));
+                body.put("seed", seed);
             }
 
-            // 参考图片：优先使用已生成图片，其次使用第一张参考图
+            // 图生视频 imageUrl：优先已生成图片（本地文件 → data URI 内联——
+            // 图片在业务 uploads 目录，网关无权限访问，设计 §6.2 明确业务侧保留此转换），
+            // 其次参考图第一张（base64 已有，直接用）
             if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
                 String filename = extractFilename(generatedImageUrl);
                 Path localFile = fileStorageService.resolveImage(filename);
                 if (Files.exists(localFile)) {
                     byte[] bytes = Files.readAllBytes(localFile);
-                    mp.file("input_reference", filename, fileStorageService.contentType(filename), bytes);
+                    String mime = fileStorageService.contentType(filename);
+                    body.put("imageUrl", "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes));
                 } else {
                     log.warn("Reference image not found: {}", localFile);
                 }
             } else if (referenceImages != null && !referenceImages.isEmpty()) {
-                String base64 = referenceImages.get(0);
-                byte[] bytes = decodeBase64Image(base64);
-                mp.file("input_reference", "reference.png", "image/png", bytes);
+                body.put("imageUrl", normalizeImageUrl(referenceImages.get(0)));
             }
 
-            byte[] body = mp.build();
+            String jsonBody = objectMapper.writeValueAsString(body);
 
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrlOpenai() + config.getEndpointVideoCreate()))
-                .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.getGatewayApiKey())
                 .timeout(Duration.ofSeconds(120))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
-            HttpResponse<String> resp = null;
-            // ── 自动重试（重要）──────────────────────────────────────────────
-            // 老张网关将视频请求轮询路由到多个上游 Google 项目，其中大部分项目
-            // 未开通 veo-3.1-fast-generate-preview（locations/global 下无此模型），
-            // 命中即返回 404 fail_to_fetch_task。实测 2026-08-04 成功率仅约 1/8
-            // 且失败集中在 fir-2-80d08，故重试上限提到 10 次（~73% 成功率），
-            // 每次重试会重新路由到不同上游项目。待上游修复后可视情况调回。
-            // 另外部分池子的服务账号已失效，创建返回 500（body 含 do_request_failed
-            // / invalid_grant: account not found，实测 2026-08-04 复现）。该错误发生在
-            // 请求发往 Google 之前的 token 获取阶段，任务必然未创建，可安全重试换池。
-            int maxAttempts = 10;
-            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-                resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                int code = resp.statusCode();
-                String respBody = resp.body();
-                if (!isRetryableVideoCreate(code, respBody) || attempt == maxAttempts) {
-                    break;
-                }
-                log.warn("视频任务创建返回 {}(上游项目池故障), 第 {}/{} 次重试, body={}",
-                    code, attempt, maxAttempts,
-                    respBody.length() > 150 ? respBody.substring(0, 150) : respBody);
-                Thread.sleep(500L * attempt);
-            }
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new RuntimeException("Video API returned " + resp.statusCode() + ": " + resp.body());
             }
+            // 网关透传上游响应：task_id（minimax）/ id / taskId（laozhang）三选一
             JsonNode root = objectMapper.readTree(resp.body());
-            String taskId = root.path("id").asText();
+            String taskId = root.path("task_id").asText(
+                    root.path("id").asText(root.path("taskId").asText("")));
+            if (taskId.isBlank()) {
+                throw new RuntimeException("视频创建响应缺少 taskId: " + resp.body());
+            }
 
             if (scene != null) {
                 scene.setVideoTaskId(taskId);
@@ -199,45 +159,41 @@ public class VideoGenerationService {
     }
 
     /**
-     * 轮询视频任务状态，完成后自动下载视频文件。
+     * 轮询视频任务状态，完成后自动下载视频文件（统一走网关）。
+     * 网关统一响应 {taskId, status, progress?, error?}（status: processing/succeeded/failed）：
+     *   succeeded → GET 网关下载端点拿视频流 → 本地转存 uploads/videos → {status:completed, videoUrl}
+     *   failed   → 透传 error
+     *   processing → 返回 processing（透传 progress）
      */
     public Map<String, String> pollVideoTask(String taskId) {
-        // Provider 分发：minimax（默认）走 MiniMax V2 链路，laozhang 走下方原逻辑（保留可切回）
-        if ("minimax".equals(config.getVideoProvider())) {
-            return minimaxVideoService.pollVideoTask(taskId);
-        }
         try {
-            String baseUrl = config.getBaseUrlOpenai();
-            String respBody = callGet(baseUrl + config.getEndpointVideoStatus() + taskId);
+            String respBody = callGet(config.getGatewayBaseUrl() + "/v1/videos/" + taskId);
             if (respBody == null) {
-                respBody = callGet(baseUrl + config.getEndpointVideoStatusFallback() + taskId);
-            }
-            if (respBody == null) {
-                return Map.of("status", "failed", "error", "All polling endpoints failed for taskId=" + taskId);
+                return Map.of("status", "failed", "error", "视频任务查询失败: taskId=" + taskId);
             }
 
             log.info("Video poll response: {}", respBody);
             JsonNode root = objectMapper.readTree(respBody);
-            String status = root.path("status").asText();
+            String status = root.path("status").asText("");
 
             Map<String, String> result = new HashMap<>();
             result.put("taskId", taskId);
 
-            if ("completed".equals(status) || "succeeded".equals(status)) {
-                String localPath = downloadVideoContent(baseUrl, taskId);
+            if ("succeeded".equals(status)) {
+                String localPath = downloadVideoContent(taskId);
                 boolean giveUp = false;
                 if (localPath != null) {
+                    firstSucceededAt.remove(taskId);
                     result.put("status", "completed");
                     result.put("videoUrl", localPath);
                 } else {
-                    // 下载失败不立即判死：以 completed_at 为基准，4 分钟内持续返回
-                    // processing 让调用方继续轮询（每次轮询都会重新尝试下载），
-                    // 覆盖上游 "Failed to resolve Gemini video URL" 等短暂故障；
-                    // 超过 4 分钟仍失败才转 failed（避免前端/工作流无限等待或僵尸状态）
-                    long completedAtSec = root.path("completed_at").asLong(0);
-                    giveUp = completedAtSec > 0
-                            && (System.currentTimeMillis() / 1000 - completedAtSec) > 240;
+                    // 下载失败不立即判死：以本地首次观察到 succeeded 的时刻为基准，4 分钟内
+                    // 持续返回 processing 让调用方继续轮询（每次轮询都会重新尝试下载），
+                    // 覆盖网关/上游短暂故障；超过 4 分钟仍失败才转 failed
+                    long firstSeenMs = firstSucceededAt.computeIfAbsent(taskId, k -> System.currentTimeMillis());
+                    giveUp = (System.currentTimeMillis() - firstSeenMs) > 240_000;
                     if (giveUp) {
+                        firstSucceededAt.remove(taskId);
                         result.put("status", "failed");
                         result.put("error", "视频已生成但超过4分钟仍无法下载（上游内容服务异常），请重试");
                     } else {
@@ -249,46 +205,15 @@ public class VideoGenerationService {
                 // 仅在终态（下载成功或放弃）时更新 scene/asset；
                 // processing 期间保持原状，等待下次轮询重试下载
                 if (localPath != null || giveUp) {
-                    var scenes = sceneMapper.selectList(
-                        new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
-                    if (!scenes.isEmpty()) {
-                        Scene scene = scenes.get(0);
-                        scene.setVideoUrl(localPath);
-                        scene.setVideoStatus(localPath != null ? "completed" : "failed");
-                        sceneMapper.updateById(scene);
-                    } else {
-                        var assets = agentAssetMapper.selectList(
-                            new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
-                        if (!assets.isEmpty()) {
-                            AgentAsset asset = assets.get(0);
-                            asset.setUrl(localPath);
-                            asset.setStatus(localPath != null ? "completed" : "failed");
-                            asset.setError(localPath != null ? null : result.get("error"));
-                            agentAssetMapper.updateById(asset);
-                        }
-                    }
+                    updateTaskOwner(taskId, localPath, localPath != null ? "completed" : "failed",
+                            result.get("error"));
                 }
-            } else if ("failed".equals(status) || "error".equals(status)) {
+            } else if ("failed".equals(status)) {
                 result.put("status", "failed");
-                // M2：先把上游错误信息填入 error（message 优先，回退 error 字段），
-                // 避免后续 setError(result.get("error")) 恒为 null
-                result.put("error", root.path("message").asText(root.path("error").asText("")));
-                var scenes = sceneMapper.selectList(
-                    new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
-                if (!scenes.isEmpty()) {
-                    Scene scene = scenes.get(0);
-                    scene.setVideoStatus("failed");
-                    sceneMapper.updateById(scene);
-                } else {
-                    var assets = agentAssetMapper.selectList(
-                        new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
-                    if (!assets.isEmpty()) {
-                        AgentAsset asset = assets.get(0);
-                        asset.setStatus("failed");
-                        asset.setError(result.get("error"));
-                        agentAssetMapper.updateById(asset);
-                    }
-                }
+                // 网关统一响应 failed 时带 error 字段，直接透传
+                String err = root.path("error").asText("");
+                result.put("error", err.isBlank() ? "视频生成失败" : err);
+                updateTaskOwner(taskId, null, "failed", result.get("error"));
             } else {
                 result.put("status", "processing");
                 result.put("progress", root.path("progress").asText(""));
@@ -299,15 +224,16 @@ public class VideoGenerationService {
         }
     }
 
-    private String downloadVideoContent(String baseUrl, String taskId) {
+    /** 从网关下载视频流并转存本地 uploads/videos（重试 3 次，每次间隔 15s） */
+    private String downloadVideoContent(String taskId) {
         int maxRetries = 3;
         long retryDelayMs = 15_000; // 单次轮询内重试窗口约 45s；跨轮询由 pollVideoTask 持续重试
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + config.getEndpointVideoContent() + taskId + "/content"))
-                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos/" + taskId + "/content"))
+                    .header("Authorization", "Bearer " + config.getGatewayApiKey())
                     .timeout(Duration.ofSeconds(180))
                     .GET().build();
                 HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
@@ -345,11 +271,34 @@ public class VideoGenerationService {
         return null;
     }
 
+    /** 终态更新 scene / agent_asset（双通道反查，scene.videoTaskId 优先） */
+    private void updateTaskOwner(String taskId, String videoUrl, String status, String error) {
+        var scenes = sceneMapper.selectList(
+            new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
+        if (!scenes.isEmpty()) {
+            Scene scene = scenes.get(0);
+            scene.setVideoUrl(videoUrl);
+            scene.setVideoStatus(status);
+            sceneMapper.updateById(scene);
+            return;
+        }
+        var assets = agentAssetMapper.selectList(
+            new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
+        if (!assets.isEmpty()) {
+            AgentAsset asset = assets.get(0);
+            asset.setUrl(videoUrl);
+            asset.setStatus(status);
+            asset.setError(error);
+            agentAssetMapper.updateById(asset);
+        }
+    }
+
+    /** GET 网关端点（Bearer 网关 Key），非 200 或异常返回 null */
     private String callGet(String url) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Authorization", "Bearer " + config.getGatewayApiKey())
                 .timeout(Duration.ofSeconds(120))
                 .GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
@@ -367,23 +316,15 @@ public class VideoGenerationService {
     }
 
     /**
-     * 视频任务创建响应是否可安全重试（包内静态，便于直接单测）：
-     * 404 = 上游池无模型权限（fail_to_fetch_task）；5xx 且 body 含
-     * fail_to_fetch_task / do_request_failed（如 invalid_grant 凭据故障，发生在
-     * 请求发往 Google 之前，任务未创建）→ 重试换池。
-     * 其余（400 参数错、401 密钥错、普通 5xx 等）不重试，避免重复创建任务/白扣费。
+     * 参考图 data URI 归一化：已是 data URI 原样返回；裸 base64 补齐前缀
+     * （协议转换已下沉网关，业务侧只需保证 imageUrl 是合法 data URI）。
      */
-    static boolean isRetryableVideoCreate(int code, String body) {
-        if (code == 404) return true;
-        if (code < 500 || body == null) return false;
-        return body.contains("fail_to_fetch_task") || body.contains("do_request_failed");
-    }
-
-    private byte[] decodeBase64Image(String base64Data) {
-        String clean = base64Data;
-        if (clean.contains(",") && clean.contains("base64")) {
-            clean = clean.substring(clean.indexOf(",") + 1);
+    private String normalizeImageUrl(String base64) {
+        if (base64 == null || base64.isBlank()) return null;
+        if (base64.startsWith("data:")) return base64;
+        if (base64.contains(",") && base64.contains("base64")) {
+            return base64.substring(base64.indexOf("data:"));
         }
-        return Base64.getDecoder().decode(clean);
+        return "data:image/png;base64," + base64;
     }
 }
