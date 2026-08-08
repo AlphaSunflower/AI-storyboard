@@ -79,7 +79,7 @@ public class VideoGenerationService {
 
         String actualModel = alias != null
                 ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
-                : "veo-3.1-fast-generate-preview";  // 默认模型
+                : (config.getMinimaxVideoModel() != null ? config.getMinimaxVideoModel() : "MiniMax-H3");  // 默认模型：MiniMax-H3（修复通道翻转回归：默认走 minimax 渠道，显式传 veo 别名才走 laozhang）
 
         // 使用请求参数或配置默认值
         String effSize = size != null ? size : config.getDefaultVideoSize();

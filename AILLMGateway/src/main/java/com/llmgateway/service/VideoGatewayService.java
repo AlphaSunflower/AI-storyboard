@@ -91,7 +91,10 @@ public class VideoGatewayService {
             if ("minimax".equals(channel.getType())) {
                 resp = createMinimax(channel, apiKey, body);
             } else {
-                resp = createLaozhang(channel, apiKey, body);
+                // Laozhang 创建按池路由、成功率低（实测约 1/8）：按 isRetryableVideoCreate 语义
+                // 换池重试最多 10 次（退避 500ms*attempt），对齐旧 Backend 逻辑（设计 §7）；
+                // minimax 分支保持单发（其错误不可重试换池）
+                resp = createLaozhangWithRetry(channel, apiKey, body);
             }
 
             int status = resp.statusCode();
@@ -194,6 +197,39 @@ public class VideoGatewayService {
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    /** Laozhang 创建 + 换池重试（设计 §7）：老张网关按池路由到多个上游 Google 项目，
+     *  未开通 veo 模型的池返回 404 fail_to_fetch_task（实测 2026-08-04 成功率仅约 1/8），
+     *  失效服务账号返回 500（body 含 do_request_failed/invalid_grant，发生在请求发往 Google
+     *  之前，任务必然未创建）——此类错误可安全重试换池，最多 10 次，退避 500ms*attempt。 */
+    private HttpResponse<String> createLaozhangWithRetry(Channel channel, String apiKey, JsonNode body) throws Exception {
+        int maxAttempts = 10;
+        HttpResponse<String> resp = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            resp = createLaozhang(channel, apiKey, body);
+            int code = resp.statusCode();
+            String respBody = resp.body();
+            if (!isRetryableVideoCreate(code, respBody) || attempt == maxAttempts) {
+                break;
+            }
+            log.warn("视频任务创建返回 {}(上游项目池故障), 第 {}/{} 次重试换池, body={}",
+                    code, attempt, maxAttempts,
+                    respBody.length() > 150 ? respBody.substring(0, 150) : respBody);
+            Thread.sleep(500L * attempt);
+        }
+        return resp;
+    }
+
+    /** 视频任务创建响应是否可安全重试（对齐旧 Backend isRetryableVideoCreate 语义）：
+     *  404 = 上游池无模型权限（fail_to_fetch_task）；5xx 且 body 含
+     *  fail_to_fetch_task / do_request_failed / invalid_grant（凭据故障，任务未创建）→ 重试换池。
+     *  其余（400 参数错、401 密钥错等）不重试，避免重复创建任务/白扣费。 */
+    static boolean isRetryableVideoCreate(int code, String body) {
+        if (code == 404) return true;
+        if (code < 500 || body == null) return false;
+        return body.contains("fail_to_fetch_task") || body.contains("do_request_failed")
+                || body.contains("invalid_grant");
+    }
+
     private String stripTrailingSlash(String url) {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
@@ -223,6 +259,19 @@ public class VideoGatewayService {
                             .header("Authorization", "Bearer " + apiKey)
                             .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
                             .GET().build(), HttpResponse.BodyHandlers.ofString());
+                    if (!"minimax".equals(channel.getType())
+                            && (resp.statusCode() == 404 || resp.body().isBlank())) {
+                        // Laozhang fallback 端点（设计 §6.2）：主端点 404/空响应时再试 /video/generations/{taskId}
+                        String fbUrl = stripTrailingSlash(channel.getBaseUrl()) + "/video/generations/" + taskId;
+                        HttpResponse<String> fbResp = httpClient.send(HttpRequest.newBuilder()
+                                .uri(URI.create(fbUrl))
+                                .header("Authorization", "Bearer " + apiKey)
+                                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                                .GET().build(), HttpResponse.BodyHandlers.ofString());
+                        if (fbResp.statusCode() == 200) {
+                            resp = fbResp;
+                        }
+                    }
 
                     if (resp.statusCode() == 200) {
                         JsonNode json = objectMapper.readTree(resp.body());
