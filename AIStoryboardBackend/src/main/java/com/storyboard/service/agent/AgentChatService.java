@@ -65,6 +65,7 @@ public class AgentChatService {
     private final AgentGenerationService generationService;
     private final AgentMessageMapper messageMapper;
     private final ConversationTitleService titleService;
+    private final IntentRecognitionService intentRecognitionService;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
@@ -122,6 +123,7 @@ public class AgentChatService {
                             AgentGenerationService generationService,
                             AgentMessageMapper messageMapper,
                             ConversationTitleService titleService,
+                            IntentRecognitionService intentRecognitionService,
                             ProjectMapper projectMapper,
                             SceneMapper sceneMapper,
                             FileStorageService fileStorageService,
@@ -133,6 +135,7 @@ public class AgentChatService {
         this.generationService = generationService;
         this.messageMapper = messageMapper;
         this.titleService = titleService;
+        this.intentRecognitionService = intentRecognitionService;
         this.projectMapper = projectMapper;
         this.sceneMapper = sceneMapper;
         this.fileStorageService = fileStorageService;
@@ -354,10 +357,14 @@ public class AgentChatService {
 
         transactionTemplate.executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
+        // 1.6 意图识别（type 控制 Dify 工作流路由；失败已兜底 intent-other，不阻塞）。
+        // 落库后查历史（含本条，与"当前输入"轻微重复，flash 档成本可忽略）——与 streamMessage 行为一致
+        String intentType = intentRecognitionService.recognize(content, loadRecentHistory(conversationId));
+
         // 2. 调 Dify chat-messages
         Map<String, Object> result;
         try {
-            result = callDifyChat(conversation, content, userId);
+            result = callDifyChat(conversation, content, userId, intentType);
         } catch (Exception e) {
             // M8：失败路径也刷新 conversation 的 updatedAt（updateById 触发 MyBatis fill），
             // 反映最近一次对话尝试；刷新失败只记日志，不掩盖原始异常。
@@ -391,13 +398,14 @@ public class AgentChatService {
 
     /** 调用 Dify /v1/chat-messages（blocking 模式） */
     private Map<String, Object> callDifyChat(AgentConversation conversation,
-                                              String query, String userId) {
+                                              String query, String userId, String type) {
         try {
             Map<String, Object> body = new HashMap<>();
-            // Moon 工作流 start 节点变量：currentProjectId（项目 ID）+ PicUrl（参考图 URL）
+            // Moon 工作流 start 节点变量：currentProjectId（项目 ID）+ PicUrl（参考图 URL）+ type（意图路由）
             body.put("inputs", Map.of(
                 "currentProjectId", conversation.getProjectId(),
-                "PicUrl", ""
+                "PicUrl", "",
+                "type", type
             ));
             body.put("query", query);
             body.put("response_mode", "blocking");
@@ -485,7 +493,10 @@ public class AgentChatService {
         // 2. 异步代理 Dify（SseEmitter 需异步写，否则阻塞 Controller 返回；I6 专用 executor）
         CompletableFuture.runAsync(() -> {
             try {
-                Map<String, Object> body = buildChatBody(conversation, content, picUrl);
+                // 2.0 意图识别（type 控制 Dify 工作流路由；失败已兜底 intent-other，不阻塞）。
+                // user 消息已在上方落库，历史查询含本条——与"当前输入"轻微重复，flash 档成本可忽略
+                String intentType = intentRecognitionService.recognize(content, loadRecentHistory(conversationId));
+                Map<String, Object> body = buildChatBody(conversation, content, picUrl, intentType);
                 body.put("response_mode", "streaming");
                 HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(config.getDifyBaseUrl() + "/v1/chat-messages"))
@@ -518,11 +529,13 @@ public class AgentChatService {
     }
 
     /** 构建 Dify chat-messages 请求体（streaming/blocking 共用） */
-    private Map<String, Object> buildChatBody(AgentConversation conversation, String query, String picUrl) {
+    private Map<String, Object> buildChatBody(AgentConversation conversation, String query,
+                                              String picUrl, String type) {
         Map<String, Object> body = new HashMap<>();
         body.put("inputs", Map.of(
             "currentProjectId", conversation.getProjectId(),
-            "PicUrl", picUrl == null ? "" : picUrl
+            "PicUrl", picUrl == null ? "" : picUrl,
+            "type", type
         ));
         body.put("query", query);
         body.put("user", conversation.getUserId());
@@ -530,6 +543,16 @@ public class AgentChatService {
             body.put("conversation_id", conversation.getDifyConversationId());
         }
         return body;
+    }
+
+    /** 查最近 {@link IntentRecognitionService#HISTORY_LIMIT} 条消息（时间升序，供意图识别历史上下文） */
+    private List<AgentMessage> loadRecentHistory(String conversationId) {
+        List<AgentMessage> list = messageMapper.selectList(
+                new LambdaQueryWrapper<AgentMessage>()
+                        .eq(AgentMessage::getConversationId, conversationId)
+                        .orderByDesc(AgentMessage::getCreatedAt)
+                        .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT));
+        return list.reversed(); // Java 21 List.reversed()：倒序视图（最新在最后），零拷贝
     }
 
     /** SseEmitter 事件发送（捕获 IOException 忽略——前端已断开） */
