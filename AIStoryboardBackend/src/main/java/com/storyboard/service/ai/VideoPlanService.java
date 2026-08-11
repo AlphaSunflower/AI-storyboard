@@ -5,20 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.service.FileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * 图生视频方案设计服务 —— 视频生成前先用视觉模型"看图"。
@@ -42,6 +40,7 @@ import java.util.Map;
  *   <li>输出结构化为 JSON {@code {message, duration}}，{@code message} 直接作为图生视频
  *       prompt（首帧语义：画面主体/构图以首帧图为准，prompt 专注动态动作、运镜、光线氛围）；</li>
  *   <li>超时 120s（视觉理解 + 大图 base64 传输，给足余量）。</li>
+ *   <li>已换 Spring AI ChatClient 多模态（Media + UserMessage），替代原手写 JDK HttpClient 调用。</li>
  * </ul>
  */
 @Service
@@ -66,13 +65,18 @@ public class VideoPlanService {
     private final AiConfigProperties config;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
-    public VideoPlanService(AiConfigProperties config, FileStorageService fileStorageService) {
+    public VideoPlanService(AiConfigProperties config, FileStorageService fileStorageService,
+                            ChatClient.Builder chatClientBuilder) {
         this.config = config;
         this.fileStorageService = fileStorageService;
+        // 默认模型固定为 config.getDefaultVisionModel()，超时 120s（与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(config.getDefaultVisionModel())
+                        .timeout(Duration.ofSeconds(120)))
+                .build();
     }
 
     /** 图生视频方案：message=视频 prompt（直接投喂生成），duration=时长（秒） */
@@ -103,38 +107,39 @@ public class VideoPlanService {
             String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
                     + Base64.getEncoder().encodeToString(imageBytes);
 
-            // 2. 构造 OpenAI 兼容多模态请求（文本诉求 + 图片）
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getDefaultVisionModel());
-            List<Map<String, Object>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", VIDEO_PLAN_SYSTEM_PROMPT));
-            Map<String, Object> textPart = Map.of("type", "text",
-                    "text", "用户的视频创作诉求："
+            // 2. 组装多模态 UserMessage：文本诉求 + 图片（data 传完整 data URI 字符串，直接透传为 image_url）
+            Media media = Media.builder()
+                    .mimeType(MimeType.valueOf("image/" + guessImageType(filename)))
+                    .data(dataUri)
+                    .build();
+            UserMessage userMessage = UserMessage.builder()
+                    .text("用户的视频创作诉求："
                             + (userRequest == null || userRequest.isBlank()
-                                    ? "（未提供，请结合图片内容自行设计合理的动态方案）" : userRequest));
-            Map<String, Object> imagePart = Map.of("type", "image_url",
-                    "image_url", Map.of("url", dataUri));
-            messages.add(Map.of("role", "user", "content", List.of(textPart, imagePart)));
-            body.put("messages", messages);
+                                    ? "（未提供，请结合图片内容自行设计合理的动态方案）" : userRequest))
+                    .media(media)
+                    .build();
 
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
+            // 3. 调用视觉模型（ChatClient 统一走 LLM 网关）
+            String content = chatClient.prompt()
+                    .system(VIDEO_PLAN_SYSTEM_PROMPT)
+                    .messages(userMessage)
+                    .call()
+                    .content();
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("视觉理解 API 返回 " + resp.statusCode() + ": " + resp.body());
+            // 4. 解析：优先 BeanOutputConverter 结构化解析，失败走 extractVideoPlan 兜底
+            VideoPlan plan = null;
+            try {
+                BeanOutputConverter<VideoPlan> conv = new BeanOutputConverter<>(VideoPlan.class);
+                VideoPlan parsed = conv.convert(content);
+                if (parsed != null && parsed.isValid()) {
+                    plan = parsed;
+                }
+            } catch (RuntimeException e) {
+                // 结构化解析失败（AI 返回非 JSON / 字段不符等），走兜底
             }
-
-            // 3. 解析结构化 JSON {message, duration}
-            JsonNode root = objectMapper.readTree(resp.body());
-            String content = root.path("choices").get(0).path("message").path("content").asText("");
-            VideoPlan plan = extractVideoPlan(content);
+            if (plan == null) {
+                plan = extractVideoPlan(content);
+            }
             if (plan == null) {
                 throw new RuntimeException("视觉理解未输出有效的视频方案");
             }
