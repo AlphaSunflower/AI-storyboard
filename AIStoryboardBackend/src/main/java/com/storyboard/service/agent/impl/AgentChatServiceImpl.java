@@ -472,8 +472,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
                 emitter.complete();
             } finally {
-                // 会话锁释放（无论成败/断开，保证下一条消息可进入）
+                // 先释放会话锁再 complete：前端收到 EOF 时锁已释放，防下一条消息立即撞锁（竞态 40901）
                 conversationLock.release(conversationId);
+                try { emitter.complete(); } catch (Exception ignore) { }
             }
         }, agentExecutor);
     }
@@ -625,8 +626,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("图生视频生成失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
             } finally {
-                if (!cancel.get()) emitter.complete();
+                // 先释放会话锁再 complete（防 EOF 竞态：前端收到 task_accepted 后立即轮询/再发消息）
                 conversationLock.release(conversationId);
+                if (!cancel.get()) emitter.complete();
             }
         }, agentExecutor);
     }
@@ -666,9 +668,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
                 log.error("HITL 提交失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
-                emitter.complete();
             } finally {
+                // 先释放会话锁再 complete（防 EOF 竞态）
                 conversationLock.release(conversationId);
+                try { emitter.complete(); } catch (Exception ignore) { }
             }
         }, agentExecutor);
     }

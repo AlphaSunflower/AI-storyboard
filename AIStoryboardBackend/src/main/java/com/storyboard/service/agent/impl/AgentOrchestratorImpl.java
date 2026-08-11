@@ -111,9 +111,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.error("AgentOrchestrator 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             support.sendEvent(request, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
             return "";
-        } finally {
-            try { emitter.complete(); } catch (Exception ignore) { }
         }
+        // 注意：emitter.complete() 由调用方（AgentChatServiceImpl）统一执行，
+        // 且调用方 finally 先释放会话锁再 complete——避免前端收到 EOF 立即发下一条时锁未释放（竞态 40901）
     }
 
     @Override
@@ -157,8 +157,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         } catch (Exception e) {
             log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             support.sendEvent(request, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
-        } finally {
-            try { emitter.complete(); } catch (Exception ignore) { }
         }
+        // 同上：complete 由调用方统一执行（先释放锁再 complete，防 EOF 竞态）
     }
 }
