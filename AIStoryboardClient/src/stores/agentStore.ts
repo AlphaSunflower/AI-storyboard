@@ -76,7 +76,7 @@ interface AgentState {
 
   // 发送
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
-  submitHumanInput: (actionId: string) => Promise<void>;
+  submitHumanInput: (actionId: string, customText?: string) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
   submitVideoPlan: (actionId: string) => Promise<void>;
@@ -379,7 +379,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (get().activeConversationId === snapshotId) set({ refImageUrl: null });
   },
 
-  submitHumanInput: async (actionId) => {
+  submitHumanInput: async (actionId, customText = '') => {
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
@@ -435,7 +435,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id: `tmp-user-${Date.now()}`,
       conversationId: id,
       role: 'user',
-      content: `确认：${confirmTitle}`,
+      // 自定义输入：落库用户原文（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
+      content: actionId === 'custom' ? customText : `确认：${confirmTitle}`,
       difyMessageId: null,
       createdAt: new Date().toISOString(),
     };
@@ -465,7 +466,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 actions: e.actions ?? [],
                 expirationTime: e.expirationTime ?? 0,
               },
-            });
+      });
             break;
           case 'message_end':
             receivedMessageEnd = true;
@@ -513,7 +514,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      });
+      }, customText);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误
       if (get().activeConversationId === snapshotId) {

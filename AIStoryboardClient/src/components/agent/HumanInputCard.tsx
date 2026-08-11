@@ -1,9 +1,17 @@
+import { useState } from 'react';
 import { useAgentStore, type HumanInputInfo } from '../../stores/agentStore';
 
+/**
+ * 人工确认卡片（human_input 事件）：渲染 actions 选项按钮；
+ * id=custom 的「自定义输入」选项点击后展开内联输入框，用户可输入选项之外的想法。
+ */
 export function HumanInputCard({ info }: { info: HumanInputInfo }) {
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const streaming = useAgentStore((s) => s.streaming);
   const expired = info.expirationTime > 0 && Date.now() / 1000 > info.expirationTime;
+  // 自定义输入展开态：点「自定义输入」按钮展开内联输入框，确认后 submitHumanInput('custom', text)
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customText, setCustomText] = useState('');
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
@@ -14,13 +22,58 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
         </div>
         {expired ? (
           <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>确认已过期，请重新发起对话</div>
+        ) : customOpen ? (
+          <div>
+            <input
+              autoFocus
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && customText.trim() && !streaming) {
+                  submitHumanInput('custom', customText.trim());
+                }
+              }}
+              placeholder="输入你的想法…"
+              style={{
+                width: '100%', boxSizing: 'border-box', padding: '6px 10px',
+                border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
+                fontSize: 13, outline: 'none', marginBottom: 8,
+              }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                disabled={streaming || !customText.trim()}
+                onClick={() => submitHumanInput('custom', customText.trim())}
+                style={{
+                  padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
+                  background: 'var(--color-primary)', color: 'white', fontSize: 13,
+                  cursor: streaming || !customText.trim() ? 'not-allowed' : 'pointer',
+                  opacity: streaming || !customText.trim() ? 0.6 : 1,
+                }}
+              >
+                确认输入
+              </button>
+              <button
+                disabled={streaming}
+                onClick={() => { setCustomOpen(false); setCustomText(''); }}
+                style={{
+                  padding: '6px 16px', border: '1px solid var(--color-hairline)',
+                  borderRadius: 'var(--rounded-md)', background: 'transparent',
+                  color: 'var(--color-muted)', fontSize: 13,
+                  cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
         ) : (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {info.actions.map((a) => (
               <button
                 key={a.id}
                 disabled={streaming}
-                onClick={() => submitHumanInput(a.id)}
+                onClick={() => (a.id === 'custom' ? setCustomOpen(true) : submitHumanInput(a.id))}
                 style={{
                   padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
                   background: 'var(--color-primary)', color: 'white', fontSize: 13,

@@ -28,4 +28,7 @@ public class OrchestrationRequest {
 
     /** resume 阶段用户点选的选项 id（run 阶段为空串；由 Orchestrator.resume 设置） */
     private String action = "";
+
+    /** resume 阶段自定义输入文本（action=custom 时携带，其余为空串；由 Orchestrator.resume 设置） */
+    private String customText = "";
 }

@@ -143,12 +143,13 @@ export async function submitForm(
   taskId: string,
   action: string,
   onEvent: (e: SseEvent) => void,
+  customText?: string,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ formToken, taskId, action }),
+    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '' }),
   });
   await consumeSse(res, onEvent);
 }

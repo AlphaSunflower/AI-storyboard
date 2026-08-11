@@ -126,10 +126,13 @@ public class AisplitIntentHandler implements IntentHandler {
             return false;
         }
         if (options != null && !options.isEmpty()) {
+            // 追加「自定义输入」选项：没有想要的选项时用户可自由输入（resume 特判 action=custom 用 customText）
+            List<Map<String, Object>> withCustom = new java.util.ArrayList<>(options);
+            withCustom.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
             support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     questionText, "clarify-option",
-                    List.of(Map.of("kind", kind, "originalContent", originalContent, "options", options)),
-                    "human_input", options));
+                    List.of(Map.of("kind", kind, "originalContent", originalContent, "options", withCustom)),
+                    "human_input", withCustom));
         } else if (request.getLastMessage().isBlank()) {
             // 流式失败兜底 / LLM 未输出 options：退回纯文本追问（message 未发出时补一条）
             support.sendMessage(request, questionText);
@@ -139,15 +142,18 @@ public class AisplitIntentHandler implements IntentHandler {
 
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 澄清选项续流：所选选项标题拼入需求，重走对应 gate（kind=script 从剧本优化重走；plan 从分镜方案重走）
+        // 澄清选项续流：所选选项标题拼入需求，重走对应 gate（kind=script 从剧本优化重走；plan 从分镜方案重走）。
+        // action=custom（自定义输入）：直接用用户输入文本作为补充，不查 options 表
         if ("clarify-option".equals(checkpoint.getAction())) {
             String kind = support.planField(checkpoint.getPlan(), "kind");
             String original = support.planField(checkpoint.getPlan(), "originalContent");
             String chosenId = request.getAction();
-            String title = support.planListField(checkpoint.getPlan(), "options").stream()
-                    .filter(o -> chosenId.equals(o.get("id")))
-                    .map(o -> String.valueOf(o.getOrDefault("title", "")))
-                    .findFirst().orElse("");
+            String title = "custom".equals(chosenId)
+                    ? request.getCustomText()
+                    : support.planListField(checkpoint.getPlan(), "options").stream()
+                            .filter(o -> chosenId.equals(o.get("id")))
+                            .map(o -> String.valueOf(o.getOrDefault("title", "")))
+                            .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
             return "plan".equals(kind)
                     ? handleFromPlanGate(request, supplemented)

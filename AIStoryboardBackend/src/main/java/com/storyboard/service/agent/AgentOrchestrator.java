@@ -34,10 +34,11 @@ public interface AgentOrchestrator {
      *
      * @param conversation 会话（已校验归属）
      * @param formToken    checkpoint 一次性 token（前端 formToken / planToken）
-     * @param action       用户确认动作（agree / disagree / generate_image / generate_video / refine）
+     * @param action       用户确认动作（agree / disagree / generate_image / generate_video / refine / custom）
+     * @param customText   自定义输入文本（action=custom 时必填，其余可空）
      * @param emitter      SSE 输出
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息，与 {@link #run} 同契约；
      *         异步任务/失败分支返回空串）
      */
-    String resume(AgentConversation conversation, String formToken, String action, SseEmitter emitter);
+    String resume(AgentConversation conversation, String formToken, String action, String customText, SseEmitter emitter);
 }

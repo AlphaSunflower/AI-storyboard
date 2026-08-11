@@ -97,7 +97,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                 Map.of("id", "intent-aisplit", "title", "生成分镜"),
                                 Map.of("id", "intent-pic", "title", "生成图片"),
                                 Map.of("id", "intent-video", "title", "生成视频"),
-                                Map.of("id", "intent-other", "title", "其他 / 继续输入"))));
+                                Map.of("id", "intent-other", "title", "其他 / 继续输入"),
+                                Map.of("id", "custom", "title", "✍ 自定义输入"))));
             }
 
             // 2.5 非 aisplit 轮清零澄清计数（澄清追问次数只在分镜链内连续累计）
@@ -124,7 +125,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     }
 
     @Override
-    public String resume(AgentConversation conversation, String formToken, String action, SseEmitter emitter) {
+    public String resume(AgentConversation conversation, String formToken, String action, String customText, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
@@ -153,17 +154,27 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             }
 
             // 澄清类 checkpoint 特判（不在 byAction 注册表内，避免动态选项 id 与全局 action 冲突）：
-            // 1) intent-clarify：意图澄清卡片，用户点选的目标意图 id（= intentType）→ 按所选意图重新分发 handle
+            // 1) intent-clarify：意图澄清卡片，用户点选的目标意图 id（= intentType）→ 按所选意图重新分发 handle；
+            //    action=custom（自定义输入）→ 把自定义文本作为新用户消息走完整编排（重新意图识别 + 分发）
             if ("intent-clarify".equals(cp.getAction())) {
+                if ("custom".equals(action)) {
+                    if (customText == null || customText.isBlank()) {
+                        support.sendEvent(request, "message", Map.of("content", "请直接输入你的想法，我会继续处理。"));
+                        return request.getLastMessage();
+                    }
+                    return run(conversation, customText, null, emitter);
+                }
                 IntentHandler target = byIntent.getOrDefault(action, byIntent.get(IntentRecognitionService.FALLBACK_TYPE));
                 OrchestrationRequest rerun = new OrchestrationRequest(conversation,
                         support.planField(cp.getPlan(), "content"), null, emitter);
                 target.handle(rerun);
                 return rerun.getLastMessage();
             }
-            // 2) clarify-option：链内 gate 澄清卡片，选项 id 由 LLM 动态生成（optN）→ 转 aisplit handler 按所选选项续流
+            // 2) clarify-option：链内 gate 澄清卡片，选项 id 由 LLM 动态生成（optN）→ 转 aisplit handler 按所选选项续流；
+            //    自定义输入同样走此分支（action=custom，customText 为自定义内容）
             if ("clarify-option".equals(cp.getAction())) {
                 request.setAction(action);
+                request.setCustomText(customText);
                 byIntent.get("intent-aisplit").resume(request, cp);
                 return request.getLastMessage();
             }

@@ -645,7 +645,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * HITL 表单提交并续流（编排 checkpoint 驱动，替代 Dify form API）：
      * 校验 form_token 归属/未过期 → 一次性消费（status pending→used）→ orchestrator.resume 恢复对应 step。
      */
-    public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, SseEmitter emitter) {
+    public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
         if (!conversationLock.tryAcquire(conversationId)) {
@@ -661,11 +661,11 @@ public class AgentChatServiceImpl implements AgentChatService {
         CompletableFuture.runAsync(() -> {
             try {
                 // 生成后端化：HITL 人工确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
-                persistUserConfirmation(conversation, action, null);
+                persistUserConfirmation(conversation, action, "custom".equals(action) ? customText : null);
                 // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resume 内处理）；
                 // resume 返回本轮最后一条 message（如生成图片的 ![...](url)），落库 assistant 消息，
                 // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
-                String answer = orchestrator.resume(conversation, formToken, action, emitter);
+                String answer = orchestrator.resume(conversation, formToken, action, customText, emitter);
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);
                 }
@@ -714,8 +714,9 @@ public class AgentChatServiceImpl implements AgentChatService {
      * title 为确认动作可读文案（如「开始生成视频」），缺省回退 action id 原文。
      */
     private void persistUserConfirmation(AgentConversation conversation, String action, String title) {
+        // 自定义输入：直接落库用户原文（不带「确认：」前缀）；否则 title 缺省回退 action id 原文
         if (title == null || title.isBlank()) title = action;
-        final String content = "确认：" + title;
+        final String content = "custom".equals(action) ? title : "确认：" + title;
         transactionTemplate().executeWithoutResult(tx -> {
             AgentMessage userMessage = new AgentMessage();
             userMessage.setConversationId(conversation.getId());
