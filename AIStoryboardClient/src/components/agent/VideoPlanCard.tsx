@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { useAgentStore, type VideoPlanInfo } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
+import { AgentParamSelector } from './AgentParamSelector';
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
 export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
   const submitVideoPlan = useAgentStore((s) => s.submitVideoPlan);
   const streaming = useAgentStore((s) => s.streaming);
+  // 卡片参数选择器的当前选择（模型/分辨率/时长/画幅；无选择器时为 {}）
+  const [selectedParams, setSelectedParams] = useState<Record<string, string>>({});
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
@@ -42,6 +46,15 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
         >
           {info.message}
         </div>
+        {/* 模型/参数选择器（后端下发 models 时渲染；推荐值默认选中，用户可改） */}
+        {info.models && info.models.length > 0 && (
+          <AgentParamSelector
+            models={info.models}
+            recommended={info.recommended}
+            reasons={info.reasons}
+            onParamsChange={setSelectedParams}
+          />
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
           {info.actions.map((a) => {
             const primary = a.id === 'generate_video';
@@ -49,7 +62,7 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
               <button
                 key={a.id}
                 disabled={streaming}
-                onClick={() => submitVideoPlan(a.id)}
+                onClick={() => submitVideoPlan(a.id, selectedParams)}
                 style={{
                   padding: '6px 16px', borderRadius: 'var(--rounded-md)', fontSize: 13,
                   background: primary ? 'var(--color-primary)' : 'white',

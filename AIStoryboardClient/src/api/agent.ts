@@ -1,5 +1,6 @@
 import client from './client';
 import { BACKEND_URL } from '../config';
+import type { GatewayModelOption } from './ai';
 
 export interface AgentConversation {
   id: string;
@@ -51,6 +52,11 @@ export interface SseEvent {
   formContent?: string;
   actions?: { id: string; title: string }[];
   expirationTime?: number;
+  // 卡片模型/参数选项（后端下发网关模型列表，含各模型参数能力；无配置时缺失）
+  models?: GatewayModelOption[];
+  // LLM 推荐的生成参数值与推荐理由（video 链方案生成时输出）
+  recommended?: Record<string, string>;
+  reasons?: Record<string, string>;
   messageId?: string;
   sceneCount?: number;
   // confirm_result 事件字段（生成结果看图确认卡片）
@@ -144,12 +150,13 @@ export async function submitForm(
   action: string,
   onEvent: (e: SseEvent) => void,
   customText?: string,
+  params?: Record<string, string>,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '' }),
+    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {} }),
   });
   await consumeSse(res, onEvent);
 }

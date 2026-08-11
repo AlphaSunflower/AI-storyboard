@@ -6,6 +6,7 @@ import {
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl } from '../config';
+import type { GatewayModelOption } from '../api/ai';
 
 export interface HumanInputInfo {
   formToken: string;
@@ -13,6 +14,10 @@ export interface HumanInputInfo {
   formContent: string;
   actions: { id: string; title: string }[];
   expirationTime: number;
+  // 卡片模型/参数选项 + LLM 推荐（后端 human_input 事件下发；无配置时为空数组/空对象）
+  models?: GatewayModelOption[];
+  recommended?: Record<string, string>;
+  reasons?: Record<string, string>;
 }
 
 /** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
@@ -31,6 +36,10 @@ export interface VideoPlanInfo {
   duration: number;
   picUrl: string;
   actions: { id: string; title: string }[];
+  // 卡片模型/参数选项 + LLM 推荐（后端 video_plan 事件下发；无配置时为空数组/空对象）
+  models?: GatewayModelOption[];
+  recommended?: Record<string, string>;
+  reasons?: Record<string, string>;
 }
 
 interface AgentState {
@@ -76,10 +85,10 @@ interface AgentState {
 
   // 发送
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
-  submitHumanInput: (actionId: string, customText?: string) => Promise<void>;
+  submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
-  submitVideoPlan: (actionId: string) => Promise<void>;
+  submitVideoPlan: (actionId: string, params?: Record<string, string>) => Promise<void>;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
   refineAsset: () => void;
   dismissConfirm: () => void;
@@ -341,6 +350,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
+                models: e.models,
+                recommended: e.recommended,
+                reasons: e.reasons,
               },
             });
             break;
@@ -379,7 +391,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (get().activeConversationId === snapshotId) set({ refImageUrl: null });
   },
 
-  submitHumanInput: async (actionId, customText = '') => {
+  submitHumanInput: async (actionId, customText = '', params) => {
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
@@ -465,8 +477,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 formContent: e.formContent ?? '',
                 actions: e.actions ?? [],
                 expirationTime: e.expirationTime ?? 0,
+                models: e.models,
+                recommended: e.recommended,
+                reasons: e.reasons,
               },
-      });
+            });
             break;
           case 'message_end':
             receivedMessageEnd = true;
@@ -504,6 +519,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
+                models: e.models,
+                recommended: e.recommended,
+                reasons: e.reasons,
               },
             });
             break;
@@ -514,7 +532,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, customText);
+      }, customText, params);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误
       if (get().activeConversationId === snapshotId) {
@@ -548,7 +566,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
    * - 继续完善：本地关闭卡片，参考图转 pendingPicUrl 保留（与图片完善 refine 同语义），
    *   用户输入完善需求后随下一条消息发送（重新分流 → 再设计）。
    */
-  submitVideoPlan: async (actionId) => {
+  submitVideoPlan: async (actionId, params) => {
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
@@ -658,7 +676,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      });
+      }, '', params);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误
       if (get().activeConversationId === snapshotId) {
