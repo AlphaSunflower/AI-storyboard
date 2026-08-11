@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import {
-  agentApi, streamChat, submitForm, submitVideoPlan,
+  agentApi, streamChat, submitForm,
   type AgentConversation, type AgentMessage, type AgentAsset,
-  type AgentPage, type SseEvent,
+  type AgentPage, type SseEvent, type VideoTaskStatus,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl } from '../config';
@@ -385,6 +385,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!id || !info || get().streaming) return;
     // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
     set({ streaming: true, waitingHumanInput: null, streamError: null });
+    // 刷新基准：提交时刻的项目分镜数（sendMessage 时的旧值可能已过期，
+    // 例如 HITL 期间分镜被其他操作修改；确认写库后 sceneCount(总数) > 此值才触发列表刷新）
+    initialSceneCount = useProjectStore.getState().scenes.length;
 
     // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应）。
     // sendMessage 流结束（receivedHumanInput=true）时 pendingAssistantId 已被 finally 清空，
@@ -538,15 +541,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   /**
    * 图生视频方案确认卡片（video_plan 事件）：
-   * - 开始生成视频：调后端 video/plan/generate（SSE）→ 视频生成 → 结果 + confirm_result 卡片；
+   * - 开始生成视频：统一走 /form/submit（action=generate_video → 后端 VideoIntentHandler.resume）
+   *   → 立即收到 task_accepted（视频任务已受理）→ 前端 5s 轮询 GET /tasks/{taskId}，
+   *   completed 后渲染视频结果 + confirm_result 卡片；failed 显示错误；
    * - 继续完善：本地关闭卡片，参考图转 pendingPicUrl 保留（与图片完善 refine 同语义），
-   *   用户输入完善需求后随下一条消息发送（Dify 重新分流 → 再设计）。
+   *   用户输入完善需求后随下一条消息发送（重新分流 → 再设计）。
    */
   submitVideoPlan: async (actionId) => {
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
-    // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，Dify 容器内可访问）
+    // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，后端容器内可访问）
     if (actionId === 'refine') {
       set({ waitingVideoPlan: null, pendingPicUrl: assetUrl(info.picUrl) });
       return;
@@ -565,8 +570,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     };
     set((s) => ({ messages: [...s.messages, confirmMsg] }));
 
-    // 新建 assistant 占位气泡：视频生成期间为空（AgentChatPanel 显示生成中加载条），
-    // 完成后由 message 事件（视频 URL）填充，MessageBubble 渲染 <video> 播放器
+    // 新建 assistant 占位气泡：视频异步生成期间为空（AgentChatPanel 显示生成中加载条），
+    // 完成后由轮询结果填充，MessageBubble 渲染 <video> 播放器
     const assistantId = `tmp-assistant-${Date.now()}`;
     const optimisticAssistant: AgentMessage = {
       id: assistantId,
@@ -587,12 +592,58 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
     let receivedResult = false;
+    // 视频异步任务：task_accepted 后启动 5s 轮询（跨会话守卫；completed/failed 停止）
+    let acceptedTaskId: string | null = null;
+    const startTaskPolling = (taskId: string) => {
+      const timer = setInterval(async () => {
+        if (get().activeConversationId !== snapshotId || acceptedTaskId === null) {
+          clearInterval(timer);
+          return;
+        }
+        try {
+          const res = await agentApi.getVideoTaskStatus(taskId);
+          const t: VideoTaskStatus = res.data.data;
+          if (t.status === 'completed') {
+            clearInterval(timer);
+            receivedResult = true;
+            updateAssistantFull(t.url || '');
+            set({
+              streaming: false,
+              pendingAssistantId: null,
+              confirmResult: {
+                kind: 'video',
+                url: t.url || '',
+                assetId: t.assetId,
+                sceneCount: 0,
+                actions: [
+                  { id: 'refine', title: '继续完善' },
+                  { id: 'done', title: '满意完成' },
+                ],
+              },
+            });
+            void get().loadAssets();
+          } else if (t.status === 'failed') {
+            clearInterval(timer);
+            if (get().activeConversationId === snapshotId) {
+              set({ streamError: t.error || '视频生成失败，请重试' });
+            }
+          }
+          // queued/running：继续轮询（5s 后下一次 tick）
+        } catch {
+          // 单次轮询失败不终止：下一 tick 重试（后端瞬时故障容错）
+        }
+      }, 5000);
+    };
+
     try {
-      await submitVideoPlan(id, info.planToken, (e: SseEvent) => {
+      // 统一 HITL 提交路径：video_plan 的 planToken 即 checkpoint formToken
+      await submitForm(id, info.planToken, '', 'generate_video', (e: SseEvent) => {
         switch (e.type) {
-          case 'message':
+          case 'task_accepted':
+            // 视频任务已受理：流即将结束，转轮询取结果（跨会话守卫）
             if (get().activeConversationId !== snapshotId) break;
-            updateAssistantFull(e.content ?? '');
+            acceptedTaskId = e.taskId ?? '';
+            if (acceptedTaskId) startTaskPolling(acceptedTaskId);
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -614,6 +665,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     } finally {
       const stillSameConversation = get().activeConversationId === snapshotId;
+      // 异步视频任务已受理：保持 streaming（轮询 completed 时关闭），占位气泡不补写
+      if (acceptedTaskId) {
+        if (!get().streaming) set({ streaming: true });
+        return;
+      }
       // 失败（streamError 非空）时占位显示"（生成失败）"，避免空气泡误导
       const failedText = get().streamError ? '（生成失败）' : '（未收到回复）';
       set((s) => ({

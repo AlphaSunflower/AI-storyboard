@@ -42,7 +42,7 @@ export interface AgentPage<T> {
 }
 
 export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'error';
+  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error';
   content?: string;
   title?: string;
   status?: string;
@@ -63,6 +63,15 @@ export interface SseEvent {
   picUrl?: string;
   code?: string;
   message?: string;
+}
+
+/** 视频异步任务状态（GET /api/agent/tasks/{taskId} 轮询结果） */
+export interface VideoTaskStatus {
+  taskId: string;
+  assetId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
+  url: string;
+  error: string;
 }
 
 // ── 会话 ──────────────────────────────────────────────
@@ -105,6 +114,10 @@ export const agentApi = {
   // 满意完成：清空 Dify 会话的 storage_pic_talk 变量（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>
     client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/confirm-done`),
+
+  // 视频异步任务状态（task_accepted 后前端 5s 轮询，取 status/url/error）
+  getVideoTaskStatus: (taskId: string) =>
+    client.get<{ data: VideoTaskStatus }>(`/agent/tasks/${taskId}`),
 };
 
 /** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */
@@ -136,21 +149,6 @@ export async function submitForm(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ formToken, taskId, action }),
-  });
-  await consumeSse(res, onEvent);
-}
-
-/** 图生视频方案确认后生成（video_plan 事件「开始生成视频」按钮触发） */
-export async function submitVideoPlan(
-  conversationId: string,
-  planToken: string,
-  onEvent: (e: SseEvent) => void,
-): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/video/plan/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ planToken }),
   });
   await consumeSse(res, onEvent);
 }
