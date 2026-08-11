@@ -5,76 +5,37 @@ import com.storyboard.dto.request.GenerateScriptRequest;
 import com.storyboard.dto.request.GenerateVideoRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.dto.response.TaskStatusResponse;
-import com.storyboard.entity.Scene;
-import com.storyboard.mapper.SceneMapper;
-import com.storyboard.service.ProjectService;
-import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.ScriptGenerationService;
 import com.storyboard.service.ai.VideoGenerationService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
+/**
+ * AI 生成端点：分镜脚本 / 图片 / 视频生成 + 任务轮询 + 网关模型列表。
+ * 仅收参 → 调 Service → 封装返回，不持有任何业务逻辑。
+ */
 @RestController
 @RequestMapping("/api/ai")
+@RequiredArgsConstructor
 public class AIController {
 
     private final ScriptGenerationService scriptService;
     private final ImageGenerationService imageService;
     private final VideoGenerationService videoService;
-    private final SceneMapper sceneMapper;
-    private final ProjectService projectService;
-    private final AiConfigProperties config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
-    public AIController(ScriptGenerationService scriptService, ImageGenerationService imageService,
-                        VideoGenerationService videoService, SceneMapper sceneMapper,
-                        ProjectService projectService, AiConfigProperties config) {
-        this.scriptService = scriptService;
-        this.imageService = imageService;
-        this.videoService = videoService;
-        this.sceneMapper = sceneMapper;
-        this.projectService = projectService;
-        this.config = config;
-    }
+    private final GatewayModelService gatewayModelService;
 
     @PostMapping("/generate-script")
     public ApiResponse<Map<String, Object>> generateScript(@RequestBody GenerateScriptRequest request) {
-        List<Map<String, Object>> scenes = scriptService.generateScenes(
+        // 生成 + 落库全部在 Service 层完成（原 Controller 内 sceneMapper 循环写库已下沉）
+        return ApiResponse.ok(scriptService.generateAndSaveScenes(
             request.projectId(), request.scriptText(), request.creationType(),
             request.customTypeDesc(), request.aspectRatio(), request.model()
-        );
-
-        // 将生成的 scenes 存入数据库
-        for (Map<String, Object> s : scenes) {
-            Scene scene = new Scene();
-            scene.setProjectId(request.projectId());
-            scene.setSceneNumber((Integer) s.get("sceneNumber"));
-            scene.setScriptContent((String) s.get("scriptContent"));
-            scene.setImagePrompt((String) s.get("imagePrompt"));
-            scene.setVideoPrompt((String) s.get("videoPrompt"));
-            scene.setNegativePrompt((String) s.get("negativePrompt"));
-            scene.setCameraMovement((String) s.get("cameraMovement"));
-            scene.setShotType((String) s.get("shotType"));
-            scene.setSoundDesign((String) s.get("soundDesign"));
-            sceneMapper.insert(scene);
-        }
-
-        return ApiResponse.ok(Map.of("projectId", request.projectId(), "sceneCount", scenes.size()));
+        ));
     }
 
     @PostMapping("/generate-image")
@@ -114,45 +75,8 @@ public class AIController {
     @GetMapping("/models")
     public ApiResponse<Map<String, Object>> aiModels() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("imageModels", fetchGatewayModels("image"));
-        result.put("videoModels", fetchGatewayModels("video"));
+        result.put("imageModels", gatewayModelService.fetchModels("image"));
+        result.put("videoModels", gatewayModelService.fetchModels("video"));
         return ApiResponse.ok(result);
-    }
-
-    /** 拉取网关模型列表：GET {gateway}/v1/models?type=X → data[].id；失败返回空列表（不阻塞主流程） */
-    private List<Map<String, String>> fetchGatewayModels(String type) {
-        List<Map<String, String>> models = new ArrayList<>();
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(config.getGatewayBaseUrl() + "/v1/models?type=" + type))
-                    .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-                return models;
-            }
-            JsonNode data = objectMapper.readTree(resp.body()).path("data");
-            if (data.isArray()) {
-                for (JsonNode n : data) {
-                    String id = n.path("id").asText("");
-                    if (!id.isBlank()) {
-                        Map<String, String> m = new LinkedHashMap<>();
-                        m.put("value", id);
-                        m.put("label", id);
-                        // 透传网关下发的模型参数（能力枚举+默认值）：非 null 非空对象时以 JSON 字符串下发，前端 store 解析为对象
-                        JsonNode paramsNode = n.path("params");
-                        if (paramsNode.isObject() && !paramsNode.isEmpty()) {
-                            m.put("params", paramsNode.toString());
-                        }
-                        models.add(m);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // 网关不可达/解析失败：返回空列表，前端用默认模型继续工作
-        }
-        return models;
     }
 }

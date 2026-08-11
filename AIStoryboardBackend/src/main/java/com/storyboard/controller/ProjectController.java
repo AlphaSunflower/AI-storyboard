@@ -5,6 +5,7 @@ import com.storyboard.dto.request.UpdateProjectRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.dto.response.ProjectResponse;
 import com.storyboard.service.ProjectService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,13 +13,10 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/projects")
+@RequiredArgsConstructor
 public class ProjectController {
 
     private final ProjectService projectService;
-
-    public ProjectController(ProjectService projectService) {
-        this.projectService = projectService;
-    }
 
     @GetMapping
     public ApiResponse<List<ProjectResponse>> list(Authentication auth) {

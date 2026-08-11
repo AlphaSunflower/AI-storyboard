@@ -2,6 +2,7 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.service.FileStorageService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -18,13 +19,10 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/files")
+@RequiredArgsConstructor
 public class FileController {
 
     private final FileStorageService fileStorageService;
-
-    public FileController(FileStorageService fileStorageService) {
-        this.fileStorageService = fileStorageService;
-    }
 
     /**
      * 上传图片，返回可访问路径。

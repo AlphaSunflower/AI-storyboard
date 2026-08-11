@@ -1,85 +1,58 @@
 package com.storyboard.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storyboard.dto.request.AgentConversationUpdateRequest;
 import com.storyboard.dto.request.AgentCreateConversationRequest;
 import com.storyboard.dto.request.AgentFormSubmitRequest;
 import com.storyboard.dto.request.AgentSendMessageRequest;
 import com.storyboard.dto.request.AgentVideoPlanGenerateRequest;
 import com.storyboard.dto.request.PromptOptimizeRequest;
+import com.storyboard.dto.response.AgentConversationVO;
+import com.storyboard.dto.response.AgentMessageVO;
 import com.storyboard.dto.response.ApiResponse;
-import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.AgentMessage;
-import com.storyboard.mapper.AgentAssetMapper;
-import com.storyboard.mapper.AgentConversationMapper;
-import com.storyboard.mapper.AgentMessageMapper;
 import com.storyboard.exception.BusinessException;
-import com.storyboard.service.FileStorageService;
 import com.storyboard.service.agent.AgentChatService;
 import com.storyboard.service.agent.PromptOptimizeService;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Agent 对话模块 —— JWT 鉴权（/api/agent/** 不在 SecurityConfig 白名单）。
- * 会话 / 消息 / 资产 / 图片上传。
+ * Agent 智能体对话端点：会话 / 消息 / 资产 / 图片上传 / 提示词优化。
+ * 仅收参 → 校验 → 调 Service → 封装返回，不持有数据访问层与业务逻辑。
  */
 @RestController
 @RequestMapping("/api/agent")
+@RequiredArgsConstructor
 public class AgentConversationController {
 
     private static final Logger log = LoggerFactory.getLogger(AgentConversationController.class);
 
     private final AgentChatService chatService;
-    private final AgentConversationMapper conversationMapper;
-    private final AgentAssetMapper assetMapper;
-    private final AgentMessageMapper messageMapper;
-    private final FileStorageService fileStorageService;
     private final PromptOptimizeService optimizeService;
-
-    public AgentConversationController(AgentChatService chatService,
-                                       AgentConversationMapper conversationMapper,
-                                       AgentAssetMapper assetMapper,
-                                       AgentMessageMapper messageMapper,
-                                       FileStorageService fileStorageService,
-                                       PromptOptimizeService optimizeService) {
-        this.chatService = chatService;
-        this.conversationMapper = conversationMapper;
-        this.assetMapper = assetMapper;
-        this.messageMapper = messageMapper;
-        this.fileStorageService = fileStorageService;
-        this.optimizeService = optimizeService;
-    }
 
     /** 创建会话 */
     @PostMapping("/conversations")
-    public ApiResponse<AgentConversation> createConversation(
+    public ApiResponse<AgentConversationVO> createConversation(
             Authentication auth, @RequestBody AgentCreateConversationRequest request) {
-        return ApiResponse.ok(chatService.createConversation(auth.getName(), request.projectId(), request.title()));
+        return ApiResponse.ok(toVO(chatService.createConversation(auth.getName(), request.projectId(), request.title())));
     }
 
     /** 当前用户的项目会话列表（updated_at 倒序） */
     @GetMapping("/conversations")
-    public ApiResponse<List<AgentConversation>> listConversations(
+    public ApiResponse<List<AgentConversationVO>> listConversations(
             Authentication auth, @RequestParam String projectId) {
-        List<AgentConversation> list = conversationMapper.selectList(
-            new LambdaQueryWrapper<AgentConversation>()
-                .eq(AgentConversation::getUserId, auth.getName())
-                .eq(AgentConversation::getProjectId, projectId)
-                .orderByDesc(AgentConversation::getUpdatedAt));
-        return ApiResponse.ok(list);
+        return ApiResponse.ok(chatService.listConversations(auth.getName(), projectId).stream()
+                .map(AgentConversationController::toVO).toList());
     }
 
     /** 会话详情（含消息列表） */
@@ -87,15 +60,15 @@ public class AgentConversationController {
     public ApiResponse<Map<String, Object>> getConversation(
             Authentication auth, @PathVariable String id) {
         AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
-        List<AgentMessage> messages = chatService.listMessages(id);
-        return ApiResponse.ok(Map.of("conversation", conversation, "messages", messages));
+        List<AgentMessageVO> messages = chatService.listMessages(id).stream()
+                .map(AgentConversationController::toVO).toList();
+        return ApiResponse.ok(Map.of("conversation", toVO(conversation), "messages", messages));
     }
 
-    /** 删除会话（级联删消息） */
+    /** 删除会话（级联删消息/资产） */
     @DeleteMapping("/conversations/{id}")
     public ApiResponse<Void> deleteConversation(Authentication auth, @PathVariable String id) {
-        AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
-        conversationMapper.deleteById(conversation.getId());
+        chatService.deleteConversation(auth.getName(), id);
         return ApiResponse.ok("删除成功", null);
     }
 
@@ -108,40 +81,28 @@ public class AgentConversationController {
 
     /** 消息列表 */
     @GetMapping("/conversations/{id}/messages")
-    public ApiResponse<List<AgentMessage>> listMessages(
+    public ApiResponse<List<AgentMessageVO>> listMessages(
             Authentication auth, @PathVariable String id) {
         chatService.getOwnedConversation(auth.getName(), id);
-        return ApiResponse.ok(chatService.listMessages(id));
+        return ApiResponse.ok(chatService.listMessages(id).stream().map(AgentConversationController::toVO).toList());
     }
 
     /** 发送消息（代理 Dify） */
     @PostMapping("/conversations/{id}/messages")
-    public ApiResponse<AgentMessage> sendMessage(
+    public ApiResponse<AgentMessageVO> sendMessage(
             Authentication auth, @PathVariable String id,
             @RequestBody AgentSendMessageRequest request) {
-        return ApiResponse.ok(chatService.sendMessage(auth.getName(), id, request.content()));
+        return ApiResponse.ok(toVO(chatService.sendMessage(auth.getName(), id, request.content())));
     }
 
     /** 资产列表（分页，手写 LIMIT/OFFSET——项目未装 MyBatis-Plus 分页插件） */
-    // M2：count+list 置于同一只读事务，避免并发写导致的分页总数与记录不一致
-    @Transactional(readOnly = true)
     @GetMapping("/conversations/{id}/assets")
     public ApiResponse<Map<String, Object>> listAssets(
             Authentication auth, @PathVariable String id,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         chatService.getOwnedConversation(auth.getName(), id);
-        int safePage = Math.max(1, page);
-        int safeSize = Math.min(50, Math.max(1, size));
-        long total = assetMapper.selectCount(
-            new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getConversationId, id));
-        List<AgentAsset> records = assetMapper.selectList(
-            new LambdaQueryWrapper<AgentAsset>()
-                .eq(AgentAsset::getConversationId, id)
-                .orderByDesc(AgentAsset::getCreatedAt)
-                // 先转 long 再乘，避免 (safePage - 1) * safeSize 在 int 域溢出（OFFSET 超出 21 亿行时）
-                .last("LIMIT " + safeSize + " OFFSET " + ((long) (safePage - 1) * safeSize)));
-        return ApiResponse.ok(Map.of("records", records, "total", total, "page", safePage, "size", safeSize));
+        return ApiResponse.ok(chatService.listAssets(id, page, size));
     }
 
     /** 上传图片（参考图）：存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) */
@@ -150,41 +111,13 @@ public class AgentConversationController {
             Authentication auth,
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) String conversationId) {
-        // 校验会话归属（传了 conversationId 时）
-        if (conversationId != null && !conversationId.isBlank()) {
-            chatService.getOwnedConversation(auth.getName(), conversationId);
-        }
-        // 校验文件类型（I2：模块内校验错误改抛 BusinessException）
+        // 参数校验（文件类型）：Controller 职责
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
             throw new BusinessException(40001, "仅支持上传图片文件");
         }
-        String url = fileStorageService.saveUploadedImage(file);
-
-        // 落库 agent_assets（type=reference）
-        AgentAsset asset = new AgentAsset();
-        asset.setConversationId(conversationId != null && !conversationId.isBlank() ? conversationId : null);
-        asset.setType("reference");
-        asset.setUrl(url);
-        asset.setStatus("completed");
-        assetMapper.insert(asset);
-        log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
-
-        // 参考图消息落库（conversationId 非空时）：上传的参考图作为 user 消息进入对话记录，
-        // 前端对话窗口可见（MessageBubble 渲染层支持裸图片 URL），刷新后记录仍在
-        if (conversationId != null && !conversationId.isBlank()) {
-            AgentMessage refMsg = new AgentMessage();
-            refMsg.setConversationId(conversationId);
-            refMsg.setRole("user");
-            refMsg.setContent(url);
-            messageMapper.insert(refMsg);
-            log.info("参考图 user 消息已落库: conversationId={}, url={}", conversationId, url);
-        }
-
-        return ApiResponse.ok(Map.of(
-            "url", url,
-            "assetId", asset.getId()
-        ));
+        String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file);
+        return ApiResponse.ok(Map.of("url", url));
     }
 
     /** 提示词优化：草稿 → 优化后的专业提示词（LLM 自判类型；≥6 字符；不落库、不关联会话） */
@@ -202,8 +135,7 @@ public class AgentConversationController {
     @PostMapping("/conversations/{id}/confirm-done")
     public ApiResponse<Boolean> confirmDone(Authentication auth, @PathVariable String id) {
         // 归属校验（40401）+ 清空 Dify 变量；失败抛 50202，前端保留卡片可重试
-        boolean cleared = chatService.confirmImageDone(auth.getName(), id);
-        return ApiResponse.ok(cleared);
+        return ApiResponse.ok(chatService.confirmImageDone(auth.getName(), id));
     }
 
     /** 流式发送消息（SSE） */
@@ -246,34 +178,28 @@ public class AgentConversationController {
 
     /** 重命名 / 归档会话 */
     @PatchMapping("/conversations/{id}")
-    public ApiResponse<AgentConversation> updateConversation(Authentication auth, @PathVariable String id,
+    public ApiResponse<AgentConversationVO> updateConversation(Authentication auth, @PathVariable String id,
                                                              @RequestBody AgentConversationUpdateRequest request) {
-        AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
-        if (request.title() != null && !request.title().isBlank()) {
-            conversation.setTitle(request.title().trim());
-        }
-        if (request.status() != null && !request.status().isBlank()) {
-            if (!"active".equals(request.status()) && !"archived".equals(request.status())) {
-                throw new BusinessException(40001, "会话状态非法");
-            }
-            conversation.setStatus(request.status());
-        }
-        // PATCH 后手动刷新 updatedAt：MyBatis-Plus strictUpdateFill 仅在字段为 null 时填充，
-        // 实体加载后 updatedAt 非空会写回旧值，导致列表按 updated_at 倒序时重命名/归档不置顶
-        conversation.setUpdatedAt(OffsetDateTime.now());
-        conversationMapper.updateById(conversation);
-        return ApiResponse.ok(conversation);
+        return ApiResponse.ok(toVO(chatService.updateConversation(
+                auth.getName(), id, request.title(), request.status())));
     }
 
     /** 删除资产（仅限归属本人会话；未归属资产拒绝） */
     @DeleteMapping("/assets/{id}")
     public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
-        AgentAsset asset = assetMapper.selectById(id);
-        if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
-            throw new BusinessException(40401, "资产不存在或无权访问");
-        }
-        chatService.getOwnedConversation(auth.getName(), asset.getConversationId());
-        assetMapper.deleteById(id);
+        chatService.deleteAsset(auth.getName(), id);
         return ApiResponse.ok("删除成功", null);
+    }
+
+    /** 会话实体 → VO 映射 */
+    private static AgentConversationVO toVO(AgentConversation c) {
+        return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
+                c.getDifyConversationId(), c.getStatus(), c.getCreatedAt(), c.getUpdatedAt());
+    }
+
+    /** 消息实体 → VO 映射 */
+    private static AgentMessageVO toVO(AgentMessage m) {
+        return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(), m.getContent(),
+                m.getDifyMessageId(), m.getCreatedAt());
     }
 }
