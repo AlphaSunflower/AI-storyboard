@@ -50,6 +50,12 @@ jwt:
 # Model names and API paths live here — change once, not in code.
 # ═══════════════════════════════════════════════════════
 ai:
+  # Agent 编排行为参数（意图阈值 / 澄清上限）
+  agent:
+    # 意图识别低置信度阈值：低于则触发澄清分支（不硬路由）
+    intent-threshold: ${AGENT_INTENT_THRESHOLD:0.6}
+    # 澄清追问上限：连续追问达到该值后直接给默认方案让用户选
+    max-clarify-rounds: ${AGENT_MAX_CLARIFY_ROUNDS:2}
   laozhang:
     # ── Secrets (override in env or application-local.yml) ──
     api-key: ${LAOZ...KEY}

@@ -66,6 +66,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private final AgentCheckpointMapper checkpointMapper;
     private final AgentMessageMapper messageMapper;
     private final AiConfigProperties config;
+    private final com.storyboard.service.ai.AgentAiConfigProperties agentConfig;
     private final ChatClient.Builder chatClientBuilder;
     private final com.storyboard.service.agent.AgentAnswerService answerService;
     private final com.storyboard.mapper.SceneMapper sceneMapper;
@@ -99,7 +100,15 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
             IntentResult intentResult = intentRecognitionService.recognize(content, recent);
             String intent = intentResult.type();
-            log.info("AgentOrchestrator: conversationId={} intent={}", conversation.getId(), intent);
+            log.info("AgentOrchestrator: conversationId={} intent={} confidence={} source={}",
+                    conversation.getId(), intent, intentResult.confidence(), intentResult.source());
+
+            // 低置信度：不硬路由，走澄清分支（rule 命中 1.0 / fallback 0.0 均不受影响）
+            if (intentResult.confidence() < agentConfig.getIntentThreshold()) {
+                sendEvent(emitter, "message", Map.of("content",
+                        "没太确定你想做什么——是要生成分镜（剧本/故事板）、图片，还是视频？"));
+                return lastMessage;
+            }
 
             int steps = 0;
             switch (intent) {
