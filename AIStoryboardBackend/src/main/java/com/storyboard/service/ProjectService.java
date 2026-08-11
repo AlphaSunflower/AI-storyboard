@@ -3,104 +3,29 @@ package com.storyboard.service;
 import com.storyboard.dto.request.CreateProjectRequest;
 import com.storyboard.dto.request.UpdateProjectRequest;
 import com.storyboard.dto.response.ProjectResponse;
-import com.storyboard.dto.response.SceneResponse;
-import com.storyboard.entity.Project;
-import com.storyboard.entity.Scene;
-import com.storyboard.exception.BusinessException;
-import com.storyboard.mapper.ProjectMapper;
-import com.storyboard.mapper.SceneMapper;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-@Service
-public class ProjectService {
+/**
+ * 项目服务接口：项目列表、创建、查询、更新、删除、最近草稿。
+ */
+public interface ProjectService {
 
-    private final ProjectMapper projectMapper;
-    private final SceneMapper sceneMapper;
+    /** 查询指定用户的项目列表。 */
+    List<ProjectResponse> listByUser(String userId);
 
-    public ProjectService(ProjectMapper projectMapper, SceneMapper sceneMapper) {
-        this.projectMapper = projectMapper;
-        this.sceneMapper = sceneMapper;
-    }
+    /** 创建项目（缺省名称「未命名项目」、类型 movie、比例 16:9、状态 draft）。 */
+    ProjectResponse create(String userId, CreateProjectRequest request);
 
-    public List<ProjectResponse> listByUser(String userId) {
-        return projectMapper.findByUserId(userId).stream()
-            .map(this::toResponse)
-            .toList();
-    }
+    /** 按 ID 查询项目（校验归属，不存在或非本人抛 40401）。 */
+    ProjectResponse getById(String userId, String projectId);
 
-    @Transactional
-    public ProjectResponse create(String userId, CreateProjectRequest request) {
-        Project project = new Project();
-        project.setUserId(userId);
-        project.setName(request.name() != null ? request.name() : "未命名项目");
-        project.setDescription(request.description());
-        project.setCreationType(request.creationType() != null ? request.creationType() : "movie");
-        project.setAspectRatio(request.aspectRatio() != null ? request.aspectRatio() : "16:9");
-        project.setStatus("draft");
-        projectMapper.insert(project);
-        return toResponse(project);
-    }
+    /** 更新项目（仅更新请求中非 null 的字段）。 */
+    ProjectResponse update(String userId, String projectId, UpdateProjectRequest request);
 
-    public ProjectResponse getById(String userId, String projectId) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || !project.getUserId().equals(userId)) {
-            throw new BusinessException(40401, "项目不存在");
-        }
-        return toResponse(project);
-    }
+    /** 删除项目（校验归属）。 */
+    void delete(String userId, String projectId);
 
-    @Transactional
-    public ProjectResponse update(String userId, String projectId, UpdateProjectRequest request) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || !project.getUserId().equals(userId)) {
-            throw new BusinessException(40401, "项目不存在");
-        }
-        if (request.name() != null) project.setName(request.name());
-        if (request.description() != null) project.setDescription(request.description());
-        if (request.scriptText() != null) project.setScriptText(request.scriptText());
-        if (request.creationType() != null) project.setCreationType(request.creationType());
-        if (request.customTypeDesc() != null) project.setCustomTypeDesc(request.customTypeDesc());
-        if (request.aspectRatio() != null) project.setAspectRatio(request.aspectRatio());
-        if (request.referenceImageUrl() != null) project.setReferenceImageUrl(request.referenceImageUrl());
-        if (request.aiModel() != null) project.setAiModel(request.aiModel());
-        if (request.status() != null) project.setStatus(request.status());
-        projectMapper.updateById(project);
-        return toResponse(project);
-    }
-
-    @Transactional
-    public void delete(String userId, String projectId) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || !project.getUserId().equals(userId)) {
-            throw new BusinessException(40401, "项目不存在");
-        }
-        projectMapper.deleteById(projectId);
-    }
-
-    public ProjectResponse getLatestDraft(String userId) {
-        Project draft = projectMapper.findLatestDraft(userId);
-        return draft != null ? toResponse(draft) : null;
-    }
-
-    private ProjectResponse toResponse(Project project) {
-        List<Scene> scenes = sceneMapper.findByProjectIdOrdered(project.getId());
-        List<SceneResponse> sceneResponses = scenes.stream().map(s -> new SceneResponse(
-            s.getId(), s.getProjectId(), s.getSceneNumber(),
-            s.getScriptContent(), s.getImagePrompt(), s.getVideoPrompt(),
-            s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
-            s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
-            s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
-            s.getImageStatus(), s.getVideoStatus(), s.getCreatedAt(), s.getUpdatedAt()
-        )).toList();
-        return new ProjectResponse(
-            project.getId(), project.getUserId(), project.getName(),
-            project.getDescription(), project.getCreationType(), project.getCustomTypeDesc(),
-            project.getAspectRatio(), project.getReferenceImageUrl(), project.getScriptText(),
-            project.getAiModel(), project.getStatus(),
-            project.getCreatedAt(), project.getUpdatedAt(), sceneResponses
-        );
-    }
+    /** 查询用户最近一次草稿项目（无则返回 null）。 */
+    ProjectResponse getLatestDraft(String userId);
 }

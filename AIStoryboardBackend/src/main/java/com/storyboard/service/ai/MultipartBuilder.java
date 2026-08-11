@@ -10,30 +10,30 @@ import java.util.List;
  * 手动构建 multipart/form-data 请求体的工具类。
  * JDK HttpClient 不内置 multipart 支持，此工具提供轻量级替代。
  */
-final class MultipartBuilder {
+public final class MultipartBuilder {
 
     private final String boundary;
     private final List<Part> parts = new ArrayList<>();
 
     record Part(String name, String filename, String contentType, byte[] data) {}
 
-    MultipartBuilder() {
+    public MultipartBuilder() {
         this.boundary = "----Boundary" + java.util.UUID.randomUUID();
     }
 
-    String boundary() { return boundary; }
+    public String boundary() { return boundary; }
 
-    MultipartBuilder field(String name, String value) {
+    public MultipartBuilder field(String name, String value) {
         parts.add(new Part(name, null, null, value.getBytes(StandardCharsets.UTF_8)));
         return this;
     }
 
-    MultipartBuilder file(String name, String filename, String contentType, byte[] data) {
+    public MultipartBuilder file(String name, String filename, String contentType, byte[] data) {
         parts.add(new Part(name, filename, contentType, data));
         return this;
     }
 
-    byte[] build() throws IOException {
+    public byte[] build() throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] crlf = "\r\n".getBytes(StandardCharsets.UTF_8);
         byte[] dd = "--".getBytes(StandardCharsets.UTF_8);
