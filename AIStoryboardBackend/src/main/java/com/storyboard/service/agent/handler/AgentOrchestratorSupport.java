@@ -195,15 +195,15 @@ public class AgentOrchestratorSupport {
         return sb.toString();
     }
 
-    /** 无参考图文生图：LLM 生成图片提示词 */
+    /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次） */
     public String callImagePrompt(String content) {
         try {
-            String raw = planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt()
                 .system("你是 AI 绘画提示词工程师。根据用户的需求输出一条高质量图片生成提示词，"
                     + "只输出提示词文本本身，不要任何解释、引号或前后缀。")
                 .user(content)
                 .call()
-                .content();
+                .content());
             return raw != null && !raw.isBlank() ? raw.trim() : content;
         } catch (Exception e) {
             log.warn("图片提示词 LLM 调用失败: {}", e.getMessage());
@@ -211,21 +211,56 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /** 无参考图视频：LLM 生成视频方案（prompt + 时长） */
+    /** 无参考图视频：LLM 生成视频方案（prompt + 时长；瞬态失败重试 1 次） */
     public VideoPlanResult callVideoPlan(String content) {
         try {
-            String raw = planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt()
                 .system("你是视频生成方案设计师。根据用户需求设计视频 prompt。"
                     + "输出 JSON：{\"message\":\"视频生成 prompt，中文 50~120 字，描述动作/运镜/光线/氛围\",\"duration\":4~15 整数}。"
                     + "只输出 JSON。")
                 .user(content)
                 .call()
-                .content();
+                .content());
             return new BeanOutputConverter<>(VideoPlanResult.class).convert(raw);
         } catch (Exception e) {
             log.warn("视频方案 LLM 调用失败: {}", e.getMessage());
             return new VideoPlanResult(content, 8);
         }
+    }
+
+    /**
+     * 瞬态失败重试 1 次（LLM 调用幂等可安全重试；500ms backoff）。
+     * 非瞬态异常（解析/校验类）直接抛，由调用方兜底。仅用于非流式 call()——
+     * 流式 streamPlanWithMessage 不重试（会重复转发 message 增量）。
+     */
+    private static <T> T retryTransient(java.util.function.Supplier<T> fn) {
+        try {
+            return fn.get();
+        } catch (RuntimeException e) {
+            if (!isTransient(e)) throw e;
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            return fn.get();
+        }
+    }
+
+    /** 瞬态判定：HTTP 429/5xx（Spring 状态码异常）或网络超时/连接失败 */
+    private static boolean isTransient(Throwable e) {
+        for (Throwable c = e; c != null; c = c.getCause()) {
+            if (c instanceof org.springframework.web.client.HttpStatusCodeException sce) {
+                int s = sce.getStatusCode().value();
+                if (s == 429 || s >= 500) return true;
+            }
+            if (c instanceof java.net.ConnectException
+                    || c instanceof java.net.http.HttpTimeoutException
+                    || c instanceof java.net.SocketTimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 懒加载 planClient：对话交流统一 deepseek-v4-flash（用户指定；deepseek 无思考参数，不加 thinking_level） */

@@ -129,11 +129,12 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             // 当前输入截断到 500 字：意图识别只需要线索，避免超长输入拖慢/抬高成本
             String truncated = query != null && query.length() > 500
                     ? query.substring(0, 500) : query;
-            String raw = chatClient().prompt()
+            // 瞬态失败重试 1 次（LLM 调用幂等；识别失败本就兜底，多一次重试降低误判概率）
+            String raw = retryTransient(() -> chatClient().prompt()
                     .system(buildPrompt(recentMessages))
                     .user(truncated)
                     .call()
-                    .content();
+                    .content());
             if (raw != null && !raw.isBlank()) {
                 // 1) JSON {type, confidence}
                 java.util.regex.Matcher m = INTENT_JSON.matcher(raw);
@@ -195,5 +196,38 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             }
         }
         return t;
+    }
+
+    /**
+     * 瞬态失败重试 1 次（500ms backoff）。非瞬态异常直接抛，由调用方兜底。
+     */
+    private static <T> T retryTransient(java.util.function.Supplier<T> fn) {
+        try {
+            return fn.get();
+        } catch (RuntimeException e) {
+            if (!isTransient(e)) throw e;
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            return fn.get();
+        }
+    }
+
+    /** 瞬态判定：HTTP 429/5xx 或网络超时/连接失败 */
+    private static boolean isTransient(Throwable e) {
+        for (Throwable c = e; c != null; c = c.getCause()) {
+            if (c instanceof org.springframework.web.client.HttpStatusCodeException sce) {
+                int s = sce.getStatusCode().value();
+                if (s == 429 || s >= 500) return true;
+            }
+            if (c instanceof java.net.ConnectException
+                    || c instanceof java.net.http.HttpTimeoutException
+                    || c instanceof java.net.SocketTimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 }
