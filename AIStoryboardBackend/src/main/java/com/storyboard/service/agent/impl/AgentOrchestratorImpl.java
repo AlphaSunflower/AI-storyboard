@@ -93,6 +93,11 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 return request.getLastMessage();
             }
 
+            // 2.5 非 aisplit 轮清零澄清计数（澄清追问次数只在分镜链内连续累计）
+            if (!"intent-aisplit".equals(intent)) {
+                support.resetClarify(conversation.getId());
+            }
+
             // 3. intent → handler 分发（未知意图兜底 intent-other）
             IntentHandler handler = byIntent.get(intent);
             if (handler == null) {

@@ -45,10 +45,39 @@ public class AgentOrchestratorSupport {
 
     private final AgentCheckpointMapper checkpointMapper;
     private final ChatClient.Builder chatClientBuilder;
+    private final com.storyboard.service.ai.AgentAiConfigProperties agentConfig;
 
     /** 剧本优化 / 分镜方案 LLM（懒加载，复用网关默认对话模型，超时 120s） */
     private volatile ChatClient planClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 澄清计数：conversationId → 连续追问次数（跨用户消息持续）。
+     * 每轮 gate（剧本优化/分镜方案）type=0 时 +1；type=1（有进展）或非 aisplit 轮清零。
+     * 达到 {@code maxClarifyRounds} 上限后不再追问，直接给默认方案让用户选。
+     * ponytail: 内存态重启即失（计数清零，用户重新获得追问额度，无害）；多实例需落 DB 列。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> clarifyCount =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 澄清上限判定：本次 type=0 记 +1；未达上限返回 false（调用方正常追问并结束本轮）；
+     * 已达上限返回 true（调用方跳过追问，以用户原始需求为默认方案继续）。
+     */
+    public boolean clarifyLimitReached(String conversationId, OrchestrationRequest req) {
+        int n = clarifyCount.merge(conversationId, 1, Integer::sum);
+        if (n > agentConfig.getMaxClarifyRounds()) {
+            clarifyCount.remove(conversationId);
+            sendMessage(req, "已按你的原始需求直接生成方案，可在确认卡片上调整。");
+            return true;
+        }
+        return false;
+    }
+
+    /** 澄清计数清零（type=1 有进展 / 非 aisplit 轮调用） */
+    public void resetClarify(String conversationId) {
+        clarifyCount.remove(conversationId);
+    }
 
     // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
 

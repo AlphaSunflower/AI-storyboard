@@ -44,27 +44,40 @@ public class AisplitIntentHandler implements IntentHandler {
     @Override
     public String handle(OrchestrationRequest request) {
         String content = request.getContent();
+        String conversationId = request.getConversation().getId();
 
         // 1. 剧本优化（手动澄清循环：type=0 回答结束，type=1 继续；message 字段已流式增量转发）
         support.sendEvent(request, "workflow", Map.of("title", "正在优化剧本…", "status", "node_started"));
         AgentOrchestratorSupport.ScriptOptimizeResult opt = support.callScriptOptimize(content, request);
+        String script;
         if (opt == null || opt.type() == 0) {
-            // 流式失败兜底（message 未发出时补一条）
-            if (request.getLastMessage().isBlank()) {
-                support.sendMessage(request, opt != null ? opt.message() : "已理解你的需求，请继续补充。");
+            // 澄清上限判定：未达上限 → 追问并结束本轮；已达上限 → 以原始需求为默认剧本继续
+            if (!support.clarifyLimitReached(conversationId, request)) {
+                // 流式失败兜底（message 未发出时补一条）
+                if (request.getLastMessage().isBlank()) {
+                    support.sendMessage(request, opt != null ? opt.message() : "已理解你的需求，请继续补充。");
+                }
+                return request.getLastMessage();
             }
-            return request.getLastMessage();
+            script = content;
+        } else {
+            support.resetClarify(conversationId);
+            script = opt.script() != null && !opt.script().isBlank() ? opt.script() : content;
         }
-        String script = opt.script() != null && !opt.script().isBlank() ? opt.script() : content;
 
         // 2. 分镜方案设计（结构化 message，流式增量转发）
         support.sendEvent(request, "workflow", Map.of("title", "正在设计分镜方案…", "status", "node_started"));
         AgentOrchestratorSupport.StoryboardPlanResult plan = support.callStoryboardPlan(script, request);
         if (plan == null || plan.type() == 0) {
-            if (request.getLastMessage().isBlank()) {
-                support.sendMessage(request, plan != null ? plan.message() : "分镜方案需要进一步明确，请补充描述。");
+            // 澄清上限判定同上：未达上限 → 追问结束本轮；已达上限 → 直接进入分镜生成
+            if (!support.clarifyLimitReached(conversationId, request)) {
+                if (request.getLastMessage().isBlank()) {
+                    support.sendMessage(request, plan != null ? plan.message() : "分镜方案需要进一步明确，请补充描述。");
+                }
+                return request.getLastMessage();
             }
-            return request.getLastMessage();
+        } else {
+            support.resetClarify(conversationId);
         }
 
         // 3. 分镜 JSON（复用 ScriptGenerationService：LLM 生成 8 字段分镜列表）
