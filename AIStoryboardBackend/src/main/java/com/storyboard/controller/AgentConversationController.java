@@ -161,7 +161,8 @@ public class AgentConversationController {
         chatService.getOwnedConversation(auth.getName(), id);
         SseEmitter emitter = new SseEmitter(600_000L);
         chatService.submitFormAndResume(auth.getName(), id,
-            request.formToken(), request.taskId(), request.action(), request.content(), emitter);
+            request.formToken(), request.taskId(), request.action(), request.content(),
+            request.params() == null ? java.util.Map.of() : request.params(), emitter);
         return emitter;
     }
 

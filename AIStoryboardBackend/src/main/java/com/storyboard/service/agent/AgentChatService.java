@@ -104,8 +104,10 @@ public interface AgentChatService {
 
     /**
      * HITL 表单提交并续流：校验 checkpoint form_token → 一次性消费 → 编排 resume 恢复执行。
+     *
+     * @param params 卡片参数选择器提交的生成参数（model/resolution/duration 等；空=未选择）
      */
-    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, SseEmitter emitter);
+    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, SseEmitter emitter);
 
     /**
      * 视频异步任务状态查询（前端轮询）：按 taskId 查 agent_assets 行（归属校验，未归属/无权 40401）。

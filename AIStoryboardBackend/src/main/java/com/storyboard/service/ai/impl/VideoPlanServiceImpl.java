@@ -20,6 +20,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 图生视频方案设计服务实现 —— 视频生成前先用视觉模型"看图"。
@@ -60,7 +62,7 @@ public class VideoPlanServiceImpl implements VideoPlanService {
      * @return 视频方案；视觉理解失败或输出非法时抛 RuntimeException（调用方转业务错误）
      */
     @Override
-    public VideoPlan buildVideoPlan(String imagePath, String userRequest) {
+    public VideoPlan buildVideoPlan(String imagePath, String userRequest, String modelOptionsText) {
         try {
             // 1. 读本地源图 → base64 data URI
             String filename = extractFilename(imagePath);
@@ -84,10 +86,10 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                     .media(media)
                     .build();
 
-            // 3. 调用视觉模型（ChatClient 统一走 LLM 网关）
+            // 3. 调用视觉模型（ChatClient 统一走 LLM 网关；有选项文本时追加选参指令）
             String content = chatClient()
                     .prompt()
-                    .system(VIDEO_PLAN_SYSTEM_PROMPT)
+                    .system(buildSystemPrompt(modelOptionsText))
                     .messages(userMessage)
                     .call()
                     .content();
@@ -141,6 +143,19 @@ public class VideoPlanServiceImpl implements VideoPlanService {
         return chatClient;
     }
 
+    /** 组装 system prompt：基础方案指令 + 可选的模型参数选择指令（有选项文本时要求 LLM 预选参数并给理由） */
+    private String buildSystemPrompt(String modelOptionsText) {
+        if (modelOptionsText == null || modelOptionsText.isBlank()) {
+            return VIDEO_PLAN_SYSTEM_PROMPT;
+        }
+        return VIDEO_PLAN_SYSTEM_PROMPT
+                + "\n3. params（对象，必填）：从以下可用模型与参数选项中选择合适的值：\n"
+                + modelOptionsText
+                + "（形如 {\"model\":\"...\",\"resolution\":\"...\",\"aspectRatio\":\"...\"}，值必须是选项中出现的）\n"
+                + "4. reasons（对象，必填）：每个参数一句简短推荐理由（≤15 字），键与 params 一致。\n"
+                + "只输出 JSON，不要输出其他内容。";
+    }
+
     /** 从模型输出提取视频方案：JSON 结构优先（message/duration），非法返回 null */
     private VideoPlan extractVideoPlan(String content) {
         if (content == null || content.isBlank()) return null;
@@ -161,12 +176,23 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                             message.length() > 60 ? message.substring(0, 60) + "…" : message, duration);
                     return null;
                 }
-                return new VideoPlan(message.trim(), duration);
+                return new VideoPlan(message.trim(), duration,
+                        parseStringMap(node, "params"), parseStringMap(node, "reasons"));
             }
         } catch (Exception ignored) {
             // 非 JSON 输出，降级 null（调用方转业务错误）
         }
         return null;
+    }
+
+    /** 从 JSON 节点提取字符串 Map（对象字段 → Map；缺失/非对象返回空 Map） */
+    private Map<String, String> parseStringMap(JsonNode node, String field) {
+        if (node == null || !node.has(field) || !node.get(field).isObject()) {
+            return Map.of();
+        }
+        Map<String, String> out = new HashMap<>();
+        node.get(field).fields().forEachRemaining(e -> out.put(e.getKey(), e.getValue().asText("")));
+        return out;
     }
 
     /** 从 URL 路径中提取文件名（/api/files/images/abc.png → abc.png） */

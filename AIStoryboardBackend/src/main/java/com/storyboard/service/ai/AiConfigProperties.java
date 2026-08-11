@@ -153,6 +153,10 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String defaultImageModel = "gpt-image-2";
+    /** 默认图生图/图改图模型（edits 分支；独立于文生图，可经环境变量 DEFAULT_IMAGE_EDIT_MODEL 填写） */
+    @Setter
+    @Getter
+    private String defaultImageEditModel = "gpt-image-2";
     /** 默认脚本生成模型（Vision） */
     @Setter
     @Getter

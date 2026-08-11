@@ -85,13 +85,17 @@ public class AgentTools {
      * @param conversationId 会话 ID（校验归属用）
      * @param prompt        生成提示词
      * @param picUrl        源图（参考图 / 已生成图 URL，走 edits 图改图）
+     * @param model         模型名（可空，默认配置——图改图走 defaultImageEditModel）
+     * @param size          图片尺寸如 1024x1024（可空，默认配置）
      * @return {ok, imageUrl, assetId} 或 {ok:false, code, message}
      */
     @Tool(description = "生成或完善一张图片（提供 picUrl 时基于该图改图），结果落库到会话产出素材")
     public Map<String, Object> refineImage(
             @ToolParam(description = "会话 ID") String conversationId,
             @ToolParam(description = "图片生成提示词") String prompt,
-            @ToolParam(description = "源图 URL（可空，空则纯文生图）") String picUrl) {
+            @ToolParam(description = "源图 URL（可空，空则纯文生图）") String picUrl,
+            @ToolParam(description = "模型名（可空，默认配置）") String model,
+            @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") String size) {
         try {
             AgentConversation conv = conversationMapper.selectById(conversationId);
             if (conv == null) {
@@ -99,7 +103,7 @@ public class AgentTools {
             }
             String mode = (picUrl != null && !picUrl.isBlank()) ? "edit" : null;
             Map<String, String> result = generationService.generateImage(
-                    conv, null, prompt, null, null, mode, null, picUrl);
+                    conv, null, prompt, model, size, mode, null, picUrl);
             String url = result.get("imageUrl");
             if (url == null || url.isBlank()) {
                 return error("50202", "图片生成失败，请稍后重试");
@@ -120,6 +124,8 @@ public class AgentTools {
      * @param duration      时长秒（可空用默认）
      * @param aspectRatio   画幅（可空；图生视频恒 adaptive）
      * @param picUrl        参考图 URL（可空）
+     * @param model         模型名（可空，默认 MiniMax-H3；显式传 veo 别名走 laozhang 渠道）
+     * @param resolution    分辨率（可空，默认配置档）
      * @return {ok, videoUrl} 或 {ok:false, code, message}
      */
     @Tool(description = "生成一段视频（提供 picUrl 时基于该图生成），同步等待生成完成，结果落库到会话产出素材")
@@ -128,14 +134,16 @@ public class AgentTools {
             @ToolParam(description = "视频提示词") String prompt,
             @ToolParam(description = "时长秒（可空）") String duration,
             @ToolParam(description = "画幅如 16:9 或 9:16（可空）") String aspectRatio,
-            @ToolParam(description = "参考图 URL（可空）") String picUrl) {
+            @ToolParam(description = "参考图 URL（可空）") String picUrl,
+            @ToolParam(description = "模型名（可空，默认 MiniMax-H3）") String model,
+            @ToolParam(description = "分辨率（可空，默认配置档）") String resolution) {
         try {
             AgentConversation conv = conversationMapper.selectById(conversationId);
             if (conv == null) {
                 return error("40401", "会话不存在");
             }
             String taskId = generationService.createVideoTask(
-                    conv, null, prompt, null, null, null, aspectRatio,
+                    conv, null, prompt, model, resolution, null, aspectRatio,
                     duration, null, null, picUrl);
             if (taskId == null || taskId.isBlank()) {
                 return error("50202", "视频任务创建失败，请稍后重试");

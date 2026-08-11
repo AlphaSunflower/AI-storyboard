@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.Map;
+
 /**
  * 一轮编排的输入上下文：会话 + 消息 + 参考图 + SSE 输出。
  *
@@ -31,4 +33,7 @@ public class OrchestrationRequest {
 
     /** resume 阶段自定义输入文本（action=custom 时携带，其余为空串；由 Orchestrator.resume 设置） */
     private String customText = "";
+
+    /** resume 阶段用户提交的生成参数选择（如 {model, resolution, duration}；空 Map=未提交，由 Orchestrator.resume 设置） */
+    private Map<String, String> params = Map.of();
 }

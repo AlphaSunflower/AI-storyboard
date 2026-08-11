@@ -1,5 +1,6 @@
 package com.storyboard.service.agent.handler;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentCheckpoint;
@@ -8,6 +9,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentCheckpointMapper;
 import com.storyboard.service.agent.AgentGenerationService;
 import com.storyboard.service.agent.AgentSceneItem;
+import com.storyboard.service.ai.GatewayModelService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +55,7 @@ public class AgentOrchestratorSupport {
     private final com.storyboard.service.ai.AgentAiConfigProperties agentConfig;
     private final AgentGenerationService generationService;
     private final AgentAssetMapper assetMapper;
+    private final GatewayModelService gatewayModelService;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -97,15 +100,31 @@ public class AgentOrchestratorSupport {
     /** 分镜方案结构化输出（options：同上） */
     public record StoryboardPlanResult(int type, String message,
                                        List<Map<String, Object>> options) {}
-    /** 无图视频方案结构化输出 */
-    public record VideoPlanResult(String message, int duration) {}
+    /** 无图视频方案结构化输出（params=LLM 推荐的生成参数，reasons=推荐理由；可空） */
+    public record VideoPlanResult(String message, int duration,
+                                  Map<String, String> params, Map<String, String> reasons) {
+        /** 兼容构造器：无推荐参数（解析失败兜底/现状调用） */
+        public VideoPlanResult(String message, int duration) {
+            this(message, duration, Map.of(), Map.of());
+        }
+    }
 
     /**
      * HITL 阶段产出（模板 {@link #runHITLStage} 的输入）：
-     * 方案文本 + checkpoint action + plan 载荷 + 事件名（human_input / video_plan）+ 确认按钮。
+     * 方案文本 + checkpoint action + plan 载荷 + 事件名（human_input / video_plan）+ 确认按钮
+     * + models（网关模型列表含参数能力，卡片参数选择器用）+ recommended/reasons（LLM 推荐参数值与理由）。
      */
     public record StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
-                            String eventName, List<Map<String, Object>> actions) {}
+                            String eventName, List<Map<String, Object>> actions,
+                            List<Map<String, Object>> models,
+                            Map<String, String> recommended,
+                            Map<String, String> reasons) {
+        /** 兼容构造器：无模型/推荐参数（现有 7 处调用零改动） */
+        public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
+                         String eventName, List<Map<String, Object>> actions) {
+            this(planText, action, planPayload, eventName, actions, List.of(), Map.of(), Map.of());
+        }
+    }
 
     // ===== LLM 调用（结构化输出：纯解析，不发 response_format） =====
 
@@ -215,17 +234,36 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /** 无参考图视频：LLM 生成视频方案（prompt + 时长；瞬态失败重试 1 次） */
+    /** 无参考图视频：LLM 生成视频方案（无模型选项，兼容现状调用） */
     public VideoPlanResult callVideoPlan(String content) {
+        return callVideoPlan(content, null);
+    }
+
+    /**
+     * 无参考图视频：LLM 生成视频方案（prompt + 时长 + 推荐参数；瞬态失败重试 1 次）。
+     *
+     * @param modelOptionsText 可选的模型与参数枚举文本（来自 {@link #buildModelOptionsText}；空=不要求 LLM 选参）
+     */
+    public VideoPlanResult callVideoPlan(String content, String modelOptionsText) {
         try {
+            boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
+            String system = "你是视频生成方案设计师。根据用户需求设计视频 prompt。"
+                    + "输出 JSON：{\"message\":\"视频生成 prompt，中文 50~120 字，描述动作/运镜/光线/氛围\",\"duration\":4~15 整数"
+                    + (withParams ? ",\"params\":{\"model\":\"所选模型名\",\"resolution\":\"所选分辨率\",\"aspectRatio\":\"所选画幅\"},\"reasons\":{\"model\":\"推荐理由\",\"resolution\":\"推荐理由\",\"aspectRatio\":\"推荐理由\"}}" : "")
+                    + "}"
+                    + (withParams ? "。可用模型与参数选项：\n" + modelOptionsText
+                        + "。从上述选项中为每个参数选择最合适的值，理由简短（≤15 字）。" : "")
+                    + " 只输出 JSON。";
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是视频生成方案设计师。根据用户需求设计视频 prompt。"
-                    + "输出 JSON：{\"message\":\"视频生成 prompt，中文 50~120 字，描述动作/运镜/光线/氛围\",\"duration\":4~15 整数}。"
-                    + "只输出 JSON。")
+                .system(system)
                 .user(content)
                 .call()
                 .content());
-            return new BeanOutputConverter<>(VideoPlanResult.class).convert(raw);
+            VideoPlanResult plan = new BeanOutputConverter<>(VideoPlanResult.class).convert(raw);
+            // 兜底：params/reasons 缺失（LLM 未按要求输出）→ 空 Map，行为与现状一致
+            return new VideoPlanResult(plan.message(), plan.duration(),
+                    plan.params() == null ? Map.of() : plan.params(),
+                    plan.reasons() == null ? Map.of() : plan.reasons());
         } catch (Exception e) {
             log.warn("视频方案 LLM 调用失败: {}", e.getMessage());
             return new VideoPlanResult(content, 8);
@@ -283,6 +321,49 @@ public class AgentOrchestratorSupport {
         return planClient;
     }
 
+    // ===== 模型能力选项（网关 fetchModels 透传，卡片/LLM 选参共用） =====
+
+    /** 卡片模型选项：网关 fetchModels(type) → [{value,label,params(JSON字符串)}]（网关不可用返回空列表，前端回退静态兜底） */
+    public List<Map<String, Object>> buildModels(String type) {
+        try {
+            List<Map<String, Object>> out = new java.util.ArrayList<>();
+            for (Map<String, String> m : gatewayModelService.fetchModels(type)) {
+                out.add(new java.util.LinkedHashMap<>(m));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("网关模型列表获取失败: type={}, error={}", type, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** LLM 选参用的人类可读选项文本：模型名 + 参数枚举（来自网关 params JSON 字符串；无选项返回空串） */
+    public String buildModelOptionsText(String type) {
+        List<Map<String, Object>> models = buildModels(type);
+        if (models.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> m : models) {
+            sb.append("- ").append(m.get("value"));
+            String paramsJson = m.get("params") instanceof String s ? s : null;
+            if (paramsJson != null && !paramsJson.isBlank()) {
+                try {
+                    JsonNode p = objectMapper.readTree(paramsJson);
+                    List<String> parts = new java.util.ArrayList<>();
+                    if (p.has("resolutions")) parts.add("分辨率 " + p.get("resolutions"));
+                    if (p.has("durations")) parts.add("时长 " + p.get("durations") + " 秒");
+                    if (p.has("aspectRatios")) parts.add("画幅 " + p.get("aspectRatios"));
+                    if (p.has("sizes")) parts.add("尺寸 " + p.get("sizes"));
+                    if (p.has("qualities")) parts.add("质量 " + p.get("qualities"));
+                    if (!parts.isEmpty()) sb.append("（").append(String.join("；", parts)).append("）");
+                } catch (Exception ignored) {
+                    // params 解析失败忽略，仅保留模型名
+                }
+            }
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
     // ===== HITL checkpoint =====
 
     /** 创建 HITL checkpoint（pending，30min 过期），返回 form_token */
@@ -318,11 +399,16 @@ public class AgentOrchestratorSupport {
         }
         sendEvent(req, "message", Map.of("content", plan.planText()));
         String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE);
-        sendEvent(req, plan.eventName(), Map.of(
+        Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
             "formToken", formToken, "taskId", "",
             "formContent", plan.planText(),
             "actions", plan.actions(),
             "expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString()));
+        // 模型/参数选项与 LLM 推荐（非空才下发；旧前端/无配置时字段缺失，行为与现状一致）
+        if (plan.models() != null && !plan.models().isEmpty()) event.put("models", plan.models());
+        if (plan.recommended() != null && !plan.recommended().isEmpty()) event.put("recommended", plan.recommended());
+        if (plan.reasons() != null && !plan.reasons().isEmpty()) event.put("reasons", plan.reasons());
+        sendEvent(req, plan.eventName(), event);
         return plan.planText();
     }
 
@@ -350,13 +436,24 @@ public class AgentOrchestratorSupport {
      * 创建任务（内部落 agent_assets queued 行）→ 立即发 task_accepted 事件 → 结束 SSE，
      * 后台虚拟线程轮询直至终态并更新资产行（前端轮询 GET /api/agent/tasks/{taskId} 取结果）。
      *
+     * @param params 用户选择的生成参数（model/resolution/duration/aspectRatio；空=未选择，走默认）
      * @return taskId（创建失败返回 null，已发 error 事件）
      */
     public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
                                             String aspectRatio, String source) {
+        return startVideoGenerationAsync(req, prompt, duration, aspectRatio, source, Map.of());
+    }
+
+    /** 带用户参数选择的异步视频生成（params 显式优先，未提供键回退原值/默认） */
+    public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
+                                            String aspectRatio, String source, Map<String, String> params) {
+        String model = params.getOrDefault("model", null);
+        String resolution = params.getOrDefault("resolution", null);
+        String effDuration = params.getOrDefault("duration", duration);
+        String effAspectRatio = params.getOrDefault("aspectRatio", aspectRatio);
         String taskId = generationService.createVideoTask(
-                req.getConversation(), null, prompt, null, null, null,
-                aspectRatio, duration, null, null, source);
+                req.getConversation(), null, prompt, model, resolution, null,
+                effAspectRatio, effDuration, null, null, source);
         if (taskId == null || taskId.isBlank()) {
             sendEvent(req, "error", Map.of("code", "50202", "message", "视频任务创建失败，请稍后重试"));
             return null;

@@ -46,17 +46,19 @@ public class PicIntentHandler implements IntentHandler {
                 String refinedPrompt = imageRefinePromptService.buildRefinedPrompt(source, request.getContent());
                 String planText = "🖼 已结合你的参考图与需求，生成了改图方案：\n" + refinedPrompt
                         + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
-                // 2. HITL 通用模板：方案 → checkpoint(generate_image) → human_input 事件
+                // 2. HITL 通用模板：方案 → checkpoint(generate_image) → human_input 事件（带网关图片模型选项，卡片可选模型/尺寸）
+                List<Map<String, Object>> models = support.buildModels("image");
                 return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                         planText, "generate_image",
                         List.of(Map.of("prompt", refinedPrompt, "source", source)), "human_input",
                         List.of(Map.of("id", "generate_image", "title", "生成图片"),
-                                Map.of("id", "refine", "title", "继续完善"))));
+                                Map.of("id", "refine", "title", "继续完善")),
+                        models, Map.of(), Map.of()));
             } else {
                 // 无参考图：LLM 生成图片提示词 → 直接文生图（自动完成，无 HITL）
                 support.sendEvent(request, "workflow", Map.of("title", "正在生成图片…", "status", "node_started"));
                 String prompt = support.callImagePrompt(request.getContent());
-                Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, null);
+                Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, null, null, null);
                 if (Boolean.TRUE.equals(result.get("ok"))) {
                     String url = String.valueOf(result.get("imageUrl"));
                     String content = "![生成图片](" + url + ")";
@@ -89,7 +91,10 @@ public class PicIntentHandler implements IntentHandler {
         // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）；收尾事件序列走 resumeStage 模板
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
-        Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source);
+        // 用户提交的模型/尺寸参数（卡片选择）优先，未提交走默认（图改图默认模型=defaultImageEditModel）
+        String model = request.getParams().getOrDefault("model", null);
+        String size = request.getParams().getOrDefault("size", null);
+        Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source, model, size);
         if (Boolean.TRUE.equals(result.get("ok"))) {
             String url = String.valueOf(result.get("imageUrl"));
             String content = "![生成图片](" + url + ")";

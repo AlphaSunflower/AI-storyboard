@@ -645,7 +645,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * HITL 表单提交并续流（编排 checkpoint 驱动，替代 Dify form API）：
      * 校验 form_token 归属/未过期 → 一次性消费（status pending→used）→ orchestrator.resume 恢复对应 step。
      */
-    public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, SseEmitter emitter) {
+    public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
         if (!conversationLock.tryAcquire(conversationId)) {
@@ -665,7 +665,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resume 内处理）；
                 // resume 返回本轮最后一条 message（如生成图片的 ![...](url)），落库 assistant 消息，
                 // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
-                String answer = orchestrator.resume(conversation, formToken, action, customText, emitter);
+                String answer = orchestrator.resume(conversation, formToken, action, customText, params, emitter);
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);
                 }

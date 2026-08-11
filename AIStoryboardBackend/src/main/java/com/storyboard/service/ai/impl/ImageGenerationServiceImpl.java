@@ -95,8 +95,6 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             throw new RuntimeException("图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
         }
 
-        String effectiveModel = model != null ? model : config.getDefaultImageModel();
-
         if (scene != null) {
             scene.setImageStatus("generating");
             sceneMapper.updateById(scene);
@@ -106,6 +104,11 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             String result;
             String localPath;
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
+            // 模型选择：显式传入 > 分支默认——图改图/编辑分支用 defaultImageEditModel（环境变量可配），纯文生图用 defaultImageModel
+            String effectiveModel = model != null ? model
+                    : (hasReferenceImages || "edit".equals(mode))
+                            ? config.getDefaultImageEditModel()
+                            : config.getDefaultImageModel();
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关）
             if (hasReferenceImages || "edit".equals(mode)) {

@@ -125,8 +125,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     }
 
     @Override
-    public String resume(AgentConversation conversation, String formToken, String action, String customText, SseEmitter emitter) {
+    public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
+        request.setParams(params == null ? Map.of() : params);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()

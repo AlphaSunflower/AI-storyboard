@@ -38,28 +38,38 @@ public class VideoIntentHandler implements IntentHandler {
     public String handle(OrchestrationRequest request) {
         String source = request.getPicUrl();
         try {
+            // 网关模型列表（卡片参数选择器用）+ LLM 选参选项文本（网关不可用时为空）
+            List<Map<String, Object>> models = support.buildModels("video");
+            String modelOptionsText = support.buildModelOptionsText("video");
             support.sendEvent(request, "workflow", Map.of("title", "正在设计视频方案…", "status", "node_started"));
             String message;
             int duration;
+            Map<String, String> recommended = Map.of();
+            Map<String, String> reasons = Map.of();
             if (source != null && !source.isBlank()) {
                 // 视觉模型看图 + 诉求 → 视频方案（首帧语义）
-                VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(source, request.getContent());
+                VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(source, request.getContent(), modelOptionsText);
                 message = plan.message();
                 duration = plan.duration();
+                recommended = plan.params() == null ? Map.of() : plan.params();
+                reasons = plan.reasons() == null ? Map.of() : plan.reasons();
             } else {
-                // 无图：LLM 生成视频方案（prompt + 时长）
-                AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(request.getContent());
+                // 无图：LLM 生成视频方案（prompt + 时长 + 推荐参数）
+                AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(request.getContent(), modelOptionsText);
                 message = plan.message();
                 duration = plan.duration();
+                recommended = plan.params();
+                reasons = plan.reasons();
             }
-            // HITL 通用模板：方案 → checkpoint(generate_video) → video_plan 卡片
+            // HITL 通用模板：方案 → checkpoint(generate_video) → video_plan 卡片（models/推荐参数随事件下发）
             String planText = "📹 视频方案：\n" + message + "\n（时长 " + duration + " 秒）";
             return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     planText, "generate_video",
                     List.of(Map.of("message", message, "duration", duration, "source", source == null ? "" : source)),
                     "video_plan",
                     List.of(Map.of("id", "generate_video", "title", "开始生成视频"),
-                            Map.of("id", "refine", "title", "继续完善"))));
+                            Map.of("id", "refine", "title", "继续完善")),
+                    models, recommended, reasons));
         } catch (Exception e) {
             log.error("VideoIntentHandler.handle 失败: conversationId={}, error={}",
                     request.getConversation().getId(), e.getMessage(), e);
@@ -75,7 +85,8 @@ public class VideoIntentHandler implements IntentHandler {
         String message = support.planField(checkpoint.getPlan(), "message");
         String duration = support.planField(checkpoint.getPlan(), "duration");
         String source = support.planField(checkpoint.getPlan(), "source");
-        support.startVideoGenerationAsync(request, message, duration, null, source);
+        // 生成参数：用户提交 params 优先，未提交回退 checkpoint 推荐/原值（startVideoGenerationAsync 内做键级兜底）
+        support.startVideoGenerationAsync(request, message, duration, null, source, request.getParams());
         return "";
     }
 }

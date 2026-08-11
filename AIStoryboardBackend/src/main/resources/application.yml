@@ -91,6 +91,7 @@ ai:
 
     # ── Defaults ──
     default-image-model: gpt-image-2
+    default-image-edit-model: ${DEFAULT_IMAGE_EDIT_MODEL:gpt-image-2}  # 图生图/图改图默认模型（独立于文生图）
     default-vision-model: gemini-3-flash-preview
     default-image-size: "1024x1024"
     default-video-duration: "8"
