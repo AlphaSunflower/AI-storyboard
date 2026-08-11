@@ -1,9 +1,12 @@
 package com.storyboard.service.agent.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.entity.AgentConversation;
+import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentCheckpointMapper;
+import com.storyboard.service.agent.AgentGenerationService;
 import com.storyboard.service.agent.AgentSceneItem;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -19,6 +22,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,6 +51,11 @@ public class AgentOrchestratorSupport {
     private final AgentCheckpointMapper checkpointMapper;
     private final ChatClient.Builder chatClientBuilder;
     private final com.storyboard.service.ai.AgentAiConfigProperties agentConfig;
+    private final AgentGenerationService generationService;
+    private final AgentAssetMapper assetMapper;
+
+    /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
+    private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     /** 剧本优化 / 分镜方案 LLM（懒加载，复用网关默认对话模型，超时 120s） */
     private volatile ChatClient planClient;
@@ -294,6 +304,76 @@ public class AgentOrchestratorSupport {
         sendEvent(req, "confirm_result", confirm);
         long sceneCount = result.get("sceneCount") instanceof Number n ? n.longValue() : -1L;
         sendEvent(req, "message_end", Map.of("messageId", "", "sceneCount", sceneCount, "content", content));
+    }
+
+    /**
+     * 异步视频生成（resume/generate_video 与图生视频方案确认共用）：
+     * 创建任务（内部落 agent_assets queued 行）→ 立即发 task_accepted 事件 → 结束 SSE，
+     * 后台虚拟线程轮询直至终态并更新资产行（前端轮询 GET /api/agent/tasks/{taskId} 取结果）。
+     *
+     * @return taskId（创建失败返回 null，已发 error 事件）
+     */
+    public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
+                                            String aspectRatio, String source) {
+        String taskId = generationService.createVideoTask(
+                req.getConversation(), null, prompt, null, null, null,
+                aspectRatio, duration, null, null, source);
+        if (taskId == null || taskId.isBlank()) {
+            sendEvent(req, "error", Map.of("code", "50202", "message", "视频任务创建失败，请稍后重试"));
+            return null;
+        }
+        // 立即受理：task_accepted → 本轮 SSE 结束（前端转轮询，不再同步阻塞 7.5min）
+        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
+        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        return taskId;
+    }
+
+    /** 后台轮询视频任务直至终态（90×5s ≈ 7.5min 上限），终态更新 agent_assets 行 */
+    private void pollVideoTaskAndUpdate(String taskId) {
+        try {
+            for (int i = 0; i < 90; i++) {
+                if (Thread.currentThread().isInterrupted()) return;
+                Map<String, String> result = generationService.pollVideoTask(taskId);
+                String status = result.get("status");
+                String progress = result.get("progress");
+                log.info("视频生成后台轮询: taskId={}, 第 {}/90 次, status={}{}", taskId, i + 1, status,
+                        progress != null && !progress.isBlank() ? ", progress=" + progress : "");
+                if ("completed".equals(status)) {
+                    updateVideoAsset(taskId, "completed", result.get("videoUrl"), null);
+                    return;
+                }
+                if ("failed".equals(status)) {
+                    updateVideoAsset(taskId, "failed", null,
+                            result.getOrDefault("error", "未知错误"));
+                    return;
+                }
+                // 运行中：status 置 running（progress 无存储列，仅日志可见；前端轮询态即可）
+                updateVideoAsset(taskId, "running", null, null);
+                Thread.sleep(5000);
+            }
+            updateVideoAsset(taskId, "failed", null, "视频生成超时，请重试");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.error("视频后台轮询失败: taskId={}, error={}", taskId, e.getMessage(), e);
+            updateVideoAsset(taskId, "failed", null, "视频生成失败，请稍后重试");
+        }
+    }
+
+    /** 按 taskId 更新 agent_assets 行（幂等；行不存在忽略——scene 视频无资产行） */
+    private void updateVideoAsset(String taskId, String status, String url, String error) {
+        try {
+            AgentAsset asset = assetMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
+                            .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
+            if (asset == null) return;
+            asset.setStatus(status);
+            if (url != null && !url.isBlank()) asset.setUrl(url);
+            if (error != null && !error.isBlank()) asset.setError(error);
+            assetMapper.updateById(asset);
+        } catch (Exception e) {
+            log.warn("视频资产状态更新失败: taskId={}, error={}", taskId, e.getMessage());
+        }
     }
 
     /** checkpoint plan JSON 取字段（宽松解析，缺失返回空串） */

@@ -82,9 +82,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
     private final AiConfigProperties config;
-    private final ImageRefinePromptService imageRefinePromptService;
-    private final VideoPlanService videoPlanService;
     private final com.storyboard.service.agent.AgentOrchestrator orchestrator;
+    private final com.storyboard.service.agent.handler.AgentOrchestratorSupport orchestratorSupport;
     private final com.storyboard.mapper.AgentCheckpointMapper checkpointMapper;
     private final com.storyboard.service.agent.ConversationLock conversationLock;
     private final com.storyboard.service.agent.AgentAnswerService answerService;
@@ -544,63 +543,12 @@ public class AgentChatServiceImpl implements AgentChatService {
 
 
 
-    /** 生成中/完成的工作流进度事件（title 供前端展示生成阶段） */
-    private static final Map<String, String> GENERATION_STAGE_LABELS = Map.of(
-        "script", "正在生成分镜…",
-        "image", "正在生成图片…",
-        "video", "正在生成视频…"
-    );
-
-    /** 推送生成结果：image 完成推图消息 + 看图确认卡片；script 已由调用方推。
-     *  §4.3：推给前端的生成结果消息同步落库（conversation 由调用方传入，会话已删时为 null，判空跳过） */
-    private void pushGenerationResult(SseEmitter emitter, String type, String url,
-                                      String assetId, int sceneCount, boolean withConfirmCard,
-                                      AgentConversation conversation) {
-        if (url == null || url.isBlank()) {
-            sendEvent(emitter, "error", Map.of("code", "50202", "message", "生成失败，请稍后重试"));
-            return;
-        }
-        String content;
-        if ("image".equals(type)) {
-            content = "![生成图片](" + url + ")";
-        } else {
-            content = url;
-        }
-        sendEvent(emitter, "message", Map.of("content", content));
-        // §4.3：生成结果消息落库（刷新后历史消息里生成结果不消失）；会话已删则跳过
-        if (conversation != null) persistAssistant(conversation, content);
-        if (withConfirmCard) {
-            sendEvent(emitter, "confirm_result", Map.of(
-                "kind", type, "url", url, "assetId", assetId == null ? "" : assetId,
-                "sceneCount", sceneCount,
-                "actions", List.of(
-                    Map.of("id", "refine", "title", "继续完善"),
-                    Map.of("id", "done", "title", "满意完成"))));
-        }
-    }
-
-    /**
-     * 执行视频生成（HITL generate_video 与图生视频方案确认两路共用）：
-     * 发送生成进度事件 → 创建 MiniMax 视频任务 → 清空 Dify 会话 picture 变量（生成后）
-     * → 同步轮询直至终态 → 推视频结果 + 确认卡片。
-     *
-     * @param duration 时长字符串（秒，可 null 用默认）；aspectRatio 画幅（可 null；图生视频恒 adaptive）
-     */
-    private void executeVideoGeneration(AgentConversation conv, String prompt, String duration,
-                                        String aspectRatio, String source, SseEmitter emitter) {
-        sendEvent(emitter, "workflow", Map.of("title", GENERATION_STAGE_LABELS.get("video"), "status", "node_started"));
-        String taskId = generationService.createVideoTask(
-            conv, null, prompt, null, null, null, aspectRatio,
-            duration, null, null, source);
-        // 同步轮询直至终态（运行在虚拟线程，阻塞安全；轮询完成即 SSE 关闭前推送完成）
-        pollVideoAndPush(taskId, emitter, conv);
-    }
-
     /**
      * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
      *
-     * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 →
-     * {@link #executeVideoGeneration}（源图=方案快照 source，prompt=视觉模型设计的 message）。
+     * <p>兼容壳：前端已统一走 {@code /form/submit}（action=generate_video → VideoIntentHandler.resume），
+     * 本端点保留以兼容旧前端——checkpoint 校验/消费逻辑一致，执行改走异步
+     * {@link AgentOrchestratorSupport#startVideoGenerationAsync}（task_accepted + 后台轮询）。
      */
     public void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
@@ -665,9 +613,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
                 // 确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
                 persistUserConfirmation(conversation, "开始生成视频", null);
-                executeVideoGeneration(conversation, message, duration,
-                        null, source, emitter);
-                log.info("图生视频生成完成: conversationId={}, duration={}", conversationId, duration);
+                // 异步视频生成：创建任务 → task_accepted → 本轮 SSE 结束，前端轮询状态端点取结果
+                orchestratorSupport.startVideoGenerationAsync(
+                        new com.storyboard.service.agent.handler.OrchestrationRequest(
+                                conversation, "", null, emitter),
+                        message, duration, null, source);
+                log.info("图生视频任务已受理: conversationId={}, duration={}", conversationId, duration);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) return;
@@ -678,39 +629,6 @@ public class AgentChatServiceImpl implements AgentChatService {
                 conversationLock.release(conversationId);
             }
         }, agentExecutor);
-    }
-
-
-    /** 轮询视频任务直至终态（复用 service 重试逻辑），终态推结果与确认卡片 */
-    private void pollVideoAndPush(String taskId, SseEmitter emitter, AgentConversation conversation) {
-        try {
-            for (int i = 0; i < 90; i++) { // 90 * 5s ≈ 7.5min 上限
-                if (Thread.currentThread().isInterrupted()) return;
-                Map<String, String> result = generationService.pollVideoTask(taskId);
-                String status = result.get("status");
-                // 轮询可见性：每 5s 一次状态查询打 info 日志（含次数/状态/进度），
-                // 便于观察生成进度；约 90 条/任务，视频生成本来就是低频长任务，噪音可接受
-                String progress = result.get("progress");
-                log.info("视频生成轮询: taskId={}, 第 {}/90 次, status={}{}", taskId, i + 1, status,
-                        progress != null && !progress.isBlank() ? ", progress=" + progress : "");
-                if ("completed".equals(status)) {
-                    pushGenerationResult(emitter, "video", result.get("videoUrl"), null, 0, true, conversation);
-                    return;
-                }
-                if ("failed".equals(status)) {
-                    sendEvent(emitter, "error", Map.of("code", "50202",
-                        "message", "视频生成失败：" + result.getOrDefault("error", "未知错误")));
-                    return;
-                }
-                Thread.sleep(5000);
-            }
-            sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成超时，请重试"));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Exception e) {
-            log.error("视频轮询失败: taskId={}, error={}", taskId, e.getMessage(), e);
-            sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
-        }
     }
 
 
@@ -753,6 +671,28 @@ public class AgentChatServiceImpl implements AgentChatService {
                 conversationLock.release(conversationId);
             }
         }, agentExecutor);
+    }
+
+    /**
+     * 视频异步任务状态查询（前端轮询）：按 taskId 查 agent_assets 行，归属校验防 IDOR。
+     * 资产未归属（conversationId 空）或会话无权访问 → 统一 40401。
+     */
+    public Map<String, Object> getVideoTaskStatus(String userId, String taskId) {
+        AgentAsset asset = assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
+                .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
+        if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
+            throw new BusinessException(40401, "任务不存在");
+        }
+        AgentConversation conv = conversationMapper.selectById(asset.getConversationId());
+        if (conv == null || !userId.equals(conv.getUserId())) {
+            throw new BusinessException(40401, "任务不存在");
+        }
+        return Map.of(
+                "taskId", taskId,
+                "assetId", asset.getId(),
+                "status", asset.getStatus() == null ? "unknown" : asset.getStatus(),
+                "url", asset.getUrl() == null ? "" : asset.getUrl(),
+                "error", asset.getError() == null ? "" : asset.getError());
     }
 
     /**

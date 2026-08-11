@@ -13,10 +13,7 @@ import java.util.Set;
 
 /**
  * video 视频链：方案设计（有参考图 → 视觉模型 buildVideoPlan；无图 → LLM callVideoPlan）
- * → HITL video_plan 卡片（开始生成视频/继续完善）。
- *
- * <p>resume（generate_video 执行）暂由 {@code AgentChatServiceImpl.generateVideoFromPlan}
- * 独立端点承担（Task 10 统一到 handler resume 并异步化）；此处暂不认领 resumeActions。
+ * → HITL video_plan 卡片（开始生成视频/继续完善）→ resume 异步视频生成（task_accepted + 后台轮询）。
  */
 @Component
 @RequiredArgsConstructor
@@ -34,7 +31,7 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public Set<String> resumeActions() {
-        return Set.of();
+        return Set.of("generate_video");
     }
 
     @Override
@@ -73,6 +70,10 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 见类注释：generate_video 执行暂由 generateVideoFromPlan 端点承担
+        // 视频异步执行：方案确认后创建任务 → task_accepted → 本轮结束，前端轮询状态端点取结果
+        String message = support.planField(checkpoint.getPlan(), "message");
+        String duration = support.planField(checkpoint.getPlan(), "duration");
+        String source = support.planField(checkpoint.getPlan(), "source");
+        support.startVideoGenerationAsync(request, message, duration, null, source);
     }
 }

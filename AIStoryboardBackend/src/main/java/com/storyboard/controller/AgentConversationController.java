@@ -176,6 +176,12 @@ public class AgentConversationController {
         return emitter;
     }
 
+    /** 视频异步任务状态（前端轮询：task_accepted 后 5s 间隔 GET，取 status/url/error） */
+    @GetMapping("/tasks/{taskId}")
+    public ApiResponse<Map<String, Object>> getVideoTaskStatus(Authentication auth, @PathVariable String taskId) {
+        return ApiResponse.ok(chatService.getVideoTaskStatus(auth.getName(), taskId));
+    }
+
     /** 重命名 / 归档会话 */
     @PatchMapping("/conversations/{id}")
     public ApiResponse<AgentConversationVO> updateConversation(Authentication auth, @PathVariable String id,
