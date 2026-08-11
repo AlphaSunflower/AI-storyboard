@@ -180,7 +180,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
         ImageResponse response = imageModel.call(new ImagePrompt(prompt, builder.build()));
         // b64_json 优先，url 兜底（与原实现一致）
-        Image image = response.getResult().getOutput();
+        Image image = Objects.requireNonNull(response.getResult()).getOutput();
         String result = image.getB64Json();
         if (result == null || result.isEmpty()) {
             result = image.getUrl();
@@ -194,11 +194,11 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     /**
      * 调用 /v1/images/edits 接口进行图改图。
-     *
+     * <p>
      * 源图获取优先级：
      * 1. generatedImageUrl — 当前已生成的图片路径（完善图片场景）
      * 2. referenceImages[0] — 第一张上传的参考图 base64（参考图生图场景）
-     *
+     * <p>
      * 返回 b64_json 字符串（已清洗 data URI 前缀及补齐 base64 padding）。
      */
     private String callImageEdit(String model, String prompt,
@@ -219,7 +219,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             imageFilename = filename;
         } else if (referenceImages != null && !referenceImages.isEmpty()) {
             // 参考图生图：使用第一张参考图（base64 data URL）
-            String base64Data = referenceImages.get(0);
+            String base64Data = referenceImages.getFirst();
             imageBytes = decodeBase64Image(base64Data);
             imageFilename = "reference.png";
         } else {

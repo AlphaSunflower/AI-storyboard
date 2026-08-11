@@ -109,7 +109,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                     log.warn("Reference image not found: {}", localFile);
                 }
             } else if (referenceImages != null && !referenceImages.isEmpty()) {
-                body.put("imageUrl", normalizeImageUrl(referenceImages.get(0)));
+                body.put("imageUrl", normalizeImageUrl(referenceImages.getFirst()));
             }
 
             String jsonBody = objectMapper.writeValueAsString(body);
@@ -269,7 +269,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         var scenes = sceneMapper.selectList(
             new LambdaQueryWrapper<Scene>().eq(Scene::getVideoTaskId, taskId));
         if (!scenes.isEmpty()) {
-            Scene scene = scenes.get(0);
+            Scene scene = scenes.getFirst();
             scene.setVideoUrl(videoUrl);
             scene.setVideoStatus(status);
             sceneMapper.updateById(scene);
@@ -278,7 +278,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         var assets = agentAssetMapper.selectList(
             new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
         if (!assets.isEmpty()) {
-            AgentAsset asset = assets.get(0);
+            AgentAsset asset = assets.getFirst();
             asset.setUrl(videoUrl);
             asset.setStatus(status);
             asset.setError(error);

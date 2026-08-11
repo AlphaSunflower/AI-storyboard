@@ -32,17 +32,18 @@ public class VideoPlanServiceImpl implements VideoPlanService {
 
     /** System Prompt：要求视觉模型看图后输出图生视频方案（动态 prompt + 时长） */
     private static final String VIDEO_PLAN_SYSTEM_PROMPT =
-        "你是一名专业的视频生成方案设计师。用户会给你一张参考图片和一句视频创作诉求。\n"
-        + "这张图片将作为视频的第一帧（首帧画面），画面主体、构图、环境以图片内容为准。\n"
-        + "请先仔细观察图片内容（主体、构图、色调、光线、风格、环境），再结合用户诉求，\n"
-        + "输出一个 JSON 对象，包含两个字段：\n"
-        + "1. message（字符串，必填）：完整视频生成 prompt，中文 50~120 字，必须包含：\n"
-        + "   ①基于首帧画面的动态动作（画面中什么在动、怎么动）②环境与背景的延伸 ③光线、色调与氛围\n"
-        + "   ④运镜（从推/拉/摇/移/跟/升/降中明确选择，写明起幅到落幅）⑤景别与视角 ⑥风格\n"
-        + "   （电影感/写实/动画等）。注意：画面主体与构图已在首帧中确定，不要描述与图片冲突的\n"
-        + "   静态内容，prompt 专注「动态」——动作、运镜、氛围变化。不要写入分辨率、时长、画幅参数。\n"
-        + "2. duration（数字，必填）：4~15 之间的整数，常用档位 4/6/8/12/15。用户未指定时默认 8。\n"
-        + "只输出 JSON，不要输出其他内容。";
+            """
+                    你是一名专业的视频生成方案设计师。用户会给你一张参考图片和一句视频创作诉求。
+                    这张图片将作为视频的第一帧（首帧画面），画面主体、构图、环境以图片内容为准。
+                    请先仔细观察图片内容（主体、构图、色调、光线、风格、环境），再结合用户诉求，
+                    输出一个 JSON 对象，包含两个字段：
+                    1. message（字符串，必填）：完整视频生成 prompt，中文 50~120 字，必须包含：
+                       ①基于首帧画面的动态动作（画面中什么在动、怎么动）②环境与背景的延伸 ③光线、色调与氛围
+                       ④运镜（从推/拉/摇/移/跟/升/降中明确选择，写明起幅到落幅）⑤景别与视角 ⑥风格
+                       （电影感/写实/动画等）。注意：画面主体与构图已在首帧中确定，不要描述与图片冲突的
+                       静态内容，prompt 专注「动态」——动作、运镜、氛围变化。不要写入分辨率、时长、画幅参数。
+                    2. duration（数字，必填）：4~15 之间的整数，常用档位 4/6/8/12/15。用户未指定时默认 8。
+                    只输出 JSON，不要输出其他内容。""";
 
     private final AiConfigProperties config;
     private final FileStorageService fileStorageService;
@@ -95,7 +96,10 @@ public class VideoPlanServiceImpl implements VideoPlanService {
             VideoPlan plan = null;
             try {
                 BeanOutputConverter<VideoPlan> conv = new BeanOutputConverter<>(VideoPlan.class);
-                VideoPlan parsed = conv.convert(content);
+                VideoPlan parsed = null;
+                if (content != null) {
+                    parsed = conv.convert(content);
+                }
                 if (parsed != null && parsed.isValid()) {
                     plan = parsed;
                 }

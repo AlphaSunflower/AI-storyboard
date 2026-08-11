@@ -262,7 +262,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
         var scenes = sceneMapper.selectList(new LambdaQueryWrapper<Scene>()
                 .eq(Scene::getVideoTaskId, taskId));
         if (!scenes.isEmpty()) {
-            Scene scene = scenes.get(0);
+            Scene scene = scenes.getFirst();
             scene.setVideoUrl(videoUrl);
             scene.setVideoStatus(status);
             sceneMapper.updateById(scene);
@@ -271,7 +271,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
         var assets = agentAssetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getTaskId, taskId));
         if (!assets.isEmpty()) {
-            AgentAsset asset = assets.get(0);
+            AgentAsset asset = assets.getFirst();
             asset.setUrl(videoUrl);
             asset.setStatus(status);
             asset.setError(error);

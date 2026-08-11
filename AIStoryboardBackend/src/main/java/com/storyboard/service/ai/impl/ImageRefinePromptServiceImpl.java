@@ -32,14 +32,15 @@ public class ImageRefinePromptServiceImpl implements ImageRefinePromptService {
 
     /** System Prompt：要求视觉模型结构化输出（现状/修改点/改图提示词） */
     private static final String REFINE_SYSTEM_PROMPT =
-        "你是一名专业的图片编辑提示词设计师。用户会给你一张图片和一句修改诉求。\n"
-        + "请先仔细观察图片内容（主体、构图、色调、光线、风格、环境），再结合用户诉求，"
-        + "输出一个 JSON 对象，包含三个字段：\n"
-        + "1. image_analysis：对图片现状的简要描述（你实际看到了什么）；\n"
-        + "2. modifications：根据用户诉求确定的修改点列表（要改什么、怎么改）；\n"
-        + "3. refined_prompt：一段可直接投喂给图生图模型的完整改图提示词（中文，包含："
-        + "保留的既有元素 + 修改点 + 修改后期望效果 + 风格/光线/构图约束）。\n"
-        + "只输出 JSON，不要输出其他内容。";
+            """
+                    你是一名专业的图片编辑提示词设计师。用户会给你一张图片和一句修改诉求。
+                    请先仔细观察图片内容（主体、构图、色调、光线、风格、环境），再结合用户诉求，\
+                    输出一个 JSON 对象，包含三个字段：
+                    1. image_analysis：对图片现状的简要描述（你实际看到了什么）；
+                    2. modifications：根据用户诉求确定的修改点列表（要改什么、怎么改）；
+                    3. refined_prompt：一段可直接投喂给图生图模型的完整改图提示词（中文，包含：\
+                    保留的既有元素 + 修改点 + 修改后期望效果 + 风格/光线/构图约束）。
+                    只输出 JSON，不要输出其他内容。""";
 
     /**
      * 结构化输出定义（字段名与 AI 返回 JSON 键一致，snake_case）。
@@ -97,7 +98,10 @@ public class ImageRefinePromptServiceImpl implements ImageRefinePromptService {
             // 4. 解析：优先取结构化 refined_prompt；解析失败降级取全文
             try {
                 BeanOutputConverter<RefinePlan> conv = new BeanOutputConverter<>(RefinePlan.class);
-                RefinePlan plan = conv.convert(content);
+                RefinePlan plan = null;
+                if (content != null) {
+                    plan = conv.convert(content);
+                }
                 if (plan != null && plan.refined_prompt() != null && !plan.refined_prompt().isBlank()) {
                     return plan.refined_prompt().trim();
                 }

@@ -52,7 +52,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         try {
             BeanOutputConverter<List<SceneSpec>> conv = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {});
             List<SceneSpec> specs = conv.convert(content);
-            if (specs != null && !specs.isEmpty()) {
+            if (!specs.isEmpty()) {
                 return toSceneMaps(specs, projectId);
             }
         } catch (RuntimeException e) {
