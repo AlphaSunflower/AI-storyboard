@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -48,6 +49,16 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     /** 四类合法意图（与 Dify 工作流「意图路由」if-else 分支一一对应） */
     private static final Set<String> VALID_TYPES = Set.of(
             "intent-aisplit", "intent-pic", "intent-video", "intent-other");
+
+    /**
+     * 规则前置匹配表：强关键词命中直接路由（免一次 LLM 调用）。
+     * 仅放无歧义强信号词；列表顺序即优先级（aisplit 分镜/剧本词优先）。
+     * 歧义/未命中交给 LLM 判断（LLM prompt 仍含完整分类规则）。
+     */
+    private static final List<Map.Entry<String, java.util.regex.Pattern>> RULE_TABLE = List.of(
+            Map.entry("intent-aisplit", java.util.regex.Pattern.compile("分镜|故事板|剧本")),
+            Map.entry("intent-video", java.util.regex.Pattern.compile("生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本")),
+            Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
 
     /**
      * 意图识别 prompt：移植自 Dify 工作流「意图识别」节点。
@@ -104,6 +115,16 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
      * 解析顺序：JSON {type, confidence} → 兼容裸标识符（无置信度按 0.5）→ 白名单校验 → 兜底。
      */
     public IntentResult recognize(String query, List<AgentMessage> recentMessages) {
+        // 0) 规则前置：强关键词命中直接路由（免一次 LLM 调用，置信度 1.0）
+        if (query != null && !query.isBlank()) {
+            String q = query.trim();
+            for (Map.Entry<String, java.util.regex.Pattern> rule : RULE_TABLE) {
+                if (rule.getValue().matcher(q).find()) {
+                    log.info("意图识别规则命中: type={} query={}", rule.getKey(), q);
+                    return IntentResult.rule(rule.getKey());
+                }
+            }
+        }
         try {
             // 当前输入截断到 500 字：意图识别只需要线索，避免超长输入拖慢/抬高成本
             String truncated = query != null && query.length() > 500
