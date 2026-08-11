@@ -85,7 +85,7 @@ public class PicIntentHandler implements IntentHandler {
     }
 
     @Override
-    public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+    public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）；收尾事件序列走 resumeStage 模板
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
@@ -102,9 +102,11 @@ public class PicIntentHandler implements IntentHandler {
                                     Map.of("id", "refine", "title", "继续完善"),
                                     Map.of("id", "done", "title", "满意完成"))),
                     "sceneCount", -1L));
+            return content;
         } else {
             support.sendEvent(request, "error", Map.of("code", "50202",
                     "message", String.valueOf(result.getOrDefault("message", "图片生成失败，请稍后重试"))));
+            return "";
         }
     }
 }

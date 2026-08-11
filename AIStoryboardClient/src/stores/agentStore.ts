@@ -160,7 +160,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   selectConversation: async (id) => {
     // I3 store 守卫：HITL 等待期 / 图生视频方案确认期禁止切换会话（UI 层另有禁用，双保险）
     if (get().waitingHumanInput || get().waitingVideoPlan) return;
-    set({ activeConversationId: id, messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null });
+    set({ activeConversationId: id, messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null, refImageUrl: null });
     const res = await agentApi.listMessages(id);
     set({ messages: res.data.data ?? [] });
     const conv = get().conversations.find((c) => c.id === id);

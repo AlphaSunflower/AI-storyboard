@@ -55,6 +55,41 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     }
 
     @Override
+    public String streamAnswer(AgentConversation conversation, String content, SseEmitter emitter) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            chatClient().prompt()
+                .system("你是 Moon 智能体，AI Storyboard 平台的创作助手。"
+                    + "你可以帮用户写分镜、生成图片、生成视频。回答简洁自然，使用中文。"
+                    + "如果用户请求的是分镜/图片/视频创作，引导对方用明确指令描述需求（如\"帮我做个清朝灭亡的分镜\"）。")
+                .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
+                .stream()
+                .content()
+                .doOnNext(chunk -> {
+                    if (chunk == null || chunk.isBlank()) return;
+                    sb.append(chunk);
+                    try {
+                        emitter.send(SseEmitter.event().name("message").data(java.util.Map.of("content", chunk)));
+                    } catch (Exception e) {
+                        log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                    }
+                })
+                .blockLast();
+        } catch (Exception e) {
+            log.error("AgentAnswerService 流式回答失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
+        }
+        String full = sb.toString();
+        if (full.isBlank()) {
+            // LLM 失败或流中断：降级文案补发一条 message（前端打字机仍需内容收尾）
+            full = "服务开小差了，请稍后再试。";
+            try {
+                emitter.send(SseEmitter.event().name("message").data(java.util.Map.of("content", full)));
+            } catch (Exception ignore) { }
+        }
+        return full;
+    }
+
+    @Override
     public String answer(AgentConversation conversation, String content, SseEmitter emitter) {
         String answer = generate(conversation, content);
         try {
@@ -87,10 +122,11 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
             synchronized (this) {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
-                        .defaultOptions(OpenAiChatOptions.builder()
-                            .model(config.getDefaultVisionModel())
-                            .timeout(Duration.ofSeconds(60)))
-                        .build();
+                            .defaultOptions(OpenAiChatOptions.builder()
+                                    // 对话交流统一 deepseek-v4-flash（用户指定；deepseek 无思考参数，不加 thinking_level）
+                                    .model("deepseek-v4-flash")
+                                    .timeout(Duration.ofSeconds(120)))
+                            .build();
                 }
             }
         }

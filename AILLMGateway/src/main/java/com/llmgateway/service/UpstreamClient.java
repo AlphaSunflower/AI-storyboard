@@ -42,6 +42,27 @@ public class UpstreamClient {
         return sendWithRetry(request);
     }
 
+    /**
+     * POST JSON 流式（SSE）：上游 stream=true 响应以 InputStream 返回，调用方逐块转发。
+     * 超时用流式专用长超时（SSE 长连接，token 间隔可数秒；复用 requestTimeoutMs 会中断长生成）。
+     * 不重试——SSE 流一旦建立无法安全重放，重试语义交给调用方（渠道轮换）。
+     */
+    public HttpResponse<java.io.InputStream> postJsonStream(String baseUrl, String path, String apiKey, String bodyJson) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(stripTrailingSlash(baseUrl) + path))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(Duration.ofMillis(Math.max(config.getUpstream().getRequestTimeoutMs(), 300_000L)))
+                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
+                .build();
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (Exception e) {
+            log.warn("上游流式请求失败: path={}, error={}", path, e.getMessage());
+            throw new RuntimeException("upstream stream request failed: " + e.getMessage(), e);
+        }
+    }
+
     /** POST Gemini 原生格式（Key 走 query 参数） */
     public HttpResponse<String> postGemini(String baseUrl, String apiKey, String bodyJson) {
         HttpRequest request = HttpRequest.newBuilder()

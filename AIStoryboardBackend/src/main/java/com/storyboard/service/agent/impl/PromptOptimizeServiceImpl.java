@@ -61,7 +61,8 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(config.getDefaultVisionModel())
+                                    // 对话交流统一 deepseek-v4-flash（用户指定）
+                                    .model("deepseek-v4-flash")
                                     .timeout(Duration.ofSeconds(60)))
                             .build();
                 }

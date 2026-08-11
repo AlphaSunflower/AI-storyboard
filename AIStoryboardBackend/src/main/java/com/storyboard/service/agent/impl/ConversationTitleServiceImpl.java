@@ -44,17 +44,12 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
     private static final String DEFAULT_TITLE = "新对话";
 
     /**
-     * 标题生成专用模型：gemini-3.5-flash-lite（默认零思考 token，即真正的"不思考模式"）。
+     * 标题生成专用模型：deepseek-v4-flash（对话交流统一模型，用户指定）。
      *
-     * 实测结论（2026-08 联调）：
-     * - 老张网关对 gemini-3-flash-preview 的一切思考参数（thinking_level / thinking / thinking_config）
-     *   均不透传或拒绝（reasoning_tokens 仍 500+），preview 上无法关闭思考；
-     * - gemini-3.5-flash-lite 默认 minimal 思考（usage 无 reasoning_tokens），响应极快，
-     *   是老张官方文档推荐给分类/提取/高吞吐低成本任务的模型，标题生成完全匹配；
-     * - thinking_level 参数仍显式携带（"minimal"）：flash-lite 接受该参数，语义自文档化。
+     * <p>deepseek 无思考参数，无需 thinking_level（原 gemini-3.5-flash-lite 的
+     * "不思考模式"extraBody 已随模型切换移除）。
      */
-    private static final String TITLE_MODEL = "gemini-3.5-flash-lite";
-    private static final String TITLE_THINKING_LEVEL = "minimal";
+    private static final String TITLE_MODEL = "deepseek-v4-flash";
 
     /** 标题生成 prompt：约束输出为 6-15 字中文（或 3-8 英文词）的纯标题 */
     private static final String TITLE_PROMPT =
@@ -78,9 +73,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
                                     .model(TITLE_MODEL)
-                                    .timeout(Duration.ofSeconds(30))
-                                    // 不思考模式（联调验证实际写法，见常量注释）：经 extraBody 透传为请求体顶层字段
-                                    .extraBody(Map.of("thinking_level", TITLE_THINKING_LEVEL)))
+                                    .timeout(Duration.ofSeconds(30)))
                             .build();
                 }
             }

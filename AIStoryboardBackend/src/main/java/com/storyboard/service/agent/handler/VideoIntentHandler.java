@@ -69,11 +69,13 @@ public class VideoIntentHandler implements IntentHandler {
     }
 
     @Override
-    public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 视频异步执行：方案确认后创建任务 → task_accepted → 本轮结束，前端轮询状态端点取结果
+    public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        // 视频异步执行：方案确认后创建任务 → task_accepted → 本轮结束，前端轮询状态端点取结果。
+        // 无同步 message 输出，返回空串（结果由后台轮询更新资产行，前端轮询渲染）
         String message = support.planField(checkpoint.getPlan(), "message");
         String duration = support.planField(checkpoint.getPlan(), "duration");
         String source = support.planField(checkpoint.getPlan(), "source");
         support.startVideoGenerationAsync(request, message, duration, null, source);
+        return "";
     }
 }

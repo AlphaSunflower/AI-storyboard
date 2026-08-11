@@ -29,6 +29,8 @@ public interface IntentHandler {
     /**
      * HITL 表单提交后续流（checkpoint 已由 Orchestrator 校验并一次性消费）。
      * 执行对应工具 → confirm_result → message_end。
+     *
+     * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息；无消息返回空串）
      */
-    void resume(OrchestrationRequest request, AgentCheckpoint checkpoint);
+    String resume(OrchestrationRequest request, AgentCheckpoint checkpoint);
 }

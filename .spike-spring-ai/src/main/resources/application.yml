@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: spring-ai-spike
+  ai:
+    openai:
+      base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
+      api-key: ${LLM_GATEWAY_API_KEY:spike-key}
+      chat:
+        options:
+          model: gemini-3-flash-preview
+server:
+  port: 18083
+logging:
+  level:
+    org.springframework.ai: INFO

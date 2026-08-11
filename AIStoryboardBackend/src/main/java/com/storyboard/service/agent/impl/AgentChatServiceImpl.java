@@ -306,11 +306,15 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 分页安全钳制（原 Controller 逻辑下沉：page 下限 1、size 1~50）
         int safePage = Math.max(1, page);
         int safeSize = Math.min(50, Math.max(1, size));
+        // 产出素材 = 生成结果（image/video），排除用户自己上传的参考图（type=reference，不算产出）
         long total = assetMapper.selectCount(
-                new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getConversationId, conversationId));
+                new LambdaQueryWrapper<AgentAsset>()
+                        .eq(AgentAsset::getConversationId, conversationId)
+                        .ne(AgentAsset::getType, "reference"));
         List<AgentAsset> records = assetMapper.selectList(
                 new LambdaQueryWrapper<AgentAsset>()
                         .eq(AgentAsset::getConversationId, conversationId)
+                        .ne(AgentAsset::getType, "reference")
                         .orderByDesc(AgentAsset::getCreatedAt)
                         // 先转 long 再乘，避免 (safePage - 1) * safeSize 在 int 域溢出（OFFSET 超出 21 亿行时）
                         .last("LIMIT " + safeSize + " OFFSET " + ((long) (safePage - 1) * safeSize)));
@@ -658,8 +662,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             try {
                 // 生成后端化：HITL 人工确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
                 persistUserConfirmation(conversation, action, null);
-                // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resume 内处理）
-                orchestrator.resume(conversation, formToken, action, emitter);
+                // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resume 内处理）；
+                // resume 返回本轮最后一条 message（如生成图片的 ![...](url)），落库 assistant 消息，
+                // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
+                String answer = orchestrator.resume(conversation, formToken, action, emitter);
+                if (answer != null && !answer.isBlank()) {
+                    persistAssistant(conversation, answer);
+                }
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {

@@ -42,7 +42,8 @@ public class OtherIntentHandler implements IntentHandler {
     }
 
     @Override
-    public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 无 HITL checkpoint 认领
+    public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        // 无 HITL checkpoint 认领（resumeActions 为空，编排器不会分发到本处理器）
+        return "";
     }
 }

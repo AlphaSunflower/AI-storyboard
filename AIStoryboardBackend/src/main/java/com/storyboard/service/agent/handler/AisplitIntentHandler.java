@@ -97,7 +97,7 @@ public class AisplitIntentHandler implements IntentHandler {
     }
 
     @Override
-    public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+    public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         // 执行写分镜（EXECUTE step：自动模式工具调用）；收尾事件序列走 resumeStage 模板
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
         int count = agentTools.writeScenes(request.getConversation().getProjectId(), items)
@@ -114,5 +114,6 @@ public class AisplitIntentHandler implements IntentHandler {
                 "content", msg,
                 "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
                 "sceneCount", totalScenes));
+        return msg;
     }
 }

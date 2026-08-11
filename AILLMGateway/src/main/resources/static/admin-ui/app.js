@@ -677,6 +677,35 @@ async function loadRoutes() {
   }
 }
 
+/** 滑块控件：range input + 实时值显示（数值参数避免手填） */
+const sliderField = (id, label, min, max, step, def) =>
+  '<label>' + label
+  + ' <input type="range" class="p-range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + def + '">'
+  + ' <span class="p-val" id="' + id + '-val">' + def + '</span></label>';
+
+/** 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/temperature/max_tokens/top_p/时长），字符串枚举保持输入框 */
+const paramsGroups = {
+  text: sliderField('p-temperature', 'temperature', '0', '2', '0.1', '0.7')
+      + sliderField('p-maxtokens', 'max_tokens', '100', '8192', '100', '1024')
+      + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9'),
+  image: sliderField('p-nmin', '数量min', '1', '10', '1', '1')
+       + sliderField('p-nmax', '数量max', '1', '10', '1', '4')
+       + sliderField('p-ndefault', '数量默认', '1', '10', '1', '1')
+       + '<label>尺寸(逗号) <input class="input" id="p-sizes" placeholder="1024x1024,1536x1024"></label>'
+       + '<label>尺寸默认 <input class="input" id="p-sizedefault" placeholder="1024x1024"></label>'
+       + '<label>质量(逗号) <input class="input" id="p-qualities" placeholder="standard,hd"></label>'
+       + '<label>质量默认 <input class="input" id="p-qualitydefault" placeholder="hd"></label>'
+       + '<label>风格(逗号) <input class="input" id="p-styles" placeholder="vivid,natural"></label>'
+       + '<label>风格默认 <input class="input" id="p-styledefault" placeholder="vivid"></label>',
+  video: sliderField('p-dmin', '时长min(秒)', '4', '15', '1', '4')
+       + sliderField('p-dmax', '时长max(秒)', '4', '15', '1', '8')
+       + sliderField('p-durationdefault', '时长默认(秒)', '4', '15', '1', '6')
+       + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
+       + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
+       + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
+       + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>',
+};
+
 /** 新建/编辑路由弹窗：渠道下拉（停用渠道灰显）+ defaultParams JSON 校验 */
 function openRouteModal(route) {
   const isEdit = !!route;
@@ -695,35 +724,6 @@ function openRouteModal(route) {
   const typeOpts = [
     ['text', '文本模型'], ['image', '生图模型'], ['video', '视频模型（生成视频）'], ['vision', '图片/视频理解模型'],
   ].map(([v, label]) => '<option value="' + v + '"' + ((route ? route.type : 'text') === v ? ' selected' : '') + '>' + label + '</option>').join('');
-
-  // 滑块控件：range input + 实时值显示（数值参数避免手填）
-  const sliderField = (id, label, min, max, step, def) =>
-    '<label>' + label
-    + ' <input type="range" class="p-range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + def + '">'
-    + ' <span class="p-val" id="' + id + '-val">' + def + '</span></label>';
-
-  // 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/temperature/max_tokens/top_p/时长），字符串枚举保持输入框
-  const paramsGroups = {
-    text: sliderField('p-temperature', 'temperature', '0', '2', '0.1', '0.7')
-        + sliderField('p-maxtokens', 'max_tokens', '100', '8192', '100', '1024')
-        + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9'),
-    image: sliderField('p-nmin', '数量min', '1', '10', '1', '1')
-         + sliderField('p-nmax', '数量max', '1', '10', '1', '4')
-         + sliderField('p-ndefault', '数量默认', '1', '10', '1', '1')
-         + '<label>尺寸(逗号) <input class="input" id="p-sizes" placeholder="1024x1024,1536x1024"></label>'
-         + '<label>尺寸默认 <input class="input" id="p-sizedefault" placeholder="1024x1024"></label>'
-         + '<label>质量(逗号) <input class="input" id="p-qualities" placeholder="standard,hd"></label>'
-         + '<label>质量默认 <input class="input" id="p-qualitydefault" placeholder="hd"></label>'
-         + '<label>风格(逗号) <input class="input" id="p-styles" placeholder="vivid,natural"></label>'
-         + '<label>风格默认 <input class="input" id="p-styledefault" placeholder="vivid"></label>',
-    video: sliderField('p-dmin', '时长min(秒)', '4', '15', '1', '4')
-         + sliderField('p-dmax', '时长max(秒)', '4', '15', '1', '8')
-         + sliderField('p-durationdefault', '时长默认(秒)', '4', '15', '1', '6')
-         + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
-         + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
-         + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
-         + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>',
-  };
 
   // 绑定滑块：input 事件实时刷新值显示；n 范围/时长范围 min<=max 联动（拖动 min 时 max 下限跟随，反之亦然）
   const bindParamSliders = () => {

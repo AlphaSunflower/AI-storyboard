@@ -117,7 +117,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     }
 
     @Override
-    public void resume(AgentConversation conversation, String formToken, String action, SseEmitter emitter) {
+    public String resume(AgentConversation conversation, String formToken, String action, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
@@ -127,12 +127,12 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .last("LIMIT 1"));
             if (cp == null) {
                 support.sendEvent(request, "error", Map.of("code", "40401", "message", "确认信息不存在或已失效，请重新发起"));
-                return;
+                return "";
             }
             if (!"pending".equals(cp.getStatus()) || cp.getExpirationTime() == null
                     || cp.getExpirationTime().isBefore(OffsetDateTime.now())) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已过期，请重新发起"));
-                return;
+                return "";
             }
             // 一次性消费：status → used（原子条件防并发重放）
             int updated = checkpointMapper.update(null,
@@ -142,7 +142,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .set(AgentCheckpoint::getStatus, "used"));
             if (updated == 0) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已被使用，请重新发起"));
-                return;
+                return "";
             }
 
             // 按提交 action 分发（前端提交的 action 为准：agree/generate_image → 对应 handler；refine/disagree 等 → 默认继续完善）
@@ -151,12 +151,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 support.sendEvent(request, "message", Map.of("content", "好的，请继续完善设计方案。"));
                 support.sendEvent(request, "message_end", Map.of(
                         "messageId", "", "sceneCount", -1L, "content", "好的，请继续完善设计方案。"));
-                return;
+                return request.getLastMessage();
             }
             handler.resume(request, cp);
+            return request.getLastMessage();
         } catch (Exception e) {
             log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             support.sendEvent(request, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
+            return "";
         }
         // 同上：complete 由调用方统一执行（先释放锁再 complete，防 EOF 竞态）
     }

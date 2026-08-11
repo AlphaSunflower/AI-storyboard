@@ -24,6 +24,17 @@ public interface AgentAnswerService {
     String generate(AgentConversation conversation, String content);
 
     /**
+     * 流式生成回答：逐 token 推 SSE message 增量事件（前端打字机逐段拼接），
+     * 返回完整文本（调用方负责 message_end 收尾 + 落库）。
+     *
+     * @param conversation 会话（已校验归属）
+     * @param content      用户消息
+     * @param emitter      SSE 输出
+     * @return 完整回答文本（LLM 失败返回降级文案并补发一条 message）
+     */
+    String streamAnswer(AgentConversation conversation, String content, SseEmitter emitter);
+
+    /**
      * 生成回答并推 SSE message 事件（blocking 路径兼容入口）。
      *
      * @param conversation 会话（已校验归属）

@@ -23,10 +23,38 @@ public class OpenAiCompatController {
     private final VideoGatewayService videoGatewayService;
     private final ImageEditService imageEditService;
 
-    @PostMapping(value = "/chat/completions", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> chatCompletions(@RequestBody String body) {
-        RouteResult result = routingService.route("/chat/completions", body);
-        return ResponseEntity.status(result.status()).body(result.body());
+    /**
+     * OpenAI 兼容 chat completions：stream=true 走 SSE 流式透传（text/event-stream），
+     * 否则同步缓冲透传（application/json）。
+     */
+    @PostMapping(value = "/chat/completions", produces = {
+            MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
+    public void chatCompletions(@RequestBody String body,
+                                jakarta.servlet.http.HttpServletResponse response) throws Exception {
+        boolean stream = body != null && body.contains("\"stream\":true");
+        if (!stream) {
+            RouteResult result = routingService.route("/chat/completions", body);
+            response.setStatus(result.status());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
+            response.getWriter().write(result.body());
+            return;
+        }
+        // SSE 流式透传：上游逐块转发，边写边 flush（不缓冲）
+        response.setStatus(200);
+        response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+        jakarta.servlet.ServletOutputStream out = response.getOutputStream();
+        routingService.streamChat("/chat/completions", body, bytes -> {
+            try {
+                out.write(bytes);
+                out.flush();
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e); // 客户端断开：中断转发
+            }
+        });
     }
 
     @PostMapping(value = "/images/generations", produces = MediaType.APPLICATION_JSON_VALUE)

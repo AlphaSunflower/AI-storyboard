@@ -54,6 +54,61 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
+    public void streamChat(String path, String requestBody, java.util.function.Consumer<byte[]> sink) throws Exception {
+        JsonNode body = objectMapper.readTree(requestBody);
+        String modelName = body.path("model").asText("");
+        if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
+
+        // 候选渠道（与 route 同规则：model_route → enabled 渠道按 priority 升序）
+        List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                .eq(ModelRoute::getModelName, modelName));
+        if (routes == null || routes.isEmpty()) throw new BusinessException(40401, "no route for model: " + modelName);
+        List<Channel> candidates = routes.stream()
+                .map(r -> channelMapper.selectById(r.getChannelId()))
+                .filter(c -> c != null && Boolean.TRUE.equals(c.getEnabled()))
+                .sorted(Comparator.comparingInt(c -> c.getPriority() == null ? 0 : c.getPriority()))
+                .toList();
+        if (candidates.isEmpty()) throw new BusinessException(50301, "no available channel for model: " + modelName);
+
+        // 逐个渠道尝试：openai_compatible 原生 SSE 透传；gemini 降级非流式（转换后回写）
+        Exception lastError = null;
+        for (Channel channel : candidates) {
+            try {
+                String apiKey = keyService.decrypt(channel.getApiKey());
+                if ("gemini".equals(channel.getType())) {
+                    // gemini 无 SSE 透传路径：降级非流式（上游不支持 stream 透传时兼容）
+                    String geminiBody = geminiConverter.toGeminiRequest(requestBody);
+                    HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
+                    byte[] out = (resp.statusCode() == 200
+                            ? geminiConverter.toOpenAiResponse(resp.body())
+                            : resp.body()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    sink.accept(out);
+                    return;
+                }
+                // openai_compatible：流式透传上游 SSE
+                HttpResponse<java.io.InputStream> resp = upstreamClient.postJsonStream(
+                        channel.getBaseUrl(), path, apiKey, requestBody);
+                if (resp.statusCode() != 200) {
+                    String err = new String(resp.body().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    throw new RuntimeException("upstream " + resp.statusCode() + ": " + err);
+                }
+                try (java.io.InputStream in = resp.body()) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        sink.accept(java.util.Arrays.copyOf(buf, n));
+                    }
+                }
+                return;
+            } catch (Exception e) {
+                lastError = e;
+                log.warn("流式渠道失败，尝试下一个: channel={}, error={}", channel.getId(), e.getMessage());
+            }
+        }
+        throw lastError != null ? lastError : new BusinessException(50202, "upstream stream failed");
+    }
+
+    @Override
     public RouteResult route(String path, String requestBody) {
         long start = System.currentTimeMillis();
         String model = null;
