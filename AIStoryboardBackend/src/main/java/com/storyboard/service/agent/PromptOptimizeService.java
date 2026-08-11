@@ -1,21 +1,13 @@
 package com.storyboard.service.agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * 提示词优化服务。
@@ -31,6 +23,9 @@ import java.util.Map;
  * - 超时 60s：用户主动触发、可接受等待，一次性返回（不做流式）；
  * - 任何失败包装为 RuntimeException 由 Controller 统一转错误码，不静默吞错（与标题
  *   被动静默不同：优化是用户显式操作，失败必须可见）。
+ *
+ * 实现说明：已从手写 JDK HttpClient 直连网关 /v1/chat/completions 改为
+ * Spring AI ChatClient（spring.ai.openai.base-url 已指向网关 /v1，纯文本调用，无结构化输出）。
  */
 @Service
 public class PromptOptimizeService {
@@ -48,48 +43,31 @@ public class PromptOptimizeService {
         + "主体、环境、光线、色彩、风格、镜头类型；视频类给出运镜、节奏、转场、画面动势、时长感。"
         + "直接输出优化后的提示词本身，不要 JSON、不要解释、不要编号前缀。";
 
-    private final AiConfigProperties config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
-    public PromptOptimizeService(AiConfigProperties config) {
-        this.config = config;
+    public PromptOptimizeService(AiConfigProperties config, ChatClient.Builder chatClientBuilder) {
+        // 默认模型固定为 config.getDefaultVisionModel()，超时 60s（与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(config.getDefaultVisionModel())
+                        .timeout(Duration.ofSeconds(60)))
+                .build();
     }
 
     /** 优化草稿为专业提示词（LLM 自判类型，单文本输出）。失败抛 RuntimeException（Controller 统一转错误码）。 */
     public String optimize(String content) {
         try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getDefaultVisionModel()); // 质量优先（用户确认）
-            List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", OPTIMIZE_PROMPT));
             // 草稿截断 500 字：提示词优化只需要核心需求，防超长输入拖慢
-            messages.add(Map.of("role", "user", "content",
-                    content.length() > 500 ? content.substring(0, 500) : content));
-            body.put("messages", messages);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                // 优化任务用户主动等待，60s 内一次性返回（不做流式）
-                .timeout(Duration.ofSeconds(60))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("提示词优化 API 返回 " + resp.statusCode() + ": " + resp.body());
-            }
-            JsonNode root = objectMapper.readTree(resp.body());
-            String optimized = root.path("choices").get(0).path("message").path("content").asText("").trim();
-            if (optimized.isBlank()) {
+            String userContent = content.length() > 500 ? content.substring(0, 500) : content;
+            String optimized = chatClient.prompt()
+                    .system(OPTIMIZE_PROMPT)
+                    .user(userContent)
+                    .call()
+                    .content();
+            if (optimized == null || optimized.isBlank()) {
                 throw new RuntimeException("优化结果为空");
             }
-            return optimized;
+            return optimized.trim();
         } catch (Exception e) {
             log.warn("提示词优化失败: {}", e.getMessage());
             throw new RuntimeException("提示词优化失败: " + e.getMessage(), e);
