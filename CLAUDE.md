@@ -289,7 +289,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | GET | `/api/agent/conversations/{id}/assets?page=&size=` | 资产列表（**分页**，page 默认 1 / size 默认 20 / 上限 50，返回 `{records, total, page, size}`） |
 | POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
 | POST | `/api/agent/conversations/{id}/messages/stream` | SSE 流式发送消息（body `{content, picUrl?}`，`text/event-stream`） |
-| POST | `/api/agent/conversations/{id}/form/submit` | HITL 表单提交并续流（body `{formToken, taskId, action}`），SSE 返回；video 确认（action=generate_video）→ `task_accepted` 立即返回 |
+| POST | `/api/agent/conversations/{id}/form/submit` | HITL 表单提交并续流（body `{formToken, taskId, action, content?}`，`content` 为 action=custom 自定义输入文本），SSE 返回；video 确认（action=generate_video）→ `task_accepted` 立即返回 |
 | GET | `/api/agent/tasks/{taskId}` | 视频异步任务状态（前端 5s 轮询：`{taskId, assetId, status(queued/running/completed/failed), url, error}`；归属校验，未归属/无权 40401） |
 | PATCH | `/api/agent/conversations/{id}` | 重命名 title / 归档（status: `active`\|`archived`） |
 | DELETE | `/api/agent/assets/{id}` | 删除资产（未归属资产拒绝 40401） |
@@ -305,7 +305,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 |-------|----------|------|
 | `message` | `content` | 回答增量（前端逐段拼接打字机效果） |
 | `workflow` | `title`, `status` | 节点进度（`node_started` / `node_finished`） |
-|| `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机 |
+||| `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机。`actions` 可含 `{id:"custom", title:"✍ 自定义输入"}`——前端渲染内联输入框，提交时 `POST /form/submit` body 携带 `content` 为用户自定义文本 |
 || `task_accepted` | `taskId`, `message` | 视频异步任务已受理（resume/generate_video 或图生视频确认后立即返回）；前端转 5s 轮询 `GET /api/agent/tasks/{taskId}` 取结果 |
 || `message_end` | `messageId`, `sceneCount`, `content`, `title?` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定；`title` 为首条消息异步 AI 重命名的新标题（**一次性**：仅重命名完成的那一轮携带，取走即删，不做轮询） |
 | `error` | `code`, `message` | 失败结束；`message` 已脱敏 |
@@ -314,21 +314,21 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 ### Spring AI 2.0 编排（2026-08-11 迁移，替代 Dify；2026-08-11 二次重构：策略注册 + HITL 模板）
 
-- **编排器**：`AgentOrchestratorImpl` 瘦身为**纯分发器**（策略模式注册）：`run()` = 意图识别（规则前置 → LLM + confidence → 阈值判断）→ 按 intentType 查 `Map<String, IntentHandler>` 分发；`resume()` = checkpoint 校验+一次性消费 → 按提交 action 查 handler 恢复。处理器注册表由 Spring 自动收集（`List<IntentHandler>` + `@PostConstruct buildRegistry`），**新增意图 = 新实现类 + @Component，核心零改动**
+- **编排器**：`AgentOrchestratorImpl` 瘦身为**纯分发器**（策略模式注册）：`run()` = 意图识别（规则前置 → LLM + confidence → 阈值判断）→ 按 intentType 查 `Map<String, IntentHandler>` 分发；`resume()` = checkpoint 校验+一次性消费 → 按提交 action 查 handler 恢复。处理器注册表由 Spring 自动收集（`List<IntentHandler>` + `@PostConstruct buildRegistry`），**新增意图 = 新实现类 + @Component，核心零改动**。resume 分发前 `request.setAction(action)` 透传提交的选项 id；**动态选项卡片**（选项 id 由 LLM/场景生成，不进 byAction 注册表）按 checkpoint action 特判转对应 handler：`intent-clarify`（意图澄清）/ `clarify-option`（gate 澄清）/ `scene-mode`（分镜处理方式）/ `scene-regenerate`（分镜调整意见）
 - **处理器**（`service/agent/handler/` 包）：`IntentHandler` 接口（intentType/resumeActions/handle/resume）+ `OrchestrationRequest` 上下文（含 per-request lastMessage，修复多会话并发互踩）+ `AgentOrchestratorSupport` 共享组件（SSE 发送/checkpoint 落库/LLM 调用/瞬态重试）+ 4 个实现：AisplitIntentHandler / PicIntentHandler / VideoIntentHandler / OtherIntentHandler
 - **HITLStage 通用模板**：`runHITLStage`（workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件）+ `resumeStage`（workflow → 结果消息 → confirm_result → message_end）；三链只填「方案生成逻辑」与「执行工具」两个钩子（StagePlan record 承载差异），HITL/checkpoint/resume 全复用
 - **意图识别增强**：规则前置匹配（强关键词如「分镜/剧本」「生成视频」「生成图片」直接路由，免一次 LLM 调用，confidence=1.0）+ LLM 输出 JSON `{type, confidence}`；**低于 `ai.agent.intent-threshold`（默认 0.6）不硬路由，走澄清分支**；失败兜底 intent-other；LLM 调用瞬态失败（429/5xx/超时）重试 1 次（流式与 writeScenes 刻意不重试——非幂等/重复 delta）
 - **意图路由（决策 4，2026-08-11 全链实现）**：
-  - aisplit：剧本优化 gate（type=0 追问澄清/type=1 继续）→ 分镜方案 → 分镜 JSON（ScriptGenerationService）→ HITL（agree/disagree）→ resume 写库；**澄清追问上限 `ai.agent.max-clarify-rounds`（默认 2）**——连续 type=0 达上限后不再追问，直接按原始需求出默认方案让用户选（内存计数，type=1/非 aisplit 轮清零）
+  - aisplit：**现有分镜检测（handle 入口一次，防重入死循环）**——项目已有分镜 → 卡片1「处理方式」（`scene-mode`：基于现有优化/全新创建/不生成）→ 剧本优化 gate（type=0 追问澄清/type=1 继续）→ 分镜方案 → 分镜 JSON（ScriptGenerationService）→ 方案确认卡片（checkpoint action 恒 `agree`，选项动态：**有现有分镜**→ [replace 覆盖导入][append 追加][disagree 不满意][cancel 不生成] + 覆盖警告文案；**无**→ [agree 满意][disagree 不满意]）→ resume 写库；**不满意（disagree）→ 调整意见卡片（`scene-regenerate`，选项=✍自定义输入）→ 意见+上一轮方案重走生成链（可循环）**，连续不满意达 `ai.agent.max-regenerate-rounds`（默认 3）后不再弹卡片，提示直接输入新需求（regenCount 内存计数，写库成功清零）；**澄清追问上限 `ai.agent.max-clarify-rounds`（默认 2）**——连续 type=0 达上限后不再追问，直接按原始需求出默认方案让用户选（内存计数，type=1/非 aisplit 轮清零）；写库策略：replace → `AgentTools.replaceScenes`（同事务清空+写入，中途失败不丢现有分镜）/ append → 追加（现状）/ cancel → 不写库 message_end（sceneCount=-1 不触发前端刷新）
   - pic：有参考图 → `ImageRefinePromptService.buildRefinedPrompt`（视觉模型）→ HITL（generate_image/refine）→ resume 图改图；无图 → `callImagePrompt`（LLM）→ 直接文生图自动完成
   - video：有参考图 → `VideoPlanService.buildVideoPlan`（视觉模型）→ video_plan 卡片；无图 → `callVideoPlan`（LLM 方案）→ 同样 video_plan 卡片；**「开始生成视频」统一走 `/form/submit`（action=generate_video → VideoIntentHandler.resume）→ `task_accepted` 立即返回，后台虚拟线程轮询 MiniMax（~2min）更新 agent_assets 行**，前端轮询 `GET /api/agent/tasks/{taskId}`（旧 `/video/plan/generate` 端点保留为兼容壳，同一异步路径）
   - other：`AgentAnswerService` 主回答（ChatClient 拼历史，流式打字机）
 - **会话级互斥**：`ConversationLock`（Semaphore，无所有权跨线程安全）——同一 conversation 同时只允许一个活跃编排实例；streamMessage / submitFormAndResume / generateVideoFromPlan / sendMessage 四入口统一 tryAcquire，忙碌返回 40901（SSE error 事件 / blocking 抛 BusinessException，GlobalExceptionHandler 已映射 CONFLICT）；**complete 由调用方统一执行且先释放锁再 complete**（防前端收到 EOF 立即发下一条撞锁）
-- **工具面**：`AgentTools`（@Component 工具组件，不接口化）：writeScenes（复用 `AgentGenerationService.writeScript`）/ refineImage / generateVideo；当前由编排（handler 链）直接调用，自动模式 `ChatClient.tools()` 工具循环为后续增强；**工具异常不向上抛**（LLM 消化为文本），业务错误须在 @Tool 内返回错误对象
+- **工具面**：`AgentTools`（@Component 工具组件，不接口化）：writeScenes（复用 `AgentGenerationService.writeScript`）/ replaceScenes（复用 `replaceScript`，同事务清空+写入）/ refineImage / generateVideo；当前由编排（handler 链）直接调用，自动模式 `ChatClient.tools()` 工具循环为后续增强；**工具异常不向上抛**（LLM 消化为文本），业务错误须在 @Tool 内返回错误对象
 - **主回答**：`AgentAnswerService`（intent-other 闲聊）ChatClient 拼历史流式（打字机）；D3 定案流式（message 增量 + message_end 携完整文本）
 - **HITL checkpoint**（表 `agent_checkpoints`，V4 migration）：form_token 一次性消费（status pending→used 原子条件）、30 分钟过期、plan 存方案 JSON 文本（TEXT 列，实体 String 直插）；替代原内存 Map 快照（formSnapshots/videoPlanSnapshots 已删）
 - **事务语义**（沿用 I1）：user 消息 `TransactionTemplate` + `REQUIRES_NEW` 独立事务立即提交；编排失败 user 消息保留；编排成功后 `persistAssistant` 落库 assistant 消息
-- **LLM 配置**：复用 `spring.ai.openai.*`（网关），编排 ChatClient 超时 60-120s；`ai.agent.*` 为编排行为参数（intent-threshold / max-clarify-rounds）
+- **LLM 配置**：复用 `spring.ai.openai.*`（网关），编排 ChatClient 超时 60-120s；`ai.agent.*` 为编排行为参数（intent-threshold / max-clarify-rounds / max-regenerate-rounds）
 
 ### 首条消息异步 AI 重命名标题
 

@@ -44,6 +44,14 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         return value;
     }
 
+    /** 覆盖写分镜：同一事务内先清空现有再批量写入（replaceScript 事务包裹，writeScript 内部调用共享事务） */
+    @Transactional
+    public int replaceScript(String projectId, List<AgentSceneItem> scenes) {
+        sceneMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Scene>()
+                .eq(Scene::getProjectId, projectId));
+        return writeScript(projectId, scenes);
+    }
+
     /** 批量写分镜（宽松 items 直接透传）；批量插入需保证原子性 */
     @Transactional
     public int writeScript(String projectId, List<AgentSceneItem> scenes) {

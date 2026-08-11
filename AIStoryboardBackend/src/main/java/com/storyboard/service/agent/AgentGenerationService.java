@@ -19,6 +19,9 @@ public interface AgentGenerationService {
     /** 批量写分镜（宽松 items 直接透传）；批量插入需保证原子性 */
     int writeScript(String projectId, List<AgentSceneItem> scenes);
 
+    /** 覆盖写分镜：同一事务内先清空项目现有分镜再批量写入（避免中途失败丢失现有分镜） */
+    int replaceScript(String projectId, List<AgentSceneItem> scenes);
+
     /**
      * 生图并落库。
      * sceneId 非空 → 更新真实分镜（返回 imageUrl）；为空 → 落 agent_assets（返回 imageUrl + assetId）。

@@ -59,6 +59,27 @@ public class AgentTools {
     }
 
     /**
+     * 覆盖写分镜：先清空项目现有分镜再批量写入（同一事务，避免中途失败丢失现有分镜）。
+     *
+     * @param projectId 项目 ID
+     * @param scenes    分镜列表（8 字段，见 {@link AgentSceneItem}）
+     * @return {ok, count} 或 {ok:false, code, message}
+     */
+    @Tool(description = "覆盖写分镜：清空项目现有分镜后批量写入新分镜（删除与写入同一事务）")
+    public Map<String, Object> replaceScenes(
+            @ToolParam(description = "项目 ID") String projectId,
+            @ToolParam(description = "分镜列表") List<AgentSceneItem> scenes) {
+        try {
+            int count = generationService.replaceScript(projectId, scenes);
+            log.info("AgentTools.replaceScenes: projectId={} count={}", projectId, count);
+            return Map.of("ok", true, "count", count);
+        } catch (Exception e) {
+            log.error("AgentTools.replaceScenes 失败: {}", e.getMessage(), e);
+            return error("50001", "分镜覆盖写入失败：" + e.getMessage());
+        }
+    }
+
+    /**
      * 完善/生成图片（图生图或图改图，sceneId=null 落 agent_assets）。
      *
      * @param conversationId 会话 ID（校验归属用）

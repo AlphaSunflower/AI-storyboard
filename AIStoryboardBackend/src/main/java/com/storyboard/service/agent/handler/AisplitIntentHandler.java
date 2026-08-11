@@ -4,6 +4,7 @@ import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.agent.AgentSceneItem;
 import com.storyboard.service.agent.AgentTools;
+import com.storyboard.service.ai.AgentAiConfigProperties;
 import com.storyboard.service.ai.ScriptGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -38,6 +39,16 @@ public class AisplitIntentHandler implements IntentHandler {
     private final ScriptGenerationService scriptGenerationService;
     private final AgentTools agentTools;
     private final SceneMapper sceneMapper;
+    private final AgentAiConfigProperties agentConfig;
+
+    /**
+     * 不满意调整计数：conversationId → 连续「不满意→调整→重生成」轮次。
+     * 达 {@code maxRegenerateRounds} 上限后不再弹调整卡片，提示直接输入新需求；
+     * 写库成功（agree/replace/append）或达上限清零。
+     * ponytail: 内存态重启即失（无害）；多实例需落 DB 列。
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> regenCount =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public String intentType() {
@@ -228,7 +239,11 @@ public class AisplitIntentHandler implements IntentHandler {
             return endWithoutScenes(request, "好的，已取消本次分镜导入，现有分镜保持不变。");
         }
         if ("disagree".equals(chosen)) {
-            // 不满意 → 发「调整意见」卡片：上一轮方案文本存 plan，用户自定义输入意见后重走生成链
+            // 不满意 → 调整意见卡片（连续不满意达上限后不再弹，提示直接输入新需求）
+            if (regenerateLimitReached(request.getConversation().getId())) {
+                return endWithoutScenes(request, "已连续调整多次仍未满意，请直接输入新的分镜需求，我会重新处理。");
+            }
+            // 上一轮方案文本存 plan，用户自定义输入意见后重走生成链
             StringBuilder prev = new StringBuilder("上一轮分镜方案：\n");
             int idx = 1;
             for (AgentSceneItem s : support.parsePlanScenes(checkpoint.getPlan())) {
@@ -243,14 +258,14 @@ public class AisplitIntentHandler implements IntentHandler {
                     "human_input",
                     List.of(Map.of("id", "custom", "title", "✍ 自定义输入"))));
         }
-        // 执行写分镜（EXECUTE step：自动模式工具调用）；replace 先清空现有再写（覆盖）
+        // 执行写分镜（EXECUTE step）；replace=同事务清空现有再写（覆盖）/ 其余=追加（现状）
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
-        if ("replace".equals(chosen)) {
-            int removed = clearScenes(request.getConversation().getProjectId());
-            log.info("分镜覆盖导入：已清空 {} 条现有分镜，projectId={}", removed, request.getConversation().getProjectId());
-        }
-        int count = agentTools.writeScenes(request.getConversation().getProjectId(), items)
-                .getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
+        Map<String, Object> writeResult = "replace".equals(chosen)
+                ? agentTools.replaceScenes(request.getConversation().getProjectId(), items)
+                : agentTools.writeScenes(request.getConversation().getProjectId(), items);
+        int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
+        // 写库成功：不满意调整计数清零（新一轮生成起点）
+        regenCount.remove(request.getConversation().getId());
         // sceneCount 传写库后项目分镜总数（writeScenes 为追加语义；前端用
         // sceneCount > 会话开始时数量 判断是否需要刷新分镜列表——总数才正确，replace 后即新数量）
         long totalScenes = sceneMapper.selectCount(
@@ -273,16 +288,19 @@ public class AisplitIntentHandler implements IntentHandler {
         return msg;
     }
 
+    /** 不满意调整上限判定：本次 +1；达上限返回 true（调用方提示后结束，不再弹卡片）并清零计数 */
+    private boolean regenerateLimitReached(String conversationId) {
+        int n = regenCount.merge(conversationId, 1, Integer::sum);
+        if (n > agentConfig.getMaxRegenerateRounds()) {
+            regenCount.remove(conversationId);
+            return true;
+        }
+        return false;
+    }
+
     /** 当前项目分镜数 */
     private long existingSceneCount(String projectId) {
         return sceneMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.storyboard.entity.Scene>()
-                        .eq(com.storyboard.entity.Scene::getProjectId, projectId));
-    }
-
-    /** 清空当前项目全部分镜（覆盖导入前置），返回删除条数 */
-    private int clearScenes(String projectId) {
-        return sceneMapper.delete(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.storyboard.entity.Scene>()
                         .eq(com.storyboard.entity.Scene::getProjectId, projectId));
     }

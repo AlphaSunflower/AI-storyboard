@@ -56,6 +56,8 @@ ai:
     intent-threshold: ${AGENT_INTENT_THRESHOLD:0.6}
     # 澄清追问上限：连续追问达到该值后直接给默认方案让用户选
     max-clarify-rounds: ${AGENT_MAX_CLARIFY_ROUNDS:2}
+    # 分镜不满意调整上限：连续「不满意→调整→重生成」达到该值后不再弹调整卡片
+    max-regenerate-rounds: ${AGENT_MAX_REGENERATE_ROUNDS:3}
   laozhang:
     # ── Secrets (override in env or application-local.yml) ──
     api-key: ${LAOZ...KEY}
