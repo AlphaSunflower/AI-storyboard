@@ -86,23 +86,22 @@ public class PicIntentHandler implements IntentHandler {
 
     @Override
     public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）
-        support.sendEvent(request, "workflow", Map.of("title", "正在生成图片…", "status", "node_started"));
+        // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）；收尾事件序列走 resumeStage 模板
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
         Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source);
         if (Boolean.TRUE.equals(result.get("ok"))) {
             String url = String.valueOf(result.get("imageUrl"));
             String content = "![生成图片](" + url + ")";
-            support.sendMessage(request, content);
-            support.sendEvent(request, "confirm_result", Map.of(
-                    "kind", "image", "url", url, "assetId", result.getOrDefault("assetId", ""),
-                    "sceneCount", 0,
-                    "actions", List.of(
-                            Map.of("id", "refine", "title", "继续完善"),
-                            Map.of("id", "done", "title", "满意完成"))));
-            support.sendEvent(request, "message_end", Map.of(
-                    "messageId", "", "sceneCount", -1L, "content", content));
+            support.resumeStage(request, "正在生成图片…", Map.of(
+                    "content", content,
+                    "confirm", Map.of(
+                            "kind", "image", "url", url, "assetId", result.getOrDefault("assetId", ""),
+                            "sceneCount", 0,
+                            "actions", List.of(
+                                    Map.of("id", "refine", "title", "继续完善"),
+                                    Map.of("id", "done", "title", "满意完成"))),
+                    "sceneCount", -1L));
         } else {
             support.sendEvent(request, "error", Map.of("code", "50202",
                     "message", String.valueOf(result.getOrDefault("message", "图片生成失败，请稍后重试"))));

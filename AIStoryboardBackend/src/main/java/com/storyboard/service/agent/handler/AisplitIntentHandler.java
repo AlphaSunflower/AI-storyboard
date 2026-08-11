@@ -85,8 +85,7 @@ public class AisplitIntentHandler implements IntentHandler {
 
     @Override
     public void resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 执行写分镜（EXECUTE step：自动模式工具调用）
-        support.sendEvent(request, "workflow", Map.of("title", "正在写入分镜…", "status", "node_started"));
+        // 执行写分镜（EXECUTE step：自动模式工具调用）；收尾事件序列走 resumeStage 模板
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
         int count = agentTools.writeScenes(request.getConversation().getProjectId(), items)
                 .getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
@@ -98,10 +97,9 @@ public class AisplitIntentHandler implements IntentHandler {
         String msg = count > 0
                 ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
                 : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
-        support.sendMessage(request, msg);
-        support.sendEvent(request, "confirm_result", Map.of(
-                "kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()));
-        support.sendEvent(request, "message_end", Map.of(
-                "messageId", "", "sceneCount", totalScenes, "content", msg));
+        support.resumeStage(request, "正在写入分镜…", Map.of(
+                "content", msg,
+                "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
+                "sceneCount", totalScenes));
     }
 }

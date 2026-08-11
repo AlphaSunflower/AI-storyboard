@@ -248,6 +248,25 @@ public class AgentOrchestratorSupport {
         return plan.planText();
     }
 
+    /**
+     * resume 通用收尾模板：workflow → message（结果内容）→ confirm_result → message_end。
+     * 各链只填充执行工具结果（executeTool 钩子），收尾事件序列全部复用。
+     *
+     * @param result 含 {content, confirm(Map), sceneCount(long)} 三键
+     */
+    public void resumeStage(OrchestrationRequest req, String workflowTitle, Map<String, Object> result) {
+        if (workflowTitle != null) {
+            sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
+        }
+        String content = String.valueOf(result.getOrDefault("content", ""));
+        sendMessage(req, content);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> confirm = (Map<String, Object>) result.getOrDefault("confirm", Map.of());
+        sendEvent(req, "confirm_result", confirm);
+        long sceneCount = result.get("sceneCount") instanceof Number n ? n.longValue() : -1L;
+        sendEvent(req, "message_end", Map.of("messageId", "", "sceneCount", sceneCount, "content", content));
+    }
+
     /** checkpoint plan JSON 取字段（宽松解析，缺失返回空串） */
     public String planField(String planJson, String field) {
         if (planJson == null || planJson.isBlank()) return "";
