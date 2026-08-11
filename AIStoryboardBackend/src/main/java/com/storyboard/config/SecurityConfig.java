@@ -1,8 +1,6 @@
 package com.storyboard.config;
 
-import com.storyboard.security.DifyApiKeyFilter;
 import com.storyboard.security.JwtAuthenticationFilter;
-import com.storyboard.service.ai.AiConfigProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -23,11 +21,9 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
-    private final AiConfigProperties aiConfig;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtFilter, AiConfigProperties aiConfig) {
+    public SecurityConfig(JwtAuthenticationFilter jwtFilter) {
         this.jwtFilter = jwtFilter;
-        this.aiConfig = aiConfig;
     }
 
     @Bean
@@ -45,11 +41,6 @@ public class SecurityConfig {
     }
 
     @Bean
-    public DifyApiKeyFilter difyApiKeyFilter() {
-        return new DifyApiKeyFilter(aiConfig.getDifyApiKey());
-    }
-
-    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -63,7 +54,6 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/files/**").permitAll()
-                .requestMatchers("/api/ai/dify/**").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(ex -> ex
@@ -73,7 +63,6 @@ public class SecurityConfig {
                     response.getWriter().write("{\"code\":40101,\"message\":\"未授权，请先登录\"}");
                 })
             )
-            .addFilterBefore(difyApiKeyFilter(), UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

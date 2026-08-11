@@ -1,8 +1,7 @@
 package com.storyboard.service.agent.impl;
 
 import com.storyboard.service.agent.AgentGenerationService;
-import com.storyboard.controller.DifyAgentController;
-import com.storyboard.dto.request.DifyGenerateScriptRequest;
+import com.storyboard.service.agent.AgentSceneItem;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.Scene;
@@ -24,7 +23,7 @@ import java.util.Map;
  *
  * 在 HITL 表单提交事件后由后端直接执行生成（写分镜 / 生图 / 生视频），
  * 替代原 Dify 工作流内 HTTP 节点回调（/api/ai/dify/**）。
- * 逻辑从 DifyAgentController 抽取复用；归属校验一律以 conversation.getProjectId() 为准。
+ * 归属校验一律以 conversation.getProjectId() 为准。
  */
 @Service
 @RequiredArgsConstructor
@@ -38,9 +37,16 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     private final AgentAssetMapper agentAssetMapper;
 
 
-    /** 批量写分镜（原 DifyAgentController.generateScript 逻辑，宽松 items 直接透传）；批量插入需保证原子性 */
+    /** 清洗外部传入参数：未解析的 Dify 变量引用（含 structured_output.）视为无效值返回 null（原 DifyAgentController.sanitize 迁移） */
+    private static String sanitize(String value) {
+        if (value == null || value.isBlank()) return null;
+        if (value.contains("structured_output.")) return null;
+        return value;
+    }
+
+    /** 批量写分镜（宽松 items 直接透传）；批量插入需保证原子性 */
     @Transactional
-    public int writeScript(String projectId, List<DifyGenerateScriptRequest.SceneItem> scenes) {
+    public int writeScript(String projectId, List<AgentSceneItem> scenes) {
         if (scenes == null || scenes.isEmpty()) return 0;
         int count = 0;
         for (var item : scenes) {
@@ -72,16 +78,16 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
         String imageUrl = imageService.generateImage(
             effectiveSceneId,
-            DifyAgentController.sanitize(prompt), DifyAgentController.sanitize(model),
-            DifyAgentController.sanitize(size), null, null,
-            referenceImages, mode, DifyAgentController.sanitize(generatedImageUrl));
+            sanitize(prompt), sanitize(model),
+            sanitize(size), null, null,
+            referenceImages, mode, sanitize(generatedImageUrl));
         if (effectiveSceneId == null) {
             AgentAsset asset = new AgentAsset();
             asset.setConversationId(conversation.getId());
             asset.setType("image");
             asset.setUrl(imageUrl);
-            asset.setPrompt(DifyAgentController.sanitize(prompt));
-            asset.setModel(DifyAgentController.sanitize(model));
+            asset.setPrompt(sanitize(prompt));
+            asset.setModel(sanitize(model));
             asset.setStatus("completed");
             try {
                 agentAssetMapper.insert(asset);
@@ -115,17 +121,17 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
         String taskId = videoService.createVideoTask(
             effectiveSceneId,
-            DifyAgentController.sanitize(prompt), DifyAgentController.sanitize(model),
-            DifyAgentController.sanitize(resolution), DifyAgentController.sanitize(size),
-            DifyAgentController.sanitize(aspectRatio),
-            durationInt, DifyAgentController.sanitize(negativePrompt), null,
-            referenceImages, DifyAgentController.sanitize(generatedImageUrl));
+            sanitize(prompt), sanitize(model),
+            sanitize(resolution), sanitize(size),
+            sanitize(aspectRatio),
+            durationInt, sanitize(negativePrompt), null,
+            referenceImages, sanitize(generatedImageUrl));
         if (effectiveSceneId == null) {
             AgentAsset asset = new AgentAsset();
             asset.setConversationId(conversation.getId());
             asset.setType("video");
-            asset.setPrompt(DifyAgentController.sanitize(prompt));
-            asset.setModel(DifyAgentController.sanitize(model));
+            asset.setPrompt(sanitize(prompt));
+            asset.setModel(sanitize(model));
             asset.setStatus("queued");
             asset.setTaskId(taskId);
             try {

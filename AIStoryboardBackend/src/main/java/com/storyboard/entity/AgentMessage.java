@@ -13,7 +13,6 @@ public class AgentMessage {
     private String conversationId;
     private String role;
     private String content;
-    private String difyMessageId;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
 }

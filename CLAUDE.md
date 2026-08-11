@@ -89,7 +89,7 @@ private OffsetDateTime createdAt;
 
 ### 3.5 视频生成双通道（MiniMax V2 默认 + Laozhang 保留）
 
-- **分发**：`VideoGenerationService` 为门面，按 `ai.video-provider`（`minimax` 默认 | `laozhang`）分发到 `MinimaxVideoService` 或原 Laozhang 逻辑；**调用方（AIController / DifyAgentController / AgentGenerationService）零改动**
+- **分发**：`VideoGenerationService` 为门面，按 `ai.video-provider`（`minimax` 默认 | `laozhang`）分发到 `MinimaxVideoService` 或原 Laozhang 逻辑；**调用方（AIController / AgentGenerationService）零改动**
 - **MiniMax V2 链路**（`MinimaxVideoService`，实测 2026-08-06 全通：创建 200 → 轮询 queued/running/succeeded ~2min → 下载 200）：
   - 创建：`POST {minimax-base-url}/v2/video_generation`，Bearer `MINIMAX_API_KEY`（.env，不提交），JSON body `{model:"MiniMax-H3", content:[{type:text,text:prompt}, {type:image_url,image_url:{url},role:first_frame}], resolution:"768P"|"2K", duration:4-15, ratio}` → `task_id`
   - 轮询：`GET /v2/query/video_generation/{task_id}` → `task.status`（queued/running→processing；succeeded→`content.url` **限时链接须立即转存** uploads/videos；failed→`error.message`）
@@ -180,7 +180,8 @@ spring:
 - 结构化输出用**纯解析**（不发 response_format，规避网关不兼容）：`BeanOutputConverter<T>`（`org.springframework.ai.converter`）`convert(content)`，解析失败抛 `tools.jackson.core.JacksonException`（unchecked）→ catch 后走原手写 JSON 兜底解析
 - 超时按 ChatClient 粒度（`OpenAiChatOptions.Builder.timeout`），非全局：标题/意图 30s、优化 60s、脚本/视觉 120s
 
-**仍保留 HttpClient 直连**（不在迁移范围）：`AgentChatService`（Dify 编排）、`ImageGenerationService`/`VideoGenerationService`/`MinimaxVideoService`（生图/生视频 REST）、`FileStorageService`（文件下载）、`AIController`。
+**仍保留 HttpClient 直连**（不在迁移范围）：`AgentGenerationService`（生图/生视频 REST）、`FileStorageService`（文件下载）、`AIController`。
+**编排层（2026-08-11 起）**：Agent 对话改 Spring AI 2.0 应用层编排（`AgentOrchestrator` 状态机 + `AgentTools` @Tool 工具面），不再依赖 Dify。
 
 ## Frontend State Management (Zustand)
 
@@ -270,9 +271,12 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 | 表 | 关键字段 | 说明 |
 |----|---------|------|
-| `conversations` | user_id + project_id（JWT 归属双键）、title、dify_conversation_id、status | 一个项目可多个会话；project 删除级联 |
-| `agent_messages` | conversation_id（CASCADE）、role（user/assistant）、content、dify_message_id | 消息历史 |
+| `conversations` | user_id + project_id（JWT 归属双键）、title、status | 一个项目可多个会话；project 删除级联 |
+| `agent_messages` | conversation_id（CASCADE）、role（user/assistant）、content | 消息历史 |
 | `agent_assets` | conversation_id（**可空**=未归属）、type（**image/video/reference**）、url、task_id、status | Agent 生成的图/视频 + 用户上传的参考图 |
+| `agent_checkpoints` | conversation_id（CASCADE）、action、form_token（一次性）、plan（方案 JSON 文本）、step、status（pending/used/expired）、expiration_time | HITL 确认点（V4 migration，替代原内存 Map 快照） |
+
+> **Migration 手动执行**：项目未引入 Flyway，`db/migration/V*.sql` 为留档，需 psql 手动应用（V2 会话表 → V3 资产 url 可空 → V4 checkpoints → V5 删 dify 列）
 
 ### 端点（全部 JWT 鉴权，`/api/agent/**` 不在 SecurityConfig 白名单）
 
@@ -281,7 +285,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | POST | `/api/agent/conversations` | 创建会话（校验 project.userId 归属） |
 | GET | `/api/agent/conversations?projectId=` | 会话列表（updated_at 倒序） |
 | GET/DELETE | `/api/agent/conversations/{id}` | 详情（含消息）/ 删除（DB CASCADE 删消息） |
-| GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（代理 Dify） |
+| GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（编排回答） |
 | GET | `/api/agent/conversations/{id}/assets?page=&size=` | 资产列表（**分页**，page 默认 1 / size 默认 20 / 上限 50，返回 `{records, total, page, size}`） |
 | POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
 | POST | `/api/agent/conversations/{id}/messages/stream` | SSE 流式发送消息（body `{content, picUrl?}`，`text/event-stream`） |
@@ -294,7 +298,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 
 ### SSE 事件协议（后端→前端）
 
-事件类型由 SSE `event` 字段承担（转发负载不含 `type` 键），后端裁剪 Dify 原始流后转发；流结束即 `emitter.complete()`：
+事件类型由 SSE `event` 字段承担（负载不含 `type` 键），后端编排（AgentOrchestrator）直接发射；流结束即 `emitter.complete()`：
 
 | event | 负载字段 | 说明 |
 |-------|----------|------|
@@ -302,23 +306,31 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | `workflow` | `title`, `status` | 节点进度（`node_started` / `node_finished`） |
 | `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机 |
 | `message_end` | `messageId`, `sceneCount`, `content`, `title?` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定；`title` 为首条消息异步 AI 重命名的新标题（**一次性**：仅重命名完成的那一轮携带，取走即删，不做轮询） |
-| `error` | `code`, `message` | 失败结束；`message` 已脱敏（"Dify 服务异常，请稍后重试"） |
+| `error` | `code`, `message` | 失败结束；`message` 已脱敏 |
 
-- Dify 原始流中的 `ping`、`node_started/finished` 内部 `inputs`/`outputs`、`tts_message` 等事件一律过滤，不转发到前端
+- `workflow` 事件仅发 `{title, status}`（node_started/node_finished），不携带节点 inputs/outputs
 
-### AgentChatService — Dify 对话代理
+### Spring AI 2.0 编排（2026-08-11 迁移，替代 Dify）
 
-- `POST {difyBaseUrl}/v1/chat-messages`，`response_mode: "blocking"`（非流式），`Authorization: Bearer {difyApiKey}`
-- **事务语义**（重要）：user 消息用 `TransactionTemplate` + `PROPAGATION_REQUIRES_NEW` 独立事务立即提交；Dify 调用失败时 **user 消息保留**、抛业务异常；Dify 成功后 `transactionTemplate.execute` 内完成"回填 dify_conversation_id + 保存 assistant 消息"（失败整体回滚）
-- Dify 上游错误完整信息只进日志，抛给客户端的文案脱敏（"Dify 服务异常，请稍后重试"）
-- 配置：`ai.laozhang.dify-base-url`（默认 `http://localhost`）+ `ai.laozhang.dify-api-key`（复用既有字段）
+- **编排器**：`AgentOrchestrator`（接口+impl）应用层状态机：INTENT（IntentRecognitionService）→ 按意图路由（aisplit 分镜链 / pic 图片链 / video 视频链 / other 回答）→ 需求澄清（手动循环 LLM 逐轮追问）→ HITL checkpoint 落库（`agent_checkpoints` 表）→ resume（表单提交）→ EXECUTE（AgentTools 工具执行）→ message_end
+- **意图路由（决策 4，2026-08-11 全链实现）**：
+  - aisplit：剧本优化 gate（type=0 追问澄清/type=1 继续）→ 分镜方案 → 分镜 JSON（ScriptGenerationService）→ HITL（agree/disagree）→ resume 写库
+  - pic：有参考图 → `ImageRefinePromptService.buildRefinedPrompt`（视觉模型）→ HITL（generate_image/refine）→ resume 图改图；无图 → `callImagePrompt`（LLM）→ 直接文生图自动完成
+  - video：有参考图 → `VideoPlanService.buildVideoPlan`（视觉模型）→ video_plan 卡片 → `generateVideoFromPlan`（checkpoint 消费 → MiniMax 轮询）；无图 → `callVideoPlan`（LLM 方案）→ 同样 video_plan 卡片
+  - other：`AgentAnswerService` 主回答（ChatClient 拼历史非流式）
+- **工具面**：`AgentTools`（@Component 工具组件，不接口化）：writeScenes（复用 `AgentGenerationService.writeScript`）/ refineImage / generateVideo；当前由编排（runPic/runVideo/resume）直接调用，自动模式 `ChatClient.tools()` 工具循环为后续增强；**工具异常不向上抛**（LLM 消化为文本），业务错误须在 @Tool 内返回错误对象
+- **主回答**：`AgentAnswerService`（intent-other 闲聊）ChatClient 拼历史非流式；D3 定案非流式（一次 message + message_end）
+- **HITL checkpoint**（表 `agent_checkpoints`，V4 migration）：form_token 一次性消费（status pending→used 原子条件）、30 分钟过期、plan 存方案 JSON 文本（TEXT 列，实体 String 直插）；替代原内存 Map 快照（formSnapshots/videoPlanSnapshots 已删）
+- **事务语义**（沿用 I1）：user 消息 `TransactionTemplate` + `REQUIRES_NEW` 独立事务立即提交；编排失败 user 消息保留；编排成功后 `persistAssistant` 落库 assistant 消息
+- **LLM 配置**：复用 `spring.ai.openai.*`（网关），编排 ChatClient 超时 60-120s
+- **循环模式（Phase 0 spike 定案）**：需求澄清=手动循环（LLM 逐轮确认）→ 确认后全自动（自动模式）；spike 证据：`.spike-spring-ai`（真网关实测）
 
 ### 首条消息异步 AI 重命名标题
 
 - **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，**必须在 user 消息落库前调用**——落库后 selectCount 已 +1，"首条"判定 count==0 永远不成立，线上实测踩坑）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
-- **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞 Dify 主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
+- **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞编排主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
 - **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision`，超时 30s），模型固定 `gemini-3.5-flash-lite`（**实测**：老张网关对 preview 系模型的一切思考参数均不透传/拒绝，无法关思考；flash-lite 默认零思考 token，即"不思考模式"），请求体显式带 `thinking_level: minimal`（flash-lite 接受，语义自文档化）
-- **落库（并发坑）**：Dify 线程持有同一 `AgentConversation` 实体并整实体 updateById（回填 difyConversationId），标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉
+- **落库（并发坑）**：编排线程持有同一 `AgentConversation` 实体并整实体 updateById，标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉
 - **一次性推送**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end`（含 workflow_finished 恢复流）发送时 `remove` 取走并附 `title` 字段；**只推一次**（取走即删），不做轮询/持续推送；极端时序（标题未生成完流已结束）该轮不推送，前端下次拉取会话列表自然可见
 - **前端**：`agentStore.ts` 两个 `message_end` 分支（sendMessage / submitHumanInput）收到 `e.title` 就地更新 `conversations` 列表（守卫 `c.title !== e.title` 防重复 set）；`SseEvent.title` 类型已存在，零类型改动
 
@@ -329,33 +341,16 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **实现**：`PromptOptimizeService` 调 Laozhang chat completions（`baseUrlVision` + `defaultVisionModel` 质量优先，不传 thinking_level；超时 60s）；**优化方向由 LLM 自行判断**（草稿可能是剧情/图片/视频或综合需求），单文本输出不强制 JSON——规避解析失败风险
 - **前端**：已取消「✨ 优化」按钮（AgentChatPanel 输入区只保留发送按钮）；接口保留备用，前端不再调用
 
-### DifyAgentController 改造（消灭孤儿 scene）
-
-- **无 sceneId 时不再创建临时 scene**（旧 `scene_number=0` 孤儿记录），改写入 `agent_assets`：
-  - `sceneId` 非空 → 写 scene（原行为不变）
-  - `sceneId` 空 + `conversationId` 非空 → 写 agent_assets（关联会话；**先校验 conversation 存在，不存在降级未归属**，避免 FK 违例 500）
-  - `sceneId` 空 + 无 `conversationId` → 写 agent_assets（conversation_id=NULL 未归属）
-- DTO（`DifyGenerateImageRequest`/`DifyGenerateVideoRequest`）新增字段：`conversationId`、`picUrl`
-- **PicUrl 图生图/图生视频**：`picUrl`（用户上传图 URL，来自 `/api/agent/upload`）优先于 `generatedImageUrl`，Controller 合并后作为 `generatedImageUrl` 传入 Service（本地读文件逻辑已存在，零额外改造）
-- generateVideo 无 sceneId 分支响应只返回 `taskId/assetId/status`（**不把 assetId 塞进 sceneId 键**——否则 Dify 工作流回传 assetId 当 sceneId 导致"分镜不存在"）
-
 ### AI Service 解耦（sceneId 可空）
+
 
 - `ImageGenerationService.generateImage`：sceneId 为 null 时不查/不写 scene 表，只用局部变量 `localPath` 返回
 - `VideoGenerationService.createVideoTask`：同样支持 sceneId 为 null；`pollVideoTask` **双通道反查**——先按 `videoTaskId` 查 scene，查不到再按 `taskId` 查 agent_assets 并更新其 url/status/error（failed 分支先解析上游 message/error 再 setError）
 
-### 完善图片自动生成（无 HITL 信号触发，2026-08-07 重构）
+### 图改图/图生视频（编排链，2026-08-11 起）
 
-**背景**：旧链路 Dify 用 deepseek（无视觉能力）盲猜改图方案 + HITL 人工确认，方案与实际图片脱节。重构后：
-- **Dify 工作流删掉「完善图片设计方案」LLM 与「人工介入」HITL**，完善路径改为：`user_finishing(code 写 storage_pic_talk)` → `赋值` → answer 节点「后端执行识别图片加人工介入流程」（文案"结合用户输入理解图片优化提示词中..."）即结束（无确认）
-- **后端触发**：`AgentChatService.forwardDifySse` 监听 `node_finished` 事件，`data.title == "后端执行识别图片加人工介入流程"`（常量 `AUTO_REFINE_SIGNAL_TITLE`，**必须与 Moon智能体.yml 该 answer 节点 title 完全一致**）→ `triggerAutoImageRefine` 自动生成：
-  1. `ImageRefinePromptService.buildRefinedPrompt(source, userRequest)`：**视觉模型（gemini-3-flash-preview，baseUrlVision）看图 + 用户诉求 → 结构化 JSON（image_analysis/modifications/refined_prompt）**，源图从本地 uploads 读转 base64 data URI 内联（参照 MiniMax 图生视频）；`refined_prompt` 直接投喂图生图
-  2. `AgentGenerationService.generateImage(sceneId=null, mode=edit, prompt=refined_prompt, generatedImageUrl=source)` → 落 agent_assets
-  3. `pushGenerationResult` 推图 + confirm_result 卡片（「继续完善/满意完成」交互保留）
-- **数据来源**：源图 = `lastPicUrlByConversation`（本轮 PicUrl）；用户诉求 = 最近一条 user 消息（streamMessage 已落库，等价 sys.query）
-- **SSE 时序坑**：信号触发后置 `autoGenerate` 标志，forwardDifySse 内**所有 `!deferComplete` complete 判断都要加 `&& !autoGenerate.get()`**（message_end / EOF / 异常分支），否则 Dify 流一结束 emitter 就被 complete，图片还没生成完
-- **Dify 侧配套**：`storage_pic_talk.user_finishing` 必须由 code 节点写入（sys.query），并确保「传到公共变量」类 code 输出 lis **含 user_finishing**（over-write 整体替换，不加会丢）
-
+- **图改图**：`AgentTools.refineImage` 复用 `ImageRefinePromptService.buildRefinedPrompt`（视觉模型看图+诉求→refined_prompt）+ `AgentGenerationService.generateImage(mode=edit)`；源图=本轮 PicUrl（streamMessage 传入），诉求=用户消息；确认卡片「继续完善/满意完成」交互保留，`confirmImageDone` 清会话图片上下文
+- **图生视频**：`VideoPlanService.buildVideoPlan`（视觉模型）+ MiniMax 图生视频链路；`generateVideoFromPlan` 读 checkpoint（plan 存 `{message,duration,source}`，兼容 items 包裹），confirm_result 卡片保留
 ### 智能体窗口前端约定
 
 - **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（62vw，minWidth 480）：左会话栏（180px，顶部为「☾ Moon 智能体」标题）+ 右对话区（顶部显示当前会话标题，无会话占位「未选择对话」；右侧 📁 产出素材 + 🧹 清除聊天记录按钮）
@@ -364,7 +359,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
 - **参考图**：`POST /api/agent/upload` → 返回 `url` → 作为 `PicUrl` 随消息发送（图生图/图生视频）
-- **配置**：`AI_DIFY_API_KEY`（`AIStoryboardBackend/.env`，不提交）+ `DIFY_BASE_URL`（默认 `http://localhost`）
+- **LLM 配置**：复用 `LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`（.env，Spring AI 网关）
 
 ## Verification Commands
 

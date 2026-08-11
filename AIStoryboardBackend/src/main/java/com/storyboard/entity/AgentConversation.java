@@ -13,7 +13,6 @@ public class AgentConversation {
     private String userId;
     private String projectId;
     private String title;
-    private String difyConversationId;
     private String status;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;

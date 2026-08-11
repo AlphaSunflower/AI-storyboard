@@ -1,6 +1,5 @@
 package com.storyboard.service.agent;
 
-import com.storyboard.dto.request.DifyGenerateScriptRequest;
 import com.storyboard.entity.AgentConversation;
 
 import java.util.List;
@@ -10,15 +9,15 @@ import java.util.Map;
  * Agent 生成编排服务（智能体生成后端化重构）。
  *
  * 在 HITL 表单提交事件后由后端直接执行生成（写分镜 / 生图 / 生视频），
- * 替代原 Dify 工作流内 HTTP 节点回调（/api/ai/dify/**）。
- * 逻辑从 DifyAgentController 抽取复用；归属校验一律以 conversation.getProjectId() 为准。
+ * 
+ * 归属校验一律以 conversation.getProjectId() 为准。
  *
  * <p>实现：{@link com.storyboard.service.agent.impl.AgentGenerationServiceImpl}。
  */
 public interface AgentGenerationService {
 
-    /** 批量写分镜（原 DifyAgentController.generateScript 逻辑，宽松 items 直接透传）；批量插入需保证原子性 */
-    int writeScript(String projectId, List<DifyGenerateScriptRequest.SceneItem> scenes);
+    /** 批量写分镜（宽松 items 直接透传）；批量插入需保证原子性 */
+    int writeScript(String projectId, List<AgentSceneItem> scenes);
 
     /**
      * 生图并落库。

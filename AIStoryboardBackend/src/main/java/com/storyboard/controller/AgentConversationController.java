@@ -194,12 +194,12 @@ public class AgentConversationController {
     /** 会话实体 → VO 映射 */
     private static AgentConversationVO toVO(AgentConversation c) {
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
-                c.getDifyConversationId(), c.getStatus(), c.getCreatedAt(), c.getUpdatedAt());
+                c.getStatus(), c.getCreatedAt(), c.getUpdatedAt());
     }
 
     /** 消息实体 → VO 映射 */
     private static AgentMessageVO toVO(AgentMessage m) {
         return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(), m.getContent(),
-                m.getDifyMessageId(), m.getCreatedAt());
+                m.getCreatedAt());
     }
 }

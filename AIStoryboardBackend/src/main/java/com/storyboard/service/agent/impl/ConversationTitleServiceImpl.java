@@ -30,7 +30,6 @@ import java.util.Map;
  *   additionalBodyProperties，即请求体顶层字段（与原手写 body.put("thinking_level", ...) 等价）；
  * - 更新用 LambdaUpdateWrapper 只动 title/updatedAt 两列，并带「仍为默认值」原子条件——
  *   Dify 线程持有同一 AgentConversation 实体实例并会整实体 updateById（回填
- *   difyConversationId），此处若复用该实例整实体更新会把对方刚写的新字段冲掉。
  *
  * 实现说明：已从手写 JDK HttpClient 直连网关 /v1/chat/completions 改为
  * Spring AI ChatClient（spring.ai.openai.base-url 已指向网关 /v1，纯文本调用，无结构化输出）。

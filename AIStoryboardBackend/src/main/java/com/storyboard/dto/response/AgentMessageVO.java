@@ -11,6 +11,5 @@ public record AgentMessageVO(
     String conversationId,
     String role,
     String content,
-    String difyMessageId,
     OffsetDateTime createdAt
 ) {}

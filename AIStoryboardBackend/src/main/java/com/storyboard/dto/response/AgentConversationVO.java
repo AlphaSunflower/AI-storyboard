@@ -11,7 +11,6 @@ public record AgentConversationVO(
     String userId,
     String projectId,
     String title,
-    String difyConversationId,
     String status,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt

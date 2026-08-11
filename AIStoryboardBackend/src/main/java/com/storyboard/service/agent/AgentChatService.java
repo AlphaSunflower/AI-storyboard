@@ -9,13 +9,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Agent 对话服务 —— 代理 Dify /v1/chat-messages（blocking + streaming）。
- * 负责：会话校验、消息落库、Dify 调用、conversation_id 回填、SSE 流式转发、HITL 表单提交续流。
+ * Agent 对话服务 —— 会话/消息/资产 CRUD + 编排入口（Spring AI 编排驱动）。
+ * 负责：会话校验、消息落库、SSE 流式转发、HITL checkpoint 提交续流。
  *
  * 事务边界说明（I1）：
  * - user 消息用独立事务（REQUIRES_NEW）保存并立即提交；
- * - Dify 调用失败时 user 消息保留（独立事务已提交），assistant 消息不落库；
- * - Dify 成功后，回填 difyConversationId + 保存 assistant 消息在同一事务内完成。
+ * - 编排失败时 user 消息保留（独立事务已提交），assistant 消息不落库；
+ * - 编排成功后，保存 assistant 消息在独立事务内完成。
  *
  * <p>实现：{@link com.storyboard.service.agent.impl.AgentChatServiceImpl}。
  */
@@ -35,20 +35,15 @@ public interface AgentChatService {
 
     /**
      * 清空会话聊天记录（上下文重置）：
-     * 删除该会话全部消息 + 清空 difyConversationId —— 下一条消息会开启全新的 Dify 会话，
-     * AI 不再记得任何历史。会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
+     * 删除该会话全部消息 —— 下一条消息 AI 不再记得任何历史。
+     * 会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
      */
     void clearMessages(String userId, String conversationId);
 
     /**
-     * 满意完成：清空 Dify 会话的 storage_pic_talk 变量（图片方案状态重置）。
+     * 满意完成：清空会话图片上下文（原 Dify storage_pic_talk 语义）。
      *
-     * 触发点：前端 confirm_result 卡片「满意完成」→ 本方法；生成后的人工介入由后端驱动，
-     * 清空动作也必须在后端做（而非 Dify 工作流 generate_image 分支）——点「生成图片」只是开始
-     * 生成，未确认满意，变量必须保留供「继续完善」走完善路径；确认满意后才清空，下次图片
-     * 需求才走全新设计。
-     *
-     * @return true=已清空（含 Dify 变量不存在等视为已完成）；false=Dify 会话未建立（无可清空）
+     * @return true（语义与旧 Dify 路径兼容：始终视为已完成）
      */
     boolean confirmImageDone(String userId, String conversationId);
 
@@ -83,21 +78,21 @@ public interface AgentChatService {
     String uploadReferenceImage(String userId, String conversationId, MultipartFile file);
 
     /**
-     * 发送消息：落库 user 消息（独立事务）→ 调 Dify chat-messages → 回填 + 落库 assistant 消息。
+     * 发送消息：落库 user 消息（独立事务）→ 编排回答 → 落库 assistant 消息。
      *
      * 事务语义（I1）：
      * - user 消息在独立事务（REQUIRES_NEW）中立即提交；
-     * - Dify 失败时 user 消息保留（独立事务已提交），assistant 消息不落库，抛业务异常；
-     * - Dify 成功后，"回填 difyConversationId + 保存 assistant 消息"在同一事务内完成。
+     * - 编排失败时 user 消息保留（独立事务已提交），assistant 消息不落库，抛业务异常；
+     * - 编排成功后，保存 assistant 消息在独立事务内完成。
      *
      * @return assistant 消息
      */
     AgentMessage sendMessage(String userId, String conversationId, String content);
 
     /**
-     * 流式发送消息：user 消息独立事务提交 → 代理 Dify streaming → 事件裁剪转发到 SseEmitter。
-     * 收到 human_input_required → 转发 human_input 事件 → 结束流（Dify 侧 pause 自动关闭）。
-     * message_end → 落库 assistant 消息 + 回填 dify_conversation_id + 附带 sceneCount。
+     * 流式发送消息：user 消息独立事务提交 → 编排（Spring AI 状态机）→ SSE 事件转发到 SseEmitter。
+     * HITL 暂停 → 转发 human_input 事件 → 结束流（等表单提交 resume）。
+     * message_end → 落库 assistant 消息 + 附带 sceneCount。
      */
     void streamMessage(String userId, String conversationId, String content, String picUrl, SseEmitter emitter);
 
@@ -108,9 +103,7 @@ public interface AgentChatService {
     void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter);
 
     /**
-     * HITL 表单提交并续流：
-     * 1. POST {base}/v1/form/human_input/{formToken}（body {action}）
-     * 2. 成功 → GET {base}/v1/workflow/{taskId}/events?user={userId} 续传 SSE（复用 forwardDifySse）
+     * HITL 表单提交并续流：校验 checkpoint form_token → 一次性消费 → 编排 resume 恢复执行。
      */
     void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, SseEmitter emitter);
 }
