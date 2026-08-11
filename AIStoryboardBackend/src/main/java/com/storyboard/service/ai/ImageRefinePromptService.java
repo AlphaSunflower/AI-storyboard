@@ -5,20 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.service.FileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * 图片完善提示词增强服务 —— 图生图前先用视觉模型"看图"。
@@ -39,6 +37,7 @@ import java.util.Map;
  *   <li>输出结构化为 JSON {@code {image_analysis, modifications, refined_prompt}}，
  *       {@code refined_prompt} 直接投喂图生图；可排查"模型理解了什么、决定改什么"；</li>
  *   <li>超时 120s（视觉理解 + 大图 base64 传输，给足余量）。</li>
+ *   <li>已换 Spring AI ChatClient 多模态（Media + UserMessage），替代原手写 JDK HttpClient 调用。</li>
  * </ul>
  */
 @Service
@@ -57,16 +56,28 @@ public class ImageRefinePromptService {
         + "保留的既有元素 + 修改点 + 修改后期望效果 + 风格/光线/构图约束）。\n"
         + "只输出 JSON，不要输出其他内容。";
 
+    /**
+     * 结构化输出定义（字段名与 AI 返回 JSON 键一致，snake_case）。
+     * modifications 用 Object：模型可能输出数组（修改点列表）或字符串，两种形状都能反序列化，
+     * 避免 String 遇到数组抛 MismatchedInputException 导致结构化路径白走（该字段本服务不消费）。
+     */
+    public record RefinePlan(String image_analysis, Object modifications, String refined_prompt) {}
+
     private final AiConfigProperties config;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
-    public ImageRefinePromptService(AiConfigProperties config, FileStorageService fileStorageService) {
+    public ImageRefinePromptService(AiConfigProperties config, FileStorageService fileStorageService,
+                                    ChatClient.Builder chatClientBuilder) {
         this.config = config;
         this.fileStorageService = fileStorageService;
+        // 默认模型固定为 config.getDefaultVisionModel()，超时 120s（与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(config.getDefaultVisionModel())
+                        .timeout(Duration.ofSeconds(120)))
+                .build();
     }
 
     /**
@@ -88,36 +99,34 @@ public class ImageRefinePromptService {
             String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
                     + Base64.getEncoder().encodeToString(imageBytes);
 
-            // 2. 构造 OpenAI 兼容多模态请求
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", config.getDefaultVisionModel());
-            List<Map<String, Object>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", REFINE_SYSTEM_PROMPT));
-            // user content 为多模态数组：文本诉求 + 图片
-            Map<String, Object> textPart = Map.of("type", "text",
-                    "text", "用户的修改诉求：" + (userRequest == null || userRequest.isBlank() ? "（未提供，请结合图片自行判断合理的优化方向）" : userRequest));
-            Map<String, Object> imagePart = Map.of("type", "image_url",
-                    "image_url", Map.of("url", dataUri));
-            messages.add(Map.of("role", "user", "content", List.of(textPart, imagePart)));
-            body.put("messages", messages);
+            // 2. 组装多模态 UserMessage：文本诉求 + 图片（data 传完整 data URI 字符串，直接透传为 image_url）
+            Media media = Media.builder()
+                    .mimeType(MimeType.valueOf("image/" + guessImageType(filename)))
+                    .data(dataUri)
+                    .build();
+            UserMessage userMessage = UserMessage.builder()
+                    .text("用户的修改诉求：" + (userRequest == null || userRequest.isBlank()
+                            ? "（未提供，请结合图片自行判断合理的优化方向）" : userRequest))
+                    .media(media)
+                    .build();
 
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
+            // 3. 调用视觉模型（ChatClient 统一走 LLM 网关）
+            String content = chatClient.prompt()
+                    .system(REFINE_SYSTEM_PROMPT)
+                    .messages(userMessage)
+                    .call()
+                    .content();
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("视觉理解 API 返回 " + resp.statusCode() + ": " + resp.body());
+            // 4. 解析：优先取结构化 refined_prompt；解析失败降级取全文
+            try {
+                BeanOutputConverter<RefinePlan> conv = new BeanOutputConverter<>(RefinePlan.class);
+                RefinePlan plan = conv.convert(content);
+                if (plan != null && plan.refined_prompt() != null && !plan.refined_prompt().isBlank()) {
+                    return plan.refined_prompt().trim();
+                }
+            } catch (RuntimeException e) {
+                // 结构化解析失败（AI 返回非 JSON / 字段不符等），走兜底
             }
-
-            // 3. 解析：优先取结构化 refined_prompt；解析失败降级取全文
-            JsonNode root = objectMapper.readTree(resp.body());
-            String content = root.path("choices").get(0).path("message").path("content").asText("");
             return extractRefinedPrompt(content);
         } catch (Exception e) {
             log.warn("图片完善提示词增强失败: {}", e.getMessage());
