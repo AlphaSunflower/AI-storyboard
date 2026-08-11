@@ -86,6 +86,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final VideoPlanService videoPlanService;
     private final com.storyboard.service.agent.AgentOrchestrator orchestrator;
     private final com.storyboard.mapper.AgentCheckpointMapper checkpointMapper;
+    private final com.storyboard.service.agent.ConversationLock conversationLock;
     private final com.storyboard.service.agent.AgentAnswerService answerService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -362,31 +363,39 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
 
-        // 1. 保存 user 消息 —— 独立事务（REQUIRES_NEW），失败时保留
-        AgentMessage userMessage = new AgentMessage();
-        userMessage.setConversationId(conversationId);
-        userMessage.setRole("user");
-        userMessage.setContent(content);
+        // 会话级互斥：同一会话只允许一个活跃编排实例（blocking 同步执行，锁持整个编排期）
+        if (!conversationLock.tryAcquire(conversationId)) {
+            throw new BusinessException(40901, "当前对话正在处理中，请稍候");
+        }
+        try {
+            // 1. 保存 user 消息 —— 独立事务（REQUIRES_NEW），失败时保留
+            AgentMessage userMessage = new AgentMessage();
+            userMessage.setConversationId(conversationId);
+            userMessage.setRole("user");
+            userMessage.setContent(content);
 
-        // 1.5 首条消息异步 AI 重命名标题（不阻塞编排；blocking 无 SSE 通道，靠前端下次拉取可见）。
-        // 注意：必须在 user 消息落库【前】判定"首条"——落库后 selectCount 已 +1，判定永远不成立
-        maybeScheduleTitleRename(conversation, content);
+            // 1.5 首条消息异步 AI 重命名标题（不阻塞编排；blocking 无 SSE 通道，靠前端下次拉取可见）。
+            // 注意：必须在 user 消息落库【前】判定"首条"——落库后 selectCount 已 +1，判定永远不成立
+            maybeScheduleTitleRename(conversation, content);
 
-        transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
+            transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
 
-        // 2. 走编排（blocking：用内存 SseEmitter 收集 message 事件，取最后一条回答）
-        String answer = runBlocking(conversation, content);
+            // 2. 走编排（blocking：用内存 SseEmitter 收集 message 事件，取最后一条回答）
+            String answer = runBlocking(conversation, content);
 
-        // 3. 成功：事务性保存 assistant 消息 + 刷新 updatedAt
-        return transactionTemplate().execute(tx -> {
-            conversationMapper.updateById(conversation);
-            AgentMessage assistantMessage = new AgentMessage();
-            assistantMessage.setConversationId(conversationId);
-            assistantMessage.setRole("assistant");
-            assistantMessage.setContent(answer);
-            messageMapper.insert(assistantMessage);
-            return assistantMessage;
-        });
+            // 3. 成功：事务性保存 assistant 消息 + 刷新 updatedAt
+            return transactionTemplate().execute(tx -> {
+                conversationMapper.updateById(conversation);
+                AgentMessage assistantMessage = new AgentMessage();
+                assistantMessage.setConversationId(conversationId);
+                assistantMessage.setRole("assistant");
+                assistantMessage.setContent(answer);
+                messageMapper.insert(assistantMessage);
+                return assistantMessage;
+            });
+        } finally {
+            conversationLock.release(conversationId);
+        }
     }
 
     /** blocking 编排：直接走主回答服务（intent-other 语义；前端实际走 streamMessage SSE，此路为通用入口） */
@@ -412,6 +421,13 @@ public class AgentChatServiceImpl implements AgentChatService {
             return;
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+
+        // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取，防双实例并发启动）
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
+            emitter.complete();
+            return;
+        }
 
         // 图改图参考图兜底：按会话记录最近一次 PicUrl（本条带图则更新，不带图则清空，
         // 严格限定在"带图的当轮"内生效，防跨轮误用）
@@ -456,6 +472,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("Agent 编排失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
                 emitter.complete();
+            } finally {
+                // 会话锁释放（无论成败/断开，保证下一条消息可进入）
+                conversationLock.release(conversationId);
             }
         }, agentExecutor);
     }
@@ -585,6 +604,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     public void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
+            emitter.complete();
+            return;
+        }
         // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage / submitFormAndResume）
         AtomicBoolean cancel = new AtomicBoolean(false);
         emitter.onCompletion(() -> cancel.set(true));
@@ -650,6 +675,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
             } finally {
                 if (!cancel.get()) emitter.complete();
+                conversationLock.release(conversationId);
             }
         }, agentExecutor);
     }
@@ -697,6 +723,12 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
+            emitter.complete();
+            return;
+        }
         // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage，语义见上）
         AtomicBoolean cancel = new AtomicBoolean(false);
         emitter.onCompletion(() -> cancel.set(true));
@@ -717,6 +749,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("HITL 提交失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
                 emitter.complete();
+            } finally {
+                conversationLock.release(conversationId);
             }
         }, agentExecutor);
     }

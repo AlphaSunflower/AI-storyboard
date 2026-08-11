@@ -72,6 +72,7 @@ public class GlobalExceptionHandler {
             case 40301 -> HttpStatus.FORBIDDEN;
             case 40401 -> HttpStatus.NOT_FOUND;
             case 40001 -> HttpStatus.BAD_REQUEST;
+            case 40901 -> HttpStatus.CONFLICT;
             case 50201, 50202 -> HttpStatus.BAD_GATEWAY;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
