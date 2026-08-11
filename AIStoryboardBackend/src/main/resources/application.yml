@@ -19,6 +19,10 @@ spring:
     driver-class-name: org.postgresql.Driver
   profiles:
     active: local
+  ai:
+    openai:
+      base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
+      api-key: ${LLM_GATEWAY_API_KEY:}
 
 server:
   port: ${SERVER_PORT:8082}
