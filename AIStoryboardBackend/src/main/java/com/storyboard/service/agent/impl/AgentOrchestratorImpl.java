@@ -178,8 +178,21 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 byIntent.get("intent-aisplit").resume(request, cp);
                 return request.getLastMessage();
             }
+            // 3) scene-mode：分镜处理方式卡片（基于现有优化/全新创建/不生成），选项 id 动态 → 转 aisplit handler
+            if ("scene-mode".equals(cp.getAction())) {
+                request.setAction(action);
+                byIntent.get("intent-aisplit").resume(request, cp);
+                return request.getLastMessage();
+            }
+            // 4) scene-regenerate：调整意见卡片（不满意后），选项=custom → 转 aisplit handler（customText 带意见）
+            if ("scene-regenerate".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                byIntent.get("intent-aisplit").resume(request, cp);
+                return request.getLastMessage();
+            }
 
-            // 按提交 action 分发（前端提交的 action 为准：agree/generate_image → 对应 handler；refine/disagree 等 → 默认继续完善）
+            // 按提交 action 分发（前端提交的 action 为准：agree/replace/append/cancel/disagree → 对应 handler；refine 等 → 默认继续完善）
             IntentHandler handler = byAction.get(action);
             if (handler == null) {
                 support.sendEvent(request, "message", Map.of("content", "好的，请继续完善设计方案。"));
@@ -187,6 +200,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         "messageId", "", "sceneCount", -1L, "content", "好的，请继续完善设计方案。"));
                 return request.getLastMessage();
             }
+            // 提交的 action 传给 handler（写库策略 replace/append/cancel 与不满意 disagree 分支需要区分）
+            request.setAction(action);
             handler.resume(request, cp);
             return request.getLastMessage();
         } catch (Exception e) {
