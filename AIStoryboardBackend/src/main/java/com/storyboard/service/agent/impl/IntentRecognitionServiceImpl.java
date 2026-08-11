@@ -1,6 +1,7 @@
 package com.storyboard.service.agent.impl;
 
 import com.storyboard.service.agent.IntentRecognitionService;
+import com.storyboard.service.agent.IntentResult;
 import com.storyboard.entity.AgentMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,7 +69,12 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
         + "3. 分镜相关\"优化/完善剧本\"也归 intent-aisplit（剧本优化设计分支处理）\n"
         + "4. 无法明确区分时，输出 intent-other\n"
         + "## 输出约束\n"
-        + "只输出意图标识符本身（如 intent-pic），禁止任何解释、JSON、代码块、标点或多余字符。";
+        + "只输出 JSON：{\\\"type\\\":\\\"intent-pic\\\",\\\"confidence\\\":0.9}，"
+        + "type 为四类意图之一，confidence 为 0~1 的置信度。禁止任何解释、代码块、标点或多余字符。";
+
+    /** 宽松提取 JSON 中的 {type, confidence}（LLM 常带空格/代码块包裹，正则兜底） */
+    private static final java.util.regex.Pattern INTENT_JSON = java.util.regex.Pattern.compile(
+            "\"type\"\\s*:\\s*\"([^\"]+)\"[\\s\\S]*?\"confidence\"\\s*:\\s*([0-9.]+)");
 
     private final ChatClient.Builder chatClientBuilder;
 
@@ -94,13 +100,10 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     }
 
     /**
-     * 识别用户输入意图 → type。
-     *
-     * @param query          用户当前输入（≤500 字截断）
-     * @param recentMessages 最近对话历史（时间升序；可为空）
-     * @return 四类意图之一；任何失败返回 {@link #FALLBACK_TYPE}
+     * 识别用户输入意图 → 结构化结果。
+     * 解析顺序：JSON {type, confidence} → 兼容裸标识符（无置信度按 0.5）→ 白名单校验 → 兜底。
      */
-    public String recognize(String query, List<AgentMessage> recentMessages) {
+    public IntentResult recognize(String query, List<AgentMessage> recentMessages) {
         try {
             // 当前输入截断到 500 字：意图识别只需要线索，避免超长输入拖慢/抬高成本
             String truncated = query != null && query.length() > 500
@@ -110,16 +113,33 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                     .user(truncated)
                     .call()
                     .content();
-            String type = cleanType(raw);
-            if (!VALID_TYPES.contains(type)) {
+            if (raw != null && !raw.isBlank()) {
+                // 1) JSON {type, confidence}
+                java.util.regex.Matcher m = INTENT_JSON.matcher(raw);
+                if (m.find()) {
+                    String type = cleanType(m.group(1));
+                    double conf = 0.5;
+                    try {
+                        conf = Double.parseDouble(m.group(2));
+                    } catch (NumberFormatException ignore) {
+                        // confidence 非法 → 0.5（视为不明确，交由阈值判断）
+                    }
+                    if (VALID_TYPES.contains(type)) {
+                        return IntentResult.llm(type, conf);
+                    }
+                }
+                // 2) 兼容裸标识符（LLM 未按 JSON 输出时）
+                String type = cleanType(raw);
+                if (VALID_TYPES.contains(type)) {
+                    return IntentResult.llm(type, 0.5);
+                }
                 log.warn("意图识别结果不在白名单，兜底 intent-other: raw={}", raw);
-                return FALLBACK_TYPE;
             }
-            return type;
+            return IntentResult.fallback();
         } catch (Exception e) {
             // 识别失败不阻塞对话：兜底走引导分支
             log.warn("意图识别失败，兜底 intent-other: error={}", e.getMessage());
-            return FALLBACK_TYPE;
+            return IntentResult.fallback();
         }
     }
 

@@ -24,11 +24,11 @@ public interface IntentRecognitionService {
     String FALLBACK_TYPE = "intent-other";
 
     /**
-     * 识别用户输入意图 → type。
+     * 识别用户输入意图 → 结构化结果（type + confidence + source）。
      *
      * @param query          用户当前输入（≤500 字截断）
      * @param recentMessages 最近对话历史（时间升序；可为空）
-     * @return 四类意图之一；任何失败返回 {@link #FALLBACK_TYPE}
+     * @return 意图识别结果；任何失败返回 {@link #FALLBACK_TYPE} + 置信度 0
      */
-    String recognize(String query, List<AgentMessage> recentMessages);
+    IntentResult recognize(String query, List<AgentMessage> recentMessages);
 }

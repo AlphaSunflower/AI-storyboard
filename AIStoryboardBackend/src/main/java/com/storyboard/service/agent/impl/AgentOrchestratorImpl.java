@@ -10,6 +10,7 @@ import com.storyboard.service.agent.AgentOrchestrator;
 import com.storyboard.service.agent.AgentSceneItem;
 import com.storyboard.service.agent.AgentTools;
 import com.storyboard.service.agent.IntentRecognitionService;
+import com.storyboard.service.agent.IntentResult;
 import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.ScriptGenerationService;
 import lombok.RequiredArgsConstructor;
@@ -67,6 +68,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private final AiConfigProperties config;
     private final ChatClient.Builder chatClientBuilder;
     private final com.storyboard.service.agent.AgentAnswerService answerService;
+    private final com.storyboard.mapper.SceneMapper sceneMapper;
 
     /** 剧本优化 / 分镜方案 LLM（懒加载，复用网关默认视觉模型，超时 120s） */
     private volatile ChatClient planClient;
@@ -95,7 +97,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .eq(AgentMessage::getConversationId, conversation.getId())
                     .orderByDesc(AgentMessage::getCreatedAt)
                     .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
-            String intent = intentRecognitionService.recognize(content, recent);
+            IntentResult intentResult = intentRecognitionService.recognize(content, recent);
+            String intent = intentResult.type();
             log.info("AgentOrchestrator: conversationId={} intent={}", conversation.getId(), intent);
 
             int steps = 0;
@@ -120,21 +123,25 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     /** aisplit 分镜链：剧本优化 gate → 分镜方案 → 分镜 JSON → HITL → 写库 */
     private void runAisplit(AgentConversation conversation, String content, SseEmitter emitter, int steps) {
-        // 1. 剧本优化（手动澄清循环：type=0 回答结束，type=1 继续）
+        // 1. 剧本优化（手动澄清循环：type=0 回答结束，type=1 继续；message 字段已流式增量转发）
         sendEvent(emitter, "workflow", Map.of("title", "正在优化剧本…", "status", "node_started"));
-        ScriptOptimizeResult opt = callScriptOptimize(content);
+        ScriptOptimizeResult opt = callScriptOptimize(content, emitter);
         if (opt == null || opt.type() == 0) {
-            sendEvent(emitter, "message", Map.of("content", opt != null ? opt.message() : "已理解你的需求，请继续补充。"));
+            // 流式失败兜底（message 未发出时补一条）
+            if (lastMessage.isBlank()) {
+                sendEvent(emitter, "message", Map.of("content", opt != null ? opt.message() : "已理解你的需求，请继续补充。"));
+            }
             return;
         }
-        sendEvent(emitter, "message", Map.of("content", opt.message()));
         String script = opt.script() != null && !opt.script().isBlank() ? opt.script() : content;
 
-        // 2. 分镜方案设计（结构化 message）
+        // 2. 分镜方案设计（结构化 message，流式增量转发）
         sendEvent(emitter, "workflow", Map.of("title", "正在设计分镜方案…", "status", "node_started"));
-        StoryboardPlanResult plan = callStoryboardPlan(script);
+        StoryboardPlanResult plan = callStoryboardPlan(script, emitter);
         if (plan == null || plan.type() == 0) {
-            sendEvent(emitter, "message", Map.of("content", plan != null ? plan.message() : "分镜方案需要进一步明确，请补充描述。"));
+            if (lastMessage.isBlank()) {
+                sendEvent(emitter, "message", Map.of("content", plan != null ? plan.message() : "分镜方案需要进一步明确，请补充描述。"));
+            }
             return;
         }
 
@@ -244,11 +251,11 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         }
     }
 
-    /** other 回答链（AgentAnswerService 主回答，非流式 message + message_end） */
+    /** other 回答链（AgentAnswerService 主回答，流式 message 增量 + message_end 收尾） */
     private void runAnswer(AgentConversation conversation, String content, SseEmitter emitter, int steps) {
-        // 经编排 sendEvent 发射（捕获 lastMessage 供调用方落库），answerService 只负责生成文本
-        String answer = answerService.generate(conversation, content);
-        sendEvent(emitter, "message", Map.of("content", answer));
+        // streamAnswer 内部逐 token 发 message 事件（打字机效果），返回完整文本
+        String answer = answerService.streamAnswer(conversation, content, emitter);
+        lastMessage = answer;
         sendEvent(emitter, "message_end", Map.of(
             "messageId", "", "sceneCount", -1L, "content", answer));
     }
@@ -287,14 +294,19 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 List<AgentSceneItem> items = parsePlanScenes(cp.getPlan());
                 int count = agentTools.writeScenes(conversation.getProjectId(), items)
                         .getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
+                // sceneCount 传写库后项目分镜总数（writeScenes 为追加语义；前端用
+                // sceneCount > 会话开始时数量 判断是否需要刷新分镜列表——总数才正确）
+                long totalScenes = sceneMapper.selectCount(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.storyboard.entity.Scene>()
+                                .eq(com.storyboard.entity.Scene::getProjectId, conversation.getProjectId()));
                 String msg = count > 0
                     ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
                     : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
                 sendEvent(emitter, "message", Map.of("content", msg));
                 sendEvent(emitter, "confirm_result", Map.of(
-                    "kind", "script", "sceneCount", count, "url", "", "actions", List.of()));
+                    "kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()));
                 sendEvent(emitter, "message_end", Map.of(
-                    "messageId", "", "sceneCount", count, "content", msg));
+                    "messageId", "", "sceneCount", totalScenes, "content", msg));
             } else if ("generate_image".equals(action)) {
                 // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）
                 sendEvent(emitter, "workflow", Map.of("title", "正在生成图片…", "status", "node_started"));
@@ -332,16 +344,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     // ===== LLM 调用（结构化输出：纯解析，不发 response_format）=====
 
-    /** 剧本优化：手动澄清循环的单步调用 */
-    private ScriptOptimizeResult callScriptOptimize(String content) {
+    /** 剧本优化：手动澄清循环的单步调用（message 字段流式增量转发，完整文本返回解析） */
+    private ScriptOptimizeResult callScriptOptimize(String content, SseEmitter emitter) {
         try {
-            String raw = planClient().prompt()
-                .system("你是分镜助手，先理解用户的分镜需求并给出优化后的剧本。"
+            String raw = streamPlanWithMessage(
+                "你是分镜助手，先理解用户的分镜需求并给出优化后的剧本。"
                     + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"script\":\"优化后的完整剧本\"}"
-                    + "。type=1 表示已理解可继续；type=0 表示需求不足需追问（此时 message 为追问内容，script 为空）。")
-                .user(content)
-                .call()
-                .content();
+                    + "。type=1 表示已理解可继续；type=0 表示需求不足需追问（此时 message 为追问内容，script 为空）。",
+                content, emitter);
             return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
         } catch (Exception e) {
             log.warn("剧本优化 LLM 调用失败: {}", e.getMessage());
@@ -349,20 +359,77 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         }
     }
 
-    /** 分镜方案设计 */
-    private StoryboardPlanResult callStoryboardPlan(String script) {
+    /** 分镜方案设计（message 字段流式增量转发） */
+    private StoryboardPlanResult callStoryboardPlan(String script, SseEmitter emitter) {
         try {
-            String raw = planClient().prompt()
-                .system("你是分镜方案设计师。基于剧本给出分镜方案要点。"
-                    + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\"}。type=1 方案已明确；type=0 需用户补充（message 为追问）。")
-                .user(script)
-                .call()
-                .content();
+            String raw = streamPlanWithMessage(
+                "你是分镜方案设计师。基于剧本给出分镜方案要点。"
+                    + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\"}。type=1 方案已明确；type=0 需用户补充（message 为追问）。",
+                script, emitter);
             return new BeanOutputConverter<>(StoryboardPlanResult.class).convert(raw);
         } catch (Exception e) {
             log.warn("分镜方案 LLM 调用失败: {}", e.getMessage());
             return new StoryboardPlanResult(1, "已根据剧本生成方案。");
         }
+    }
+
+    /**
+     * 流式调用 planClient：逐 token 收集完整响应，同时提取 JSON 中 {@code message} 字段值
+     * 增量转发为 SSE message 事件（打字机效果；结构化输出本身仍需完整 JSON 解析，故不转发原始 token）。
+     *
+     * @return 完整响应文本（调用方 BeanOutputConverter 解析）
+     */
+    private String streamPlanWithMessage(String systemPrompt, String userContent, SseEmitter emitter) {
+        StringBuilder full = new StringBuilder();
+        // 已转发的 message 字段值（增量对比基准）
+        java.util.concurrent.atomic.AtomicReference<String> emitted = new java.util.concurrent.atomic.AtomicReference<>("");
+        try {
+            planClient().prompt()
+                .system(systemPrompt)
+                .user(userContent)
+                .stream()
+                .content()
+                .doOnNext(chunk -> {
+                    if (chunk == null || chunk.isBlank()) return;
+                    full.append(chunk);
+                    String msg = extractMessageField(full.toString());
+                    if (msg != null && msg.length() > emitted.get().length()) {
+                        String delta = msg.substring(emitted.get().length());
+                        emitted.set(msg);
+                        sendEvent(emitter, "message", Map.of("content", delta));
+                    }
+                })
+                .blockLast();
+        } catch (Exception e) {
+            log.warn("流式 LLM 调用失败: {}", e.getMessage());
+        }
+        return full.toString();
+    }
+
+    /** 宽松提取 JSON 字符串中的 message 字段值（未闭合/截断时返回已见部分；失败返回 null） */
+    private String extractMessageField(String json) {
+        if (json == null) return null;
+        // 兼容 "message":"..." 与 "message": "..."（LLM 输出常带空格）
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"message\"\\s*:\\s*\"").matcher(json);
+        if (!m.find()) return null;
+        int start = m.end();
+        StringBuilder sb = new StringBuilder();
+        boolean escaped = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                sb.append(c);
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '"') break;
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     /** 无参考图文生图：LLM 生成图片提示词 */
@@ -419,7 +486,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 if (planClient == null) {
                     planClient = chatClientBuilder
                         .defaultOptions(OpenAiChatOptions.builder()
-                            .model(config.getDefaultVisionModel())
+                            // 对话交流统一 deepseek-v4-flash（用户指定；deepseek 无思考参数，不加 thinking_level）
+                            .model("deepseek-v4-flash")
                             .timeout(Duration.ofSeconds(120)))
                         .build();
                 }
@@ -480,14 +548,12 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     /** 分镜概要（HITL 确认卡片文本） */
     private String summarizeScenes(List<Map<String, Object>> scenes) {
         StringBuilder sb = new StringBuilder();
-        int max = Math.min(scenes.size(), 5);
-        for (int i = 0; i < max; i++) {
+        // 全量展示所有镜头（HITL 确认前用户需要看完整方案），单条内容不截断
+        for (int i = 0; i < scenes.size(); i++) {
             Map<String, Object> s = scenes.get(i);
             String content = s.get("scriptContent") instanceof String c ? c : "";
-            if (content.length() > 60) content = content.substring(0, 60) + "…";
             sb.append(i + 1).append(". ").append(content).append("\n");
         }
-        if (scenes.size() > max) sb.append("…等 ").append(scenes.size()).append(" 个镜头");
         return sb.toString();
     }
 
