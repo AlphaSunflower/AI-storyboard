@@ -150,8 +150,11 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
             imgPart.put("role", "first_frame");
         }
 
-        // 分辨率恒用默认档（省钱；调用方传 720p/1080p/4K/2K 一律忽略）
-        payload.put("resolution", config.getVideoDefaultResolution() == null ? "768P" : config.getVideoDefaultResolution());
+        // 分辨率：调用方显式传值则透传（人工选择生效，如卡片选 2K），未传回落默认档（省钱，默认 768P）
+        String resolution = body.path("resolution").asText("");
+        payload.put("resolution", resolution.isBlank()
+                ? (config.getVideoDefaultResolution() == null ? "768P" : config.getVideoDefaultResolution())
+                : resolution);
         int duration = body.path("duration").asInt(8);
         payload.put("duration", Math.max(4, Math.min(15, duration)));   // clamp 4~15
         String ratio = body.path("aspectRatio").asText("");
