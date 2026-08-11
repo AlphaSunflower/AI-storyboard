@@ -2,33 +2,48 @@ package com.storyboard.service.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.storyboard.entity.Project;
-import com.storyboard.entity.Scene;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.*;
 
+/**
+ * 分镜脚本生成：通过 Spring AI ChatClient 调用 LLM 网关（spring.ai.openai.base-url 已指向网关 /v1，
+ * 即原手写 HttpClient 直连的 /v1/chat/completions），生成并解析分镜脚本。
+ */
 @Service
 public class ScriptGenerationService {
+
+    /**
+     * 结构化解析用的分镜定义（字段名与 AI 返回的 JSON 键一致；sceneNumber 仅占位，实际递增逻辑见 toSceneMaps/parseScenes）。
+     */
+    public record SceneSpec(String sceneNumber, String scriptContent, String imagePrompt,
+                            String videoPrompt, String negativePrompt, String cameraMovement,
+                            String shotType, String soundDesign) {}
 
     private final AiConfigProperties config;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
-    public ScriptGenerationService(AiConfigProperties config, ProjectMapper projectMapper, SceneMapper sceneMapper) {
+    public ScriptGenerationService(AiConfigProperties config, ProjectMapper projectMapper,
+                                   SceneMapper sceneMapper, ChatClient.Builder chatClientBuilder) {
         this.config = config;
         this.projectMapper = projectMapper;
         this.sceneMapper = sceneMapper;
+        // 默认模型固定为 config.getDefaultVisionModel()，超时 120s（与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(config.getDefaultVisionModel())
+                        .timeout(Duration.ofSeconds(120)))
+                .build();
     }
 
     public List<Map<String, Object>> generateScenes(String projectId, String scriptText,
@@ -37,8 +52,18 @@ public class ScriptGenerationService {
         String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
         String userPrompt = "请根据以下剧本内容生成分镜脚本，每个分镜包含：镜头号、剧本内容、生图提示词（格式：【镜头构图】→【场景主体】→【环境细节/道具】→【光线与色彩】→【氛围情绪】→【画质/风格】）、生视频提示词、反向提示词、机位和运动、镜头类型、声音设计。\n\n剧本：\n" + scriptText;
 
-        String response = callVisionApi(model, systemPrompt, userPrompt);
-        return parseScenes(response, projectId);
+        String content = callLLM(model, systemPrompt, userPrompt);
+        // 结构化解析优先；失败/空结果走下方原有 JSON 兜底逻辑
+        try {
+            BeanOutputConverter<List<SceneSpec>> conv = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {});
+            List<SceneSpec> specs = conv.convert(content);
+            if (specs != null && !specs.isEmpty()) {
+                return toSceneMaps(specs, projectId);
+            }
+        } catch (RuntimeException e) {
+            // 结构化解析失败（AI 返回非 JSON / 字段不符等），走兜底
+        }
+        return parseScenes(content, projectId);
     }
 
     private String buildSystemPrompt(String creationType, String customTypeDesc, String aspectRatio) {
@@ -55,41 +80,46 @@ public class ScriptGenerationService {
             "。请以 JSON 数组格式返回分镜列表，每个分镜包含：sceneNumber(整数), scriptContent, imagePrompt, videoPrompt, negativePrompt, cameraMovement, shotType, soundDesign。";
     }
 
-    private String callVisionApi(String model, String systemPrompt, String userPrompt) {
+    private String callLLM(String model, String systemPrompt, String userPrompt) {
         try {
-            String effectiveModel = model != null ? model : config.getDefaultVisionModel();
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", effectiveModel);
-
-            List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-            messages.add(Map.of("role", "user", "content", userPrompt));
-            body.put("messages", messages);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .timeout(java.time.Duration.ofSeconds(120))
-            .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("Vision API returned " + resp.statusCode() + ": " + resp.body());
+            ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userPrompt);
+            if (model != null) {
+                // 单次调用覆盖模型（默认模型已在 defaultOptions 固定）
+                spec = spec.options(OpenAiChatOptions.builder().model(model));
             }
-            JsonNode root = objectMapper.readTree(resp.body());
-            return root.path("choices").get(0).path("message").path("content").asText();
+            return spec.call().content();
         } catch (Exception e) {
             throw new RuntimeException("AI 生成分镜脚本失败: " + e.getMessage(), e);
         }
     }
 
-    private List<Map<String, Object>> parseScenes(String response, String projectId) {
+    /** 结构化解析成功路径：SceneSpec → Map（sceneNumber 递增逻辑与 parseScenes 一致）。 */
+    private List<Map<String, Object>> toSceneMaps(List<SceneSpec> specs, String projectId) {
+        List<Map<String, Object>> scenes = new ArrayList<>();
+        int sceneNum = sceneMapper.maxSceneNumber(projectId);
+        for (SceneSpec s : specs) {
+            sceneNum++;
+            Map<String, Object> scene = new HashMap<>();
+            scene.put("projectId", projectId);
+            scene.put("sceneNumber", sceneNum);
+            scene.put("scriptContent", s.scriptContent() == null ? "" : s.scriptContent());
+            scene.put("imagePrompt", s.imagePrompt() == null ? "" : s.imagePrompt());
+            scene.put("videoPrompt", s.videoPrompt() == null ? "" : s.videoPrompt());
+            scene.put("negativePrompt", s.negativePrompt() == null ? "" : s.negativePrompt());
+            scene.put("cameraMovement", s.cameraMovement() == null ? "" : s.cameraMovement());
+            scene.put("shotType", s.shotType() == null ? "" : s.shotType());
+            scene.put("soundDesign", s.soundDesign() == null ? "" : s.soundDesign());
+            scenes.add(scene);
+        }
+        return scenes;
+    }
+
+    private List<Map<String, Object>> parseScenes(String content, String projectId) {
         try {
             // 提取 JSON 数组（AI 可能在前后包裹 markdown 代码块）
-            String json = response;
+            String json = content;
             if (json.contains("```json")) {
                 json = json.substring(json.indexOf("```json") + 7);
                 json = json.substring(0, json.lastIndexOf("```"));
