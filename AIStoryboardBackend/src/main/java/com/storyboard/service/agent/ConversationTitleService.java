@@ -1,24 +1,17 @@
 package com.storyboard.service.agent;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.mapper.AgentConversationMapper;
 import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -31,10 +24,15 @@ import java.util.Map;
  * - 全程在虚拟线程中异步执行，任何失败只记日志、绝不抛出（不阻塞 Dify 对话主流程）；
  * - 模型固定用 {@code TITLE_MODEL}（gemini-3.5-flash-lite，默认零思考 token——实测老张网关
  *   无法关闭 preview 系模型的思考，故选 flash-lite 实现"不思考模式"，见常量注释）；
- * - 请求体显式携带 thinking_level 不思考参数（"minimal"，flash-lite 接受，语义自文档化）；
+ * - thinking_level 不思考参数（"minimal"，flash-lite 接受，语义自文档化）通过 Spring AI
+ *   OpenAiChatOptions.extraBody 透传——字节码级验证会 merge 进 ChatCompletionCreateParams 的
+ *   additionalBodyProperties，即请求体顶层字段（与原手写 body.put("thinking_level", ...) 等价）；
  * - 更新用 LambdaUpdateWrapper 只动 title/updatedAt 两列，并带「仍为默认值」原子条件——
  *   Dify 线程持有同一 AgentConversation 实体实例并会整实体 updateById（回填
  *   difyConversationId），此处若复用该实例整实体更新会把对方刚写的新字段冲掉。
+ *
+ * 实现说明：已从手写 JDK HttpClient 直连网关 /v1/chat/completions 改为
+ * Spring AI ChatClient（spring.ai.openai.base-url 已指向网关 /v1，纯文本调用，无结构化输出）。
  */
 @Service
 public class ConversationTitleService {
@@ -65,15 +63,21 @@ public class ConversationTitleService {
 
     private final AgentConversationMapper conversationMapper;
     private final AiConfigProperties config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
     public ConversationTitleService(AgentConversationMapper conversationMapper,
-                                    AiConfigProperties config) {
+                                    AiConfigProperties config,
+                                    ChatClient.Builder chatClientBuilder) {
         this.conversationMapper = conversationMapper;
         this.config = config;
+        // 标题是锦上添花，超时比脚本生成（120s）收紧，不值得长等（与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(TITLE_MODEL)
+                        .timeout(Duration.ofSeconds(30))
+                        // 不思考模式（联调验证实际写法，见常量注释）：经 extraBody 透传为请求体顶层字段
+                        .extraBody(Map.of("thinking_level", TITLE_THINKING_LEVEL)))
+                .build();
     }
 
     /**
@@ -94,37 +98,17 @@ public class ConversationTitleService {
         }
     }
 
-    /** 调 Laozhang chat completions 生成标题（固定 TITLE_MODEL 不思考模型 + thinking_level 显式声明） */
+    /** 调 LLM 网关生成标题（固定 TITLE_MODEL 不思考模型 + thinking_level 经 extraBody 显式声明） */
     private String generateTitle(String userContent) {
         try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", TITLE_MODEL);
-            List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", TITLE_PROMPT));
             // 首条消息截断到 200 字：标题生成只需要主题线索，避免超长输入拖慢/抬高成本
-            messages.add(Map.of("role", "user", "content",
-                    userContent != null && userContent.length() > 200
-                            ? userContent.substring(0, 200) : userContent));
-            body.put("messages", messages);
-            // 不思考模式（联调验证实际写法，见常量注释）
-            body.put("thinking_level", TITLE_THINKING_LEVEL);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                // 标题是锦上添花，超时比脚本生成（120s）收紧，不值得长等
-                .timeout(Duration.ofSeconds(30))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("标题生成 API 返回 " + resp.statusCode() + ": " + resp.body());
-            }
-            JsonNode root = objectMapper.readTree(resp.body());
-            String raw = root.path("choices").get(0).path("message").path("content").asText("");
+            String truncated = userContent != null && userContent.length() > 200
+                    ? userContent.substring(0, 200) : userContent;
+            String raw = chatClient.prompt()
+                    .system(TITLE_PROMPT)
+                    .user(truncated)
+                    .call()
+                    .content();
             return cleanTitle(raw);
         } catch (Exception e) {
             throw new RuntimeException("AI 生成会话标题失败: " + e.getMessage(), e);
