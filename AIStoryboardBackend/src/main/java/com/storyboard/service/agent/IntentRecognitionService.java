@@ -1,22 +1,14 @@
 package com.storyboard.service.agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.AgentMessage;
-import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -27,7 +19,8 @@ import java.util.Set;
  * start 节点 type 变量，「意图路由」if-else 直接按 type 分流（Dify 侧已删除「意图识别」LLM 节点）。
  *
  * 设计要点：
- * - 复用 ConversationTitleService 的网关调用模式（/v1/chat/completions + 网关 Key）；
+ * - 复用 ConversationTitleService 的 Spring AI ChatClient 调用模式（纯文本调用，
+ *   spring.ai.openai.base-url 已指向网关 /v1）；
  * - 模型固定 {@code INTENT_MODEL}（deepseek-v4-flash，用户指定；fast 档分类任务足够，
  *   deepseek 无思考参数，不加 thinking_level）；
  * - 输出约束为纯意图标识符（如 intent-pic），解析后白名单校验，非法兜底 intent-other；
@@ -41,9 +34,6 @@ public class IntentRecognitionService {
 
     /** 意图识别专用模型：deepseek-v4-flash（用户指定；fast 档，分类任务足够） */
     private static final String INTENT_MODEL = "deepseek-v4-flash";
-
-    /** 识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等） */
-    private static final Duration INTENT_TIMEOUT = Duration.ofSeconds(30);
 
     /** 历史上下文：最多取最近 8 条消息（支撑"继续/接着上次"判断） */
     public static final int HISTORY_LIMIT = 8;
@@ -77,14 +67,15 @@ public class IntentRecognitionService {
         + "## 输出约束\n"
         + "只输出意图标识符本身（如 intent-pic），禁止任何解释、JSON、代码块、标点或多余字符。";
 
-    private final AiConfigProperties config;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final ChatClient chatClient;
 
-    public IntentRecognitionService(AiConfigProperties config) {
-        this.config = config;
+    public IntentRecognitionService(ChatClient.Builder chatClientBuilder) {
+        // 识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等，与原 HttpClient timeout 一致）
+        this.chatClient = chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(INTENT_MODEL)
+                        .timeout(Duration.ofSeconds(30)))
+                .build();
     }
 
     /**
@@ -96,30 +87,14 @@ public class IntentRecognitionService {
      */
     public String recognize(String query, List<AgentMessage> recentMessages) {
         try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("model", INTENT_MODEL);
-            List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", buildPrompt(recentMessages)));
             // 当前输入截断到 500 字：意图识别只需要线索，避免超长输入拖慢/抬高成本
-            messages.add(Map.of("role", "user", "content",
-                    query != null && query.length() > 500 ? query.substring(0, 500) : query));
-            body.put("messages", messages);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                // chat 调用统一走 LLM 网关（/v1/chat/completions），Authorization 换网关 Key
-                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(INTENT_TIMEOUT)
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                throw new RuntimeException("意图识别 API 返回 " + resp.statusCode() + ": " + resp.body());
-            }
-            JsonNode root = objectMapper.readTree(resp.body());
-            String raw = root.path("choices").get(0).path("message").path("content").asText("");
+            String truncated = query != null && query.length() > 500
+                    ? query.substring(0, 500) : query;
+            String raw = chatClient.prompt()
+                    .system(buildPrompt(recentMessages))
+                    .user(truncated)
+                    .call()
+                    .content();
             String type = cleanType(raw);
             if (!VALID_TYPES.contains(type)) {
                 log.warn("意图识别结果不在白名单，兜底 intent-other: raw={}", raw);
