@@ -86,11 +86,18 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.info("AgentOrchestrator: conversationId={} intent={} confidence={} source={}",
                     conversation.getId(), intent, intentResult.confidence(), intentResult.source());
 
-            // 2. 低置信度：不硬路由，走澄清分支（rule 命中 1.0 / fallback 0.0 均不受影响）
+            // 2. 低置信度：不硬路由，走意图澄清卡片（选项 id = intentType，resume 时按所选意图重新分发）
             if (intentResult.confidence() < agentConfig.getIntentThreshold()) {
-                support.sendEvent(request, "message", Map.of("content",
-                        "没太确定你想做什么——是要生成分镜（剧本/故事板）、图片，还是视频？"));
-                return request.getLastMessage();
+                return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                        "没太确定你想做什么，请选择：",
+                        "intent-clarify",
+                        List.of(Map.of("content", content)),
+                        "human_input",
+                        List.of(
+                                Map.of("id", "intent-aisplit", "title", "生成分镜"),
+                                Map.of("id", "intent-pic", "title", "生成图片"),
+                                Map.of("id", "intent-video", "title", "生成视频"),
+                                Map.of("id", "intent-other", "title", "其他 / 继续输入"))));
             }
 
             // 2.5 非 aisplit 轮清零澄清计数（澄清追问次数只在分镜链内连续累计）
@@ -143,6 +150,22 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             if (updated == 0) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已被使用，请重新发起"));
                 return "";
+            }
+
+            // 澄清类 checkpoint 特判（不在 byAction 注册表内，避免动态选项 id 与全局 action 冲突）：
+            // 1) intent-clarify：意图澄清卡片，用户点选的目标意图 id（= intentType）→ 按所选意图重新分发 handle
+            if ("intent-clarify".equals(cp.getAction())) {
+                IntentHandler target = byIntent.getOrDefault(action, byIntent.get(IntentRecognitionService.FALLBACK_TYPE));
+                OrchestrationRequest rerun = new OrchestrationRequest(conversation,
+                        support.planField(cp.getPlan(), "content"), null, emitter);
+                target.handle(rerun);
+                return rerun.getLastMessage();
+            }
+            // 2) clarify-option：链内 gate 澄清卡片，选项 id 由 LLM 动态生成（optN）→ 转 aisplit handler 按所选选项续流
+            if ("clarify-option".equals(cp.getAction())) {
+                request.setAction(action);
+                byIntent.get("intent-aisplit").resume(request, cp);
+                return request.getLastMessage();
             }
 
             // 按提交 action 分发（前端提交的 action 为准：agree/generate_image → 对应 handler；refine/disagree 等 → 默认继续完善）

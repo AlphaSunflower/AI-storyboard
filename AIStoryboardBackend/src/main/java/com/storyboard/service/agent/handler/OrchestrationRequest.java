@@ -25,4 +25,7 @@ public class OrchestrationRequest {
 
     /** 本轮最后一条 message 事件内容（流式增量时逐段更新；空串=尚未发出） */
     private String lastMessage = "";
+
+    /** resume 阶段用户点选的选项 id（run 阶段为空串；由 Orchestrator.resume 设置） */
+    private String action = "";
 }

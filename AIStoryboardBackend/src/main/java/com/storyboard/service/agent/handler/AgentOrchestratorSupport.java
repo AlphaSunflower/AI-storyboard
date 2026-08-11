@@ -91,10 +91,12 @@ public class AgentOrchestratorSupport {
 
     // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
 
-    /** 剧本优化结构化输出 */
-    public record ScriptOptimizeResult(int type, String message, String script) {}
-    /** 分镜方案结构化输出 */
-    public record StoryboardPlanResult(int type, String message) {}
+    /** 剧本优化结构化输出（options：type=0 追问时的 2~4 个选项；type=1 时为空/缺失） */
+    public record ScriptOptimizeResult(int type, String message, String script,
+                                       List<Map<String, Object>> options) {}
+    /** 分镜方案结构化输出（options：同上） */
+    public record StoryboardPlanResult(int type, String message,
+                                       List<Map<String, Object>> options) {}
     /** 无图视频方案结构化输出 */
     public record VideoPlanResult(String message, int duration) {}
 
@@ -112,13 +114,14 @@ public class AgentOrchestratorSupport {
         try {
             String raw = streamPlanWithMessage(
                     "你是分镜助手，先理解用户的分镜需求并给出优化后的剧本。"
-                        + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"script\":\"优化后的完整剧本\"}"
-                        + "。type=1 表示已理解可继续；type=0 表示需求不足需追问（此时 message 为追问内容，script 为空）。",
+                        + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"script\":\"优化后的完整剧本\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
+                        + "。type=1 表示已理解可继续（此时 script 必填，options 为空数组）；"
+                        + "type=0 表示需求不足需追问（此时 message 为追问内容，script 为空，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）。",
                     content, req);
             return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
         } catch (Exception e) {
             log.warn("剧本优化 LLM 调用失败: {}", e.getMessage());
-            return new ScriptOptimizeResult(0, "已理解你的需求，请继续补充。", null);
+            return new ScriptOptimizeResult(0, "已理解你的需求，请继续补充。", null, List.of());
         }
     }
 
@@ -127,12 +130,13 @@ public class AgentOrchestratorSupport {
         try {
             String raw = streamPlanWithMessage(
                     "你是分镜方案设计师。基于剧本给出分镜方案要点。"
-                        + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\"}。type=1 方案已明确；type=0 需用户补充（message 为追问）。",
+                        + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
+                        + "。type=1 方案已明确（options 为空数组）；type=0 需用户补充（message 为追问，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）。",
                     script, req);
             return new BeanOutputConverter<>(StoryboardPlanResult.class).convert(raw);
         } catch (Exception e) {
             log.warn("分镜方案 LLM 调用失败: {}", e.getMessage());
-            return new StoryboardPlanResult(1, "已根据剧本生成方案。");
+            return new StoryboardPlanResult(1, "已根据剧本生成方案。", List.of());
         }
     }
 
@@ -424,6 +428,20 @@ public class AgentOrchestratorSupport {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** checkpoint plan JSON 取 items[0] 的 List 字段（宽松解析，缺失/失败返回空 list） */
+    public List<Map<String, Object>> planListField(String planJson, String field) {
+        if (planJson == null || planJson.isBlank()) return List.of();
+        try {
+            var items = objectMapper.readTree(planJson).path("items");
+            if (items.isArray() && !items.isEmpty() && items.get(0).has(field)) {
+                List<Map<String, Object>> out = new java.util.ArrayList<>();
+                for (var e : items.get(0).path(field)) out.add(objectMapper.convertValue(e, Map.class));
+                return out;
+            }
+        } catch (Exception ignored) {}
+        return List.of();
     }
 
     /** checkpoint plan JSON → AgentSceneItem 列表（宽松解析） */
