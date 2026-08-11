@@ -1,0 +1,4 @@
+interface:
+  display_name: Spring AI 2.0 Agent Engineering
+  short_description: Build Spring AI 2.0 agent systems safely
+  default_prompt: Use the Spring AI 2.0 skill to design or implement a production-ready agent system with ChatClient, tools, advisors, RAG, memory, MCP, testing, and observability.

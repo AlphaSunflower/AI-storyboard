@@ -19,3 +19,8 @@ uploads/
 # OS
 .DS_Store
 Thumbs.db
+__pycache__/
+
+# 实习周记与竞赛材料（不提交 GitHub）
+docs/zhouji/
+ICAN/

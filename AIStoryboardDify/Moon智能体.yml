@@ -24,14 +24,6 @@ workflow:
     - picture
     value: ''
     value_type: string
-  - description: ''
-    id: 4a8a2d3b-c689-4404-92bd-f73b682733e3
-    name: taskId
-    selector:
-    - conversation
-    - taskId
-    value: ed629b3e-5bbb-4468-9e62-4632e778a9d7
-    value_type: string
   - description: 'pic_generate生成的图案描述
 
       user_finishing用户希望继续完善的描述
@@ -45,10 +37,10 @@ workflow:
     - conversation
     - storage_pic_talk
     value:
-      mode: ' '
-      pic_generate_talk: ' '
-      picture: ' '
-      user_finishing: ' '
+      mode: null
+      pic_generate_talk: null
+      picture: null
+      user_finishing: null
     value_type: object
   - description: 剧本的设计方案
     id: 5b6ba34b-113a-4077-8181-2347f11602a0
@@ -56,14 +48,6 @@ workflow:
     selector:
     - conversation
     - script_prompt
-    value: ''
-    value_type: string
-  - description: 当前操作的项目ID
-    id: 1bf871e2-0b92-4042-a9a9-a7427f3774ee
-    name: currentProjectId
-    selector:
-    - conversation
-    - currentProjectId
     value: ''
     value_type: string
   environment_variables:
@@ -74,30 +58,6 @@ workflow:
     - env
     - VIDEO_MODEL
     value: MiniMax-H3
-    value_type: string
-  - description: ''
-    id: 50a67807-b211-4f01-94f1-20320717c214
-    name: GENERATER_PIC_MODEL
-    selector:
-    - env
-    - GENERATER_PIC_MODEL
-    value: gpt-image-2
-    value_type: string
-  - description: ''
-    id: 73e8197b-87b4-4ec7-b99f-2fe8161aff66
-    name: DIFY_KEY
-    selector:
-    - env
-    - DIFY_KEY
-    value: app-gsYkBxnoGIQV8leBGFzK7v1Y
-    value_type: string
-  - description: ''
-    id: fe30099e-f827-44d6-ba65-c3e8295a3215
-    name: LAOZHANG_KEY
-    selector:
-    - env
-    - LAOZHANG_KEY
-    value: sk-bQfq7Zzf9OZ5XkdPCf3254E2D3D64673Be76D08f2830EbCd
     value_type: string
   features:
     file_upload:
@@ -178,21 +138,6 @@ workflow:
         isInLoop: false
         iteration_id: null
         loop_id: null
-        sourceType: llm
-        targetType: if-else
-      id: 1785286652605-source-17852867601920-target
-      selected: false
-      source: '1785286652605'
-      sourceHandle: source
-      target: '17852867601920'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
         sourceType: if-else
         targetType: answer
       id: 17852867601920-false-1785287790005-target
@@ -256,6 +201,7 @@ workflow:
         sourceType: if-else
         targetType: if-else
       id: 17852867601920-intent-video-1786091356243-target
+      selected: false
       source: '17852867601920'
       sourceHandle: intent-video
       target: '1786091356243'
@@ -328,21 +274,6 @@ workflow:
         iteration_id: null
         loop_id: null
         sourceType: llm
-        targetType: if-else
-      id: 1785289782670-source-17852900874780-target
-      selected: false
-      source: '1785289782670'
-      sourceHandle: source
-      target: '17852900874780'
-      targetHandle: target
-      type: custom
-      zIndex: 0
-    - data:
-        isInIteration: false
-        isInLoop: false
-        iteration_id: null
-        loop_id: null
-        sourceType: llm
         targetType: assigner
       id: 1785289782670-source-1785290421184-target
       selected: false
@@ -379,6 +310,21 @@ workflow:
       source: '17852900874780'
       sourceHandle: 'true'
       target: '1785290540008'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        iteration_id: null
+        loop_id: null
+        sourceType: assigner
+        targetType: if-else
+      id: 1785290421184-source-17852900874780-target
+      selected: false
+      source: '1785290421184'
+      sourceHandle: source
+      target: '17852900874780'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -433,12 +379,12 @@ workflow:
         iteration_id: null
         loop_id: null
         sourceType: assigner
-        targetType: llm
-      id: 1785478874143-source-1785286652605-target
+        targetType: if-else
+      id: 1785478874143-source-17852867601920-target
       selected: false
       source: '1785478874143'
       sourceHandle: source
-      target: '1785286652605'
+      target: '17852867601920'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -449,11 +395,11 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785728867774-__timeout-1785399995734-target
+      id: 1785728867774-__timeout-1785891056513-target
       selected: false
       source: '1785728867774'
       sourceHandle: __timeout
-      target: '1785399995734'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -464,11 +410,11 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785728867774-generate_video-1785399995734-target
+      id: 1785728867774-generate_video-1785891056513-target
       selected: false
       source: '1785728867774'
       sourceHandle: generate_video
-      target: '1785399995734'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -479,11 +425,10 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785728867774-refine-1785288539691-target
-      selected: false
+      id: 1785728867774-refine-17859168366910-target
       source: '1785728867774'
       sourceHandle: refine
-      target: '1785288539691'
+      target: '17859168366910'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -524,11 +469,11 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785747933811-disagree-1785748101848-target
+      id: 1785747933811-disagree-17859168366910-target
       selected: false
       source: '1785747933811'
       sourceHandle: disagree
-      target: '1785748101848'
+      target: '17859168366910'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -539,11 +484,11 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785910286651-__timeout-1785307659567-target
+      id: 1785910286651-__timeout-1785891056513-target
       selected: false
       source: '1785910286651'
       sourceHandle: __timeout
-      target: '1785307659567'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -554,11 +499,11 @@ workflow:
         loop_id: null
         sourceType: human-input
         targetType: answer
-      id: 1785910286651-generate_image-1785307659567-target
+      id: 1785910286651-generate_image-1785891056513-target
       selected: false
       source: '1785910286651'
       sourceHandle: generate_image
-      target: '1785307659567'
+      target: '1785891056513'
       targetHandle: target
       type: custom
       zIndex: 0
@@ -600,6 +545,7 @@ workflow:
         sourceType: if-else
         targetType: code
       id: 1786068209182-false-1786082824642-target
+      selected: false
       source: '1786068209182'
       sourceHandle: 'false'
       target: '1786082824642'
@@ -629,6 +575,7 @@ workflow:
         sourceType: code
         targetType: assigner
       id: 1786082824642-source-1786082977772-target
+      selected: false
       source: '1786082824642'
       sourceHandle: source
       target: '1786082977772'
@@ -643,6 +590,7 @@ workflow:
         sourceType: assigner
         targetType: answer
       id: 1786082977772-source-1786086274364-target
+      selected: false
       source: '1786082977772'
       sourceHandle: source
       target: '1786086274364'
@@ -657,6 +605,7 @@ workflow:
         sourceType: if-else
         targetType: answer
       id: 1786091356243-false-1786091427703-target
+      selected: false
       source: '1786091356243'
       sourceHandle: 'false'
       target: '1786091427703'
@@ -664,13 +613,14 @@ workflow:
       type: custom
       zIndex: 0
     - data:
-        isInIteration: null
+        isInIteration: false
         isInLoop: false
         iteration_id: null
         loop_id: null
         sourceType: if-else
         targetType: llm
       id: 1786091356243-true-1785288460056-target
+      selected: false
       source: '1786091356243'
       sourceHandle: 'true'
       target: '1785288460056'
@@ -708,14 +658,24 @@ workflow:
           required: false
           type: text-input
           variable: PicUrl
-      height: 134
+        - default: intent-other
+          hide: true
+          hint: ''
+          label: type
+          max_length: 20
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: type
+      height: 160
       id: '1785286288428'
       position:
         x: 0
-        y: 774.252380952381
+        y: 652.9666666666666
       positionAbsolute:
         x: 0
-        y: 774.252380952381
+        y: 652.9666666666666
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -723,157 +683,48 @@ workflow:
       width: 242
       zIndex: 0
     - data:
-        context:
-          enabled: false
-          variable_selector: []
-        memory:
-          query_prompt_template: '{{#sys.query#}}
-
-
-            {{#sys.files#}}'
-          role_prefix:
-            assistant: ''
-            user: ''
-          window:
-            enabled: true
-            size: 30
-        model:
-          completion_params:
-            response_format: json_object
-            temperature: 0.5
-            thinking: false
-          mode: chat
-          name: deepseek-v4-pro
-          provider: langgenius/deepseek/deepseek
-        prompt_template:
-        - id: c1d23bf5-35ed-4fc0-b5c9-54916957189f
-          role: system
-          text: '结合用户当前输入 + 全部历史对话记录 + 是否携带参考图，识别用户意图：
-
-
-            意图分类（四类）：
-
-            - intent-aisplit = 剧本/分镜制作：用户提供剧本、故事、文案，要求生成分镜脚本/故事板，或对剧本、分镜方案进行优化完善
-
-            - intent-pic = 全新图片生成，或对已有图片的修改/完善（更亮/换风格/改构图/去掉某元素/继续完善/不满意等，或携带参考图且内容是修改诉求）
-
-            - intent-video = 视频生成：用户要求生成短视频、动画片段，或设计视频方案
-
-            - intent-other = 打招呼、闲聊、询问功能等非创作需求
-
-
-            判断规则：
-
-            1. 明确意图词优先：剧本/分镜/故事板 → intent-aisplit；视频/动画/短片 → intent-video；图片/海报/插画
-            → intent-pic
-
-            2. 用户说"继续/接着上次"时，结合历史对话判断：在完善分镜 → intent-aisplit；在完善图片 → intent-pic
-
-            3. 分镜相关"优化/完善剧本"也归 intent-aisplit（剧本优化设计分支处理）
-
-            4. 无法明确区分时，message 引导用户："你希望 AI 分镜、图片生成还是视频生成呢？"
-
-            5. message 字段：创作类意图给一句简短执行确认语（如"好的，开始设计分镜方案"）；intent-other 类给自然回复
-
-
-            4种输出格式如下（只输出纯 JSON）：
-
-            {"type":"intent-aisplit","message":"回复内容"}、
-
-            {"type":"intent-pic","message":"回复内容"}、
-
-            {"type":"intent-video","message":"回复内容"}、
-
-            {"type":"intent-other","message":"回复内容"}'
-        reasoning_format: tagged
-        selected: false
-        structured_output:
-          schema:
-            additionalProperties: false
-            properties:
-              message:
-                description: 回复用户的内容
-                enum: null
-                type: string
-              type:
-                description: intent-aisplit → 剧本(分镜)优化设计 intent-pic → 图片方案设计 intent-video
-                  → 视频方案设计  intent-other → 引导回复
-                enum:
-                - intent-aisplit
-                - intent-pic
-                - intent-video
-                - intent-other
-                type: string
-            required:
-            - message
-            - type
-            type: object
-        structured_output_enabled: true
-        title: 意图识别
-        type: llm
-        vision:
-          enabled: false
-      height: 87
-      id: '1785286652605'
-      position:
-        x: 682.1795011750022
-        y: 836.2880952380954
-      positionAbsolute:
-        x: 682.1795011750022
-        y: 836.2880952380954
-      selected: true
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
         cases:
         - case_id: intent-aisplit
           conditions:
-          - comparison_operator: is
+          - comparison_operator: contains
             id: intent-aisplit-cond
             value: intent-aisplit
             varType: string
             variable_selector:
-            - '1785286652605'
-            - structured_output
+            - '1785286288428'
             - type
           id: intent-aisplit
           logical_operator: and
         - case_id: intent-pic
           conditions:
-          - comparison_operator: is
+          - comparison_operator: contains
             id: intent-pic-cond
             value: intent-pic
             varType: string
             variable_selector:
-            - '1785286652605'
-            - structured_output
+            - '1785286288428'
             - type
           id: intent-pic
           logical_operator: and
         - case_id: intent-video
           conditions:
-          - comparison_operator: is
+          - comparison_operator: contains
             id: intent-video-cond
             value: intent-video
             varType: string
             variable_selector:
-            - '1785286652605'
-            - structured_output
+            - '1785286288428'
             - type
           id: intent-video
           logical_operator: and
         - case_id: intent-other
           conditions:
-          - comparison_operator: is
+          - comparison_operator: contains
             id: intent-other-cond
             value: intent-other
             varType: string
             variable_selector:
-            - '1785286652605'
-            - structured_output
+            - '1785286288428'
             - type
           id: intent-other
           logical_operator: and
@@ -886,11 +737,11 @@ workflow:
       height: 363
       id: '17852867601920'
       position:
-        x: 1024
-        y: 710.4190476190478
+        x: 683
+        y: 591.9666666666666
       positionAbsolute:
-        x: 1024
-        y: 710.4190476190478
+        x: 683
+        y: 591.9666666666666
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -915,7 +766,9 @@ workflow:
             size: 50
         model:
           completion_params:
-            temperature: 0.4
+            response_format: json_object
+            temperature: 0.6
+            top_p: 0.81
           mode: chat
           name: deepseek-v4-pro
           provider: langgenius/deepseek/deepseek
@@ -955,10 +808,10 @@ workflow:
       height: 87
       id: '1785286839392'
       position:
-        x: 2448
+        x: 2428
         y: 22.5
       positionAbsolute:
-        x: 2448
+        x: 2428
         y: 22.5
       selected: false
       sourcePosition: right
@@ -975,7 +828,9 @@ workflow:
           - message
         model:
           completion_params:
+            response_format: json_object
             temperature: 0.7
+            top_p: 0.81
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
@@ -1085,10 +940,10 @@ workflow:
       height: 87
       id: '1785287100384'
       position:
-        x: 2789
+        x: 2769
         y: 37
       positionAbsolute:
-        x: 2789
+        x: 2769
         y: 37
       selected: false
       sourcePosition: right
@@ -1097,19 +952,19 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: '{{#1785286652605.structured_output.message#}}'
+        answer: 请详细您的需求，您希望AI分镜设计、生成图片还是生成视频呢？
         selected: false
         title: 引导回复
         type: answer
         variables: []
-      height: 101
+      height: 115
       id: '1785287790005'
       position:
-        x: 1403.8501130110415
-        y: 1179.7437401730824
+        x: 1155.5878401997118
+        y: 984.0326055665564
       positionAbsolute:
-        x: 1403.8501130110415
-        y: 1179.7437401730824
+        x: 1155.5878401997118
+        y: 984.0326055665564
       selected: true
       sourcePosition: right
       targetPosition: left
@@ -1133,7 +988,9 @@ workflow:
             size: 30
         model:
           completion_params:
-            temperature: 0.7
+            response_format: json_object
+            temperature: 0.8
+            top_p: 0.8
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
@@ -1210,10 +1067,10 @@ workflow:
       id: '1785287847725'
       position:
         x: 2087
-        y: 434.95000000000016
+        y: 360
       positionAbsolute:
         x: 2087
-        y: 434.95000000000016
+        y: 360
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1307,32 +1164,12 @@ workflow:
       height: 87
       id: '1785288460056'
       position:
-        x: 1713.275169516562
-        y: 918.4931751178758
+        x: 1746
+        y: 750.5666666666667
       positionAbsolute:
-        x: 1713.275169516562
-        y: 918.4931751178758
+        x: 1746
+        y: 750.5666666666667
       selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 你希望怎么改善？
-        selected: false
-        title: 视频方案回复
-        type: answer
-        variables: []
-      height: 99
-      id: '1785288539691'
-      position:
-        x: 2543.686417270324
-        y: 1266.4542600238724
-      positionAbsolute:
-        x: 2543.686417270324
-        y: 1266.4542600238724
-      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1352,10 +1189,13 @@ workflow:
             user: ''
           window:
             enabled: true
-            size: 50
+            size: 30
         model:
           completion_params:
-            temperature: 0.4
+            response_format: json_object
+            temperature: 0.6
+            thinking: true
+            top_p: 0.8
           mode: chat
           name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
@@ -1384,7 +1224,7 @@ workflow:
             {"type":1|0,"message":"优化剧本方案","script":"最终的剧本，用户认可了最终的方案才填入，默认不填"}
 
             type是number类型的，type=1 表示用户认可方案，type=0 表示需要继续修改'
-        reasoning_format: separated
+        reasoning_format: tagged
         selected: false
         structured_output:
           schema:
@@ -1415,11 +1255,11 @@ workflow:
       height: 87
       id: '1785289782670'
       position:
-        x: 1385
-        y: 258.7904761904764
+        x: 1044
+        y: 77.99999999999991
       positionAbsolute:
-        x: 1385
-        y: 258.7904761904764
+        x: 1044
+        y: 77.99999999999991
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1449,11 +1289,11 @@ workflow:
       height: 147
       id: '17852900874780'
       position:
-        x: 1746
-        y: 84.7238095238099
+        x: 1726
+        y: 76.33333333333329
       positionAbsolute:
-        x: 1746
-        y: 84.7238095238099
+        x: 1726
+        y: 76.33333333333329
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1478,11 +1318,11 @@ workflow:
       height: 83
       id: '1785290421184'
       position:
-        x: 1746
-        y: 375.6904761904765
+        x: 1385
+        y: 94.49999999999991
       positionAbsolute:
-        x: 1746
-        y: 375.6904761904765
+        x: 1385
+        y: 94.49999999999991
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1498,11 +1338,11 @@ workflow:
       height: 99
       id: '1785290540008'
       position:
-        x: 2111.9745746474064
-        y: -29.847447884438544
+        x: 2087
+        y: 0
       positionAbsolute:
-        x: 2111.9745746474064
-        y: -29.847447884438544
+        x: 2087
+        y: 0
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1518,54 +1358,12 @@ workflow:
       height: 101
       id: '1785290593627'
       position:
-        x: 2107
-        y: 179.00000000000023
+        x: 2087
+        y: 179
       positionAbsolute:
-        x: 2107
-        y: 179.00000000000023
+        x: 2087
+        y: 179
       selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 正在生成图片…
-        selected: false
-        title: 直接回复 12
-        type: answer
-        variables: []
-      height: 99
-      id: '1785307659567'
-      position:
-        x: 4130.036949401712
-        y: 554.1169704361763
-      positionAbsolute:
-        x: 4130.036949401712
-        y: 554.1169704361763
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: '生成视频中....
-
-          '
-        selected: false
-        title: 生成视频中....
-        type: answer
-        variables: []
-      height: 99
-      id: '1785399995734'
-      position:
-        x: 2562.3319865759413
-        y: 1055.0960291725276
-      positionAbsolute:
-        x: 2562.3319865759413
-        y: 1055.0960291725276
-      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1624,11 +1422,11 @@ workflow:
       height: 51
       id: '17854679129180'
       position:
-        x: 2448
-        y: 486.78333333333353
+        x: 2428
+        y: 411.83333333333337
       positionAbsolute:
-        x: 2448
-        y: 486.78333333333353
+        x: 2428
+        y: 411.83333333333337
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1652,11 +1450,11 @@ workflow:
       height: 83
       id: '1785468047542'
       position:
-        x: 2789
-        y: 479.28333333333353
+        x: 2769
+        y: 404.33333333333337
       positionAbsolute:
-        x: 2789
-        y: 479.28333333333353
+        x: 2769
+        y: 404.33333333333337
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1681,10 +1479,10 @@ workflow:
       id: '1785478874143'
       position:
         x: 342
-        y: 822.0857142857144
+        y: 718.1333333333333
       positionAbsolute:
         x: 342
-        y: 822.0857142857144
+        y: 718.1333333333333
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1713,11 +1511,11 @@ workflow:
       height: 188
       id: '1785728867774'
       position:
-        x: 2091.874466531952
-        y: 1026.8208596559655
+        x: 3100.1540141000255
+        y: 755.5916079165607
       positionAbsolute:
-        x: 2091.874466531952
-        y: 1026.8208596559655
+        x: 3100.1540141000255
+        y: 755.5916079165607
       selected: true
       sourcePosition: right
       targetPosition: left
@@ -1749,10 +1547,10 @@ workflow:
       height: 188
       id: '1785747933811'
       position:
-        x: 3130
+        x: 3110
         y: 1
       positionAbsolute:
-        x: 3130
+        x: 3110
         y: 1
       selected: false
       sourcePosition: right
@@ -1761,40 +1559,20 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: 请继续完善分镜设计方案
+        answer: 正在为您生成中...
         selected: false
-        title: 请继续完善分镜设计方案
-        type: answer
-        variables: []
-      height: 99
-      id: '1785748101848'
-      position:
-        x: 3491
-        y: 275.1428571428572
-      positionAbsolute:
-        x: 3491
-        y: 275.1428571428572
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom
-      width: 241
-      zIndex: 0
-    - data:
-        answer: 准备为您生成AI分镜
-        selected: false
-        title: 准备为您生成AI分镜
+        title: 正在为您生成中...
         type: answer
         variables: []
       height: 99
       id: '1785891056513'
       position:
-        x: 3491
-        y: 96.14285714285734
+        x: 4181.206967970598
+        y: 437.3593662333927
       positionAbsolute:
-        x: 3491
-        y: 96.14285714285734
-      selected: false
+        x: 4181.206967970598
+        y: 437.3593662333927
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1822,11 +1600,11 @@ workflow:
       height: 188
       id: '1785910286651'
       position:
-        x: 3387.9446592493855
-        y: 522.8467710530845
+        x: 3110
+        y: 365.66666666666663
       positionAbsolute:
-        x: 3387.9446592493855
-        y: 522.8467710530845
+        x: 3110
+        y: 365.66666666666663
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1860,11 +1638,11 @@ workflow:
       height: 51
       id: '17859129841880'
       position:
-        x: 1385
-        y: 615.2161452071473
+        x: 1044
+        y: 483.23333333333335
       positionAbsolute:
-        x: 1385
-        y: 615.2161452071473
+        x: 1044
+        y: 483.23333333333335
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -1872,25 +1650,25 @@ workflow:
       width: 241
       zIndex: 0
     - data:
-        answer: 请继续完善图片设计方案
+        answer: 请继续完善设计方案
         desc: ''
         isInIteration: false
         isInLoop: false
         iteration_id: null
         loop_id: null
         selected: false
-        title: 请继续完善图片设计方案
+        title: 请继续完善设计方案
         type: answer
         variables: []
       height: 99
       id: '17859168366910'
       position:
-        x: 4030.5911151502078
-        y: 788.528167469264
+        x: 4314.818213734812
+        y: 728.2045555975047
       positionAbsolute:
-        x: 4030.5911151502078
-        y: 788.528167469264
-      selected: false
+        x: 4314.818213734812
+        y: 728.2045555975047
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
@@ -1907,51 +1685,31 @@ workflow:
             variable_selector:
             - '17859129841880'
             - pic_generate_talk
+          - comparison_operator: empty
+            id: 84b55990-cbda-4fc2-b9be-e58d718c5a1c
+            value: ''
+            varType: string
+            variable_selector:
+            - conversation
+            - picture
           id: 'true'
-          logical_operator: and
+          logical_operator: or
         selected: false
         title: 条件分支 3
         type: if-else
-      height: 139
+      height: 165
       id: '1786068209182'
       position:
-        x: 1711.2310211500383
-        y: 586.2801358071305
+        x: 1471.6453642506567
+        y: 444.4513380333418
       positionAbsolute:
-        x: 1711.2310211500383
-        y: 586.2801358071305
-      selected: false
+        x: 1471.6453642506567
+        y: 444.4513380333418
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
-      zIndex: 0
-    - data:
-        author: weichenyi
-        desc: ''
-        height: 576
-        selected: false
-        showAuthor: true
-        text: '{"root":{"children":[{"children":[{"detail":0,"format":1,"mode":"normal","style":"font-size:
-          16px;","text":"图片人工介入完，后端会会生成图片，再次进入人工介入，若完成图片生成则会清空上一轮的对话","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"paragraph","version":1,"textFormat":1,"textStyle":"font-size:
-          16px;"}],"direction":null,"format":"","indent":0,"type":"root","version":1}}'
-        theme: pink
-        title: ''
-        type: ''
-        width: 1267
-      height: 576
-      id: '1786073202538'
-      position:
-        x: 3100.511924799864
-        y: 464.5143544833717
-      positionAbsolute:
-        x: 3100.511924799864
-        y: 464.5143544833717
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom-note
-      width: 1267
       zIndex: 0
     - data:
         code: "\ndef main(user_finishing: str, storage_pic_talk: dict):\n    storage_pic_talk[\"\
@@ -1979,11 +1737,11 @@ workflow:
       height: 51
       id: '1786082824642'
       position:
-        x: 2037.770070500127
-        y: 674.8166666666668
+        x: 2087
+        y: 568.9999999999999
       positionAbsolute:
-        x: 2037.770070500127
-        y: 674.8166666666668
+        x: 2087
+        y: 568.9999999999999
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2007,11 +1765,11 @@ workflow:
       height: 83
       id: '1786082977772'
       position:
-        x: 2359.103039950072
-        y: 674.8166666666668
+        x: 2428
+        y: 561.4999999999999
       positionAbsolute:
-        x: 2359.103039950072
-        y: 674.8166666666668
+        x: 2428
+        y: 561.4999999999999
       selected: false
       sourcePosition: right
       targetPosition: left
@@ -2027,43 +1785,16 @@ workflow:
       height: 99
       id: '1786086274364'
       position:
-        x: 2665.0260329000594
-        y: 694.5086384666159
+        x: 2769
+        y: 568.9999999999999
       positionAbsolute:
-        x: 2665.0260329000594
-        y: 694.5086384666159
-      selected: false
+        x: 2769
+        y: 568.9999999999999
+      selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
-      zIndex: 0
-    - data:
-        author: weichenyi
-        desc: ''
-        height: 500
-        selected: false
-        showAuthor: true
-        text: '{"root":{"children":[{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
-          16px;","text":"这里图生图走后端，因为图片理解要走大模型，为了职责单一放后端去","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"paragraph","version":1,"textFormat":0,"textStyle":"font-size:
-          16px;"}],"direction":null,"format":"","indent":0,"type":"root","version":1}}'
-        theme: blue
-        title: ''
-        type: ''
-        width: 701
-      height: 500
-      id: '1786089408699'
-      position:
-        x: 2262.3319865759413
-        y: 554.1169704361763
-      positionAbsolute:
-        x: 2262.3319865759413
-        y: 554.1169704361763
-      selected: false
-      sourcePosition: right
-      targetPosition: left
-      type: custom-note
-      width: 701
       zIndex: 0
     - data:
         cases:
@@ -2084,16 +1815,17 @@ workflow:
       height: 123
       id: '1786091356243'
       position:
-        x: 1369.9199095911672
-        y: 952.4233785377502
+        x: 1355.4620423000763
+        y: 830.5076643166625
       positionAbsolute:
-        x: 1369.9199095911672
-        y: 952.4233785377502
+        x: 1355.4620423000763
+        y: 830.5076643166625
       selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
+      zIndex: 0
     - data:
         answer: 结合你上传的参考图设计视频方案中...
         selected: false
@@ -2103,18 +1835,19 @@ workflow:
       height: 99
       id: '1786091427703'
       position:
-        x: 1731.9661454621837
-        y: 1217.914214819456
+        x: 1726
+        y: 991.411560916476
       positionAbsolute:
-        x: 1731.9661454621837
-        y: 1217.914214819456
+        x: 1726
+        y: 991.411560916476
       selected: true
       sourcePosition: right
       targetPosition: left
       type: custom
       width: 241
+      zIndex: 0
     viewport:
-      x: -11.734378693382268
-      y: -57.68226525593184
-      zoom: 0.5305007982786403
+      x: -912.374842116028
+      y: 85.20793033440634
+      zoom: 0.8040888484979256
   rag_pipeline_variables: []
