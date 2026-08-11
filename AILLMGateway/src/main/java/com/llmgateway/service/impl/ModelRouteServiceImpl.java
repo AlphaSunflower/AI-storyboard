@@ -1,0 +1,107 @@
+package com.llmgateway.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.llmgateway.dto.admin.RouteRequest;
+import com.llmgateway.entity.ModelRoute;
+import com.llmgateway.exception.BusinessException;
+import com.llmgateway.mapper.ChannelMapper;
+import com.llmgateway.mapper.ModelRouteMapper;
+import com.llmgateway.service.ModelRouteService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Set;
+
+/** 模型路由管理服务实现：模型名 → 渠道映射 CRUD */
+@Service
+@RequiredArgsConstructor
+public class ModelRouteServiceImpl implements ModelRouteService {
+
+    /** 合法模型类型（text 文本 / image 生图 / video 视频生成 / vision 图片视频理解） */
+    private static final Set<String> ROUTE_TYPES = Set.of("text", "image", "video", "vision");
+
+    private final ModelRouteMapper routeMapper;
+    private final ChannelMapper channelMapper;
+
+    /** 创建路由：modelName + channelId 必填，且渠道必须存在 */
+    @Override
+    public ModelRoute create(RouteRequest request) {
+        if (request.getModelName() == null || request.getModelName().isBlank()
+                || request.getChannelId() == null || request.getChannelId().isBlank()) {
+            throw new BusinessException(40001, "modelName/channelId 不能为空");
+        }
+        if (channelMapper.selectById(request.getChannelId()) == null) {
+            throw new BusinessException(40401, "渠道不存在");
+        }
+        ModelRoute route = new ModelRoute();
+        route.setModelName(request.getModelName());
+        route.setChannelId(request.getChannelId());
+        route.setType(normalizeType(request.getType()));   // 默认 text，校验枚举
+        route.setDefaultParams(request.getDefaultParams());
+        route.setCreatedAt(OffsetDateTime.now());
+        route.setUpdatedAt(OffsetDateTime.now());
+        routeMapper.insert(route);
+        return route;
+    }
+
+    /** 路由列表（第一版返回原始行，不做渠道名 join） */
+    @Override
+    public List<ModelRoute> list() {
+        return routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                .orderByAsc(ModelRoute::getModelName));
+    }
+
+    @Override
+    public ModelRoute update(String id, RouteRequest request) {
+        ModelRoute route = routeMapper.selectById(id);
+        if (route == null) throw new BusinessException(40401, "路由不存在");
+        if (request.getModelName() != null) route.setModelName(request.getModelName());
+        if (request.getChannelId() != null) {
+            // 换渠道时同样校验渠道存在
+            if (channelMapper.selectById(request.getChannelId()) == null) {
+                throw new BusinessException(40401, "渠道不存在");
+            }
+            route.setChannelId(request.getChannelId());
+        }
+        if (request.getDefaultParams() != null) route.setDefaultParams(request.getDefaultParams());
+        if (request.getType() != null) route.setType(normalizeType(request.getType()));
+        route.setUpdatedAt(OffsetDateTime.now());
+        routeMapper.updateById(route);
+        return route;
+    }
+
+    @Override
+    public void delete(String id) {
+        if (routeMapper.deleteById(id) == 0) throw new BusinessException(40401, "路由不存在");
+    }
+
+    @Override
+    public ModelRoute getById(String id) {
+        ModelRoute route = routeMapper.selectById(id);
+        if (route == null) throw new BusinessException(40401, "路由不存在");
+        return route;
+    }
+
+    @Override
+    public List<ModelRoute> listByChannelId(String channelId) {
+        return routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                .eq(ModelRoute::getChannelId, channelId)
+                .orderByAsc(ModelRoute::getModelName));
+    }
+
+    @Override
+    public long countAll() {
+        Long count = routeMapper.selectCount(null);
+        return count == null ? 0 : count;
+    }
+
+    /** 归一化模型类型：空默认 text，非法值抛 40001 */
+    private String normalizeType(String type) {
+        if (type == null || type.isBlank()) return "text";
+        String t = type.trim().toLowerCase();
+        if (!ROUTE_TYPES.contains(t)) throw new BusinessException(40001, "type 仅支持 text/image/video/vision");
+        return t;
+    }
+}

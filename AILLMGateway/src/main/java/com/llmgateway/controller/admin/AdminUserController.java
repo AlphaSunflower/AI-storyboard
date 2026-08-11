@@ -1,118 +1,49 @@
 package com.llmgateway.controller.admin;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.lambdaworks.crypto.SCryptUtil;
 import com.llmgateway.dto.ApiResponse;
+import com.llmgateway.dto.admin.AdminUserRequest;
+import com.llmgateway.dto.vo.AdminUserVO;
 import com.llmgateway.entity.AdminUser;
-import com.llmgateway.exception.BusinessException;
-import com.llmgateway.mapper.AdminUserMapper;
-import org.springframework.security.core.context.SecurityContextHolder;
+import com.llmgateway.service.AdminUserService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 管理后台用户管理：scrypt 哈希（与 AdminInitRunner 一致 N=16384），列表/响应永不返回 passwordHash。
- * 防自锁双校验：不能操作当前登录账号；禁用/删除 admin 角色用户前校验剩余启用管理员 ≥ 1。
+ * 防自锁双校验（不能操作当前登录账号；禁用/删除 admin 角色用户前校验剩余启用管理员 ≥ 1）在 AdminUserService 内实现。
  */
 @RestController
 @RequestMapping("/admin/users")
+@RequiredArgsConstructor
 public class AdminUserController {
 
-    /** 创建/更新请求体：POST 用 username+password；PUT 用 password（非空才重置）+ status（enabled/disabled） */
-    public record UserRequest(String username, String password, String status) {}
-
-    private final AdminUserMapper adminUserMapper;
-
-    public AdminUserController(AdminUserMapper adminUserMapper) {
-        this.adminUserMapper = adminUserMapper;
-    }
+    private final AdminUserService adminUserService;
 
     @GetMapping
-    public ApiResponse<List<AdminUser>> list() {
-        List<AdminUser> users = adminUserMapper.selectList(new LambdaQueryWrapper<AdminUser>()
-                .orderByAsc(AdminUser::getCreatedAt));
-        users.forEach(u -> u.setPasswordHash(null));   // 抹掉哈希，保证不泄漏
-        return ApiResponse.ok(users);
+    public ApiResponse<List<AdminUserVO>> list() {
+        return ApiResponse.ok(adminUserService.list().stream().map(this::toVO).toList());
     }
 
     @PostMapping
-    public ApiResponse<AdminUser> create(@RequestBody UserRequest request) {
-        if (request.username() == null || request.username().isBlank()
-                || request.password() == null || request.password().isBlank()) {
-            throw new BusinessException(40001, "用户名和密码不能为空");
-        }
-        String username = request.username().trim();
-        Long dup = adminUserMapper.selectCount(new LambdaQueryWrapper<AdminUser>()
-                .eq(AdminUser::getUsername, username));
-        if (dup != null && dup > 0) {
-            throw new BusinessException(40001, "用户名已存在");
-        }
-        AdminUser user = new AdminUser();
-        user.setUsername(username);
-        user.setPasswordHash(SCryptUtil.scrypt(request.password(), 16384, 8, 1));
-        user.setRole("admin");
-        user.setStatus("enabled");
-        user.setCreatedAt(OffsetDateTime.now());
-        user.setUpdatedAt(OffsetDateTime.now());
-        adminUserMapper.insert(user);
-        user.setPasswordHash(null);
-        return ApiResponse.ok(user);
+    public ApiResponse<AdminUserVO> create(@RequestBody AdminUserRequest request) {
+        return ApiResponse.ok(toVO(adminUserService.create(request)));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<AdminUser> update(@PathVariable String id, @RequestBody UserRequest request) {
-        AdminUser user = adminUserMapper.selectById(id);
-        if (user == null) throw new BusinessException(40401, "用户不存在");
-        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
-        if (user.getUsername().equals(currentUsername)) {
-            throw new BusinessException(40301, "不能操作当前登录账号");
-        }
-        // 防自锁：把启用的 admin 改为 disabled 前，校验剩余启用管理员 ≥ 1
-        if ("disabled".equals(request.status()) && "admin".equals(user.getRole()) && "enabled".equals(user.getStatus())) {
-            Long enabledAdmins = adminUserMapper.selectCount(new LambdaQueryWrapper<AdminUser>()
-                    .eq(AdminUser::getRole, "admin")
-                    .eq(AdminUser::getStatus, "enabled"));
-            if (enabledAdmins != null && enabledAdmins <= 1) {
-                throw new BusinessException(40301, "必须至少保留一个启用的管理员");
-            }
-        }
-        if (request.password() != null && !request.password().isBlank()) {
-            user.setPasswordHash(SCryptUtil.scrypt(request.password(), 16384, 8, 1));
-        }
-        if (request.status() != null) {
-            // 校验 status 枚举：脏值会破坏登录判定（"enabled".equals 永假）与最后管理员保护计数
-            if (!Set.of("enabled", "disabled").contains(request.status())) {
-                throw new BusinessException(40001, "status 仅支持 enabled/disabled");
-            }
-            user.setStatus(request.status());
-        }
-        user.setUpdatedAt(OffsetDateTime.now());
-        adminUserMapper.updateById(user);
-        user.setPasswordHash(null);
-        return ApiResponse.ok(user);
+    public ApiResponse<AdminUserVO> update(@PathVariable String id, @RequestBody AdminUserRequest request) {
+        return ApiResponse.ok(toVO(adminUserService.update(id, request)));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable String id) {
-        AdminUser user = adminUserMapper.selectById(id);
-        if (user == null) throw new BusinessException(40401, "用户不存在");
-        String currentUsername = SecurityContextHolder.getContext().getAuthentication().getName();
-        if (user.getUsername().equals(currentUsername)) {
-            throw new BusinessException(40301, "不能操作当前登录账号");
-        }
-        // 防自锁：删除启用的 admin 前，校验剩余启用管理员 ≥ 1（已禁用的 admin 删除不影响启用数，无需拦截）
-        if ("admin".equals(user.getRole()) && "enabled".equals(user.getStatus())) {
-            Long enabledAdmins = adminUserMapper.selectCount(new LambdaQueryWrapper<AdminUser>()
-                    .eq(AdminUser::getRole, "admin")
-                    .eq(AdminUser::getStatus, "enabled"));
-            if (enabledAdmins != null && enabledAdmins <= 1) {
-                throw new BusinessException(40301, "必须至少保留一个启用的管理员");
-            }
-        }
-        adminUserMapper.deleteById(id);
+        adminUserService.delete(id);
         return ApiResponse.ok(null);
+    }
+
+    private AdminUserVO toVO(AdminUser e) {
+        return new AdminUserVO(e.getId(), e.getUsername(), e.getRole(), e.getStatus(),
+                e.getCreatedAt(), e.getUpdatedAt());
     }
 }

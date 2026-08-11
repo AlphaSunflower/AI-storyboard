@@ -1,82 +1,46 @@
 package com.llmgateway.controller.admin;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.llmgateway.dto.ApiResponse;
 import com.llmgateway.dto.admin.ChannelRequest;
+import com.llmgateway.dto.vo.ChannelVO;
 import com.llmgateway.entity.Channel;
-import com.llmgateway.exception.BusinessException;
-import com.llmgateway.mapper.ChannelMapper;
-import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ChannelService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 
 /** 渠道管理：Key 写入 AES 加密，读取永远不返回明文 */
 @RestController
 @RequestMapping("/admin/channels")
+@RequiredArgsConstructor
 public class AdminChannelController {
 
-    private final ChannelMapper channelMapper;
-    private final KeyService keyService;
-
-    public AdminChannelController(ChannelMapper channelMapper, KeyService keyService) {
-        this.channelMapper = channelMapper;
-        this.keyService = keyService;
-    }
+    private final ChannelService channelService;
 
     @PostMapping
-    public ApiResponse<Channel> create(@RequestBody ChannelRequest request) {
-        if (request.getName() == null || request.getName().isBlank()
-                || request.getBaseUrl() == null || request.getBaseUrl().isBlank()
-                || request.getApiKey() == null || request.getApiKey().isBlank()) {
-            throw new BusinessException(40001, "name/baseUrl/apiKey 不能为空");
-        }
-        Channel channel = new Channel();
-        channel.setName(request.getName());
-        channel.setType(request.getType() == null ? "openai_compatible" : request.getType());
-        channel.setBaseUrl(request.getBaseUrl());
-        channel.setApiKey(keyService.encrypt(request.getApiKey()));   // AES 加密存储
-        channel.setModels(request.getModels());
-        channel.setEnabled(request.getEnabled() == null ? true : request.getEnabled());
-        channel.setPriority(request.getPriority() == null ? 0 : request.getPriority());
-        channel.setCreatedAt(OffsetDateTime.now());
-        channel.setUpdatedAt(OffsetDateTime.now());
-        channelMapper.insert(channel);
-        channel.setApiKey("***");   // 返回脱敏
-        return ApiResponse.ok(channel);
+    public ApiResponse<ChannelVO> create(@RequestBody ChannelRequest request) {
+        return ApiResponse.ok(toVO(channelService.create(request)));
     }
 
     @GetMapping
-    public ApiResponse<List<Channel>> list() {
-        List<Channel> channels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
-                .orderByAsc(Channel::getPriority));
-        channels.forEach(c -> c.setApiKey("***"));
-        return ApiResponse.ok(channels);
+    public ApiResponse<List<ChannelVO>> list() {
+        return ApiResponse.ok(channelService.list().stream().map(this::toVO).toList());
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<Channel> update(@PathVariable String id, @RequestBody ChannelRequest request) {
-        Channel channel = channelMapper.selectById(id);
-        if (channel == null) throw new BusinessException(40401, "渠道不存在");
-        if (request.getName() != null) channel.setName(request.getName());
-        if (request.getType() != null) channel.setType(request.getType());
-        if (request.getBaseUrl() != null) channel.setBaseUrl(request.getBaseUrl());
-        if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
-            channel.setApiKey(keyService.encrypt(request.getApiKey()));  // 传新 Key 才重加密
-        }
-        if (request.getModels() != null) channel.setModels(request.getModels());  // models 可更新为空串清空
-        if (request.getEnabled() != null) channel.setEnabled(request.getEnabled());
-        if (request.getPriority() != null) channel.setPriority(request.getPriority());
-        channel.setUpdatedAt(OffsetDateTime.now());
-        channelMapper.updateById(channel);
-        channel.setApiKey("***");
-        return ApiResponse.ok(channel);
+    public ApiResponse<ChannelVO> update(@PathVariable String id, @RequestBody ChannelRequest request) {
+        return ApiResponse.ok(toVO(channelService.update(id, request)));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable String id) {
-        if (channelMapper.deleteById(id) == 0) throw new BusinessException(40401, "渠道不存在");
+        channelService.delete(id);
         return ApiResponse.ok(null);
+    }
+
+    private ChannelVO toVO(Channel e) {
+        return new ChannelVO(e.getId(), e.getName(), e.getType(), e.getBaseUrl(), e.getModels(),
+                e.getEnabled(), e.getPriority(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

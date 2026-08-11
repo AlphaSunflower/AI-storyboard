@@ -1,41 +1,31 @@
 package com.llmgateway.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.llmgateway.entity.CallLog;
-import com.llmgateway.mapper.CallLogMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 
-/** 调用日志异步落库（不阻塞响应）；videoUrl 供视频下载端点暂存 MiniMax 限时直链 */
-@Service
-public class CallLogService {
+/** 调用日志异步落库（不阻塞响应）+ 管理后台日志/统计查询（admin 模块）；videoUrl 供视频下载端点暂存 MiniMax 限时直链 */
+public interface CallLogService {
 
-    private static final Logger log = LoggerFactory.getLogger(CallLogService.class);
+    /** 记录一次调用日志：异步落库，落库失败仅告警不抛出，不阻塞调用方 */
+    void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId);
 
-    private final CallLogMapper callLogMapper;
+    // ===== 管理后台查询（admin 模块使用）=====
 
-    public CallLogService(CallLogMapper callLogMapper) {
-        this.callLogMapper = callLogMapper;
-    }
+    /** 分页查询调用日志（按 createdAt 倒序；size 钳制 1~50；model 非空时精确过滤） */
+    Page<CallLog> page(long page, long size, String model);
 
-    @Async
-    public void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId) {
-        try {
-            CallLog record = new CallLog();
-            record.setModel(model);
-            record.setChannelId(channelId);
-            record.setStatus(status);
-            record.setDurationMs(durationMs);
-            record.setError(error);
-            record.setVideoUrl(videoUrl);
-            record.setTaskId(taskId);
-            record.setCreatedAt(OffsetDateTime.now());
-            callLogMapper.insert(record);
-        } catch (Exception e) {
-            log.warn("调用日志落库失败: {}", e.getMessage());
-        }
-    }
+    /** 全量调用状态分布：{total, success, failed, successRate}（'created' 不计入成功/失败） */
+    Map<String, Object> callStats();
+
+    /** 今日（当天 00:00 起）调用状态分布：{total, success, failed, successRate} */
+    Map<String, Object> todayCallStats();
+
+    /** Top 10 模型：[{model, count, successRate}]（按调用次数倒序） */
+    List<Map<String, Object>> topModels();
+
+    /** 近 7 天每日调用量：[{date, count}]（含今天，按日期升序） */
+    List<Map<String, Object>> trend7d();
 }

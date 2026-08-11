@@ -1,18 +1,20 @@
 package com.llmgateway.controller.admin;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.llmgateway.dto.ApiResponse;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
-import com.llmgateway.mapper.ChannelMapper;
-import com.llmgateway.mapper.ModelRouteMapper;
+import com.llmgateway.service.ChannelService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelRouteService;
+import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
 import com.llmgateway.service.VideoGatewayService;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.llmgateway.service.VideoResult;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,42 +43,30 @@ import java.util.Set;
  */
 @RestController
 @RequestMapping("/admin")
+@RequiredArgsConstructor
 public class AdminTestController {
 
     private static final Logger log = LoggerFactory.getLogger(AdminTestController.class);
 
-    /** 测试专用 HttpClient：连接超时 5s，单请求超时在 sendTestRequest 里设为 10s，无重试 */
+    /** 测试专用 HttpClient：连接超时 5s，单请求超时在 sendTestRequest 里设为 20s，无重试 */
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    private final ChannelMapper channelMapper;
-    private final ModelRouteMapper routeMapper;
+    private final ChannelService channelService;
+    private final ModelRouteService routeService;
     private final KeyService keyService;
     private final UpstreamClient upstreamClient;
     private final GatewayRoutingService gatewayRoutingService;
     private final VideoGatewayService videoGatewayService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AdminTestController(ChannelMapper channelMapper, ModelRouteMapper routeMapper,
-                               KeyService keyService, UpstreamClient upstreamClient,
-                               GatewayRoutingService gatewayRoutingService,
-                               VideoGatewayService videoGatewayService) {
-        this.channelMapper = channelMapper;
-        this.routeMapper = routeMapper;
-        this.keyService = keyService;
-        this.upstreamClient = upstreamClient;
-        this.gatewayRoutingService = gatewayRoutingService;
-        this.videoGatewayService = videoGatewayService;
-    }
-
     /** GET /admin/channels/{id}/models：获取该渠道可测试的模型列表（测试弹窗候选）。
      *  优先从上游拉取（openai_compatible：GET {baseUrl}/models 解析 data[].id），失败/非 openai_compatible
      *  回退本地候选（渠道 models 字段 + 该渠道已配路由模型，去重）；两者合并去重返回。 */
     @GetMapping("/channels/{id}/models")
     public ApiResponse<Map<String, Object>> channelModels(@PathVariable String id) {
-        Channel channel = channelMapper.selectById(id);
-        if (channel == null) throw new BusinessException(40401, "渠道不存在");
+        Channel channel = channelService.getById(id);
         Set<String> merged = new LinkedHashSet<>();
         // 本地候选：渠道 models 字段（中英文逗号分隔）+ 该渠道已配路由模型
         if (channel.getModels() != null) {
@@ -85,8 +75,7 @@ public class AdminTestController {
                 if (!t.isEmpty()) merged.add(t);
             }
         }
-        routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                        .eq(ModelRoute::getChannelId, id))
+        routeService.listByChannelId(id)
                 .forEach(r -> { if (r.getModelName() != null && !r.getModelName().isBlank()) merged.add(r.getModelName()); });
         // 上游拉取（仅 openai_compatible 有标准 GET /models；gemini/minimax 接口格式不同，不尝试）
         String source = "local";
@@ -124,14 +113,11 @@ public class AdminTestController {
     @PostMapping("/channels/{id}/test")
     public ApiResponse<Map<String, Object>> testChannel(@PathVariable String id,
                                                         @RequestBody(required = false) Map<String, String> body) {
-        Channel channel = channelMapper.selectById(id);
-        if (channel == null) throw new BusinessException(40401, "渠道不存在");
+        Channel channel = channelService.getById(id);
         // 测试模型选择：请求体 modelName 优先，其次该渠道已配路由中的 chat 类模型（跳过 image/video 等生成类，它们不支持 chat 探活），最后渠道类型默认
         String modelName = body == null ? null : body.get("modelName");
         if (modelName == null || modelName.isBlank()) {
-            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                    .eq(ModelRoute::getChannelId, id).orderByAsc(ModelRoute::getModelName));
-            for (ModelRoute r : routes) {
+            for (ModelRoute r : routeService.listByChannelId(id)) {
                 if (isChatModel(r.getModelName())) { modelName = r.getModelName(); break; }
             }
         }
@@ -181,8 +167,7 @@ public class AdminTestController {
      *  均与线上调用同路径（视频会落 created 日志，其余落 success/error 日志，可复核）。 */
     @PostMapping("/routes/{id}/test")
     public ApiResponse<Map<String, Object>> testRoute(@PathVariable String id) {
-        ModelRoute route = routeMapper.selectById(id);
-        if (route == null) throw new BusinessException(40401, "路由不存在");
+        ModelRoute route = routeService.getById(id);
         String type = route.getType() == null ? "text" : route.getType();
         log.info("【路由测试】发起: model={} type={} channelId={}", route.getModelName(), type, route.getChannelId());
         long start = System.currentTimeMillis();
@@ -191,19 +176,19 @@ public class AdminTestController {
             String respBody;
             if ("video".equals(type)) {
                 // 视频：走 VideoGatewayService 创建任务（与 /v1/videos 同链路，按 model 分发 MiniMax/Laozhang）
-                VideoGatewayService.VideoResult vr = videoGatewayService.create(String.format(
+                VideoResult vr = videoGatewayService.create(String.format(
                         "{\"model\":\"%s\",\"prompt\":\"a cat walking\"}", route.getModelName()));
                 status = vr.status();
                 respBody = vr.body();
             } else if ("image".equals(type)) {
                 // 生图：走通用路由转发 /images/generations（OpenAI 图片格式）
-                GatewayRoutingService.RouteResult rr = gatewayRoutingService.route("/images/generations", String.format(
+                RouteResult rr = gatewayRoutingService.route("/images/generations", String.format(
                         "{\"model\":\"%s\",\"prompt\":\"a red apple\",\"size\":\"1024x1024\",\"n\":1}", route.getModelName()));
                 status = rr.status();
                 respBody = rr.body();
             } else {
                 // 文本/理解：走通用路由转发 /chat/completions
-                GatewayRoutingService.RouteResult rr = gatewayRoutingService.route("/chat/completions", String.format(
+                RouteResult rr = gatewayRoutingService.route("/chat/completions", String.format(
                         "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}", route.getModelName()));
                 status = rr.status();
                 respBody = rr.body();
