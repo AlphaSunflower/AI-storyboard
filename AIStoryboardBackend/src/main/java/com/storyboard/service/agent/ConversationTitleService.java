@@ -3,7 +3,6 @@ package com.storyboard.service.agent;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.mapper.AgentConversationMapper;
-import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -62,14 +61,11 @@ public class ConversationTitleService {
         + "不要“对话”“聊天”“标题”等字眼；只输出标题本身，不要任何解释或前后缀。\n\n用户消息：";
 
     private final AgentConversationMapper conversationMapper;
-    private final AiConfigProperties config;
     private final ChatClient chatClient;
 
     public ConversationTitleService(AgentConversationMapper conversationMapper,
-                                    AiConfigProperties config,
                                     ChatClient.Builder chatClientBuilder) {
         this.conversationMapper = conversationMapper;
-        this.config = config;
         // 标题是锦上添花，超时比脚本生成（120s）收紧，不值得长等（与原 HttpClient timeout 一致）
         this.chatClient = chatClientBuilder
                 .defaultOptions(OpenAiChatOptions.builder()
