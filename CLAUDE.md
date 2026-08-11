@@ -172,6 +172,7 @@ spring:
 **已转换服务**（手写 JDK HttpClient → ChatClient，全部保留解析兜底/错误文案/公共签名，调用方零改动）：
 - `ScriptGenerationService` / `PromptOptimizeService` / `IntentRecognitionService` / `ConversationTitleService`（纯文本）
 - `ImageRefinePromptService` / `VideoPlanService`（多模态：`Media.builder().mimeType(MimeType.valueOf("image/png")).data(dataUri)` + `UserMessage.builder().text().media()`，data 传完整 data URI 字符串直达 image_url；实测网关兼容）
+- `ImageGenerationService` 纯文生图分支 → Spring AI `ImageModel`（自动装配 OpenAiImageModel，吃 spring.ai.openai.* → 网关 /v1/images/generations；`OpenAiImageOptions.builder().model().size().n().timeout(180s).maxRetries(1)`；size 白名单 normalizeImageSize 保留；实测 1024x1024/1536x1024/非法 2K 降级全通）；**edits 图改图分支保留 HttpClient 直连**（multipart octet-stream workaround，Spring AI 无对应适配）
 
 **2.0 API 要点**（spike 字节码级验证）：
 - 每服务从注入 `ChatClient.Builder` 构建：`builder.defaultOptions(OpenAiChatOptions.builder().model(X).timeout(Duration)).build()`（**直接传 options builder，不要调 .build()**）；单次覆盖用 `prompt().options(OpenAiChatOptions.builder().model(Y))`

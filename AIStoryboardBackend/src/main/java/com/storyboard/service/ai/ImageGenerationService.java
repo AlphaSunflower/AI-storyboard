@@ -7,6 +7,11 @@ import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.image.Image;
+import org.springframework.ai.image.ImageModel;
+import org.springframework.ai.image.ImagePrompt;
+import org.springframework.ai.image.ImageResponse;
+import org.springframework.ai.openai.OpenAiImageOptions;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -44,15 +49,19 @@ public class ImageGenerationService {
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    /** 生图走 Spring AI ImageModel（自动装配的 OpenAiImageModel，spring.ai.openai.* 指向网关，文生图 /v1/images/generations） */
+    private final ImageModel imageModel;
+    /** edits 图改图仍用 HttpClient 直连（multipart octet-stream workaround，Spring AI 无对应适配） */
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
     public ImageGenerationService(AiConfigProperties config, SceneMapper sceneMapper,
-                                   FileStorageService fileStorageService) {
+                                   FileStorageService fileStorageService, ImageModel imageModel) {
         this.config = config;
         this.sceneMapper = sceneMapper;
         this.fileStorageService = fileStorageService;
+        this.imageModel = imageModel;
     }
 
     /**
@@ -154,40 +163,34 @@ public class ImageGenerationService {
         }
     }
 
+    /**
+     * 纯文生图：Spring AI ImageModel 调 /v1/images/generations（统一走网关，模型→渠道路由与密钥选择下沉网关）。
+     * 超时 180s + 重试 1 次对齐原 HttpClient 语义（OpenAI SDK 重试覆盖超时/连接错误/5xx）。
+     */
     private String callOpenAIImage(String model, String prompt, String size, String quality,
-                                    String aspectRatio, Integer n) throws Exception {
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
-        body.put("prompt", prompt);
-        // 生成数量：请求显式传入且 >0 时透传，否则默认 1
-        body.put("n", (n != null && n > 0) ? n : 1);
-        // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
-        // 避免上游返回 400 "不合法的size"
-        body.put("size", normalizeImageSize(size, config.getDefaultImageSize()));
+                                    String aspectRatio, Integer n) {
+        OpenAiImageOptions.Builder builder = OpenAiImageOptions.builder()
+                .model(model)
+                // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
+                // 避免上游返回 400 "不合法的size"
+                .size(normalizeImageSize(size, config.getDefaultImageSize()))
+                // 生成数量：请求显式传入且 >0 时透传，否则默认 1
+                .n((n != null && n > 0) ? n : 1)
+                // 超时 180s + 重试 1 次（Laozhang 偶发响应 >120s，实测多次出现；重试大概率成功）
+                .timeout(Duration.ofSeconds(180))
+                .maxRetries(1);
         if (quality != null && !quality.isEmpty()) {
-            body.put("quality", quality);
+            builder.quality(quality);
         }
 
-        String requestBody = objectMapper.writeValueAsString(body);
-        // 超时 180s + 超时重试 1 次（Laozhang 偶发响应 >120s，实测多次出现；重试大概率成功）
-        HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
-            // 文生图统一走 LLM 网关（/v1/images/generations）；模型→渠道路由与密钥选择下沉网关
-            .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/generations"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer " + config.getGatewayApiKey())
-            .timeout(Duration.ofSeconds(180))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build());
-        if (resp.statusCode() != 200) {
-            throw new RuntimeException("Image API returned " + resp.statusCode() + ": " + resp.body());
+        ImageResponse response = imageModel.call(new ImagePrompt(prompt, builder.build()));
+        // b64_json 优先，url 兜底（与原实现一致）
+        Image image = response.getResult().getOutput();
+        String result = image.getB64Json();
+        if (result == null || result.isEmpty()) {
+            result = image.getUrl();
         }
-        JsonNode root = objectMapper.readTree(resp.body());
-        JsonNode data = root.path("data").get(0);
-        String url = data.path("b64_json").asText();
-        if (url == null || url.isEmpty()) {
-            url = data.path("url").asText();
-        }
-        return url;
+        return result;
     }
 
     // ═══════════════════════════════════════════════════════════
