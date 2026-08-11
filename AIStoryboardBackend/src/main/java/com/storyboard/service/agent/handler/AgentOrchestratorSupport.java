@@ -4,13 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.mapper.AgentCheckpointMapper;
-import com.storyboard.mapper.SceneMapper;
-import com.storyboard.service.agent.AgentAnswerService;
 import com.storyboard.service.agent.AgentSceneItem;
-import com.storyboard.service.agent.AgentTools;
-import com.storyboard.service.ai.ImageRefinePromptService;
-import com.storyboard.service.ai.ScriptGenerationService;
-import com.storyboard.service.ai.VideoPlanService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,13 +43,7 @@ public class AgentOrchestratorSupport {
     /** checkpoint step 常量（原 Step 枚举 EXECUTE 阶段；跨包用字符串常量避免枚举暴露） */
     public static final String STEP_EXECUTE = "EXECUTE";
 
-    private final ScriptGenerationService scriptGenerationService;
-    private final ImageRefinePromptService imageRefinePromptService;
-    private final VideoPlanService videoPlanService;
-    private final AgentTools agentTools;
     private final AgentCheckpointMapper checkpointMapper;
-    private final AgentAnswerService answerService;
-    private final SceneMapper sceneMapper;
     private final ChatClient.Builder chatClientBuilder;
 
     /** 剧本优化 / 分镜方案 LLM（懒加载，复用网关默认对话模型，超时 120s） */
@@ -247,7 +235,9 @@ public class AgentOrchestratorSupport {
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan) {
-        sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
+        if (workflowTitle != null) {
+            sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
+        }
         sendEvent(req, "message", Map.of("content", plan.planText()));
         String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE);
         sendEvent(req, plan.eventName(), Map.of(
