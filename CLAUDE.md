@@ -381,6 +381,14 @@ cd AIStoryboardClient && npx tsc -p tsconfig.app.json --noEmit && npm run build
 
 ## Coding Conventions
 
+- **Backend 分层规范（2026-08-11 重构，严格执行）**：
+  - Controller 层：只做接收参数、参数校验、调用 Service、封装 `ApiResponse`，**禁止任何业务逻辑**（不持有 HttpClient/Mapper/对象组装）
+  - Service 层：必须「接口 `XxxService` + 实现 `XxxServiceImpl`」，接口在 `service` / `service/agent` / `service/ai` 原路径，Impl 在对应 `impl/` 子包；接口只放 public 方法 + 中文 javadoc，私有方法/常量/内部 record 留 Impl
+  - 依赖注入：lombok `@RequiredArgsConstructor`（final 字段），禁止字段 `@Autowired`、禁止手写构造器（例外：`AiConfigProperties` 构造器 `@Autowired` 是 SB4 配置绑定需要，保留）
+  - Mapper 层：`mapper/` 包独立隔离，Service 通过 Mapper 访问数据，Controller 禁止直接注入 Mapper
+  - DTO/VO：前端参数一律 `dto/request` 的 record 接收；返回一律 `dto/response` 的 VO/record，**禁止 Controller 直接返回 entity**（例外：生成类接口返回 `Map<String,String>` 属数据封装，可接受）
+  - 单文件单类：嵌套 record 若被接口方法签名引用，提取为同包顶层类
+- **AILLMGateway（LLM 网关，8083，2026-08-11 同套规范重构完成）**：分层规范与主后端一致——12 个 service 接口+impl（`service/` + `service/impl/`，UpstreamClient/GeminiFormatConverter 为 @Component 工具组件不接口化）；11 个 controller 全部薄层（@RequiredArgsConstructor，无 Mapper/HttpClient/业务逻辑，/v1/models 组装下沉 GatewayRoutingService.fetchModels）；admin 模块 4 个新 service（ChannelService/ModelRouteService/ModelParamsService/AdminUserService）+ 6 个 VO（dto/vo，敏感密钥字段不包含）；RouteResult/VideoResult 为 service 包顶层 record；`/v1/**` 由 StaticApiKeyFilter 鉴权、`/admin/**` 由 AdminJwtFilter 鉴权（均不变）
 - **Backend**: DTOs use Java records; services are `@Service`; mappers extend `BaseMapper<T>`; entities use Lombok `@Data`
 - **Frontend**: Functional components with hooks; Zustand for global state; Axios instances with interceptors for auth token injection
 - **API responses**: Wrapped in `ApiResponse<T>` with `code`, `message`, `data`
