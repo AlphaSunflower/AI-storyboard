@@ -97,6 +97,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                 Map.of("id", "intent-aisplit", "title", "生成分镜"),
                                 Map.of("id", "intent-pic", "title", "生成图片"),
                                 Map.of("id", "intent-video", "title", "生成视频"),
+                                Map.of("id", "intent-delete", "title", "删除分镜"),
                                 Map.of("id", "intent-other", "title", "其他 / 继续输入"),
                                 Map.of("id", "custom", "title", "✍ 自定义输入"))));
             }

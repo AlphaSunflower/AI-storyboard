@@ -173,10 +173,12 @@ public class AisplitIntentHandler implements IntentHandler {
             // 追加「自定义输入」选项：没有想要的选项时用户可自由输入（resume 特判 action=custom 用 customText）
             List<Map<String, Object>> withCustom = new java.util.ArrayList<>(options);
             withCustom.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
+            // skipMessage=true：追问文本已由流式 message 增量发过（callScriptOptimize/Plan 的
+            // streamPlanWithMessage 转发 message 字段），此处再发一次会重复；卡片 formContent 不受影响
             support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     questionText, "clarify-option",
                     List.of(Map.of("kind", kind, "originalContent", originalContent, "options", withCustom)),
-                    "human_input", withCustom));
+                    "human_input", withCustom), true);
         } else if (request.getLastMessage().isBlank()) {
             // 流式失败兜底 / LLM 未输出 options：退回纯文本追问（message 未发出时补一条）
             support.sendMessage(request, questionText);

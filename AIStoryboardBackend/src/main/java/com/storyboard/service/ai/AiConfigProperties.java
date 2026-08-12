@@ -27,45 +27,7 @@ public class AiConfigProperties {
     /** JSON 解析器（用于解析 video-model-aliases 等 JSON 字符串配置） */
     private static final ObjectMapper json = new ObjectMapper();
 
-    // ═══════════════════════════════════════════════════════════
-    //  密钥（无默认值，必须通过环境变量或 application-local.yml 提供）
-    // ═══════════════════════════════════════════════════════════
 
-    // ── 密钥 ──
-    /** Laozhang API 通用密钥 */
-    @Setter
-    @Getter
-    private String apiKey;
-    /** Sora2 专用 API 密钥（某些模型需要独立计费） */
-    @Setter
-    @Getter
-    private String sora2OfficialApiKey;
-    /** MiniMax 视频生成 API 密钥（V2 接口 Bearer 鉴权；.env 提供，不提交） */
-    @Setter
-    @Getter
-    private String minimaxApiKey;
-
-    // ═══════════════════════════════════════════════════════════
-    //  API 基础地址
-    // ═══════════════════════════════════════════════════════════
-
-    // ── 基础地址 ──
-    /** OpenAI 兼容接口基础地址（用于生图、生视频） */
-    @Setter
-    @Getter
-    private String baseUrlOpenai;
-    /** Gemini 原生接口基础地址（用于 Gemini 系列模型生图） */
-    @Setter
-    @Getter
-    private String baseUrlGemini;
-    /** Chat Completions 接口基础地址（用于脚本生成的 Vision 模型） */
-    @Setter
-    @Getter
-    private String baseUrlVision;
-    /** MiniMax 视频生成基础地址（V2 接口；国内 api.minimaxi.com，国际 api.minimax.io） */
-    @Setter
-    @Getter
-    private String minimaxBaseUrl = "https://api.minimaxi.com";
 
     // ═══════════════════════════════════════════════════════════
     //  LLM 网关配置（独立前缀 ai.gateway：chat/文生图统一入口）
@@ -92,35 +54,6 @@ public class AiConfigProperties {
         this.gateway = gateway;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  API 端点路径（相对于 baseUrlOpenai）
-    // ═══════════════════════════════════════════════════════════
-
-    // ── 端点路径 ──
-    /** 图片生成端点 */
-    @Setter
-    @Getter
-    private String endpointImageGenerations = "/images/generations";
-    /** 视频任务创建端点 */
-    @Setter
-    @Getter
-    private String endpointVideoCreate = "/videos";
-    /** 视频任务状态查询端点（后会拼接 taskId） */
-    @Setter
-    @Getter
-    private String endpointVideoStatus = "/videos/";
-    /** 视频任务状态查询回退端点（当主端点不可用时） */
-    @Setter
-    @Getter
-    private String endpointVideoStatusFallback = "/video/generations/";
-    /** 图片编辑端点（图改图，multipart 上传） */
-    @Setter
-    @Getter
-    private String endpointImageEdits = "/images/edits";
-    /** 视频内容下载端点（后会拼接 taskId + "/content"） */
-    @Setter
-    @Getter
-    private String endpointVideoContent = "/videos/";
 
     // ═══════════════════════════════════════════════════════════
     //  模型路由规则（控制请求发往哪个端点 / 使用哪把密钥）
@@ -131,10 +64,6 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String geminiImageModels = "gemini-3-pro-image-preview";
-    /** 使用 Sora2 独立密钥的模型列表（逗号分隔） */
-    @Setter
-    @Getter
-    private String sora2Models = "gpt-image-2-official";
     /**
      * 视频模型别名映射（JSON 格式）。
      * 前端传简称 → 后端通过此映射转为 Laozhang API 实际模型名。
@@ -182,20 +111,11 @@ public class AiConfigProperties {
     @Getter
     private String defaultVideoAspectRatio = "16:9";
 
-    // ── 视频生成 Provider（Laozhang / MiniMax 双通道）──
-    // ── 视频 Provider ──
-    /** 视频生成通道：minimax（默认）| laozhang（保留可切回） */
-    @Setter
-    @Getter
-    private String videoProvider = "minimax";
+    // ── 视频生成（模型名经网关透传上游）──
     /** MiniMax 视频生成模型 */
     @Setter
     @Getter
     private String minimaxVideoModel = "MiniMax-H3";
-    /** MiniMax 视频生成分辨率档（768P | 2K） */
-    @Setter
-    @Getter
-    private String minimaxVideoResolution = "768P";
 
     // ═══════════════════════════════════════════════════════════
     //  文件存储路径
@@ -215,18 +135,6 @@ public class AiConfigProperties {
     @Getter
     private String videoUrlPrefix = "/api/files/videos/";
 
-    // ═══════════════════════════════════════════════════════════
-    //  轮询参数（用于异步视频生成任务）
-    // ═══════════════════════════════════════════════════════════
-
-    // ── 轮询 ──
-    /** 任务状态轮询间隔（毫秒） */
-    @Setter
-    @Getter
-    private long pollIntervalMs = 5000;
-    /** 任务状态轮询超时（毫秒） */
-
-    private long pollTimeoutMs = 600000;
 
     // ═══════════════════════════════════════════════════════════
     //  标准 Getter / Setter（Spring Boot 配置绑定需要）
@@ -262,8 +170,6 @@ public class AiConfigProperties {
 
     /** Gemini 生图模型 Set 缓存（从逗号分隔字符串解析） */
     private transient Set<String> geminiImageModelSet;
-    /** Sora2 密钥模型 Set 缓存（从逗号分隔字符串解析） */
-    private transient Set<String> sora2ModelSet;
     /** 视频模型别名 Map 缓存（从 JSON 字符串解析） */
     private transient Map<String, String> videoModelAliasMap;
 
@@ -279,16 +185,6 @@ public class AiConfigProperties {
         return geminiImageModelSet;
     }
 
-    /**
-     * 获取 Sora2 独立密钥模型集合。
-     * 用于判断某个模型是否应使用 {@code sora2OfficialApiKey} 而非通用密钥。
-     */
-    public Set<String> getSora2ModelSet() {
-        if (sora2ModelSet == null) {
-            sora2ModelSet = Set.of(sora2Models.split("\\s*,\\s*"));
-        }
-        return sora2ModelSet;
-    }
 
     /**
      * 获取视频模型别名映射表。

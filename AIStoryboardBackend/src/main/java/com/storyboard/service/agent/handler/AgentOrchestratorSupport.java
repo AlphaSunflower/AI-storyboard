@@ -141,7 +141,9 @@ public class AgentOrchestratorSupport {
                     "你是分镜助手，先理解用户的分镜需求并给出优化后的剧本。"
                         + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"script\":\"优化后的完整剧本\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
                         + "。type=1 表示已理解可继续（此时 script 必填，options 为空数组）；"
-                        + "type=0 表示需求不足需追问（此时 message 为追问内容，script 为空，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）。",
+                        + "type=0 表示关键信息缺失需追问（此时 message 只问一个最关键的问题，script 为空，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）；"
+                        + "用户回复只要提供了任何有效信息（哪怕不完整），就直接用已有信息生成剧本（type=1），不要重复追问、不要一次问多个问题；"
+                        + "只有回复为空或与需求完全无关时才 type=0。",
                     content, req);
             return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
         } catch (Exception e) {
@@ -156,7 +158,8 @@ public class AgentOrchestratorSupport {
             String raw = streamPlanWithMessage(
                     "你是分镜方案设计师。基于剧本给出分镜方案要点。"
                         + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                        + "。type=1 方案已明确（options 为空数组）；type=0 需用户补充（message 为追问，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）。",
+                        + "。type=1 方案已明确（options 为空数组）；type=0 需用户补充（message 只问一个最关键的问题，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）；"
+                        + "用户回复只要提供了任何有效信息就直接生成方案（type=1），不要重复追问。",
                     script, req);
             return new BeanOutputConverter<>(StoryboardPlanResult.class).convert(raw);
         } catch (Exception e) {
@@ -429,16 +432,29 @@ public class AgentOrchestratorSupport {
     }
 
     /**
-     * HITL 通用模板：workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件
-     * （发完即结束本轮，等表单提交 resume）。
+     * HITL 通用模板（message 事件照发；兼容现状调用）。
      *
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan) {
+        return runHITLStage(req, workflowTitle, plan, false);
+    }
+
+    /**
+     * HITL 通用模板：workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件
+     * （发完即结束本轮，等表单提交 resume）。
+     *
+     * @param skipMessage 追问场景传 true：方案文本已由流式 message 增量发过（streamPlanWithMessage），
+     *                    再发一次会重复出现在气泡里；human_input 事件的 formContent 不受影响
+     * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
+     */
+    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan, boolean skipMessage) {
         if (workflowTitle != null) {
             sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
         }
-        sendEvent(req, "message", Map.of("content", plan.planText()));
+        if (!skipMessage) {
+            sendEvent(req, "message", Map.of("content", plan.planText()));
+        }
         String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE);
         Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
             "formToken", formToken, "taskId", "",

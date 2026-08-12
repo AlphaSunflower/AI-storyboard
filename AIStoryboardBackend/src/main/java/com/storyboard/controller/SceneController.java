@@ -2,13 +2,17 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.SceneRequest;
 import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.service.SceneService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 /**
- * 分镜端点：新增 / 更新 / 删除（列表由 ProjectController 随项目返回）。
+ * 分镜端点：新增 / 更新 / 删除 / 参考素材（列表由 ProjectController 随项目返回）。
  */
 @RestController
 @RequestMapping("/api")
@@ -30,6 +34,26 @@ public class SceneController {
     @DeleteMapping("/scenes/{id}")
     public ApiResponse<Void> delete(@PathVariable String id) {
         sceneService.deleteScene(id);
+        return ApiResponse.ok("删除成功", null);
+    }
+
+    /** 参考素材列表（type: image/video/audio）。 */
+    @GetMapping("/scenes/{id}/references")
+    public ApiResponse<List<SceneReferenceResponse>> listReferences(@PathVariable String id) {
+        return ApiResponse.ok(sceneService.listReferences(id));
+    }
+
+    /** 上传参考素材（multipart：type + file）。 */
+    @PostMapping("/scenes/{id}/references")
+    public ApiResponse<SceneReferenceResponse> uploadReference(@PathVariable String id,
+            @RequestParam String type, @RequestParam MultipartFile file) {
+        return ApiResponse.ok(sceneService.uploadReference(id, type, file));
+    }
+
+    /** 删除参考素材。 */
+    @DeleteMapping("/scenes/references/{referenceId}")
+    public ApiResponse<Void> deleteReference(@PathVariable String referenceId) {
+        sceneService.deleteReference(referenceId);
         return ApiResponse.ok("删除成功", null);
     }
 }

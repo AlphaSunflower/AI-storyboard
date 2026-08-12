@@ -46,16 +46,19 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     /** 兜底意图：识别失败/解析失败/白名单外 → 引导分支，不阻塞对话 */
     public static final String FALLBACK_TYPE = "intent-other";
 
-    /** 四类合法意图（与 Dify 工作流「意图路由」if-else 分支一一对应） */
+    /** 五类合法意图（与 Dify 工作流「意图路由」if-else 分支一一对应） */
     private static final Set<String> VALID_TYPES = Set.of(
-            "intent-aisplit", "intent-pic", "intent-video", "intent-other");
+            "intent-aisplit", "intent-pic", "intent-video", "intent-delete", "intent-other");
 
     /**
      * 规则前置匹配表：强关键词命中直接路由（免一次 LLM 调用）。
-     * 仅放无歧义强信号词；列表顺序即优先级（aisplit 分镜/剧本词优先）。
+     * 仅放无歧义强信号词；列表顺序即优先级（删除意图必须排在 aisplit 的「分镜」词之前，
+     * 否则「删除分镜」会被分镜词先命中误入 aisplit 生成链）。
      * 歧义/未命中交给 LLM 判断（LLM prompt 仍含完整分类规则）。
      */
     private static final List<Map.Entry<String, java.util.regex.Pattern>> RULE_TABLE = List.of(
+            Map.entry("intent-delete", java.util.regex.Pattern.compile(
+                    "(删|清)(除|掉|光|空)?.{0,6}(分镜|剧本|故事板)|(分镜|剧本|故事板).{0,8}(删|清)(除|掉|光|空)?")),
             Map.entry("intent-aisplit", java.util.regex.Pattern.compile("分镜|故事板|剧本")),
             Map.entry("intent-video", java.util.regex.Pattern.compile("生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本")),
             Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
@@ -72,10 +75,11 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
         + "- intent-pic = 全新图片生成，或对已有图片的修改/完善（更亮/换风格/改构图/去掉某元素/"
         + "继续完善/不满意等，或携带参考图且内容是修改诉求）\n"
         + "- intent-video = 视频生成：用户要求生成短视频、动画片段，或设计视频方案\n"
+        + "- intent-delete = 删除/清空分镜：用户要求删除当前项目的分镜（含省略说法「全删了」「都删掉吧」「清空」等）\n"
         + "- intent-other = 打招呼、闲聊、询问功能等非创作需求\n"
         + "## 判断规则\n"
-        + "1. 明确意图词优先：剧本/分镜/故事板 → intent-aisplit；视频/动画/短片 → intent-video；"
-        + "图片/海报/插画 → intent-pic\n"
+        + "1. 明确意图词优先：删除/清空分镜 → intent-delete（优先于其他分镜相关意图）；剧本/分镜/故事板 → intent-aisplit；"
+        + "视频/动画/短片 → intent-video；图片/海报/插画 → intent-pic\n"
         + "2. 用户说\"继续/接着上次\"时，结合历史对话判断：在完善分镜 → intent-aisplit；在完善图片 → intent-pic\n"
         + "3. 分镜相关\"优化/完善剧本\"也归 intent-aisplit（剧本优化设计分支处理）\n"
         + "4. 无法明确区分时，输出 intent-other\n"

@@ -29,6 +29,7 @@ public class FileStorageServiceImpl implements FileStorageService {
     private static final Logger log = LoggerFactory.getLogger(FileStorageServiceImpl.class);
     private static final Path IMAGES_DIR = Paths.get("uploads/images");
     private static final Path VIDEOS_DIR = Paths.get("uploads/videos");
+    private static final Path AUDIOS_DIR = Paths.get("uploads/audios");
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -39,6 +40,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         try {
             Files.createDirectories(IMAGES_DIR);
             Files.createDirectories(VIDEOS_DIR);
+            Files.createDirectories(AUDIOS_DIR);
         } catch (IOException e) {
             log.error("Failed to create upload directories", e);
         }
@@ -72,6 +74,63 @@ public class FileStorageServiceImpl implements FileStorageService {
     /** 允许保存的上传图片扩展名白名单（M6），其余一律回退 png */
     private static final Set<String> ALLOWED_IMAGE_EXTENSIONS =
         Set.of("png", "jpg", "jpeg", "webp", "gif");
+
+    /** 允许保存的参考音频扩展名白名单 */
+    private static final Set<String> ALLOWED_AUDIO_EXTENSIONS = Set.of("wav", "mp3", "m4a");
+
+    /** 允许保存的参考视频扩展名白名单 */
+    private static final Set<String> ALLOWED_VIDEO_EXTENSIONS = Set.of("mp4", "mov");
+
+    @Override
+    public String saveUploadedReference(String type, org.springframework.web.multipart.MultipartFile file) {
+        try {
+            if (file == null || file.isEmpty()) {
+                throw new RuntimeException("上传文件为空");
+            }
+            String t = type == null ? "image" : type;
+            String contentType = file.getContentType();
+            Path targetDir;
+            String urlPrefix;
+            Set<String> allowedExts;
+            switch (t) {
+                case "video" -> {
+                    if (contentType == null || !(contentType.startsWith("video/") || contentType.contains("quicktime"))) {
+                        throw new RuntimeException("仅支持上传视频文件");
+                    }
+                    targetDir = VIDEOS_DIR; urlPrefix = "/api/files/videos/"; allowedExts = ALLOWED_VIDEO_EXTENSIONS;
+                }
+                case "audio" -> {
+                    if (contentType == null || !contentType.startsWith("audio/")) {
+                        throw new RuntimeException("仅支持上传音频文件");
+                    }
+                    targetDir = AUDIOS_DIR; urlPrefix = "/api/files/audios/"; allowedExts = ALLOWED_AUDIO_EXTENSIONS;
+                }
+                default -> {
+                    if (contentType == null || !contentType.startsWith("image/")) {
+                        throw new RuntimeException("仅支持上传图片文件");
+                    }
+                    targetDir = IMAGES_DIR; urlPrefix = "/api/files/images/"; allowedExts = ALLOWED_IMAGE_EXTENSIONS;
+                }
+            }
+            String original = file.getOriginalFilename();
+            String extension = switch (t) {
+                case "video" -> "mp4";
+                case "audio" -> "mp3";
+                default -> "png";
+            };
+            if (original != null && original.contains(".")) {
+                String raw = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
+                // 扩展名白名单校验，非法回退默认扩展名（防御异常扩展名）
+                if (allowedExts.contains(raw)) extension = raw;
+            }
+            String filename = UUID.randomUUID().toString() + "." + extension;
+            Files.write(targetDir.resolve(filename), file.getBytes());
+            log.info("Saved reference {}: {}", t, targetDir.resolve(filename));
+            return urlPrefix + filename;
+        } catch (IOException e) {
+            throw new RuntimeException("保存参考素材失败: " + e.getMessage(), e);
+        }
+    }
 
     @Override
     public String saveUploadedImage(org.springframework.web.multipart.MultipartFile file) {
@@ -180,5 +239,10 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Override
     public Path resolveVideo(String filename) {
         return VIDEOS_DIR.resolve(filename);
+    }
+
+    @Override
+    public Path resolveAudio(String filename) {
+        return AUDIOS_DIR.resolve(filename);
     }
 }

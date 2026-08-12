@@ -1,18 +1,28 @@
 package com.storyboard.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storyboard.dto.request.SceneRequest;
+import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneReferenceImage;
 import com.storyboard.exception.BusinessException;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.service.FileStorageService;
 import com.storyboard.service.SceneService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 分镜服务实现。
@@ -21,8 +31,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SceneServiceImpl implements SceneService {
 
+    private static final Logger log = LoggerFactory.getLogger(SceneServiceImpl.class);
+
     private final SceneMapper sceneMapper;
     private final SceneReferenceImageMapper refImageMapper;
+    private final FileStorageService fileStorageService;
+
+    /** 参考素材上限兜底（对齐 MiniMax 输入约束；网关 params 精确值由前端展示，后端硬上限防滥用） */
+    private static final Map<String, int[]> REF_LIMITS = Map.of(
+        "image", new int[] { 10, 30 * 1024 * 1024 },   // 数量, 单文件字节
+        "video", new int[] { 3, 50 * 1024 * 1024 },
+        "audio", new int[] { 3, 15 * 1024 * 1024 });
 
     @Override
     public List<SceneResponse> listByProject(String projectId) {
@@ -82,6 +101,76 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
         sceneMapper.deleteById(sceneId);
+    }
+
+    @Override
+    public List<SceneReferenceResponse> listReferences(String sceneId) {
+        Scene scene = sceneMapper.selectById(sceneId);
+        if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        return refImageMapper.findBySceneId(sceneId).stream()
+            .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getImageUrl(),
+                    r.getFileName(), r.getFileSize()))
+            .toList();
+    }
+
+    @Override
+    @Transactional
+    public SceneReferenceResponse uploadReference(String sceneId, String type, MultipartFile file) {
+        Scene scene = sceneMapper.selectById(sceneId);
+        if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        String t = type == null ? "image" : type;
+        if (!REF_LIMITS.containsKey(t)) throw new BusinessException(40001, "不支持的素材类型: " + t);
+
+        int[] limits = REF_LIMITS.get(t);
+        long existing = refImageMapper.selectCount(new LambdaQueryWrapper<SceneReferenceImage>()
+                .eq(SceneReferenceImage::getSceneId, sceneId)
+                .eq(SceneReferenceImage::getType, t));
+        String typeName = switch (t) {
+            case "video" -> "视频";
+            case "audio" -> "音频";
+            default -> "图";
+        };
+        if (existing >= limits[0]) {
+            throw new BusinessException(40001, "参考" + typeName + "数量已达上限 " + limits[0]);
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(40001, "上传文件为空");
+        }
+        if (file.getSize() > limits[1]) {
+            throw new BusinessException(40001, "文件超过大小限制 " + (limits[1] / 1024 / 1024) + "MB");
+        }
+        String url = fileStorageService.saveUploadedReference(t, file);
+        SceneReferenceImage ref = new SceneReferenceImage();
+        ref.setSceneId(sceneId);
+        ref.setType(t);
+        ref.setImageUrl(url);
+        ref.setFileName(file.getOriginalFilename());
+        ref.setFileSize(file.getSize());
+        ref.setSortOrder((int) existing);
+        refImageMapper.insert(ref);
+        return new SceneReferenceResponse(ref.getId(), t, url, ref.getFileName(), ref.getFileSize());
+    }
+
+    @Override
+    public void deleteReference(String referenceId) {
+        SceneReferenceImage ref = refImageMapper.selectById(referenceId);
+        if (ref == null) throw new BusinessException(40401, "素材不存在");
+        // 删除本地文件（失败仅警告，不阻断——素材表已删，残留文件由磁盘清理兜底）
+        try {
+            String url = ref.getImageUrl();
+            if (url != null && url.contains("/")) {
+                String filename = url.substring(url.lastIndexOf('/') + 1);
+                Path p = switch (ref.getType() == null ? "image" : ref.getType()) {
+                    case "video" -> fileStorageService.resolveVideo(filename);
+                    case "audio" -> fileStorageService.resolveAudio(filename);
+                    default -> fileStorageService.resolveImage(filename);
+                };
+                Files.deleteIfExists(p);
+            }
+        } catch (IOException e) {
+            log.warn("删除参考素材本地文件失败: {}", e.getMessage());
+        }
+        refImageMapper.deleteById(referenceId);
     }
 
     private SceneResponse toResponse(Scene s) {

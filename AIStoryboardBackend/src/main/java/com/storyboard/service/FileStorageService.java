@@ -26,6 +26,12 @@ public interface FileStorageService {
     String saveUploadedImage(org.springframework.web.multipart.MultipartFile file);
 
     /**
+     * 保存分镜参考素材（image→images 目录，video→videos，audio→audios）。
+     * @return local relative path like /api/files/images|videos|audios/xxx
+     */
+    String saveUploadedReference(String type, org.springframework.web.multipart.MultipartFile file);
+
+    /**
      * Download video from URL and save locally.
      * @return local relative path like /api/files/videos/xxx.mp4
      */
@@ -36,6 +42,9 @@ public interface FileStorageService {
 
     /** 解析视频本地文件路径。 */
     Path resolveVideo(String filename);
+
+    /** 解析音频本地文件路径（参考音频素材）。 */
+    Path resolveAudio(String filename);
 
     /** Infer Content-Type from filename extension. */
     static String contentType(String filename) {
@@ -48,6 +57,9 @@ public interface FileStorageService {
             case "mp4" -> "video/mp4";
             case "webm" -> "video/webm";
             case "mov" -> "video/quicktime";
+            case "wav" -> "audio/wav";
+            case "mp3" -> "audio/mpeg";
+            case "m4a" -> "audio/mp4";
             default -> "application/octet-stream";
         };
     }

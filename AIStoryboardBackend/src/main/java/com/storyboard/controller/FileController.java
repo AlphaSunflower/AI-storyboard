@@ -64,4 +64,21 @@ public class FileController {
                 .contentLength(Files.size(filePath))
                 .body(resource);
     }
+
+    @GetMapping("/audios/{filename}")
+    public ResponseEntity<Resource> getAudio(@PathVariable String filename) throws IOException {
+        Path filePath = fileStorageService.resolveAudio(filename);
+        if (!Files.exists(filePath)) {
+            return ResponseEntity.notFound().build();
+        }
+
+        var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
+        FileInputStream fis = new FileInputStream(filePath.toFile());
+        InputStreamResource resource = new InputStreamResource(fis);
+
+        return ResponseEntity.ok()
+                .contentType(contentType)
+                .contentLength(Files.size(filePath))
+                .body(resource);
+    }
 }
