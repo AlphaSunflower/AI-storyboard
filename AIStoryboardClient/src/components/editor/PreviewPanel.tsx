@@ -5,6 +5,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
 import { ReferenceUploader } from './ReferenceUploader';
+import { RefineImageModal } from './RefineImageModal';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
@@ -161,6 +162,7 @@ export function PreviewPanel() {
   const [selectedDownloads, setSelectedDownloads] = useState<Set<string>>(new Set()); // 勾选下载
   const [useRefImage, setUseRefImage] = useState(false); // 参考图生图勾选
   const [useFirstFrame, setUseFirstFrame] = useState(false); // 以本分镜图片为首帧
+  const [refineTarget, setRefineTarget] = useState<string | null>(null); // 完善图片弹窗的源图 URL（null=关闭）
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
   const animatedSrcRef = useRef<string | null>(null);
@@ -293,16 +295,18 @@ export function PreviewPanel() {
   });
 
   const btnDownload: React.CSSProperties = {
-    padding: '5px 12px',
+    padding: '6px 14px',
     fontSize: 11,
-    borderRadius: 'var(--rounded-sm)',
-    border: '1px solid var(--color-hairline)',
-    background: 'var(--color-canvas)',
-    color: 'var(--color-body-strong)',
+    fontWeight: 500,
+    borderRadius: 8,
+    border: '1px solid var(--color-primary)',
+    background: 'transparent',
+    color: 'var(--color-primary)',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
+    transition: 'all 0.18s ease',
   };
 
   const toggleDownload = (url: string) => {
@@ -437,17 +441,38 @@ export function PreviewPanel() {
                     ))}
                   </div>
                 )}
-                {/* 选择性下载 */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                {/* 选择性下载（勾选框用主题色 accent，点击整行可勾选） */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
                   {imageList.map((url, i) => (
-                    <label key={url} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={selectedDownloads.has(url)} onChange={() => toggleDownload(url)} style={{ margin: 0, cursor: 'pointer' }} />
+                    <label
+                      key={url}
+                      onClick={() => toggleDownload(url)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        fontSize: 11, color: selectedDownloads.has(url) ? 'var(--color-primary)' : 'var(--color-muted)',
+                        cursor: 'pointer', padding: '3px 9px', borderRadius: 999,
+                        border: selectedDownloads.has(url) ? '1px solid var(--color-primary)' : '1px solid var(--color-hairline)',
+                        background: selectedDownloads.has(url) ? 'rgba(204,120,92,0.10)' : 'transparent',
+                        transition: 'all 0.18s ease', userSelect: 'none',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDownloads.has(url)}
+                        onChange={() => {}}
+                        style={{ margin: 0, cursor: 'pointer', accentColor: 'var(--color-primary)' }}
+                      />
                       图 {i + 1}
                     </label>
                   ))}
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => downloadAsset(assetUrl(imageList[imgIndex]), `scene-${scene.sceneNumber}.png`)} style={btnDownload}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => downloadAsset(assetUrl(imageList[imgIndex]), `scene-${scene.sceneNumber}.png`)}
+                    style={{ ...btnDownload, background: 'var(--color-primary)', color: '#fff' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#b9654b'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }}
+                  >
                     ⬇ 下载当前
                   </button>
                   {selectedDownloads.size > 0 && (
@@ -525,7 +550,7 @@ export function PreviewPanel() {
 
             {/* 参考图生图：勾选后展开模型指定 + 上传入口 */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer', marginBottom: useRefImage ? 8 : 0 }}>
-              <input type="checkbox" checked={useRefImage} onChange={(e) => setUseRefImage(e.target.checked)} style={{ margin: 0, cursor: 'pointer' }} />
+              <input type="checkbox" checked={useRefImage} onChange={(e) => setUseRefImage(e.target.checked)} style={{ margin: 0, cursor: 'pointer', accentColor: 'var(--color-primary)' }} />
               参考图生图（以参考图为源图改图）
             </label>
             {useRefImage && (
@@ -551,11 +576,10 @@ export function PreviewPanel() {
               </button>
               {scene.imageUrl && (
                 <button
-                  disabled={generatingImage}
-                  onClick={() => handleGenerateImage('edit', 'current')}
-                  style={{ ...btnGhost, opacity: generatingImage ? 0.6 : 1, cursor: generatingImage ? 'not-allowed' : 'pointer' }}
+                  onClick={() => setRefineTarget(scene.imageUrl)}
+                  style={{ ...btnGhost, cursor: 'pointer' }}
                 >
-                  完善图片（以当前图为源）
+                  ✨ 完善图片
                 </button>
               )}
             </div>
@@ -684,7 +708,7 @@ export function PreviewPanel() {
                     setUseFirstFrame(e.target.checked);
                     if (e.target.checked) setUseRefImage(false);
                   }}
-                  style={{ margin: 0, cursor: 'pointer' }}
+                  style={{ margin: 0, cursor: 'pointer', accentColor: 'var(--color-primary)' }}
                 />
                 以本分镜图片为首帧（参考素材与首帧互斥）
               </label>
@@ -721,6 +745,10 @@ export function PreviewPanel() {
 
       {/* 图片点击放大预览（灯箱，与智能体窗口行为一致） */}
       <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      {/* 完善图片弹窗：以当前图为源图做图改图（诉求输入后生成） */}
+      {refineTarget && scene && (
+        <RefineImageModal sceneId={scene.id} imageUrl={refineTarget} onClose={() => setRefineTarget(null)} />
+      )}
     </div>
   );
 }

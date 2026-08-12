@@ -27,6 +27,13 @@ spring:
 server:
   port: ${SERVER_PORT:8082}
 
+# 只暴露 health 端点（部署探活），其余 actuator 端点不外泄
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
@@ -46,8 +53,7 @@ jwt:
   refresh-token-ttl: 2592000
 
 # ═══════════════════════════════════════════════════════
-# AI / Laozhang configuration
-# Model names and API paths live here — change once, not in code.
+# AI configuration — 模型名/默认值（LLM 调用统一走网关，见 ai.gateway / spring.ai.openai）
 # ═══════════════════════════════════════════════════════
 ai:
   # Agent 编排行为参数（意图阈值 / 澄清上限）
@@ -59,34 +65,12 @@ ai:
     # 分镜不满意调整上限：连续「不满意→调整→重生成」达到该值后不再弹调整卡片
     max-regenerate-rounds: ${AGENT_MAX_REGENERATE_ROUNDS:3}
   laozhang:
-    # ── Secrets (override in env or application-local.yml) ──
-    api-key: ${LAOZ...KEY}
-    sora2-official-api-key: ${LAOZ...KEY}
 
-    # ── MiniMax 视频通道（V2 接口，默认 provider；密钥来自 .env MINIMAX_API_KEY，不提交）──
-    minimax-api-key: ${MINIMAX_API_KEY:}
-    minimax-base-url: ${MINIMAX_BASE_URL:https://api.minimaxi.com}
-    # 视频生成通道：minimax（默认）| laozhang（保留可切回）
-    video-provider: ${VIDEO_PROVIDER:minimax}
     # MiniMax 模型与分辨率档位（768P 最低档 | 2K）
     minimax-video-model: ${MINIMAX_VIDEO_MODEL:MiniMax-H3}
-    minimax-video-resolution: ${MINIMAX_VIDEO_RESOLUTION:768P}
-
-    # ── Base URLs ──
-    base-url-openai: https://api2.laozhang.ai/v1
-    base-url-gemini: https://api2.laozhang.ai/v1beta/models/gemini-3-pro-image-preview:generateContent
-    base-url-vision: https://api2.laozhang.ai/v1/chat/completions
-
-    # ── API endpoint paths (relative to base-url-openai) ──
-    endpoint-image-generations: /images/generations
-    endpoint-video-create: /videos
-    endpoint-video-status: /videos/
-    endpoint-video-status-fallback: /video/generations/
-    endpoint-video-content: /videos/
 
     # ── Model routing ──
     gemini-image-models: gemini-3-pro-image-preview
-    sora2-models: gpt-image-2-official
     video-model-aliases: '{"veo-3.1-fast":"veo-3.1-fast-generate-preview","veo-3.1-fast-fl":"veo-3.1-fast-generate-preview","veo-3.1":"veo-3.1-generate-preview","veo-3.1-fl":"veo-3.1-generate-preview"}'
 
     # ── Defaults ──
@@ -100,10 +84,6 @@ ai:
     video-upload-dir: uploads/videos
     video-file-extension: .mp4
     video-url-prefix: /api/files/videos/
-
-    # ── Polling ──
-    poll-interval-ms: 5000
-    poll-timeout-ms: 600000
 
   # ── LLM 网关（chat/文生图统一入口；edits 图改图保持直连）──
   gateway:
