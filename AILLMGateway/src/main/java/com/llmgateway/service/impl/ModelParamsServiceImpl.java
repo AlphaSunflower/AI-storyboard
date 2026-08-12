@@ -34,6 +34,12 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.nMin() != null && req.nMax() != null && req.nMin() > req.nMax()) {
             throw new BusinessException(40001, "数量范围不合法");
         }
+        // 输入约束范围校验：5 组 min/max 均非空时 min 必须 <= max
+        validateRange(req.refImagesMin(), req.refImagesMax(), "可参考图范围");
+        validateRange(req.refVideosMin(), req.refVideosMax(), "可参考视频范围");
+        validateRange(req.audioCountMin(), req.audioCountMax(), "音频个数范围");
+        validateRange(req.audioSegmentDurationMin(), req.audioSegmentDurationMax(), "音频单段时长范围");
+        validateRange(req.videoSegmentDurationMin(), req.videoSegmentDurationMax(), "视频单段时长范围");
 
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, req.modelName().trim()));
@@ -93,5 +99,29 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.resolutionDefault() != null) entity.setResolutionDefault(req.resolutionDefault());
         if (req.aspectRatios() != null) entity.setAspectRatios(req.aspectRatios());
         if (req.aspectRatioDefault() != null) entity.setAspectRatioDefault(req.aspectRatioDefault());
+        if (req.refImagesMin() != null) entity.setRefImagesMin(req.refImagesMin());
+        if (req.refImagesMax() != null) entity.setRefImagesMax(req.refImagesMax());
+        if (req.refVideosMin() != null) entity.setRefVideosMin(req.refVideosMin());
+        if (req.refVideosMax() != null) entity.setRefVideosMax(req.refVideosMax());
+        if (req.audioCountMin() != null) entity.setAudioCountMin(req.audioCountMin());
+        if (req.audioCountMax() != null) entity.setAudioCountMax(req.audioCountMax());
+        if (req.audioSegmentDurationMin() != null) entity.setAudioSegmentDurationMin(req.audioSegmentDurationMin());
+        if (req.audioSegmentDurationMax() != null) entity.setAudioSegmentDurationMax(req.audioSegmentDurationMax());
+        if (req.videoSegmentDurationMin() != null) entity.setVideoSegmentDurationMin(req.videoSegmentDurationMin());
+        if (req.videoSegmentDurationMax() != null) entity.setVideoSegmentDurationMax(req.videoSegmentDurationMax());
+        if (req.maxTotalDuration() != null) entity.setMaxTotalDuration(req.maxTotalDuration());
+        if (req.maxTotalFiles() != null) entity.setMaxTotalFiles(req.maxTotalFiles());
+        if (req.maxVideoSizeMb() != null) entity.setMaxVideoSizeMb(req.maxVideoSizeMb());
+        if (req.maxImageSizeMb() != null) entity.setMaxImageSizeMb(req.maxImageSizeMb());
+        if (req.maxAudioSizeMb() != null) entity.setMaxAudioSizeMb(req.maxAudioSizeMb());
+        if (req.maxRequestBodyMb() != null) entity.setMaxRequestBodyMb(req.maxRequestBodyMb());
+        if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
+    }
+
+    /** 范围校验：min/max 均非空且 min > max → 40001 */
+    private void validateRange(Integer min, Integer max, String label) {
+        if (min != null && max != null && min > max) {
+            throw new BusinessException(40001, label + "不合法：min 不能大于 max");
+        }
     }
 }

@@ -36,6 +36,24 @@ public class ModelParams {
     private String resolutionDefault;
     private String aspectRatios;
     private String aspectRatioDefault;
+    // video 输入约束（能力描述，透传不校验）：范围类拆 min/max，单值类一列
+    private Integer refImagesMin;
+    private Integer refImagesMax;
+    private Integer refVideosMin;
+    private Integer refVideosMax;
+    private Integer audioCountMin;
+    private Integer audioCountMax;
+    private Integer audioSegmentDurationMin;
+    private Integer audioSegmentDurationMax;
+    private Integer videoSegmentDurationMin;
+    private Integer videoSegmentDurationMax;
+    private Integer maxTotalDuration;
+    private Integer maxTotalFiles;
+    private Integer maxVideoSizeMb;
+    private Integer maxImageSizeMb;
+    private Integer maxAudioSizeMb;
+    private Integer maxRequestBodyMb;
+    private Integer maxPromptChars;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

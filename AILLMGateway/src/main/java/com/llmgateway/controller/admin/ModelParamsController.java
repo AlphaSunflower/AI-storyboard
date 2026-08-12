@@ -34,6 +34,15 @@ public class ModelParamsController {
                 e.getTopP(), e.getNMin(), e.getNMax(), e.getNDefault(), e.getSizes(), e.getSizeDefault(),
                 e.getQualities(), e.getQualityDefault(), e.getStyles(), e.getStyleDefault(),
                 e.getDurations(), e.getDurationDefault(), e.getResolutions(), e.getResolutionDefault(),
-                e.getAspectRatios(), e.getAspectRatioDefault(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getAspectRatios(), e.getAspectRatioDefault(),
+                e.getRefImagesMin(), e.getRefImagesMax(),
+                e.getRefVideosMin(), e.getRefVideosMax(),
+                e.getAudioCountMin(), e.getAudioCountMax(),
+                e.getAudioSegmentDurationMin(), e.getAudioSegmentDurationMax(),
+                e.getVideoSegmentDurationMin(), e.getVideoSegmentDurationMax(),
+                e.getMaxTotalDuration(), e.getMaxTotalFiles(),
+                e.getMaxVideoSizeMb(), e.getMaxImageSizeMb(), e.getMaxAudioSizeMb(),
+                e.getMaxRequestBodyMb(), e.getMaxPromptChars(),
+                e.getCreatedAt(), e.getUpdatedAt());
     }
 }

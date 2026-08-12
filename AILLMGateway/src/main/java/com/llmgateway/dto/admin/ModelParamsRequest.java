@@ -23,5 +23,13 @@ public record ModelParamsRequest(
         String resolutions,
         String resolutionDefault,
         String aspectRatios,
-        String aspectRatioDefault) {
+        String aspectRatioDefault,
+        Integer refImagesMin, Integer refImagesMax,
+        Integer refVideosMin, Integer refVideosMax,
+        Integer audioCountMin, Integer audioCountMax,
+        Integer audioSegmentDurationMin, Integer audioSegmentDurationMax,
+        Integer videoSegmentDurationMin, Integer videoSegmentDurationMax,
+        Integer maxTotalDuration, Integer maxTotalFiles,
+        Integer maxVideoSizeMb, Integer maxImageSizeMb, Integer maxAudioSizeMb,
+        Integer maxRequestBodyMb, Integer maxPromptChars) {
 }
