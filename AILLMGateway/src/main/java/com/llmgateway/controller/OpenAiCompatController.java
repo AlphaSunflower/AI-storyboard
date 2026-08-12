@@ -1,5 +1,6 @@
 package com.llmgateway.controller;
 
+import com.llmgateway.service.FileUploadService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.ImageEditService;
 import com.llmgateway.service.RouteResult;
@@ -22,6 +23,7 @@ public class OpenAiCompatController {
     private final GatewayRoutingService routingService;
     private final VideoGatewayService videoGatewayService;
     private final ImageEditService imageEditService;
+    private final FileUploadService fileUploadService;
 
     /**
      * OpenAI 兼容 chat completions：stream=true 走 SSE 流式透传（text/event-stream），
@@ -97,5 +99,13 @@ public class OpenAiCompatController {
     public ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             videoContent(@PathVariable String taskId) {
         return videoGatewayService.download(taskId);
+    }
+
+    /** 文件上传代理：原始 multipart 字节流 + Content-Type（含 boundary）→ MiniMax，返回 {"file_id":"mm_file://..."} */
+    @PostMapping(value = "/files/upload", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> fileUpload(@RequestBody byte[] body,
+                                             @RequestHeader("Content-Type") String contentType) {
+        String fileId = fileUploadService.upload(contentType, body);
+        return ResponseEntity.ok("{\"file_id\":\"" + fileId + "\"}");
     }
 }

@@ -77,11 +77,18 @@ public class UpstreamClient {
     /** POST multipart 到 openai_compatible 渠道（图改图 edits：原样透传 multipart 字节流） */
     public HttpResponse<String> postMultipart(String baseUrl, String path, String apiKey,
                                               String contentType, byte[] bodyBytes) {
+        return postMultipart(baseUrl, path, apiKey, contentType, bodyBytes,
+                config.getUpstream().getRequestTimeoutMs());
+    }
+
+    /** POST multipart（上传大文件用长超时，如 MiniMax 文件上传最大 50 MB） */
+    public HttpResponse<String> postMultipart(String baseUrl, String path, String apiKey,
+                                              String contentType, byte[] bodyBytes, long timeoutMs) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", contentType)          // 透传上游 Content-Type（含 boundary）
                 .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .timeout(Duration.ofMillis(timeoutMs))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                 .build();
         return sendWithRetry(request);

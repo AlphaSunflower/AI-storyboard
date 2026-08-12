@@ -1,5 +1,6 @@
 package com.llmgateway.config;
 
+import com.llmgateway.config.AccessLogFilter;
 import com.llmgateway.security.AdminJwtFilter;
 import com.llmgateway.security.StaticApiKeyFilter;
 import jakarta.servlet.DispatcherType;
@@ -24,10 +25,13 @@ public class SecurityConfig {
 
     private final AdminJwtFilter adminJwtFilter;
     private final StaticApiKeyFilter staticApiKeyFilter;
+    private final AccessLogFilter accessLogFilter;
 
-    public SecurityConfig(AdminJwtFilter adminJwtFilter, StaticApiKeyFilter staticApiKeyFilter) {
+    public SecurityConfig(AdminJwtFilter adminJwtFilter, StaticApiKeyFilter staticApiKeyFilter,
+                          AccessLogFilter accessLogFilter) {
         this.adminJwtFilter = adminJwtFilter;
         this.staticApiKeyFilter = staticApiKeyFilter;
+        this.accessLogFilter = accessLogFilter;
     }
 
     @Bean
@@ -65,7 +69,8 @@ public class SecurityConfig {
                 })
             )
             .addFilterBefore(staticApiKeyFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(adminJwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(adminJwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(accessLogFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }
