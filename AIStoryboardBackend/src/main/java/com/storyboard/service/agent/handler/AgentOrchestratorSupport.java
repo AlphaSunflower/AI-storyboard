@@ -112,6 +112,9 @@ public class AgentOrchestratorSupport {
     /** 图片修改方向选项（refine 继续完善时 LLM 按当前方案动态生成；options=[{id,title}]） */
     public record PicRefineOptionsResult(String message, List<Map<String, Object>> options) {}
 
+    /** 图片生成失败自救结果：recoverable=审核拒绝可重写提示词；rewrittenPrompt=重写后的提示词；message=给用户的说明 */
+    public record ImageRecoveryResult(boolean recoverable, String rewrittenPrompt, String message) {}
+
     /**
      * HITL 阶段产出（模板 {@link #runHITLStage} 的输入）：
      * 方案文本 + checkpoint action + plan 载荷 + 事件名（human_input / video_plan）+ 确认按钮
@@ -651,6 +654,34 @@ public class AgentOrchestratorSupport {
         sendEvent(req, "message", Map.of("content", friendly));
         sendEvent(req, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", friendly));
         return friendly;
+    }
+
+    /**
+     * 图片生成失败自救：LLM 判断错误是否审核拒绝（safety/rejected/violations）。
+     * 是 → 重写提示词（保留原创作意图、剔除触发词）自动重试，message 说明给用户；
+     * 否 → recoverable=false，message 为友好告知。LLM 失败兜底不可恢复（不阻塞主流程）。
+     */
+    public ImageRecoveryResult attemptImageRecovery(String originalPrompt, String rawError) {
+        try {
+            String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
+            String content = planClient().prompt()
+                    .system("你是图片生成错误修复助手。用户提交的图片提示词被上游 AI 生成服务拒绝，请判断错误并处理：\n"
+                            + "- 如果错误是内容安全审核拒绝（错误含 safety/rejected/violations/审核 等关键词）：重写提示词，"
+                            + "保留用户原本的创作意图（主体/构图/氛围），剔除可能触发审核的元素（暴力/血腥等），用更温和的措辞表达。\n"
+                            + "- 其他错误（网络/超时/服务不可用等）：不重写。\n"
+                            + "只输出 JSON：{\\\"recoverable\\\": true/false, \\\"rewrittenPrompt\\\": \\\"重写后的提示词（不可恢复时为空串）\\\", "
+                            + "\\\"message\\\": \\\"给用户看的简短中文说明（可恢复时如：你的描述可能触及暴力内容，我帮你调整了措辞重新生成；不可恢复时如：服务暂时繁忙，请稍后重试）\\\"}。"
+                            + "禁止任何解释、代码块或多余字符。")
+                    .user("原提示词：\n" + originalPrompt + "\n\n上游错误：\n" + raw)
+                    .call()
+                    .content();
+            if (content != null && !content.isBlank()) {
+                return new BeanOutputConverter<>(ImageRecoveryResult.class).convert(content);
+            }
+        } catch (Exception e) {
+            log.warn("图片生成自救 LLM 调用失败，按不可恢复处理: {}", e.getMessage());
+        }
+        return new ImageRecoveryResult(false, "", "图片没生成出来，请稍后重试或调整一下描述。");
     }
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */

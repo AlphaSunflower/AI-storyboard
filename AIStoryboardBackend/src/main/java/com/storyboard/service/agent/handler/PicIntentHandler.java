@@ -107,23 +107,39 @@ public class PicIntentHandler implements IntentHandler {
         String size = request.getParams().getOrDefault("size", null);
         Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source, model, size);
         if (Boolean.TRUE.equals(result.get("ok"))) {
-            String url = String.valueOf(result.get("imageUrl"));
-            String content = "![生成图片](" + url + ")";
-            support.resumeStage(request, "正在生成图片…", Map.of(
-                    "content", content,
-                    "confirm", Map.of(
-                            "kind", "image", "url", url, "assetId", result.getOrDefault("assetId", ""),
-                            "sceneCount", 0,
-                            "actions", List.of(
-                                    Map.of("id", "refine", "title", "继续完善"),
-                                    Map.of("id", "done", "title", "满意完成"))),
-                    "sceneCount", -1L));
-            return content;
-        } else {
-            // 上游生成失败（如 safety 审核拒绝）：LLM 翻译成友好中文回复（提示改措辞），不直接展示英文报错
-            return support.sendFriendlyError(request, String.valueOf(result.getOrDefault("message", "")),
-                    "图片没生成出来，请稍后重试或调整一下描述。");
+            return presentImage(request, String.valueOf(result.get("imageUrl")),
+                    String.valueOf(result.getOrDefault("assetId", "")), null);
         }
+        // 生成失败 → LLM 自救：审核拒绝则重写提示词自动重试一次（成功给图+说明，失败才友好告知）
+        String rawError = String.valueOf(result.getOrDefault("message", ""));
+        AgentOrchestratorSupport.ImageRecoveryResult recovery = support.attemptImageRecovery(prompt, rawError);
+        if (recovery.recoverable() && recovery.rewrittenPrompt() != null && !recovery.rewrittenPrompt().isBlank()) {
+            Map<String, Object> retry = agentTools.refineImage(
+                    request.getConversation().getId(), recovery.rewrittenPrompt(), source, model, size);
+            if (Boolean.TRUE.equals(retry.get("ok"))) {
+                return presentImage(request, String.valueOf(retry.get("imageUrl")),
+                        String.valueOf(retry.getOrDefault("assetId", "")), recovery.message());
+            }
+        }
+        // 自救失败 / 不可恢复：友好告知（LLM 翻译，不直接展示英文报错）
+        return support.sendFriendlyError(request, rawError,
+                "图片没生成出来，请稍后重试或调整一下描述。");
+    }
+
+    /** 生成成功收尾：resumeStage 展示图片；promptNote 非空时前置一句说明（如「已帮你调整措辞重新生成」） */
+    private String presentImage(OrchestrationRequest request, String url, String assetId, String promptNote) {
+        String content = "![生成图片](" + url + ")";
+        String display = promptNote == null || promptNote.isBlank() ? content : promptNote + "\n\n" + content;
+        support.resumeStage(request, "正在生成图片…", Map.of(
+                "content", display,
+                "confirm", Map.of(
+                        "kind", "image", "url", url, "assetId", assetId,
+                        "sceneCount", 0,
+                        "actions", List.of(
+                                Map.of("id", "refine", "title", "继续完善"),
+                                Map.of("id", "done", "title", "满意完成"))),
+                "sceneCount", -1L));
+        return display;
     }
 
     /**
