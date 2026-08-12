@@ -89,9 +89,9 @@ public class PicIntentHandler implements IntentHandler {
         if ("refine".equals(request.getAction())) {
             return resumeRefineOptions(request, checkpoint);
         }
-        // 分支 2：选项卡片提交（pic-option 由 Orchestrator 特判转此，customText/action 已设置）→
-        // 合并所选方向重新设计方案卡片（先展示新方案再确认）
-        if ("pic-option".equals(request.getAction())) {
+        // 分支 2：选项卡片提交（Orchestrator 特判转此）→ 合并所选方向重新设计方案卡片（先展示新方案再确认）。
+        // 注意用 checkpoint.getAction() 判断：request.getAction() 此时是用户点的选项 id（opt1/custom），不是 checkpoint action
+        if ("pic-option".equals(checkpoint.getAction())) {
             return resumeRefineOption(request, checkpoint);
         }
         // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
