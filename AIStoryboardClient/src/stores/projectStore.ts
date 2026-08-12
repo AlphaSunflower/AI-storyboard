@@ -46,8 +46,6 @@ interface ProjectState {
   // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
   imageModelOptions: ModelOption[];
   videoModelOptions: ModelOption[];
-  // 分镜参考素材（sceneId -> 素材列表）
-  sceneRefs: Record<string, SceneReferenceAsset[]>;
 
   // toast 通知
   toasts: ToastMessage[];
