@@ -269,6 +269,19 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         putDefault(params, "resolutionDefault", mp.getResolutionDefault());
         putCsvList(params, "aspectRatios", mp.getAspectRatios());
         putDefault(params, "aspectRatioDefault", mp.getAspectRatioDefault());
+        // video：输入约束（范围类嵌套 {min,max}，单值类平铺数字）
+        putRange(params, "refImages", mp.getRefImagesMin(), mp.getRefImagesMax());
+        putRange(params, "refVideos", mp.getRefVideosMin(), mp.getRefVideosMax());
+        putRange(params, "audioCount", mp.getAudioCountMin(), mp.getAudioCountMax());
+        putRange(params, "audioSegmentDuration", mp.getAudioSegmentDurationMin(), mp.getAudioSegmentDurationMax());
+        putRange(params, "videoSegmentDuration", mp.getVideoSegmentDurationMin(), mp.getVideoSegmentDurationMax());
+        putInt(params, "maxTotalDuration", mp.getMaxTotalDuration());
+        putInt(params, "maxTotalFiles", mp.getMaxTotalFiles());
+        putInt(params, "maxVideoSizeMB", mp.getMaxVideoSizeMb());
+        putInt(params, "maxImageSizeMB", mp.getMaxImageSizeMb());
+        putInt(params, "maxAudioSizeMB", mp.getMaxAudioSizeMb());
+        putInt(params, "maxRequestBodyMB", mp.getMaxRequestBodyMb());
+        putInt(params, "maxPromptChars", mp.getMaxPromptChars());
         return params.isEmpty() ? null : params;
     }
 
@@ -311,5 +324,19 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         } catch (NumberFormatException e) {
             params.put(key, val.trim());
         }
+    }
+
+    /** 范围对象 {min,max}：任一端非空才放 */
+    private void putRange(Map<String, Object> params, String key, Integer min, Integer max) {
+        if (min == null && max == null) return;
+        Map<String, Object> r = new LinkedHashMap<>();
+        if (min != null) r.put("min", min);
+        if (max != null) r.put("max", max);
+        params.put(key, r);
+    }
+
+    /** Integer 直放（null 跳过） */
+    private void putInt(Map<String, Object> params, String key, Integer val) {
+        if (val != null) params.put(key, val);
     }
 }
