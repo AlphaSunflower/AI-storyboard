@@ -13,6 +13,8 @@ interface Props {
   recommended?: Record<string, string>;
   reasons?: Record<string, string>;
   onParamsChange: (params: Record<string, string>) => void;
+  /** 推荐/提交键前缀（aisplit 分镜卡片图片/视频分区用，如 "image"/"video"；默认 '' 零回归） */
+  keyPrefix?: string;
 }
 
 /** 参数元信息：key=提交键名，field=网关 params 中的枚举数组字段，defaultField=默认值字段 */
@@ -49,35 +51,35 @@ function parseParamLists(model?: GatewayModelOption): ParamLists {
 }
 
 /** 计算某模型的参数初始值：LLM 推荐 > 模型默认 > 首选项 */
-function initialValues(lists: ParamLists, recommended: Record<string, string>): Record<string, string> {
+function initialValues(lists: ParamLists, recommended: Record<string, string>, prefix: string): Record<string, string> {
   const init: Record<string, string> = {};
   for (const [key, v] of Object.entries(lists)) {
-    const rec = recommended[key];
-    init[key] = rec && v.options.includes(rec) ? rec : (v.default ?? v.options[0]);
+    const rec = recommended[prefix + key];
+    init[prefix + key] = rec && v.options.includes(rec) ? rec : (v.default ?? v.options[0]);
   }
   return init;
 }
 
-export function AgentParamSelector({ models, recommended = {}, reasons = {}, onParamsChange }: Props) {
+export function AgentParamSelector({ models, recommended = {}, reasons = {}, onParamsChange, keyPrefix = '' }: Props) {
   // 模型：默认 LLM 推荐（在选项中）否则首个
   const [model, setModel] = useState(() => {
-    const rec = recommended.model;
+    const rec = recommended[keyPrefix + 'model'];
     if (rec && models.some((m) => m.value === rec)) return rec;
     return models[0]?.value ?? '';
   });
   const current = useMemo(() => models.find((m) => m.value === model), [models, model]);
   const paramLists = useMemo(() => parseParamLists(current), [current]);
   const [selected, setSelected] = useState<Record<string, string>>(() =>
-    initialValues(parseParamLists(models[0]), recommended));
+    initialValues(parseParamLists(models[0]), recommended, keyPrefix));
 
   // 模型切换：参数重置为该模型推荐/默认值（旧参数如 2K 不适配新模型时清掉）
   useEffect(() => {
-    setSelected(initialValues(paramLists, recommended));
-  }, [model, paramLists, recommended]);
+    setSelected(initialValues(paramLists, recommended, keyPrefix));
+  }, [model, paramLists, recommended, keyPrefix]);
 
-  // 选择变化 → 上报全量参数（模型 + 各参数）
+  // 选择变化 → 上报全量参数（模型 + 各参数，键带前缀）
   useEffect(() => {
-    onParamsChange({ ...selected, model });
+    onParamsChange({ ...selected, [keyPrefix + 'model']: model });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, model]);
 
@@ -97,7 +99,8 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
       }}
     >
       <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
-        生成参数（已按推荐选择，可直接确认或修改）
+        {keyPrefix === 'image' ? '🖼️ 图片生成参数' : keyPrefix === 'video' ? '🎬 视频生成参数' : '生成参数'}
+        （已按推荐选择，可直接确认或修改）
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -107,22 +110,22 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
               <option key={m.value} value={m.value}>{m.label || m.value}</option>
             ))}
           </select>
-          {reasons.model && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ {reasons.model}</span>}
+          {reasons[keyPrefix + 'model'] && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ {reasons[keyPrefix + 'model']}</span>}
         </div>
         {visibleMeta.map((meta) => (
           <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>{meta.label}</span>
             <select
-              value={selected[meta.key] ?? ''}
-              onChange={(e) => setSelected((s) => ({ ...s, [meta.key]: e.target.value }))}
+              value={selected[keyPrefix + meta.key] ?? ''}
+              onChange={(e) => setSelected((s) => ({ ...s, [keyPrefix + meta.key]: e.target.value }))}
               style={selectStyle}
             >
               {paramLists[meta.key].options.map((o) => (
                 <option key={o} value={o}>{o}</option>
               ))}
             </select>
-            {reasons[meta.key] && (
-              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ 推荐：{reasons[meta.key]}</span>
+            {reasons[keyPrefix + meta.key] && (
+              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ 推荐：{reasons[keyPrefix + meta.key]}</span>
             )}
           </div>
         ))}

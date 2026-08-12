@@ -16,6 +16,8 @@ export interface HumanInputInfo {
   expirationTime: number;
   // 卡片模型/参数选项 + LLM 推荐（后端 human_input 事件下发；无配置时为空数组/空对象）
   models?: GatewayModelOption[];
+  imageModels?: GatewayModelOption[];
+  videoModels?: GatewayModelOption[];
   recommended?: Record<string, string>;
   reasons?: Record<string, string>;
 }
@@ -69,6 +71,8 @@ interface AgentState {
   // 当前运行阶段提示（workflow 事件标题 / 视频异步生成进度；渲染在聊天窗口「正在生成」行）
   workflowHint: string;
   setWorkflowHint: (v: string) => void;
+  // 智能体视频异步任务（进行中；completed/failed 后清空）——任务中心悬浮球展示用
+  agentVideoTask: { taskId: string; status: 'queued' | 'running'; waitingSec: number } | null;
   // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
   pendingAssistantId: string | null;
 
@@ -189,6 +193,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streamError: null,
   workflowHint: '',
   setWorkflowHint: (v) => set({ workflowHint: v }),
+  agentVideoTask: null,
   confirmResult: null,
   pendingPicUrl: null,
   pendingAssistantId: null,
@@ -319,6 +324,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 formContent: e.formContent ?? '',
                 actions: e.actions ?? [],
                 expirationTime: e.expirationTime ?? 0,
+                models: e.models,
+                imageModels: e.imageModels,
+                videoModels: e.videoModels,
+                recommended: e.recommended,
+                reasons: e.reasons,
               },
             });
             break;
@@ -335,8 +345,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
               }));
             }
-            if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
-              get().setAgentGeneratedScenes(true);
+            // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
+            // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
+            if (typeof e.sceneCount === 'number' && e.sceneCount !== initialSceneCount) {
+              if (e.sceneCount > initialSceneCount) {
+                get().setAgentGeneratedScenes(true);
+              }
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
               const currentProject = useProjectStore.getState().currentProject;
               if (currentProject) {
@@ -491,6 +505,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 actions: e.actions ?? [],
                 expirationTime: e.expirationTime ?? 0,
                 models: e.models,
+                imageModels: e.imageModels,
+                videoModels: e.videoModels,
                 recommended: e.recommended,
                 reasons: e.reasons,
               },
@@ -509,8 +525,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
               }));
             }
-            if (typeof e.sceneCount === 'number' && e.sceneCount > initialSceneCount) {
-              get().setAgentGeneratedScenes(true);
+            // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
+            // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
+            if (typeof e.sceneCount === 'number' && e.sceneCount !== initialSceneCount) {
+              if (e.sceneCount > initialSceneCount) {
+                get().setAgentGeneratedScenes(true);
+              }
               // currentProject 守卫：项目不存在时跳过 loadProject 刷新
               const currentProject = useProjectStore.getState().currentProject;
               if (currentProject) {
@@ -628,6 +648,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let acceptedTaskId: string | null = null;
     let pollTick = 0; // 轮询次数（阶段提示「已等待约 X 秒」用，5s/tick）
     const startTaskPolling = (taskId: string) => {
+      // 任务中心：任务开始，暴露进行中状态（completed/failed 清空）
+      set({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
       const timer = setInterval(async () => {
         if (get().activeConversationId !== snapshotId || acceptedTaskId === null) {
           clearInterval(timer);
@@ -645,6 +667,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               streaming: false,
               workflowHint: '', // 生成完成，阶段提示清空
               pendingAssistantId: null,
+              agentVideoTask: null,
               confirmResult: {
                 kind: 'video',
                 url: t.url || '',
@@ -660,7 +683,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           } else if (t.status === 'failed') {
             clearInterval(timer);
             if (get().activeConversationId === snapshotId) {
-              set({ streamError: t.error || '视频生成失败，请重试', workflowHint: '' });
+              set({ streamError: t.error || '视频生成失败，请重试', workflowHint: '', agentVideoTask: null });
             }
           } else {
             // queued/running：阶段提示实时更新到聊天窗口（防「卡住」错觉）；继续轮询
@@ -668,7 +691,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             const stage = t.status === 'queued'
               ? `视频排队中…（已等待约 ${waiting} 秒）`
               : `视频生成中…（已等待约 ${waiting} 秒，通常 1~3 分钟）`;
-            set({ workflowHint: stage });
+            set({
+              workflowHint: stage,
+              agentVideoTask: { taskId, status: t.status === 'queued' ? 'queued' : 'running', waitingSec: waiting },
+            });
           }
           // queued/running：继续轮询（5s 后下一次 tick）
         } catch {

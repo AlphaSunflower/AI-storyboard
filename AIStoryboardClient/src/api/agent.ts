@@ -54,6 +54,9 @@ export interface SseEvent {
   expirationTime?: number;
   // 卡片模型/参数选项（后端下发网关模型列表，含各模型参数能力；无配置时缺失）
   models?: GatewayModelOption[];
+  // aisplit 分镜确认卡片：图片/视频两组模型列表（分区参数选择器用）
+  imageModels?: GatewayModelOption[];
+  videoModels?: GatewayModelOption[];
   // LLM 推荐的生成参数值与推荐理由（video 链方案生成时输出）
   recommended?: Record<string, string>;
   reasons?: Record<string, string>;

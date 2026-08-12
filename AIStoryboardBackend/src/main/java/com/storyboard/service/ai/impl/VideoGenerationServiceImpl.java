@@ -86,13 +86,24 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
         String actualModel = alias != null
                 ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
-                : (config.getMinimaxVideoModel() != null ? config.getMinimaxVideoModel() : "MiniMax-H3");  // 默认模型：MiniMax-H3（修复通道翻转回归：默认走 minimax 渠道，显式传 veo 别名才走 laozhang）
+                : (scene != null && scene.getVideoModel() != null && !scene.getVideoModel().isBlank())
+                        ? scene.getVideoModel()
+                        : (config.getMinimaxVideoModel() != null ? config.getMinimaxVideoModel() : "MiniMax-H3");  // 默认模型：MiniMax-H3（修复通道翻转回归：默认走 minimax 渠道，显式传 veo 别名才走 laozhang）
 
-        // 使用请求参数或配置默认值
+        // 使用请求参数或分镜覆盖值或配置默认值（优先级：显式传入 > 分镜覆盖 > config 默认）
         String effSize = size != null ? size : config.getDefaultVideoSize();
-        String effResolution = resolution != null ? resolution : config.getDefaultVideoResolution();
-        String effAspectRatio = aspectRatio != null ? aspectRatio : config.getDefaultVideoAspectRatio();
-        int effDuration = duration != null ? duration : Integer.parseInt(config.getDefaultVideoDuration());
+        String effResolution = resolution != null ? resolution
+                : (scene != null && scene.getVideoResolution() != null && !scene.getVideoResolution().isBlank())
+                        ? scene.getVideoResolution()
+                        : config.getDefaultVideoResolution();
+        String effAspectRatio = aspectRatio != null ? aspectRatio
+                : (scene != null && scene.getVideoAspectRatio() != null && !scene.getVideoAspectRatio().isBlank())
+                        ? scene.getVideoAspectRatio()
+                        : config.getDefaultVideoAspectRatio();
+        int effDuration = duration != null ? duration
+                : (scene != null && scene.getDuration() != null && scene.getDuration() > 0)
+                        ? scene.getDuration()
+                        : Integer.parseInt(config.getDefaultVideoDuration());
 
         try {
             // 统一 OpenAI 风格 JSON 请求体（模型→渠道路由、协议转换已下沉网关）

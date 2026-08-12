@@ -2,11 +2,15 @@ package com.storyboard.service.agent.handler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.entity.AgentConversation;
+import com.storyboard.entity.Scene;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentCheckpointMapper;
+import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.agent.AgentGenerationService;
 import com.storyboard.service.agent.AgentSceneItem;
 import com.storyboard.service.ai.GatewayModelService;
@@ -56,6 +60,7 @@ public class AgentOrchestratorSupport {
     private final AgentGenerationService generationService;
     private final AgentAssetMapper assetMapper;
     private final GatewayModelService gatewayModelService;
+    private final SceneMapper sceneMapper;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -118,18 +123,46 @@ public class AgentOrchestratorSupport {
     /**
      * HITL 阶段产出（模板 {@link #runHITLStage} 的输入）：
      * 方案文本 + checkpoint action + plan 载荷 + 事件名（human_input / video_plan）+ 确认按钮
-     * + models（网关模型列表含参数能力，卡片参数选择器用）+ recommended/reasons（LLM 推荐参数值与理由）。
+     * + models（网关模型列表含参数能力，卡片参数选择器用）+ recommended/reasons（LLM 推荐参数值与理由）
+     * + imageModels/videoModels（aisplit 分镜确认卡片分图片/视频两组模型列表；空=不渲染分区选择器）。
      */
     public record StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
                             String eventName, List<Map<String, Object>> actions,
                             List<Map<String, Object>> models,
                             Map<String, String> recommended,
-                            Map<String, String> reasons) {
-        /** 兼容构造器：无模型/推荐参数（现有 7 处调用零改动） */
+                            Map<String, String> reasons,
+                            List<Map<String, Object>> imageModels,
+                            List<Map<String, Object>> videoModels) {
+        /** 兼容构造器：无模型/推荐参数（现有调用零改动） */
         public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
                          String eventName, List<Map<String, Object>> actions) {
-            this(planText, action, planPayload, eventName, actions, List.of(), Map.of(), Map.of());
+            this(planText, action, planPayload, eventName, actions, List.of(), Map.of(), Map.of(), List.of(), List.of());
         }
+
+        /** 兼容构造器：单组模型/推荐参数（pic/video 链路现有调用，无分区模型列表） */
+        public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
+                         String eventName, List<Map<String, Object>> actions,
+                         List<Map<String, Object>> models,
+                         Map<String, String> recommended,
+                         Map<String, String> reasons) {
+            this(planText, action, planPayload, eventName, actions, models, recommended, reasons, List.of(), List.of());
+        }
+    }
+
+    /** aisplit 分镜参数推荐结果：图片/视频两组模型列表 + LLM 推荐参数（平铺前缀键）+ 推荐理由 */
+    public record SceneParamsRecommendation(List<Map<String, Object>> imageModels,
+                                            List<Map<String, Object>> videoModels,
+                                            Map<String, String> recommended,
+                                            Map<String, String> reasons) {
+        public static SceneParamsRecommendation empty() {
+            return new SceneParamsRecommendation(List.of(), List.of(), Map.of(), Map.of());
+        }
+    }
+
+    /** LLM 推荐参数输出（嵌套结构，BeanOutputConverter 直接解析） */
+    public record RecommendedParams(ImageRec image, VideoRec video, Map<String, String> reasons) {
+        public record ImageRec(String model, String size, String quality) {}
+        public record VideoRec(String model, String duration, String resolution, String aspectRatio) {}
     }
 
     // ===== LLM 调用（结构化输出：纯解析，不发 response_format） =====
@@ -410,6 +443,77 @@ public class AgentOrchestratorSupport {
 
     // ===== HITL checkpoint =====
 
+    /**
+     * aisplit 分镜参数推荐（整套统一一套：图片 + 视频各一套）：LLM 从网关模型选项中选择，
+     * 返回两组模型列表 + 平铺推荐参数（image/video 前缀键）+ 推荐理由。
+     * 推荐失败：模型列表照常下发（选择器用模型默认值），无推荐理由，分镜流程不受影响。
+     */
+    public SceneParamsRecommendation recommendSceneParams(String script, OrchestrationRequest req) {
+        List<Map<String, Object>> imageModels = buildModels("image");
+        List<Map<String, Object>> videoModels = buildModels("video");
+        if (imageModels.isEmpty() && videoModels.isEmpty()) return SceneParamsRecommendation.empty();
+        try {
+            String imageOpts = buildModelOptionsText("image");
+            String videoOpts = buildModelOptionsText("video");
+            String raw = retryTransient(() -> planClient().prompt()
+                .system("你是分镜生成参数推荐官。根据整套分镜剧情的整体风格与内容，从给定选项中选择一套适合整套分镜的图片生成参数和视频生成参数。"
+                    + "必须严格从给定选项中取值，只输出 JSON："
+                    + "{\"image\":{\"model\":\"生图模型\",\"size\":\"尺寸\",\"quality\":\"质量\"},"
+                    + "\"video\":{\"model\":\"视频模型\",\"duration\":\"时长秒数\",\"resolution\":\"分辨率\",\"aspectRatio\":\"画幅\"},"
+                    + "\"reasons\":{\"imageModel\":\"推荐理由(≤15字)\",\"imageSize\":\"理由\",\"imageQuality\":\"理由\","
+                    + "\"videoModel\":\"理由\",\"videoDuration\":\"理由\",\"videoResolution\":\"理由\",\"videoAspectRatio\":\"理由\"}}。")
+                .user("剧本：\n" + script
+                    + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
+                    + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
+                .call()
+                .content());
+            RecommendedParams r = new BeanOutputConverter<>(RecommendedParams.class).convert(raw);
+            if (r == null) return new SceneParamsRecommendation(imageModels, videoModels, Map.of(), Map.of());
+            Map<String, String> recommended = new java.util.LinkedHashMap<>();
+            Map<String, String> reasons = new java.util.LinkedHashMap<>(r.reasons() == null ? Map.of() : r.reasons());
+            if (r.image() != null) {
+                if (r.image().model() != null) recommended.put("imageModel", r.image().model());
+                if (r.image().size() != null) recommended.put("imageSize", r.image().size());
+                if (r.image().quality() != null) recommended.put("imageQuality", r.image().quality());
+            }
+            if (r.video() != null) {
+                if (r.video().model() != null) recommended.put("videoModel", r.video().model());
+                if (r.video().duration() != null) recommended.put("videoDuration", r.video().duration());
+                if (r.video().resolution() != null) recommended.put("videoResolution", r.video().resolution());
+                if (r.video().aspectRatio() != null) recommended.put("videoAspectRatio", r.video().aspectRatio());
+            }
+            return new SceneParamsRecommendation(imageModels, videoModels, recommended, reasons);
+        } catch (Exception e) {
+            log.warn("分镜参数推荐 LLM 调用失败: {}", e.getMessage());
+            return new SceneParamsRecommendation(imageModels, videoModels, Map.of(), Map.of());
+        }
+    }
+
+    /** 用户确认的整套推荐参数（选择器默认值=推荐值）→ 应用到项目全部分镜的覆盖参数列（空键跳过） */
+    public void applySceneParamsToProject(String projectId, Map<String, String> params) {
+        if (projectId == null || params == null || params.isEmpty()) return;
+        LambdaUpdateWrapper<Scene> uw = new LambdaUpdateWrapper<Scene>().eq(Scene::getProjectId, projectId);
+        putParam(uw, Scene::getImageModel, params.get("imageModel"));
+        putParam(uw, Scene::getImageSize, params.get("imageSize"));
+        putParam(uw, Scene::getImageQuality, params.get("imageQuality"));
+        putParam(uw, Scene::getVideoModel, params.get("videoModel"));
+        putParam(uw, Scene::getVideoResolution, params.get("videoResolution"));
+        putParam(uw, Scene::getVideoAspectRatio, params.get("videoAspectRatio"));
+        String d = params.get("videoDuration");
+        if (d != null && !d.isBlank()) {
+            try {
+                uw.set(Scene::getDuration, Integer.parseInt(d.trim()));
+            } catch (NumberFormatException ignored) {
+                // 非法时长忽略
+            }
+        }
+        sceneMapper.update(null, uw);
+    }
+
+    private void putParam(LambdaUpdateWrapper<Scene> uw, SFunction<Scene, ?> col, String v) {
+        if (v != null && !v.isBlank()) uw.set(col, v.trim());
+    }
+
     /** 创建 HITL checkpoint（pending，30min 过期），返回 form_token */
     public String createCheckpoint(AgentConversation conversation, String action,
                                    List<Map<String, Object>> planPayload, String step) {
@@ -463,6 +567,9 @@ public class AgentOrchestratorSupport {
             "expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString()));
         // 模型/参数选项与 LLM 推荐（非空才下发；旧前端/无配置时字段缺失，行为与现状一致）
         if (plan.models() != null && !plan.models().isEmpty()) event.put("models", plan.models());
+        // aisplit 分镜确认卡片：图片/视频两组模型列表（前端渲染分区参数选择器）
+        if (plan.imageModels() != null && !plan.imageModels().isEmpty()) event.put("imageModels", plan.imageModels());
+        if (plan.videoModels() != null && !plan.videoModels().isEmpty()) event.put("videoModels", plan.videoModels());
         if (plan.recommended() != null && !plan.recommended().isEmpty()) event.put("recommended", plan.recommended());
         if (plan.reasons() != null && !plan.reasons().isEmpty()) event.put("reasons", plan.reasons());
         sendEvent(req, plan.eventName(), event);

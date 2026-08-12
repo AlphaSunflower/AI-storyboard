@@ -16,6 +16,10 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
   const [customText, setCustomText] = useState('');
   // 卡片参数选择器的当前选择（模型/尺寸等；无选择器时为 {}）
   const [selectedParams, setSelectedParams] = useState<Record<string, string>>({});
+  // aisplit 分镜卡片：图片/视频两个分区选择器的提交值（键带 image*/video* 前缀）
+  const mergeParams = (p: Record<string, string>) => setSelectedParams((prev) => ({ ...prev, ...p }));
+  // 分区选择器模式：后端下发 imageModels/videoModels 时渲染图片+视频两组；否则保持原单选择器逻辑
+  const hasSplitSelectors = !!((info.imageModels && info.imageModels.length > 0) || (info.videoModels && info.videoModels.length > 0));
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
@@ -24,15 +28,36 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
         <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 10, whiteSpace: 'pre-wrap' }}>
           {info.formContent || '请确认是否继续？'}
         </div>
-        {/* 模型/参数选择器（后端下发 models 时渲染；如图片确认卡片可选模型/尺寸） */}
-        {info.models && info.models.length > 0 && !customOpen && (
+        {/* 模型/参数选择器：aisplit 分镜卡片渲染图片+视频两组（LLM 推荐预选+理由）；其余卡片保持单选择器 */}
+        {hasSplitSelectors ? (
+          <div style={{ marginBottom: 10 }}>
+            {info.imageModels && info.imageModels.length > 0 && (
+              <AgentParamSelector
+                keyPrefix="image"
+                models={info.imageModels}
+                recommended={info.recommended}
+                reasons={info.reasons}
+                onParamsChange={mergeParams}
+              />
+            )}
+            {info.videoModels && info.videoModels.length > 0 && (
+              <AgentParamSelector
+                keyPrefix="video"
+                models={info.videoModels}
+                recommended={info.recommended}
+                reasons={info.reasons}
+                onParamsChange={mergeParams}
+              />
+            )}
+          </div>
+        ) : info.models && info.models.length > 0 && !customOpen ? (
           <AgentParamSelector
             models={info.models}
             recommended={info.recommended}
             reasons={info.reasons}
             onParamsChange={setSelectedParams}
           />
-        )}
+        ) : null}
         {expired ? (
           <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>确认已过期，请重新发起对话</div>
         ) : customOpen ? (

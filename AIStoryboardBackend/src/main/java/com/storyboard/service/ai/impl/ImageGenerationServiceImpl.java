@@ -103,11 +103,21 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         try {
             List<String> localPaths = new ArrayList<>();
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
-            // 模型选择：显式传入 > 分支默认——图改图/编辑分支用 defaultImageEditModel（环境变量可配），纯文生图用 defaultImageModel
+            // 模型选择：显式传入 > 分镜覆盖 > 分支默认——图改图/编辑分支用 defaultImageEditModel（环境变量可配），纯文生图用 defaultImageModel
+            String sceneModel = scene != null && scene.getImageModel() != null && !scene.getImageModel().isBlank()
+                    ? scene.getImageModel() : null;
             String effectiveModel = model != null ? model
+                    : sceneModel != null ? sceneModel
                     : (hasReferenceImages || "edit".equals(mode))
                             ? config.getDefaultImageEditModel()
                             : config.getDefaultImageModel();
+            // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
+            String effSize = size != null ? size
+                    : (scene != null && scene.getImageSize() != null && !scene.getImageSize().isBlank()) ? scene.getImageSize() : null;
+            String effQuality = quality != null ? quality
+                    : (scene != null && scene.getImageQuality() != null && !scene.getImageQuality().isBlank()) ? scene.getImageQuality() : null;
+            Integer effN = (n != null && n > 0) ? n
+                    : (scene != null && scene.getImageN() != null && scene.getImageN() > 0) ? scene.getImageN() : null;
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
             if (hasReferenceImages || "edit".equals(mode)) {
@@ -116,7 +126,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
             // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式；n>1 多图）
             } else {
-                for (String r : callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio, n)) {
+                for (String r : callOpenAIImage(effectiveModel, prompt, effSize, effQuality, aspectRatio, effN)) {
                     localPaths.add(r.startsWith("http://") || r.startsWith("https://")
                             ? fileStorageService.saveImage(r)
                             : fileStorageService.saveImageFromBase64(r));

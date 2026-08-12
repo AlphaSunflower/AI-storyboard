@@ -150,8 +150,11 @@ public class AisplitIntentHandler implements IntentHandler {
             // 覆盖导入会删除现有分镜及其产出素材——卡片正文前置警告
             planText = "⚠ 检测到您当前已有 " + existing + " 个分镜（含已生成的图片/视频素材），覆盖导入将全部删除。\n" + planText;
         }
+        // 5. 整套统一推荐一套生成参数（图片+视频，LLM 预选 + 用户可改；推荐失败静默回退，卡片照常）
+        AgentOrchestratorSupport.SceneParamsRecommendation rec = support.recommendSceneParams(script, request);
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                planText, "agree", scenes, "human_input", actions));
+                planText, "agree", scenes, "human_input", actions,
+                List.of(), rec.recommended(), rec.reasons(), rec.imageModels(), rec.videoModels()));
     }
 
     /**
@@ -266,8 +269,11 @@ public class AisplitIntentHandler implements IntentHandler {
                 ? agentTools.replaceScenes(request.getConversation().getProjectId(), items)
                 : agentTools.writeScenes(request.getConversation().getProjectId(), items);
         int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
-        // 写库成功：不满意调整计数清零（新一轮生成起点）
+        // 写库成功：不满意调整计数清零（新一轮生成起点）+ 用户确认的整套推荐参数应用到全部分镜
         regenCount.remove(request.getConversation().getId());
+        if (count > 0) {
+            support.applySceneParamsToProject(request.getConversation().getProjectId(), request.getParams());
+        }
         // sceneCount 传写库后项目分镜总数（writeScenes 为追加语义；前端用
         // sceneCount > 会话开始时数量 判断是否需要刷新分镜列表——总数才正确，replace 后即新数量）
         long totalScenes = sceneMapper.selectCount(
