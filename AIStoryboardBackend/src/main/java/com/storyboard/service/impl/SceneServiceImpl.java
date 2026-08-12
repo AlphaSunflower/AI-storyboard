@@ -64,6 +64,13 @@ public class SceneServiceImpl implements SceneService {
         if (request.aiModel() != null) scene.setAiModel(request.aiModel());
         if (request.videoResolution() != null) scene.setVideoResolution(request.videoResolution());
         if (request.duration() != null) scene.setDuration(request.duration());
+        // 分镜生成参数覆盖（null = 不修改）
+        if (request.imageModel() != null) scene.setImageModel(request.imageModel());
+        if (request.imageSize() != null) scene.setImageSize(request.imageSize());
+        if (request.imageQuality() != null) scene.setImageQuality(request.imageQuality());
+        if (request.imageN() != null) scene.setImageN(request.imageN());
+        if (request.videoModel() != null) scene.setVideoModel(request.videoModel());
+        if (request.videoAspectRatio() != null) scene.setVideoAspectRatio(request.videoAspectRatio());
 
         sceneMapper.updateById(scene);
         return toResponse(scene);
@@ -84,7 +91,10 @@ public class SceneServiceImpl implements SceneService {
             s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
             s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
             s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
-            s.getImageStatus(), s.getVideoStatus(), s.getCreatedAt(), s.getUpdatedAt()
+            s.getImageStatus(), s.getVideoStatus(),
+            s.getImageUrls(), s.getImageModel(), s.getImageSize(),
+            s.getImageQuality(), s.getImageN(), s.getVideoModel(),
+            s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()
         );
     }
 }

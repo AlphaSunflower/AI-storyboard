@@ -20,6 +20,13 @@ public record SceneResponse(
     String videoUrl,
     String imageStatus,
     String videoStatus,
+    String imageUrls,
+    String imageModel,
+    String imageSize,
+    String imageQuality,
+    Integer imageN,
+    String videoModel,
+    String videoAspectRatio,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt
 ) {}

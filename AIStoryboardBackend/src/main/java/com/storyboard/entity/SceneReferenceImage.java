@@ -11,4 +11,8 @@ public class SceneReferenceImage {
     private String sceneId;
     private String imageUrl;
     private Integer sortOrder;
+    // 素材类型：image / video / audio（原表仅参考图，改造为通用参考素材表）
+    private String type;
+    private String fileName;
+    private Long fileSize;
 }

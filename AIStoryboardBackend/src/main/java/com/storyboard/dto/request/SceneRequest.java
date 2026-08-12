@@ -19,5 +19,12 @@ public record SceneRequest(
         String soundDesign,
         String aiModel,
         String videoResolution,
-        Integer duration
+        Integer duration,
+        // 分镜生成参数覆盖（null = 不修改；置 null 语义：前端显式不传即可，恢复全局默认用「置空」端点/传空串）
+        String imageModel,
+        String imageSize,
+        String imageQuality,
+        Integer imageN,
+        String videoModel,
+        String videoAspectRatio
 ) {}

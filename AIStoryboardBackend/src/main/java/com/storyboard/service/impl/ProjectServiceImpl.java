@@ -100,7 +100,10 @@ public class ProjectServiceImpl implements ProjectService {
             s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
             s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
             s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
-            s.getImageStatus(), s.getVideoStatus(), s.getCreatedAt(), s.getUpdatedAt()
+            s.getImageStatus(), s.getVideoStatus(),
+            s.getImageUrls(), s.getImageModel(), s.getImageSize(),
+            s.getImageQuality(), s.getImageN(), s.getVideoModel(),
+            s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()
         )).toList();
         return new ProjectResponse(
             project.getId(), project.getUserId(), project.getName(),
