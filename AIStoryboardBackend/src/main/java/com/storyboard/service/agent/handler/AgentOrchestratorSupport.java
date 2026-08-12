@@ -221,12 +221,12 @@ public class AgentOrchestratorSupport {
         return sb.toString();
     }
 
-    /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次） */
+    /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次；强制中文输出——方案卡片直接展示给用户） */
     public String callImagePrompt(String content) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
                 .system("你是 AI 绘画提示词工程师。根据用户的需求输出一条高质量图片生成提示词，"
-                    + "只输出提示词文本本身，不要任何解释、引号或前后缀。")
+                    + "必须使用中文输出，只输出提示词文本本身，不要任何解释、引号或前后缀。")
                 .user(content)
                 .call()
                 .content());

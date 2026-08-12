@@ -199,6 +199,23 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 byIntent.get("intent-pic").resume(request, cp);
                 return request.getLastMessage();
             }
+            // 6) custom 自定义输入：图片/视频方案卡片（generate_image/generate_video）与视频调整意见卡片（video-opinion）
+            //    → 合并自定义文本重新设计方案（转对应 handler，customText 透传）
+            if ("custom".equals(action)) {
+                String cpAction = cp.getAction();
+                if ("generate_image".equals(cpAction)) {
+                    request.setAction("custom");
+                    request.setCustomText(customText);
+                    byIntent.get("intent-pic").resume(request, cp);
+                    return request.getLastMessage();
+                }
+                if ("generate_video".equals(cpAction) || "video-opinion".equals(cpAction)) {
+                    request.setAction("custom");
+                    request.setCustomText(customText);
+                    byIntent.get("intent-video").resume(request, cp);
+                    return request.getLastMessage();
+                }
+            }
 
             // 按提交 action 分发（前端提交的 action 为准：agree/replace/append/cancel/disagree → 对应 handler；refine 等 → 默认继续完善）
             IntentHandler handler = byAction.get(action);

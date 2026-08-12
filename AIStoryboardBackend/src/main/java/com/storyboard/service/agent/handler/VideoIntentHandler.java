@@ -31,7 +31,7 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public Set<String> resumeActions() {
-        return Set.of("generate_video");
+        return Set.of("generate_video", "refine");
     }
 
     @Override
@@ -68,7 +68,8 @@ public class VideoIntentHandler implements IntentHandler {
                     List.of(Map.of("message", message, "duration", duration, "source", source == null ? "" : source)),
                     "video_plan",
                     List.of(Map.of("id", "generate_video", "title", "开始生成视频"),
-                            Map.of("id", "refine", "title", "继续完善")),
+                            Map.of("id", "refine", "title", "继续完善"),
+                            Map.of("id", "custom", "title", "✍ 自定义输入")),
                     models, recommended, reasons));
         } catch (Exception e) {
             log.error("VideoIntentHandler.handle 失败: conversationId={}, error={}",
@@ -80,7 +81,20 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 视频异步执行：方案确认后创建任务 → task_accepted → 本轮结束，前端轮询状态端点取结果。
+        String cpAction = checkpoint.getAction();
+        // 调整意见卡片提交（video-opinion）：合并自定义意见重新设计方案 → 新 video_plan 卡片
+        if ("video-opinion".equals(cpAction)) {
+            return resumeVideoWithOpinion(request, checkpoint);
+        }
+        // 方案卡片的「继续完善」：弹调整意见卡片（自定义输入，与分镜 scene-regenerate 同款）
+        if ("refine".equals(request.getAction()) && "generate_video".equals(cpAction)) {
+            return showVideoOpinionCard(request, checkpoint);
+        }
+        // 方案卡片的「✍ 自定义输入」：直接按自定义意见重新设计
+        if ("custom".equals(request.getAction()) && "generate_video".equals(cpAction)) {
+            return resumeVideoWithOpinion(request, checkpoint);
+        }
+        // 默认 generate_video：视频异步执行——方案确认后创建任务 → task_accepted → 本轮结束，前端轮询状态端点取结果。
         // 无同步 message 输出，返回空串（结果由后台轮询更新资产行，前端轮询渲染）
         String message = support.planField(checkpoint.getPlan(), "message");
         String duration = support.planField(checkpoint.getPlan(), "duration");
@@ -88,5 +102,53 @@ public class VideoIntentHandler implements IntentHandler {
         // 生成参数：用户提交 params 优先，未提交回退 checkpoint 推荐/原值（startVideoGenerationAsync 内做键级兜底）
         support.startVideoGenerationAsync(request, message, duration, null, source, request.getParams());
         return "";
+    }
+
+    /** 继续完善：调整意见卡片（✍ 自定义输入，用户描述修改意见） */
+    private String showVideoOpinionCard(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String message = support.planField(checkpoint.getPlan(), "message");
+        String duration = support.planField(checkpoint.getPlan(), "duration");
+        String source = support.planField(checkpoint.getPlan(), "source");
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                "📹 想怎么调整视频方案？\n\n请直接描述修改意见（如节奏、运镜、内容、时长、画幅），我会重新设计方案。",
+                "video-opinion",
+                List.of(Map.of("message", message, "duration", duration, "source", source == null ? "" : source)),
+                "human_input",
+                List.of(Map.of("id", "custom", "title", "✍ 自定义输入"))));
+    }
+
+    /** 合并自定义意见重新设计方案（有图 → 视觉模型看原图；无图 → LLM）→ 新 video_plan 卡片（先展示再确认） */
+    private String resumeVideoWithOpinion(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String opinion = request.getCustomText();
+        if (opinion == null || opinion.isBlank()) opinion = request.getContent();
+        String source = support.planField(checkpoint.getPlan(), "source");
+        String modelOptionsText = support.buildModelOptionsText("video");
+        List<Map<String, Object>> models = support.buildModels("video");
+        Map<String, String> recommended = Map.of();
+        Map<String, String> reasons = Map.of();
+        String message;
+        int duration;
+        if (source != null && !source.isBlank()) {
+            VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(source, opinion, modelOptionsText);
+            message = plan.message();
+            duration = plan.duration();
+            recommended = plan.params() == null ? Map.of() : plan.params();
+            reasons = plan.reasons() == null ? Map.of() : plan.reasons();
+        } else {
+            AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(opinion, modelOptionsText);
+            message = plan.message();
+            duration = plan.duration();
+            recommended = plan.params();
+            reasons = plan.reasons();
+        }
+        String planText = "📹 视频方案：\n" + message + "\n（时长 " + duration + " 秒）";
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText, "generate_video",
+                List.of(Map.of("message", message, "duration", duration, "source", source == null ? "" : source)),
+                "video_plan",
+                List.of(Map.of("id", "generate_video", "title", "开始生成视频"),
+                        Map.of("id", "refine", "title", "继续完善"),
+                        Map.of("id", "custom", "title", "✍ 自定义输入")),
+                models, recommended, reasons));
     }
 }

@@ -58,7 +58,8 @@ public class PicIntentHandler implements IntentHandler {
                         planText, "generate_image",
                         List.of(Map.of("prompt", refinedPrompt, "source", source)), "human_input",
                         List.of(Map.of("id", "generate_image", "title", "生成图片"),
-                                Map.of("id", "refine", "title", "继续完善")),
+                                Map.of("id", "refine", "title", "继续完善"),
+                                Map.of("id", "custom", "title", "✍ 自定义输入")),
                         models, Map.of(), Map.of()));
             } else {
                 // 无参考图：LLM 生成图片提示词 → HITL 方案确认卡片（与有图链同构：用户确认后才生成，
@@ -72,7 +73,8 @@ public class PicIntentHandler implements IntentHandler {
                         planText, "generate_image",
                         List.of(Map.of("prompt", prompt, "source", "")), "human_input",
                         List.of(Map.of("id", "generate_image", "title", "生成图片"),
-                                Map.of("id", "refine", "title", "继续完善")),
+                                Map.of("id", "refine", "title", "继续完善"),
+                                Map.of("id", "custom", "title", "✍ 自定义输入")),
                         models, Map.of(), Map.of()));
             }
         } catch (Exception e) {
@@ -92,6 +94,10 @@ public class PicIntentHandler implements IntentHandler {
         // 分支 2：选项卡片提交（Orchestrator 特判转此）→ 合并所选方向重新设计方案卡片（先展示新方案再确认）。
         // 注意用 checkpoint.getAction() 判断：request.getAction() 此时是用户点的选项 id（opt1/custom），不是 checkpoint action
         if ("pic-option".equals(checkpoint.getAction())) {
+            return resumeRefineOption(request, checkpoint);
+        }
+        // 分支 2.5：方案卡片的「✍ 自定义输入」（Orchestrator custom 特判转此）→ 合并自定义意见重新设计方案卡片
+        if ("custom".equals(request.getAction()) && "generate_image".equals(checkpoint.getAction())) {
             return resumeRefineOption(request, checkpoint);
         }
         // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
