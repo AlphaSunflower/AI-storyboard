@@ -101,8 +101,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         }
 
         try {
-            String result;
-            String localPath;
+            List<String> localPaths = new ArrayList<>();
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
             // 模型选择：显式传入 > 分支默认——图改图/编辑分支用 defaultImageEditModel（环境变量可配），纯文生图用 defaultImageModel
             String effectiveModel = model != null ? model
@@ -110,27 +109,28 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                             ? config.getDefaultImageEditModel()
                             : config.getDefaultImageModel();
 
-            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关）
+            // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
             if (hasReferenceImages || "edit".equals(mode)) {
-                result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
-                localPath = fileStorageService.saveImageFromBase64(result);
+                String result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
+                localPaths.add(fileStorageService.saveImageFromBase64(result));
 
-            // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式）
+            // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式；n>1 多图）
             } else {
-                result = callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio, n);
-                if (result.startsWith("http://") || result.startsWith("https://")) {
-                    localPath = fileStorageService.saveImage(result);
-                } else {
-                    localPath = fileStorageService.saveImageFromBase64(result);
+                for (String r : callOpenAIImage(effectiveModel, prompt, size, quality, aspectRatio, n)) {
+                    localPaths.add(r.startsWith("http://") || r.startsWith("https://")
+                            ? fileStorageService.saveImage(r)
+                            : fileStorageService.saveImageFromBase64(r));
                 }
             }
 
             if (scene != null) {
-                scene.setImageUrl(localPath);
+                scene.setImageUrl(localPaths.getFirst());
+                // 多图结果：逗号分隔存入 image_urls（imageUrl 保留首图，兼容旧逻辑/Agent 链路）
+                scene.setImageUrls(String.join(",", localPaths));
                 scene.setImageStatus("completed");
                 sceneMapper.updateById(scene);
             }
-            return localPath;
+            return localPaths.getFirst();
         } catch (Exception e) {
             if (scene != null) {
                 scene.setImageStatus("failed");
@@ -164,8 +164,9 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     /**
      * 纯文生图：Spring AI ImageModel 调 /v1/images/generations（统一走网关，模型→渠道路由与密钥选择下沉网关）。
      * 超时 180s + 重试 1 次对齐原 HttpClient 语义（OpenAI SDK 重试覆盖超时/连接错误/5xx）。
+     * n>1 时返回多张结果（b64_json 优先，url 兜底）。
      */
-    private String callOpenAIImage(String model, String prompt, String size, String quality,
+    private List<String> callOpenAIImage(String model, String prompt, String size, String quality,
                                     String aspectRatio, Integer n) {
         OpenAiImageOptions.Builder builder = OpenAiImageOptions.builder()
                 .model(model)
@@ -182,13 +183,19 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         }
 
         ImageResponse response = imageModel.call(new ImagePrompt(prompt, builder.build()));
-        // b64_json 优先，url 兜底（与原实现一致）
-        Image image = Objects.requireNonNull(response.getResult()).getOutput();
-        String result = image.getB64Json();
-        if (result == null || result.isEmpty()) {
-            result = image.getUrl();
+        List<String> results = new ArrayList<>();
+        for (org.springframework.ai.image.ImageGeneration gen : response.getResults()) {
+            Image image = gen.getOutput();
+            String r = image.getB64Json();
+            if (r == null || r.isEmpty()) {
+                r = image.getUrl();
+            }
+            if (r != null && !r.isEmpty()) results.add(r);
         }
-        return result;
+        if (results.isEmpty()) {
+            throw new RuntimeException("图片生成返回结果为空");
+        }
+        return results;
     }
 
     // ═══════════════════════════════════════════════════════════
