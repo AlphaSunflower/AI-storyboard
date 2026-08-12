@@ -9,6 +9,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.MultipartBuilder;
 import com.storyboard.service.ai.VideoGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -62,6 +63,20 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                                    String resolution, String size, String aspectRatio,
                                    Integer duration, String negativePrompt, Long seed,
                                    List<String> referenceImages, String generatedImageUrl) {
+        return createVideoTask(sceneId, prompt, alias, resolution, size, aspectRatio,
+                duration, negativePrompt, seed, referenceImages, generatedImageUrl, null, null);
+    }
+
+    /**
+     * 创建视频生成任务（多模态参考素材版）。
+     * 参考素材任一存在 → 多模态参考模式（r2va，不传首帧 imageUrl）；否则沿用首帧/文生视频逻辑。
+     */
+    @Override
+    public String createVideoTask(String sceneId, String prompt, String alias,
+                                   String resolution, String size, String aspectRatio,
+                                   Integer duration, String negativePrompt, Long seed,
+                                   List<String> referenceImages, String generatedImageUrl,
+                                   List<String> referenceVideos, List<String> referenceAudios) {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
 
@@ -95,21 +110,42 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 body.put("seed", seed);
             }
 
-            // 图生视频 imageUrl：优先已生成图片（本地文件 → data URI 内联——
-            // 图片在业务 uploads 目录，网关无权限访问，设计 §6.2 明确业务侧保留此转换），
-            // 其次参考图第一张（base64 已有，直接用）
-            if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
-                String filename = extractFilename(generatedImageUrl);
-                Path localFile = fileStorageService.resolveImage(filename);
-                if (Files.exists(localFile)) {
-                    byte[] bytes = Files.readAllBytes(localFile);
-                    String mime = FileStorageService.contentType(filename);
-                    body.put("imageUrl", "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes));
-                } else {
-                    log.warn("Reference image not found: {}", localFile);
+            // 参考素材转换：任一存在 → 多模态参考模式（r2va），不再传首帧 imageUrl
+            // 本地文件（/api/files/... 相对路径）→ 小文件(≤10MB) data URI 内联 / 大文件经网关上传代理换 mm_file://
+            List<String> refImages = new ArrayList<>();
+            List<String> refVideos = new ArrayList<>();
+            List<String> refAudios = new ArrayList<>();
+            if (referenceVideos != null) {
+                for (String v : referenceVideos) { String u = resolveReferenceUrl(v, "video"); if (u != null) refVideos.add(u); }
+            }
+            if (referenceAudios != null) {
+                for (String a : referenceAudios) { String u = resolveReferenceUrl(a, "audio"); if (u != null) refAudios.add(u); }
+            }
+            if (referenceImages != null) {
+                for (String i : referenceImages) { String u = resolveReferenceUrl(i, "image"); if (u != null) refImages.add(u); }
+            }
+            boolean hasRefs = !refImages.isEmpty() || !refVideos.isEmpty() || !refAudios.isEmpty();
+            if (hasRefs) {
+                body.put("referenceImages", refImages);
+                body.put("referenceVideos", refVideos);
+                body.put("referenceAudios", refAudios);
+            } else {
+                // 首帧图生视频 imageUrl：优先已生成图片（本地文件 → data URI 内联——
+                // 图片在业务 uploads 目录，网关无权限访问，设计 §6.2 明确业务侧保留此转换），
+                // 其次参考图第一张（base64 已有，直接用）
+                if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
+                    String filename = extractFilename(generatedImageUrl);
+                    Path localFile = fileStorageService.resolveImage(filename);
+                    if (Files.exists(localFile)) {
+                        byte[] bytes = Files.readAllBytes(localFile);
+                        String mime = FileStorageService.contentType(filename);
+                        body.put("imageUrl", "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes));
+                    } else {
+                        log.warn("Reference image not found: {}", localFile);
+                    }
+                } else if (referenceImages != null && !referenceImages.isEmpty()) {
+                    body.put("imageUrl", normalizeImageUrl(referenceImages.getFirst()));
                 }
-            } else if (referenceImages != null && !referenceImages.isEmpty()) {
-                body.put("imageUrl", normalizeImageUrl(referenceImages.getFirst()));
             }
 
             String jsonBody = objectMapper.writeValueAsString(body);
@@ -309,7 +345,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     }
 
     /**
-     * 参考图 data URI 归一化：已是 data URI 原样返回；裸 base64 补齐前缀
+     * 参考素材 data URI 归一化：已是 data URI 原样返回；裸 base64 补齐前缀
      * （协议转换已下沉网关，业务侧只需保证 imageUrl 是合法 data URI）。
      */
     private String normalizeImageUrl(String base64) {
@@ -319,5 +355,68 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             return base64.substring(base64.indexOf("data:"));
         }
         return "data:image/png;base64," + base64;
+    }
+
+    /** 参考素材转换：已内联/绝对 URL 原样返回；本地文件 ≤10MB 转 data URI，大文件经网关上传代理换 mm_file:// */
+    private String resolveReferenceUrl(String urlPath, String type) {
+        if (urlPath == null || urlPath.isBlank()) return null;
+        if (urlPath.startsWith("data:") || urlPath.startsWith("http") || urlPath.startsWith("mm_file://")) {
+            return urlPath;
+        }
+        String filename = extractFilename(urlPath);
+        Path localFile = switch (type) {
+            case "video" -> fileStorageService.resolveVideo(filename);
+            case "audio" -> fileStorageService.resolveAudio(filename);
+            default -> fileStorageService.resolveImage(filename);
+        };
+        if (!Files.exists(localFile)) {
+            log.warn("参考素材文件不存在: {}", localFile);
+            return null;
+        }
+        try {
+            byte[] bytes = Files.readAllBytes(localFile);
+            if (bytes.length <= 10 * 1024 * 1024) {
+                String mime = FileStorageService.contentType(filename);
+                return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes);
+            }
+            // 大文件：multipart 字节流 → 网关 /v1/files/upload → mm_file://{file_id}
+            // （base64 膨胀 ~33% 会爆上游 64MB 请求体限制，必须走平台 file_id 引用）
+            MultipartBuilder mp = new MultipartBuilder()
+                    .file("file", filename, mimeOf(filename), bytes);
+            byte[] bodyBytes = mp.build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(config.getGatewayBaseUrl() + "/v1/files/upload"))
+                    .header("Content-Type", "application/octet-stream")
+                    .header("Authorization", "Bearer " + config.getGatewayApiKey())
+                    .timeout(Duration.ofSeconds(300))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
+                    .build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                throw new RuntimeException("参考素材上传失败: " + resp.statusCode() + " " + resp.body());
+            }
+            JsonNode root = objectMapper.readTree(resp.body());
+            String fileId = root.path("file_id").asText("");
+            if (fileId.isBlank()) {
+                throw new RuntimeException("参考素材上传响应缺少 file_id: " + resp.body());
+            }
+            return fileId;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("参考素材转换失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 参考素材 MIME 推断（multipart 上传用） */
+    private String mimeOf(String filename) {
+        String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+        return switch (ext) {
+            case "mp4" -> "video/mp4";
+            case "mov" -> "video/quicktime";
+            case "wav" -> "audio/wav";
+            case "m4a" -> "audio/mp4";
+            default -> "audio/mpeg";
+        };
     }
 }

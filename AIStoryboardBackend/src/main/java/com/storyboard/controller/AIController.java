@@ -56,7 +56,8 @@ public class AIController {
             request.sceneId(), request.prompt(), request.model(),
             request.resolution(), request.size(), request.aspectRatio(),
             request.duration(), request.negativePrompt(), request.seed(),
-            request.referenceImages(), request.generatedImageUrl()
+            request.referenceImages(), request.generatedImageUrl(),
+            request.referenceVideos(), request.referenceAudios()
         );
         return ApiResponse.ok(Map.of("taskId", taskId, "sceneId", request.sceneId()));
     }

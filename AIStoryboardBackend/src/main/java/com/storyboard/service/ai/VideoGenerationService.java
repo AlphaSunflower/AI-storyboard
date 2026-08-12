@@ -22,6 +22,16 @@ public interface VideoGenerationService {
                            List<String> referenceImages, String generatedImageUrl);
 
     /**
+     * 创建视频生成任务（多模态参考素材版：referenceVideos/referenceAudios 为本地文件相对 URL
+     * 或 data URI/mm_file://；与首帧 imageUrl 互斥，由服务内部保证）。
+     */
+    String createVideoTask(String sceneId, String prompt, String alias,
+                           String resolution, String size, String aspectRatio,
+                           Integer duration, String negativePrompt, Long seed,
+                           List<String> referenceImages, String generatedImageUrl,
+                           List<String> referenceVideos, List<String> referenceAudios);
+
+    /**
      * 轮询视频任务状态，完成后自动下载视频文件（统一走网关）。
      * 网关统一响应 {taskId, status, progress?, error?}（status: processing/succeeded/failed）：
      *   succeeded → GET 网关下载端点拿视频流 → 本地转存 uploads/videos → {status:completed, videoUrl}

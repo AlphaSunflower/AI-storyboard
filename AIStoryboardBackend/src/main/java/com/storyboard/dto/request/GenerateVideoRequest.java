@@ -13,5 +13,7 @@ public record GenerateVideoRequest(
     String negativePrompt,
     Long seed,
     List<String> referenceImages,
-    String generatedImageUrl
+    String generatedImageUrl,
+    List<String> referenceVideos,
+    List<String> referenceAudios
 ) {}
