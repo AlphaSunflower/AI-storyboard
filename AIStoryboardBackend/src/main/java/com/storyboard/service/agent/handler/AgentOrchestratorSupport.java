@@ -109,6 +109,9 @@ public class AgentOrchestratorSupport {
         }
     }
 
+    /** 图片修改方向选项（refine 继续完善时 LLM 按当前方案动态生成；options=[{id,title}]） */
+    public record PicRefineOptionsResult(String message, List<Map<String, Object>> options) {}
+
     /**
      * HITL 阶段产出（模板 {@link #runHITLStage} 的输入）：
      * 方案文本 + checkpoint action + plan 载荷 + 事件名（human_input / video_plan）+ 确认按钮
@@ -237,6 +240,41 @@ public class AgentOrchestratorSupport {
     /** 无参考图视频：LLM 生成视频方案（无模型选项，兼容现状调用） */
     public VideoPlanResult callVideoPlan(String content) {
         return callVideoPlan(content, null);
+    }
+
+    /**
+     * 图片修改方向选项（refine「继续完善」时调用）：基于当前图片方案，
+     * LLM 从不同维度（场景/服装/氛围/画风等，按方案内容动态）给出 2~4 个修改方向选项。
+     * 解析失败/空输出 → 兜底通用 4 方向（保证卡片始终有选项可点）。
+     */
+    public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource) {
+        try {
+            String raw = retryTransient(() -> planClient().prompt()
+                .system("你是图片修改方向设计师。基于当前图片方案，从不同修改维度给出 2~4 个具体可执行的修改方向选项。"
+                    + (hasSource ? "注意图片有参考图（图改图场景），选项要能基于原图调整。" : "")
+                    + "输出 JSON：{\"message\":\"给用户的简短引导语（≤20 字）\",\"options\":[{\"id\":\"opt1\",\"title\":\"维度-具体方向（≤10 字）\"}]}。"
+                    + "title 用「维度-方向」格式，如 场景-婚礼现场、氛围-更浪漫、画风-Q版、服装-中式礼服。只输出 JSON。")
+                .user("当前图片方案：" + basePrompt)
+                .call()
+                .content());
+            PicRefineOptionsResult result = new BeanOutputConverter<>(PicRefineOptionsResult.class).convert(raw);
+            if (result.options() == null || result.options().isEmpty()) {
+                return fallbackPicRefineOptions();
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("图片修改选项 LLM 调用失败: {}", e.getMessage());
+            return fallbackPicRefineOptions();
+        }
+    }
+
+    /** 兜底选项：LLM 失败/空输出时保证卡片可点 */
+    private PicRefineOptionsResult fallbackPicRefineOptions() {
+        return new PicRefineOptionsResult("想怎么调整这张图片？", List.of(
+                Map.of("id", "opt1", "title", "场景-换个环境"),
+                Map.of("id", "opt2", "title", "氛围-更突出"),
+                Map.of("id", "opt3", "title", "画风-更精致"),
+                Map.of("id", "opt4", "title", "构图-重新布局")));
     }
 
     /**

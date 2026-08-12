@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,7 +36,7 @@ public class PicIntentHandler implements IntentHandler {
 
     @Override
     public Set<String> resumeActions() {
-        return Set.of("generate_image");
+        return Set.of("generate_image", "refine");
     }
 
     @Override
@@ -84,7 +85,16 @@ public class PicIntentHandler implements IntentHandler {
 
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        // 图片方案确认：图改图执行（checkpoint plan 存 prompt+source）；收尾事件序列走 resumeStage 模板
+        // 分支 1：继续完善 → LLM 生成修改方向选项卡片（人工介入点选，替代让用户打字）
+        if ("refine".equals(request.getAction())) {
+            return resumeRefineOptions(request, checkpoint);
+        }
+        // 分支 2：选项卡片提交（pic-option 由 Orchestrator 特判转此，customText/action 已设置）→
+        // 合并所选方向重新设计方案卡片（先展示新方案再确认）
+        if ("pic-option".equals(request.getAction())) {
+            return resumeRefineOption(request, checkpoint);
+        }
+        // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
         // 用户提交的模型/尺寸参数（卡片选择）优先，未提交走默认（图改图默认模型=defaultImageEditModel）
@@ -109,5 +119,66 @@ public class PicIntentHandler implements IntentHandler {
                     "message", String.valueOf(result.getOrDefault("message", "图片生成失败，请稍后重试"))));
             return "";
         }
+    }
+
+    /**
+     * 「继续完善」：LLM 按当前方案动态生成修改方向选项（场景/服装/氛围/画风等）→ 选项卡片。
+     * 用户点选或自定义输入，均走 pic-option checkpoint 续流。
+     */
+    private String resumeRefineOptions(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String basePrompt = support.planField(checkpoint.getPlan(), "prompt");
+        String source = support.planField(checkpoint.getPlan(), "source");
+        boolean hasSource = source != null && !source.isBlank();
+        AgentOrchestratorSupport.PicRefineOptionsResult opt = support.callPicRefineOptions(basePrompt, hasSource);
+        List<Map<String, Object>> actions = new ArrayList<>();
+        for (Map<String, Object> o : opt.options()) {
+            actions.add(Map.of("id", String.valueOf(o.get("id")), "title", String.valueOf(o.get("title"))));
+        }
+        actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
+        String planText = "🖼 想怎么调整这张图片？\n"
+                + (opt.message() == null || opt.message().isBlank() ? "" : opt.message() + "\n")
+                + "\n点选修改方向，或「✍ 自定义输入」直接描述。";
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText, "pic-option",
+                List.of(Map.of("prompt", basePrompt, "source", source == null ? "" : source,
+                        "options", opt.options())),
+                "human_input", actions));
+    }
+
+    /**
+     * 选项卡片提交：合并所选修改方向（选项 title 或自定义文本）到原需求 → 重新设计方案卡片
+     * （先展示调整后的新方案，用户确认后才生成——「不断完善方案」交互）。
+     */
+    private String resumeRefineOption(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String basePrompt = support.planField(checkpoint.getPlan(), "prompt");
+        String source = support.planField(checkpoint.getPlan(), "source");
+        // 所选方向：custom 输入优先，否则按 action id 查 plan options 的 title
+        String chosen = request.getCustomText();
+        if (chosen == null || chosen.isBlank()) {
+            for (Map<String, Object> o : support.planListField(checkpoint.getPlan(), "options")) {
+                if (String.valueOf(o.get("id")).equals(request.getAction())) {
+                    chosen = String.valueOf(o.get("title"));
+                    break;
+                }
+            }
+        }
+        if (chosen == null || chosen.isBlank()) {
+            chosen = request.getAction();
+        }
+        // 合并方向重新设计提示词：有源图 → 视觉模型看图 + 新诉求；无源图 → LLM 重写
+        String refinedPrompt;
+        if (source != null && !source.isBlank()) {
+            refinedPrompt = imageRefinePromptService.buildRefinedPrompt(source, basePrompt + "，调整方向：" + chosen);
+        } else {
+            refinedPrompt = support.callImagePrompt(basePrompt + "，调整方向：" + chosen);
+        }
+        String planText = "🖼 调整后的图片方案：\n" + refinedPrompt
+                + "\n\n点击「生成图片」开始生成，或「继续完善」再次调整。";
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText, "generate_image",
+                List.of(Map.of("prompt", refinedPrompt, "source", source == null ? "" : source)), "human_input",
+                List.of(Map.of("id", "generate_image", "title", "生成图片"),
+                        Map.of("id", "refine", "title", "继续完善")),
+                List.of(), Map.of(), Map.of()));
     }
 }

@@ -192,6 +192,13 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 byIntent.get("intent-aisplit").resume(request, cp);
                 return request.getLastMessage();
             }
+            // 5) pic-option：图片修改方向选项卡片（refine 后动态选项，含 custom）→ 转 pic handler（customText 带自定义方向）
+            if ("pic-option".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                byIntent.get("intent-pic").resume(request, cp);
+                return request.getLastMessage();
+            }
 
             // 按提交 action 分发（前端提交的 action 为准：agree/replace/append/cancel/disagree → 对应 handler；refine 等 → 默认继续完善）
             IntentHandler handler = byAction.get(action);
