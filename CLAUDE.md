@@ -94,7 +94,7 @@ private OffsetDateTime createdAt;
   - 创建：`POST {minimax-base-url}/v2/video_generation`，Bearer `MINIMAX_API_KEY`（.env，不提交），JSON body `{model:"MiniMax-H3", content:[{type:text,text:prompt}, {type:image_url,image_url:{url},role:first_frame}], resolution:"768P"|"2K", duration:4-15, ratio}` → `task_id`
   - 轮询：`GET /v2/query/video_generation/{task_id}` → `task.status`（queued/running→processing；succeeded→`content.url` **限时链接须立即转存** uploads/videos；failed→`error.message`）
   - **图生视频**：本地图（`/api/files/images/xxx.png`）读文件转 `data:image/png;base64,...` 内联（无需上传接口；请求体 ≤64MB）；图生视频 ratio 恒 `adaptive`
-  - **分辨率**：恒用配置默认档 `minimaxVideoResolution`（默认 **768P** 最低档；用户要求默认最低分辨率，调用方传 720p/1080p/4K/2K 一律忽略，不 2K 透传——省钱且生成更快；换档改配置即可 768P|2K）；时长 clamp 4~15
+  - **分辨率**：默认档 `minimaxVideoResolution`（默认 **768P** 最低档，省钱且生成更快）；**显式传值透传**（2026-08-12 起：Agent 卡片人工选 2K 等生效——网关 `VideoGatewayServiceImpl` 显式 resolution 优先，未传回落默认档）；时长 clamp 4~15
   - 错误结构 OAI 风格 `{error:{message}}`，透传前端；429/5xx 轻量重试 3 次（无需 Laozhang 的 10 次换池）
 - **配置**：`ai.video-provider`、`ai.laozhang.minimax-api-key`、`ai.laozhang.minimax-base-url`（默认 api.minimaxi.com）、`minimax-video-model`（MiniMax-H3）、`minimax-video-resolution`（768P）；切回 Laozhang 只需 `ai.video-provider=laozhang`
 - **MCP 文档检索**：MiniMax 文档中心 MCP = `https://platform.minimaxi.com/docs/mcp`（HTTP transport，search + 虚拟文件系统查文档/OpenAPI spec），已配置 Hermes `mcp_servers.minimax_docs`
@@ -363,6 +363,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **命名**：用户可见文案统一「产出素材」（原「资产」，仅文案，store/字段名 assets/AgentAsset 不变）
 - **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
+- **卡片模型/参数选择（2026-08-12 起）**：`human_input`/`video_plan` 事件可带 `models`（网关 `/v1/models` 模型列表，含各模型 params 能力枚举+默认值）、`recommended`（LLM 方案生成时预选的参数值）、`reasons`（每参数推荐理由，≤15 字）——前端 `AgentParamSelector` 渲染模型下拉+参数联动，**默认选中 LLM 推荐值并展示理由，用户可改**；提交 `/form/submit` body 带 `params`（`{model,resolution,duration,aspectRatio,size,quality}`），经 `OrchestrationRequest.params` → handler → 生成服务透传，**取值优先级：用户提交 > LLM 推荐 > checkpoint plan 原值 > config 默认**；无 `models` 字段时前端不渲染选择器（零回归）。LLM 选参选项文本由 `AgentOrchestratorSupport.buildModelOptionsText(type)` 组装（网关不可用返回空，LLM 不选参直接出默认方案）
 - **参考图**：`POST /api/agent/upload` → 返回 `url` → 作为 `PicUrl` 随消息发送（图生图/图生视频）
 - **LLM 配置**：复用 `LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`（.env，Spring AI 网关）
 
