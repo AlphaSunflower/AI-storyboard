@@ -117,8 +117,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             return answer;
         } catch (Exception e) {
             log.error("AgentOrchestrator 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            support.sendEvent(request, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
-            return "";
+            // 上游错误不直接展示：LLM 翻译成友好中文回复（踩线→改措辞 / 网络→稍后重试），正常 message 收尾
+            return support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再问我一次。");
         }
         // 注意：emitter.complete() 由调用方（AgentChatServiceImpl）统一执行，
         // 且调用方 finally 先释放会话锁再 complete——避免前端收到 EOF 立即发下一条时锁未释放（竞态 40901）
@@ -231,8 +231,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             return request.getLastMessage();
         } catch (Exception e) {
             log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            support.sendEvent(request, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
-            return "";
+            // 上游错误不直接展示：LLM 翻译成友好中文回复，正常 message 收尾（同 run）
+            return support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再试一次。");
         }
         // 同上：complete 由调用方统一执行（先释放锁再 complete，防 EOF 竞态）
     }

@@ -493,7 +493,7 @@ public class AgentOrchestratorSupport {
                 req.getConversation(), null, prompt, model, resolution, null,
                 effAspectRatio, effDuration, null, null, source);
         if (taskId == null || taskId.isBlank()) {
-            sendEvent(req, "error", Map.of("code", "50202", "message", "视频任务创建失败，请稍后重试"));
+            sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
         }
         // 立即受理：task_accepted → 本轮 SSE 结束（前端转轮询，不再同步阻塞 7.5min）
@@ -517,8 +517,9 @@ public class AgentOrchestratorSupport {
                     return;
                 }
                 if ("failed".equals(status)) {
-                    updateVideoAsset(taskId, "failed", null,
-                            result.getOrDefault("error", "未知错误"));
+                    // 上游失败原因 LLM 友好化后落库（前端轮询展示友好文案，不露英文报错）
+                    String friendly = friendlyErrorText(result.getOrDefault("error", ""), "视频生成失败了，请稍后重试。");
+                    updateVideoAsset(taskId, "failed", null, friendly);
                     return;
                 }
                 // 运行中：status 置 running（progress 无存储列，仅日志可见；前端轮询态即可）
@@ -617,6 +618,40 @@ public class AgentOrchestratorSupport {
     }
 
     // ===== SSE 事件 =====
+
+    /**
+     * 错误友好化：调 LLM 把上游原始错误（safety 审核/网络/超时等）翻译成给用户看的自然中文回复。
+     * 用户不该看到英文报错原文——踩线提示改措辞、网络提示稍后重试、其余通用文案。
+     * LLM 调用失败回退 fallback（保证永不空手）。后台线程（视频轮询失败）也可用。
+     */
+    public String friendlyErrorText(String rawError, String fallback) {
+        try {
+            String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
+            String content = planClient().prompt()
+                    .system("你是用户友好的 AI 创作助手。上游 AI 生成服务返回了错误，请把错误翻译成对用户友好的中文回复：\n"
+                            + "- 如果是内容安全审核拒绝（错误含 safety/rejected/violations/审核 等关键词）：告诉用户提示词可能触及了内容审核限制（如暴力等类别），建议修改措辞后重试，不要展开敏感细节。\n"
+                            + "- 如果是网络/服务不可用（错误含 timeout/connect/refused/5xx/429 等）：告诉用户服务暂时繁忙，请稍后重试。\n"
+                            + "- 其他错误：简短说明生成失败了，建议稍后重试或调整描述。\n"
+                            + "要求：2~4 句自然口语中文，不要出现原始错误码或英文原文，不要提“上游/渠道”等技术词。")
+                    .user(raw)
+                    .call()
+                    .content();
+            if (content != null && !content.isBlank()) {
+                return content.trim();
+            }
+        } catch (Exception e) {
+            log.warn("错误友好化 LLM 调用失败，回退固定文案: {}", e.getMessage());
+        }
+        return fallback;
+    }
+
+    /** 友好错误收尾：发 message（完整文案）+ message_end（正常结束，非 error 事件），返回文案供落库 */
+    public String sendFriendlyError(OrchestrationRequest req, String rawError, String fallback) {
+        String friendly = friendlyErrorText(rawError, fallback);
+        sendEvent(req, "message", Map.of("content", friendly));
+        sendEvent(req, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", friendly));
+        return friendly;
+    }
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {

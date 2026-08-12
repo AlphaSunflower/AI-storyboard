@@ -74,8 +74,7 @@ public class VideoIntentHandler implements IntentHandler {
         } catch (Exception e) {
             log.error("VideoIntentHandler.handle 失败: conversationId={}, error={}",
                     request.getConversation().getId(), e.getMessage(), e);
-            support.sendEvent(request, "error", Map.of("code", "50202", "message", "视频方案生成失败，请稍后重试"));
-            return "";
+            return support.sendFriendlyError(request, e.getMessage(), "视频方案暂时没生成出来，请稍后重试或换个说法。");
         }
     }
 

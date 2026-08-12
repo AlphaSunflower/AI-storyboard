@@ -407,7 +407,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             return answerService.answer(conversation, content, new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L));
         } catch (Exception e) {
             log.error("blocking 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            return "服务异常，请稍后重试";
+            // 友好化：返回给用户的文案由 LLM 翻译，不直接展示英文报错
+            return orchestratorSupport.friendlyErrorText(e.getMessage(), "服务暂时出了点问题，请稍后重试。");
         }
     }
 
@@ -473,7 +474,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     return;
                 }
                 log.error("Agent 编排失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
-                sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
+                sendFriendlyError(emitter, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再问我一次。");
                 emitter.complete();
             } finally {
                 // 先释放会话锁再 complete：前端收到 EOF 时锁已释放，防下一条消息立即撞锁（竞态 40901）
@@ -501,6 +502,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
         }
+    }
+
+    /** 兜底友好错误：LLM 翻译原始错误 → message + message_end 正常收尾（不露英文报错） */
+    private void sendFriendlyError(SseEmitter emitter, String rawError, String fallback) {
+        String friendly = orchestratorSupport.friendlyErrorText(rawError, fallback);
+        sendEvent(emitter, "message", Map.of("content", friendly));
+        sendEvent(emitter, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", friendly));
     }
 
     /**
@@ -628,7 +636,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) return;
                 log.error("图生视频生成失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
-                sendEvent(emitter, "error", Map.of("code", "50202", "message", "视频生成失败，请稍后重试"));
+                sendFriendlyError(emitter, e.getMessage(), "视频生成暂时失败了，请稍后重试。");
             } finally {
                 // 先释放会话锁再 complete（防 EOF 竞态：前端收到 task_accepted 后立即轮询/再发消息）
                 conversationLock.release(conversationId);
@@ -676,7 +684,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     return;
                 }
                 log.error("HITL 提交失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
-                sendEvent(emitter, "error", Map.of("code", "50202", "message", "服务异常，请稍后重试"));
+                sendFriendlyError(emitter, e.getMessage(), "刚才的操作没成功，请稍后重试或换个说法。");
             } finally {
                 // 先释放会话锁再 complete（防 EOF 竞态）
                 conversationLock.release(conversationId);

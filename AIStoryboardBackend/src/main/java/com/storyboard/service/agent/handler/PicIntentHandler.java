@@ -80,8 +80,7 @@ public class PicIntentHandler implements IntentHandler {
         } catch (Exception e) {
             log.error("PicIntentHandler.handle 失败: conversationId={}, error={}",
                     request.getConversation().getId(), e.getMessage(), e);
-            support.sendEvent(request, "error", Map.of("code", "50202", "message", "图片方案生成失败，请稍后重试"));
-            return "";
+            return support.sendFriendlyError(request, e.getMessage(), "图片方案暂时没生成出来，请稍后重试或换个说法。");
         }
     }
 
@@ -121,9 +120,9 @@ public class PicIntentHandler implements IntentHandler {
                     "sceneCount", -1L));
             return content;
         } else {
-            support.sendEvent(request, "error", Map.of("code", "50202",
-                    "message", String.valueOf(result.getOrDefault("message", "图片生成失败，请稍后重试"))));
-            return "";
+            // 上游生成失败（如 safety 审核拒绝）：LLM 翻译成友好中文回复（提示改措辞），不直接展示英文报错
+            return support.sendFriendlyError(request, String.valueOf(result.getOrDefault("message", "")),
+                    "图片没生成出来，请稍后重试或调整一下描述。");
         }
     }
 
