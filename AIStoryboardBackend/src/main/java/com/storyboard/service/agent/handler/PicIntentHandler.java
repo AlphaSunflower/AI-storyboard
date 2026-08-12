@@ -60,28 +60,19 @@ public class PicIntentHandler implements IntentHandler {
                                 Map.of("id", "refine", "title", "继续完善")),
                         models, Map.of(), Map.of()));
             } else {
-                // 无参考图：LLM 生成图片提示词 → 直接文生图（自动完成，无 HITL）
-                support.sendEvent(request, "workflow", Map.of("title", "正在生成图片…", "status", "node_started"));
+                // 无参考图：LLM 生成图片提示词 → HITL 方案确认卡片（与有图链同构：用户确认后才生成，
+                // 满足「计划形式」交互——2026-08-12 用户要求，替代原直接自动文生图）
+                support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
                 String prompt = support.callImagePrompt(request.getContent());
-                Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, null, null, null);
-                if (Boolean.TRUE.equals(result.get("ok"))) {
-                    String url = String.valueOf(result.get("imageUrl"));
-                    String content = "![生成图片](" + url + ")";
-                    support.sendMessage(request, content);
-                    support.sendEvent(request, "confirm_result", Map.of(
-                            "kind", "image", "url", url, "assetId", result.getOrDefault("assetId", ""),
-                            "sceneCount", 0,
-                            "actions", List.of(
-                                    Map.of("id", "refine", "title", "继续完善"),
-                                    Map.of("id", "done", "title", "满意完成"))));
-                    support.sendEvent(request, "message_end", Map.of(
-                            "messageId", "", "sceneCount", -1L, "content", content));
-                    return content;
-                } else {
-                    support.sendEvent(request, "error", Map.of("code", "50202",
-                            "message", String.valueOf(result.getOrDefault("message", "图片生成失败，请稍后重试"))));
-                    return "";
-                }
+                String planText = "🖼 图片生成方案：\n" + prompt + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
+                // models 不过滤 Gemini：文生图（mode=null）走 generations 接口，网关对 Gemini 转原生格式可用
+                List<Map<String, Object>> models = support.buildModels("image");
+                return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                        planText, "generate_image",
+                        List.of(Map.of("prompt", prompt, "source", "")), "human_input",
+                        List.of(Map.of("id", "generate_image", "title", "生成图片"),
+                                Map.of("id", "refine", "title", "继续完善")),
+                        models, Map.of(), Map.of()));
             }
         } catch (Exception e) {
             log.error("PicIntentHandler.handle 失败: conversationId={}, error={}",
