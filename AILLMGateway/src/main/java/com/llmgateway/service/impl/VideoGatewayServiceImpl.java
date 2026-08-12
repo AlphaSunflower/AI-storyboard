@@ -26,6 +26,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -142,7 +143,38 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         textPart.put("type", "text");
         textPart.put("text", body.path("prompt").asText(""));
 
+        // 多模态参考素材（r2va）：referenceImages / referenceVideos / referenceAudios
+        // （data URI 或 mm_file://）；与图生视频首帧（imageUrl）互斥——MiniMax 契约明确二者不可混用
+        List<String> refImages = new ArrayList<>();
+        for (JsonNode n : body.path("referenceImages")) refImages.add(n.asText(""));
+        List<String> refVideos = new ArrayList<>();
+        for (JsonNode n : body.path("referenceVideos")) refVideos.add(n.asText(""));
+        List<String> refAudios = new ArrayList<>();
+        for (JsonNode n : body.path("referenceAudios")) refAudios.add(n.asText(""));
+        boolean hasRefs = !refImages.isEmpty() || !refVideos.isEmpty() || !refAudios.isEmpty();
         String imageUrl = body.path("imageUrl").asText("");
+        if (hasRefs && !imageUrl.isBlank()) {
+            throw new BusinessException(40001, "多模态参考素材与首帧图生视频互斥，不能同时提交");
+        }
+        for (String ref : refImages) {
+            ObjectNode imgPart = content.addObject();
+            imgPart.put("type", "image_url");
+            imgPart.put("image_url", objectMapper.createObjectNode().put("url", ref));
+            imgPart.put("role", "reference_image");
+        }
+        for (String ref : refVideos) {
+            ObjectNode vidPart = content.addObject();
+            vidPart.put("type", "video_url");
+            vidPart.put("video_url", objectMapper.createObjectNode().put("url", ref));
+            vidPart.put("role", "reference_video");
+        }
+        for (String ref : refAudios) {
+            ObjectNode audPart = content.addObject();
+            audPart.put("type", "audio_url");
+            audPart.put("audio_url", objectMapper.createObjectNode().put("url", ref));
+            audPart.put("role", "reference_audio");
+        }
+
         if (!imageUrl.isBlank()) {
             ObjectNode imgPart = content.addObject();
             imgPart.put("type", "image_url");
