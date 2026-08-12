@@ -37,7 +37,7 @@ export const aiApi = {
     referenceImages?: string[];
     mode?: string;
     generatedImageUrl?: string;
-  }) => client.post<ApiResponse<{ imageUrl: string }>>('/ai/generate-image', data),
+  }) => client.post<ApiResponse<{ imageUrl: string; imageUrls?: string; sceneId: string }>>('/ai/generate-image', data),
 
   generateVideo: (data: {
     sceneId: string;
@@ -50,6 +50,8 @@ export const aiApi = {
     negativePrompt?: string;
     seed?: number;
     referenceImages?: string[];
+    referenceVideos?: string[];
+    referenceAudios?: string[];
     generatedImageUrl?: string;
   }) => client.post<ApiResponse<{ taskId: string; sceneId: string }>>('/ai/generate-video', data),
 

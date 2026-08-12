@@ -14,6 +14,14 @@ export interface ProjectResponse {
   scenes: SceneResponse[];
 }
 
+export interface SceneReferenceAsset {
+  id: string;
+  type: 'image' | 'video' | 'audio';
+  url: string;
+  fileName: string;
+  fileSize: number;
+}
+
 export interface SceneResponse {
   id: string;
   projectId: string;
@@ -29,6 +37,18 @@ export interface SceneResponse {
   videoUrl: string;
   imageStatus: string;
   videoStatus: string;
+  /** 多图结果：逗号分隔 URL（imageUrl 为首图） */
+  imageUrls: string;
+  /** 分镜生成参数覆盖（null/undefined = 跟随全局默认） */
+  imageModel: string;
+  imageSize: string;
+  imageQuality: string;
+  imageN: number;
+  videoModel: string;
+  videoAspectRatio: string;
+  /** 视频覆盖参数（复用既有列） */
+  videoResolution: string;
+  duration: number;
 }
 
 export const projectApi = {

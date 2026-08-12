@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { projectApi } from '../api/projects';
-import type { ProjectResponse, SceneResponse } from '../api/projects';
+import type { ProjectResponse, SceneReferenceAsset, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, IMAGE_MODELS, VIDEO_MODELS, type ModelOption } from '../config';
@@ -46,6 +46,8 @@ interface ProjectState {
   // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
   imageModelOptions: ModelOption[];
   videoModelOptions: ModelOption[];
+  // 分镜参考素材（sceneId -> 素材列表）
+  sceneRefs: Record<string, SceneReferenceAsset[]>;
 
   // toast 通知
   toasts: ToastMessage[];
@@ -65,9 +67,15 @@ interface ProjectState {
   /** 从网关拉取生图/生视频模型列表（编辑器挂载时调用；失败静默保持默认） */
   fetchAiModels: () => Promise<void>;
 
-  // scene ref state — stored as JSON in soundDesign field
-  getSceneRefs: (sceneId: string) => { images: string[]; useForImage: boolean; useForVideo: boolean };
-  setSceneRefs: (sceneId: string, refs: { images: string[]; useForImage: boolean; useForVideo: boolean }) => Promise<void>;
+  // ── 分镜参考素材（后端 scene_reference_images 表持久化，替代原 soundDesign JSON 方案）──
+  sceneRefs: Record<string, SceneReferenceAsset[]>;
+  fetchSceneRefs: (sceneId: string) => Promise<void>;
+  uploadSceneRef: (sceneId: string, type: 'image' | 'video' | 'audio', file: File) => Promise<void>;
+  deleteSceneRef: (sceneId: string, refId: string) => Promise<void>;
+
+  // ── 分镜生成参数覆盖（全局默认 + 分镜覆盖：空串/0 = 清覆盖回退全局默认）──
+  setSceneParams: (sceneId: string, params: Record<string, unknown>) => Promise<void>;
+  clearSceneParams: (sceneId: string) => Promise<void>;
 
   loadProjects: () => Promise<void>;
   createProject: (name: string, creationType: string, aspectRatio: string) => Promise<ProjectResponse>;
@@ -78,7 +86,7 @@ interface ProjectState {
   selectScene: (sceneId: string) => void;
   generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string) => Promise<void>;
   generateImage: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], mode?: string, generatedImageUrl?: string) => Promise<string>;
-  generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], generatedImageUrl?: string) => Promise<string>;
+  generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], generatedImageUrl?: string, referenceVideos?: string[], referenceAudios?: string[]) => Promise<string>;
   setGeneratingImage: (sceneId: string, v: boolean) => void;
   setGeneratingVideo: (sceneId: string, v: boolean) => void;
   addScene: (projectId: string) => Promise<void>;
@@ -109,6 +117,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 初始 = 静态默认（as const 需展开为可变 ModelOption[]，不带 params）；网关拉取成功且非空时替换
   imageModelOptions: IMAGE_MODELS.map((m) => ({ value: m.value, label: m.label })),
   videoModelOptions: VIDEO_MODELS.map((m) => ({ value: m.value, label: m.label })),
+  sceneRefs: {},
   toasts: [],
   unreadScenes: new Set<string>(),
 
@@ -221,11 +230,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: true } }));
     try {
       const { imageSize, imageQuality, imageN } = get();
+      // 分镜覆盖参数优先（空串/0 = 未覆盖，回退全局默认）
+      const p = get().scenes.find(s => s.id === sceneId) ?? ({} as SceneResponse);
       const res = await aiApi.generateImage({
-        sceneId, prompt, model, referenceImages, mode, generatedImageUrl,
-        size: imageSize,
-        quality: imageQuality,
-        n: imageN,
+        sceneId, prompt,
+        model: p.imageModel || model,
+        referenceImages, mode, generatedImageUrl,
+        size: p.imageSize || imageSize,
+        quality: p.imageQuality || imageQuality,
+        n: p.imageN || imageN,
       });
       if (get().currentProject) {
         await get().loadProject(get().currentProject!.id);
@@ -245,17 +258,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  generateVideo: async (sceneId, prompt, model, referenceImages, generatedImageUrl) => {
+  generateVideo: async (sceneId, prompt, model, referenceImages, generatedImageUrl, referenceVideos, referenceAudios) => {
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: true } }));
     try {
       // 解析当前 preset（静态 VIDEO_PRESETS 或按模型 params 动态组合的 `${d}s-${a}`）
       const preset = resolveVideoPreset(get().videoPreset);
+      // 分镜覆盖参数优先（videoModel/videoAspectRatio/videoResolution/duration 覆盖全局）
+      const p = get().scenes.find(s => s.id === sceneId) ?? ({} as SceneResponse);
       const res = await aiApi.generateVideo({
-        sceneId, prompt, model, referenceImages, generatedImageUrl,
-        resolution: preset.resolution,
+        sceneId, prompt, model: p.videoModel || model, referenceImages, generatedImageUrl,
+        referenceVideos, referenceAudios,
+        resolution: p.videoResolution || preset.resolution,
         size: preset.size,
-        aspectRatio: preset.aspectRatio,
-        duration: parseInt(preset.duration),
+        aspectRatio: p.videoAspectRatio || preset.aspectRatio,
+        duration: p.duration || parseInt(preset.duration),
       });
       const taskId = res.data.data.taskId;
       let videoFailed = false;
@@ -344,15 +360,45 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  // scene ref state — stored as JSON in soundDesign field
-  getSceneRefs: (sceneId) => {
-    const scene = get().scenes.find(s => s.id === sceneId);
-    if (!scene || !scene.soundDesign) return { images: [], useForImage: true, useForVideo: true };
-    try { return JSON.parse(scene.soundDesign); } catch { return { images: [], useForImage: true, useForVideo: true }; }
+  // ── 分镜参考素材（后端持久化；替代原 soundDesign JSON 方案）──
+  fetchSceneRefs: async (sceneId) => {
+    try {
+      const res = await sceneApi.listReferences(sceneId);
+      set((s) => ({ sceneRefs: { ...s.sceneRefs, [sceneId]: res.data.data || [] } }));
+    } catch {
+      // 素材列表拉取失败不阻断页面（预览面板显示空）
+    }
   },
-  setSceneRefs: async (sceneId, refs) => {
-    await sceneApi.update(sceneId, { soundDesign: JSON.stringify(refs) });
-    set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? { ...sc, soundDesign: JSON.stringify(refs) } : sc) }));
+  uploadSceneRef: async (sceneId, type, file) => {
+    const res = await sceneApi.uploadReference(sceneId, type, file);
+    const created = res.data.data;
+    set((s) => ({ sceneRefs: { ...s.sceneRefs, [sceneId]: [...(s.sceneRefs[sceneId] || []), created] } }));
+  },
+  deleteSceneRef: async (sceneId, refId) => {
+    await sceneApi.deleteReference(refId);
+    set((s) => ({ sceneRefs: { ...s.sceneRefs, [sceneId]: (s.sceneRefs[sceneId] || []).filter(r => r.id !== refId) } }));
+  },
+
+  // ── 分镜生成参数覆盖（空串/0 = 清覆盖回退全局默认；后端 null=不修改，故清覆盖传空串/0）──
+  setSceneParams: async (sceneId, params) => {
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null || v === '') {
+        // 清覆盖：字符串字段置空串，数值字段置 0
+        body[k] = k === 'imageN' || k === 'duration' ? 0 : '';
+      } else {
+        body[k] = v;
+      }
+    }
+    const res = await sceneApi.update(sceneId, body);
+    set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? res.data.data : sc) }));
+  },
+  clearSceneParams: async (sceneId) => {
+    const res = await sceneApi.update(sceneId, {
+      imageModel: '', imageSize: '', imageQuality: '', imageN: 0,
+      videoModel: '', videoAspectRatio: '', videoResolution: '', duration: 0,
+    });
+    set((s) => ({ scenes: s.scenes.map(sc => sc.id === sceneId ? res.data.data : sc) }));
   },
 
   updateSceneInStore: (sceneId: string, data: Record<string, unknown>) =>

@@ -134,3 +134,15 @@ export const IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto'] as const;
 
 export const DEFAULT_IMAGE_SIZE: string = '1024x1024';
 export const DEFAULT_IMAGE_QUALITY: string = 'auto';
+
+// ═══════════════════════════════════════════════════
+//  Reference asset upload limits (static fallback)
+//  网关 params 精确值优先（refImages/refVideos/audioCount/max*SizeMB），
+//  未配置时前端用此兜底展示上传约束。
+// ═══════════════════════════════════════════════════
+
+export const REFERENCE_LIMITS = {
+  image: { maxCount: 10, maxSizeMB: 30 },
+  video: { maxCount: 3, maxSizeMB: 50 },
+  audio: { maxCount: 3, maxSizeMB: 15 },
+} as const;

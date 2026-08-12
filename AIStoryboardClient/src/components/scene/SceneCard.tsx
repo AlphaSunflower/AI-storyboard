@@ -4,8 +4,6 @@ import { useGSAP } from '@gsap/react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
-import { ImageRefineModal } from '../ai/ImageRefineModal';
-import { VideoRefineModal } from '../ai/VideoRefineModal';
 
 function Tag({ children }: { children: string }) {
   return (
@@ -24,54 +22,18 @@ function Tag({ children }: { children: string }) {
   );
 }
 
-function getImageLabel(scene: SceneResponse, generating: boolean): string {
-  if (generating) return '⏳生成中';
-  if (scene.imageStatus === 'completed' && !scene.imageUrl) return '重试';
-  if (scene.imageStatus === 'generating' && !generating) return '重试';
-  switch (scene.imageStatus) {
-    case 'pending':
-      return '生成图片';
+/** 状态徽标文案与配色（列表只读展示，生成/完善操作已移到预览面板） */
+function statusBadge(status: string | undefined, kind: 'image' | 'video'): { text: string; color: string } {
+  switch (status) {
     case 'generating':
-      return '⏳生成中';
+      return { text: kind === 'image' ? '🖼️ 图片生成中' : '🎬 视频生成中', color: '#d97706' };
     case 'completed':
-      return '完善图片';
+      return { text: kind === 'image' ? '🖼️ 图片已生成' : '🎬 视频已生成', color: '#059669' };
     case 'failed':
-      return '重试';
+      return { text: kind === 'image' ? '🖼️ 图片失败' : '🎬 视频失败', color: '#e53935' };
     default:
-      return '生成图片';
+      return { text: kind === 'image' ? '🖼️ 图片未生成' : '🎬 视频未生成', color: 'var(--color-muted-soft)' };
   }
-}
-
-function getVideoLabel(scene: SceneResponse, generating: boolean): string {
-  if (generating) return '⏳生成中';
-  if (scene.videoStatus === 'completed' && !scene.videoUrl) return '重试';
-  if (scene.videoStatus === 'generating' && !generating) return '重试';
-  switch (scene.videoStatus) {
-    case 'pending':
-      return '生成视频';
-    case 'generating':
-      return '⏳生成中';
-    case 'completed':
-      return '完善视频';
-    case 'failed':
-      return '重试';
-    default:
-      return '生成视频';
-  }
-}
-
-function actionBtnStyle(status: string, url?: string, generating?: boolean): React.CSSProperties {
-  const isDone = status === 'completed' && !!url;
-  return {
-    padding: '4px 8px',
-    fontSize: 10,
-    borderRadius: 'var(--rounded-sm)',
-    border: isDone ? '1px solid var(--color-primary)' : 'none',
-    background: isDone ? 'transparent' : 'var(--color-primary)',
-    color: isDone ? 'var(--color-primary)' : 'var(--color-on-primary)',
-    cursor: generating ? 'not-allowed' : 'pointer',
-    opacity: generating ? 0.7 : 1,
-  };
 }
 
 /** E11: 进度数字滚动——从旧值平滑滚到新值（gsap 数字补间 + 卸载自动清理） */
@@ -108,19 +70,9 @@ export function SceneCard({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const generatingImage = useProjectStore((s) => s.generatingImage[scene.id]);
-  const generatingVideo = useProjectStore((s) => s.generatingVideo[scene.id]);
-  const generateImage = useProjectStore((s) => s.generateImage);
-  const generateVideo = useProjectStore((s) => s.generateVideo);
   const deleteScene = useProjectStore((s) => s.deleteScene);
-  const imageModel = useProjectStore((s) => s.imageModel);
-  const videoModel = useProjectStore((s) => s.videoModel);
-  const updateSceneInStore = useProjectStore((s) => s.updateSceneInStore);
   const videoProgress = useProjectStore((s) => s.videoProgress[scene.id]) || 0;
-  const getSceneRefs = useProjectStore((s) => s.getSceneRefs);
-  const setSceneRefs = useProjectStore((s) => s.setSceneRefs);
-
-  const refs = getSceneRefs(scene.id);
+  const updateSceneInStore = useProjectStore((s) => s.updateSceneInStore);
 
   // 卡片根节点 ref（删除收起动画用）
   const cardRef = useRef<HTMLDivElement>(null);
@@ -134,9 +86,6 @@ export function SceneCard({
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const unreadScenes = useProjectStore((s) => s.unreadScenes);
   const isUnread = unreadScenes.has(scene.id);
-  const refInputRef = useRef<HTMLInputElement>(null);
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [showVideoModal, setShowVideoModal] = useState(false);
   // A2: 未读红点 ref（生成完成弹入动画用）+ 前一状态记录（只在 false→true 时播）
   const unreadDotRef = useRef<HTMLSpanElement>(null);
   const prevUnreadRef = useRef(isUnread);
@@ -170,88 +119,15 @@ export function SceneCard({
     }
   }, { dependencies: [isUnread], scope: cardRef });
 
-  const imageLabel = getImageLabel(scene, !!generatingImage);
-  const videoLabel = getVideoLabel(scene, !!generatingVideo);
-
-  const handleGenerateImage = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!imagePrompt.trim()) return;
-
-    // When already completed AND has URL, open refine modal instead of direct re-generation
-    if (scene.imageStatus === 'completed' && scene.imageUrl) {
-      setShowImageModal(true);
-      return;
-    }
-
-    // Retry / first generation
+  // 提示词修改即存（无本地保存按钮——失焦保存语义）
+  const handlePromptBlur = async (field: 'imagePrompt' | 'videoPrompt') => {
+    const value = field === 'imagePrompt' ? imagePrompt.trim() : videoPrompt.trim();
+    if (value === (field === 'imagePrompt' ? scene.imagePrompt || '' : scene.videoPrompt || '')) return;
     try {
-      await sceneApi.update(scene.id, { imagePrompt });
-      // 勾选了参考图生图且有参考图时 → 图改图模式
-      const useEdit = refs.useForImage && refs.images.length > 0;
-      await generateImage(
-        scene.id, imagePrompt, imageModel,
-        useEdit ? refs.images : undefined,
-        useEdit ? 'edit' : undefined,
-      );
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        || (err instanceof Error ? err.message : '生成图片失败');
-      alert(msg);
-    }
-  };
-
-  const handleImageRefineConfirm = async (params: { prompt: string; model: string }) => {
-    try {
-      await sceneApi.update(scene.id, { imagePrompt: params.prompt });
-      // 完善图片 → 图改图模式，传入当前生图作为源图
-      await generateImage(
-        scene.id, params.prompt, params.model,
-        undefined,
-        'edit',
-        scene.imageUrl || undefined,
-      );
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        || (err instanceof Error ? err.message : '完善图片失败');
-      alert(msg);
-    }
-  };
-
-  const handleGenerateVideo = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!videoPrompt.trim()) return;
-
-    // When already completed AND has URL, open refine modal instead of direct re-generation
-    if (scene.videoStatus === 'completed' && scene.videoUrl) {
-      setShowVideoModal(true);
-      return;
-    }
-
-    // Retry / first generation
-    try {
-      await sceneApi.update(scene.id, { videoPrompt });
-      // 只有勾选"参考图生视频"时才传参考图；只允许一张
-      const useRef = refs.useForVideo && (refs.images.length > 0 || !!scene.imageUrl);
-      await generateVideo(
-        scene.id, videoPrompt, videoModel,
-        useRef && refs.images.length > 0 ? refs.images : undefined,
-        useRef && scene.imageUrl ? scene.imageUrl : undefined,
-      );
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        || (err instanceof Error ? err.message : '生成视频失败');
-      alert(msg);
-    }
-  };
-
-  const handleVideoRefineConfirm = async (params: { prompt: string; model: string; referenceImages: string[] }) => {
-    try {
-      await sceneApi.update(scene.id, { videoPrompt: params.prompt });
-      await generateVideo(scene.id, params.prompt, params.model, params.referenceImages, scene.imageUrl || undefined);
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        || (err instanceof Error ? err.message : '完善视频失败');
-      alert(msg);
+      await sceneApi.update(scene.id, { [field]: value });
+      updateSceneInStore(scene.id, { [field]: value });
+    } catch {
+      // 保存失败保持原值（下次编辑重新触发）
     }
   };
 
@@ -294,20 +170,19 @@ export function SceneCard({
         duration: 0.3,
         ease: 'back.out(2.5)',
         onComplete: () => {
-          // 关键：清除残留 transform，否则卡片作为 containing block 会让内部 fixed 弹窗（完善图片/视频）错位被遮挡
+          // 关键：清除残留 transform，否则卡片作为 containing block 会让内部 fixed 弹窗错位被遮挡
           gsap.set(cardRef.current, { clearProps: 'transform' });
         },
       }
     );
   }, { dependencies: [isSelected], scope: cardRef });
 
-  // A4: 提示词折叠区展开/收起高度动画（useLayoutEffect 保证首帧前设置初始高度，避免闪动）
+  // A4: 提示词折叠区展开/收起高度动画
   useLayoutEffect(() => {
     const panel = promptPanelRef.current;
     if (!panel) return;
     const ctx = gsap.context(() => {
       if (expanded) {
-        // 先置为自然高度量取真实高度，再从未展开状态动画到目标高度
         gsap.set(panel, { height: 'auto', opacity: 1, visibility: 'visible' });
         const target = panel.offsetHeight;
         gsap.fromTo(
@@ -319,7 +194,6 @@ export function SceneCard({
             duration: 0.3,
             ease: 'power2.out',
             onComplete: () => {
-              // 动画结束后释放内联 height，避免内容变化（如传参考图）后高度不自适应
               gsap.set(panel, { height: 'auto' });
             },
           }
@@ -351,6 +225,9 @@ export function SceneCard({
     setSceneLabel(customName);
     setIsRenaming(true);
   };
+
+  const imageBadge = statusBadge(scene.imageStatus, 'image');
+  const videoBadge = statusBadge(scene.videoStatus, 'video');
 
   return (
     <div
@@ -487,6 +364,47 @@ export function SceneCard({
         {scene.soundDesign && !scene.soundDesign.startsWith('{') && <Tag>{scene.soundDesign}</Tag>}
       </div>
 
+      {/* 状态徽标（只读查看；生成/完善操作在预览面板） */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 10,
+            padding: '1px 6px',
+            borderRadius: 'var(--rounded-sm)',
+            background: 'var(--color-surface-soft)',
+            color: imageBadge.color,
+          }}
+        >
+          {imageBadge.text}
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            padding: '1px 6px',
+            borderRadius: 'var(--rounded-sm)',
+            background: 'var(--color-surface-soft)',
+            color: videoBadge.color,
+          }}
+        >
+          {videoBadge.text}
+        </span>
+      </div>
+
+      {/* Video progress bar */}
+      {scene.videoStatus === 'generating' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>视频生成中</span>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>
+              <AnimatedProgress value={videoProgress} />
+            </span>
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: 'var(--color-surface-soft)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${videoProgress}%`, borderRadius: 2, background: 'var(--color-primary)', transition: 'width 0.3s ease' }} />
+          </div>
+        </div>
+      )}
+
       {/* Expand/collapse toggle */}
       <button
         onClick={handleToggleExpand}
@@ -497,7 +415,7 @@ export function SceneCard({
           fontSize: 11,
           color: 'var(--color-primary)',
           padding: 0,
-          marginBottom: expanded ? 8 : 6,
+          marginBottom: expanded ? 8 : 0,
         }}
       >
         {expanded ? '▲ 收起提示词' : '▼ 编辑提示词'}
@@ -522,6 +440,7 @@ export function SceneCard({
           <textarea
             value={imagePrompt}
             onChange={(e) => setImagePrompt(e.target.value)}
+            onBlur={() => handlePromptBlur('imagePrompt')}
             onClick={(e) => e.stopPropagation()}
             placeholder="输入生图提示词..."
             rows={3}
@@ -545,6 +464,7 @@ export function SceneCard({
           <textarea
             value={videoPrompt}
             onChange={(e) => setVideoPrompt(e.target.value)}
+            onBlur={() => handlePromptBlur('videoPrompt')}
             onClick={(e) => e.stopPropagation()}
             placeholder="输入生视频提示词..."
             rows={3}
@@ -560,115 +480,8 @@ export function SceneCard({
               fontFamily: 'inherit',
             }}
           />
-
-          {/* Reference image upload */}
-          <div style={{ marginTop: 8 }}>
-            <div
-              onClick={() => refInputRef.current?.click()}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 10px', borderRadius: 'var(--rounded-md)',
-                border: '1px dashed var(--color-hairline)', cursor: 'pointer',
-                background: 'var(--color-canvas)', fontSize: 11,
-                color: 'var(--color-muted)',
-              }}
-            >
-              <span style={{ fontSize: 14 }}>🖼️</span>
-              <span>{refs.images.length > 0 ? `${refs.images.length}/1 张参考图` : '添加参考图（可选，仅1张）'}</span>
-            </div>
-            <input ref={refInputRef} type="file" accept="image/*" hidden
-              onChange={(e) => {
-                const files = Array.from(e.target.files || []);
-                if (refs.images.length + files.length > 1) { alert('最多1张参考图'); return; }
-                files.forEach(f => {
-                  const reader = new FileReader();
-                  reader.onload = () => setSceneRefs(scene.id, { ...refs, images: [...refs.images, reader.result as string] });
-                  reader.readAsDataURL(f);
-                });
-              }} />
-            {refs.images.length > 0 && (
-              <div style={{ display:'flex',gap:4,marginTop:6,flexWrap:'wrap' }}>
-                {refs.images.map((url,i) => (
-                  <div key={i} style={{position:'relative'}}>
-                    <img src={url} style={{width:48,height:48,borderRadius:4,objectFit:'cover'}} />
-                    <span onClick={() => setSceneRefs(scene.id, { ...refs, images: refs.images.filter((_,j) => j!==i) })}
-                      style={{position:'absolute',top:-4,right:-4,background:'var(--color-error)',color:'white',borderRadius:'50%',width:16,height:16,fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>×</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Toggle ref-image usage */}
-          <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={refs.useForImage} onChange={e => setSceneRefs(scene.id, { ...refs, useForImage: e.target.checked })}
-                style={{ margin: 0, cursor: 'pointer' }} />
-              参考图生图
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={refs.useForVideo} onChange={e => setSceneRefs(scene.id, { ...refs, useForVideo: e.target.checked })}
-                style={{ margin: 0, cursor: 'pointer' }} />
-              参考图生视频
-            </label>
-          </div>
         </div>
       </div>
-
-      {/* Video progress bar */}
-      {generatingVideo && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>视频生成中</span>
-            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>
-              <AnimatedProgress value={videoProgress} />
-            </span>
-          </div>
-          <div style={{ height: 4, borderRadius: 2, background: 'var(--color-surface-soft)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${videoProgress}%`, borderRadius: 2, background: 'var(--color-primary)', transition: 'width 0.3s ease' }} />
-          </div>
-        </div>
-      )}
-
-      {/* Image + Video action buttons */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button
-          disabled={!!generatingImage || !imagePrompt.trim()}
-          onClick={handleGenerateImage}
-          style={{
-            ...actionBtnStyle(scene.imageStatus, scene.imageUrl, generatingImage),
-            ...(imagePrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
-          }}
-        >
-          {imageLabel}
-        </button>
-        <button
-          disabled={!!generatingVideo || !videoPrompt.trim()}
-          onClick={handleGenerateVideo}
-          style={{
-            ...actionBtnStyle(scene.videoStatus, scene.videoUrl, generatingVideo),
-            ...(videoPrompt.trim() ? {} : { opacity: 0.5, cursor: 'not-allowed' }),
-          }}
-        >
-          {videoLabel}
-        </button>
-      </div>
-
-      {/* Refine modals */}
-      {showImageModal && (
-        <ImageRefineModal
-          scene={scene}
-          onClose={() => setShowImageModal(false)}
-          onGenerate={handleImageRefineConfirm}
-        />
-      )}
-      {showVideoModal && (
-        <VideoRefineModal
-          scene={scene}
-          onClose={() => setShowVideoModal(false)}
-          onGenerate={handleVideoRefineConfirm}
-        />
-      )}
     </div>
   );
 }
