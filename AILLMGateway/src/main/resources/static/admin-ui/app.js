@@ -703,7 +703,24 @@ const paramsGroups = {
        + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
        + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
        + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
-       + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>',
+       + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>'
+       + sliderField('p-refimagesmin', '参考图min(张)', '0', '10', '1', '0')
+       + sliderField('p-refimagesmax', '参考图max(张)', '0', '10', '1', '3')
+       + sliderField('p-refvideosmin', '参考视频min(个)', '0', '5', '1', '0')
+       + sliderField('p-refvideosmax', '参考视频max(个)', '0', '5', '1', '1')
+       + sliderField('p-audiocountmin', '音频个数min', '0', '10', '1', '0')
+       + sliderField('p-audiocountmax', '音频个数max', '0', '10', '1', '2')
+       + sliderField('p-audiodmin', '音频单段min(秒)', '1', '300', '1', '5')
+       + sliderField('p-audiodmax', '音频单段max(秒)', '1', '300', '1', '60')
+       + sliderField('p-videodmin', '视频单段min(秒)', '1', '300', '1', '5')
+       + sliderField('p-videodmax', '视频单段max(秒)', '1', '300', '1', '60')
+       + sliderField('p-maxtotalduration', '总时长上限(秒)', '1', '3600', '1', '300')
+       + sliderField('p-maxtotalfiles', '文件总数上限', '1', '50', '1', '10')
+       + sliderField('p-maxvideosize', '视频单个(MB)', '1', '500', '1', '100')
+       + sliderField('p-maximagesize', '图片单个(MB)', '1', '100', '1', '10')
+       + sliderField('p-maxaudiosize', '音频单个(MB)', '1', '100', '1', '15')
+       + sliderField('p-maxbody', '请求体上限(MB)', '1', '200', '1', '64')
+       + sliderField('p-maxprompt', '提示词上限(字符)', '100', '20000', '100', '2000'),
 };
 
 /** 新建/编辑路由弹窗：渠道下拉（停用渠道灰显）+ defaultParams JSON 校验 */
@@ -737,9 +754,22 @@ function openRouteModal(route) {
         if (id === 'p-nmax') { const mn = document.getElementById('p-nmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
         if (id === 'p-dmin') { const mx = document.getElementById('p-dmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
         if (id === 'p-dmax') { const mn = document.getElementById('p-dmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-refimagesmin') { const mx = document.getElementById('p-refimagesmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-refimagesmax') { const mn = document.getElementById('p-refimagesmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-refvideosmin') { const mx = document.getElementById('p-refvideosmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-refvideosmax') { const mn = document.getElementById('p-refvideosmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-audiocountmin') { const mx = document.getElementById('p-audiocountmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-audiocountmax') { const mn = document.getElementById('p-audiocountmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-audiodmin') { const mx = document.getElementById('p-audiodmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-audiodmax') { const mn = document.getElementById('p-audiodmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
+        if (id === 'p-videodmin') { const mx = document.getElementById('p-videodmax'); if (mx && Number(mx.value) < Number(el.value)) mx.value = el.value; }
+        if (id === 'p-videodmax') { const mn = document.getElementById('p-videodmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
       });
     };
-    ['p-temperature', 'p-maxtokens', 'p-topp', 'p-nmin', 'p-nmax', 'p-ndefault', 'p-dmin', 'p-dmax', 'p-durationdefault']
+    ['p-temperature', 'p-maxtokens', 'p-topp', 'p-nmin', 'p-nmax', 'p-ndefault', 'p-dmin', 'p-dmax', 'p-durationdefault',
+     'p-refimagesmin', 'p-refimagesmax', 'p-refvideosmin', 'p-refvideosmax',
+     'p-audiocountmin', 'p-audiocountmax', 'p-audiodmin', 'p-audiodmax', 'p-videodmin', 'p-videodmax',
+     'p-maxtotalduration', 'p-maxtotalfiles', 'p-maxvideosize', 'p-maximagesize', 'p-maxaudiosize', 'p-maxbody', 'p-maxprompt']
       .forEach(bind);
   };
   // 当前类型：编辑取路由 type（默认 text），决定初始渲染哪组参数表单
@@ -820,6 +850,23 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-resolutiondefault', mp.resolutionDefault);
     set('p-aspects', mp.aspectRatios);
     set('p-aspectdefault', mp.aspectRatioDefault);
+    set('p-refimagesmin', mp.refImagesMin);
+    set('p-refimagesmax', mp.refImagesMax);
+    set('p-refvideosmin', mp.refVideosMin);
+    set('p-refvideosmax', mp.refVideosMax);
+    set('p-audiocountmin', mp.audioCountMin);
+    set('p-audiocountmax', mp.audioCountMax);
+    set('p-audiodmin', mp.audioSegmentDurationMin);
+    set('p-audiodmax', mp.audioSegmentDurationMax);
+    set('p-videodmin', mp.videoSegmentDurationMin);
+    set('p-videodmax', mp.videoSegmentDurationMax);
+    set('p-maxtotalduration', mp.maxTotalDuration);
+    set('p-maxtotalfiles', mp.maxTotalFiles);
+    set('p-maxvideosize', mp.maxVideoSizeMb);
+    set('p-maximagesize', mp.maxImageSizeMb);
+    set('p-maxaudiosize', mp.maxAudioSizeMb);
+    set('p-maxbody', mp.maxRequestBodyMb);
+    set('p-maxprompt', mp.maxPromptChars);
     // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
   } catch (e) {
     console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
@@ -905,6 +952,23 @@ async function saveModelParams(modelName, type) {
     req.resolutionDefault = val('p-resolutiondefault');
     req.aspectRatios = val('p-aspects');
     req.aspectRatioDefault = val('p-aspectdefault');
+    req.refImagesMin = num('p-refimagesmin');
+    req.refImagesMax = num('p-refimagesmax');
+    req.refVideosMin = num('p-refvideosmin');
+    req.refVideosMax = num('p-refvideosmax');
+    req.audioCountMin = num('p-audiocountmin');
+    req.audioCountMax = num('p-audiocountmax');
+    req.audioSegmentDurationMin = num('p-audiodmin');
+    req.audioSegmentDurationMax = num('p-audiodmax');
+    req.videoSegmentDurationMin = num('p-videodmin');
+    req.videoSegmentDurationMax = num('p-videodmax');
+    req.maxTotalDuration = num('p-maxtotalduration');
+    req.maxTotalFiles = num('p-maxtotalfiles');
+    req.maxVideoSizeMb = num('p-maxvideosize');
+    req.maxImageSizeMb = num('p-maximagesize');
+    req.maxAudioSizeMb = num('p-maxaudiosize');
+    req.maxRequestBodyMb = num('p-maxbody');
+    req.maxPromptChars = num('p-maxprompt');
   }
   await api('/admin/model-params', { method: 'PUT', body: JSON.stringify(req) });
 }
