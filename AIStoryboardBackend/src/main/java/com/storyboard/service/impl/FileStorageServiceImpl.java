@@ -79,6 +79,11 @@ public class FileStorageServiceImpl implements FileStorageService {
             if (file == null || file.isEmpty()) {
                 throw new RuntimeException("上传文件为空");
             }
+            // 校验 content-type：仅接受图片（防改后缀上传 html/脚本，如 .png 实为 text/html）
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                throw new RuntimeException("仅支持上传图片文件");
+            }
             String original = file.getOriginalFilename();
             String extension = "png";
             if (original != null && original.contains(".")) {

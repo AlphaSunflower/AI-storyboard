@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/files")
@@ -25,29 +24,13 @@ public class FileController {
     private final FileStorageService fileStorageService;
 
     /**
-     * 上传图片，返回可访问路径。
-     * 前端上传后，将返回的 url 传入 Dify 作为文本变量，
-     * Dify 再以 generatedImageUrl 传给 /api/ai/dify/generate-image 即可。
-     */
-    @PostMapping("/upload")
-    public ApiResponse<Map<String, String>> upload(@RequestParam MultipartFile file) throws IOException {
-        if (file.isEmpty()) {
-            return ApiResponse.error(400, "文件为空");
-        }
-        String ext = extension(file.getOriginalFilename());
-        String filename = UUID.randomUUID() + ext;
-        Path dest = fileStorageService.resolveImage(filename);
-        Files.createDirectories(dest.getParent());
-        file.transferTo(dest);
-
-        String url = "/api/files/images/" + filename;
-        return ApiResponse.ok(Map.of("url", url, "filename", filename));
-    }
-
-    private String extension(String filename) {
-        if (filename == null || !filename.contains(".")) return ".png";
-        return filename.substring(filename.lastIndexOf('.'));
-    }
+     /** 上传图片，返回可访问路径。校验（扩展名白名单+content-type）收敛在 FileStorageService.saveUploadedImage。 */
+     @PostMapping("/upload")
+     public ApiResponse<Map<String, String>> upload(@RequestParam MultipartFile file) {
+         String url = fileStorageService.saveUploadedImage(file);
+         String filename = url.substring(url.lastIndexOf('/') + 1);
+         return ApiResponse.ok(Map.of("url", url, "filename", filename));
+     }
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) throws IOException {
