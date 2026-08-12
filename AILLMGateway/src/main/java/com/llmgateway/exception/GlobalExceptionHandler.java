@@ -6,8 +6,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.apache.catalina.connector.ClientAbortException;
 
+import java.io.IOException;
 import java.util.Map;
 
 /** 统一异常处理：输出 OAI 风格 {error:{message}} */
@@ -38,6 +41,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException e) {
         return err(404, "not found");
+    }
+
+    /**
+     * 客户端断开连接（前端刷新/取消/超时中断流式请求）：响应流已死，写不进任何数据。
+     * 非业务错误——静默吞掉即可，写响应反而再抛一次同样的错。
+     */
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public void handleClientAbort(IOException e) {
+        log.debug("客户端中断请求（连接已断开）: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

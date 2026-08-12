@@ -4,14 +4,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+
+import java.io.IOException;
 
 @Slf4j
 @RestControllerAdvice
@@ -103,6 +107,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest().body(ApiResponse.error(40001, "参数类型错误：" + e.getName()));
+    }
+
+    /**
+     * 客户端断开连接（前端刷新/取消/超时中断 SSE 流式请求）：响应流已死，写不进任何数据。
+     * 非业务错误——静默吞掉，避免 handleUnknown 刷 ERROR 且写响应再抛一次同样的错。
+     */
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public void handleClientAbort(IOException e) {
+        log.debug("客户端中断请求（连接已断开）: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
