@@ -7,7 +7,7 @@ import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
   const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
@@ -128,7 +128,7 @@ export function AgentChatPanel() {
         ))}
         {streaming && !waitingHumanInput && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-muted)', fontSize: 12, marginLeft: 4 }}>
-            <span>正在生成</span>
+            <span>{workflowHint || '正在生成'}</span>
             {/* C 组：思考中三点依次跳动 */}
             <span style={{ display: 'inline-flex', gap: 2 }}>
               {[0, 1, 2].map((i) => (

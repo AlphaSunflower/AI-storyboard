@@ -66,6 +66,9 @@ interface AgentState {
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
   confirmResult: ConfirmResultInfo | null;
+  // 当前运行阶段提示（workflow 事件标题 / 视频异步生成进度；渲染在聊天窗口「正在生成」行）
+  workflowHint: string;
+  setWorkflowHint: (v: string) => void;
   // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
   pendingAssistantId: string | null;
 
@@ -184,6 +187,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   waitingHumanInput: null,
   waitingVideoPlan: null,
   streamError: null,
+  workflowHint: '',
+  setWorkflowHint: (v) => set({ workflowHint: v }),
   confirmResult: null,
   pendingPicUrl: null,
   pendingAssistantId: null,
@@ -299,12 +304,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             updateAssistant(e.content ?? '');
             break;
           case 'workflow':
-            break; // 进度提示可后续在 UI 展示，本期仅打字机
+            // 阶段进度提示（如「正在设计视频方案…」）：写入聊天窗口「正在生成」行；node_finished 无标题→清空
+            set({ workflowHint: e.title ?? '' });
+            break;
           case 'human_input':
             // 跨会话守卫：已切换会话则忽略旧流事件
             if (get().activeConversationId !== snapshotId) break;
             receivedHumanInput = true;
             set({
+              workflowHint: '', // HITL 卡片接管展示，阶段提示清空
               waitingHumanInput: {
                 formToken: e.formToken ?? '',
                 taskId: e.taskId ?? '',
@@ -466,11 +474,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           case 'message':
             updateAssistant(e.content ?? '');
             break;
+          case 'workflow':
+            // 阶段进度提示（如「正在生成图片…」/「正在生成视频…」）
+            set({ workflowHint: e.title ?? '' });
+            break;
           case 'human_input':
             // 跨会话守卫：已切换会话则忽略旧流事件
             if (get().activeConversationId !== snapshotId) break;
             receivedHumanInput = true;
             set({
+              workflowHint: '', // HITL 卡片接管展示，阶段提示清空
               waitingHumanInput: {
                 formToken: e.formToken ?? '',
                 taskId: e.taskId ?? '',
@@ -613,12 +626,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedResult = false;
     // 视频异步任务：task_accepted 后启动 5s 轮询（跨会话守卫；completed/failed 停止）
     let acceptedTaskId: string | null = null;
+    let pollTick = 0; // 轮询次数（阶段提示「已等待约 X 秒」用，5s/tick）
     const startTaskPolling = (taskId: string) => {
       const timer = setInterval(async () => {
         if (get().activeConversationId !== snapshotId || acceptedTaskId === null) {
           clearInterval(timer);
           return;
         }
+        pollTick += 1;
         try {
           const res = await agentApi.getVideoTaskStatus(taskId);
           const t: VideoTaskStatus = res.data.data;
@@ -628,6 +643,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             updateAssistantFull(t.url || '');
             set({
               streaming: false,
+              workflowHint: '', // 生成完成，阶段提示清空
               pendingAssistantId: null,
               confirmResult: {
                 kind: 'video',
@@ -644,8 +660,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           } else if (t.status === 'failed') {
             clearInterval(timer);
             if (get().activeConversationId === snapshotId) {
-              set({ streamError: t.error || '视频生成失败，请重试' });
+              set({ streamError: t.error || '视频生成失败，请重试', workflowHint: '' });
             }
+          } else {
+            // queued/running：阶段提示实时更新到聊天窗口（防「卡住」错觉）；继续轮询
+            const waiting = Math.round(pollTick * 5);
+            const stage = t.status === 'queued'
+              ? `视频排队中…（已等待约 ${waiting} 秒）`
+              : `视频生成中…（已等待约 ${waiting} 秒，通常 1~3 分钟）`;
+            set({ workflowHint: stage });
           }
           // queued/running：继续轮询（5s 后下一次 tick）
         } catch {
@@ -662,6 +685,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 视频任务已受理：流即将结束，转轮询取结果（跨会话守卫）
             if (get().activeConversationId !== snapshotId) break;
             acceptedTaskId = e.taskId ?? '';
+            set({ workflowHint: e.message ?? '视频任务已受理，正在排队生成…' });
             if (acceptedTaskId) startTaskPolling(acceptedTaskId);
             break;
           case 'confirm_result':
@@ -737,5 +761,5 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
+    set({ messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, workflowHint: '', assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
 }));
