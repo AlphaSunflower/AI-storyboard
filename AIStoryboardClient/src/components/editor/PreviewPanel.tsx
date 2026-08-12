@@ -133,7 +133,10 @@ function parseParams(model: { params?: unknown } | undefined): ParamLists {
 export function PreviewPanel() {
   const { scenes, selectedSceneId } = useProjectStore();
   const scene = scenes.find((s) => s.id === selectedSceneId);
-  const sceneRefs = useProjectStore((s) => s.sceneRefs[selectedSceneId ?? ''] ?? []);
+  // 注意：selector 必须返回稳定引用（undefined/store 内已存数组），不能 `?? []`——每次新建数组
+  // 会让 useSyncExternalStore 的 getSnapshot 不稳定 → React 无限重渲染（Maximum update depth exceeded）
+  const rawSceneRefs = useProjectStore((s) => s.sceneRefs[selectedSceneId ?? '']);
+  const sceneRefs = rawSceneRefs ?? [];
   const fetchSceneRefs = useProjectStore((s) => s.fetchSceneRefs);
   const uploadSceneRef = useProjectStore((s) => s.uploadSceneRef);
   const deleteSceneRef = useProjectStore((s) => s.deleteSceneRef);
