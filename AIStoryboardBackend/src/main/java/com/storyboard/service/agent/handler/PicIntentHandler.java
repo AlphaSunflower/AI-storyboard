@@ -2,6 +2,7 @@ package com.storyboard.service.agent.handler;
 
 import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.service.agent.AgentTools;
+import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.ImageRefinePromptService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -25,6 +26,7 @@ public class PicIntentHandler implements IntentHandler {
     private final AgentOrchestratorSupport support;
     private final ImageRefinePromptService imageRefinePromptService;
     private final AgentTools agentTools;
+    private final AiConfigProperties config;
 
     @Override
     public String intentType() {
@@ -46,8 +48,11 @@ public class PicIntentHandler implements IntentHandler {
                 String refinedPrompt = imageRefinePromptService.buildRefinedPrompt(source, request.getContent());
                 String planText = "🖼 已结合你的参考图与需求，生成了改图方案：\n" + refinedPrompt
                         + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
-                // 2. HITL 通用模板：方案 → checkpoint(generate_image) → human_input 事件（带网关图片模型选项，卡片可选模型/尺寸）
-                List<Map<String, Object>> models = support.buildModels("image");
+                // 2. HITL 通用模板：方案 → checkpoint(generate_image) → human_input 事件
+                //    models 过滤走 Gemini 原生接口的模型（generateContent 不支持 /images/edits multipart 图改图，实测 404）
+                List<Map<String, Object>> models = support.buildModels("image").stream()
+                        .filter(m -> !config.getGeminiImageModelSet().contains(String.valueOf(m.get("value"))))
+                        .toList();
                 return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                         planText, "generate_image",
                         List.of(Map.of("prompt", refinedPrompt, "source", source)), "human_input",
