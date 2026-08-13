@@ -15,6 +15,10 @@ export function ConfirmResultCard() {
 
   const isScript = info.kind === 'script';
   const isVideo = info.kind === 'video';
+  // 图片结果：多图（urls）优先，否则回退单 url
+  const imgs = !isVideo && !isScript
+    ? (info.urls && info.urls.length ? info.urls : (info.url ? [info.url] : []))
+    : [];
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
       <div
@@ -27,22 +31,28 @@ export function ConfirmResultCard() {
         <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
           {isScript ? '分镜生成完成' : isVideo ? '视频生成完成' : '图片生成完成'}
         </div>
-        {info.url &&
-          (isVideo ? (
+        {isVideo ? (
+          info.url && (
             <video
               src={assetUrl(info.url)}
               controls
               style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0 8px', display: 'block' }}
             />
-          ) : (
-            <img
-              src={assetUrl(info.url)}
-              alt="生成结果"
-              onClick={() => setPreviewUrl(info.url)}
-              style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, margin: '4px 0 8px', display: 'block', cursor: 'zoom-in' }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-          ))}
+          )
+        ) : !isScript ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '4px 0 8px' }}>
+            {imgs.map((u, i) => (
+              <img
+                key={i}
+                src={assetUrl(u)}
+                alt="生成结果"
+                onClick={() => setPreviewUrl(u)}
+                style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, display: 'block', cursor: 'zoom-in' }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ))}
+          </div>
+        ) : null}
         {!isScript && <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
         {isScript && (
           <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 8 }}>

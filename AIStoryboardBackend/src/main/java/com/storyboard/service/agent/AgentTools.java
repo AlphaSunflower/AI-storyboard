@@ -89,27 +89,34 @@ public class AgentTools {
      * @param size          图片尺寸如 1024x1024（可空，默认配置）
      * @return {ok, imageUrl, assetId} 或 {ok:false, code, message}
      */
-    @Tool(description = "生成或完善一张图片（提供 picUrl 时基于该图改图），结果落库到会话产出素材")
+    @Tool(description = "生成或完善图片（提供 picUrl 时基于该图改图），支持多张（n>1），结果落库到会话产出素材")
     public Map<String, Object> refineImage(
             @ToolParam(description = "会话 ID") String conversationId,
             @ToolParam(description = "图片生成提示词") String prompt,
             @ToolParam(description = "源图 URL（可空，空则纯文生图）") String picUrl,
             @ToolParam(description = "模型名（可空，默认配置）") String model,
-            @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") String size) {
+            @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") String size,
+            @ToolParam(description = "图片质量（可空，默认配置）") String quality,
+            @ToolParam(description = "生成数量（可空，默认 1）") String n) {
         try {
             AgentConversation conv = conversationMapper.selectById(conversationId);
             if (conv == null) {
                 return error("40401", "会话不存在");
             }
             String mode = (picUrl != null && !picUrl.isBlank()) ? "edit" : null;
-            Map<String, String> result = generationService.generateImage(
-                    conv, null, prompt, model, size, mode, null, picUrl);
-            String url = result.get("imageUrl");
-            if (url == null || url.isBlank()) {
+            Integer nInt = null;
+            if (n != null && !n.isBlank()) {
+                try { nInt = Integer.parseInt(n.trim()); } catch (NumberFormatException ignored) { }
+            }
+            Map<String, Object> result = generationService.generateImage(
+                    conv, null, prompt, model, size, quality, nInt, mode, null, picUrl);
+            @SuppressWarnings("unchecked")
+            List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
+            if (urls.isEmpty()) {
                 return error("50202", "图片生成失败，请稍后重试");
             }
-            return Map.of("ok", true, "imageUrl", url,
-                    "assetId", result.getOrDefault("assetId", ""));
+            return Map.of("ok", true, "imageUrls", urls,
+                    "assetIds", result.getOrDefault("assetIds", List.of()));
         } catch (Exception e) {
             log.error("AgentTools.refineImage 失败: {}", e.getMessage(), e);
             return error("50202", "图片生成失败：" + e.getMessage());

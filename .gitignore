@@ -7,6 +7,7 @@ target/
 node_modules/
 dist/
 uploads/
+logs/
 
 # IDE
 .idea/

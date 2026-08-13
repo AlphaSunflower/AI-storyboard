@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
+import WarpText from '../WarpText';
 
-const headerHeight = 48;
+const headerHeight = 64;
 
 // ── shared inline styles ────────────────────────────────────────────
 
@@ -148,6 +149,23 @@ export function AppHeader() {
     setDropdownOpen(false);
   };
 
+  // Ctrl/Cmd+S 保存当前项目（与「💾 保存」按钮同逻辑）
+  const handleSave = () => {
+    if (currentProject) updateProject(currentProject.id, { status: 'active' });
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject, updateProject]);
+
   // ── helpers ──────────────────────────────────────────────────────
 
   const currentName = currentProject?.name || '选择项目';
@@ -171,22 +189,25 @@ export function AppHeader() {
       >
         {/* Left: project selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              font: 'var(--text-display-sm)',
-              color: 'var(--color-primary)',
-              fontSize: 18,
-              lineHeight: 1,
-              marginRight: 4,
-            }}
-          >
-            AlphaSunflower AI分镜
-          </span>
+          <WarpText
+            text="AlphaSunflower AI分镜"
+            color="#cc785c"
+            fontSize={26}
+            fontWeight={700}
+            warpStrength={0.06}
+            warpScale={1.4}
+            speed={0.4}
+            pointerInfluence={0.35}
+            pointerStrength={0.3}
+            refraction={0.012}
+            ripple
+            style={{ width: 360, height: 64, minHeight: 64, flexShrink: 0 }}
+          />
 
           {/* Save button */}
           {currentProject && (
             <button
-              onClick={() => updateProject(currentProject.id, { status: 'active' })}
+              onClick={handleSave}
               style={{
                 padding: '4px 10px',
                 fontSize: 12,
@@ -327,19 +348,21 @@ export function AppHeader() {
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteConfirm(p); }}
-                            title="删除"
+                            disabled={projects.length <= 1}
+                            title={projects.length <= 1 ? '默认项目不可删除' : '删除'}
                             style={{
                               width: 28,
                               height: 28,
                               border: 'none',
                               background: 'none',
-                              cursor: 'pointer',
+                              cursor: projects.length <= 1 ? 'not-allowed' : 'pointer',
                               fontSize: 14,
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               borderRadius: 'var(--rounded-sm)',
                               color: 'var(--color-muted)',
+                              opacity: projects.length <= 1 ? 0.35 : 1,
                             }}
                           >
                             🗑️

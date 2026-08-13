@@ -27,6 +27,9 @@ export interface ConfirmResultInfo {
   kind: 'script' | 'image' | 'video';
   url: string;
   assetId?: string;
+  /** 多图结果（n>1 时后端下发全部 URL；未下发则回退单 url） */
+  urls?: string[];
+  assetIds?: string[];
   sceneCount?: number;
   actions: { id: string; title: string }[];
 }
@@ -245,8 +248,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   sendMessage: async (content, opts?: { picUrl?: string }) => {
-    const id = get().activeConversationId;
-    if (!id || get().streaming || !content.trim()) return;
+    if (get().streaming || !content.trim()) return;
+    let id = get().activeConversationId;
+    // 未选对话但已选项目：自动新建对话并选中，避免用户消息被吞
+    if (!id) {
+      const projectId = useProjectStore.getState().currentProject?.id;
+      if (!projectId) { set({ streamError: '请先在左上角选择一个项目' }); return; }
+      await get().createConversation();
+      id = get().activeConversationId;
+    }
+    if (!id) return;
     // 继续完善参考图：点"继续完善"后暂存的 PicUrl，随本条用户消息发送并消费（只带一次，
     // 避免后续普通消息也误带图片导致 Dify 误判 pic-refine 意图）
     const pendingPic = get().pendingPicUrl;

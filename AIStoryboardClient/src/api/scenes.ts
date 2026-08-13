@@ -15,7 +15,10 @@ export const sceneApi = {
     const fd = new FormData();
     fd.append('type', type);
     fd.append('file', file);
-    return client.post<ApiResponse<SceneReferenceAsset>>(`/scenes/${sceneId}/references`, fd);
+    // multipart：显式声明 Content-Type，避免 client 全局 application/json 覆盖导致后端收不到 type（同 agent uploadImage）
+    return client.post<ApiResponse<SceneReferenceAsset>>(`/scenes/${sceneId}/references`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   },
   deleteReference: (id: string) => client.delete(`/scenes/references/${id}`),
 };

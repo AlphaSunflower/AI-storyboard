@@ -3,6 +3,8 @@ package com.llmgateway.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
@@ -178,6 +180,11 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     private ForwardResult forward(Channel channel, String path, String requestBody) throws Exception {
         String apiKey = keyService.decrypt(channel.getApiKey());
         if ("gemini".equals(channel.getType())) {
+            // Gemini 图片生成：单次 generateContent 只回一张图；n>1 时循环 N 次再合并 data[]
+            int imageN = path.contains("images/generations") ? readImageN(requestBody) : 1;
+            if (imageN > 1) {
+                return forwardGeminiImageMulti(channel, apiKey, requestBody, imageN);
+            }
             String geminiBody = geminiConverter.toGeminiRequest(requestBody);
             HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
             if (resp.statusCode() == 200) {
@@ -189,6 +196,48 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         // openai_compatible：原路径透传，Bearer 换渠道 Key
         HttpResponse<String> resp = upstreamClient.postJson(channel.getBaseUrl(), path, apiKey, requestBody);
         return new ForwardResult(resp.statusCode(), resp.body());
+    }
+
+    /**
+     * Gemini 图片多图：循环调用 N 次 generateContent，逐次转 OpenAI 格式并合并 data[]。
+     * 单张失败跳过（不拖垮整批），全部失败回首个错误状态码/响应体。
+     */
+    private ForwardResult forwardGeminiImageMulti(Channel channel, String apiKey, String requestBody, int n) throws Exception {
+        String geminiBody = geminiConverter.toGeminiRequest(requestBody);
+        ArrayNode merged = objectMapper.createArrayNode();
+        int firstErrorStatus = 0;
+        String firstErrorBody = null;
+        for (int i = 0; i < n; i++) {
+            HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
+            if (resp.statusCode() == 200) {
+                JsonNode oai = objectMapper.readTree(geminiConverter.toOpenAiResponse(resp.body()));
+                JsonNode data = oai.path("data");
+                if (data.isArray()) {
+                    for (JsonNode item : data) merged.add(item);
+                }
+            } else if (firstErrorStatus == 0) {
+                firstErrorStatus = resp.statusCode();
+                firstErrorBody = resp.body();
+            }
+        }
+        if (merged.isEmpty()) {
+            return new ForwardResult(firstErrorStatus != 0 ? firstErrorStatus : 502,
+                    firstErrorBody != null ? firstErrorBody : "{\"error\":{\"message\":\"Gemini image generation returned no images\"}}");
+        }
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("created", System.currentTimeMillis() / 1000);
+        out.set("data", merged);
+        return new ForwardResult(200, objectMapper.writeValueAsString(out));
+    }
+
+    /** 解析图片请求的 n（缺失/非法默认 1） */
+    private int readImageN(String requestBody) {
+        try {
+            int n = objectMapper.readTree(requestBody).path("n").asInt(1);
+            return n > 0 ? n : 1;
+        } catch (Exception e) {
+            return 1;
+        }
     }
 
     @Override

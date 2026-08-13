@@ -23,13 +23,13 @@ public interface AgentGenerationService {
     int replaceScript(String projectId, List<AgentSceneItem> scenes);
 
     /**
-     * 生图并落库。
-     * sceneId 非空 → 更新真实分镜（返回 imageUrl）；为空 → 落 agent_assets（返回 imageUrl + assetId）。
-     * mode="edit" 走图改图（generatedImageUrl 为源图）。
+     * 生图并落库（支持 quality/n 多张）。
+     * sceneId 非空 → 更新真实分镜（返回 imageUrls）；为空 → 每张图落一条 agent_assets（返回 imageUrls + assetIds）。
+     * mode="edit" 走图改图（generatedImageUrl 为源图，恒单张）。
      */
-    Map<String, String> generateImage(AgentConversation conversation, String sceneId,
-                                      String prompt, String model, String size, String mode,
-                                      List<String> referenceImages, String generatedImageUrl);
+    Map<String, Object> generateImage(AgentConversation conversation, String sceneId,
+                                      String prompt, String model, String size, String quality, Integer n,
+                                      String mode, List<String> referenceImages, String generatedImageUrl);
 
     /**
      * 创建视频任务并落库（queued）。

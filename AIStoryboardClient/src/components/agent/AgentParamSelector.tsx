@@ -24,6 +24,7 @@ const PARAM_META = [
   { key: 'aspectRatio', label: '画幅', field: 'aspectRatios', defaultField: 'aspectRatioDefault' },
   { key: 'size', label: '尺寸', field: 'sizes', defaultField: 'sizeDefault' },
   { key: 'quality', label: '质量', field: 'qualities', defaultField: 'qualityDefault' },
+  { key: 'n', label: '生成个数', field: 'n', defaultField: 'nDefault' },
 ] as const;
 
 type ParamLists = Record<string, { options: string[]; default?: string }>;
@@ -39,6 +40,18 @@ function parseParamLists(model?: GatewayModelOption): ParamLists {
     return out;
   }
   for (const meta of PARAM_META) {
+    // 生成个数：网关 params 的 n 是 {min,max,default} 对象（非枚举数组），特判为连续整数范围
+    if (meta.key === 'n') {
+      const nObj = p['n'];
+      if (nObj && typeof nObj === 'object' && !Array.isArray(nObj)) {
+        const o = nObj as { min?: number; max?: number; default?: number };
+        const lo = o.min ?? 1;
+        const hi = o.max ?? o.min ?? 1;
+        const opts = Array.from({ length: Math.max(0, hi - lo + 1) }, (_, i) => String(lo + i));
+        if (opts.length) out['n'] = { options: opts, default: o.default != null ? String(o.default) : opts[0] };
+      }
+      continue;
+    }
     const arr = p[meta.field];
     if (Array.isArray(arr) && arr.length > 0) {
       out[meta.key] = {

@@ -70,7 +70,20 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     }
 
     /**
-     * 生成/编辑图片入口方法。
+     * 生成/编辑图片入口方法（带数量 n），返回首图 URL；多图场景用 {@link #generateImages}。
+     */
+    @Override
+    public String generateImage(String sceneId, String prompt, String model,
+                                 String size, String quality, String aspectRatio,
+                                 List<String> referenceImages,
+                                 String mode, String generatedImageUrl, Integer n) {
+        List<String> paths = generateImages(sceneId, prompt, model, size, quality,
+                aspectRatio, referenceImages, mode, generatedImageUrl, n);
+        return paths.isEmpty() ? null : paths.getFirst();
+    }
+
+    /**
+     * 生成/编辑图片入口方法（返回全部本地路径列表）。
      *
      * @param sceneId         分镜 ID
      * @param prompt          生图/改图提示词
@@ -83,7 +96,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
      * @param n               生成数量（null 或 <=0 时默认 1）
      */
     @Override
-    public String generateImage(String sceneId, String prompt, String model,
+    public List<String> generateImages(String sceneId, String prompt, String model,
                                  String size, String quality, String aspectRatio,
                                  List<String> referenceImages,
                                  String mode, String generatedImageUrl, Integer n) {
@@ -140,7 +153,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 scene.setImageStatus("completed");
                 sceneMapper.updateById(scene);
             }
-            return localPaths.getFirst();
+            return localPaths;
         } catch (Exception e) {
             if (scene != null) {
                 scene.setImageStatus("failed");

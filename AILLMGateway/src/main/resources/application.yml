@@ -10,6 +10,13 @@ spring:
 server:
   port: ${LLM_GATEWAY_PORT:8083}
 
+# 只暴露 health 端点（部署探活），其余 actuator 端点不外泄
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

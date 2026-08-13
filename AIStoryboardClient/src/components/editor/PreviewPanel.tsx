@@ -6,6 +6,8 @@ import { assetUrl } from '../../config';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
 import { ReferenceUploader } from './ReferenceUploader';
 import { RefineImageModal } from './RefineImageModal';
+import ElasticSlider from '../ElasticSlider';
+import BounceCards from '../BounceCards';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
@@ -21,6 +23,17 @@ function downloadAsset(url: string, filename: string) {
       URL.revokeObjectURL(u);
     })
     .catch(() => window.open(url, '_blank'));
+}
+
+/** 按图片数量生成对称扇形 transform（BounceCards 多图浏览用） */
+function fanTransforms(count: number): string[] {
+  const mid = (count - 1) / 2;
+  return Array.from({ length: count }, (_, i) => {
+    const offset = i - mid;
+    const x = Math.round(offset * 85);
+    const rot = -Math.round(offset * 5);
+    return `rotate(${rot}deg) translate(${x}px)`;
+  });
 }
 
 type PreviewTab = 'image' | 'video';
@@ -158,7 +171,6 @@ export function PreviewPanel() {
 
   const [activeTab, setActiveTab] = useState<PreviewTab>('image');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null); // 图片点击放大预览（灯箱）
-  const [imgIndex, setImgIndex] = useState(0); // 多图轮播当前索引
   const [selectedDownloads, setSelectedDownloads] = useState<Set<string>>(new Set()); // 勾选下载
   const [useRefImage, setUseRefImage] = useState(false); // 参考图生图勾选
   const [useFirstFrame, setUseFirstFrame] = useState(false); // 以本分镜图片为首帧
@@ -210,7 +222,7 @@ export function PreviewPanel() {
     return urls.length ? urls : (scene.imageUrl ? [scene.imageUrl] : []);
   }, [scene]);
 
-  useEffect(() => { setImgIndex(0); setSelectedDownloads(new Set()); }, [scene?.id]);
+  useEffect(() => { setSelectedDownloads(new Set()); }, [scene?.id]);
 
   // 生成参数（分镜覆盖优先：空串/0 = 回退全局默认）
   const effImageModel = scene?.imageModel || globalImageModel;
@@ -223,9 +235,6 @@ export function PreviewPanel() {
   const effImageSize = scene?.imageSize || imageParams.sizeDefault || globalImageSize;
   const effImageQuality = scene?.imageQuality || imageParams.qualityDefault || globalImageQuality;
   const effImageN = scene?.imageN || imageParams.nRange?.default || globalImageN;
-  const nOptions = imageParams.nRange
-    ? Array.from({ length: Math.max(0, (imageParams.nRange.max ?? effImageN) - (imageParams.nRange.min ?? 1) + 1) }, (_, i) => (imageParams.nRange!.min ?? 1) + i)
-    : [];
 
   const preset = resolveVideoPreset(globalVideoPreset);
   const effVideoDuration = scene?.duration || videoParams.durationDefault || parseInt(preset.duration);
@@ -393,11 +402,20 @@ export function PreviewPanel() {
           <div style={{ marginBottom: 12 }}>
             {imageList.length > 0 ? (
               <div>
-                <div style={{ position: 'relative' }}>
+                {imageList.length > 1 ? (
+                  <BounceCards
+                    images={imageList.map((u) => assetUrl(u))}
+                    containerWidth={480}
+                    containerHeight={260}
+                    enableHover
+                    transformStyles={fanTransforms(imageList.length)}
+                    onImageClick={(url) => setPreviewUrl(url)}
+                  />
+                ) : (
                   <img
-                    src={assetUrl(imageList[imgIndex])}
-                    alt={`分镜 ${scene.sceneNumber} 生成图 ${imgIndex + 1}`}
-                    onClick={() => setPreviewUrl(imageList[imgIndex])}
+                    src={assetUrl(imageList[0])}
+                    alt={`分镜 ${scene.sceneNumber} 生成图`}
+                    onClick={() => setPreviewUrl(imageList[0])}
                     onLoad={handleMediaLoaded}
                     style={{
                       width: '100%',
@@ -410,36 +428,6 @@ export function PreviewPanel() {
                       cursor: 'zoom-in',
                     }}
                   />
-                  {imageList.length > 1 && (
-                    <>
-                      <button
-                        onClick={() => setImgIndex((i) => (i - 1 + imageList.length) % imageList.length)}
-                        style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', ...btnDownload, background: 'rgba(255,255,255,0.85)' }}
-                      >
-                        ◀
-                      </button>
-                      <button
-                        onClick={() => setImgIndex((i) => (i + 1) % imageList.length)}
-                        style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', ...btnDownload, background: 'rgba(255,255,255,0.85)' }}
-                      >
-                        ▶
-                      </button>
-                    </>
-                  )}
-                </div>
-                {imageList.length > 1 && (
-                  <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginBottom: 8 }}>
-                    {imageList.map((_, i) => (
-                      <span
-                        key={i}
-                        onClick={() => setImgIndex(i)}
-                        style={{
-                          width: 8, height: 8, borderRadius: '50%', cursor: 'pointer',
-                          background: i === imgIndex ? 'var(--color-primary)' : 'var(--color-hairline)',
-                        }}
-                      />
-                    ))}
-                  </div>
                 )}
                 {/* 选择性下载（勾选框用主题色 accent，点击整行可勾选） */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -467,14 +455,16 @@ export function PreviewPanel() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={() => downloadAsset(assetUrl(imageList[imgIndex]), `scene-${scene.sceneNumber}.png`)}
-                    style={{ ...btnDownload, background: 'var(--color-primary)', color: '#fff' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#b9654b'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }}
-                  >
-                    ⬇ 下载当前
-                  </button>
+                  {imageList.length === 1 && (
+                    <button
+                      onClick={() => downloadAsset(assetUrl(imageList[0]), `scene-${scene.sceneNumber}.png`)}
+                      style={{ ...btnDownload, background: 'var(--color-primary)', color: '#fff' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#b9654b'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }}
+                    >
+                      ⬇ 下载当前
+                    </button>
+                  )}
                   {selectedDownloads.size > 0 && (
                     <button onClick={downloadSelected} style={btnDownload}>
                       ⬇ 下载选中 ({selectedDownloads.size})
@@ -539,12 +529,17 @@ export function PreviewPanel() {
                 {qualityOptions.map((q) => <option key={q} value={q}>{q}</option>)}
               </select>
             </div>
-            {nOptions.length > 0 && (
+            {imageParams.nRange && (
               <div style={fieldRow}>
                 <span style={fieldLabel}>生成个数</span>
-                <select value={effImageN} onChange={(e) => setSceneParams(scene.id, { imageN: Number(e.target.value) })} style={selectStyle}>
-                  {nOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
+                <ElasticSlider
+                  defaultValue={effImageN}
+                  startingValue={imageParams.nRange.min ?? 1}
+                  maxValue={imageParams.nRange.max ?? imageParams.nRange.min ?? 1}
+                  isStepped
+                  stepSize={1}
+                  onChange={(v) => setSceneParams(scene.id, { imageN: v })}
+                />
               </div>
             )}
 
@@ -650,9 +645,14 @@ export function PreviewPanel() {
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>时长(秒)</span>
-              <select value={effVideoDuration} onChange={(e) => setSceneParams(scene.id, { duration: Number(e.target.value) })} style={selectStyle}>
-                {durationOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <ElasticSlider
+                defaultValue={effVideoDuration}
+                startingValue={Math.min(...durationOptions)}
+                maxValue={Math.max(...durationOptions)}
+                isStepped
+                stepSize={1}
+                onChange={(v) => setSceneParams(scene.id, { duration: v })}
+              />
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>分辨率</span>

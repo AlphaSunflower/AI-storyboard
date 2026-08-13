@@ -1,5 +1,6 @@
 package com.storyboard.config;
 
+import com.storyboard.config.AccessLogFilter;
 import com.storyboard.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,9 +22,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
+    private final AccessLogFilter accessLogFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtFilter, AccessLogFilter accessLogFilter) {
         this.jwtFilter = jwtFilter;
+        this.accessLogFilter = accessLogFilter;
     }
 
     @Bean
@@ -54,6 +57,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/files/**").permitAll()
+                .requestMatchers("/actuator/health").permitAll()  // 健康检查（部署探活，只暴露 health）
                 .anyRequest().authenticated()
             )
             .exceptionHandling(ex -> ex
@@ -63,7 +67,8 @@ public class SecurityConfig {
                     response.getWriter().write("{\"code\":40101,\"message\":\"未授权，请先登录\"}");
                 })
             )
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(accessLogFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }

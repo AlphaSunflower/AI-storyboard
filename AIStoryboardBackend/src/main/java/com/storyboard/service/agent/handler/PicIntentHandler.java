@@ -102,23 +102,23 @@ public class PicIntentHandler implements IntentHandler {
         // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
-        // 用户提交的模型/尺寸参数（卡片选择）优先，未提交走默认（图改图默认模型=defaultImageEditModel）
+        // 用户提交的模型/尺寸/质量/数量参数（卡片选择）优先，未提交走默认（图改图默认模型=defaultImageEditModel）
         String model = request.getParams().getOrDefault("model", null);
         String size = request.getParams().getOrDefault("size", null);
-        Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source, model, size);
+        String quality = request.getParams().getOrDefault("quality", null);
+        String n = request.getParams().getOrDefault("n", null);
+        Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source, model, size, quality, n);
         if (Boolean.TRUE.equals(result.get("ok"))) {
-            return presentImage(request, String.valueOf(result.get("imageUrl")),
-                    String.valueOf(result.getOrDefault("assetId", "")), null);
+            return presentImages(request, urlsOf(result), assetIdsOf(result), null);
         }
         // 生成失败 → LLM 自救：审核拒绝则重写提示词自动重试一次（成功给图+说明，失败才友好告知）
         String rawError = String.valueOf(result.getOrDefault("message", ""));
         AgentOrchestratorSupport.ImageRecoveryResult recovery = support.attemptImageRecovery(prompt, rawError);
         if (recovery.recoverable() && recovery.rewrittenPrompt() != null && !recovery.rewrittenPrompt().isBlank()) {
             Map<String, Object> retry = agentTools.refineImage(
-                    request.getConversation().getId(), recovery.rewrittenPrompt(), source, model, size);
+                    request.getConversation().getId(), recovery.rewrittenPrompt(), source, model, size, quality, n);
             if (Boolean.TRUE.equals(retry.get("ok"))) {
-                return presentImage(request, String.valueOf(retry.get("imageUrl")),
-                        String.valueOf(retry.getOrDefault("assetId", "")), recovery.message());
+                return presentImages(request, urlsOf(retry), assetIdsOf(retry), recovery.message());
             }
         }
         // 自救失败 / 不可恢复：友好告知（LLM 翻译，不直接展示英文报错）
@@ -126,18 +126,34 @@ public class PicIntentHandler implements IntentHandler {
                 "图片没生成出来，请稍后重试或调整一下描述。");
     }
 
-    /** 生成成功收尾：resumeStage 展示图片；promptNote 非空时前置一句说明（如「已帮你调整措辞重新生成」） */
-    private String presentImage(OrchestrationRequest request, String url, String assetId, String promptNote) {
-        String content = "![生成图片](" + url + ")";
+    @SuppressWarnings("unchecked")
+    private List<String> urlsOf(Map<String, Object> result) {
+        return (List<String>) result.getOrDefault("imageUrls", List.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> assetIdsOf(Map<String, Object> result) {
+        return (List<String>) result.getOrDefault("assetIds", List.of());
+    }
+
+    /** 生成成功收尾：resumeStage 展示全部图片（n 张各占一行）；promptNote 非空时前置一句说明（如「已帮你调整措辞重新生成」） */
+    private String presentImages(OrchestrationRequest request, List<String> urls, List<String> assetIds, String promptNote) {
+        String content = urls.stream().map(u -> "![生成图片](" + u + ")")
+                .collect(java.util.stream.Collectors.joining("\n"));
         String display = promptNote == null || promptNote.isBlank() ? content : promptNote + "\n\n" + content;
+        Map<String, Object> confirm = new java.util.LinkedHashMap<>();
+        confirm.put("kind", "image");
+        confirm.put("url", urls.isEmpty() ? "" : urls.getFirst());
+        confirm.put("urls", urls);
+        confirm.put("assetId", assetIds.isEmpty() ? "" : assetIds.getFirst());
+        confirm.put("assetIds", assetIds);
+        confirm.put("sceneCount", 0);
+        confirm.put("actions", List.of(
+                Map.of("id", "refine", "title", "继续完善"),
+                Map.of("id", "done", "title", "满意完成")));
         support.resumeStage(request, "正在生成图片…", Map.of(
                 "content", display,
-                "confirm", Map.of(
-                        "kind", "image", "url", url, "assetId", assetId,
-                        "sceneCount", 0,
-                        "actions", List.of(
-                                Map.of("id", "refine", "title", "继续完善"),
-                                Map.of("id", "done", "title", "满意完成"))),
+                "confirm", confirm,
                 "sceneCount", -1L));
         return display;
     }

@@ -4,6 +4,9 @@ import gsap from 'gsap';
 import { SplitText } from 'gsap/SplitText';
 import { useGSAP } from '@gsap/react';
 import { useAuthStore } from '../stores/authStore';
+import Particles from '../components/Particles';
+import SplashCursor from '../components/SplashCursor';
+import ParticleText from '../components/ParticleText';
 
 // 注册 SplitText 插件（GSAP 3.13+ 全插件免费）
 gsap.registerPlugin(SplitText);
@@ -66,28 +69,86 @@ export function LoginPage() {
   return (
     <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        position: 'relative',
         minHeight: '100vh',
-        background: 'var(--color-canvas)',
+        overflow: 'hidden',
+        background: 'var(--color-surface-dark)',
       }}
     >
+      <div style={{ position: 'absolute', inset: 0 }}>
+        <Particles
+          particleColors={["#cc785c"]}
+          particleCount={200}
+          particleSpread={10}
+          speed={0.1}
+          particleBaseSize={100}
+          moveParticlesOnHover={true}
+          alphaParticles={false}
+          disableRotation={false}
+        />
+      </div>
+      <SplashCursor RAINBOW_MODE={false} COLOR="#cc785c" />
+      {/* 顶部导航栏：ParticleText 品牌名（珊瑚→琥珀渐变） */}
+      <nav
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 64,
+          zIndex: 3,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 var(--space-lg)',
+        }}
+      >
+        <ParticleText
+          text="AlphaSunflower AI分镜"
+          particleSize={2}
+          density={3}
+          color="#cc785c"
+          highlightColor="#e8a55a"
+          scatter={120}
+          gatherDuration={1200}
+          stagger={200}
+          pointerRepel={30}
+          repelRadius={110}
+          idleDrift={0.6}
+          trigger="hover"
+          fontSize={26}
+          fontWeight={700}
+          glow
+          style={{ width: 420, height: 64, minHeight: 64 }}
+        />
+      </nav>
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 2,
+          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh',
+        }}
+      >
       <div
         ref={cardRef}
         style={{
-          background: 'white',
+          pointerEvents: 'auto',
+          background: 'var(--color-surface-dark-elevated)',
+          border: '1px solid rgba(250, 249, 245, 0.08)',
           borderRadius: 'var(--rounded-lg)',
           padding: 'var(--space-xl)',
           maxWidth: 400,
           width: '100%',
-          boxShadow: '0 1px 3px rgba(20,20,19,0.08)',
+          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.4)',
         }}
       >
         <h1
           style={{
             font: 'var(--text-display-sm)',
-            color: 'var(--color-ink)',
+            color: 'var(--color-on-dark)',
             marginBottom: 'var(--space-lg)',
             textAlign: 'center',
           }}
@@ -101,7 +162,7 @@ export function LoginPage() {
                 style={{
                   display: 'block',
                   marginBottom: 4,
-                  color: 'var(--color-muted)',
+                  color: 'var(--color-on-dark-soft)',
                 }}
               >
                 用户名
@@ -120,7 +181,7 @@ export function LoginPage() {
               style={{
                 display: 'block',
                 marginBottom: 4,
-                color: 'var(--color-muted)',
+                color: 'var(--color-on-dark-soft)',
               }}
             >
               邮箱
@@ -138,7 +199,7 @@ export function LoginPage() {
               style={{
                 display: 'block',
                 marginBottom: 4,
-                color: 'var(--color-muted)',
+                color: 'var(--color-on-dark-soft)',
               }}
             >
               密码
@@ -187,7 +248,7 @@ export function LoginPage() {
             textAlign: 'center',
             marginTop: 'var(--space-md)',
             fontSize: 13,
-            color: 'var(--color-muted)',
+            color: 'var(--color-on-dark-soft)',
           }}
         >
           {isRegister ? '已有账号？' : '没有账号？'}
@@ -207,6 +268,7 @@ export function LoginPage() {
           </button>
         </p>
       </div>
+      </div>
     </div>
   );
 }
@@ -215,8 +277,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 14px',
   height: 40,
-  border: '1px solid var(--color-hairline)',
+  border: '1px solid rgba(250, 249, 245, 0.12)',
   borderRadius: 'var(--rounded-md)',
   fontSize: 14,
-  background: 'var(--color-canvas)',
+  background: 'var(--color-surface-dark-soft)',
+  color: 'var(--color-on-dark)',
 };

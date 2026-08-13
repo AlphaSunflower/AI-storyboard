@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -76,38 +78,46 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     }
 
     /**
-     * 生图并落库。
-     * sceneId 非空 → 更新真实分镜（返回 imageUrl）；为空 → 落 agent_assets（返回 imageUrl + assetId）。
-     * mode="edit" 走图改图（generatedImageUrl 为源图）。
+     * 生图并落库（支持 quality/n 多张）。
+     * sceneId 非空 → 更新真实分镜（返回 imageUrls）；为空 → 每张图落一条 agent_assets（返回 imageUrls + assetIds）。
+     * mode="edit" 走图改图（generatedImageUrl 为源图，恒单张）。
      */
-    public Map<String, String> generateImage(AgentConversation conversation, String sceneId,
-                                             String prompt, String model, String size, String mode,
-                                             List<String> referenceImages, String generatedImageUrl) {
+    public Map<String, Object> generateImage(AgentConversation conversation, String sceneId,
+                                             String prompt, String model, String size, String quality, Integer n,
+                                             String mode, List<String> referenceImages, String generatedImageUrl) {
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
-        String imageUrl = imageService.generateImage(
+        List<String> urls = imageService.generateImages(
             effectiveSceneId,
             sanitize(prompt), sanitize(model),
-            sanitize(size), null, null,
-            referenceImages, mode, sanitize(generatedImageUrl));
+            sanitize(size), sanitize(quality), null,
+            referenceImages, mode, sanitize(generatedImageUrl),
+            (n != null && n > 0) ? n : 1);
+        Map<String, Object> out = new HashMap<>();
         if (effectiveSceneId == null) {
-            AgentAsset asset = new AgentAsset();
-            asset.setConversationId(conversation.getId());
-            asset.setType("image");
-            asset.setUrl(imageUrl);
-            asset.setPrompt(sanitize(prompt));
-            asset.setModel(sanitize(model));
-            asset.setStatus("completed");
-            try {
-                agentAssetMapper.insert(asset);
-                log.info("Agent 生成编排：图片资产已落库 assetId={}, conversationId={}", asset.getId(), conversation.getId());
-                return Map.of("imageUrl", imageUrl, "assetId", asset.getId());
-            } catch (Exception e) {
-                // 图片已生成（已计费），落库失败不能抛异常导致 URL 丢失、重试重复计费
-                log.error("Agent 生成编排：图片资产落库失败(不影响已生成的图片), conversationId={}, 原因: {}", conversation.getId(), e.getMessage());
-                return Map.of("imageUrl", imageUrl);
+            List<String> assetIds = new ArrayList<>();
+            for (String url : urls) {
+                AgentAsset asset = new AgentAsset();
+                asset.setConversationId(conversation.getId());
+                asset.setType("image");
+                asset.setUrl(url);
+                asset.setPrompt(sanitize(prompt));
+                asset.setModel(sanitize(model));
+                asset.setStatus("completed");
+                try {
+                    agentAssetMapper.insert(asset);
+                    assetIds.add(asset.getId());
+                } catch (Exception e) {
+                    // 图片已生成（已计费），落库失败不能抛异常导致 URL 丢失、重试重复计费
+                    log.error("Agent 生成编排：图片资产落库失败(不影响已生成的图片), conversationId={}, 原因: {}", conversation.getId(), e.getMessage());
+                }
             }
+            out.put("imageUrls", urls);
+            out.put("assetIds", assetIds);
+            return out;
         }
-        return Map.of("imageUrl", imageUrl);
+        out.put("imageUrls", urls);
+        out.put("assetIds", List.of());
+        return out;
     }
 
     /**

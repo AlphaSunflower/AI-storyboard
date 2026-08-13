@@ -66,6 +66,9 @@ export interface SseEvent {
   kind?: 'script' | 'image' | 'video';
   url?: string;
   assetId?: string;
+  // confirm_result 多图结果（n>1 时后端下发）
+  urls?: string[];
+  assetIds?: string[];
   // video_plan 事件字段（图生视频方案确认卡片）
   planToken?: string;
   duration?: number;

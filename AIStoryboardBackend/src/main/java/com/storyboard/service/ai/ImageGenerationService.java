@@ -36,4 +36,14 @@ public interface ImageGenerationService {
                          String size, String quality, String aspectRatio,
                          List<String> referenceImages,
                          String mode, String generatedImageUrl, Integer n);
+
+    /**
+     * 生成/编辑图片入口方法，返回全部本地路径列表（n>1 时多张；edits 分支恒单张）。
+     *
+     * @param n 生成数量（null 或 <=0 时默认 1）
+     */
+    List<String> generateImages(String sceneId, String prompt, String model,
+                                String size, String quality, String aspectRatio,
+                                List<String> referenceImages,
+                                String mode, String generatedImageUrl, Integer n);
 }

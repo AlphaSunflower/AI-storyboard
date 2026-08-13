@@ -9,7 +9,7 @@ interface VideoPresetSelectorProps {
 
 /**
  * 按 durations × aspectRatios 组合生成 preset 列表（label 文案与静态 VIDEO_PRESETS 一致：
- * N秒 横/竖屏；size/resolution 沿用静态默认 1280x720/720p，竖屏画幅 9:16/3:4 用 720x1280）。
+ * N秒 横/竖屏；resolution 默认档 768P（MiniMax 仅支持 768P/2K），竖屏画幅 9:16/3:4 用 720x1280）。
  */
 export function buildPresets(durations: number[], aspectRatios: string[]): VideoPreset[] {
   const presets: VideoPreset[] = [];
@@ -22,7 +22,7 @@ export function buildPresets(durations: number[], aspectRatios: string[]): Video
         seconds: String(d),
         duration: String(d),
         size: vertical ? '720x1280' : '1280x720',
-        resolution: '720p',
+        resolution: '768P',
         aspectRatio: a,
       });
     }
@@ -49,7 +49,7 @@ export function resolveVideoPreset(value: string): VideoPreset {
     seconds,
     duration: seconds,
     size: vertical ? '720x1280' : '1280x720',
-    resolution: '720p',
+    resolution: '768P',
     aspectRatio,
   };
 }
