@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
-import { VideoPresetSelector, resolveVideoPreset } from '../common/VideoPresetSelector';
+import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
-import { IMAGE_SIZES, IMAGE_QUALITIES, type ImageModelParams } from '../../config';
+import { REFERENCE_LIMITS, type UnderstandingModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
 
 const creationTypes = [
@@ -56,30 +56,13 @@ export function LeftSidebar() {
     videoModel,
     imageModelOptions,
     videoModelOptions,
+    understandingModel,
+    understandingModelOptions,
     videoPreset,
-    imageSize,
-    imageQuality,
-    imageN,
     setImageModel,
     setVideoModel,
-    setVideoPreset,
-    setImageSize,
-    setImageQuality,
-    setImageN,
+    setUnderstandingModel,
   } = useProjectStore();
-
-  // 当前生图模型的参数能力（网关下发 params；未配置时回退静态 IMAGE_SIZES/IMAGE_QUALITIES）
-  const imageParams = imageModelOptions.find((m) => m.value === imageModel)?.params as ImageModelParams | undefined;
-  const sizeOptions = imageParams?.sizes?.length ? imageParams.sizes : [...IMAGE_SIZES];
-  const qualityOptions = imageParams?.qualities?.length ? imageParams.qualities : [...IMAGE_QUALITIES];
-  // 数量可选值（仅当前模型 params 配置了 n 能力时非空）：min..max 连续整数
-  const nRange = imageParams?.n;
-  const nOptions = nRange
-    ? Array.from(
-        { length: Math.max(0, (nRange.max ?? nRange.min ?? 1) - (nRange.min ?? 1) + 1) },
-        (_, i) => (nRange.min ?? 1) + i
-      )
-    : [];
 
   // 智能体已生成分镜时，手动剧本输入与生成按钮互斥禁用
   const agentGeneratedScenes = useAgentStore((s) => s.agentGeneratedScenes);
@@ -88,21 +71,39 @@ export function LeftSidebar() {
   const [creationType, setCreationType] = useState('movie');
   const [customTypeDesc, setCustomTypeDesc] = useState('');
   const [scriptText, setScriptText] = useState('');
-  const [_refImageFile, setRefImageFile] = useState<File | null>(null);
-  const [refImagePreview, setRefImagePreview] = useState('');
+  // 参考图（base64 data URI 列表；作为理解模型的看图输入）
+  const [refImages, setRefImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRefImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    const file = e.target.files?.[0];
-    if (file) {
-      setRefImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setRefImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  // 上传约束：优先当前理解模型 params（网关 model_params refImages/maxImageSizeMB），未配置回退静态兜底
+  const uParams = understandingModelOptions.find((m) => m.value === understandingModel)?.params as UnderstandingModelParams | undefined;
+  const maxCount = uParams?.refImages?.max ?? REFERENCE_LIMITS.image.maxCount;
+  const maxSizeMB = uParams?.maxImageSizeMB ?? REFERENCE_LIMITS.image.maxSizeMB;
+
+  const handleRefImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    const available = maxCount - refImages.length;
+    if (files.length > available) {
+      alert(`最多上传 ${maxCount} 张参考图（当前已 ${refImages.length} 张）`);
     }
+    const accepted = files.slice(0, Math.max(0, available));
+    if (accepted.some((f) => f.size > maxSizeMB * 1024 * 1024)) {
+      alert(`单张图片不能超过 ${maxSizeMB}MB`);
+    }
+    const valid = accepted.filter((f) => f.size <= maxSizeMB * 1024 * 1024);
+    Promise.all(
+      valid.map((f) => new Promise<string>((resolve) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result as string);
+        r.readAsDataURL(f);
+      }))
+    ).then((uris) => setRefImages((prev) => [...prev, ...uris]));
+    // 允许重复选择同一文件：重置 input value
+    e.target.value = '';
+  };
+
+  const removeRefImage = (idx: number) => {
+    setRefImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleGenerate = async () => {
@@ -123,7 +124,11 @@ export function LeftSidebar() {
     }
 
     const preset = resolveVideoPreset(videoPreset);
-    await generateScript(projectId, scriptText, creationType, preset.aspectRatio, undefined);
+    await generateScript(
+      projectId, scriptText, creationType, preset.aspectRatio, undefined,
+      refImages.length ? understandingModel : undefined,
+      refImages.length ? refImages : undefined
+    );
   };
 
   // ── Collapsed state: vertical tab ──
@@ -204,7 +209,6 @@ export function LeftSidebar() {
 
       {/* ═══════════ 剧本输入区域 ═══════════ */}
 
-
       {/* Creation type */}
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>创作类型</label>
@@ -254,7 +258,7 @@ export function LeftSidebar() {
         />
       </div>
 
-      {/* Reference image upload */}
+      {/* Reference image multi-upload（理解模型看图输入） */}
       <div style={{ flexShrink: 0 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -263,79 +267,58 @@ export function LeftSidebar() {
           background: 'var(--color-canvas)',
         }} onClick={() => fileInputRef.current?.click()}>
           <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
-            {refImagePreview ? '更换参考图' : '📎 上传风格参考图（可选）'}
+            📎 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
           </span>
         </div>
-        <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleRefImage} />
-        {refImagePreview && (
-          <div style={{ position: 'relative', marginTop: 8 }}>
-            <img src={refImagePreview} style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8 }} />
-            <span onClick={(e) => { e.stopPropagation(); setRefImagePreview(''); setRefImageFile(null); }}
-              style={{ position: 'absolute', top: -4, right: -4, background: 'var(--color-error)', color: 'white',
-                borderRadius: '50%', width: 18, height: 18, fontSize: 12, display: 'flex',
-                alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>×</span>
+        <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleRefImages} />
+        {refImages.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {refImages.map((uri, i) => (
+              <div key={i} style={{ position: 'relative' }}>
+                <img
+                  src={uri}
+                  style={{
+                    width: 56,
+                    height: 56,
+                    objectFit: 'contain',
+                    borderRadius: 'var(--rounded-sm)',
+                    background: 'var(--color-surface-soft)',
+                    border: '1px solid var(--color-hairline)',
+                  }}
+                />
+                <span
+                  onClick={() => removeRefImage(i)}
+                  style={{
+                    position: 'absolute', top: -5, right: -5,
+                    background: 'var(--color-error)', color: 'white',
+                    borderRadius: '50%', width: 16, height: 16, fontSize: 11,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ×
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* ═══════════ 生图区域 ═══════════ */}
+      {/* ═══════════ 生图区域（只保留模型）═══════════ */}
       <div style={sectionHeaderStyle}>🎨 生图设置</div>
 
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>生图模型</label>
         <select
           value={imageModel}
-          onChange={(e) => {
-            const m = e.target.value;
-            setImageModel(m);
-            // 切换模型：按新模型参数能力重置悬空值（尺寸/质量默认值，数量取 n 默认）
-            const p = imageModelOptions.find((o) => o.value === m)?.params as ImageModelParams | undefined;
-            if (p?.sizes?.length) setImageSize(p.sizeDefault && p.sizes.includes(p.sizeDefault) ? p.sizeDefault : p.sizes[0]);
-            if (p?.qualities?.length) setImageQuality(p.qualityDefault && p.qualities.includes(p.qualityDefault) ? p.qualityDefault : p.qualities[0]);
-            if (p?.n) setImageN(p.n.default ?? p.n.min ?? 1);
-          }}
+          onChange={(e) => setImageModel(e.target.value)}
           style={{ ...sharedInputStyle, cursor: 'pointer' }}
         >
           {imageModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生图尺寸</label>
-        <select
-          value={imageSize}
-          onChange={(e) => setImageSize(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生图质量</label>
-        <select
-          value={imageQuality}
-          onChange={(e) => setImageQuality(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {qualityOptions.map(q => <option key={q} value={q}>{q}</option>)}
-        </select>
-      </div>
-      {/* 数量控件：仅当前模型 params 配置了 n 能力时渲染（min..max 范围，默认 n.default） */}
-      {nRange && (
-        <div style={{ flexShrink: 0 }}>
-          <label style={labelStyle}>生成数量</label>
-          <select
-            value={imageN}
-            onChange={(e) => setImageN(Number(e.target.value))}
-            style={{ ...sharedInputStyle, cursor: 'pointer' }}
-          >
-            {nOptions.map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-        </div>
-      )}
 
-      {/* ═══════════ 生视频区域 ═══════════ */}
+      {/* ═══════════ 生视频区域（只保留模型）═══════════ */}
       <div style={sectionHeaderStyle}>🎬 生视频设置</div>
 
       <div style={{ flexShrink: 0 }}>
@@ -349,10 +332,18 @@ export function LeftSidebar() {
         </select>
       </div>
 
-      {/* Video preset — duration + resolution */}
+      {/* ═══════════ 理解设置 ═══════════ */}
+      <div style={sectionHeaderStyle}>🧠 理解设置</div>
+
       <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>时长和画幅</label>
-        <VideoPresetSelector value={videoPreset} onChange={setVideoPreset} />
+        <label style={labelStyle}>理解模型</label>
+        <select
+          value={understandingModel}
+          onChange={(e) => setUnderstandingModel(e.target.value)}
+          style={{ ...sharedInputStyle, cursor: 'pointer' }}
+        >
+          {understandingModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
       </div>
 
       {/* Generate button */}

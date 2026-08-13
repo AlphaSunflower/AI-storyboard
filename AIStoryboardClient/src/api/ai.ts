@@ -23,7 +23,8 @@ export const aiApi = {
     customTypeDesc?: string;
     aspectRatio: string;
     model?: string;
-    referenceImageUrl?: string;
+    understandingModel?: string;
+    referenceImages?: string[];
   }) => client.post('/ai/generate-script', data),
 
   generateImage: (data: {
@@ -63,5 +64,5 @@ export const aiApi = {
 
   // 网关模型列表（生图/生视频，来自 LLM 网关路由 type 过滤；网关不可用时为空数组；params 为 JSON 字符串）
   aiModels: () =>
-    client.get<ApiResponse<{ imageModels: GatewayModelOption[]; videoModels: GatewayModelOption[] }>>('/ai/models'),
+    client.get<ApiResponse<{ imageModels: GatewayModelOption[]; videoModels: GatewayModelOption[]; understandingModels: GatewayModelOption[] }>>('/ai/models'),
 };

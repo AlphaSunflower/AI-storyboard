@@ -34,7 +34,8 @@ public class AIController {
         // 生成 + 落库全部在 Service 层完成（原 Controller 内 sceneMapper 循环写库已下沉）
         return ApiResponse.ok(scriptService.generateAndSaveScenes(
             request.projectId(), request.scriptText(), request.creationType(),
-            request.customTypeDesc(), request.aspectRatio(), request.model()
+            request.customTypeDesc(), request.aspectRatio(), request.model(),
+            request.understandingModel(), request.referenceImages()
         ));
     }
 
@@ -78,6 +79,7 @@ public class AIController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("imageModels", gatewayModelService.fetchModels("image"));
         result.put("videoModels", gatewayModelService.fetchModels("video"));
+        result.put("understandingModels", gatewayModelService.fetchModels("vision"));
         return ApiResponse.ok(result);
     }
 }

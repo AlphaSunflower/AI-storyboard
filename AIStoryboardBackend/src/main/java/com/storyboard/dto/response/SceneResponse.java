@@ -20,6 +20,7 @@ public record SceneResponse(
     String videoUrl,
     String imageStatus,
     String videoStatus,
+    String videoTaskId,
     String imageUrls,
     String imageModel,
     String imageSize,

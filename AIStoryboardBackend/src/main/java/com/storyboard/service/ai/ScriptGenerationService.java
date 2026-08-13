@@ -12,17 +12,20 @@ public interface ScriptGenerationService {
     /**
      * 生成分镜脚本：调用 LLM 生成 JSON 分镜列表并解析为 Map 列表。
      *
-     * @param projectId      项目 ID
-     * @param scriptText     剧本内容
-     * @param creationType   创作类型（movie/short_video/ad/drama/documentary/custom）
-     * @param customTypeDesc 自定义类型描述（creationType=custom 时使用）
-     * @param aspectRatio    画幅
-     * @param model          模型名（null 时用默认视觉模型）
+     * @param projectId          项目 ID
+     * @param scriptText         剧本内容
+     * @param creationType       创作类型（movie/short_video/ad/drama/documentary/custom）
+     * @param customTypeDesc     自定义类型描述（creationType=custom 时使用）
+     * @param aspectRatio        画幅
+     * @param model              分镜模型名（null 时用默认视觉模型）
+     * @param understandingModel 理解模型名（null 时用默认理解模型；仅 referenceImages 非空时调用）
+     * @param referenceImages    参考图 base64 data URI 列表（可为 null/空）
      * @return 分镜 Map 列表（sceneNumber/scriptContent/imagePrompt/videoPrompt 等字段）
      */
     List<Map<String, Object>> generateScenes(String projectId, String scriptText,
                                              String creationType, String customTypeDesc,
-                                             String aspectRatio, String model);
+                                             String aspectRatio, String model,
+                                             String understandingModel, List<String> referenceImages);
 
     /**
      * 生成分镜脚本并直接落库（generateScenes + 批量写 scenes 表）。
@@ -34,5 +37,6 @@ public interface ScriptGenerationService {
      */
     Map<String, Object> generateAndSaveScenes(String projectId, String scriptText,
                                               String creationType, String customTypeDesc,
-                                              String aspectRatio, String model);
+                                              String aspectRatio, String model,
+                                              String understandingModel, List<String> referenceImages);
 }

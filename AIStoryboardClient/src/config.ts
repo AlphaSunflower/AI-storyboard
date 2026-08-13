@@ -64,11 +64,17 @@ export interface TextModelParams {
   defaults?: { temperature?: number; max_tokens?: number; top_p?: number };
 }
 
+/** 理解模型（vision 类型）参数能力：上传参考图约束（来自网关 model_params refImages/maxImageSizeMB） */
+export interface UnderstandingModelParams {
+  refImages?: { min?: number; max?: number };
+  maxImageSizeMB?: number;
+}
+
 /** 模型下拉选项（网关下发与静态默认统一结构；params 为解析后的参数对象，未配置时为 null/undefined） */
 export interface ModelOption {
   value: string;
   label: string;
-  params?: ImageModelParams | VideoModelParams | TextModelParams | null;
+  params?: ImageModelParams | VideoModelParams | TextModelParams | UnderstandingModelParams | null;
 }
 
 export const IMAGE_MODELS = [
@@ -84,8 +90,13 @@ export const VIDEO_MODELS = [
   { value: 'MiniMax-H3', label: 'MiniMax H3' },
 ] as const;
 
+export const UNDERSTANDING_MODELS = [
+  { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+] as const;
+
 export const DEFAULT_IMAGE_MODEL: string = IMAGE_MODELS[0].value;
 export const DEFAULT_VIDEO_MODEL: string = VIDEO_MODELS[0].value;
+export const DEFAULT_UNDERSTANDING_MODEL: string = UNDERSTANDING_MODELS[0].value;
 
 // ═══════════════════════════════════════════════════
 //  Video duration + resolution presets
@@ -102,15 +113,15 @@ export interface VideoPreset {
 }
 
 export const VIDEO_PRESETS: VideoPreset[] = [
-  // 注意：分辨率由后端统一为配置默认档（768P），size/resolution 字段后端忽略，仅兼容保留；
-  // 真实生效参数 = duration + aspectRatio（MiniMax ratio 白名单 21:9/16:9/4:3/1:1/3:4/9:16；
-  // 官方 duration 合法范围 4~15 整数，此处 UI 提供常用 4/6/8 秒档）
-  { value: '4s-16:9',  label: '4秒 横屏',   seconds: '4', duration: '4',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
-  { value: '6s-16:9',  label: '6秒 横屏',   seconds: '6', duration: '6',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
-  { value: '8s-16:9',  label: '8秒 横屏',   seconds: '8', duration: '8',  size: '1280x720',  resolution: '720p', aspectRatio: '16:9' },
-  { value: '4s-9:16',  label: '4秒 竖屏',   seconds: '4', duration: '4',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
-  { value: '6s-9:16',  label: '6秒 竖屏',   seconds: '6', duration: '6',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
-  { value: '8s-9:16',  label: '8秒 竖屏',   seconds: '8', duration: '8',  size: '720x1280',  resolution: '720p', aspectRatio: '9:16' },
+  // 注意：分辨率默认档统一 768P（MiniMax 仅支持 768P/2K，720p 会 400）；无分镜覆盖时前端不再下发
+  // resolution，由后端 config 默认档兜底；真实生效参数 = duration + aspectRatio（MiniMax ratio 白名单
+  // 21:9/16:9/4:3/1:1/3:4/9:16；官方 duration 合法范围 4~15 整数，此处 UI 提供常用 4/6/8 秒档）
+  { value: '4s-16:9',  label: '4秒 横屏',   seconds: '4', duration: '4',  size: '1280x720',  resolution: '768P', aspectRatio: '16:9' },
+  { value: '6s-16:9',  label: '6秒 横屏',   seconds: '6', duration: '6',  size: '1280x720',  resolution: '768P', aspectRatio: '16:9' },
+  { value: '8s-16:9',  label: '8秒 横屏',   seconds: '8', duration: '8',  size: '1280x720',  resolution: '768P', aspectRatio: '16:9' },
+  { value: '4s-9:16',  label: '4秒 竖屏',   seconds: '4', duration: '4',  size: '720x1280',  resolution: '768P', aspectRatio: '9:16' },
+  { value: '6s-9:16',  label: '6秒 竖屏',   seconds: '6', duration: '6',  size: '720x1280',  resolution: '768P', aspectRatio: '9:16' },
+  { value: '8s-9:16',  label: '8秒 竖屏',   seconds: '8', duration: '8',  size: '720x1280',  resolution: '768P', aspectRatio: '9:16' },
 ];
 
 export const DEFAULT_VIDEO_PRESET: string = VIDEO_PRESETS[2].value; // 8秒 横屏（与官方/原系统默认一致）

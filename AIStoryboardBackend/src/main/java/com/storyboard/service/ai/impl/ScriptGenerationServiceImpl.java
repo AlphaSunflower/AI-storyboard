@@ -9,10 +9,13 @@ import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.ScriptGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
 
 import java.time.Duration;
 import java.util.*;
@@ -43,9 +46,16 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     @Override
     public List<Map<String, Object>> generateScenes(String projectId, String scriptText,
                                                       String creationType, String customTypeDesc,
-                                                      String aspectRatio, String model) {
+                                                      String aspectRatio, String model,
+                                                      String understandingModel, List<String> referenceImages) {
         String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
-        String userPrompt = "请根据以下剧本内容生成分镜脚本，每个分镜包含：镜头号、剧本内容、生图提示词（格式：【镜头构图】→【场景主体】→【环境细节/道具】→【光线与色彩】→【氛围情绪】→【画质/风格】）、生视频提示词、反向提示词、机位和运动、镜头类型、声音设计。\n\n剧本：\n" + scriptText;
+
+        // 有参考图 → 先调理解模型看图生成描述，再连同用户提示词交给分镜模型（无图直接分镜模型）
+        String understanding = null;
+        if (referenceImages != null && !referenceImages.isEmpty()) {
+            understanding = callUnderstandingModel(understandingModel, referenceImages);
+        }
+        String userPrompt = buildUserPrompt(scriptText, understanding);
 
         String content = callLLM(model, systemPrompt, userPrompt);
         // 结构化解析优先；失败/空结果走下方原有 JSON 兜底逻辑
@@ -64,10 +74,12 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     @Override
     public Map<String, Object> generateAndSaveScenes(String projectId, String scriptText,
                                                      String creationType, String customTypeDesc,
-                                                     String aspectRatio, String model) {
+                                                     String aspectRatio, String model,
+                                                     String understandingModel, List<String> referenceImages) {
         // 先生成分镜（复用 generateScenes 的 LLM 调用 + 双路解析）
         List<Map<String, Object>> scenes = generateScenes(
-                projectId, scriptText, creationType, customTypeDesc, aspectRatio, model);
+                projectId, scriptText, creationType, customTypeDesc, aspectRatio, model,
+                understandingModel, referenceImages);
         // 批量写库（原 AIController.generateScript 的循环落库逻辑下沉至此）
         for (Map<String, Object> s : scenes) {
             Scene scene = new Scene();
@@ -132,6 +144,50 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         } catch (Exception e) {
             throw new RuntimeException("AI 生成分镜脚本失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 理解模型看图：多张参考图 → 「图一/图二…」文字描述（多模态 Media 输入）。
+     * 模型优先级：显式传入 understandingModel > 默认理解模型 config.getDefaultUnderstandingModel()。
+     */
+    private String callUnderstandingModel(String model, List<String> referenceImages) {
+        String effModel = (model != null && !model.isBlank()) ? model : config.getDefaultUnderstandingModel();
+        List<Media> medias = new ArrayList<>();
+        for (String img : referenceImages) {
+            medias.add(Media.builder()
+                    .mimeType(MimeType.valueOf(imageMimeType(img)))
+                    .data(img)
+                    .build());
+        }
+        UserMessage msg = UserMessage.builder()
+                .text("请逐一描述以下参考图的内容与风格（主体、构图、色调、光线、氛围、画风），"
+                        + "用「图一：…」「图二：…」的格式输出，供后续分镜生成参考。")
+                .media(medias.toArray(new Media[0]))
+                .build();
+        return chatClient().prompt()
+                .system("你是分镜前期视觉理解助手，擅长提炼参考图的关键视觉要素。")
+                .messages(msg)
+                .options(OpenAiChatOptions.builder().model(effModel))
+                .call()
+                .content();
+    }
+
+    /** 组装分镜生成 user prompt：有理解描述时前置参考图视觉要素，否则仅剧本。 */
+    private String buildUserPrompt(String scriptText, String understanding) {
+        String base = "请根据以下剧本内容生成分镜脚本，每个分镜包含：镜头号、剧本内容、生图提示词（格式：【镜头构图】→【场景主体】→【环境细节/道具】→【光线与色彩】→【氛围情绪】→【画质/风格】）、生视频提示词、反向提示词、机位和运动、镜头类型、声音设计。\n\n";
+        if (understanding != null && !understanding.isBlank()) {
+            base += "参考图视觉要素（请在分镜中体现这些风格与要素）：\n" + understanding + "\n\n";
+        }
+        return base + "剧本：\n" + scriptText;
+    }
+
+    /** 从 data URI 前缀提取图片 MIME（data:image/png;base64,... → image/png；非 data URI 兜底 png） */
+    private String imageMimeType(String dataUri) {
+        if (dataUri != null && dataUri.startsWith("data:")) {
+            int end = dataUri.indexOf(';');
+            if (end > 5) return dataUri.substring(5, end);
+        }
+        return "image/png";
     }
 
     /** 结构化解析成功路径：SceneSpec → Map（sceneNumber 递增逻辑与 parseScenes 一致）。 */

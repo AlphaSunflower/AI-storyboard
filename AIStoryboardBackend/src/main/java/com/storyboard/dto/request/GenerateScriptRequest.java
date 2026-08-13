@@ -1,5 +1,7 @@
 package com.storyboard.dto.request;
 
+import java.util.List;
+
 public record GenerateScriptRequest(
     String projectId,
     String scriptText,
@@ -7,5 +9,6 @@ public record GenerateScriptRequest(
     String customTypeDesc,
     String aspectRatio,
     String model,
-    String referenceImageUrl
+    String understandingModel,
+    List<String> referenceImages
 ) {}

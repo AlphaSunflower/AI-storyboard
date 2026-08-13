@@ -90,6 +90,10 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String defaultVisionModel = "gemini-3-flash-preview";
+    /** 默认理解模型（vision 类型，剧本输入上传参考图时先看图生成描述；可经环境变量覆盖） */
+    @Setter
+    @Getter
+    private String defaultUnderstandingModel = "gemini-3-flash-preview";
     /** 默认生成图片尺寸（OpenAI 格式：宽x高） */
     @Setter
     @Getter
@@ -98,10 +102,10 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String defaultVideoDuration = "8";
-    /** 默认生成视频分辨率 */
+    /** 默认生成视频分辨率（MiniMax 仅支持 768P/2K，720p 会 400 invalid params 2013） */
     @Setter
     @Getter
-    private String defaultVideoResolution = "720p";
+    private String defaultVideoResolution = "768P";
     /** 默认生成视频尺寸 */
     @Setter
     @Getter

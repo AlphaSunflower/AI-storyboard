@@ -37,6 +37,7 @@ export interface SceneResponse {
   videoUrl: string;
   imageStatus: string;
   videoStatus: string;
+  videoTaskId: string;
   /** 多图结果：逗号分隔 URL（imageUrl 为首图） */
   imageUrls: string;
   /** 分镜生成参数覆盖（null/undefined = 跟随全局默认） */

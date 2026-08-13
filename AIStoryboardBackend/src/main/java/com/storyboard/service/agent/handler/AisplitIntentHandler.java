@@ -129,7 +129,7 @@ public class AisplitIntentHandler implements IntentHandler {
         // 3. 分镜 JSON（复用 ScriptGenerationService：LLM 生成 8 字段分镜列表）
         support.sendEvent(request, "workflow", Map.of("title", "正在生成分镜…", "status", "node_started"));
         List<Map<String, Object>> scenes = scriptGenerationService.generateScenes(
-                request.getConversation().getProjectId(), script, "movie", null, "16:9", null);
+                request.getConversation().getProjectId(), script, "movie", null, "16:9", null, null, null);
         if (scenes == null || scenes.isEmpty()) {
             support.sendMessage(request, "⚠ 未能生成分镜内容，请重新描述需求。");
             return request.getLastMessage();

@@ -180,7 +180,7 @@ public class SceneServiceImpl implements SceneService {
             s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
             s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
             s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
-            s.getImageStatus(), s.getVideoStatus(),
+            s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
             s.getImageUrls(), s.getImageModel(), s.getImageSize(),
             s.getImageQuality(), s.getImageN(), s.getVideoModel(),
             s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()

@@ -83,6 +83,10 @@ public class ProjectServiceImpl implements ProjectService {
         if (project == null || !project.getUserId().equals(userId)) {
             throw new BusinessException(40401, "项目不存在");
         }
+        // 默认项目保护：最后一个项目禁止删除（保证始终有项目可进入，避免空态无法加分镜/与智能体沟通）
+        if (projectMapper.findByUserId(userId).size() <= 1) {
+            throw new BusinessException(40301, "至少保留一个项目");
+        }
         projectMapper.deleteById(projectId);
     }
 
@@ -100,7 +104,7 @@ public class ProjectServiceImpl implements ProjectService {
             s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
             s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
             s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
-            s.getImageStatus(), s.getVideoStatus(),
+            s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
             s.getImageUrls(), s.getImageModel(), s.getImageSize(),
             s.getImageQuality(), s.getImageN(), s.getVideoModel(),
             s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()

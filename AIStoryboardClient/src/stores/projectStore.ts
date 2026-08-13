@@ -3,7 +3,7 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneReferenceAsset, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, IMAGE_MODELS, VIDEO_MODELS, type ModelOption } from '../config';
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, DEFAULT_UNDERSTANDING_MODEL, IMAGE_MODELS, VIDEO_MODELS, UNDERSTANDING_MODELS, type ModelOption } from '../config';
 import { resolveVideoPreset } from '../components/common/VideoPresetSelector';
 
 // 生成完成后的 toast 通知
@@ -46,6 +46,9 @@ interface ProjectState {
   // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
   imageModelOptions: ModelOption[];
   videoModelOptions: ModelOption[];
+  // 理解模型（vision 类型）：剧本输入上传参考图时先看图生成描述
+  understandingModel: string;
+  understandingModelOptions: ModelOption[];
 
   // toast 通知
   toasts: ToastMessage[];
@@ -58,6 +61,7 @@ interface ProjectState {
 
   setImageModel: (m: string) => void;
   setVideoModel: (m: string) => void;
+  setUnderstandingModel: (m: string) => void;
   setVideoPreset: (p: string) => void;
   setImageSize: (s: string) => void;
   setImageQuality: (q: string) => void;
@@ -82,9 +86,17 @@ interface ProjectState {
   deleteProject: (id: string) => Promise<void>;
   checkDraft: () => Promise<ProjectResponse | null>;
   selectScene: (sceneId: string) => void;
-  generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string) => Promise<void>;
+  generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string, understandingModel?: string, referenceImages?: string[]) => Promise<void>;
   generateImage: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], mode?: string, generatedImageUrl?: string) => Promise<string>;
   generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], generatedImageUrl?: string, referenceVideos?: string[], referenceAudios?: string[]) => Promise<string>;
+  /** 轮询单个视频任务直到终态（复用：新生成 + 刷新/重登后恢复）；不管理 generatingVideo 标志，由调用方负责 */
+  pollVideoTask: (sceneId: string, taskId: string) => Promise<void>;
+  /** 加载分镜后恢复仍在生成中的视频轮询（刷新/重登后不丢任务，避免重复生成新任务） */
+  resumePendingVideos: () => void;
+  /** 重载分镜列表但保留当前选中（图片生成恢复轮询用，不重置 selectedSceneId） */
+  refreshScenes: () => Promise<void>;
+  /** 加载分镜后恢复仍在生成中的图片轮询（同步生图在客户端刷新后后端仍会完成并落库，前端需周期重载拾取结果） */
+  resumePendingImages: () => void;
   setGeneratingImage: (sceneId: string, v: boolean) => void;
   setGeneratingVideo: (sceneId: string, v: boolean) => void;
   addScene: (projectId: string) => Promise<void>;
@@ -94,6 +106,8 @@ interface ProjectState {
 }
 
 let toastIdCounter = 0;
+// 图片生成恢复轮询定时器（模块级，保证全局仅一个，避免重复启动）
+let imageResumeTimer: ReturnType<typeof setInterval> | null = null;
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
@@ -115,6 +129,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 初始 = 静态默认（as const 需展开为可变 ModelOption[]，不带 params）；网关拉取成功且非空时替换
   imageModelOptions: IMAGE_MODELS.map((m) => ({ value: m.value, label: m.label })),
   videoModelOptions: VIDEO_MODELS.map((m) => ({ value: m.value, label: m.label })),
+  understandingModel: DEFAULT_UNDERSTANDING_MODEL,
+  understandingModelOptions: UNDERSTANDING_MODELS.map((m) => ({ value: m.value, label: m.label })),
   sceneRefs: {},
   toasts: [],
   unreadScenes: new Set<string>(),
@@ -163,6 +179,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedSceneId: null,
       isLoading: false,
     });
+    // 恢复刷新/重登前仍在生成中的视频任务（续接轮询，不重复生成新任务）
+    get().resumePendingVideos();
+    // 同上：恢复仍在生成中的图片任务
+    get().resumePendingImages();
   },
 
   updateProject: async (id, data) => {
@@ -194,14 +214,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().markSceneRead(sceneId);
   },
 
-  generateScript: async (projectId, scriptText, creationType, aspectRatio, model) => {
+  generateScript: async (projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages) => {
     set({
       isLoading: true,
       scriptGenerationStatus: 'generating',
       scriptGenerationMessage: '正在连接 AI...',
     });
     try {
-      await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model });
+      await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages });
       set({
         scriptGenerationStatus: 'generating',
         scriptGenerationMessage: 'AI 正在分析剧本...',
@@ -266,43 +286,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const res = await aiApi.generateVideo({
         sceneId, prompt, model: p.videoModel || model, referenceImages, generatedImageUrl,
         referenceVideos, referenceAudios,
-        resolution: p.videoResolution || preset.resolution,
-        size: preset.size,
+        resolution: p.videoResolution || undefined,
         aspectRatio: p.videoAspectRatio || preset.aspectRatio,
         duration: p.duration || parseInt(preset.duration),
       });
       const taskId = res.data.data.taskId;
-      let videoFailed = false;
-      let videoDone = false;
-      // 轮询直到完成（上限 120 次 × 5s = 10 分钟：MiniMax 生成 4~15s 视频实测可达 5-10 分钟，
-      // 原 60 次上限（5 分钟）会提前放弃——前端停止轮询后任务无人接管，UI 卡在生成中）
-      let attempts = 0;
-      const poll = async () => {
-        attempts++;
-        const statusRes = await aiApi.getTaskStatus(taskId);
-        const status = statusRes.data.data;
-        if (status.progress) {
-          set((s) => ({ videoProgress: { ...s.videoProgress, [sceneId]: parseInt(status.progress!) } }));
-        }
-        if (status.status === 'completed') {
-          videoDone = true;
-          if (get().currentProject) await get().loadProject(get().currentProject!.id);
-        } else if (status.status === 'failed') {
-          videoFailed = true;
-        } else if (attempts < 120) {
-          await new Promise(r => setTimeout(r, 5000));
-          await poll();
-        }
-      };
-      await poll();
-      get().markDirty();
-      // 生成完成 → toast + 未读（仅在确认终态时发成功/失败；超时未完成不发成功，避免假成功）
-      const scene = get().scenes.find(s => s.id === sceneId);
-      if (videoFailed) {
-        get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
-      } else if (videoDone) {
-        get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
-      }
+      await get().pollVideoTask(sceneId, taskId);
       return taskId;
     } catch (err: unknown) {
       const scene = get().scenes.find(s => s.id === sceneId);
@@ -316,6 +305,104 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  /** 轮询单个视频任务直到终态（进度/完成刷新/toast；不管理 generatingVideo 标志，由调用方负责） */
+  pollVideoTask: async (sceneId, taskId) => {
+    let videoFailed = false;
+    let videoDone = false;
+    // 轮询直到完成（上限 120 次 × 5s = 10 分钟：MiniMax 生成 4~15s 视频实测可达 5-10 分钟，
+    // 原 60 次上限（5 分钟）会提前放弃——前端停止轮询后任务无人接管，UI 卡在生成中）
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      const statusRes = await aiApi.getTaskStatus(taskId);
+      const status = statusRes.data.data;
+      if (status.progress) {
+        set((s) => ({ videoProgress: { ...s.videoProgress, [sceneId]: parseInt(status.progress!) } }));
+      }
+      if (status.status === 'completed') {
+        videoDone = true;
+        if (get().currentProject) await get().loadProject(get().currentProject!.id);
+      } else if (status.status === 'failed') {
+        videoFailed = true;
+      } else if (attempts < 120) {
+        await new Promise(r => setTimeout(r, 5000));
+        await poll();
+      }
+    };
+    await poll();
+    get().markDirty();
+    // 终态 → toast + 未读（超时未完成不发成功，避免假成功）
+    const scene = get().scenes.find(s => s.id === sceneId);
+    if (videoFailed) {
+      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+    } else if (videoDone) {
+      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
+    }
+  },
+
+  /** 加载分镜后：恢复仍在生成中的视频轮询（刷新/重登后不丢任务，避免重复生成新任务） */
+  resumePendingVideos: () => {
+    const { scenes, generatingVideo } = get();
+    scenes.forEach((scene) => {
+      if (scene.videoStatus === 'generating' && scene.videoTaskId && !generatingVideo[scene.id]) {
+        set((s) => ({ generatingVideo: { ...s.generatingVideo, [scene.id]: true } }));
+        get().pollVideoTask(scene.id, scene.videoTaskId)
+          .catch(() => {
+            const sc = get().scenes.find(s => s.id === scene.id);
+            get().addToast({ sceneId: scene.id, sceneNumber: sc?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+          })
+          .finally(() => {
+            set((s) => ({ generatingVideo: { ...s.generatingVideo, [scene.id]: false } }));
+          });
+      }
+    });
+  },
+
+  /** 重载分镜列表但保留当前选中（图片生成恢复轮询用） */
+  refreshScenes: async () => {
+    const { currentProject } = get();
+    if (!currentProject) return;
+    const res = await projectApi.get(currentProject.id);
+    const project = res.data.data;
+    set(() => ({ currentProject: project, scenes: project.scenes || [] }));
+  },
+
+  /**
+   * 加载分镜后：恢复仍在生成中的图片轮询。
+   * 图片生成为同步 POST（后端在请求线程内完成并落库 imageStatus=completed/failed），
+   * 客户端刷新/重登会中断请求但后端仍会完成——故只需周期重载拾取结果，无需重新生成。
+   */
+  resumePendingImages: () => {
+    const pending = get().scenes.filter(s => s.imageStatus === 'generating').map(s => s.id);
+    if (!pending.length) return;
+    // 重建生成中标志（刷新后内存态丢失，需重新禁用「生成图片」按钮/显示进度）
+    set((s) => {
+      const flags = { ...s.generatingImage };
+      pending.forEach(id => { flags[id] = true; });
+      return { generatingImage: flags };
+    });
+    if (imageResumeTimer) return; // 全局仅一个轮询定时器
+    imageResumeTimer = setInterval(async () => {
+      const { currentProject, scenes } = get();
+      const stillGenerating = scenes.some(s => s.imageStatus === 'generating');
+      if (!currentProject || !stillGenerating) {
+        if (imageResumeTimer) { clearInterval(imageResumeTimer); imageResumeTimer = null; }
+        // 仅清本恢复轮次涉及的场景标志，不碰其他场景
+        set((s) => {
+          const flags = { ...s.generatingImage };
+          pending.forEach(id => { flags[id] = false; });
+          return { generatingImage: flags };
+        });
+        return;
+      }
+      await get().refreshScenes();
+    }, 3000);
+    // ponytail: 10 分钟硬上限，防后端异常导致 imageStatus 卡 generating 时无限轮询；到时停止（按钮恢复可手动重试）
+    setTimeout(() => {
+      if (imageResumeTimer) { clearInterval(imageResumeTimer); imageResumeTimer = null; }
+    }, 600_000);
+  },
+
   setGeneratingImage: (sceneId, v) =>
     set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: v } })),
   setGeneratingVideo: (sceneId, v) =>
@@ -323,6 +410,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setImageModel: (m) => set({ imageModel: m }),
   setVideoModel: (m) => set({ videoModel: m }),
+  setUnderstandingModel: (m) => set({ understandingModel: m }),
   setVideoPreset: (p) => set({ videoPreset: p }),
   setImageSize: (s) => set({ imageSize: s }),
   setImageQuality: (q) => set({ imageQuality: q }),
@@ -333,6 +421,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const res = await aiApi.aiModels();
       const imageModels = res.data.data?.imageModels ?? [];
       const videoModels = res.data.data?.videoModels ?? [];
+      const understandingModels = res.data.data?.understandingModels ?? [];
       // 网关下发的 params 是 JSON 字符串 → 解析为参数对象（解析失败置 null，前端回退静态默认）
       const parsedImageModels: ModelOption[] = imageModels.map((m) => ({
         ...m,
@@ -342,9 +431,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...m,
         params: m.params ? safeParseParams(m.params) : null,
       }));
+      const parsedUnderstandingModels: ModelOption[] = understandingModels.map((m) => ({
+        ...m,
+        params: m.params ? safeParseParams(m.params) : null,
+      }));
       set((s) => ({
         imageModelOptions: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
         videoModelOptions: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
+        understandingModelOptions: parsedUnderstandingModels.length ? parsedUnderstandingModels : s.understandingModelOptions,
       }));
     } catch {
       // 网关不可达：保持静态默认，模型选择不中断
