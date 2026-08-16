@@ -38,7 +38,7 @@ const ghostBtn: React.CSSProperties = {
   background: 'white', color: 'var(--color-muted)', font: 'var(--text-caption)', cursor: 'pointer',
 };
 
-export function AssetLibraryPanel({ onClose }: { onClose: () => void }) {
+export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () => void; mode?: 'manage' | 'pick' }) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const selectedSceneId = useProjectStore((s) => s.selectedSceneId);
 
@@ -82,7 +82,7 @@ export function AssetLibraryPanel({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  // 当前分镜已关联资产
+  // 当前分镜已关联资产（pick 模式勾选态）
   useEffect(() => {
     if (!selectedSceneId) { setSceneAssetIds(new Set()); return; }
     assetApi.listSceneAssets(selectedSceneId)
@@ -183,109 +183,137 @@ export function AssetLibraryPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // ── 列表行（list 与 workbench 左栏共用） ──
-  const renderRow = (a: Asset, compact: boolean) => {
+  // ── 竖向卡片（一列一资产：图在上，名称/文字约束/操作在下） ──
+  const renderCard = (a: Asset, compact: boolean) => {
     const cover = a.images[0];
+    const linked = mode === 'pick' && sceneAssetIds.has(a.id);
     const active = a.id === selectedId;
     return (
       <div
         key={a.id}
-        className={`asset-row${active ? ' is-active' : ''}`}
-        onClick={() => openWorkbench(a)}
+        className={`asset-row${active && mode === 'manage' ? ' is-active' : ''}`}
+        onClick={() => (mode === 'pick' ? toggleAssociate(a) : openWorkbench(a))}
         style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: compact ? '8px 10px' : '12px 14px',
-          border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'white',
-          marginBottom: 8,
+          background: linked ? 'var(--color-surface-card)' : 'white',
+          border: `1px solid ${linked ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
+          borderRadius: 'var(--rounded-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          marginBottom: compact ? 8 : 0,
         }}
       >
-        <div style={{ width: compact ? 44 : 60, height: compact ? 44 : 60, flexShrink: 0, borderRadius: 'var(--rounded-md)', background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        <div style={{ height: compact ? 64 : 150, background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
           {cover ? (
             <img src={assetUrl(cover.url)} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <span style={{ color: 'var(--color-muted-soft)', font: 'var(--text-caption)' }}>无图</span>
           )}
+          {a.images.length > 1 && (
+            <span style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(20,20,19,0.65)', color: 'white', fontSize: 11, padding: '2px 6px', borderRadius: 999 }}>{a.images.length} 图</span>
+          )}
+          {linked && (
+            <span style={{ position: 'absolute', top: 6, left: 6, background: 'var(--color-primary)', color: 'white', width: 22, height: 22, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✓</span>
+          )}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ padding: compact ? '6px 8px' : '10px 12px', flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ font: 'var(--text-body-sm)', fontWeight: 600, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+            <span style={{ font: 'var(--text-body-sm)', fontWeight: 600, color: 'var(--color-ink)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
             <span style={{ fontSize: 10, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 6px', borderRadius: 999, whiteSpace: 'nowrap' }}>
               {TYPE_LABEL[a.type]}{a.projectId ? '' : '·全局'}
             </span>
-            {a.images.length > 1 && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>{a.images.length} 图</span>}
           </div>
-          <p style={{ margin: '2px 0 0', font: 'var(--text-caption)', color: 'var(--color-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <p style={{ margin: '4px 0 0', font: 'var(--text-caption)', color: 'var(--color-muted)', fontSize: 12, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: compact ? 1 : 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {a.description || '（无文字约束）'}
           </p>
         </div>
-        {!compact && (
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-            <label style={{ ...ghostBtn, cursor: 'pointer' }}>
+        {!compact && mode === 'manage' && (
+          <div style={{ display: 'flex', gap: 6, padding: '8px 10px', borderTop: '1px solid var(--color-hairline-soft)' }} onClick={(e) => e.stopPropagation()}>
+            <label style={{ ...ghostBtn, flex: 1, textAlign: 'center', cursor: 'pointer', margin: 0 }}>
               📷 上传
               <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(a.id, e.target.files); e.target.value = ''; }} />
             </label>
-            <button style={ghostBtn} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}>✏️ 编辑</button>
-            <button style={ghostBtn} onClick={() => handleDelete(a)}>🗑 删除</button>
+            <button style={{ ...ghostBtn, flex: 1 }} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}>✏️ 编辑</button>
+            <button style={ghostBtn} onClick={() => handleDelete(a)}>🗑</button>
           </div>
         )}
       </div>
     );
   };
 
+  const typeFilterRow = (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {(['all', 'character', 'prop', 'scene'] as const).map((t) => (
+        <button key={t} onClick={() => setTypeFilter(t)}
+          style={{ ...ghostBtn, background: typeFilter === t ? 'var(--color-surface-card)' : 'white', color: typeFilter === t ? 'var(--color-ink)' : 'var(--color-muted)', fontWeight: typeFilter === t ? 600 : 400 }}>
+          {t === 'all' ? '全部' : TYPE_LABEL[t]}
+        </button>
+      ))}
+    </div>
+  );
+
+  // ── PICK 模式：仅竖向卡片网格 + 勾选切换关联 + 完成 ──
+  if (mode === 'pick') {
+    return (
+      <div ref={overlayRef} style={overlayStyle} onClick={onClose}>
+        <div ref={panelRef} style={panelStyle} onClick={(e) => e.stopPropagation()}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>选择要关联的资产</h2>
+            {typeFilterRow}
+            <button style={primaryBtn} onClick={onClose}>完成</button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, alignContent: 'start' }}>
+            {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
+            {!loading && filtered.length === 0 && (
+              <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
+                暂无资产——先到「🧩 资产库」创建人物/道具/场景卡
+              </p>
+            )}
+            {filtered.map((a) => renderCard(a, false))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── MANAGE 模式：列表 ↔ 工作台 ──
   return (
     <div ref={overlayRef} style={overlayStyle} onClick={onClose}>
       <div ref={panelRef} style={panelStyle} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>AI 资产库</h2>
-          {(['all', 'character', 'prop', 'scene'] as const).map((t) => (
-            <button key={t} onClick={() => setTypeFilter(t)}
-              style={{ ...ghostBtn, background: typeFilter === t ? 'var(--color-surface-card)' : 'white', color: typeFilter === t ? 'var(--color-ink)' : 'var(--color-muted)', fontWeight: typeFilter === t ? 600 : 400 }}>
-              {t === 'all' ? '全部' : TYPE_LABEL[t]}
-            </button>
-          ))}
+          {typeFilterRow}
           <button style={primaryBtn} onClick={() => setCreateOpen(true)}>＋ 新建资产</button>
           <button style={{ ...ghostBtn, border: 'none', fontSize: 16 }} onClick={onClose}>✕</button>
         </div>
 
-        {/* 列表视图 */}
+        {/* 列表视图：竖向卡片网格 */}
         {view === 'list' && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14, alignContent: 'start' }}>
             {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
             {!loading && filtered.length === 0 && (
-              <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', textAlign: 'center', padding: 48 }}>
+              <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
                 暂无资产，点「＋ 新建资产」创建人物/道具/场景卡
               </p>
             )}
-            {filtered.map((a) => renderRow(a, false))}
+            {filtered.map((a) => renderCard(a, false))}
           </div>
         )}
 
         {/* 工作台视图：左列表 + 右预览 */}
         {view === 'workbench' && selected && (
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid var(--color-hairline)', overflowY: 'auto', padding: 12 }}>
+            <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--color-hairline)', overflowY: 'auto', padding: 12 }}>
               <button style={{ ...ghostBtn, marginBottom: 10, width: '100%' }} onClick={() => setView('list')}>← 返回列表</button>
-              {filtered.map((a) => renderRow(a, true))}
+              {filtered.map((a) => renderCard(a, true))}
             </div>
             <div ref={previewRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: 16 }}>
-              {/* 头部 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <h3 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>{selected.name}</h3>
                 <span style={{ fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 8px', borderRadius: 999 }}>
                   {TYPE_LABEL[selected.type]}{selected.projectId ? '' : ' · 全局'}
                 </span>
-                <button
-                  style={{ ...ghostBtn, borderColor: selectedSceneId ? (sceneAssetIds.has(selected.id) ? 'var(--color-primary)' : 'var(--color-hairline)') : 'var(--color-hairline)', color: sceneAssetIds.has(selected.id) ? 'var(--color-primary)' : 'var(--color-muted)', background: sceneAssetIds.has(selected.id) ? 'var(--color-surface-card)' : 'white' }}
-                  onClick={() => toggleAssociate(selected)}
-                  disabled={!selectedSceneId}
-                  title={selectedSceneId ? '关联到当前分镜（生成时注入参考图与设定）' : '先在预览面板选中一个分镜'}
-                >
-                  {sceneAssetIds.has(selected.id) ? '✓ 已关联本镜' : '关联本镜'}
-                </button>
               </div>
               <p style={{ margin: '0 0 12px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>{selected.description || '（无文字约束）'}</p>
 
-              {/* DepthCarousel 图片展示 */}
               {selected.images.length > 0 ? (
                 <>
                   <div style={{ height: 360, position: 'relative', flexShrink: 0 }}>
@@ -324,7 +352,6 @@ export function AssetLibraryPanel({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
-              {/* 底部操作 */}
               <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 14 }}>
                 <button style={ghostBtn} onClick={() => { setEditTarget(selected); setEditName(selected.name); setEditDesc(selected.description); }}>✏️ 编辑资产</button>
                 <button style={{ ...ghostBtn, color: 'var(--color-error)' }} onClick={() => handleDelete(selected)}>🗑 删除资产</button>
