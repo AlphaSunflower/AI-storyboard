@@ -5,6 +5,7 @@ import com.storyboard.dto.request.AssetCreateRequest;
 import com.storyboard.dto.request.AssetUpdateRequest;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
+import com.storyboard.dto.response.SceneAssetsResponse;
 import com.storyboard.entity.Asset;
 import com.storyboard.entity.AssetImage;
 import com.storyboard.entity.Project;
@@ -151,30 +152,23 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     @Transactional
-    public void setSceneAssets(String userId, String sceneId, List<String> assetIds) {
+    public void setSceneAssets(String userId, String sceneId, List<String> imageAssetIds, List<String> videoAssetIds) {
         getOwnedScene(userId, sceneId);
         // 校验所有资产归属（无权访问统一 40401）
-        if (assetIds != null) {
-            for (String id : assetIds) {
-                getOwnedAsset(userId, id);
-            }
-        }
-        // 覆盖式：清空旧关联再写入
+        validateAssetIds(userId, imageAssetIds);
+        validateAssetIds(userId, videoAssetIds);
+        // 覆盖式：清空该分镜全部关联（图片+视频）再按用途写入
         sceneAssetMapper.delete(new LambdaQueryWrapper<SceneAsset>().eq(SceneAsset::getSceneId, sceneId));
-        if (assetIds != null) {
-            for (String id : assetIds) {
-                SceneAsset link = new SceneAsset();
-                link.setSceneId(sceneId);
-                link.setAssetId(id);
-                sceneAssetMapper.insert(link);
-            }
-        }
+        insertLinks(sceneId, imageAssetIds, "image");
+        insertLinks(sceneId, videoAssetIds, "video");
     }
 
     @Override
-    public List<AssetVO> listSceneAssets(String userId, String sceneId) {
+    public SceneAssetsResponse listSceneAssets(String userId, String sceneId) {
         getOwnedScene(userId, sceneId);
-        return doListSceneAssets(sceneId);
+        return new SceneAssetsResponse(
+                doListSceneAssets(sceneId, "image"),
+                doListSceneAssets(sceneId, "video"));
     }
 
     @Override
@@ -186,9 +180,9 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public List<AssetVO> sceneAssets(String sceneId) {
+    public List<AssetVO> sceneAssets(String sceneId, String purpose) {
         if (sceneId == null || sceneId.isBlank()) return List.of();
-        return doListSceneAssets(sceneId);
+        return doListSceneAssets(sceneId, purpose);
     }
 
     @Override
@@ -223,14 +217,37 @@ public class AssetServiceImpl implements AssetService {
 
     // ─────────── 私有辅助 ───────────
 
-    /** 分镜关联资产（含图），无归属校验。 */
-    private List<AssetVO> doListSceneAssets(String sceneId) {
+    /** 分镜关联资产（含图，按用途过滤），无归属校验。 */
+    private List<AssetVO> doListSceneAssets(String sceneId, String purpose) {
         List<SceneAsset> links = sceneAssetMapper.findBySceneId(sceneId);
         if (links.isEmpty()) return List.of();
-        List<String> ids = links.stream().map(SceneAsset::getAssetId).distinct().toList();
+        List<String> ids = links.stream()
+                .filter(l -> l.getPurpose() == null || purpose.equals(l.getPurpose()))
+                .map(SceneAsset::getAssetId).distinct().toList();
+        if (ids.isEmpty()) return List.of();
         return assetMapper.selectBatchIds(ids).stream()
                 .map(a -> toVO(a, loadImages(a.getId())))
                 .toList();
+    }
+
+    /** 校验资产列表归属（无权访问统一 40401）。 */
+    private void validateAssetIds(String userId, List<String> assetIds) {
+        if (assetIds == null) return;
+        for (String id : assetIds) {
+            getOwnedAsset(userId, id);
+        }
+    }
+
+    /** 按用途写入分镜关联。 */
+    private void insertLinks(String sceneId, List<String> assetIds, String purpose) {
+        if (assetIds == null) return;
+        for (String id : assetIds) {
+            SceneAsset link = new SceneAsset();
+            link.setSceneId(sceneId);
+            link.setAssetId(id);
+            link.setPurpose(purpose);
+            sceneAssetMapper.insert(link);
+        }
     }
 
     /** 资产归属校验：不存在或非本人一律 40401（防 IDOR 枚举）。 */

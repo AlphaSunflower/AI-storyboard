@@ -115,7 +115,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         String effectivePrompt = prompt;
         if (scene != null) {
             try {
-                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId);
+                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId, "image");
                 if (sceneAssets != null && !sceneAssets.isEmpty()) {
                     String sheet = assetService.buildSheetText(sceneAssets);
                     if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;

@@ -38,7 +38,7 @@ const ghostBtn: React.CSSProperties = {
   background: 'white', color: 'var(--color-muted)', font: 'var(--text-caption)', cursor: 'pointer',
 };
 
-export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () => void; mode?: 'manage' | 'pick' }) {
+export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' }: { onClose: () => void; mode?: 'manage' | 'pick'; purpose?: 'image' | 'video' }) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const selectedSceneId = useProjectStore((s) => s.selectedSceneId);
 
@@ -48,7 +48,8 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
   const [view, setView] = useState<'list' | 'workbench'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [sceneAssetIds, setSceneAssetIds] = useState<Set<string>>(new Set());
+  const [sceneImageIds, setSceneImageIds] = useState<Set<string>>(new Set());
+  const [sceneVideoIds, setSceneVideoIds] = useState<Set<string>>(new Set());
 
   // 新建弹窗
   const [createOpen, setCreateOpen] = useState(false);
@@ -82,12 +83,16 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
 
   useEffect(() => { void load(); }, [load]);
 
-  // 当前分镜已关联资产（pick 模式勾选态）
+  // 当前分镜已关联资产（pick 模式勾选态，按用途拆分）
   useEffect(() => {
-    if (!selectedSceneId) { setSceneAssetIds(new Set()); return; }
+    if (!selectedSceneId) { setSceneImageIds(new Set()); setSceneVideoIds(new Set()); return; }
     assetApi.listSceneAssets(selectedSceneId)
-      .then((res) => setSceneAssetIds(new Set((res.data.data || []).map((a) => a.id))))
-      .catch(() => setSceneAssetIds(new Set()));
+      .then((res) => {
+        const d = res.data.data;
+        setSceneImageIds(new Set((d?.imageAssets || []).map((a) => a.id)));
+        setSceneVideoIds(new Set((d?.videoAssets || []).map((a) => a.id)));
+      })
+      .catch(() => { setSceneImageIds(new Set()); setSceneVideoIds(new Set()); });
   }, [selectedSceneId]);
 
   // 入场动画
@@ -180,11 +185,14 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
 
   const toggleAssociate = async (a: Asset) => {
     if (!selectedSceneId) return;
-    const next = new Set(sceneAssetIds);
-    if (next.has(a.id)) next.delete(a.id); else next.add(a.id);
-    setSceneAssetIds(next);
+    const imageIds = new Set(sceneImageIds);
+    const videoIds = new Set(sceneVideoIds);
+    const target = purpose === 'image' ? imageIds : videoIds;
+    if (target.has(a.id)) target.delete(a.id); else target.add(a.id);
+    setSceneImageIds(new Set(imageIds));
+    setSceneVideoIds(new Set(videoIds));
     try {
-      await assetApi.setSceneAssets(selectedSceneId, Array.from(next));
+      await assetApi.setSceneAssets(selectedSceneId, Array.from(imageIds), Array.from(videoIds));
     } catch {
       /* 关联失败静默 */
     }
@@ -193,7 +201,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
   // ── 横向卡片（一行一个资产：图在左，名称/文字约束居中，操作在右） ──
   const renderCard = (a: Asset, compact: boolean) => {
     const cover = a.images[0];
-    const linked = mode === 'pick' && sceneAssetIds.has(a.id);
+    const linked = mode === 'pick' && (purpose === 'image' ? sceneImageIds : sceneVideoIds).has(a.id);
     const active = a.id === selectedId;
     const thumb = compact ? 44 : 56;
     return (
@@ -261,7 +269,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
       <div ref={overlayRef} style={overlayStyle} onClick={onClose}>
         <div ref={panelRef} style={panelStyle} onClick={(e) => e.stopPropagation()}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>选择要关联的资产</h2>
+            <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>选择要关联的{purpose === 'image' ? '图片' : '视频'}资产</h2>
             {typeFilterRow}
             <button style={primaryBtn} onClick={onClose}>完成</button>
           </div>

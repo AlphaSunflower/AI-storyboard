@@ -23,6 +23,12 @@ export interface Asset {
   updatedAt: string;
 }
 
+/** 分镜关联资产（图片/视频用途分开）。 */
+export interface SceneAssets {
+  imageAssets: Asset[];
+  videoAssets: Asset[];
+}
+
 export const assetApi = {
   /** 列表：项目资产 + 用户全局资产；type 可选过滤。 */
   list: (projectId?: string, type?: string) =>
@@ -47,10 +53,10 @@ export const assetApi = {
   deleteImage: (assetId: string, imageId: string) =>
     client.delete<ApiResponse<void>>(`/assets/${assetId}/images/${imageId}`),
 
-  /** 覆盖式设置分镜关联的资产。 */
-  setSceneAssets: (sceneId: string, assetIds: string[]) =>
-    client.put<ApiResponse<void>>(`/scenes/${sceneId}/assets`, { assetIds }),
+  /** 覆盖式设置分镜关联的资产（图片/视频用途分开）。 */
+  setSceneAssets: (sceneId: string, imageAssetIds: string[], videoAssetIds: string[]) =>
+    client.put<ApiResponse<void>>(`/scenes/${sceneId}/assets`, { imageAssetIds, videoAssetIds }),
 
   listSceneAssets: (sceneId: string) =>
-    client.get<ApiResponse<Asset[]>>(`/scenes/${sceneId}/assets`),
+    client.get<ApiResponse<SceneAssets>>(`/scenes/${sceneId}/assets`),
 };
