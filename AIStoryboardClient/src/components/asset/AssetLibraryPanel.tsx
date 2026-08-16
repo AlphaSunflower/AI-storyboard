@@ -183,55 +183,54 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
     }
   };
 
-  // ── 竖向卡片（一列一资产：图在上，名称/文字约束/操作在下） ──
+  // ── 横向卡片（一行一个资产：图在左，名称/文字约束居中，操作在右） ──
   const renderCard = (a: Asset, compact: boolean) => {
     const cover = a.images[0];
     const linked = mode === 'pick' && sceneAssetIds.has(a.id);
     const active = a.id === selectedId;
+    const thumb = compact ? 44 : 56;
     return (
       <div
         key={a.id}
         className={`asset-row${active && mode === 'manage' ? ' is-active' : ''}`}
         onClick={() => (mode === 'pick' ? toggleAssociate(a) : openWorkbench(a))}
         style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
           background: linked ? 'var(--color-surface-card)' : 'white',
           border: `1px solid ${linked ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-          borderRadius: 'var(--rounded-lg)', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          marginBottom: compact ? 8 : 0,
+          borderRadius: 'var(--rounded-md)', marginBottom: compact ? 8 : 0,
         }}
       >
-        <div style={{ height: compact ? 64 : 180, background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
+        <div style={{ width: thumb, height: thumb, flexShrink: 0, borderRadius: 'var(--rounded-md)', background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
           {cover ? (
             <img src={assetUrl(cover.url)} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
             <span style={{ color: 'var(--color-muted-soft)', font: 'var(--text-caption)' }}>无图</span>
           )}
-          {a.images.length > 1 && (
-            <span style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(20,20,19,0.65)', color: 'white', fontSize: 11, padding: '2px 6px', borderRadius: 999 }}>{a.images.length} 图</span>
-          )}
           {linked && (
-            <span style={{ position: 'absolute', top: 6, left: 6, background: 'var(--color-primary)', color: 'white', width: 22, height: 22, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>✓</span>
+            <span style={{ position: 'absolute', top: 0, left: 0, background: 'var(--color-primary)', color: 'white', width: 18, height: 18, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>✓</span>
           )}
         </div>
-        <div style={{ padding: compact ? '6px 8px' : '10px 12px', flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ font: 'var(--text-body-sm)', fontWeight: 600, color: 'var(--color-ink)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-            <span style={{ fontSize: 10, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 6px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+            <span style={{ font: 'var(--text-body-sm)', fontWeight: 600, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+            <span style={{ fontSize: 10, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 6px', borderRadius: 999, whiteSpace: 'nowrap', flexShrink: 0 }}>
               {TYPE_LABEL[a.type]}{a.projectId ? '' : '·全局'}
             </span>
+            {a.images.length > 1 && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)', flexShrink: 0 }}>{a.images.length} 图</span>}
           </div>
-          <p style={{ margin: '4px 0 0', font: 'var(--text-caption)', color: 'var(--color-muted)', fontSize: 12, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: compact ? 1 : 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          <p style={{ margin: '2px 0 0', font: 'var(--text-caption)', color: 'var(--color-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {a.description || '（无文字约束）'}
           </p>
         </div>
         {!compact && mode === 'manage' && (
-          <div style={{ display: 'flex', gap: 6, padding: '8px 10px', borderTop: '1px solid var(--color-hairline-soft)' }} onClick={(e) => e.stopPropagation()}>
-            <label style={{ ...ghostBtn, flex: 1, textAlign: 'center', cursor: 'pointer', margin: 0 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            <label style={{ ...ghostBtn, cursor: 'pointer' }}>
               📷 上传
               <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(a.id, e.target.files); e.target.value = ''; }} />
             </label>
-            <button style={{ ...ghostBtn, flex: 1 }} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}>✏️ 编辑</button>
-            <button style={ghostBtn} onClick={() => handleDelete(a)}>🗑</button>
+            <button style={ghostBtn} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}>✏️ 编辑</button>
+            <button style={ghostBtn} onClick={() => handleDelete(a)}>🗑 删除</button>
           </div>
         )}
       </div>
