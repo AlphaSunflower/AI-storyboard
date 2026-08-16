@@ -5,6 +5,8 @@ import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
+import TextType from '../TextType';
+import SpecularButton from '../SpecularButton';
 
 export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
@@ -114,9 +116,17 @@ export function AgentChatPanel() {
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}
       >
         {messages.length === 0 && !streaming && (
-          <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
-            与 Moon 智能体对话，设计分镜、图片与视频方案
-          </p>
+          <TextType
+            as="p"
+            text="与 Moon 智能体对话，设计分镜、图片与视频方案"
+            typingSpeed={55}
+            initialDelay={200}
+            pauseDuration={4000}
+            loop={false}
+            showCursor
+            cursorCharacter="|"
+            style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}
+          />
         )}
         {messages.map((m) => (
           <MessageBubble
@@ -215,15 +225,21 @@ export function AgentChatPanel() {
             }}
           />
           {/* 右侧发送按钮 */}
-          <button
-            onClick={handleSend}
+          <SpecularButton
+            size="sm"
+            radius={8}
+            tint="#cc785c"
+            tintOpacity={1}
+            textColor="#ffffff"
+            lineColor="#ffffff"
+            baseColor="#ffffff"
+            intensity={1}
+            thickness={1.2}
             disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
-            style={{
-              height: 32, padding: '0 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-              background: streaming || !text.trim() ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
-              color: 'white', fontSize: 13, cursor: 'pointer', flexShrink: 0,
-            }}
-          >发送</button>
+            onClick={handleSend}
+          >
+            发送
+          </SpecularButton>
         </div>
       </div>
 

@@ -1,11 +1,13 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
 import { EditorPage } from './pages/EditorPage';
+import { DocsPage } from './pages/DocsPage';
 
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/docs" element={<DocsPage />} />
       <Route path="/editor" element={<EditorPage />} />
       <Route path="*" element={<Navigate to="/editor" replace />} />
     </Routes>

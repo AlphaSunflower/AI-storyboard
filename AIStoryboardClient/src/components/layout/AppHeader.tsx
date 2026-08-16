@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
 import WarpText from '../WarpText';
+import SpecularButton from '../SpecularButton';
 
 const headerHeight = 64;
 
@@ -64,6 +66,7 @@ const secondaryBtnStyle: React.CSSProperties = {
 // ── component ────────────────────────────────────────────────────────
 
 export function AppHeader() {
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const {
@@ -379,6 +382,19 @@ export function AppHeader() {
 
         {/* Right: user + logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <SpecularButton
+            size="sm"
+            radius={10}
+            tintOpacity={0}
+            textColor="#cc785c"
+            lineColor="#cc785c"
+            baseColor="#cc785c"
+            intensity={0.9}
+            thickness={1.2}
+            onClick={() => navigate('/docs')}
+          >
+            使用文档
+          </SpecularButton>
           {user?.displayName && (
             <span style={{ font: 'var(--text-caption)', color: 'var(--color-muted)' }}>
               {user.displayName}

@@ -99,6 +99,7 @@ export function LoginPage() {
           zIndex: 3,
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           padding: '0 var(--space-lg)',
         }}
       >
@@ -120,6 +121,22 @@ export function LoginPage() {
           glow
           style={{ width: 420, height: 64, minHeight: 64 }}
         />
+        <button
+          type="button"
+          onClick={() => navigate('/docs')}
+          style={{
+            background: 'none',
+            border: '1px solid rgba(250, 249, 245, 0.2)',
+            color: 'var(--color-on-dark-soft)',
+            padding: '6px 16px',
+            height: 32,
+            borderRadius: 'var(--rounded-md)',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          使用文档
+        </button>
       </nav>
       <div
         style={{

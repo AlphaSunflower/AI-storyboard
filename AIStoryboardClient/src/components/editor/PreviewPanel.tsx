@@ -8,6 +8,7 @@ import { ReferenceUploader } from './ReferenceUploader';
 import { RefineImageModal } from './RefineImageModal';
 import ElasticSlider from '../ElasticSlider';
 import BounceCards from '../BounceCards';
+import SpecularButton from '../SpecularButton';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 
@@ -61,17 +62,6 @@ const fieldLabel: React.CSSProperties = {
   width: 56,
   flexShrink: 0,
   fontSize: 11,
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '7px 18px',
-  fontSize: 12,
-  borderRadius: 'var(--rounded-sm)',
-  border: 'none',
-  background: 'var(--color-primary)',
-  color: 'var(--color-on-primary)',
-  cursor: 'pointer',
-  fontWeight: 600,
 };
 
 const btnGhost: React.CSSProperties = {
@@ -179,6 +169,11 @@ export function PreviewPanel() {
   const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
   const animatedSrcRef = useRef<string | null>(null);
 
+  // ── 参数本地草稿（图片/视频分开）：控件只写草稿不发请求，点「保存参数」才一次性 PATCH，避免拖动 slider 实时打爆后端 ──
+  const [imageDraft, setImageDraft] = useState<Record<string, unknown>>({});
+  const [videoDraft, setVideoDraft] = useState<Record<string, unknown>>({});
+  const [savingParams, setSavingParams] = useState(false);
+
   // 切换分镜时拉取该分镜参考素材
   useEffect(() => {
     if (selectedSceneId) fetchSceneRefs(selectedSceneId);
@@ -222,24 +217,28 @@ export function PreviewPanel() {
     return urls.length ? urls : (scene.imageUrl ? [scene.imageUrl] : []);
   }, [scene]);
 
-  useEffect(() => { setSelectedDownloads(new Set()); }, [scene?.id]);
+  useEffect(() => {
+    setSelectedDownloads(new Set());
+    setImageDraft({});
+    setVideoDraft({});
+  }, [scene?.id]);
 
-  // 生成参数（分镜覆盖优先：空串/0 = 回退全局默认）
-  const effImageModel = scene?.imageModel || globalImageModel;
-  const effVideoModel = scene?.videoModel || globalVideoModel;
+  // 生成参数（草稿 > 分镜覆盖 > 全局默认；空串/0 = 回退）
+  const effImageModel = (imageDraft.imageModel as string) || scene?.imageModel || globalImageModel;
+  const effVideoModel = (videoDraft.videoModel as string) || scene?.videoModel || globalVideoModel;
   const imageParams = parseParams(imageModelOptions.find((m) => m.value === effImageModel));
   const videoParams = parseParams(videoModelOptions.find((m) => m.value === effVideoModel));
 
   const sizeOptions = imageParams.sizes?.length ? imageParams.sizes : [...IMAGE_SIZES];
   const qualityOptions = imageParams.qualities?.length ? imageParams.qualities : [...IMAGE_QUALITIES];
-  const effImageSize = scene?.imageSize || imageParams.sizeDefault || globalImageSize;
-  const effImageQuality = scene?.imageQuality || imageParams.qualityDefault || globalImageQuality;
-  const effImageN = scene?.imageN || imageParams.nRange?.default || globalImageN;
+  const effImageSize = (imageDraft.imageSize as string) || scene?.imageSize || imageParams.sizeDefault || globalImageSize;
+  const effImageQuality = (imageDraft.imageQuality as string) || scene?.imageQuality || imageParams.qualityDefault || globalImageQuality;
+  const effImageN = (imageDraft.imageN as number) || scene?.imageN || imageParams.nRange?.default || globalImageN;
 
   const preset = resolveVideoPreset(globalVideoPreset);
-  const effVideoDuration = scene?.duration || videoParams.durationDefault || parseInt(preset.duration);
-  const effVideoResolution = scene?.videoResolution || videoParams.resolutionDefault || preset.resolution;
-  const effVideoAspect = scene?.videoAspectRatio || videoParams.aspectRatioDefault || preset.aspectRatio;
+  const effVideoDuration = (videoDraft.duration as number) || scene?.duration || videoParams.durationDefault || parseInt(preset.duration);
+  const effVideoResolution = (videoDraft.videoResolution as string) || scene?.videoResolution || videoParams.resolutionDefault || preset.resolution;
+  const effVideoAspect = (videoDraft.videoAspectRatio as string) || scene?.videoAspectRatio || videoParams.aspectRatioDefault || preset.aspectRatio;
   const durationOptions = videoParams.durations?.length ? videoParams.durations : [4, 6, 8];
   const resolutionOptions = videoParams.resolutions?.length ? videoParams.resolutions : ['768P', '2K'];
   const aspectOptions = videoParams.aspectRatios?.length ? videoParams.aspectRatios : ['16:9', '9:16', '4:3', '1:1', '21:9'];
@@ -249,6 +248,32 @@ export function PreviewPanel() {
   const refVideos = sceneRefs.filter((r) => r.type === 'video');
   const refAudios = sceneRefs.filter((r) => r.type === 'audio');
 
+  // 提交参数草稿：仅当有未保存改动时发一次 PATCH；成功清空对应草稿，失败弹错并返回 false（调用方据此决定是否继续）
+  const commitParams = async (params: Record<string, unknown>, clear: () => void): Promise<boolean> => {
+    if (!scene || !Object.keys(params).length) return true;
+    setSavingParams(true);
+    try {
+      await setSceneParams(scene.id, params);
+      clear();
+      return true;
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '保存参数失败');
+      alert(msg);
+      return false;
+    } finally {
+      setSavingParams(false);
+    }
+  };
+
+  // 恢复全局默认：清空本分镜全部参数覆盖（图片+视频），并清空草稿
+  const handleClearParams = async () => {
+    if (!scene) return;
+    setImageDraft({});
+    setVideoDraft({});
+    await clearSceneParams(scene.id);
+  };
+
   const handleGenerateImage = async (mode?: 'edit', source?: string) => {
     if (!scene) return;
     const prompt = scene.imagePrompt || '';
@@ -257,6 +282,8 @@ export function PreviewPanel() {
     const refs: string[] | undefined = useEdit && source === 'ref'
       ? refImages.map((r) => r.url)
       : undefined;
+    // 先保存未保存的参数草稿再生成，避免生成用到旧参数（保存失败则中止）
+    if (!(await commitParams(imageDraft, () => setImageDraft({})))) return;
     try {
       await generateImage(scene.id, prompt, effImageModel, refs, useEdit ? 'edit' : undefined, source === 'current' ? scene.imageUrl || undefined : undefined);
     } catch (err: unknown) {
@@ -270,6 +297,8 @@ export function PreviewPanel() {
     if (!scene) return;
     const prompt = scene.videoPrompt || '';
     if (!prompt.trim()) { alert('请先填写生视频提示词'); return; }
+    // 先保存未保存的参数草稿再生成（保存失败则中止）
+    if (!(await commitParams(videoDraft, () => setVideoDraft({})))) return;
     try {
       if (useFirstFrame && scene.imageUrl) {
         // 以本分镜图片为首帧（i2v）：参考素材与首帧互斥
@@ -495,37 +524,54 @@ export function PreviewPanel() {
 
           {/* 生成参数区（只含图片生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🖼️ 图片生成参数</span>
-              <button
-                onClick={() => clearSceneParams(scene.id)}
-                style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
-                title="清空本分镜覆盖，跟随全局默认"
-              >
-                恢复全局默认
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {Object.keys(imageDraft).length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>
+                )}
+                <button
+                  onClick={() => commitParams(imageDraft, () => setImageDraft({}))}
+                  disabled={Object.keys(imageDraft).length === 0 || savingParams}
+                  style={{
+                    padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
+                    background: Object.keys(imageDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
+                    color: Object.keys(imageDraft).length === 0 ? 'var(--color-muted)' : 'white',
+                    cursor: Object.keys(imageDraft).length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  💾 保存参数
+                </button>
+                <button
+                  onClick={handleClearParams}
+                  style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
+                  title="清空本分镜覆盖，跟随全局默认"
+                >
+                  恢复全局默认
+                </button>
+              </div>
             </div>
 
             <div style={fieldRow}>
               <span style={fieldLabel}>模型</span>
               <select
                 value={effImageModel}
-                onChange={(e) => setSceneParams(scene.id, { imageModel: e.target.value })}
+                onChange={(e) => setImageDraft((d) => ({ ...d, imageModel: e.target.value }))}
                 style={selectStyle}
               >
                 {imageModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
-              {!scene.imageModel && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
+              {!scene.imageModel && imageDraft.imageModel === undefined && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>尺寸</span>
-              <select value={effImageSize} onChange={(e) => setSceneParams(scene.id, { imageSize: e.target.value })} style={selectStyle}>
+              <select value={effImageSize} onChange={(e) => setImageDraft((d) => ({ ...d, imageSize: e.target.value }))} style={selectStyle}>
                 {sizeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>质量</span>
-              <select value={effImageQuality} onChange={(e) => setSceneParams(scene.id, { imageQuality: e.target.value })} style={selectStyle}>
+              <select value={effImageQuality} onChange={(e) => setImageDraft((d) => ({ ...d, imageQuality: e.target.value }))} style={selectStyle}>
                 {qualityOptions.map((q) => <option key={q} value={q}>{q}</option>)}
               </select>
             </div>
@@ -538,7 +584,7 @@ export function PreviewPanel() {
                   maxValue={imageParams.nRange.max ?? imageParams.nRange.min ?? 1}
                   isStepped
                   stepSize={1}
-                  onChange={(v) => setSceneParams(scene.id, { imageN: v })}
+                  onChange={(v) => setImageDraft((d) => ({ ...d, imageN: v }))}
                 />
               </div>
             )}
@@ -561,14 +607,22 @@ export function PreviewPanel() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <button
+            <div style={{ display: 'flex', gap: 8, marginTop: 4, justifyContent: 'center' }}>
+              <SpecularButton
+                size="sm"
+                radius={8}
+                tint="#cc785c"
+                tintOpacity={1}
+                textColor="#ffffff"
+                lineColor="#ffffff"
+                baseColor="#ffffff"
+                intensity={1}
+                thickness={1.2}
                 disabled={generatingImage}
                 onClick={() => handleGenerateImage(useRefImage && refImages.length ? 'edit' : undefined, useRefImage && refImages.length ? 'ref' : undefined)}
-                style={{ ...btnPrimary, opacity: generatingImage ? 0.6 : 1, cursor: generatingImage ? 'not-allowed' : 'pointer' }}
               >
                 {generatingImage ? '⏳ 生成中...' : '🖼️ 生成图片'}
-              </button>
+              </SpecularButton>
               {scene.imageUrl && (
                 <button
                   onClick={() => setRefineTarget(scene.imageUrl)}
@@ -625,23 +679,40 @@ export function PreviewPanel() {
 
           {/* 生成参数区（只含视频生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🎬 视频生成参数</span>
-              <button
-                onClick={() => clearSceneParams(scene.id)}
-                style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
-                title="清空本分镜覆盖，跟随全局默认"
-              >
-                恢复全局默认
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {Object.keys(videoDraft).length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>
+                )}
+                <button
+                  onClick={() => commitParams(videoDraft, () => setVideoDraft({}))}
+                  disabled={Object.keys(videoDraft).length === 0 || savingParams}
+                  style={{
+                    padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
+                    background: Object.keys(videoDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
+                    color: Object.keys(videoDraft).length === 0 ? 'var(--color-muted)' : 'white',
+                    cursor: Object.keys(videoDraft).length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  💾 保存参数
+                </button>
+                <button
+                  onClick={handleClearParams}
+                  style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
+                  title="清空本分镜覆盖，跟随全局默认"
+                >
+                  恢复全局默认
+                </button>
+              </div>
             </div>
 
             <div style={fieldRow}>
               <span style={fieldLabel}>模型</span>
-              <select value={effVideoModel} onChange={(e) => setSceneParams(scene.id, { videoModel: e.target.value })} style={selectStyle}>
+              <select value={effVideoModel} onChange={(e) => setVideoDraft((d) => ({ ...d, videoModel: e.target.value }))} style={selectStyle}>
                 {videoModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
-              {!scene.videoModel && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
+              {!scene.videoModel && videoDraft.videoModel === undefined && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>时长(秒)</span>
@@ -651,18 +722,18 @@ export function PreviewPanel() {
                 maxValue={Math.max(...durationOptions)}
                 isStepped
                 stepSize={1}
-                onChange={(v) => setSceneParams(scene.id, { duration: v })}
+                onChange={(v) => setVideoDraft((d) => ({ ...d, duration: v }))}
               />
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>分辨率</span>
-              <select value={effVideoResolution} onChange={(e) => setSceneParams(scene.id, { videoResolution: e.target.value })} style={selectStyle}>
+              <select value={effVideoResolution} onChange={(e) => setVideoDraft((d) => ({ ...d, videoResolution: e.target.value }))} style={selectStyle}>
                 {resolutionOptions.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>画幅</span>
-              <select value={effVideoAspect} onChange={(e) => setSceneParams(scene.id, { videoAspectRatio: e.target.value })} style={selectStyle}>
+              <select value={effVideoAspect} onChange={(e) => setVideoDraft((d) => ({ ...d, videoAspectRatio: e.target.value }))} style={selectStyle}>
                 {aspectOptions.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
@@ -714,14 +785,22 @@ export function PreviewPanel() {
               </label>
             )}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center' }}>
+              <SpecularButton
+                size="sm"
+                radius={8}
+                tint="#cc785c"
+                tintOpacity={1}
+                textColor="#ffffff"
+                lineColor="#ffffff"
+                baseColor="#ffffff"
+                intensity={1}
+                thickness={1.2}
                 disabled={generatingVideo}
                 onClick={handleGenerateVideo}
-                style={{ ...btnPrimary, opacity: generatingVideo ? 0.6 : 1, cursor: generatingVideo ? 'not-allowed' : 'pointer' }}
               >
                 {generatingVideo ? '⏳ 生成中...' : '🎬 生成视频'}
-              </button>
+              </SpecularButton>
             </div>
           </div>
         </div>

@@ -1,0 +1,402 @@
+/* AI 分镜 · 使用指南页样式（遵循 tokens.css 设计规范：cream / coral / editorial serif） */
+
+.docs-page {
+  min-height: 100vh;
+  background: var(--color-canvas);
+  color: var(--color-body);
+}
+
+/* ── 顶部导航 ─────────────────────────────────────────── */
+.docs-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-md);
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.docs-nav__brand {
+  font: var(--text-title-md);
+  color: var(--color-ink);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.docs-nav__brand span {
+  color: var(--color-primary);
+}
+
+.docs-container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+}
+
+/* ── Hero ─────────────────────────────────────────────── */
+.docs-hero {
+  position: relative;
+  padding: 104px 0 80px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.docs-hero__inner {
+  position: relative;
+  z-index: 1;
+}
+
+.docs-hero__eyebrow {
+  font: var(--text-caption-upper);
+  letter-spacing: 0.18em;
+  color: var(--color-primary);
+  margin-bottom: var(--space-md);
+}
+
+.docs-hero__title {
+  font: var(--font-display);
+  font-size: clamp(36px, 6vw, 60px);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  margin: 0 auto var(--space-md);
+  max-width: 720px;
+}
+
+.docs-hero__sub {
+  font: var(--text-body-md);
+  color: var(--color-muted);
+  max-width: 600px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+.docs-hero__cta {
+  margin-top: var(--space-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.docs-hero__hint {
+  margin-top: var(--space-md);
+  font: var(--text-caption);
+  color: var(--color-muted-soft);
+}
+
+/* ── 分节通用 ─────────────────────────────────────────── */
+.docs-section {
+  padding: var(--space-xxl) 0;
+  scroll-margin-top: 76px; /* 锚点跳转时避开 sticky 顶栏 */
+}
+
+.docs-section--alt {
+  background: var(--color-surface-soft);
+}
+
+.docs-section__head {
+  margin-bottom: var(--space-xl);
+}
+
+.docs-section__eyebrow {
+  font: var(--text-caption-upper);
+  letter-spacing: 0.18em;
+  color: var(--color-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.docs-section__title {
+  font: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  margin-bottom: var(--space-sm);
+}
+
+.docs-section__lead {
+  font: var(--text-body-md);
+  color: var(--color-muted);
+  max-width: 680px;
+  line-height: 1.7;
+}
+
+/* ── 左右分栏：文字 + 示意窗口 ────────────────────────── */
+.docs-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  align-items: center;
+}
+
+.docs-split--wide-left {
+  grid-template-columns: 1.1fr 1fr;
+}
+
+/* ── 步骤卡片 ─────────────────────────────────────────── */
+.docs-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+
+.docs-step {
+  background: var(--color-surface-card);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-lg);
+}
+
+.docs-step__num {
+  font: var(--font-display);
+  font-size: 40px;
+  line-height: 1;
+  color: var(--color-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.docs-step__icon {
+  font-size: 22px;
+  margin-bottom: var(--space-sm);
+}
+
+.docs-step__title {
+  font: var(--text-title-md);
+  color: var(--color-ink);
+  margin-bottom: var(--space-xs);
+}
+
+.docs-step__desc {
+  font: var(--text-body-sm);
+  color: var(--color-muted);
+  line-height: 1.65;
+}
+
+/* ── 参数说明 ─────────────────────────────────────────── */
+.docs-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-md);
+}
+
+.docs-param {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-md);
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.docs-param__icon {
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.docs-param__name {
+  font: var(--text-caption);
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.docs-param__desc {
+  font: var(--text-body-sm);
+  color: var(--color-muted);
+  line-height: 1.6;
+  margin-top: 2px;
+}
+
+.docs-note {
+  margin-top: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface-card);
+  border-radius: var(--rounded-lg);
+  border-left: 3px solid var(--color-primary);
+  font: var(--text-body-sm);
+  color: var(--color-body);
+  line-height: 1.7;
+}
+
+.docs-note strong {
+  color: var(--color-ink);
+}
+
+/* ── Moon 能力矩阵 ────────────────────────────────────── */
+.docs-ability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-md);
+}
+
+.docs-ability {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-md);
+}
+
+.docs-ability__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.docs-ability__icon {
+  font-size: 22px;
+}
+
+.docs-ability__tag {
+  font: var(--text-caption);
+  font-size: 11px;
+  color: var(--color-primary);
+  background: rgba(204, 120, 92, 0.1);
+  padding: 2px 8px;
+  border-radius: var(--rounded-pill);
+}
+
+.docs-ability__name {
+  font: var(--text-title-sm);
+  color: var(--color-ink);
+  margin-bottom: 4px;
+}
+
+.docs-ability__desc {
+  font: var(--text-body-sm);
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+/* ── 要点列表（Moon 使用步骤 / 会话管理） ─────────────── */
+.docs-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.docs-point {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.docs-point__num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: var(--text-caption);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.docs-point__name {
+  font: var(--text-title-sm);
+  color: var(--color-ink);
+}
+
+.docs-point__desc {
+  font: var(--text-body-sm);
+  color: var(--color-muted);
+  line-height: 1.6;
+  margin-top: 2px;
+}
+
+/* ── FAQ ──────────────────────────────────────────────── */
+.docs-faq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.docs-faq__item {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--rounded-lg);
+  padding: var(--space-md) var(--space-lg);
+}
+
+.docs-faq__q {
+  font: var(--text-title-sm);
+  color: var(--color-ink);
+  margin-bottom: 4px;
+}
+
+.docs-faq__a {
+  font: var(--text-body-sm);
+  color: var(--color-muted);
+  line-height: 1.65;
+}
+
+/* ── Footer ───────────────────────────────────────────── */
+.docs-footer {
+  background: var(--color-surface-dark);
+  color: var(--color-on-dark-soft);
+  padding: var(--space-xxl) 0;
+  margin-top: var(--space-xxl);
+}
+
+.docs-footer__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+  text-align: center;
+}
+
+.docs-footer__brand {
+  margin-bottom: var(--space-sm);
+}
+
+.docs-footer__text {
+  font: var(--text-body-sm);
+  color: var(--color-on-dark-soft);
+  line-height: 1.6;
+}
+
+/* ── 交互微动效（克制） ───────────────────────────────── */
+.docs-ability, .docs-step, .docs-param {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.docs-ability:hover, .docs-step:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(20, 20, 19, 0.08);
+}
+
+.docs-param:hover {
+  border-color: var(--color-primary);
+}
+
+/* 示意窗口内按钮：按压反馈 */
+.docs-mock button {
+  transition: transform 0.12s ease, opacity 0.15s ease;
+}
+
+.docs-mock button:active {
+  transform: scale(0.96);
+}
+
+/* 示意窗口内 textarea 样式继承 */
+.docs-mock textarea {
+  font: var(--text-body-sm);
+  font-family: inherit;
+}
+
+/* ── 响应式 ───────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .docs-split,
+  .docs-split--wide-left {
+    grid-template-columns: 1fr;
+  }
+  .docs-hero {
+    padding: 72px 0 56px;
+  }
+}

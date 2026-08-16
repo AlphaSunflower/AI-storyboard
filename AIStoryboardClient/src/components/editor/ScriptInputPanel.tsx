@@ -3,6 +3,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector, resolveVideoPreset } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { IMAGE_SIZES, IMAGE_QUALITIES, type ImageModelParams } from '../../config';
+import SpecularButton from '../SpecularButton';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -339,27 +340,22 @@ export function ScriptInputPanel() {
       </div>
 
       {/* Generate button */}
-      <button
-        onClick={handleGenerate}
+      <SpecularButton
+        size="md"
+        radius={8}
+        tint="#cc785c"
+        tintOpacity={1}
+        textColor="#ffffff"
+        lineColor="#ffffff"
+        baseColor="#ffffff"
+        intensity={1}
+        thickness={1.2}
+        className="specular-button--block"
         disabled={isLoading || !scriptText.trim()}
-        style={{
-          width: '100%',
-          padding: '10px',
-          height: 40,
-          borderRadius: 'var(--rounded-md)',
-          border: 'none',
-          background:
-            isLoading || !scriptText.trim()
-              ? 'var(--color-primary-disabled)'
-              : 'var(--color-primary)',
-          color: 'var(--color-on-primary)',
-          fontSize: 14,
-          fontWeight: 500,
-          cursor: isLoading || !scriptText.trim() ? 'not-allowed' : 'pointer',
-        }}
+        onClick={handleGenerate}
       >
         {isLoading ? '生成中...' : '生成分镜脚本'}
-      </button>
+      </SpecularButton>
 
       {/* Project history — vertical compact list, only when expanded */}
       {!collapsed && <ProjectHistoryPanel />}

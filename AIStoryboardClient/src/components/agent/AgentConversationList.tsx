@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
+import SpecularButton from '../SpecularButton';
 
 export function AgentConversationList() {
   const {
@@ -67,16 +68,22 @@ export function AgentConversationList() {
         ☾ Moon 智能体
       </div>
       {/* 新建 */}
-      <button
-        onClick={() => createConversation()}
-        style={{
-          margin: 10, padding: '8px 0', border: '1px dashed var(--color-hairline)',
-          borderRadius: 'var(--rounded-md)', background: 'white',
-          color: 'var(--color-primary)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-        }}
-      >
-        + 新建对话
-      </button>
+      <div style={{ padding: 10 }}>
+        <SpecularButton
+          size="sm"
+          radius={8}
+          tintOpacity={0}
+          textColor="#cc785c"
+          lineColor="#cc785c"
+          baseColor="#cc785c"
+          intensity={0.9}
+          thickness={1.2}
+          className="specular-button--block"
+          onClick={() => createConversation()}
+        >
+          + 新建对话
+        </SpecularButton>
+      </div>
 
       {/* 归档筛选切换 */}
       <button
