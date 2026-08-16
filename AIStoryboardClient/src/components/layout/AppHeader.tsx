@@ -5,6 +5,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
 import WarpText from '../WarpText';
 import SpecularButton from '../SpecularButton';
+import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 
 const headerHeight = 64;
 
@@ -81,6 +82,7 @@ export function AppHeader() {
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
 
   // rename
   const [renameTarget, setRenameTarget] = useState<ProjectResponse | null>(null);
@@ -382,6 +384,21 @@ export function AppHeader() {
 
         {/* Right: user + logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={() => setAssetLibraryOpen(true)}
+            style={{
+              padding: '4px 12px',
+              height: 32,
+              border: '1px solid var(--color-primary)',
+              borderRadius: 'var(--rounded-md)',
+              background: 'white',
+              color: 'var(--color-primary)',
+              font: 'var(--text-caption)',
+              cursor: 'pointer',
+            }}
+          >
+            🧩 资产库
+          </button>
           <SpecularButton
             size="sm"
             radius={10}
@@ -479,6 +496,8 @@ export function AppHeader() {
           </div>
         </div>
       )}
+      {/* ── AI 资产库面板 ─────────────────────────────────────────── */}
+      {assetLibraryOpen && <AssetLibraryPanel onClose={() => setAssetLibraryOpen(false)} />}
     </>
   );
 }
