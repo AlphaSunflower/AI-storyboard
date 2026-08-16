@@ -116,7 +116,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         List<String> assetRefImages = List.of();
         if (scene != null) {
             try {
-                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId, "video");
+                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId);
                 if (sceneAssets != null && !sceneAssets.isEmpty()) {
                     String sheet = assetService.buildSheetText(sceneAssets);
                     if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;

@@ -6,7 +6,6 @@ import com.storyboard.dto.request.SceneAssetsUpdateRequest;
 import com.storyboard.dto.response.ApiResponse;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
-import com.storyboard.dto.response.SceneAssetsResponse;
 import com.storyboard.service.AssetService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -66,12 +65,12 @@ public class AssetController {
     @PutMapping("/scenes/{id}/assets")
     public ApiResponse<Void> setSceneAssets(Authentication auth, @PathVariable String id,
             @RequestBody SceneAssetsUpdateRequest request) {
-        assetService.setSceneAssets(auth.getName(), id, request.imageAssetIds(), request.videoAssetIds());
+        assetService.setSceneAssets(auth.getName(), id, request.assetIds());
         return ApiResponse.ok("关联成功", null);
     }
 
     @GetMapping("/scenes/{id}/assets")
-    public ApiResponse<SceneAssetsResponse> listSceneAssets(Authentication auth, @PathVariable String id) {
+    public ApiResponse<List<AssetVO>> listSceneAssets(Authentication auth, @PathVariable String id) {
         return ApiResponse.ok(assetService.listSceneAssets(auth.getName(), id));
     }
 }

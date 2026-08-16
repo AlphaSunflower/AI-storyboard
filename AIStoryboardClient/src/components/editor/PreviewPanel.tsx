@@ -167,9 +167,8 @@ export function PreviewPanel() {
   const [useRefImage, setUseRefImage] = useState(false); // 参考图生图勾选
   const [useFirstFrame, setUseFirstFrame] = useState(false); // 以本分镜图片为首帧
   const [refineTarget, setRefineTarget] = useState<string | null>(null); // 完善图片弹窗的源图 URL（null=关闭）
-  const [sceneImageAssets, setSceneImageAssets] = useState<Asset[]>([]); // 本分镜图片关联资产
-  const [sceneVideoAssets, setSceneVideoAssets] = useState<Asset[]>([]); // 本分镜视频关联资产
-  const [assetPickerPurpose, setAssetPickerPurpose] = useState<'image' | 'video' | null>(null); // 资产选择弹窗用途
+  const [sceneAssets, setSceneAssets] = useState<Asset[]>([]); // 本分镜关联资产
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false); // 资产选择弹窗
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
   const animatedSrcRef = useRef<string | null>(null);
@@ -184,29 +183,24 @@ export function PreviewPanel() {
     if (selectedSceneId) fetchSceneRefs(selectedSceneId);
   }, [selectedSceneId, fetchSceneRefs]);
 
-  // 切换分镜时拉取该分镜关联资产（图片/视频分开）
+  // 切换分镜时拉取该分镜关联资产
   const loadSceneAssets = useCallback(async () => {
-    if (!selectedSceneId) { setSceneImageAssets([]); setSceneVideoAssets([]); return; }
+    if (!selectedSceneId) { setSceneAssets([]); return; }
     try {
       const res = await assetApi.listSceneAssets(selectedSceneId);
-      const d = res.data.data;
-      setSceneImageAssets(d?.imageAssets || []);
-      setSceneVideoAssets(d?.videoAssets || []);
+      setSceneAssets(res.data.data || []);
     } catch {
-      setSceneImageAssets([]);
-      setSceneVideoAssets([]);
+      setSceneAssets([]);
     }
   }, [selectedSceneId]);
   useEffect(() => { void loadSceneAssets(); }, [loadSceneAssets]);
 
-  const removeSceneAsset = async (assetId: string, purpose: 'image' | 'video') => {
+  const removeSceneAsset = async (assetId: string) => {
     if (!selectedSceneId) return;
-    const imageIds = (purpose === 'image' ? sceneImageAssets.filter((a) => a.id !== assetId) : sceneImageAssets).map((a) => a.id);
-    const videoIds = (purpose === 'video' ? sceneVideoAssets.filter((a) => a.id !== assetId) : sceneVideoAssets).map((a) => a.id);
-    if (purpose === 'image') setSceneImageAssets((prev) => prev.filter((a) => a.id !== assetId));
-    else setSceneVideoAssets((prev) => prev.filter((a) => a.id !== assetId));
+    const remaining = sceneAssets.filter((a) => a.id !== assetId);
+    setSceneAssets(remaining);
     try {
-      await assetApi.setSceneAssets(selectedSceneId, imageIds, videoIds);
+      await assetApi.setSceneAssets(selectedSceneId, remaining.map((a) => a.id));
     } catch {
       void loadSceneAssets();
     }
@@ -855,60 +849,45 @@ export function PreviewPanel() {
         </div>
       )}
 
-      {/* 关联资产（本分镜引用的人物/道具/场景设定，图片/视频生成时分别注入） */}
+      {/* 关联资产（本分镜引用的人物/道具/场景设定，生成时注入） */}
       <div style={{ marginTop: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（图片/视频生成时分别注入各自设定与参考图）</span>
-
-        <div style={{ marginTop: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🖼️ 图片关联资产</span>
-          {sceneImageAssets.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产</div>
-          ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {sceneImageAssets.map((a) => (
-                <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                  {a.images[0] ? (
-                    <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                  ) : (
-                    <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
-                  )}
-                  {a.name}
-                  <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-            <button onClick={() => setAssetPickerPurpose('image')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加图片资产</button>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（生成时注入设定与参考图）</span>
+        {sceneAssets.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 8 }}>
+            未关联资产——关联后生成分镜/图片/视频时，会自动注入资产设定文字与参考图，保持人物/道具/场景跨分镜一致。
           </div>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🎬 视频关联资产</span>
-          {sceneVideoAssets.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产</div>
-          ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {sceneVideoAssets.map((a) => (
-                <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                  {a.images[0] ? (
-                    <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                  ) : (
-                    <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
-                  )}
-                  {a.name}
-                  <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-            <button onClick={() => setAssetPickerPurpose('video')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加视频资产</button>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {sceneAssets.map((a) => (
+              <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                {a.images[0] ? (
+                  <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
+                ) : (
+                  <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
+                )}
+                {a.name}
+                <button
+                  onClick={() => void removeSceneAsset(a.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }}
+                  title="取消关联"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
           </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+          <button
+            onClick={() => setAssetPickerOpen(true)}
+            style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
+          >
+            ＋ 添加资产
+          </button>
         </div>
       </div>
-      {assetPickerPurpose && (
-        <AssetLibraryPanel mode="pick" purpose={assetPickerPurpose} onClose={() => { setAssetPickerPurpose(null); void loadSceneAssets(); }} />
+      {assetPickerOpen && (
+        <AssetLibraryPanel mode="pick" onClose={() => { setAssetPickerOpen(false); void loadSceneAssets(); }} />
       )}
 
       {/* 图片点击放大预览（灯箱，与智能体窗口行为一致） */}
