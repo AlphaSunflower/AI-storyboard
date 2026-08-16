@@ -200,7 +200,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
           marginBottom: compact ? 8 : 0,
         }}
       >
-        <div style={{ height: compact ? 64 : 150, background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
+        <div style={{ height: compact ? 64 : 180, background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', flexShrink: 0 }}>
           {cover ? (
             <img src={assetUrl(cover.url)} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           ) : (
@@ -259,7 +259,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
             {typeFilterRow}
             <button style={primaryBtn} onClick={onClose}>完成</button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, alignContent: 'start' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: '1fr', gap: 14, alignContent: 'start' }}>
             {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
             {!loading && filtered.length === 0 && (
               <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
@@ -287,7 +287,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
 
         {/* 列表视图：竖向卡片网格 */}
         {view === 'list' && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14, alignContent: 'start' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'grid', gridTemplateColumns: '1fr', gap: 14, alignContent: 'start' }}>
             {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
             {!loading && filtered.length === 0 && (
               <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
