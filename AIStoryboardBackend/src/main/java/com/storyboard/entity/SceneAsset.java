@@ -15,6 +15,8 @@ public class SceneAsset {
     private String id;
     private String sceneId;
     private String assetId;
+    /** 用途：image=图片生成注入 / video=视频生成注入。 */
+    private String purpose;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
 }

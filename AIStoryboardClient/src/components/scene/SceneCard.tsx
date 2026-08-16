@@ -437,7 +437,7 @@ export function SceneCard({
           <label
             style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
           >
-            描述（剧情）
+            注释(跟生图/生视频无关)
           </label>
           <textarea
             value={scriptContent}

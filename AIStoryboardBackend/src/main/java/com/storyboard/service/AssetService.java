@@ -4,6 +4,7 @@ import com.storyboard.dto.request.AssetCreateRequest;
 import com.storyboard.dto.request.AssetUpdateRequest;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
+import com.storyboard.dto.response.SceneAssetsResponse;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -31,19 +32,19 @@ public interface AssetService {
     /** 删除资产图片。 */
     void deleteImage(String userId, String assetId, String imageId);
 
-    /** 覆盖式设置分镜关联的资产。 */
-    void setSceneAssets(String userId, String sceneId, List<String> assetIds);
+    /** 覆盖式设置分镜关联的资产（图片/视频用途分开）。 */
+    void setSceneAssets(String userId, String sceneId, List<String> imageAssetIds, List<String> videoAssetIds);
 
-    /** 查询分镜关联的资产（含图）。 */
-    List<AssetVO> listSceneAssets(String userId, String sceneId);
+    /** 查询分镜关联的资产（含图，按用途拆分）。 */
+    SceneAssetsResponse listSceneAssets(String userId, String sceneId);
 
     // ─────────── 生成注入辅助（供分镜/视频/图片生成服务复用，内部解析归属） ───────────
 
     /** 项目的可用资产（项目资产 + 用户全局资产），无归属校验，供分镜脚本生成用。 */
     List<AssetVO> projectAssets(String projectId);
 
-    /** 分镜关联的资产（含图），无归属校验，供视频/图片生成用。 */
-    List<AssetVO> sceneAssets(String sceneId);
+    /** 分镜关联的资产（含图，按用途过滤），无归属校验，供视频/图片生成用。 */
+    List<AssetVO> sceneAssets(String sceneId, String purpose);
 
     /** 拼「设定集」文字块（空列表返回空串），注入分镜脚本 system prompt 与视频/图片 prompt。 */
     String buildSheetText(List<AssetVO> assets);
