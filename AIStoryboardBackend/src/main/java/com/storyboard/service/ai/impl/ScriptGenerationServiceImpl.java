@@ -3,8 +3,10 @@ package com.storyboard.service.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
+import com.storyboard.dto.response.AssetVO;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.AssetService;
 import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.ScriptGenerationService;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +18,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.*;
@@ -28,6 +32,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
+    private static final Logger log = LoggerFactory.getLogger(ScriptGenerationServiceImpl.class);
+
     /**
      * 结构化解析用的分镜定义（字段名与 AI 返回的 JSON 键一致；sceneNumber 仅占位，实际递增逻辑见 toSceneMaps/parseScenes）。
      */
@@ -38,6 +44,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     private final AiConfigProperties config;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
+    private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
     /** 懒加载：首次调用时用默认视觉模型构建（@RequiredArgsConstructor 无法承载原构造器内的构建逻辑） */
@@ -49,6 +56,17 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                                                       String aspectRatio, String model,
                                                       String understandingModel, List<String> referenceImages) {
         String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
+
+        // 资产库设定集注入：项目资产 + 用户全局资产 → 文字卡塞进 system prompt 约束分镜
+        //（资产为可选增强，注入失败仅告警跳过，不影响分镜生成）
+        try {
+            List<AssetVO> assets = assetService.projectAssets(projectId);
+            if (assets != null && !assets.isEmpty()) {
+                systemPrompt += assetService.buildSheetText(assets);
+            }
+        } catch (Exception e) {
+            log.warn("资产库设定集注入失败，跳过: {}", e.getMessage());
+        }
 
         // 有参考图 → 先调理解模型看图生成描述，再连同用户提示词交给分镜模型（无图直接分镜模型）
         String understanding = null;

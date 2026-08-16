@@ -2,8 +2,10 @@ package com.storyboard.service.ai.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyboard.dto.response.AssetVO;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.ImageGenerationService;
@@ -49,6 +51,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
+    private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 生图走 Spring AI ImageModel（自动装配的 OpenAiImageModel，spring.ai.openai.* 指向网关，文生图 /v1/images/generations） */
     private final ImageModel imageModel;
@@ -108,6 +111,20 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             throw new RuntimeException("图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
         }
 
+        // 资产库注入：场景关联资产的文字卡 → imagePrompt（保证首帧图人物一致）
+        String effectivePrompt = prompt;
+        if (scene != null) {
+            try {
+                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId);
+                if (sceneAssets != null && !sceneAssets.isEmpty()) {
+                    String sheet = assetService.buildSheetText(sceneAssets);
+                    if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;
+                }
+            } catch (Exception e) {
+                log.warn("资产库文字卡注入失败，跳过: {}", e.getMessage());
+            }
+        }
+
         if (scene != null) {
             scene.setImageStatus("generating");
             sceneMapper.updateById(scene);
@@ -134,12 +151,12 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
             if (hasReferenceImages || "edit".equals(mode)) {
-                String result = callImageEdit(effectiveModel, prompt, referenceImages, generatedImageUrl);
+                String result = callImageEdit(effectiveModel, effectivePrompt, referenceImages, generatedImageUrl);
                 localPaths.add(fileStorageService.saveImageFromBase64(result));
 
             // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式；n>1 多图）
             } else {
-                for (String r : callOpenAIImage(effectiveModel, prompt, effSize, effQuality, aspectRatio, effN)) {
+                for (String r : callOpenAIImage(effectiveModel, effectivePrompt, effSize, effQuality, aspectRatio, effN)) {
                     localPaths.add(r.startsWith("http://") || r.startsWith("https://")
                             ? fileStorageService.saveImage(r)
                             : fileStorageService.saveImageFromBase64(r));

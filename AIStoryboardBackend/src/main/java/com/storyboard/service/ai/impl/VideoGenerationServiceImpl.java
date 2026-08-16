@@ -3,10 +3,12 @@ package com.storyboard.service.ai.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyboard.dto.response.AssetVO;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
 import com.storyboard.service.ai.MultipartBuilder;
@@ -38,10 +40,14 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoGenerationServiceImpl.class);
 
+    /** H3 参考图硬上限（资产参考图 + 手动参考素材合并后截断）。 */
+    private static final int MAX_REFERENCE_IMAGES = 9;
+
     private final AiConfigProperties config;
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
+    private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -105,11 +111,27 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                         ? scene.getDuration()
                         : Integer.parseInt(config.getDefaultVideoDuration());
 
+        // 资产库注入：场景关联资产的文字卡 + 参考图（≤9 优先级截断）；无资产则零影响
+        String effectivePrompt = prompt;
+        List<String> assetRefImages = List.of();
+        if (scene != null) {
+            try {
+                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId);
+                if (sceneAssets != null && !sceneAssets.isEmpty()) {
+                    String sheet = assetService.buildSheetText(sceneAssets);
+                    if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;
+                    assetRefImages = assetService.buildReferenceImages(sceneAssets);
+                }
+            } catch (Exception e) {
+                log.warn("资产库注入失败，跳过: {}", e.getMessage());
+            }
+        }
+
         try {
             // 统一 OpenAI 风格 JSON 请求体（模型→渠道路由、协议转换已下沉网关）
             Map<String, Object> body = new HashMap<>();
             body.put("model", actualModel);          // alias 映射保留在业务侧
-            body.put("prompt", prompt);
+            body.put("prompt", effectivePrompt);
             body.put("size", effSize);
             body.put("resolution", effResolution);
             body.put("aspectRatio", effAspectRatio);
@@ -134,6 +156,17 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
             if (referenceImages != null) {
                 for (String i : referenceImages) { String u = resolveReferenceUrl(i, "image"); if (u != null) refImages.add(u); }
+            }
+            // 资产参考图优先于手动参考素材：本地路径转 data URI 后合并，总数 ≤ 9
+            if (!assetRefImages.isEmpty()) {
+                List<String> merged = new ArrayList<>();
+                for (String a : assetRefImages) {
+                    String u = resolveReferenceUrl(a, "image");
+                    if (u != null) merged.add(u);
+                }
+                merged.addAll(refImages);
+                if (merged.size() > MAX_REFERENCE_IMAGES) merged = merged.subList(0, MAX_REFERENCE_IMAGES);
+                refImages = merged;
             }
             boolean hasRefs = !refImages.isEmpty() || !refVideos.isEmpty() || !refAudios.isEmpty();
             if (hasRefs) {
