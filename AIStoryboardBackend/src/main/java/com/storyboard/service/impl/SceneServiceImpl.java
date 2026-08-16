@@ -108,17 +108,18 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
         return refImageMapper.findBySceneId(sceneId).stream()
-            .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getImageUrl(),
+            .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
                     r.getFileName(), r.getFileSize()))
             .toList();
     }
 
     @Override
     @Transactional
-    public SceneReferenceResponse uploadReference(String sceneId, String type, MultipartFile file) {
+    public SceneReferenceResponse uploadReference(String sceneId, String type, String purpose, MultipartFile file) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
         String t = type == null ? "image" : type;
+        String p = purpose == null ? "image" : purpose;
         if (!REF_LIMITS.containsKey(t)) throw new BusinessException(40001, "不支持的素材类型: " + t);
 
         int[] limits = REF_LIMITS.get(t);
@@ -143,12 +144,13 @@ public class SceneServiceImpl implements SceneService {
         SceneReferenceImage ref = new SceneReferenceImage();
         ref.setSceneId(sceneId);
         ref.setType(t);
+        ref.setPurpose(p);
         ref.setImageUrl(url);
         ref.setFileName(file.getOriginalFilename());
         ref.setFileSize(file.getSize());
         ref.setSortOrder((int) existing);
         refImageMapper.insert(ref);
-        return new SceneReferenceResponse(ref.getId(), t, url, ref.getFileName(), ref.getFileSize());
+        return new SceneReferenceResponse(ref.getId(), t, p, url, ref.getFileName(), ref.getFileSize());
     }
 
     @Override

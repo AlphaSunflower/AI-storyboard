@@ -28,7 +28,7 @@ public interface SceneService {
     List<SceneReferenceResponse> listReferences(String sceneId);
 
     /** 上传参考素材（type: image/video/audio；校验类型/数量上限/单文件大小上限），返回记录。 */
-    SceneReferenceResponse uploadReference(String sceneId, String type, MultipartFile file);
+    SceneReferenceResponse uploadReference(String sceneId, String type, String purpose, MultipartFile file);
 
     /** 删除参考素材（含本地文件）。 */
     void deleteReference(String referenceId);

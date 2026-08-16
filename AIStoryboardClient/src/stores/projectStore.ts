@@ -72,7 +72,7 @@ interface ProjectState {
   // ── 分镜参考素材（后端 scene_reference_images 表持久化，替代原 soundDesign JSON 方案）──
   sceneRefs: Record<string, SceneReferenceAsset[]>;
   fetchSceneRefs: (sceneId: string) => Promise<void>;
-  uploadSceneRef: (sceneId: string, type: 'image' | 'video' | 'audio', file: File) => Promise<void>;
+  uploadSceneRef: (sceneId: string, type: 'image' | 'video' | 'audio', purpose: 'image' | 'video', file: File) => Promise<void>;
   deleteSceneRef: (sceneId: string, refId: string) => Promise<void>;
 
   // ── 分镜生成参数覆盖（全局默认 + 分镜覆盖：空串/0 = 清覆盖回退全局默认）──
@@ -468,8 +468,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 素材列表拉取失败不阻断页面（预览面板显示空）
     }
   },
-  uploadSceneRef: async (sceneId, type, file) => {
-    const res = await sceneApi.uploadReference(sceneId, type, file);
+  uploadSceneRef: async (sceneId, type, purpose, file) => {
+    const res = await sceneApi.uploadReference(sceneId, type, purpose, file);
     const created = res.data.data;
     set((s) => ({ sceneRefs: { ...s.sceneRefs, [sceneId]: [...(s.sceneRefs[sceneId] || []), created] } }));
   },

@@ -46,8 +46,8 @@ public class SceneController {
     /** 上传参考素材（multipart：type + file）。 */
     @PostMapping("/scenes/{id}/references")
     public ApiResponse<SceneReferenceResponse> uploadReference(@PathVariable String id,
-            @RequestParam String type, @RequestParam MultipartFile file) {
-        return ApiResponse.ok(sceneService.uploadReference(id, type, file));
+            @RequestParam String type, @RequestParam String purpose, @RequestParam MultipartFile file) {
+        return ApiResponse.ok(sceneService.uploadReference(id, type, purpose, file));
     }
 
     /** 删除参考素材。 */

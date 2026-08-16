@@ -13,6 +13,8 @@ public class SceneReferenceImage {
     private Integer sortOrder;
     // 素材类型：image / video / audio（原表仅参考图，改造为通用参考素材表）
     private String type;
+    // 用途：image=图片生成参考 / video=视频生成参考
+    private String purpose;
     private String fileName;
     private Long fileSize;
 }

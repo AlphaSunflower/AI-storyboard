@@ -11,9 +11,10 @@ export const sceneApi = {
   // 参考素材（图/视频/音频）
   listReferences: (sceneId: string) =>
     client.get<ApiResponse<SceneReferenceAsset[]>>(`/scenes/${sceneId}/references`),
-  uploadReference: (sceneId: string, type: string, file: File) => {
+  uploadReference: (sceneId: string, type: string, purpose: string, file: File) => {
     const fd = new FormData();
     fd.append('type', type);
+    fd.append('purpose', purpose);
     fd.append('file', file);
     // multipart：显式声明 Content-Type，避免 client 全局 application/json 覆盖导致后端收不到 type（同 agent uploadImage）
     return client.post<ApiResponse<SceneReferenceAsset>>(`/scenes/${sceneId}/references`, fd, {

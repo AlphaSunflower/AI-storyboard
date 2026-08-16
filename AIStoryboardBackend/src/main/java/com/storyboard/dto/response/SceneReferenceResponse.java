@@ -6,6 +6,7 @@ package com.storyboard.dto.response;
 public record SceneReferenceResponse(
     String id,
     String type,
+    String purpose,
     String url,
     String fileName,
     Long fileSize

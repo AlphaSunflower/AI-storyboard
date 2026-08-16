@@ -17,6 +17,7 @@ export interface ProjectResponse {
 export interface SceneReferenceAsset {
   id: string;
   type: 'image' | 'video' | 'audio';
+  purpose: 'image' | 'video';
   url: string;
   fileName: string;
   fileSize: number;

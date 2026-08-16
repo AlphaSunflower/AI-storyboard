@@ -271,7 +271,8 @@ export function PreviewPanel() {
   const aspectOptions = videoParams.aspectRatios?.length ? videoParams.aspectRatios : ['16:9', '9:16', '4:3', '1:1', '21:9'];
 
   // 参考素材按类型分组
-  const refImages = sceneRefs.filter((r) => r.type === 'image');
+  const refImages = sceneRefs.filter((r) => r.type === 'image' && r.purpose !== 'video'); // 图片生成参考图
+  const refVImages = sceneRefs.filter((r) => r.type === 'image' && r.purpose === 'video'); // 视频生成参考图
   const refVideos = sceneRefs.filter((r) => r.type === 'video');
   const refAudios = sceneRefs.filter((r) => r.type === 'audio');
 
@@ -330,11 +331,11 @@ export function PreviewPanel() {
       if (useFirstFrame && scene.imageUrl) {
         // 以本分镜图片为首帧（i2v）：参考素材与首帧互斥
         await generateVideo(scene.id, prompt, effVideoModel, undefined, scene.imageUrl);
-      } else if (refImages.length || refVideos.length || refAudios.length) {
+      } else if (refVImages.length || refVideos.length || refAudios.length) {
         // 多模态参考（r2va）
         await generateVideo(
           scene.id, prompt, effVideoModel,
-          refImages.map((r) => r.url), undefined,
+          refVImages.map((r) => r.url), undefined,
           refVideos.map((r) => r.url), refAudios.map((r) => r.url)
         );
       } else {
@@ -628,7 +629,7 @@ export function PreviewPanel() {
                   items={refImages}
                   maxCount={imageParams.refImageMax}
                   maxSizeMB={imageParams.refImageSizeMB}
-                  onUpload={(f) => uploadSceneRef(scene.id, 'image', f)}
+                  onUpload={(f) => uploadSceneRef(scene.id, 'image', 'image', f)}
                   onDelete={(id) => deleteSceneRef(scene.id, id)}
                 />
               </div>
@@ -769,10 +770,10 @@ export function PreviewPanel() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
               <ReferenceUploader
                 type="image"
-                items={refImages}
+                items={refVImages}
                 maxCount={videoParams.refImageMax}
                 maxSizeMB={videoParams.refImageSizeMB}
-                onUpload={(f) => uploadSceneRef(scene.id, 'image', f)}
+                onUpload={(f) => uploadSceneRef(scene.id, 'image', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
                 disabled={useFirstFrame}
               />
@@ -781,7 +782,7 @@ export function PreviewPanel() {
                 items={refVideos}
                 maxCount={videoParams.refVideoMax}
                 maxSizeMB={videoParams.refVideoSizeMB}
-                onUpload={(f) => uploadSceneRef(scene.id, 'video', f)}
+                onUpload={(f) => uploadSceneRef(scene.id, 'video', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
                 disabled={useFirstFrame}
               />
@@ -790,7 +791,7 @@ export function PreviewPanel() {
                 items={refAudios}
                 maxCount={videoParams.refAudioMax}
                 maxSizeMB={videoParams.refAudioSizeMB}
-                onUpload={(f) => uploadSceneRef(scene.id, 'audio', f)}
+                onUpload={(f) => uploadSceneRef(scene.id, 'audio', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
                 disabled={useFirstFrame}
               />
