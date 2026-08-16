@@ -16,6 +16,8 @@ public class AssetImage {
     private String assetId;
     /** 本地相对路径 /api/files/images/xxx.png */
     private String url;
+    /** 上传原始文件名（DepthCarousel 展示当前图片名用） */
+    private String fileName;
     /** 排序，主图 = 最小 sort_order */
     private Integer sortOrder;
     @TableField(fill = FieldFill.INSERT)

@@ -1,0 +1,13 @@
+.asset-row {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  cursor: pointer;
+}
+.asset-row:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -10px rgba(20, 20, 19, 0.22);
+  border-color: var(--color-primary) !important;
+}
+.asset-row.is-active {
+  border-color: var(--color-primary) !important;
+  background: var(--color-surface-card);
+}

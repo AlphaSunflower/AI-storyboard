@@ -134,9 +134,10 @@ public class AssetServiceImpl implements AssetService {
         AssetImage img = new AssetImage();
         img.setAssetId(assetId);
         img.setUrl(url);
+        img.setFileName(file.getOriginalFilename());
         img.setSortOrder((int) count);
         assetImageMapper.insert(img);
-        return new AssetImageVO(img.getId(), url, img.getSortOrder());
+        return new AssetImageVO(img.getId(), url, img.getSortOrder(), img.getFileName());
     }
 
     @Override
@@ -254,7 +255,7 @@ public class AssetServiceImpl implements AssetService {
 
     private List<AssetImageVO> loadImages(String assetId) {
         return assetImageMapper.findByAssetId(assetId).stream()
-                .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder()))
+                .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName()))
                 .toList();
     }
 

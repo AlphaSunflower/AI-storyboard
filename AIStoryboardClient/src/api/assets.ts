@@ -7,6 +7,8 @@ export interface AssetImage {
   id: string;
   url: string;
   sortOrder: number;
+  /** 上传原始文件名（DepthCarousel 展示当前图片名用） */
+  fileName: string;
 }
 
 /** AI 资产库资产：人物/道具/场景。projectId 为 null = 用户全局资产库。 */

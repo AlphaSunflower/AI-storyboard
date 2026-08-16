@@ -6,5 +6,6 @@ package com.storyboard.dto.response;
 public record AssetImageVO(
     String id,
     String url,
-    Integer sortOrder
+    Integer sortOrder,
+    String fileName
 ) {}
