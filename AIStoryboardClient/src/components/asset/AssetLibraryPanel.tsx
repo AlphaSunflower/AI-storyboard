@@ -56,7 +56,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
   const [createName, setCreateName] = useState('');
   const [createDesc, setCreateDesc] = useState('');
   const [createGlobal, setCreateGlobal] = useState(false);
-  const [createFiles, setCreateFiles] = useState<File[]>([]);
+  const [createFiles, setCreateFiles] = useState<{ file: File; url: string }[]>([]);
 
   // 编辑弹窗
   const [editTarget, setEditTarget] = useState<Asset | null>(null);
@@ -116,14 +116,21 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
       });
       const id = res.data.data?.id;
       if (id && createFiles.length > 0) {
-        for (const f of createFiles) await assetApi.uploadImage(id, f);
+        for (const p of createFiles) await assetApi.uploadImage(id, p.file);
       }
+      createFiles.forEach((p) => URL.revokeObjectURL(p.url));
       setCreateOpen(false);
       setCreateName(''); setCreateDesc(''); setCreateFiles([]);
       await load();
     } catch {
       /* 创建失败静默 */
     }
+  };
+
+  const removeCreateFile = (i: number) => {
+    const p = createFiles[i];
+    if (p) URL.revokeObjectURL(p.url);
+    setCreateFiles((prev) => prev.filter((_, idx) => idx !== i));
   };
 
   const handleEdit = async () => {
@@ -380,9 +387,41 @@ export function AssetLibraryPanel({ onClose, mode = 'manage' }: { onClose: () =>
                 <input style={inputStyle} placeholder="名称（如 阿伟）" value={createName} onChange={(e) => setCreateName(e.target.value)} />
                 <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="文字约束（外貌/外观/构成描述，生成时注入）" value={createDesc} onChange={(e) => setCreateDesc(e.target.value)} />
                 <label style={{ ...ghostBtn, cursor: 'pointer', textAlign: 'center' }}>
-                  📷 选择相片（可多选）{createFiles.length > 0 ? ` · 已选 ${createFiles.length} 张` : ''}
-                  <input type="file" accept="image/*" multiple hidden onChange={(e) => setCreateFiles(Array.from(e.target.files || []))} />
+                  📷 选择相片（可多选，可反复添加）
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setCreateFiles((prev) => {
+                        const seen = new Set(prev.map((p) => `${p.file.name}:${p.file.size}`));
+                        const added = files
+                          .filter((f) => !seen.has(`${f.name}:${f.size}`))
+                          .map((f) => ({ file: f, url: URL.createObjectURL(f) }));
+                        return [...prev, ...added];
+                      });
+                      e.target.value = '';
+                    }}
+                  />
                 </label>
+                {createFiles.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {createFiles.map((p, i) => (
+                      <div key={`${p.file.name}-${i}`} style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--color-hairline)', background: 'var(--color-surface-card)', flexShrink: 0 }}>
+                        <img src={p.url} alt={p.file.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                        <button
+                          onClick={() => removeCreateFile(i)}
+                          style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 999, border: 'none', background: 'rgba(20,20,19,0.6)', color: 'white', cursor: 'pointer', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="移除"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
                 <button style={ghostBtn} onClick={() => setCreateOpen(false)}>取消</button>
