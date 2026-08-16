@@ -851,21 +851,13 @@ export function PreviewPanel() {
 
       {/* 关联资产（本分镜引用的人物/道具/场景设定，生成时注入） */}
       <div style={{ marginTop: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（生成时注入设定与参考图）</span>
-          <button
-            onClick={() => setAssetPickerOpen(true)}
-            style={{ padding: '4px 12px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
-          >
-            ＋ 添加资产
-          </button>
-        </div>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（生成时注入设定与参考图）</span>
         {sceneAssets.length === 0 ? (
-          <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 8 }}>
             未关联资产——关联后生成分镜/图片/视频时，会自动注入资产设定文字与参考图，保持人物/道具/场景跨分镜一致。
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             {sceneAssets.map((a) => (
               <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
                 {a.images[0] ? (
@@ -885,6 +877,14 @@ export function PreviewPanel() {
             ))}
           </div>
         )}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+          <button
+            onClick={() => setAssetPickerOpen(true)}
+            style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
+          >
+            ＋ 添加资产
+          </button>
+        </div>
       </div>
       {assetPickerOpen && (
         <AssetLibraryPanel mode="pick" onClose={() => { setAssetPickerOpen(false); void loadSceneAssets(); }} />

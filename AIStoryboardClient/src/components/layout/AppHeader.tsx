@@ -410,7 +410,7 @@ export function AppHeader() {
             items={[
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
               { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
-              { label: '退出登录', ariaLabel: '退出登录', onClick: logout },
+              { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
             ]}
           />
         </div>

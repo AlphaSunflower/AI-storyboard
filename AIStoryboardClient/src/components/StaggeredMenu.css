@@ -14,6 +14,8 @@
   border: none;
   cursor: pointer;
   color: #e9e9ef;
+  font-family: var(--font-body);
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   overflow: visible;
