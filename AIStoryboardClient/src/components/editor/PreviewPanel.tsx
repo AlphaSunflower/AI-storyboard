@@ -858,55 +858,59 @@ export function PreviewPanel() {
 
       {/* 关联资产（本分镜引用的人物/道具/场景设定，图片/视频生成时分别注入） */}
       <div style={{ marginTop: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（图片/视频生成时分别注入各自设定与参考图）</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（{activeTab === 'image' ? '图片' : '视频'}生成时注入设定与参考图）</span>
 
-        <div style={{ marginTop: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🖼️ 图片关联资产</span>
-          {sceneImageAssets.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产</div>
-          ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {sceneImageAssets.map((a) => (
-                <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                  {a.images[0] ? (
-                    <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                  ) : (
-                    <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
-                  )}
-                  {a.name}
-                  <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
-                </span>
-              ))}
+        {activeTab === 'image' && (
+          <div style={{ marginTop: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🖼️ 图片关联资产</span>
+            {sceneImageAssets.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {sceneImageAssets.map((a) => (
+                  <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                    {a.images[0] ? (
+                      <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
+                    ) : (
+                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
+                    )}
+                    {a.name}
+                    <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <button onClick={() => setAssetPickerPurpose('image')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
             </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-            <button onClick={() => setAssetPickerPurpose('image')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加图片资产</button>
           </div>
-        </div>
+        )}
 
-        <div style={{ marginTop: 12 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🎬 视频关联资产</span>
-          {sceneVideoAssets.length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产</div>
-          ) : (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {sceneVideoAssets.map((a) => (
-                <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                  {a.images[0] ? (
-                    <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                  ) : (
-                    <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
-                  )}
-                  {a.name}
-                  <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
-                </span>
-              ))}
+        {activeTab === 'video' && (
+          <div style={{ marginTop: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🎬 视频关联资产</span>
+            {sceneVideoAssets.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {sceneVideoAssets.map((a) => (
+                  <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                    {a.images[0] ? (
+                      <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
+                    ) : (
+                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
+                    )}
+                    {a.name}
+                    <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <button onClick={() => setAssetPickerPurpose('video')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
             </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-            <button onClick={() => setAssetPickerPurpose('video')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加视频资产</button>
           </div>
-        </div>
+        )}
       </div>
       {assetPickerPurpose && (
         <AssetLibraryPanel mode="pick" purpose={assetPickerPurpose} onClose={() => { setAssetPickerPurpose(null); void loadSceneAssets(); }} />
