@@ -82,6 +82,7 @@ export function SceneCard({
   const [expanded, setExpanded] = useState(false);
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
+  const [scriptContent, setScriptContent] = useState(scene.scriptContent || '');
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const unreadScenes = useProjectStore((s) => s.unreadScenes);
@@ -120,9 +121,10 @@ export function SceneCard({
   }, { dependencies: [isUnread], scope: cardRef });
 
   // 提示词修改即存（无本地保存按钮——失焦保存语义）
-  const handlePromptBlur = async (field: 'imagePrompt' | 'videoPrompt') => {
-    const value = field === 'imagePrompt' ? imagePrompt.trim() : videoPrompt.trim();
-    if (value === (field === 'imagePrompt' ? scene.imagePrompt || '' : scene.videoPrompt || '')) return;
+  const handlePromptBlur = async (field: 'scriptContent' | 'imagePrompt' | 'videoPrompt') => {
+    const value = (field === 'scriptContent' ? scriptContent : field === 'imagePrompt' ? imagePrompt : videoPrompt).trim();
+    const original = (field === 'scriptContent' ? scene.scriptContent : field === 'imagePrompt' ? scene.imagePrompt : scene.videoPrompt) || '';
+    if (value === original) return;
     try {
       await sceneApi.update(scene.id, { [field]: value });
       updateSceneInStore(scene.id, { [field]: value });
@@ -418,7 +420,7 @@ export function SceneCard({
           marginBottom: expanded ? 8 : 0,
         }}
       >
-        {expanded ? '▲ 收起提示词' : '▼ 编辑提示词'}
+        {expanded ? '▲ 收起编辑' : '▼ 编辑描述/提示词'}
       </button>
 
       {/* Prompt editor (collapsible) — 常驻 DOM，高度由 gsap 动画控制 */}
@@ -432,6 +434,30 @@ export function SceneCard({
         }}
       >
         <div style={{ marginBottom: 8 }}>
+          <label
+            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
+          >
+            描述（剧情）
+          </label>
+          <textarea
+            value={scriptContent}
+            onChange={(e) => setScriptContent(e.target.value)}
+            onBlur={() => handlePromptBlur('scriptContent')}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="输入分镜描述..."
+            rows={3}
+            style={{
+              width: '100%',
+              fontSize: 11,
+              padding: '6px 8px',
+              borderRadius: 'var(--rounded-sm)',
+              border: '1px solid var(--color-hairline)',
+              resize: 'vertical',
+              marginBottom: 8,
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+          />
           <label
             style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
           >
