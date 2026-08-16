@@ -5,7 +5,9 @@ import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
 import WarpText from '../WarpText';
 import SpecularButton from '../SpecularButton';
+import StaggeredMenu from '../StaggeredMenu';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
+import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 
 const headerHeight = 64;
 
@@ -68,7 +70,6 @@ const secondaryBtnStyle: React.CSSProperties = {
 
 export function AppHeader() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const {
     projects,
@@ -83,6 +84,7 @@ export function AppHeader() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // rename
   const [renameTarget, setRenameTarget] = useState<ProjectResponse | null>(null);
@@ -382,23 +384,8 @@ export function AppHeader() {
           </div>
         </div>
 
-        {/* Right: user + logout */}
+        {/* Right: 资产库 + 菜单 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
-            onClick={() => setAssetLibraryOpen(true)}
-            style={{
-              padding: '4px 12px',
-              height: 32,
-              border: '1px solid var(--color-primary)',
-              borderRadius: 'var(--rounded-md)',
-              background: 'white',
-              color: 'var(--color-primary)',
-              font: 'var(--text-caption)',
-              cursor: 'pointer',
-            }}
-          >
-            🧩 资产库
-          </button>
           <SpecularButton
             size="sm"
             radius={10}
@@ -408,30 +395,24 @@ export function AppHeader() {
             baseColor="#cc785c"
             intensity={0.9}
             thickness={1.2}
-            onClick={() => navigate('/docs')}
+            onClick={() => setAssetLibraryOpen(true)}
           >
-            使用文档
+            🧩 资产库
           </SpecularButton>
-          {user?.displayName && (
-            <span style={{ font: 'var(--text-caption)', color: 'var(--color-muted)' }}>
-              {user.displayName}
-            </span>
-          )}
-          <button
-            onClick={logout}
-            style={{
-              padding: '4px 14px',
-              height: 32,
-              border: '1px solid var(--color-hairline)',
-              borderRadius: 'var(--rounded-md)',
-              background: 'white',
-              font: 'var(--text-caption)',
-              color: 'var(--color-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            退出
-          </button>
+          <StaggeredMenu
+            position="right"
+            menuButtonColor="#141413"
+            openMenuButtonColor="#141413"
+            accentColor="#cc785c"
+            colors={['#cc785c', '#efe9de', '#faf9f5']}
+            displayItemNumbering={false}
+            displaySocials={false}
+            items={[
+              { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
+              { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
+              { label: '退出登录', ariaLabel: '退出登录', onClick: logout },
+            ]}
+          />
         </div>
       </div>
 
@@ -498,6 +479,8 @@ export function AppHeader() {
       )}
       {/* ── AI 资产库面板 ─────────────────────────────────────────── */}
       {assetLibraryOpen && <AssetLibraryPanel onClose={() => setAssetLibraryOpen(false)} />}
+      {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
+      {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
     </>
   );
 }
