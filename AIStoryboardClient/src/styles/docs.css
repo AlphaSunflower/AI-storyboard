@@ -400,3 +400,18 @@
     padding: 72px 0 56px;
   }
 }
+
+/* ── 左侧 LineSidebar 章节导航（fixed，不占主内容宽度） ── */
+.docs-sidebar {
+  position: fixed;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 15; /* 低于 sticky 顶栏 (20) */
+}
+/* 视口不足以容纳侧栏时隐藏，保证不压主内容 */
+@media (max-width: 1360px) {
+  .docs-sidebar {
+    display: none;
+  }
+}
