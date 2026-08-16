@@ -251,10 +251,23 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             imageBytes = Files.readAllBytes(localFile);
             imageFilename = filename;
         } else if (referenceImages != null && !referenceImages.isEmpty()) {
-            // 参考图生图：使用第一张参考图（base64 data URL）
-            String base64Data = referenceImages.getFirst();
-            imageBytes = decodeBase64Image(base64Data);
-            imageFilename = "reference.png";
+            // 参考图生图：使用第一张参考图（后端文件路径 /api/files/... 或 base64 data URI 旧格式）
+            String ref = referenceImages.getFirst();
+            if (isImagePath(ref)) {
+                // 分镜参考素材上传后存的是本地文件路径（文件名含 UUID 连字符，直接当 base64
+                // 解码会报 Illegal base64 character 2d）→ 与 generatedImageUrl 一致，从本地存储读文件
+                String filename = extractFilename(ref);
+                Path localFile = fileStorageService.resolveImage(filename);
+                if (!Files.exists(localFile)) {
+                    throw new RuntimeException("参考图文件不存在: " + localFile);
+                }
+                imageBytes = Files.readAllBytes(localFile);
+                imageFilename = filename;
+            } else {
+                // 旧流程兼容：前端直传 base64 data URI
+                imageBytes = decodeBase64Image(ref);
+                imageFilename = "reference.png";
+            }
         } else {
             throw new RuntimeException("图改图模式下必须提供 generatedImageUrl 或 referenceImages");
         }
@@ -302,6 +315,11 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private String extractFilename(String urlPath) {
         int idx = urlPath.lastIndexOf('/');
         return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
+    }
+
+    /** 判断参考图是否为本地文件路径/URL（/api/files/... 或 http...），而非 base64 data URI */
+    private boolean isImagePath(String ref) {
+        return ref.startsWith("/") || ref.startsWith("http://") || ref.startsWith("https://");
     }
 
     /**

@@ -233,6 +233,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         scriptGenerationMessage: '分镜生成完成',
       });
       get().markDirty();
+      // 完成提示展示几秒后自动消失（否则顶部「✓ 分镜生成完成」常驻；复位前校验状态，
+      // 避免覆盖用户 4 秒内发起的新一轮生成）
+      setTimeout(() => {
+        if (get().scriptGenerationStatus === 'done') {
+          set({ scriptGenerationStatus: 'idle', scriptGenerationMessage: '' });
+        }
+      }, 4000);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : '分镜生成失败，请重试';
