@@ -100,6 +100,11 @@ public class VideoIntentHandler implements IntentHandler {
         String message = support.planField(checkpoint.getPlan(), "message");
         String duration = support.planField(checkpoint.getPlan(), "duration");
         String source = support.planField(checkpoint.getPlan(), "source");
+        // 勾选资产的第一张图片优先作视频首帧（人物形象参照：资产照片直接决定人物长相；
+        // 纯文字描述生成的视频人物与资产完全不像——2026-08-17 用户反馈；无资产图才回退用户参考图 PicUrl）
+        String assetIdsCsv = support.planField(checkpoint.getPlan(), "assetIds");
+        String assetImage = support.firstAssetImageUrl(request.getConversation().getProjectId(), assetIdsCsv);
+        if (!assetImage.isBlank()) source = assetImage;
         // 生成参数：用户提交 params 优先，未提交回退 checkpoint 推荐/原值（startVideoGenerationAsync 内做键级兜底）
         support.startVideoGenerationAsync(request, message, duration, null, source, request.getParams());
         return "";

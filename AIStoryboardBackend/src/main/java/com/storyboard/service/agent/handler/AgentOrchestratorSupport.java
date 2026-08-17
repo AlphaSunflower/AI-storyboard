@@ -663,6 +663,27 @@ public class AgentOrchestratorSupport {
         return assetService.buildSheetText(assets);
     }
 
+    /** 勾选资产（逗号分隔 ID）的第一张图片 URL（作为视频首帧参照——人物形象直接由资产照片决定；
+     *  纯文字描述生成的视频人物与资产完全不像，2026-08-17 用户反馈）；无资产/无图返回空串 */
+    public String firstAssetImageUrl(String projectId, String assetIdsCsv) {
+        if (projectId == null || assetIdsCsv == null || assetIdsCsv.isBlank()) return "";
+        try {
+            List<String> ids = java.util.Arrays.stream(assetIdsCsv.split(","))
+                    .map(String::trim).filter(x -> !x.isBlank()).toList();
+            if (ids.isEmpty()) return "";
+            for (com.storyboard.dto.response.AssetVO vo : assetService.projectAssets(projectId)) {
+                if (!ids.contains(vo.id())) continue;
+                if (vo.images() != null && !vo.images().isEmpty() && vo.images().getFirst().url() != null) {
+                    return vo.images().getFirst().url();
+                }
+            }
+            return "";
+        } catch (Exception e) {
+            log.warn("获取资产首图失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
     /**
      * 会话历史上下文文本（最近 max 条消息，按时间正序），供各编排 LLM 调用拼接——
      * 用户本条消息可能只有「重新生成/继续」等简短指令，真实需求在历史消息里，
