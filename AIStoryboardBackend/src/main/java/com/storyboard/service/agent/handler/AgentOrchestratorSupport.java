@@ -121,6 +121,9 @@ public class AgentOrchestratorSupport {
     /** 图片修改方向选项（refine 继续完善时 LLM 按当前方案动态生成；options=[{id,title}]） */
     public record PicRefineOptionsResult(String message, List<Map<String, Object>> options) {}
 
+    /** 图片需求澄清结构化输出（无图链：type=1 需求明确可出方案；type=0 需追问，options 供选项卡片） */
+    public record ImageClarifyResult(int type, String message, List<Map<String, Object>> options) {}
+
     /** 图片生成失败自救结果：recoverable=审核拒绝可重写提示词；rewrittenPrompt=重写后的提示词；message=给用户的说明 */
     public record ImageRecoveryResult(boolean recoverable, String rewrittenPrompt, String message) {}
 
@@ -289,6 +292,36 @@ public class AgentOrchestratorSupport {
         } catch (Exception e) {
             log.warn("图片提示词 LLM 调用失败: {}", e.getMessage());
             return content;
+        }
+    }
+
+    /**
+     * 图片需求澄清（无图链 gate）：LLM 判断用户描述是否足以生成明确图片。
+     * type=1 需求明确（可继续出方案）；type=0 关键信息缺失需追问（message 只问一个最关键的问题，options 2~4 个）。
+     * 用户回复只要提供了任何有效信息就直接生成方案；仅回复为空或与图片生成完全无关才 type=0。
+     * LLM 调用失败 → type=1 放行（不阻塞出方案）。
+     */
+    public ImageClarifyResult callImageClarify(String content) {
+        try {
+            String raw = retryTransient(() -> planClient().prompt()
+                .system("你是 AI 绘画需求确认助手。判断用户的描述是否足以生成一张明确的图片（能确定画面主体、场景或风格中的至少一项即可）。"
+                    + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
+                    + "。type=1 表示需求明确可继续（options 为空数组）；type=0 表示关键信息缺失需追问："
+                    + "message 只问一个最关键的问题（画面主体是什么），options 必须给出 2~4 个常见主体选项供用户选择"
+                    + "（如 人物、风景、动物、抽象插画，title 用简短名词），message 和 options 都要包含对应的具体示例；"
+                    + "用户回复只要提供了任何有效信息（哪怕不完整）就直接按已有信息生成方案（type=1），不要重复追问、不要一次问多个问题；"
+                    + "只有回复为空或与图片生成完全无关时才 type=0。只输出 JSON。")
+                .user(content)
+                .call()
+                .content());
+            ImageClarifyResult r = new BeanOutputConverter<>(ImageClarifyResult.class).convert(raw);
+            if (r == null) return new ImageClarifyResult(1, "", List.of());
+            return new ImageClarifyResult(r.type(),
+                    r.message() == null ? "" : r.message(),
+                    r.options() == null ? List.of() : r.options());
+        } catch (Exception e) {
+            log.warn("图片需求澄清 LLM 调用失败，按明确放行: {}", e.getMessage());
+            return new ImageClarifyResult(1, "", List.of());
         }
     }
 

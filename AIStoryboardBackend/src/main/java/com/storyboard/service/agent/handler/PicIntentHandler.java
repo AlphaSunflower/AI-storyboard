@@ -62,20 +62,10 @@ public class PicIntentHandler implements IntentHandler {
                                 Map.of("id", "custom", "title", "✍ 自定义输入")),
                         models, Map.of(), Map.of()));
             } else {
-                // 无参考图：LLM 生成图片提示词 → HITL 方案确认卡片（与有图链同构：用户确认后才生成，
-                // 满足「计划形式」交互——2026-08-12 用户要求，替代原直接自动文生图）
-                support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
-                String prompt = support.callImagePrompt(request.getContent());
-                String planText = "🖼 图片生成方案：\n" + prompt + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
-                // models 不过滤 Gemini：文生图（mode=null）走 generations 接口，网关对 Gemini 转原生格式可用
-                List<Map<String, Object>> models = support.buildModels("image");
-                return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                        planText, "generate_image",
-                        List.of(Map.of("prompt", prompt, "source", "")), "human_input",
-                        List.of(Map.of("id", "generate_image", "title", "生成图片"),
-                                Map.of("id", "refine", "title", "继续完善"),
-                                Map.of("id", "custom", "title", "✍ 自定义输入")),
-                        models, Map.of(), Map.of()));
+                // 无参考图：需求澄清 gate（LLM 判断描述是否足以生成明确图片；不明确 → 弹澄清卡追问，
+                // 用户补充后重判，达澄清上限放行）→ 明确后 LLM 生成图片提示词 → HITL 方案确认卡片
+                //（与有图链同构：用户确认后才生成，满足「计划形式」交互——2026-08-12 用户要求）
+                return handleNoSource(request, request.getContent());
             }
         } catch (Exception e) {
             log.error("PicIntentHandler.handle 失败: conversationId={}, error={}",
@@ -84,8 +74,59 @@ public class PicIntentHandler implements IntentHandler {
         }
     }
 
+    /**
+     * 无参考图图片链（handle 与 pic-clarify resume 共用，可重入）：
+     * 需求澄清 gate → 明确后 LLM 提示词 → HITL 方案确认卡片。
+     */
+    private String handleNoSource(OrchestrationRequest request, String content) {
+        // 1. 需求澄清 gate：LLM 判断描述是否足以生成明确图片；不明确 → 弹澄清卡（pic-clarify）结束本轮；
+        //    达澄清上限 → 提示后放行（以现有描述直接出方案，复用 clarifyLimitReached 的提示消息）
+        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callImageClarify(content);
+        if (clarify.type() == 0 && !support.clarifyLimitReached(request.getConversation().getId(), request)) {
+            List<Map<String, Object>> actions = new ArrayList<>();
+            if (clarify.options() != null) {
+                for (Map<String, Object> o : clarify.options()) {
+                    actions.add(Map.of("id", String.valueOf(o.getOrDefault("id", "opt")),
+                            "title", String.valueOf(o.getOrDefault("title", "选项"))));
+                }
+            }
+            actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
+            return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                    clarify.message() == null || clarify.message().isBlank() ? "你想生成一张什么样的图片？请描述画面主体或场景。" : clarify.message(),
+                    "pic-clarify",
+                    List.of(Map.of("originalContent", content, "options", clarify.options() == null ? List.of() : clarify.options())),
+                    "human_input", actions));
+        }
+        // 2. 需求明确/达上限：LLM 生成图片提示词 → HITL 方案确认卡片
+        support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
+        String prompt = support.callImagePrompt(content);
+        String planText = "🖼 图片生成方案：\n" + prompt + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
+        // models 不过滤 Gemini：文生图（mode=null）走 generations 接口，网关对 Gemini 转原生格式可用
+        List<Map<String, Object>> models = support.buildModels("image");
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText, "generate_image",
+                List.of(Map.of("prompt", prompt, "source", "")), "human_input",
+                List.of(Map.of("id", "generate_image", "title", "生成图片"),
+                        Map.of("id", "refine", "title", "继续完善"),
+                        Map.of("id", "custom", "title", "✍ 自定义输入")),
+                models, Map.of(), Map.of()));
+    }
+
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        // 分支 0：需求澄清卡（pic-clarify）——所选选项标题/自定义文本拼入需求，重走澄清 gate（可循环，达上限放行）
+        if ("pic-clarify".equals(checkpoint.getAction())) {
+            String original = support.planField(checkpoint.getPlan(), "originalContent");
+            String chosenId = request.getAction();
+            String title = "custom".equals(chosenId)
+                    ? request.getCustomText()
+                    : support.planListField(checkpoint.getPlan(), "options").stream()
+                            .filter(o -> chosenId.equals(o.get("id")))
+                            .map(o -> String.valueOf(o.getOrDefault("title", "")))
+                            .findFirst().orElse("");
+            String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
+            return handleNoSource(request, supplemented);
+        }
         // 分支 1：继续完善 → LLM 生成修改方向选项卡片（人工介入点选，替代让用户打字）
         if ("refine".equals(request.getAction())) {
             return resumeRefineOptions(request, checkpoint);
@@ -102,7 +143,7 @@ public class PicIntentHandler implements IntentHandler {
         // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
         String prompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
-        // 用户提交的模型/尺寸/质量/数量参数（卡片选择）优先，未提交走默认（图改图默认模型=defaultImageEditModel）
+        // 用户提交的模型/尺寸/质量/数量参数（卡片选择）优先，未提交走默认（图改图默认模型=网关默认生图模型）
         String model = request.getParams().getOrDefault("model", null);
         String size = request.getParams().getOrDefault("size", null);
         String quality = request.getParams().getOrDefault("quality", null);

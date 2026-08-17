@@ -102,8 +102,8 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                 Map.of("id", "custom", "title", "✍ 自定义输入"))));
             }
 
-            // 2.5 非 aisplit 轮清零澄清计数（澄清追问次数只在分镜链内连续累计）
-            if (!"intent-aisplit".equals(intent)) {
+            // 2.5 非 aisplit/pic 轮清零澄清计数（澄清追问次数只在分镜链/图片链内连续累计）
+            if (!"intent-aisplit".equals(intent) && !"intent-pic".equals(intent)) {
                 support.resetClarify(conversation.getId());
             }
 
@@ -209,6 +209,13 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             }
             // 5) pic-option：图片修改方向选项卡片（refine 后动态选项，含 custom）→ 转 pic handler（customText 带自定义方向）
             if ("pic-option".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                byIntent.get("intent-pic").resume(request, cp);
+                return request.getLastMessage();
+            }
+            // 5.5) pic-clarify：图片需求澄清卡片（无图链需求不明确时追问，选项=LLM 动态主体选项+自定义）→ 转 pic handler
+            if ("pic-clarify".equals(cp.getAction())) {
                 request.setAction(action);
                 request.setCustomText(customText);
                 byIntent.get("intent-pic").resume(request, cp);
