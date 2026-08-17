@@ -381,7 +381,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             set({
               waitingVideoPlan: {
-                planToken: e.planToken ?? '',
+                // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
+                planToken: e.formToken ?? e.planToken ?? '',
                 message: e.message ?? '',
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
@@ -562,7 +563,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             if (get().activeConversationId !== snapshotId) break;
             set({
               waitingVideoPlan: {
-                planToken: e.planToken ?? '',
+                // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
+                planToken: e.formToken ?? e.planToken ?? '',
                 message: e.message ?? '',
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',

@@ -125,6 +125,9 @@ public class AisplitIntentHandler implements IntentHandler {
      * @param assetIds 本轮勾选的资产 ID（空 = 不注入资产设定集）
      */
     public String handleFromScriptGate(OrchestrationRequest request, String content, List<String> assetIds) {
+        // 0. 输入拼最近会话上下文：用户可能只说「重新生成/继续」，完整需求在历史消息里
+        //    （剧本优化 gate、分镜方案、分镜 JSON 全部基于拼后的内容；checkpoint plan 仍存原始 content，resume 不重复拼）
+        content = content + support.historyContext(request.getConversation().getId(), 15);
         // 1. 剧本优化（手动澄清循环：type=0 追问结束本轮 / type=1 继续；message 字段已流式增量转发）
         support.sendEvent(request, "workflow", Map.of("title", "正在优化剧本…", "status", "node_started"));
         AgentOrchestratorSupport.ScriptOptimizeResult opt = support.callScriptOptimize(content, request);

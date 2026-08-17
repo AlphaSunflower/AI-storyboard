@@ -79,9 +79,12 @@ public class PicIntentHandler implements IntentHandler {
      * 需求澄清 gate → 明确后 LLM 提示词 → HITL 方案确认卡片。
      */
     private String handleNoSource(OrchestrationRequest request, String content) {
+        // 需求/方案输入拼最近会话上下文（用户可能只说「重新生成/继续」，完整需求在历史消息里）
+        String ctx = support.historyContext(request.getConversation().getId(), 15);
+        String contentWithCtx = content + ctx;
         // 1. 需求澄清 gate：LLM 判断描述是否足以生成明确图片；不明确 → 弹澄清卡（pic-clarify）结束本轮；
         //    达澄清上限 → 提示后放行（以现有描述直接出方案，复用 clarifyLimitReached 的提示消息）
-        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callImageClarify(content);
+        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callImageClarify(contentWithCtx);
         if (clarify.type() == 0 && !support.clarifyLimitReached(request.getConversation().getId(), request)) {
             List<Map<String, Object>> actions = new ArrayList<>();
             if (clarify.options() != null) {
@@ -99,7 +102,7 @@ public class PicIntentHandler implements IntentHandler {
         }
         // 2. 需求明确/达上限：LLM 生成图片提示词 → HITL 方案确认卡片
         support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
-        String prompt = support.callImagePrompt(content);
+        String prompt = support.callImagePrompt(contentWithCtx);
         String planText = "🖼 图片生成方案：\n" + prompt + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
         // models 不过滤 Gemini：文生图（mode=null）走 generations 接口，网关对 Gemini 转原生格式可用
         List<Map<String, Object>> models = support.buildModels("image");

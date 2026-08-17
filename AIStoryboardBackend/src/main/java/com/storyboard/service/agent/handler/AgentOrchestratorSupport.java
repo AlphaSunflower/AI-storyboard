@@ -65,6 +65,7 @@ public class AgentOrchestratorSupport {
     private final SceneMapper sceneMapper;
     private final com.storyboard.service.AssetService assetService;
     private final com.storyboard.service.agent.AssetMatchingService assetMatchingService;
+    private final com.storyboard.mapper.AgentMessageMapper messageMapper;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -663,6 +664,34 @@ public class AgentOrchestratorSupport {
     }
 
     /**
+     * 会话历史上下文文本（最近 max 条消息，按时间正序），供各编排 LLM 调用拼接——
+     * 用户本条消息可能只有「重新生成/继续」等简短指令，真实需求在历史消息里，
+     * 不读上下文会误判（如门禁判定资产不相关、方案生成跑偏）。读取失败/无消息返回空串。
+     */
+    public String historyContext(String conversationId, int max) {
+        if (conversationId == null || conversationId.isBlank() || max <= 0) return "";
+        try {
+            List<com.storyboard.entity.AgentMessage> msgs = messageMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.storyboard.entity.AgentMessage>()
+                            .eq(com.storyboard.entity.AgentMessage::getConversationId, conversationId)
+                            .orderByDesc(com.storyboard.entity.AgentMessage::getCreatedAt)
+                            .last("LIMIT " + max));
+            if (msgs == null || msgs.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder("\n\n【最近对话上下文（用于理解完整需求，按时间顺序）】\n");
+            for (int i = msgs.size() - 1; i >= 0; i--) {
+                com.storyboard.entity.AgentMessage m = msgs.get(i);
+                String c = m.getContent() == null ? "" : m.getContent().trim();
+                if (c.isBlank()) continue;
+                sb.append("user".equals(m.getRole()) ? "用户" : "助手").append("：").append(c).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("会话历史上下文读取失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
      * 关联性门禁：提示词 × 勾选资产 判定。
      *
      * @param source 来源链标识（aisplit / video，存入 checkpoint plan 供 resume 分派）
@@ -671,7 +700,9 @@ public class AgentOrchestratorSupport {
      */
     public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source, String picUrl) {
         if (chosenAssets == null || chosenAssets.isEmpty()) return null;
-        AssetRelevanceResult r = assetMatchingService.judgeRelevance(prompt, chosenAssets);
+        // 判定输入拼最近会话上下文：用户可能只说「重新生成」，真实需求在历史消息里（不读上下文会把资产误判为不相关）
+        String promptWithCtx = prompt + historyContext(req.getConversation().getId(), 15);
+        AssetRelevanceResult r = assetMatchingService.judgeRelevance(promptWithCtx, chosenAssets);
         if (r.relevant()) return null;
         // 弱关联：澄清上限未达 → 弹卡片；已达 → 提示后放行（复用 clarifyLimitReached 的提示消息）
         if (clarifyLimitReached(req.getConversation().getId(), req)) return null;

@@ -115,12 +115,15 @@ public class VideoIntentHandler implements IntentHandler {
             List<Map<String, Object>> models = support.buildModels("video");
             String modelOptionsText = support.buildModelOptionsText("video");
             support.sendEvent(request, "workflow", Map.of("title", "正在设计视频方案…", "status", "node_started"));
-            // 勾选资产设定集：文字拼入方案输入（视觉模型/LLM 都按设定生成，人物外貌/道具/场景不得改变）
+            // 勾选资产设定集：文字拼入方案输入（视觉模型/LLM 都按设定生成，人物外貌/道具/场景不得改变）；
+            // 方案输入同时拼最近会话上下文（用户可能只说「重新生成」，完整需求在历史消息里）
             List<AssetVO> chosen = support.pickAssets(
                     assetService.projectAssets(request.getConversation().getProjectId()), assetIds);
             String sheet = support.assetSheetText(chosen);
-            String enriched = sheet.isBlank() ? content
-                    : content + "\n\n【本次投入的资产设定，视频方案必须体现且不得改变】\n" + sheet;
+            String ctx = support.historyContext(request.getConversation().getId(), 15);
+            String enriched = content
+                    + (ctx.isBlank() ? "" : ctx)
+                    + (sheet.isBlank() ? "" : "\n\n【本次投入的资产设定，视频方案必须体现且不得改变】\n" + sheet);
             String message;
             int duration;
             Map<String, String> recommended = Map.of();
