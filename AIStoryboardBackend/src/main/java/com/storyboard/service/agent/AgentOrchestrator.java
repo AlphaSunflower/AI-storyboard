@@ -43,5 +43,5 @@ public interface AgentOrchestrator {
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息，与 {@link #run} 同契约；
      *         异步任务/失败分支返回空串）
      */
-    String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, SseEmitter emitter);
+    String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, SseEmitter emitter);
 }

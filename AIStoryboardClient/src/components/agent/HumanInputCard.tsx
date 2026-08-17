@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useAgentStore, type HumanInputInfo } from '../../stores/agentStore';
 import { AgentParamSelector } from './AgentParamSelector';
+import { assetUrl } from '../../config';
 
 /**
  * 人工确认卡片（human_input 事件）：渲染 actions 选项按钮；
  * id=custom 的「自定义输入」选项点击后展开内联输入框，用户可输入选项之外的想法。
  * 后端下发 models 时渲染模型/参数选择器（如图片确认卡片可选模型/尺寸），提交时携带所选。
+ * 后端下发 assets 时渲染资产勾选列表（默认全选），asset-confirm 提交携带勾选 ID、asset-skip 携带空数组。
  */
 export function HumanInputCard({ info }: { info: HumanInputInfo }) {
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
@@ -20,6 +22,30 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
   const mergeParams = (p: Record<string, string>) => setSelectedParams((prev) => ({ ...prev, ...p }));
   // 分区选择器模式：后端下发 imageModels/videoModels 时渲染图片+视频两组；否则保持原单选择器逻辑
   const hasSplitSelectors = !!((info.imageModels && info.imageModels.length > 0) || (info.videoModels && info.videoModels.length > 0));
+  // 资产勾选状态：默认全选（Set<assetId>）
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(
+    () => new Set((info.assets ?? []).map((a) => a.id)),
+  );
+  const toggleAsset = (id: string) =>
+    setSelectedAssets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const typeLabel = (t: string) => (t === 'character' ? '人物' : t === 'prop' ? '道具' : t === 'scene' ? '场景' : t);
+  // 资产卡片按钮提交：asset-confirm 携带勾选 ID；asset-skip 携带空数组（不使用资产）
+  const handleActionClick = (a: { id: string; title: string }) => {
+    if (a.id === 'asset-confirm') {
+      submitHumanInput(a.id, undefined, selectedParams, Array.from(selectedAssets));
+    } else if (a.id === 'asset-skip') {
+      submitHumanInput(a.id, undefined, selectedParams, []);
+    } else if (a.id === 'custom') {
+      setCustomOpen(true);
+    } else {
+      submitHumanInput(a.id, undefined, selectedParams);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
@@ -28,6 +54,36 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
         <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 10, whiteSpace: 'pre-wrap' }}>
           {info.formContent || '请确认是否继续？'}
         </div>
+        {/* 资产勾选列表：默认全选，取消勾选则不投入；提交走 asset-confirm / asset-skip */}
+        {info.assets && info.assets.length > 0 && (
+          <div style={{ marginBottom: 10, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', padding: 8 }}>
+            {info.assets.map((a) => (
+              <label
+                key={a.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedAssets.has(a.id)}
+                  disabled={streaming}
+                  onChange={() => toggleAsset(a.id)}
+                  style={{ accentColor: 'var(--color-primary)', cursor: 'inherit' }}
+                />
+                {a.image && (
+                  <img
+                    src={assetUrl(a.image)}
+                    alt={a.name}
+                    style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--color-hairline)' }}
+                  />
+                )}
+                <span style={{ fontSize: 13, color: 'var(--color-ink)' }}>{a.name}</span>
+                <span style={{ fontSize: 11, color: 'var(--color-muted)', background: 'var(--color-surface)', padding: '1px 6px', borderRadius: 4 }}>
+                  {typeLabel(a.type)}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
         {/* 模型/参数选择器：aisplit 分镜卡片渲染图片+视频两组（LLM 推荐预选+理由）；其余卡片保持单选择器 */}
         {hasSplitSelectors ? (
           <div style={{ marginBottom: 10 }}>
@@ -111,7 +167,7 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
               <button
                 key={a.id}
                 disabled={streaming}
-                onClick={() => (a.id === 'custom' ? setCustomOpen(true) : submitHumanInput(a.id, undefined, selectedParams))}
+                onClick={() => handleActionClick(a)}
                 style={{
                   padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
                   background: 'var(--color-primary)', color: 'white', fontSize: 13,

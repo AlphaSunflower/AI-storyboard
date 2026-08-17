@@ -126,9 +126,10 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     }
 
     @Override
-    public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, SseEmitter emitter) {
+    public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
         request.setParams(params == null ? Map.of() : params);
+        request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
@@ -191,6 +192,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 request.setAction(action);
                 request.setCustomText(customText);
                 byIntent.get("intent-aisplit").resume(request, cp);
+                return request.getLastMessage();
+            }
+            // 4.5) asset-selection / asset-gate：资产选择卡片与关联门禁澄清卡片（aisplit/video 两链共用），
+            //      按 checkpoint plan 的 source 分派对应 handler（assetIds 由前端提交透传，handler 内读取）
+            if ("asset-selection".equals(cp.getAction()) || "asset-gate".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                String source = support.planField(cp.getPlan(), "source");
+                IntentHandler target = byIntent.get("intent-video".equals(source) ? "intent-video" : "intent-aisplit");
+                if (target == null) target = byIntent.get("intent-aisplit");
+                target.resume(request, cp);
                 return request.getLastMessage();
             }
             // 5) pic-option：图片修改方向选项卡片（refine 后动态选项，含 custom）→ 转 pic handler（customText 带自定义方向）

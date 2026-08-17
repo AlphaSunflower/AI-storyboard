@@ -107,7 +107,7 @@ public interface AgentChatService {
      *
      * @param params 卡片参数选择器提交的生成参数（model/resolution/duration 等；空=未选择）
      */
-    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, SseEmitter emitter);
+    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, SseEmitter emitter);
 
     /**
      * 视频异步任务状态查询（前端轮询）：按 taskId 查 agent_assets 行（归属校验，未归属/无权 40401）。

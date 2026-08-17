@@ -172,6 +172,15 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public void linkSceneAssets(String sceneId, List<String> assetIds) {
+        if (sceneId == null || sceneId.isBlank() || assetIds == null || assetIds.isEmpty()) return;
+        for (String id : assetIds.stream().distinct().toList()) {
+            insertLinks(sceneId, List.of(id), "image");
+            insertLinks(sceneId, List.of(id), "video");
+        }
+    }
+
+    @Override
     public List<AssetVO> projectAssets(String projectId) {
         if (projectId == null || projectId.isBlank()) return List.of();
         Project project = projectMapper.selectById(projectId);

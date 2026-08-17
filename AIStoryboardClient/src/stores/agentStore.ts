@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import {
   agentApi, streamChat, submitForm,
   type AgentConversation, type AgentMessage, type AgentAsset,
-  type AgentPage, type SseEvent, type VideoTaskStatus,
+  type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl } from '../config';
@@ -20,6 +20,8 @@ export interface HumanInputInfo {
   videoModels?: GatewayModelOption[];
   recommended?: Record<string, string>;
   reasons?: Record<string, string>;
+  // 资产选择卡片：可勾选的资产清单（后端 human_input 事件下发；缺失时不渲染勾选）
+  assets?: AssetOption[];
 }
 
 /** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
@@ -95,7 +97,7 @@ interface AgentState {
 
   // 发送
   sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
-  submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>) => Promise<void>;
+  submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
   submitVideoPlan: (actionId: string, params?: Record<string, string>) => Promise<void>;
@@ -340,6 +342,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 videoModels: e.videoModels,
                 recommended: e.recommended,
                 reasons: e.reasons,
+                assets: e.assets,
               },
             });
             break;
@@ -424,7 +427,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (get().activeConversationId === snapshotId) set({ refImageUrl: null });
   },
 
-  submitHumanInput: async (actionId, customText = '', params) => {
+  submitHumanInput: async (actionId, customText = '', params, assetIds) => {
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
@@ -520,6 +523,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 videoModels: e.videoModels,
                 recommended: e.recommended,
                 reasons: e.reasons,
+                assets: e.assets,
               },
             });
             break;
@@ -576,7 +580,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, customText, params);
+      }, customText, params, assetIds);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误
       if (get().activeConversationId === snapshotId) {

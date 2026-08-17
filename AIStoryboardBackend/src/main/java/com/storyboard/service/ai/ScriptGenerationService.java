@@ -28,6 +28,18 @@ public interface ScriptGenerationService {
                                              String understandingModel, List<String> referenceImages);
 
     /**
+     * 生成分镜脚本（资产子集注入版）：仅把 {@code assetIds} 指定资产的设定集注入 system prompt；
+     * 其余语义与 {@link #generateScenes(String, String, String, String, String, String, String, List)} 一致。
+     *
+     * @param assetIds 注入的资产 ID 子集（null/空 = 注入项目全部可用资产，与旧版一致）
+     */
+    List<Map<String, Object>> generateScenes(String projectId, String scriptText,
+                                             String creationType, String customTypeDesc,
+                                             String aspectRatio, String model,
+                                             String understandingModel, List<String> referenceImages,
+                                             List<String> assetIds);
+
+    /**
      * 生成分镜脚本并直接落库（generateScenes + 批量写 scenes 表）。
      *
      * <p>供 AIController /api/ai/generate-script 使用：Controller 只负责收参返回，

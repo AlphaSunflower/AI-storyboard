@@ -7,7 +7,7 @@ import com.storyboard.dto.response.AssetVO;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.AssetService;
-import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.ScriptGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -41,7 +41,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                             String videoPrompt, String negativePrompt, String cameraMovement,
                             String shotType, String soundDesign) {}
 
-    private final AiConfigProperties config;
+    private final GatewayModelService gatewayModelService;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final AssetService assetService;
@@ -55,14 +55,30 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                                                       String creationType, String customTypeDesc,
                                                       String aspectRatio, String model,
                                                       String understandingModel, List<String> referenceImages) {
+        return generateScenes(projectId, scriptText, creationType, customTypeDesc, aspectRatio, model,
+                understandingModel, referenceImages, null);
+    }
+
+    @Override
+    public List<Map<String, Object>> generateScenes(String projectId, String scriptText,
+                                                      String creationType, String customTypeDesc,
+                                                      String aspectRatio, String model,
+                                                      String understandingModel, List<String> referenceImages,
+                                                      List<String> assetIds) {
         String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
 
         // 资产库设定集注入：项目资产 + 用户全局资产 → 文字卡塞进 system prompt 约束分镜
-        //（资产为可选增强，注入失败仅告警跳过，不影响分镜生成）
+        //（资产为可选增强，注入失败仅告警跳过，不影响分镜生成；
+        //  assetIds 非 null 时只注入指定子集——空列表=不注入，null=全量注入旧行为）
         try {
             List<AssetVO> assets = assetService.projectAssets(projectId);
             if (assets != null && !assets.isEmpty()) {
-                systemPrompt += assetService.buildSheetText(assets);
+                if (assetIds != null) {
+                    assets = assets.stream().filter(a -> assetIds.contains(a.id())).toList();
+                }
+                if (!assets.isEmpty()) {
+                    systemPrompt += assetService.buildSheetText(assets);
+                }
             }
         } catch (Exception e) {
             log.warn("资产库设定集注入失败，跳过: {}", e.getMessage());
@@ -116,7 +132,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     }
 
     /**
-     * 懒加载获取 ChatClient：默认模型固定为 config.getDefaultVisionModel()，超时 120s
+     * 懒加载获取 ChatClient：默认模型固定为网关默认视觉模型（getDefaultVisionModel），超时 120s
      * （与原 HttpClient timeout 一致）；双重检查锁保证线程安全。
      */
     private ChatClient chatClient() {
@@ -125,7 +141,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(config.getDefaultVisionModel())
+                                    .model(gatewayModelService.getDefaultVisionModel())
                                     .timeout(Duration.ofSeconds(120)))
                             .build();
                 }
@@ -166,10 +182,10 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     /**
      * 理解模型看图：多张参考图 → 「图一/图二…」文字描述（多模态 Media 输入）。
-     * 模型优先级：显式传入 understandingModel > 默认理解模型 config.getDefaultUnderstandingModel()。
+     * 模型优先级：显式传入 understandingModel > 默认视觉模型（与脚本模型共用）。
      */
     private String callUnderstandingModel(String model, List<String> referenceImages) {
-        String effModel = (model != null && !model.isBlank()) ? model : config.getDefaultUnderstandingModel();
+        String effModel = (model != null && !model.isBlank()) ? model : gatewayModelService.getDefaultVisionModel();
         List<Media> medias = new ArrayList<>();
         for (String img : referenceImages) {
             medias.add(Media.builder()

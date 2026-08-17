@@ -8,11 +8,13 @@ import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.AgentCheckpoint;
 import com.storyboard.entity.AgentConversation;
 import com.storyboard.entity.Scene;
+import com.storyboard.dto.response.AssetVO;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AgentCheckpointMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.agent.AgentGenerationService;
 import com.storyboard.service.agent.AgentSceneItem;
+import com.storyboard.service.agent.AssetRelevanceResult;
 import com.storyboard.service.ai.GatewayModelService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -61,6 +63,8 @@ public class AgentOrchestratorSupport {
     private final AgentAssetMapper assetMapper;
     private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
+    private final com.storyboard.service.AssetService assetService;
+    private final com.storyboard.service.agent.AssetMatchingService assetMatchingService;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -132,20 +136,32 @@ public class AgentOrchestratorSupport {
                             Map<String, String> recommended,
                             Map<String, String> reasons,
                             List<Map<String, Object>> imageModels,
-                            List<Map<String, Object>> videoModels) {
-        /** 兼容构造器：无模型/推荐参数（现有调用零改动） */
+                            List<Map<String, Object>> videoModels,
+                            List<Map<String, Object>> assets) {
+        /** 兼容构造器：无模型/推荐参数/资产（现有调用零改动） */
         public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
                          String eventName, List<Map<String, Object>> actions) {
-            this(planText, action, planPayload, eventName, actions, List.of(), Map.of(), Map.of(), List.of(), List.of());
+            this(planText, action, planPayload, eventName, actions, List.of(), Map.of(), Map.of(), List.of(), List.of(), null);
         }
 
-        /** 兼容构造器：单组模型/推荐参数（pic/video 链路现有调用，无分区模型列表） */
+        /** 兼容构造器：单组模型/推荐参数（pic/video 链路现有调用，无分区模型列表/资产） */
         public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
                          String eventName, List<Map<String, Object>> actions,
                          List<Map<String, Object>> models,
                          Map<String, String> recommended,
                          Map<String, String> reasons) {
-            this(planText, action, planPayload, eventName, actions, models, recommended, reasons, List.of(), List.of());
+            this(planText, action, planPayload, eventName, actions, models, recommended, reasons, List.of(), List.of(), null);
+        }
+
+        /** 兼容构造器：分区模型列表（aisplit 分镜确认卡片现有调用，无资产） */
+        public StagePlan(String planText, String action, List<Map<String, Object>> planPayload,
+                         String eventName, List<Map<String, Object>> actions,
+                         List<Map<String, Object>> models,
+                         Map<String, String> recommended,
+                         Map<String, String> reasons,
+                         List<Map<String, Object>> imageModels,
+                         List<Map<String, Object>> videoModels) {
+            this(planText, action, planPayload, eventName, actions, models, recommended, reasons, imageModels, videoModels, null);
         }
     }
 
@@ -572,8 +588,111 @@ public class AgentOrchestratorSupport {
         if (plan.videoModels() != null && !plan.videoModels().isEmpty()) event.put("videoModels", plan.videoModels());
         if (plan.recommended() != null && !plan.recommended().isEmpty()) event.put("recommended", plan.recommended());
         if (plan.reasons() != null && !plan.reasons().isEmpty()) event.put("reasons", plan.reasons());
+        // 资产选择卡片：勾选清单下发（前端渲染多选；无资产/非选择卡片时字段缺失）
+        if (plan.assets() != null && !plan.assets().isEmpty()) event.put("assets", plan.assets());
         sendEvent(req, plan.eventName(), event);
         return plan.planText();
+    }
+
+    /** 资产门禁 resume 结果：proceed=true 继续（prompt=本轮需求文本，assetIds=实际生效资产）；false=本轮已结束（澄清卡片已发） */
+    public record AssetGateResume(boolean proceed, String prompt, List<String> assetIds) {}
+
+    // ===== 资产联动（选择卡片载荷 + 关联性门禁，aisplit/video 两链共用） =====
+
+    /** 资产 → 前端勾选卡片载荷（id/name/type/主图，供 human_input 事件 assets 字段） */
+    public List<Map<String, Object>> buildAssetOptions(List<AssetVO> assets) {
+        if (assets == null || assets.isEmpty()) return List.of();
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (AssetVO a : assets) {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", a.id());
+            m.put("name", a.name());
+            m.put("type", a.type());
+            if (a.images() != null && !a.images().isEmpty()) m.put("image", a.images().getFirst().url());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 按资产 ID 子集过滤（null/空 → 空列表） */
+    public List<AssetVO> pickAssets(List<AssetVO> assets, List<String> assetIds) {
+        if (assets == null || assets.isEmpty() || assetIds == null || assetIds.isEmpty()) return List.of();
+        return assets.stream().filter(a -> assetIds.contains(a.id())).toList();
+    }
+
+    /** 勾选资产 → 设定集文字（委托 AssetService.buildSheetText；空列表返回空串） */
+    public String assetSheetText(List<AssetVO> assets) {
+        return assetService.buildSheetText(assets);
+    }
+
+    /**
+     * 关联性门禁：提示词 × 勾选资产 判定。
+     *
+     * @param source 来源链标识（aisplit / video，存入 checkpoint plan 供 resume 分派）
+     * @return null=放行（相关/判定失败/无资产）；非 null=本轮已结束（弱关联澄清卡片已发），调用方直接 return
+     */
+    public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source) {
+        if (chosenAssets == null || chosenAssets.isEmpty()) return null;
+        AssetRelevanceResult r = assetMatchingService.judgeRelevance(prompt, chosenAssets);
+        if (r.relevant()) return null;
+        // 弱关联：澄清上限未达 → 弹卡片；已达 → 提示后放行（复用 clarifyLimitReached 的提示消息）
+        if (clarifyLimitReached(req.getConversation().getId(), req)) return null;
+        List<String> ids = chosenAssets.stream().map(AssetVO::id).toList();
+        String planText = "⚠ 检测到你勾选的资产与当前需求关联性不强：\n"
+                + assetService.buildSheetText(chosenAssets)
+                + "\n" + (r.reason() == null || r.reason().isBlank() ? "请讲清楚这些资产在本次创作中的用途。" : r.reason())
+                + "\n\n请重新描述需求（讲清楚资产如何融入），或选择不使用资产继续。";
+        return runHITLStage(req, null, new StagePlan(
+                planText, "asset-gate",
+                List.of(Map.of("source", source, "content", prompt, "assetIds", String.join(",", ids))),
+                "human_input",
+                List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
+                        Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),
+                        Map.of("id", "asset-force", "title", "仍然使用这些资产"))));
+    }
+
+    /**
+     * 资产门禁澄清卡片 resume：按提交动作返回继续所需状态（{@link AssetGateResume}）。
+     * asset-skip → 清空资产继续；asset-force → 保留资产继续；custom → 新文本重判（仍弱关联再弹卡，达上限放行）。
+     *
+     * @param chosenAssets 当前勾选的资产（含图，judgeRelevance 用）
+     */
+    public AssetGateResume resumeAssetGate(OrchestrationRequest req, AgentCheckpoint cp, List<AssetVO> chosenAssets) {
+        String action = req.getAction();
+        String originPrompt = planField(cp.getPlan(), "content");
+        List<String> ids = parseAssetIds(planField(cp.getPlan(), "assetIds"));
+        if ("asset-skip".equals(action)) return new AssetGateResume(true, originPrompt, List.of());
+        if ("asset-force".equals(action)) return new AssetGateResume(true, originPrompt, ids);
+        // custom：重新描述需求 → 重判
+        String newPrompt = req.getCustomText();
+        if (newPrompt == null || newPrompt.isBlank()) newPrompt = originPrompt;
+        if (!ids.isEmpty() && chosenAssets != null && !chosenAssets.isEmpty()) {
+            AssetRelevanceResult r = assetMatchingService.judgeRelevance(newPrompt, chosenAssets);
+            if (!r.relevant()) {
+                if (clarifyLimitReached(req.getConversation().getId(), req)) {
+                    return new AssetGateResume(true, newPrompt, ids);
+                }
+                String planText = "⚠ 调整后的需求与资产关联性仍不强："
+                        + (r.reason() == null || r.reason().isBlank() ? "" : r.reason())
+                        + "\n\n请进一步讲清楚资产在本次创作中的用途，或选择不使用资产。";
+                runHITLStage(req, null, new StagePlan(
+                        planText, "asset-gate",
+                        List.of(Map.of("source", planField(cp.getPlan(), "source"),
+                                "content", newPrompt, "assetIds", String.join(",", ids))),
+                        "human_input",
+                        List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
+                                Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),
+                                Map.of("id", "asset-force", "title", "仍然使用这些资产"))));
+                return new AssetGateResume(false, newPrompt, ids);
+            }
+        }
+        return new AssetGateResume(true, newPrompt, ids);
+    }
+
+    /** checkpoint plan 里的资产 ID 列表（逗号分隔字符串 → List；宽松解析） */
+    private List<String> parseAssetIds(String s) {
+        if (s == null || s.isBlank()) return List.of();
+        return java.util.Arrays.stream(s.split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
     }
 
     /**
@@ -728,6 +847,29 @@ public class AgentOrchestratorSupport {
             return result;
         } catch (Exception e) {
             log.warn("checkpoint plan 解析失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** checkpoint plan JSON → 分镜资产关联列表（宽松解析；plan 的 items 每项含 sceneNumber/assetIds 时返回） */
+    public List<com.storyboard.service.agent.SceneAssetMatch> parsePlanAssetMatches(String planJson) {
+        if (planJson == null || planJson.isBlank()) return List.of();
+        try {
+            var root = objectMapper.readTree(planJson);
+            var items = root.path("items");
+            if (!items.isArray()) return List.of();
+            List<com.storyboard.service.agent.SceneAssetMatch> result = new java.util.ArrayList<>();
+            for (var it : items) {
+                if (!it.has("assetIds") || !it.path("assetIds").isArray()) continue;
+                List<String> ids = new java.util.ArrayList<>();
+                for (var id : it.path("assetIds")) ids.add(id.asText(""));
+                result.add(new com.storyboard.service.agent.SceneAssetMatch(
+                        it.path("sceneNumber").asInt(0),
+                        ids.stream().filter(x -> !x.isBlank()).toList()));
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("checkpoint plan 资产关联解析失败: {}", e.getMessage());
             return List.of();
         }
     }

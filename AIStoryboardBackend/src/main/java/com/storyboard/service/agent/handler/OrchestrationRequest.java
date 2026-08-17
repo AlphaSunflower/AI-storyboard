@@ -36,4 +36,7 @@ public class OrchestrationRequest {
 
     /** resume 阶段用户提交的生成参数选择（如 {model, resolution, duration}；空 Map=未提交，由 Orchestrator.resume 设置） */
     private Map<String, String> params = Map.of();
+
+    /** resume 阶段用户勾选的资产 ID 列表（资产选择卡片提交；空=未勾选/未涉及资产，由 Orchestrator.resume 设置） */
+    private java.util.List<String> assetIds = java.util.List.of();
 }

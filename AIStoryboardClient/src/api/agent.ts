@@ -42,6 +42,14 @@ export interface AgentPage<T> {
   size: number;
 }
 
+/** 资产选择卡片的资产项（human_input 事件 assets 字段） */
+export interface AssetOption {
+  id: string;
+  name: string;
+  type: string; // character / prop / scene
+  image?: string; // 主图路径（/api/files/...）
+}
+
 export interface SseEvent {
   type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error';
   content?: string;
@@ -73,6 +81,8 @@ export interface SseEvent {
   planToken?: string;
   duration?: number;
   picUrl?: string;
+  // 资产选择卡片（human_input 事件带 assets 时渲染勾选列表）
+  assets?: AssetOption[];
   code?: string;
   message?: string;
 }
@@ -157,12 +167,13 @@ export async function submitForm(
   onEvent: (e: SseEvent) => void,
   customText?: string,
   params?: Record<string, string>,
+  assetIds?: string[],
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {} }),
+    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {}, assetIds: assetIds ?? [] }),
   });
   await consumeSse(res, onEvent);
 }

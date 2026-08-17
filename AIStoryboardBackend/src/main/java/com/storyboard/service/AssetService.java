@@ -38,6 +38,9 @@ public interface AssetService {
     /** 查询分镜关联的资产（含图，按用途拆分）。 */
     SceneAssetsResponse listSceneAssets(String userId, String sceneId);
 
+    /** 批量写分镜关联（purpose 同时写 image+video，供 AI 自动关联用；无归属校验，调用方保证 assetId 合法）。 */
+    void linkSceneAssets(String sceneId, List<String> assetIds);
+
     // ─────────── 生成注入辅助（供分镜/视频/图片生成服务复用，内部解析归属） ───────────
 
     /** 项目的可用资产（项目资产 + 用户全局资产），无归属校验，供分镜脚本生成用。 */
