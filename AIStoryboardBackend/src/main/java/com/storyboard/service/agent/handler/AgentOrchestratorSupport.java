@@ -523,6 +523,10 @@ public class AgentOrchestratorSupport {
                 // 非法时长忽略
             }
         }
+        // 无 set 语句（params 键全部不匹配/为空）→ 直接返回，避免生成无 SET 的非法 UPDATE 语句抛 SQL 异常
+        //（曾导致 resume 写库分支中断、分镜资产自动关联未执行）
+        String setSql = uw.getSqlSet();
+        if (setSql == null || setSql.isBlank()) return;
         sceneMapper.update(null, uw);
     }
 

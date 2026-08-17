@@ -360,7 +360,9 @@ public class AisplitIntentHandler implements IntentHandler {
             support.applySceneParamsToProject(request.getConversation().getProjectId(), request.getParams());
         }
         // 写库成功后自动关联 scene_assets：按分镜号匹配 checkpoint plan 里的资产关联结果（matchScenes 判定），
-        // purpose 双写 image+video（图片/视频生成都能吃到）；无关联结果/失败跳过（分镜不受影响）
+        // purpose 双写 image+video（图片/视频生成都能吃到）；无关联结果/失败跳过（分镜不受影响）。
+        // 注意顺序：参数应用已加无-set 保护（getSqlSet 判空）不再抛异常；若未来仍有异常，关联失败不应
+        // 阻断整体——本方法内部已 try-catch，但为稳妥保持 apply 在前、关联紧随其后
         if (count > 0) {
             linkSceneAssetsByMatch(request, checkpoint);
         }
