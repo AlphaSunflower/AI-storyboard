@@ -68,8 +68,8 @@ public class VideoIntentHandler implements IntentHandler {
                     ? List.of() : request.getAssetIds() == null ? List.of() : request.getAssetIds();
             List<AssetVO> chosen = support.pickAssets(
                     assetService.projectAssets(request.getConversation().getProjectId()), ids);
-            // 关联性门禁：弱关联弹澄清卡片结束本轮；相关/判定失败/无资产放行
-            String gate = support.runAssetGate(request, content, chosen, "video");
+            // 关联性门禁：弱关联弹澄清卡片结束本轮；相关/判定失败/无资产放行（picUrl 存入门禁卡 plan，澄清后继续不丢参考图）
+            String gate = support.runAssetGate(request, content, chosen, "video", picUrl);
             if (gate != null) return request.getLastMessage();
             return handleVideoPlan(request, content, ids, picUrl);
         }

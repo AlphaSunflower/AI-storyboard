@@ -260,7 +260,7 @@ public class AisplitIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     assetService.projectAssets(request.getConversation().getProjectId()), ids);
             // 关联性门禁：弱关联弹澄清卡片结束本轮；相关/判定失败/无资产放行
-            String gate = support.runAssetGate(request, content, chosen, "aisplit");
+            String gate = support.runAssetGate(request, content, chosen, "aisplit", "");
             if (gate != null) return request.getLastMessage();
             return continueAisplit(request, content);
         }

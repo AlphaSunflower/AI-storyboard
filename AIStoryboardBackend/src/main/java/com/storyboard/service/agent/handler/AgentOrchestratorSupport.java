@@ -633,9 +633,10 @@ public class AgentOrchestratorSupport {
      * 关联性门禁：提示词 × 勾选资产 判定。
      *
      * @param source 来源链标识（aisplit / video，存入 checkpoint plan 供 resume 分派）
+     * @param picUrl video 链参考图（存 plan 供澄清后继续设计方案用；aisplit 传空串）
      * @return null=放行（相关/判定失败/无资产）；非 null=本轮已结束（弱关联澄清卡片已发），调用方直接 return
      */
-    public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source) {
+    public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source, String picUrl) {
         if (chosenAssets == null || chosenAssets.isEmpty()) return null;
         AssetRelevanceResult r = assetMatchingService.judgeRelevance(prompt, chosenAssets);
         if (r.relevant()) return null;
@@ -648,7 +649,8 @@ public class AgentOrchestratorSupport {
                 + "\n\n请重新描述需求（讲清楚资产如何融入），或选择不使用资产继续。";
         return runHITLStage(req, null, new StagePlan(
                 planText, "asset-gate",
-                List.of(Map.of("source", source, "content", prompt, "assetIds", String.join(",", ids))),
+                List.of(Map.of("source", source, "content", prompt, "assetIds", String.join(",", ids),
+                        "picUrl", picUrl == null ? "" : picUrl)),
                 "human_input",
                 List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
                         Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),
@@ -682,7 +684,8 @@ public class AgentOrchestratorSupport {
                 runHITLStage(req, null, new StagePlan(
                         planText, "asset-gate",
                         List.of(Map.of("source", planField(cp.getPlan(), "source"),
-                                "content", newPrompt, "assetIds", String.join(",", ids))),
+                                "content", newPrompt, "assetIds", String.join(",", ids),
+                                "picUrl", planField(cp.getPlan(), "picUrl"))),
                         "human_input",
                         List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
                                 Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),

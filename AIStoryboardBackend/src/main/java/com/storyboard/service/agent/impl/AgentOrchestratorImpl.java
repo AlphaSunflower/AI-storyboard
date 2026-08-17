@@ -195,12 +195,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 return request.getLastMessage();
             }
             // 4.5) asset-selection / asset-gate：资产选择卡片与关联门禁澄清卡片（aisplit/video 两链共用），
-            //      按 checkpoint plan 的 source 分派对应 handler（assetIds 由前端提交透传，handler 内读取）
+            //      按 checkpoint plan 的 source 分派对应 handler（assetIds 由前端提交透传，handler 内读取）。
+            //      source 值为 "video"/"aisplit"（勿写成 intentType——曾因比较 "intent-video" 恒 false
+            //      导致 video 链被错误分派到 aisplit，选完资产后去检查分镜状态）
             if ("asset-selection".equals(cp.getAction()) || "asset-gate".equals(cp.getAction())) {
                 request.setAction(action);
                 request.setCustomText(customText);
                 String source = support.planField(cp.getPlan(), "source");
-                IntentHandler target = byIntent.get("intent-video".equals(source) ? "intent-video" : "intent-aisplit");
+                IntentHandler target = byIntent.get("video".equals(source) ? "intent-video" : "intent-aisplit");
                 if (target == null) target = byIntent.get("intent-aisplit");
                 target.resume(request, cp);
                 return request.getLastMessage();
