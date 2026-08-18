@@ -187,6 +187,20 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 byIntent.get("intent-aisplit").resume(request, cp);
                 return request.getLastMessage();
             }
+            // 3.5) requirement-clarify：需求澄清卡片（多维度追问），选项 id 动态 → 转 aisplit handler
+            if ("requirement-clarify".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                byIntent.get("intent-aisplit").resume(request, cp);
+                return request.getLastMessage();
+            }
+            // 3.6) video-clarify：视频需求澄清卡片（多维度追问），选项 id 动态 → 转 video handler
+            if ("video-clarify".equals(cp.getAction())) {
+                request.setAction(action);
+                request.setCustomText(customText);
+                byIntent.get("intent-video").resume(request, cp);
+                return request.getLastMessage();
+            }
             // 4) scene-regenerate：调整意见卡片（不满意后），选项=custom → 转 aisplit handler（customText 带意见）
             if ("scene-regenerate".equals(cp.getAction())) {
                 request.setAction(action);

@@ -41,7 +41,7 @@ import java.util.regex.Pattern;
  * {@link OrchestrationRequest#lastMessage} 承担，组件本身无状态、并发安全）。
  *
  * <p>职责：SSE 事件发送、HITL checkpoint 落库/解析、剧本优化/分镜方案/图片提示词/视频方案
- * 等 LLM 调用（复用网关默认视觉模型 deepseek-v4-flash，超时 120s）、HITL 通用模板
+ * 等 LLM 调用（复用网关默认文本模型（动态获取），超时 120s）、HITL 通用模板
  * {@link #runHITLStage}。原 AgentOrchestratorImpl 中对应私有方法整体迁入。
  */
 @Component
@@ -205,6 +205,34 @@ public class AgentOrchestratorSupport {
         }
     }
 
+    /**
+     * 需求澄清 gate：分析用户分镜需求的模糊程度，输出多维度澄清问题。
+     * 复用 ScriptOptimizeResult 结构（type=0 需澄清 / type=1 已明确直接跳过）。
+     */
+    public ScriptOptimizeResult callRequirementClarify(String content, OrchestrationRequest req) {
+        try {
+            String raw = streamPlanWithMessage(
+                    "你是一位专业的分镜需求分析师。用户会给你一个模糊的分镜需求，你需要判断需求是否足够清晰。"
+                        + "\n\n分析维度：风格（写实/动漫/卡通/水墨/赛博朋克等）、调性（热血/搞笑/温馨/悬疑/史诗等）、"
+                        + "画面比例（16:9横版/9:16竖版/1:1方形等）、目标场景（广告/短片/教学/演示/宣传片等）、"
+                        + "镜头数量（3-5/6-10/10+）、是否需要文字/旁白/字幕等。"
+                        + "\n\n输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\","
+                        + "\"script\":\"\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
+                        + "\ntype=1 表示需求已足够清晰可直接进入剧本优化（此时 options 为空数组，message 简短确认）；"
+                        + "\ntype=0 表示需求模糊需澄清。此时："
+                        + "\n- message 先简短复述你理解的需求，再按维度分段列出所有不明确的点（每点一行，用 emoji 标记维度如🎨风格🎭调性📐比例），让用户一次看清全部待确认项；"
+                        + "\n- options 列出最常见的 2~4 个选项组合（title 用简洁中文，如'日系动漫·热血·16:9横版'），覆盖多个维度的典型搭配；"
+                        + "\n- 如果用户已明确说了某些维度（如'动漫风格'），跳过已明确的维度，只追问剩余的；"
+                        + "\n- 每次最多追问 3 个维度，不要一次罗列所有维度让用户选择困难。",
+                    content, req);
+            return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
+        } catch (Exception e) {
+            log.warn("需求澄清 LLM 调用失败（降级跳过）: {}", e.getMessage());
+            // 失败直接跳过澄清，不阻塞主流程
+            return new ScriptOptimizeResult(1, "", null, List.of());
+        }
+    }
+
     /** 分镜方案设计（message 字段流式增量转发） */
     public StoryboardPlanResult callStoryboardPlan(String script, OrchestrationRequest req) {
         try {
@@ -305,13 +333,17 @@ public class AgentOrchestratorSupport {
     public ImageClarifyResult callImageClarify(String content) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是 AI 绘画需求确认助手。判断用户的描述是否足以生成一张明确的图片（能确定画面主体、场景或风格中的至少一项即可）。"
+                .system("你是 AI 绘画需求确认助手。判断用户的描述是否足以生成一张明确的图片。"
+                    + "分析维度：画面主体（人物/风景/动物/产品等）、风格（写实/动漫/水彩/油画/赛博朋克/扁平插画等）、"
+                    + "调性（明亮/暗黑/温馨/科技感/复古等）、构图（特写/全景/俯视/仰视等）、"
+                    + "色调（暖色/冷色/高对比/低饱和等）。"
                     + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                    + "。type=1 表示需求明确可继续（options 为空数组）；type=0 表示关键信息缺失需追问："
-                    + "message 只问一个最关键的问题（画面主体是什么），options 必须给出 2~4 个常见主体选项供用户选择"
-                    + "（如 人物、风景、动物、抽象插画，title 用简短名词），message 和 options 都要包含对应的具体示例；"
-                    + "用户回复只要提供了任何有效信息（哪怕不完整）就直接按已有信息生成方案（type=1），不要重复追问、不要一次问多个问题；"
-                    + "只有回复为空或与图片生成完全无关时才 type=0。只输出 JSON。")
+                    + "。type=1 表示需求明确可继续（options 为空数组）；"
+                    + "type=0 表示需澄清——此时："
+                    + "message 先简短复述你理解的画面，再按维度列出不明确的点（每点一行，用 emoji 标记如🎨风格🎭调性🖼构图），"
+                    + "options 列出 2~4 个常见选项组合（如'动漫·热血·特写'、'写实·清新·全景'），覆盖多个维度的典型搭配；"
+                    + "如果用户已明确某些维度，跳过已明确的，只追问剩余的；最多追问 3 个维度；"
+                    + "用户回复只要提供了任何有效信息就直接按已有信息生成方案（type=1），不要重复追问。只输出 JSON。")
                 .user(content)
                 .call()
                 .content());
@@ -322,6 +354,33 @@ public class AgentOrchestratorSupport {
                     r.options() == null ? List.of() : r.options());
         } catch (Exception e) {
             log.warn("图片需求澄清 LLM 调用失败，按明确放行: {}", e.getMessage());
+            return new ImageClarifyResult(1, "", List.of());
+        }
+    }
+
+    /**
+     * 视频需求澄清 gate：分析用户视频需求的模糊程度，多维度追问。
+     * 复用 ImageClarifyResult 结构（type=0 需澄清 / type=1 已明确）。
+     */
+    public ImageClarifyResult callVideoClarify(String content, OrchestrationRequest req) {
+        try {
+            String raw = streamPlanWithMessage(
+                    "你是视频创作需求确认助手。判断用户的视频描述是否足够明确。"
+                        + "分析维度：风格（写实/动漫/电影感/Vlog/动画MG等）、调性（热血/搞笑/温馨/悬疑/科技感等）、"
+                        + "时长（短视频5-15s/标准30s/长片60s+）、画面比例（16:9横版/9:16竖版/1:1方形）、"
+                        + "镜头运动（固定/推拉/跟拍/航拍/快速切换等）、节奏（快切/慢镜/叙事节奏等）。"
+                        + "\n输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\","
+                        + "\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
+                        + "\ntype=1 表示需求已足够明确（options 为空数组，message 简短确认）；"
+                        + "\ntype=0 表示需澄清——此时："
+                        + "\n- message 先简短复述你理解的视频需求，再按维度列出不明确的点（每点一行，用 emoji 标记如🎬风格⏱时长📷镜头运动），让用户一次看清全部待确认项；"
+                        + "\n- options 列出 2~4 个常见选项组合（如'电影感·热血·30s·快切'、'Vlog·清新·15s·慢镜'），覆盖多个维度的典型搭配；"
+                        + "\n- 如果用户已明确某些维度，跳过已明确的，只追问剩余的；最多追问 3 个维度；"
+                        + "\n- 用户回复只要提供了任何有效信息就直接按已有信息生成方案（type=1），不要重复追问。",
+                    content, req);
+            return new BeanOutputConverter<>(ImageClarifyResult.class).convert(raw);
+        } catch (Exception e) {
+            log.warn("视频需求澄清 LLM 调用失败（降级跳过）: {}", e.getMessage());
             return new ImageClarifyResult(1, "", List.of());
         }
     }
@@ -432,14 +491,14 @@ public class AgentOrchestratorSupport {
         return false;
     }
 
-    /** 懒加载 planClient：对话交流统一 deepseek-v4-flash（用户指定；deepseek 无思考参数，不加 thinking_level） */
+    /** 懒加载 planClient：对话交流统一网关默认文本模型（动态获取） */
     private ChatClient planClient() {
         if (planClient == null) {
             synchronized (this) {
                 if (planClient == null) {
                     planClient = chatClientBuilder
                         .defaultOptions(OpenAiChatOptions.builder()
-                            .model("deepseek-v4-flash")
+                            .model(gatewayModelService.getDefaultTextModel())
                             .timeout(Duration.ofSeconds(120)))
                         .build();
                 }

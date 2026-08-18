@@ -54,13 +54,42 @@ public class VideoIntentHandler implements IntentHandler {
                     List.of(), Map.of(), Map.of(), List.of(), List.of(),
                     support.buildAssetOptions(projectAssets)));
         }
-        return handleVideoPlan(request, request.getContent(), List.of(), request.getPicUrl());
+        return handleFromVideoClarifyGate(request, request.getContent(), List.of(), request.getPicUrl());
     }
+
+    /**
+     * 视频需求澄清 gate：LLM 分析需求模糊程度，多维度追问后再进视频方案设计。
+     * type=1（需求已明确）→ 直接跳过进 handleVideoPlan；type=0 → 发 HITL 选项卡片暂停。
+     */
+    private String handleFromVideoClarifyGate(OrchestrationRequest request, String content,
+                                               List<String> assetIds, String source) {
+        // 有参考图时跳过澄清（参考图本身就是明确信息）
+        if (source != null && !source.isBlank()) {
+            return handleVideoPlan(request, content, assetIds, source);
+        }
+        String ctx = support.historyContext(request.getConversation().getId(), 15);
+        String enriched = content + (ctx.isBlank() ? "" : ctx);
+        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callVideoClarify(enriched, request);
+        if (clarify != null && clarify.type() == 0) {
+            List<Map<String, Object>> options = clarify.options() != null
+                    ? new java.util.ArrayList<>(clarify.options()) : new java.util.ArrayList<>();
+            options.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
+            support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                    clarify.message(), "video-clarify",
+                    List.of(Map.of("content", content, "assetIds", String.join(",", assetIds),
+                            "source", source == null ? "" : source, "options", options)),
+                    "human_input", options), true);
+            return request.getLastMessage();
+        }
+        return handleVideoPlan(request, content, assetIds, source);
+    }
+
+    // ===== resume =====
 
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         String cpAction = checkpoint.getAction();
-        // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 设计方案（source=video 由 Orchestrator 分派）
+        // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 需求澄清 → 设计方案
         if ("asset-selection".equals(cpAction)) {
             String content = support.planField(checkpoint.getPlan(), "content");
             String picUrl = support.planField(checkpoint.getPlan(), "picUrl");
@@ -68,10 +97,9 @@ public class VideoIntentHandler implements IntentHandler {
                     ? List.of() : request.getAssetIds() == null ? List.of() : request.getAssetIds();
             List<AssetVO> chosen = support.pickAssets(
                     assetService.projectAssets(request.getConversation().getProjectId()), ids);
-            // 关联性门禁：弱关联弹澄清卡片结束本轮；相关/判定失败/无资产放行（picUrl 存入门禁卡 plan，澄清后继续不丢参考图）
             String gate = support.runAssetGate(request, content, chosen, "video", picUrl);
             if (gate != null) return request.getLastMessage();
-            return handleVideoPlan(request, content, ids, picUrl);
+            return handleFromVideoClarifyGate(request, content, ids, picUrl);
         }
         // 资产门禁澄清卡片（asset-gate）：重新描述/不使用/仍然使用 → 重判或放行后设计方案
         if ("asset-gate".equals(cpAction)) {
@@ -80,8 +108,23 @@ public class VideoIntentHandler implements IntentHandler {
                     assetService.projectAssets(request.getConversation().getProjectId()), prevIds);
             AgentOrchestratorSupport.AssetGateResume r = support.resumeAssetGate(request, checkpoint, chosen);
             if (!r.proceed()) return request.getLastMessage();
-            return handleVideoPlan(request, r.prompt(), r.assetIds(),
+            return handleFromVideoClarifyGate(request, r.prompt(), r.assetIds(),
                     support.planField(checkpoint.getPlan(), "picUrl"));
+        }
+        // 视频需求澄清卡片续流：用户选择/自定义输入 → 拼入需求 → 进视频方案设计
+        if ("video-clarify".equals(cpAction)) {
+            String original = support.planField(checkpoint.getPlan(), "content");
+            String source = support.planField(checkpoint.getPlan(), "source");
+            List<String> assetIds = parseAssetIds(support.planField(checkpoint.getPlan(), "assetIds"));
+            String chosenId = request.getAction();
+            String title = "custom".equals(chosenId)
+                    ? request.getCustomText()
+                    : support.planListField(checkpoint.getPlan(), "options").stream()
+                            .filter(o -> chosenId.equals(o.get("id")))
+                            .map(o -> String.valueOf(o.getOrDefault("title", "")))
+                            .findFirst().orElse("");
+            String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
+            return handleVideoPlan(request, supplemented, assetIds, source);
         }
         // 调整意见卡片提交（video-opinion）：合并自定义意见重新设计方案 → 新 video_plan 卡片
         if ("video-opinion".equals(cpAction)) {

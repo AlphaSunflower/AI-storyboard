@@ -115,7 +115,30 @@ public class AisplitIntentHandler implements IntentHandler {
                             Map.of("id", "scene-mode-fresh", "title", "额外创建全新的分镜内容"),
                             Map.of("id", "scene-mode-cancel", "title", "本次不生成分镜"))));
         }
-        return handleFromScriptGate(request, content, currentAssetIds(request));
+        return handleFromClarifyGate(request, content, currentAssetIds(request));
+    }
+
+    /**
+     * 需求澄清 gate：LLM 分析需求模糊程度，多维度追问后再进正式剧本优化。
+     * type=1（需求已明确）→ 直接跳过进 handleFromScriptGate；type=0 → 发 HITL 选项卡片暂停。
+     */
+    private String handleFromClarifyGate(OrchestrationRequest request, String content, List<String> assetIds) {
+        support.sendEvent(request, "workflow", Map.of("title", "正在分析需求…", "status", "node_started"));
+        AgentOrchestratorSupport.ScriptOptimizeResult clarify = support.callRequirementClarify(content, request);
+        if (clarify != null && clarify.type() == 0) {
+            // 需求模糊 → 多维度澄清卡片（用户可选或自定义输入）
+            List<Map<String, Object>> options = clarify.options() != null
+                    ? new java.util.ArrayList<>(clarify.options()) : new java.util.ArrayList<>();
+            options.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
+            support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                    clarify.message(), "requirement-clarify",
+                    List.of(Map.of("content", content, "assetIds", assetIds == null ? List.of() : assetIds,
+                            "options", options)),
+                    "human_input", options), true);
+            return request.getLastMessage();
+        }
+        // 需求已明确 → 直接进剧本优化
+        return handleFromScriptGate(request, content, assetIds);
     }
 
     /**
@@ -296,6 +319,34 @@ public class AisplitIntentHandler implements IntentHandler {
                     : handleFromScriptGate(request, supplemented, currentAssetIds(request));
         }
 
+        // 需求澄清卡片续流：用户选择/自定义输入 → 拼入需求 → 进剧本优化（跳过二次澄清）
+        if ("requirement-clarify".equals(checkpoint.getAction())) {
+            String original = support.planField(checkpoint.getPlan(), "content");
+            String chosenId = request.getAction();
+            String title = "custom".equals(chosenId)
+                    ? request.getCustomText()
+                    : support.planListField(checkpoint.getPlan(), "options").stream()
+                            .filter(o -> chosenId.equals(o.get("id")))
+                            .map(o -> String.valueOf(o.getOrDefault("title", "")))
+                            .findFirst().orElse("");
+            String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
+            // 澄清后直接进剧本优化，不再重复澄清 gate
+            List<String> assetIds = currentAssetIds(request);
+            if (assetIds.isEmpty()) {
+                // plan 里可能存了 assetIds
+                String stored = support.planField(checkpoint.getPlan(), "assetIds");
+                if (stored != null && !stored.isBlank() && !"[]".equals(stored)) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                                .readValue(stored, java.util.List.class);
+                        assetIds = parsed.stream().map(String::valueOf).toList();
+                    } catch (Exception ignored) {}
+                }
+            }
+            return handleFromScriptGate(request, supplemented, assetIds);
+        }
+
         // 卡片1：分镜处理方式（scene-mode）——基于现有优化 / 全新创建 / 不生成
         if ("scene-mode".equals(checkpoint.getAction())) {
             String action = request.getAction();
@@ -309,10 +360,10 @@ public class AisplitIntentHandler implements IntentHandler {
                 String supplemented = "【现有分镜】\n" + existing
                         + "\n【用户需求】\n" + original
                         + "\n请在保留现有分镜合理结构的基础上，按用户需求优化并生成新的分镜方案。";
-                return handleFromScriptGate(request, supplemented, currentAssetIds(request));
+                return handleFromClarifyGate(request, supplemented, currentAssetIds(request));
             }
             // scene-mode-fresh：全新创建，正常流程
-            return handleFromScriptGate(request, original, currentAssetIds(request));
+            return handleFromClarifyGate(request, original, currentAssetIds(request));
         }
 
         // 调整意见（scene-regenerate）：上一轮方案文本 + 用户意见 → 重走生成链（LLM 基于意见重新优化）
