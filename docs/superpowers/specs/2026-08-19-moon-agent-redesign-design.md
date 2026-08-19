@@ -23,6 +23,7 @@
 
 - 全浅色:整页画布 `--color-canvas` #faf9f5,无深色块
 - 侧栏 240px 平嵌:`--color-surface-soft` #f5f0e8 背景 + 右侧 1px `--color-border-light` 分隔
+- **侧栏可左右拉伸**:240px 默认,拖拽范围 200-400px。实现参照主前端 EditorPage 的 resizer 模式——侧栏与对话区间 4px 拖拽把手(`cursor: col-resize`、hover 变主色、`flexShrink: 0`),onMouseDown 记录起点、onMouseMove 更新宽度、onMouseUp 结束;宽度用 useState 存 store 之外(局部 state,刷新回默认)。
 - 对话区 flex:1;消息列 max-w 780px 居中
 - 弹窗:400px 右侧滑出(保留现状),背景画布色,hairline 分隔
 - 素材产出收头部弹窗(现状保留,不移动)
