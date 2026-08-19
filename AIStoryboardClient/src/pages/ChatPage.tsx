@@ -95,19 +95,19 @@ export function ChatPage() {
           <AgentConversationList
             width={convWidth}
             toolbar={
-              <div style={{ display: 'flex', gap: 6, padding: '8px 14px' }}>
-                {/* 资源库 */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 14px' }}>
+                {/* 资源库（独立一行） */}
                 <button
                   onClick={() => setAssetsOpen(true)}
                   title="资源库"
                   style={{
-                    flexShrink: 0, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
+                    width: '100%', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
                     background: 'white', padding: '0 10px', height: 34, fontSize: 13,
-                    color: 'var(--color-muted)', cursor: 'pointer',
+                    color: 'var(--color-muted)', cursor: 'pointer', textAlign: 'left',
                   }}
                 >🧩 资源库</button>
-                {/* 项目选择（与资源库并排，新建对话上方） */}
-                <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                {/* 项目选择（独立一行，资源库下方） */}
+                <div style={{ position: 'relative', width: '100%' }}>
                   <button
                     onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
                     title="项目选择"
@@ -142,8 +142,9 @@ export function ChatPage() {
               style={{
                 border: 'none', background: 'transparent', borderRadius: 8,
                 padding: '7px 10px', fontSize: 14, color: 'var(--color-muted)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
               }}
-            >⚙️</button>
+            >⚙️ 设置</button>
             {settingsOpen && (
               <div style={{
                 position: 'absolute', bottom: 40, left: -60, width: 170,
