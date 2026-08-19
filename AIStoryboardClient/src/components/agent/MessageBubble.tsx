@@ -91,14 +91,36 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
   });
 }
 
-export function MessageBubble({ role, content, streaming, variant = 'default' }: {
-  role: 'user' | 'assistant'; content: string; streaming?: boolean; variant?: 'default' | 'deepseek';
+/** 消息时间格式化：今天 → HH:MM；跨天 → MM-DD HH:MM */
+function formatTime(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const today = new Date();
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  if (sameDay) return `${hh}:${mm}`;
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`;
+}
+
+export function MessageBubble({ role, content, streaming, variant = 'default', createdAt }: {
+  role: 'user' | 'assistant'; content: string; streaming?: boolean;
+  variant?: 'default' | 'deepseek'; createdAt?: string;
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => { /* 剪贴板不可用时静默 */ });
+  };
 
   // 新消息入场：从下往上轻微浮入（仅挂载时播放一次）
   useGSAP(() => {
@@ -118,7 +140,7 @@ export function MessageBubble({ role, content, streaming, variant = 'default' }:
 
   return (
     <>
-    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
+    <div ref={bubbleRef} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       <div
         style={ds
           ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
@@ -165,6 +187,34 @@ export function MessageBubble({ role, content, streaming, variant = 'default' }:
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
+      {/* 消息 meta 行：发送时间常显 + 复制（行 hover 显示） */}
+      {!streaming && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
+            padding: ds ? '0 2px' : '0 4px',
+          }}
+          className="msg-meta"
+        >
+          <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
+            {formatTime(createdAt)}
+          </span>
+          <button
+            onClick={handleCopy}
+            title="复制内容"
+            className="msg-copy"
+            style={{
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
+              color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
+              opacity: 0, transition: 'opacity 0.15s',
+            }}
+          >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+        </div>
+      )}
+      <style>{`
+        .msg-meta:hover .msg-copy { opacity: 1; }
+      `}</style>
     </div>
     <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </>

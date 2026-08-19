@@ -133,6 +133,7 @@ export function AgentChatPanel() {
             key={m.id}
             role={m.role}
             content={m.content}
+            createdAt={m.createdAt}
             streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
           />
         ))}
@@ -220,7 +221,7 @@ export function AgentChatPanel() {
             rows={2}
             style={{
               flex: 1, padding: '12px 14px', border: '1px solid var(--color-hairline)',
-              borderRadius: 'var(--rounded-md)', fontSize: 16, lineHeight: 1.6, color: 'var(--color-ink)',
+              borderRadius: 'var(--rounded-md)', fontSize: 15, lineHeight: 1.6, color: 'var(--color-ink)',
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />

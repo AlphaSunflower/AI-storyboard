@@ -51,15 +51,16 @@ export function ChatPage() {
   useEffect(() => {
     if (!MOCK_DEMO) return;
     const now = new Date().toISOString();
+    const earlier = new Date(Date.now() - 3 * 60 * 1000).toISOString();
     useAgentStore.setState({
       conversations: [
-        { id: 'mock-1', userId: 'mock', projectId: 'mock', title: '雨夜侦探短片分镜', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
+        { id: 'mock-1', userId: 'mock', projectId: 'mock', title: '雨夜侦探短片分镜', difyConversationId: null, status: 'active', createdAt: earlier, updatedAt: earlier },
         { id: 'mock-2', userId: 'mock', projectId: 'mock', title: '火星种土豆的宇航员', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
         { id: 'mock-3', userId: 'mock', projectId: 'mock', title: '产品宣传片分镜', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
       ],
       activeConversationId: 'mock-1',
       messages: [
-        { id: 'mock-m1', conversationId: 'mock-1', role: 'user', content: '帮我设计一个雨夜侦探追逐的短片分镜', difyMessageId: null, createdAt: now },
+        { id: 'mock-m1', conversationId: 'mock-1', role: 'user', content: '帮我设计一个雨夜侦探追逐的短片分镜', difyMessageId: null, createdAt: earlier },
         { id: 'mock-m2', conversationId: 'mock-1', role: 'assistant', content: '好的，为你设计 6 个分镜方案：\n\n**场景 1** 雨夜霓虹街道，侦探撑伞疾走，镜头跟随推进。\n\n**场景 2** 黑衣人从暗巷冲出，快速变焦推近，雨滴反光。\n\n**场景 3** 天台对峙，闪电照亮两人剪影。\n\n后续可继续完善任意场景或直接生成图片/视频。', difyMessageId: null, createdAt: now },
       ],
     });
@@ -274,6 +275,7 @@ export function ChatPage() {
                     role={m.role}
                     content={m.content}
                     variant="deepseek"
+                    createdAt={m.createdAt}
                     streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
                   />
                 ))}
