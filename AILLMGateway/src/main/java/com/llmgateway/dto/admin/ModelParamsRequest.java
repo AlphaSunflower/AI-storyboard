@@ -6,6 +6,7 @@ package com.llmgateway.dto.admin;
 public record ModelParamsRequest(
         String modelName,
         String type,
+        Boolean isDefault,
         String temperature,
         Integer maxTokens,
         String topP,

@@ -97,6 +97,8 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private ProjectResponse toResponse(Project project) {
+        // 批量重置卡在 generating 超过 5 分钟的场景（单条 SQL 替代逐行 updateById）
+        sceneMapper.resetStaleGenerating(project.getId());
         List<Scene> scenes = sceneMapper.findByProjectIdOrdered(project.getId());
         List<SceneResponse> sceneResponses = scenes.stream().map(s -> new SceneResponse(
             s.getId(), s.getProjectId(), s.getSceneNumber(),

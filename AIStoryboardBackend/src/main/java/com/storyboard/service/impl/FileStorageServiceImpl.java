@@ -1,6 +1,7 @@
 package com.storyboard.service.impl;
 
 import com.storyboard.service.FileStorageService;
+import com.storyboard.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -64,10 +65,10 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID().toString() + "." + extension;
             Path target = IMAGES_DIR.resolve(filename);
             Files.write(target, bytes);
-            log.info("Saved base64 image: {}", target);
+            log.debug("Saved base64 image: {}", target);
             return "/api/files/images/" + filename;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to save base64 image: " + e.getMessage(), e);
+            throw new BusinessException(50201, "Failed to save base64 image: " + e.getMessage(), e);
         }
     }
 
@@ -85,7 +86,7 @@ public class FileStorageServiceImpl implements FileStorageService {
     public String saveUploadedReference(String type, org.springframework.web.multipart.MultipartFile file) {
         try {
             if (file == null || file.isEmpty()) {
-                throw new RuntimeException("上传文件为空");
+                throw new BusinessException(40001, "上传文件为空");
             }
             String t = type == null ? "image" : type;
             String contentType = file.getContentType();
@@ -95,19 +96,19 @@ public class FileStorageServiceImpl implements FileStorageService {
             switch (t) {
                 case "video" -> {
                     if (contentType == null || !(contentType.startsWith("video/") || contentType.contains("quicktime"))) {
-                        throw new RuntimeException("仅支持上传视频文件");
+                        throw new BusinessException(40001, "仅支持上传视频文件");
                     }
                     targetDir = VIDEOS_DIR; urlPrefix = "/api/files/videos/"; allowedExts = ALLOWED_VIDEO_EXTENSIONS;
                 }
                 case "audio" -> {
                     if (contentType == null || !contentType.startsWith("audio/")) {
-                        throw new RuntimeException("仅支持上传音频文件");
+                        throw new BusinessException(40001, "仅支持上传音频文件");
                     }
                     targetDir = AUDIOS_DIR; urlPrefix = "/api/files/audios/"; allowedExts = ALLOWED_AUDIO_EXTENSIONS;
                 }
                 default -> {
                     if (contentType == null || !contentType.startsWith("image/")) {
-                        throw new RuntimeException("仅支持上传图片文件");
+                        throw new BusinessException(40001, "仅支持上传图片文件");
                     }
                     targetDir = IMAGES_DIR; urlPrefix = "/api/files/images/"; allowedExts = ALLOWED_IMAGE_EXTENSIONS;
                 }
@@ -125,10 +126,10 @@ public class FileStorageServiceImpl implements FileStorageService {
             }
             String filename = UUID.randomUUID().toString() + "." + extension;
             Files.write(targetDir.resolve(filename), file.getBytes());
-            log.info("Saved reference {}: {}", t, targetDir.resolve(filename));
+            log.debug("Saved reference {}: {}", t, targetDir.resolve(filename));
             return urlPrefix + filename;
         } catch (IOException e) {
-            throw new RuntimeException("保存参考素材失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "保存参考素材失败: " + e.getMessage(), e);
         }
     }
 
@@ -136,12 +137,12 @@ public class FileStorageServiceImpl implements FileStorageService {
     public String saveUploadedImage(org.springframework.web.multipart.MultipartFile file) {
         try {
             if (file == null || file.isEmpty()) {
-                throw new RuntimeException("上传文件为空");
+                throw new BusinessException(40001, "上传文件为空");
             }
             // 校验 content-type：仅接受图片（防改后缀上传 html/脚本，如 .png 实为 text/html）
             String contentType = file.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {
-                throw new RuntimeException("仅支持上传图片文件");
+                throw new BusinessException(40001, "仅支持上传图片文件");
             }
             String original = file.getOriginalFilename();
             String extension = "png";
@@ -153,10 +154,10 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID().toString() + "." + extension;
             Path target = IMAGES_DIR.resolve(filename);
             Files.write(target, file.getBytes());
-            log.info("Saved uploaded image: {}", target);
+            log.debug("Saved uploaded image: {}", target);
             return "/api/files/images/" + filename;
         } catch (IOException e) {
-            throw new RuntimeException("保存上传图片失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "保存上传图片失败: " + e.getMessage(), e);
         }
     }
 
@@ -164,7 +165,7 @@ public class FileStorageServiceImpl implements FileStorageService {
     public String saveVideo(String sourceUrl) {
         // Handle non-http sources (e.g., raw base64 or data URI)
         if (sourceUrl == null || sourceUrl.isBlank()) {
-            throw new RuntimeException("Empty video URL");
+            throw new BusinessException(40001, "Empty video URL");
         }
         if (sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://")) {
             return downloadAndSave(sourceUrl, VIDEOS_DIR, "/api/files/videos/", "video/mp4");
@@ -186,24 +187,26 @@ public class FileStorageServiceImpl implements FileStorageService {
                     HttpResponse.BodyHandlers.ofInputStream());
 
             if (resp.statusCode() != 200) {
-                throw new RuntimeException("Download failed, status: " + resp.statusCode());
+                throw new BusinessException(50201, "Download failed, status: " + resp.statusCode());
             }
 
             String extension = extractExtension(sourceUrl, resp);
             String filename = UUID.randomUUID().toString() + "." + extension;
             Path target = targetDir.resolve(filename);
+            Path tmp = targetDir.resolve(filename + ".tmp");
 
             try (InputStream in = resp.body()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
             }
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
 
-            log.info("Downloaded and saved: {} -> {}", sourceUrl, target);
+            log.debug("Downloaded and saved: {} -> {}", sourceUrl, target);
             return urlPrefix + filename;
         } catch (IOException e) {
-            throw new RuntimeException("Failed to download file from " + sourceUrl + ": " + e.getMessage(), e);
+            throw new BusinessException(50201, "Failed to download file from " + sourceUrl + ": " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Download interrupted: " + sourceUrl, e);
+            throw new BusinessException(50201, "Download interrupted: " + sourceUrl, e);
         }
     }
 
@@ -233,16 +236,25 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     @Override
     public Path resolveImage(String filename) {
-        return IMAGES_DIR.resolve(filename);
+        return safeResolve(IMAGES_DIR, filename);
     }
 
     @Override
     public Path resolveVideo(String filename) {
-        return VIDEOS_DIR.resolve(filename);
+        return safeResolve(VIDEOS_DIR, filename);
     }
 
     @Override
     public Path resolveAudio(String filename) {
-        return AUDIOS_DIR.resolve(filename);
+        return safeResolve(AUDIOS_DIR, filename);
+    }
+
+    /** 路径穿越防护：resolve + normalize 后校验必须在目标目录下 */
+    private Path safeResolve(Path dir, String filename) {
+        Path resolved = dir.resolve(filename).normalize();
+        if (!resolved.startsWith(dir.normalize())) {
+            throw new BusinessException(40001, "非法文件路径");
+        }
+        return resolved;
     }
 }

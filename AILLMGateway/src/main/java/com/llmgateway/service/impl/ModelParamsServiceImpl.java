@@ -1,6 +1,7 @@
 package com.llmgateway.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.llmgateway.dto.admin.ModelParamsRequest;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.exception.BusinessException;
@@ -41,6 +42,15 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         validateRange(req.audioSegmentDurationMin(), req.audioSegmentDurationMax(), "音频单段时长范围");
         validateRange(req.videoSegmentDurationMin(), req.videoSegmentDurationMax(), "视频单段时长范围");
 
+        // 单一权威源：设为默认时，先清掉同类型其它模型的默认标记（每类型至多一个默认）
+        if (Boolean.TRUE.equals(req.isDefault())) {
+            modelParamsMapper.update(null, new LambdaUpdateWrapper<ModelParams>()
+                    .eq(ModelParams::getType, type)
+                    .eq(ModelParams::getIsDefault, true)
+                    .ne(ModelParams::getModelName, req.modelName().trim())
+                    .set(ModelParams::getIsDefault, false));
+        }
+
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, req.modelName().trim()));
         if (existing != null) {
@@ -56,6 +66,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         entity.setModelName(req.modelName().trim());
         entity.setType(type);
         applyNonNull(entity, req);
+        entity.setIsDefault(Boolean.TRUE.equals(req.isDefault()));   // null → false（insert 显式落库）
         OffsetDateTime now = OffsetDateTime.now();
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
@@ -81,6 +92,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
     /** 将请求中非 null 字段拷贝到实体（upsert 更新语义） */
     private void applyNonNull(ModelParams entity, ModelParamsRequest req) {
         if (req.type() != null) entity.setType(req.type().trim().toLowerCase());
+        if (req.isDefault() != null) entity.setIsDefault(req.isDefault());
         if (req.temperature() != null) entity.setTemperature(req.temperature());
         if (req.maxTokens() != null) entity.setMaxTokens(req.maxTokens());
         if (req.topP() != null) entity.setTopP(req.topP());

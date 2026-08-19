@@ -266,6 +266,12 @@ public class AgentChatServiceImpl implements AgentChatService {
     @Override
     public void deleteConversation(String userId, String conversationId) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        // 清理内存态（防泄漏）
+        titleScheduled.remove(conversationId);
+        renamedTitleByConversation.remove(conversationId);
+        lastPicUrlByConversation.remove(conversationId);
+        orchestratorSupport.cleanupOnDelete(conversationId);
+        conversationLock.releaseAndRemove(conversationId);
         // 消息/资产由 DB 外键 ON DELETE CASCADE 级联删除
         conversationMapper.deleteById(conversation.getId());
     }

@@ -11,6 +11,7 @@ import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.MultipartBuilder;
 import com.storyboard.service.ai.VideoGenerationService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 视频生成服务实现 —— 创建/轮询/下载统一走 LLM 网关（/v1/videos）。
@@ -44,6 +46,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     private static final int MAX_REFERENCE_IMAGES = 9;
 
     private final AiConfigProperties config;
+    private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
@@ -84,32 +87,32 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                                    List<String> referenceImages, String generatedImageUrl,
                                    List<String> referenceVideos, List<String> referenceAudios) {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
-        if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
+        if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
-            throw new RuntimeException("视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
         }
 
         String actualModel = alias != null
                 ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
                 : (scene != null && scene.getVideoModel() != null && !scene.getVideoModel().isBlank())
                         ? scene.getVideoModel()
-                        : (config.getMinimaxVideoModel() != null ? config.getMinimaxVideoModel() : "MiniMax-H3");  // 默认模型：MiniMax-H3（修复通道翻转回归：默认走 minimax 渠道，显式传 veo 别名才走 laozhang）
+                        : gatewayModelService.getDefaultVideoModel();  // 默认模型：网关 model_params.is_default（MiniMax 直连自家，非 laozhang）
 
-        // 使用请求参数或分镜覆盖值或配置默认值（优先级：显式传入 > 分镜覆盖 > config 默认）
-        String effSize = size != null ? size : config.getDefaultVideoSize();
+        // 参数：显式传入 > 分镜覆盖 > 网关兜底默认（未传值则不下发，网关 model_params 兜底 768P/8s/16:9/1280x720）
+        String effSize = size;
         String effResolution = resolution != null ? resolution
                 : (scene != null && scene.getVideoResolution() != null && !scene.getVideoResolution().isBlank())
                         ? scene.getVideoResolution()
-                        : config.getDefaultVideoResolution();
+                        : null;
         String effAspectRatio = aspectRatio != null ? aspectRatio
                 : (scene != null && scene.getVideoAspectRatio() != null && !scene.getVideoAspectRatio().isBlank())
                         ? scene.getVideoAspectRatio()
-                        : config.getDefaultVideoAspectRatio();
-        int effDuration = duration != null ? duration
+                        : null;
+        Integer effDuration = duration != null ? duration
                 : (scene != null && scene.getDuration() != null && scene.getDuration() > 0)
                         ? scene.getDuration()
-                        : Integer.parseInt(config.getDefaultVideoDuration());
+                        : null;
 
         // 资产库注入：场景关联资产的文字卡 + 参考图（≤9 优先级截断）；无资产则零影响
         String effectivePrompt = prompt;
@@ -132,10 +135,11 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             Map<String, Object> body = new HashMap<>();
             body.put("model", actualModel);          // alias 映射保留在业务侧
             body.put("prompt", effectivePrompt);
-            body.put("size", effSize);
-            body.put("resolution", effResolution);
-            body.put("aspectRatio", effAspectRatio);
-            body.put("duration", effDuration);
+            // 未显式传值的参数不下发，由网关兜底默认（768P/8s/16:9/1280x720）
+            if (effSize != null) body.put("size", effSize);
+            if (effResolution != null) body.put("resolution", effResolution);
+            if (effAspectRatio != null) body.put("aspectRatio", effAspectRatio);
+            if (effDuration != null) body.put("duration", effDuration);
             if (negativePrompt != null && !negativePrompt.isEmpty()) {
                 body.put("negativePrompt", negativePrompt);
             }
@@ -204,14 +208,14 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
-                throw new RuntimeException("Video API returned " + resp.statusCode() + ": " + resp.body());
+                throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
             }
             // 网关透传上游响应：task_id（minimax）/ id / taskId（laozhang）三选一
             JsonNode root = objectMapper.readTree(resp.body());
             String taskId = root.path("task_id").asText(
                     root.path("id").asText(root.path("taskId").asText("")));
             if (taskId.isBlank()) {
-                throw new RuntimeException("视频创建响应缺少 taskId: " + resp.body());
+                throw new BusinessException(50201, "视频创建响应缺少 taskId: " + resp.body());
             }
 
             if (scene != null) {
@@ -226,7 +230,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 scene.setVideoStatus("failed");
                 sceneMapper.updateById(scene);
             }
-            throw new RuntimeException("AI 视频生成失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
     }
 
@@ -430,25 +434,25 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             byte[] bodyBytes = mp.build();
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/files/upload"))
-                    .header("Content-Type", "application/octet-stream")
+                    .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
                     .timeout(Duration.ofSeconds(300))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
-                throw new RuntimeException("参考素材上传失败: " + resp.statusCode() + " " + resp.body());
+                throw new BusinessException(50201, "参考素材上传失败: " + resp.statusCode() + " " + resp.body());
             }
             JsonNode root = objectMapper.readTree(resp.body());
             String fileId = root.path("file_id").asText("");
             if (fileId.isBlank()) {
-                throw new RuntimeException("参考素材上传响应缺少 file_id: " + resp.body());
+                throw new BusinessException(50201, "参考素材上传响应缺少 file_id: " + resp.body());
             }
             return fileId;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("参考素材转换失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "参考素材转换失败: " + e.getMessage(), e);
         }
     }
 

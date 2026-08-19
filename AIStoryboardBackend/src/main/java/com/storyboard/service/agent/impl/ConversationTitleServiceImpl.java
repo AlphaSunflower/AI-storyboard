@@ -14,6 +14,8 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import com.storyboard.service.ai.GatewayModelService;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 会话标题异步生成服务。
@@ -43,13 +45,6 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
     /** 默认标题：仅当会话标题仍是该值时才会被 AI 重命名覆盖 */
     private static final String DEFAULT_TITLE = "新对话";
 
-    /**
-     * 标题生成专用模型：deepseek-v4-flash（对话交流统一模型，用户指定）。
-     *
-     * <p>deepseek 无思考参数，无需 thinking_level（原 gemini-3.5-flash-lite 的
-     * "不思考模式"extraBody 已随模型切换移除）。
-     */
-    private static final String TITLE_MODEL = "deepseek-v4-flash";
 
     /** 标题生成 prompt：约束输出为 6-15 字中文（或 3-8 英文词）的纯标题 */
     private static final String TITLE_PROMPT =
@@ -59,6 +54,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
 
     private final AgentConversationMapper conversationMapper;
     private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
 
     /**
      * 懒加载 ChatClient：标题是锦上添花，超时比脚本生成（120s）收紧，不值得长等（与原 HttpClient timeout 一致）。
@@ -72,7 +68,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(TITLE_MODEL)
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(30)))
                             .build();
                 }
@@ -112,7 +108,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
                     .content();
             return cleanTitle(raw);
         } catch (Exception e) {
-            throw new RuntimeException("AI 生成会话标题失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "AI 生成会话标题失败: " + e.getMessage(), e);
         }
     }
 

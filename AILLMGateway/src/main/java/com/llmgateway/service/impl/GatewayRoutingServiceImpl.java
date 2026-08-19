@@ -103,11 +103,27 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 }
                 return;
             } catch (Exception e) {
+                // 客户端断开（前端刷新/取消/超时）：不是渠道故障，继续尝试下一个渠道只会重演同一错误
+                if (isClientAbort(e)) {
+                    log.debug("客户端中断流式转发，停止: channel={}", channel.getId());
+                    return;
+                }
                 lastError = e;
                 log.warn("流式渠道失败，尝试下一个: channel={}, error={}", channel.getId(), e.getMessage());
             }
         }
         throw lastError != null ? lastError : new BusinessException(50202, "upstream stream failed");
+    }
+
+    /** 判断异常链是否为客户端断开（ClientAbortException / AsyncRequestNotUsableException） */
+    private static boolean isClientAbort(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof org.apache.catalina.connector.ClientAbortException
+                    || cur instanceof org.springframework.web.context.request.async.AsyncRequestNotUsableException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -262,12 +278,15 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         // 组装 OpenAI 风格响应：{"object":"list","data":[{"id":..,"object":"model","type":..,"params":..}]}
         List<Map<String, Object>> data = new ArrayList<>();
         modelTypeMap.forEach((name, t) -> {
+            ModelParams mp = paramsMap.get(name);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", name);
             m.put("object", "model");
             m.put("type", t);
+            // 默认模型标记（每类型至多一个，后端拉取作为兜底默认模型）
+            m.put("is_default", mp != null && Boolean.TRUE.equals(mp.getIsDefault()));
             // 按 model_name 组装 params（能力+默认值；未配置 → null）
-            m.put("params", buildParams(paramsMap.get(name)));
+            m.put("params", buildParams(mp));
             data.add(m);
         });
         Map<String, Object> result = new LinkedHashMap<>();

@@ -14,12 +14,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * AI 配置属性类 —— 所有 Laozhang API 相关配置的单一数据源。
+ * AI 配置属性类 —— 模型路由提示 + 文件存储的单一数据源。
  * <p>
- * 对应 application.yml 中的 {@code ai.laozhang.*} 配置段。
- * 模型名称、API 端点路径、默认参数等全部集中在此，不再散落于 Service 代码中。
+ * 对应 application.yml 中的 {@code ai.*} 配置段（与 {@code ai.agent} / {@code ai.gateway} 平级）。
+ * 默认模型/参数、模型路由已下沉 LLM 网关（model_route + model_params 表）。
  */
-@ConfigurationProperties(prefix = "ai.laozhang")
+@ConfigurationProperties(prefix = "ai")
 public class AiConfigProperties {
 
     private static final Logger log = LoggerFactory.getLogger(AiConfigProperties.class);
@@ -34,17 +34,15 @@ public class AiConfigProperties {
     //  ═══════════════════════════════════════════════════════════
 
     // ── LLM 网关 ──
-    /** LLM 网关配置（独立前缀 {@code ai.gateway}，见 {@link Gateway}） */
-    @Setter
+    /** LLM 网关配置（独立前缀 {@code ai.gateway}，构造注入独立 bean，见 {@link Gateway}） */
     @Getter
-    private Gateway gateway = new Gateway();
+    private final Gateway gateway;
 
     /**
      * 构造器注入：接收经 {@code @EnableConfigurationProperties} 注册、已绑定
      * {@code ai.gateway.*} 的独立 Gateway bean。
-     * 嵌套类上的 {@code @ConfigurationProperties} 注解只在它被独立注册为 bean 时才生效；
-     * 若仅靠字段绑定，Binder 会按父类前缀 {@code ai.laozhang.gateway.*} 查找（yml 不存在）
-     * → 字段保留默认值、apiKey=null → 网关请求发出 "Bearer null"。
+     * gateway 字段为 final（无 setter），仅由本构造器赋值——父前缀 {@code ai} 的字段绑定
+     * 不会用 setter 覆盖它，避免"父前缀绑定"与"构造注入 bean"两实例并存。
      * <p>
      * {@code @Autowired} 必须有：Spring Boot 4 会把"唯一构造器"类当作构造器绑定目标，
      * 若不加 @Autowired，Gateway 参数会被当配置项从父前缀绑定（→ null），而非注入 bean。
@@ -72,54 +70,6 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String videoModelAliases = "{\"veo-3.1-fast\":\"veo-3.1-fast-generate-preview\",\"veo-3.1\":\"veo-3.1-generate-preview\"}";
-
-    // ═══════════════════════════════════════════════════════════
-    //  默认值（未显式指定时使用）
-    // ═══════════════════════════════════════════════════════════
-
-    // ── 默认值 ──
-    /** 默认生图模型 */
-    @Setter
-    @Getter
-    private String defaultImageModel = "gpt-image-2";
-    /** 默认图生图/图改图模型（edits 分支；独立于文生图，可经环境变量 DEFAULT_IMAGE_EDIT_MODEL 填写） */
-    @Setter
-    @Getter
-    private String defaultImageEditModel = "gpt-image-2";
-    /** 默认脚本生成模型（Vision） */
-    @Setter
-    @Getter
-    private String defaultVisionModel = "gemini-3-flash-preview";
-    /** 默认理解模型（vision 类型，剧本输入上传参考图时先看图生成描述；可经环境变量覆盖） */
-    @Setter
-    @Getter
-    private String defaultUnderstandingModel = "gemini-3-flash-preview";
-    /** 默认生成图片尺寸（OpenAI 格式：宽x高） */
-    @Setter
-    @Getter
-    private String defaultImageSize = "1024x1024";
-    /** 默认生成视频时长（秒，字符串格式由 Laozhang API 决定） */
-    @Setter
-    @Getter
-    private String defaultVideoDuration = "8";
-    /** 默认生成视频分辨率（MiniMax 仅支持 768P/2K，720p 会 400 invalid params 2013） */
-    @Setter
-    @Getter
-    private String defaultVideoResolution = "768P";
-    /** 默认生成视频尺寸 */
-    @Setter
-    @Getter
-    private String defaultVideoSize = "1280x720";
-    /** 默认生成视频宽高比 */
-    @Setter
-    @Getter
-    private String defaultVideoAspectRatio = "16:9";
-
-    // ── 视频生成（模型名经网关透传上游）──
-    /** MiniMax 视频生成模型 */
-    @Setter
-    @Getter
-    private String minimaxVideoModel = "MiniMax-H3";
 
     // ═══════════════════════════════════════════════════════════
     //  文件存储路径
@@ -152,7 +102,7 @@ public class AiConfigProperties {
     public String getGatewayApiKey() { return gateway == null ? null : gateway.getApiKey(); }
 
     /**
-     * LLM 网关配置 —— 独立前缀 {@code ai.gateway}，与 {@code ai.laozhang} 平级。
+     * LLM 网关配置 —— 独立前缀 {@code ai.gateway}，与 {@code ai} 下其它配置平级。
      * chat/文生图调用统一经网关转发（edits 图改图保持直连 Laozhang）。
      */
     @Setter
@@ -165,6 +115,12 @@ public class AiConfigProperties {
 
         /** 网关调用密钥（在网关 /admin 签发） */
         private String apiKey;
+
+        /** 兜底文本模型名（网关不可达或未标记 is_default 时使用；默认 deepseek-v4-flash） */
+        private String fallbackTextModel = "deepseek-v4-flash";
+
+        /** 兜底文本模型独立 API Key（网关正常时由网关管理密钥，仅直连兜底时使用） */
+        private String fallbackTextApiKey;
 
     }
 

@@ -40,4 +40,12 @@ public class ConversationLock {
             semaphore.release();
         }
     }
+
+    /** 释放锁并移除条目（会话删除时调用，防止内存泄漏） */
+    public void releaseAndRemove(String conversationId) {
+        Semaphore semaphore = locks.remove(conversationId);
+        if (semaphore != null) {
+            semaphore.release();
+        }
+    }
 }

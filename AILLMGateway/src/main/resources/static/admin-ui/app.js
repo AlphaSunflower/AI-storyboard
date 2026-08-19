@@ -18,7 +18,7 @@ let plainKeyCache = null;                     // 一次性 plainKey，关闭弹�
 let modalCloseHandler = null;                 // 弹窗关闭回调（confirm 用）
 const logQuery = { page: 1, size: 20, model: '' }; // 日志页查询状态
 
-const ROUTES = ['dashboard', 'channels', 'routes', 'api-keys', 'logs', 'users'];
+const ROUTES = ['dashboard', 'channels', 'routes', 'api-keys', 'logs', 'users', 'config'];
 
 /* ================= 工具函数 ================= */
 const $ = (sel) => document.querySelector(sel);
@@ -225,6 +225,7 @@ function render() {
     'api-keys': loadApiKeys,
     logs: loadLogs,
     users: loadUsers,
+    config: loadConfig,
   };
   loaders[sec]();
 }
@@ -780,6 +781,9 @@ function openRouteModal(route) {
     + field('模型类型', '<select class="input" id="r-type">' + typeOpts + '</select>')
     + field('模型', '<input class="input" id="r-model" list="r-model-list" placeholder="加载模型中…">'
       + '<datalist id="r-model-list"></datalist>')
+    + '<div class="field field-inline"><span class="field-label">默认模型</span>'
+      + '<label class="switch"><input type="checkbox" id="r-isdefault"><span class="slider"></span></label>'
+      + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
       + esc(route ? route.defaultParams || '' : '') + '</textarea>');
@@ -815,6 +819,8 @@ async function loadModelParamsForEdit(modelName, type) {
   try {
     const mp = await api('/admin/model-params/' + encodeURIComponent(modelName));
     if (!mp || (mp.type && mp.type !== type)) return;
+    const cb = $('#r-isdefault');
+    if (cb) cb.checked = !!mp.isDefault;
     // 设置控件值：滑块同时更新右侧值显示；字符串输入直接赋值
     const set = (id, v) => {
       if (v === null || v === undefined || v === '') return;
@@ -925,6 +931,7 @@ async function saveModelParams(modelName, type) {
   const val = (id) => { const el = $('#' + id); const s = el ? el.value.trim() : ''; return s === '' ? null : s; };
   const num = (id) => { const s = val(id); return s === null ? null : Number(s); };
   const req = { modelName, type };
+  req.isDefault = $('#r-isdefault') ? $('#r-isdefault').checked : false;
   if (type === 'text') {
     req.temperature = val('p-temperature');
     req.maxTokens = num('p-maxtokens');
@@ -1383,6 +1390,63 @@ async function deleteUser(id, username) {
   }
 }
 
+/** 系统配置（sys_config）：GET 回显键值表单，PUT 批量保存（落库，重启网关后生效） */
+async function loadConfig() {
+  const view = $('#view-config');
+  view.innerHTML = loadingHtml;
+  try {
+    const items = await api('/admin/config');
+    view.innerHTML =
+      '<div class="view-head"><h2>系统配置</h2></div>'
+      + '<div class="card table-card">'
+      + '<table class="table"><thead><tr><th style="width:34%">配置键</th><th>说明</th><th>值</th><th style="width:14%">更新时间</th></tr></thead><tbody>'
+      + (items.length
+        ? items.map((c) => '<tr>'
+            + '<td class="td-strong"><code>' + esc(c.key) + '</code></td>'
+            + '<td class="td-muted">' + esc(c.remark || '') + '</td>'
+            + '<td><input class="input cfg-value" data-key="' + esc(c.key) + '" value="' + esc(c.value) + '"></td>'
+            + '<td class="td-muted">' + fmtTime(c.updatedAt) + '</td>'
+            + '</tr>').join('')
+        : '<tr><td colspan="4">' + emptyHtml('暂无配置项') + '</td></tr>')
+      + '</tbody></table></div>'
+      + '<div class="view-actions" style="margin-top:12px;display:flex;align-items:center;gap:12px">'
+      + '<p class="field-hint" style="margin:0">修改仅落库，重启网关后生效（不做热更新）；非法值会被后端拒绝。</p>'
+      + '<button type="button" class="btn btn-primary" data-action="save-config">保存</button>'
+      + '</div>';
+  } catch (e) {
+    view.innerHTML = errHtml(e.message);
+    handleErr(e);
+  }
+}
+
+/** 保存：收集表单全部键值 → PUT /admin/config → 重新回显 */
+async function saveConfig() {
+  const inputs = Array.from(document.querySelectorAll('#view-config .cfg-value'));
+  if (!inputs.length) return;
+  const items = inputs.map((el) => ({ key: el.dataset.key, value: el.value.trim() }));
+  const btn = document.querySelector('#view-config [data-action="save-config"]');
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  try {
+    const updated = await api('/admin/config', { method: 'PUT', body: JSON.stringify({ items }) });
+    // 回显后端返回的最新值
+    updated.forEach((c) => {
+      const el = document.querySelector('#view-config .cfg-value[data-key="' + CSS.escape(c.key) + '"]');
+      if (el) el.value = c.value;
+    });
+    toast('已保存，重启网关后生效', 'success');
+  } catch (e) {
+    handleErr(e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+  }
+}
+
+function onConfigClick(e) {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.action === 'save-config') saveConfig();
+}
+
 /* ================= 全局事件绑定 & 启动 ================= */
 
 function onModalBodyClick(e) {
@@ -1433,6 +1497,7 @@ function init() {
   $('#view-logs').addEventListener('click', onLogsClick);
   $('#view-users').addEventListener('click', onUsersClick);
   $('#view-users').addEventListener('change', onUsersChange);
+  $('#view-config').addEventListener('click', onConfigClick);
 
   // Esc 关闭（plainKey 弹层优先，其次普通弹窗）
   document.addEventListener('keydown', onGlobalKeydown);

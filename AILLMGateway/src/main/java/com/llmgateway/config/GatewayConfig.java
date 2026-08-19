@@ -9,6 +9,8 @@ public class GatewayConfig {
     private Aes aes = new Aes();
     private Upstream upstream = new Upstream();
     private Video video = new Video();
+    /** 首启管理员自举密码（gateway.admin-init-password；仅 admin_user 表为空时生效） */
+    private String adminInitPassword;
 
     public Jwt getJwt() { return jwt; }
     public void setJwt(Jwt jwt) { this.jwt = jwt; }
@@ -21,6 +23,9 @@ public class GatewayConfig {
 
     /** 视频默认档便捷访问（对应 gateway.video.default-resolution） */
     public String getVideoDefaultResolution() { return video.getDefaultResolution(); }
+
+    public String getAdminInitPassword() { return adminInitPassword; }
+    public void setAdminInitPassword(String adminInitPassword) { this.adminInitPassword = adminInitPassword; }
 
     /** JWT 配置 */
     public static class Jwt {
@@ -53,7 +58,7 @@ public class GatewayConfig {
     /** 上游渠道超时/重试配置 */
     public static class Upstream {
         private long connectTimeoutMs = 30000;
-        private long requestTimeoutMs = 120000;
+        private long requestTimeoutMs = 300000;
         private int retryCount = 2;
 
         public long getConnectTimeoutMs() { return connectTimeoutMs; }

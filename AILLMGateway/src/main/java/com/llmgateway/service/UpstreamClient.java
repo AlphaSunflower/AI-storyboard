@@ -12,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** 上游调用客户端：透传请求体、替换 Bearer、轻量重试（429/5xx 重试 2 次） */
 @Component
@@ -113,14 +114,14 @@ public class UpstreamClient {
                 resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             } catch (Exception e) {
                 if (attempt == retries) throw new RuntimeException("上游请求失败: " + e.getMessage(), e);
-                sleep(500L * (attempt + 1));
+                sleep((long)(1000L * (1L << attempt)) + ThreadLocalRandom.current().nextInt(500));
                 continue;
             }
             int code = resp.statusCode();
             if (code != 429 && code < 500) return resp;
             if (attempt == retries) return resp;
             log.warn("上游返回 {}，第 {}/{} 次重试", code, attempt + 1, retries);
-            sleep(500L * (attempt + 1));
+            sleep((long)(1000L * (1L << attempt)) + ThreadLocalRandom.current().nextInt(500));
         }
         return resp;
     }

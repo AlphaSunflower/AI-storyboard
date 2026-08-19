@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.*;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 分镜脚本生成实现：通过 Spring AI ChatClient 调用 LLM 网关（spring.ai.openai.base-url 已指向网关 /v1，
@@ -176,7 +177,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             }
             return spec.call().content();
         } catch (Exception e) {
-            throw new RuntimeException("AI 生成分镜脚本失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "AI 生成分镜脚本失败: " + e.getMessage(), e);
         }
     }
 
@@ -280,7 +281,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             }
             return scenes;
         } catch (Exception e) {
-            throw new RuntimeException("解析 AI 返回的分镜数据失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "解析 AI 返回的分镜数据失败: " + e.getMessage(), e);
         }
     }
 }

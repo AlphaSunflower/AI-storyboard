@@ -120,8 +120,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception e) {
-        log.error("Unhandled exception", e);
         String message = extractReadableError(e.getMessage());
+        // 上游 AI 错误只记 message 不打堆栈（HttpClient 内部栈无意义）
+        if (e.getCause() != null && message != null && !message.isBlank()) {
+            log.error("Unhandled exception: {}", message);
+        } else {
+            log.error("Unhandled exception", e);
+        }
         if (message == null || message.isBlank()) {
             message = "服务器内部错误";
         } else if (message.length() > 200) {

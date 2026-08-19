@@ -53,7 +53,13 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleUnknown(Exception e) {
+    public ResponseEntity<Map<String, Object>> handleUnknown(Exception e,
+                                                             jakarta.servlet.http.HttpServletResponse response) {
+        // 响应已提交（SSE 已开始输出）时无法回写 JSON 错误体——只记日志，避免二次异常
+        if (response.isCommitted()) {
+            log.error("网关未处理异常（响应已提交，无法回写错误体）", e);
+            return null;
+        }
         log.error("网关未处理异常", e);
         return err(500, e.getMessage() == null ? "internal error" : e.getMessage());
     }

@@ -404,9 +404,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       await get().refreshScenes();
     }, 3000);
-    // ponytail: 10 分钟硬上限，防后端异常导致 imageStatus 卡 generating 时无限轮询；到时停止（按钮恢复可手动重试）
+    // ponytail: 10 分钟硬上限，防后端异常导致 imageStatus 卡 generating 时无限轮询
     setTimeout(() => {
-      if (imageResumeTimer) { clearInterval(imageResumeTimer); imageResumeTimer = null; }
+      if (!imageResumeTimer) return;
+      clearInterval(imageResumeTimer);
+      imageResumeTimer = null;
+      // 清除 generatingImage 标志 + 将仍卡 generating 的场景状态重置为 failed（按钮恢复可手动重试）
+      set((s) => {
+        const flags = { ...s.generatingImage };
+        const updatedScenes = s.scenes.map(sc => {
+          if (sc.imageStatus === 'generating') {
+            flags[sc.id] = false;
+            return { ...sc, imageStatus: 'failed' as const };
+          }
+          return sc;
+        });
+        return { generatingImage: flags, scenes: updatedScenes };
+      });
     }, 600_000);
   },
 

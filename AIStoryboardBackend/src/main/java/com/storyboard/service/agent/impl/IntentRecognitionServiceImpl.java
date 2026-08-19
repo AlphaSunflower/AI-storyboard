@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.storyboard.service.ai.GatewayModelService;
 
 /**
  * 意图识别服务：把意图识别从 Dify 工作流提取到后端。
@@ -25,8 +26,7 @@ import java.util.Set;
  * 设计要点：
  * - 复用 ConversationTitleService 的 Spring AI ChatClient 调用模式（纯文本调用，
  *   spring.ai.openai.base-url 已指向网关 /v1）；
- * - 模型固定 {@code INTENT_MODEL}（deepseek-v4-flash，用户指定；fast 档分类任务足够，
- *   deepseek 无思考参数，不加 thinking_level）；
+ * - 模型从网关动态获取（fast 档分类任务足够）；
  * - 输出约束为纯意图标识符（如 intent-pic），解析后白名单校验，非法兜底 intent-other；
  * - 任何异常（网络/解析/超时）兜底 intent-other，绝不阻塞对话主流程；
  * - 历史上下文：最多携带最近 {@link #HISTORY_LIMIT} 条消息，支撑"继续/接着上次"判断。
@@ -37,8 +37,6 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
     private static final Logger log = LoggerFactory.getLogger(IntentRecognitionServiceImpl.class);
 
-    /** 意图识别专用模型：deepseek-v4-flash（用户指定；fast 档，分类任务足够） */
-    private static final String INTENT_MODEL = "deepseek-v4-flash";
 
     /** 历史上下文：最多取最近 8 条消息（支撑"继续/接着上次"判断） */
     public static final int HISTORY_LIMIT = 8;
@@ -92,6 +90,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             "\"type\"\\s*:\\s*\"([^\"]+)\"[\\s\\S]*?\"confidence\"\\s*:\\s*([0-9.]+)");
 
     private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
 
     /**
      * 懒加载 ChatClient：识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等，
@@ -105,7 +104,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(INTENT_MODEL)
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(30)))
                             .build();
                 }

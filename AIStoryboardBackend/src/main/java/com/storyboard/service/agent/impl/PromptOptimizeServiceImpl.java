@@ -1,7 +1,6 @@
 package com.storyboard.service.agent.impl;
 
 import com.storyboard.service.agent.PromptOptimizeService;
-import com.storyboard.service.ai.AiConfigProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -10,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import com.storyboard.service.ai.GatewayModelService;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 提示词优化服务。
@@ -20,8 +21,7 @@ import java.time.Duration;
  *
  * 设计要点：
  * - 纯文本转换工具：不落库、不关联会话，调用方（AgentConversationController）直接返回；
- * - 模型固定用 {@link AiConfigProperties#getDefaultVisionModel()}（质量优先，用户确认；
- *   不传 thinking_level——实测老张网关对 preview 系模型不透传思考参数，传了无意义）；
+ * - 模型从网关动态获取（对话交流统一）；
  * - 超时 60s：用户主动触发、可接受等待，一次性返回（不做流式）；
  * - 任何失败包装为 RuntimeException 由 Controller 统一转错误码，不静默吞错（与标题
  *   被动静默不同：优化是用户显式操作，失败必须可见）。
@@ -46,11 +46,11 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
         + "主体、环境、光线、色彩、风格、镜头类型；视频类给出运镜、节奏、转场、画面动势、时长感。"
         + "直接输出优化后的提示词本身，不要 JSON、不要解释、不要编号前缀。";
 
-    private final AiConfigProperties config;
     private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
 
     /**
-     * 懒加载 ChatClient：默认模型固定为 config.getDefaultVisionModel()，超时 60s（与原 HttpClient timeout 一致）。
+     * 懒加载 ChatClient：默认模型从网关动态获取，超时 60s（与原 HttpClient timeout 一致）。
      * 构造器内构建逻辑迁移至此，统一 @RequiredArgsConstructor 注入。
      */
     private volatile ChatClient chatClient;
@@ -61,8 +61,8 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    // 对话交流统一 deepseek-v4-flash（用户指定）
-                                    .model("deepseek-v4-flash")
+                                    // 对话交流统一网关默认文本模型（动态获取）
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(60)))
                             .build();
                 }
@@ -82,12 +82,12 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
                     .call()
                     .content();
             if (optimized == null || optimized.isBlank()) {
-                throw new RuntimeException("优化结果为空");
+                throw new BusinessException(40001, "优化结果为空");
             }
             return optimized.trim();
         } catch (Exception e) {
             log.warn("提示词优化失败: {}", e.getMessage());
-            throw new RuntimeException("提示词优化失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "提示词优化失败: " + e.getMessage(), e);
         }
     }
 }

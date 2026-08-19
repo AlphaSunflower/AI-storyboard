@@ -1,6 +1,7 @@
 package com.storyboard.controller;
 
 import com.storyboard.dto.request.AgentConversationUpdateRequest;
+import jakarta.validation.Valid;
 import com.storyboard.dto.request.AgentCreateConversationRequest;
 import com.storyboard.dto.request.AgentFormSubmitRequest;
 import com.storyboard.dto.request.AgentSendMessageRequest;
@@ -43,7 +44,7 @@ public class AgentConversationController {
     /** 创建会话 */
     @PostMapping("/conversations")
     public ApiResponse<AgentConversationVO> createConversation(
-            Authentication auth, @RequestBody AgentCreateConversationRequest request) {
+            Authentication auth, @Valid @RequestBody AgentCreateConversationRequest request) {
         return ApiResponse.ok(toVO(chatService.createConversation(auth.getName(), request.projectId(), request.title())));
     }
 
@@ -87,11 +88,11 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.listMessages(id).stream().map(AgentConversationController::toVO).toList());
     }
 
-    /** 发送消息（代理 Dify） */
+    /** 发送消息 */
     @PostMapping("/conversations/{id}/messages")
     public ApiResponse<AgentMessageVO> sendMessage(
             Authentication auth, @PathVariable String id,
-            @RequestBody AgentSendMessageRequest request) {
+            @Valid @RequestBody AgentSendMessageRequest request) {
         return ApiResponse.ok(toVO(chatService.sendMessage(auth.getName(), id, request.content())));
     }
 
@@ -141,7 +142,7 @@ public class AgentConversationController {
     /** 流式发送消息（SSE） */
     @PostMapping(value = "/conversations/{id}/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamMessage(Authentication auth, @PathVariable String id,
-                                    @RequestBody AgentSendMessageRequest request) {
+                                    @Valid @RequestBody AgentSendMessageRequest request) {
         // 同步快速校验归属（失败抛 401/404 而非 SSE）
         chatService.getOwnedConversation(auth.getName(), id);
         // 同步校验消息内容非空：空内容直接抛 40001（与 blocking sendMessage 语义一致），

@@ -3,7 +3,7 @@ package com.storyboard.service.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.service.FileStorageService;
-import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.VideoPlanService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 图生视频方案设计服务实现 —— 视频生成前先用视觉模型"看图"。
@@ -47,7 +48,7 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                     2. duration（数字，必填）：4~15 之间的整数，常用档位 4/6/8/12/15。用户未指定时默认 8。
                     只输出 JSON，不要输出其他内容。""";
 
-    private final AiConfigProperties config;
+    private final GatewayModelService gatewayModelService;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
@@ -68,7 +69,7 @@ public class VideoPlanServiceImpl implements VideoPlanService {
             String filename = extractFilename(imagePath);
             Path localFile = fileStorageService.resolveImage(filename);
             if (!Files.exists(localFile)) {
-                throw new RuntimeException("源图文件不存在: " + localFile);
+                throw new BusinessException(40401, "资源不存在: " + localFile);
             }
             byte[] imageBytes = Files.readAllBytes(localFile);
             String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
@@ -112,7 +113,7 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                 plan = extractVideoPlan(content);
             }
             if (plan == null) {
-                throw new RuntimeException("视觉理解未输出有效的视频方案");
+                throw new BusinessException(50201, "视觉理解未输出有效的视频方案");
             }
             log.info("图生视频方案已生成: duration={}, message 前 120 字: {}",
                     plan.duration(),
@@ -120,12 +121,12 @@ public class VideoPlanServiceImpl implements VideoPlanService {
             return plan;
         } catch (Exception e) {
             log.warn("图生视频方案设计失败: {}", e.getMessage());
-            throw new RuntimeException("图片理解失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "图片理解失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 懒加载获取 ChatClient：默认模型固定为 config.getDefaultVisionModel()，超时 120s
+     * 懒加载获取 ChatClient：默认模型固定为网关默认视觉模型（getDefaultVisionModel），超时 120s
      * （与原 HttpClient timeout 一致）；双重检查锁保证线程安全。
      */
     private ChatClient chatClient() {
@@ -134,7 +135,7 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(config.getDefaultVisionModel())
+                                    .model(gatewayModelService.getDefaultVisionModel())
                                     .timeout(Duration.ofSeconds(120)))
                             .build();
                 }

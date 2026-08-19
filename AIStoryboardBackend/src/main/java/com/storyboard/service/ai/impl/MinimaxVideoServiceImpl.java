@@ -9,6 +9,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.MinimaxVideoService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import com.storyboard.exception.BusinessException;
 
 /**
  * MiniMax 视频生成服务实现 —— 网关通道（协议转换已下沉 LLM 网关）。
@@ -42,6 +44,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
     private static final Logger log = LoggerFactory.getLogger(MinimaxVideoServiceImpl.class);
 
     private final AiConfigProperties config;
+    private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
@@ -66,30 +69,25 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                                   Integer duration, String negativePrompt, Long seed,
                                   List<String> referenceImages, String generatedImageUrl) {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
-        if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
+        if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
         if (prompt == null || prompt.isBlank()) {
-            throw new RuntimeException("视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
         }
 
         String actualModel = alias != null
                 ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
-                : (config.getMinimaxVideoModel() != null ? config.getMinimaxVideoModel() : "MiniMax-H3");  // 默认模型：MiniMax-H3（修复通道翻转回归：默认走 minimax 渠道，显式传 veo 别名才走 laozhang）
-
-        // 使用请求参数或配置默认值
-        String effSize = size != null ? size : config.getDefaultVideoSize();
-        String effResolution = resolution != null ? resolution : config.getDefaultVideoResolution();
-        String effAspectRatio = aspectRatio != null ? aspectRatio : config.getDefaultVideoAspectRatio();
-        int effDuration = duration != null ? duration : Integer.parseInt(config.getDefaultVideoDuration());
+                : gatewayModelService.getDefaultVideoModel();  // 默认模型：网关 model_params.is_default（MiniMax 直连自家，非 laozhang）
 
         try {
             // 统一 OpenAI 风格 JSON 请求体（模型→渠道路由、协议转换已下沉网关）
             Map<String, Object> body = new HashMap<>();
             body.put("model", actualModel);
             body.put("prompt", prompt);
-            body.put("size", effSize);
-            body.put("resolution", effResolution);
-            body.put("aspectRatio", effAspectRatio);
-            body.put("duration", effDuration);
+            // 未显式传值的参数不下发，由网关兜底默认（768P/8s/16:9/1280x720，与旧 config 默认一致）
+            if (size != null) body.put("size", size);
+            if (resolution != null) body.put("resolution", resolution);
+            if (aspectRatio != null) body.put("aspectRatio", aspectRatio);
+            if (duration != null) body.put("duration", duration);
             if (negativePrompt != null && !negativePrompt.isEmpty()) {
                 body.put("negativePrompt", negativePrompt);
             }
@@ -125,14 +123,14 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
 
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
-                throw new RuntimeException("Video API returned " + resp.statusCode() + ": " + resp.body());
+                throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
             }
             // 网关透传上游响应：task_id（minimax）/ id / taskId（laozhang）三选一
             JsonNode root = objectMapper.readTree(resp.body());
             String taskId = root.path("task_id").asText(
                     root.path("id").asText(root.path("taskId").asText("")));
             if (taskId.isBlank()) {
-                throw new RuntimeException("视频创建响应缺少 taskId: " + resp.body());
+                throw new BusinessException(50201, "视频创建响应缺少 taskId: " + resp.body());
             }
 
             if (scene != null) {
@@ -141,14 +139,14 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                 sceneMapper.updateById(scene);
             }
             log.info("视频任务已创建(网关): taskId={}, model={}, resolution={}, duration={}",
-                    taskId, actualModel, effResolution, effDuration);
+                    taskId, actualModel, resolution, duration);
             return taskId;
         } catch (Exception e) {
             if (scene != null) {
                 scene.setVideoStatus("failed");
                 sceneMapper.updateById(scene);
             }
-            throw new RuntimeException("AI 视频生成失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
     }
 

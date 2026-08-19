@@ -7,6 +7,7 @@ public record ModelParamsVO(
         String id,
         String modelName,
         String type,
+        Boolean isDefault,
         String temperature,
         Integer maxTokens,
         String topP,

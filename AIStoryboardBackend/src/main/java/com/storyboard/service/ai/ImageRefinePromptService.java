@@ -13,7 +13,7 @@ package com.storyboard.service.ai;
  *
  * <p>设计要点：
  * <ul>
- *   <li>模型固定 {@link AiConfigProperties#getDefaultVisionModel()}（gemini-3-flash-preview，
+ *   <li>模型固定网关默认视觉模型（{@link GatewayModelService#getDefaultVisionModel()}，gemini-3-flash-preview，
  *       支持视觉分析；不传 thinking_level——实测老张网关对 preview 系不透传思考参数）；</li>
  *   <li>源图从本地 uploads 读取转 base64 data URI 内联（参照 MiniMax 图生视频做法，无需上传公网）；</li>
  *   <li>输出结构化为 JSON {@code {image_analysis, modifications, refined_prompt}}，

@@ -1,6 +1,7 @@
 # Environment
 .env
 application-local.yml
+application-prod.yml
 
 # Build
 target/

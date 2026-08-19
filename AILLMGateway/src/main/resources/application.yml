@@ -1,14 +1,17 @@
 spring:
   application:
     name: llm-gateway
+  profiles:
+    active: local            # 默认本地环境；生产用 --spring.profiles.active=prod 覆盖
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
   datasource:
-    url: jdbc:postgresql://${LLM_GATEWAY_DB_HOST:localhost}:${LLM_GATEWAY_DB_PORT:5432}/${LLM_GATEWAY_DB_NAME:llm_gateway}
-    username: ${LLM_GATEWAY_DB_USERNAME:postgres}
-    password: ${LLM_GATEWAY_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
 server:
-  port: ${LLM_GATEWAY_PORT:8083}
+  port: 8083
 
 # 只暴露 health 端点（部署探活），其余 actuator 端点不外泄
 management:
@@ -29,17 +32,6 @@ mybatis-plus:
 
 gateway:
   jwt:
-    access-secret: ${LLM_GATEWAY_JWT_ACCESS_SECRET}
-    refresh-secret: ${LLM_GATEWAY_JWT_REFRESH_SECRET}
-    issuer: ${LLM_GATEWAY_JWT_ISSUER:llm-gateway}
+    issuer: llm-gateway
     access-token-ttl: 3600
     refresh-token-ttl: 2592000
-  aes:
-    secret: ${LLM_GATEWAY_AES_SECRET}   # AES-256，需 32 字节
-  upstream:
-    connect-timeout-ms: 30000
-    request-timeout-ms: 120000
-    retry-count: 2
-  video:
-    default-resolution: ${LLM_GATEWAY_VIDEO_RESOLUTION:768P}
-    default-duration: "8"

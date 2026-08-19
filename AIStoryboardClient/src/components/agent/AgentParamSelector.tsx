@@ -123,7 +123,7 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
               <option key={m.value} value={m.value}>{m.label || m.value}</option>
             ))}
           </select>
-          {reasons[keyPrefix + 'model'] && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ {reasons[keyPrefix + 'model']}</span>}
+          {reasons[keyPrefix + 'model'] && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>{reasons[keyPrefix + 'model']}</span>}
         </div>
         {visibleMeta.map((meta) => (
           <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -138,7 +138,7 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
               ))}
             </select>
             {reasons[keyPrefix + meta.key] && (
-              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>✨ 推荐：{reasons[keyPrefix + meta.key]}</span>
+              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reasons[keyPrefix + meta.key]}</span>
             )}
           </div>
         ))}

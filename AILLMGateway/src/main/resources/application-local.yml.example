@@ -1,0 +1,14 @@
+# application-local.yml.example — 复制为 application-local.yml 并填入真实值
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/llm_gateway
+    username: postgres
+    password: <your-password>
+
+gateway:
+  jwt:
+    access-secret: <random-48char-hex>
+    refresh-secret: <random-48char-hex>
+  aes:
+    secret: <random-32char-hex>
+  admin-init-password: <your-admin-init-password>

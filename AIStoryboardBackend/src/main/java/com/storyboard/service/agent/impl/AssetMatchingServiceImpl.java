@@ -17,9 +17,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import com.storyboard.service.ai.GatewayModelService;
 
 /**
- * 资产判定服务实现：ChatClient 走 LLM 网关（对话模型 deepseek-v4-flash，超时 120s），
+ * 资产判定服务实现：ChatClient 走 LLM 网关（对话模型从网关动态获取，超时 120s），
  * 结构化输出用纯解析（不发 response_format，规避网关不兼容）。
  *
  * <p>降级语义：LLM 调用/解析失败 → judgeRelevance 返回「相关」（门禁放行，不阻塞生成）、
@@ -40,6 +41,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
     }
 
     private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
 
     /** 懒加载 ChatClient（复用网关默认对话模型，超时 120s） */
     private volatile ChatClient chatClient;
@@ -123,14 +125,14 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
         return sb.toString();
     }
 
-    /** 懒加载 ChatClient：对话模型固定 deepseek-v4-flash（与编排 planClient 一致），超时 120s */
+    /** 懒加载 ChatClient：对话模型从网关动态获取（与编排 planClient 一致），超时 120s */
     private ChatClient chatClient() {
         if (chatClient == null) {
             synchronized (this) {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model("deepseek-v4-flash")
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(120)))
                             .build();
                 }

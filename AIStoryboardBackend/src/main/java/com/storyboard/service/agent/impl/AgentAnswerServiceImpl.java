@@ -17,6 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
 import java.util.List;
+import com.storyboard.service.ai.GatewayModelService;
 
 /**
  * Agent 主回答实现：ChatClient 拼历史，非流式。
@@ -33,6 +34,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     private final AgentMessageMapper messageMapper;
     private final AiConfigProperties config;
     private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
 
     /** 主回答 ChatClient（懒加载，默认视觉模型，超时 60s） */
     private volatile ChatClient chatClient;
@@ -123,8 +125,8 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    // 对话交流统一 deepseek-v4-flash（用户指定；deepseek 无思考参数，不加 thinking_level）
-                                    .model("deepseek-v4-flash")
+                                    // 对话交流统一网关默认文本模型（动态获取）
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(120)))
                             .build();
                 }

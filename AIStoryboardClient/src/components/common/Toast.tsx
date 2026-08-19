@@ -20,7 +20,7 @@ function toastStyle(type: ToastMessage['type']): React.CSSProperties {
 /** E12: 成功勾选 SVG——stroke 从 0 画到完整（1s 内的小仪式），失败保持 ✕ 文本 */
 function StatusIcon({ type }: { type: ToastMessage['type'] }) {
   if (type !== 'success') {
-    return <span style={{ fontSize: 14 }}>❌</span>;
+    return <span style={{ fontSize: 14 }}>×</span>;
   }
   return (
     <svg

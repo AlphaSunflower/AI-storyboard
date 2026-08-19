@@ -15,6 +15,8 @@ public class ModelParams {
     private String modelName;
     /** 模型类型：text（文本）/ image（生图）/ video（视频生成）/ vision（图片视频理解），默认 text */
     private String type;
+    /** 是否该类型默认模型（每类型至多一个；后端拉取作为兜底默认模型，单一权威源） */
+    private Boolean isDefault;
     // text 默认值（chat/completions）
     private String temperature;
     private Integer maxTokens;

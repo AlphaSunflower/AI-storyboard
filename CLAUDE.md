@@ -59,7 +59,7 @@ AI-storyboard/
 ## Databases
 
 - **Primary**: PostgreSQL `newworkflow` (postgres/123456), shared `public.users` table
-- **Local dev**: Configure via `application-local` profile
+- **Local dev**: Configure via `application-local` profile；生产 `application-prod`（见 Pitfall #2）
 
 ## Critical Pitfalls
 
@@ -74,11 +74,13 @@ import java.time.OffsetDateTime;
 private OffsetDateTime createdAt;
 ```
 
-### 2. Spring Boot 4 incompatible with spring-dotenv
+### 2. Spring Boot 4 incompatible with spring-dotenv（已改用 Profile，2026-08-17）
 
-`spring-dotenv` does NOT work with SB4. Use manual `.env` reading in `StoryboardApplication.main()` via `System.setProperty()`.
+`spring-dotenv` does NOT work with SB4。环境配置统一走 Spring Profile，**不再读 `.env`**：
 
-`application.yml` `${VAR:default}` reads system properties first, so `.env` values override defaults. For fixed values (API URLs), hardcode in yml directly.
+- `application.yml`：共享无密钥配置 + `spring.profiles.active: local`（默认本地；生产用 `--spring.profiles.active=prod` 或 `SPRING_PROFILES_ACTIVE=prod` 覆盖）
+- `application-local.yml` / `application-prod.yml`：环境专属配置（数据源、JWT 密钥、网关地址与 Key、网关 AES / 管理员自举密码）；两文件均被 `.gitignore` 忽略，生产值硬编码后迁移 Nacos 热配置
+- 两主类（`StoryboardApplication` / `LLMGatewayApplication`）`main()` 不再调 `loadDotEnv()`；网关 `AdminInitRunner` 自举密码由 `System.getProperty("LLM_GATEWAY_ADMIN_INIT_PASSWORD")` 改为 `gateway.admin-init-password`（`GatewayConfig` 绑定）
 
 ### 3. Laozhang API v2 differences
 

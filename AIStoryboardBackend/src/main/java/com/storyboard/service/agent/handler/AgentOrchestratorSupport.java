@@ -102,6 +102,11 @@ public class AgentOrchestratorSupport {
         clarifyCount.remove(conversationId);
     }
 
+    /** 会话删除时清理全部内存态（clarifyCount） */
+    public void cleanupOnDelete(String conversationId) {
+        clarifyCount.remove(conversationId);
+    }
+
     // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
 
     /** 剧本优化结构化输出（options：type=0 追问时的 2~4 个选项；type=1 时为空/缺失） */

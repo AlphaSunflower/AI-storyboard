@@ -2,6 +2,7 @@ package com.storyboard.service.agent.impl;
 
 import com.storyboard.entity.AgentMessage;
 import com.storyboard.service.agent.IntentResult;
+import com.storyboard.service.ai.GatewayModelService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -38,7 +39,7 @@ class IntentRecognitionServiceImplTest {
         when(requestSpec.user(anyString())).thenReturn(requestSpec);
         when(requestSpec.call()).thenReturn(responseSpec);
 
-        service = new IntentRecognitionServiceImpl(builder);
+        service = new IntentRecognitionServiceImpl(builder, mock(GatewayModelService.class));
         // 默认 stub：LLM 返回空 → 走兜底；各用例按需覆写
         when(responseSpec.content()).thenReturn(null);
     }

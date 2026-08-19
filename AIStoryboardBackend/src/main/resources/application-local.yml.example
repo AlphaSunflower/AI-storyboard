@@ -1,0 +1,19 @@
+# application-local.yml.example — 复制为 application-local.yml 并填入真实值
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ai_storyboard
+    username: postgres
+    password: <your-password>
+  ai:
+    openai:
+      base-url: http://localhost:8083/v1
+      api-key: <your-gateway-api-key>
+
+jwt:
+  access-secret: <random-32char-hex>
+  refresh-secret: <random-32char-hex>
+
+ai:
+  gateway:
+    base-url: http://localhost:8083
+    api-key: <your-gateway-api-key>

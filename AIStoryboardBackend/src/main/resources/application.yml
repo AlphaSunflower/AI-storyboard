@@ -1,38 +1,24 @@
-# =============================================================================
-# SECRETS POLICY
-# Secrets (DB password, JWT keys, API keys) MUST be set via environment
-# variables or application-local.yml.  No defaults are committed.
-# The app will fail fast at startup if any secret is missing.
-# =============================================================================
-
 spring:
   application:
     name: ai-storyboard
+  profiles:
+    active: local            # 默认本地环境；生产用 --spring.profiles.active=prod 覆盖
   servlet:
     multipart:
       max-file-size: 20MB
       max-request-size: 25MB
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:newworkflow}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
-  profiles:
-    active: local
-  ai:
-    openai:
-      base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
-      api-key: ${LLM_GATEWAY_API_KEY:}
 
 server:
-  port: ${SERVER_PORT:8082}
+  port: 8082
 
 # 只暴露 health 端点（部署探活），其余 actuator 端点不外泄
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -46,46 +32,32 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  access-secret: ${JWT_ACCESS_SECRET}
-  refresh-secret: ${JWT_REFRESH_SECRET}
-  issuer: ${JWT_ISSUER:newworkflow-backend}
-  access-token-ttl: 3600
+  issuer: newworkflow-backend
+  access-token-ttl: 7200
   refresh-token-ttl: 2592000
 
-# ═══════════════════════════════════════════════════════
-# AI configuration — 模型名/默认值（LLM 调用统一走网关，见 ai.gateway / spring.ai.openai）
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════
+# AI 配置 —— 模型路由提示 + 文件存储（无密钥）
+# 默认模型/参数、模型路由已下沉 LLM 网关（model_route + model_params 表）
+# 数据源 / JWT 密钥 / 网关地址与 Key 在各 profile 文件：
+#   application-local.yml（本地） / application-prod.yml（生产）
+# ═══════════════════════════════════════════════════
 ai:
-  # Agent 编排行为参数（意图阈值 / 澄清上限）
+  # Agent 编排行为参数（意图阈值 / 澄清上限；代码默认值见 AgentAiConfigProperties，yml 覆盖）
   agent:
-    # 意图识别低置信度阈值：低于则触发澄清分支（不硬路由）
-    intent-threshold: ${AGENT_INTENT_THRESHOLD:0.6}
-    # 澄清追问上限：连续追问达到该值后直接给默认方案让用户选
-    max-clarify-rounds: ${AGENT_MAX_CLARIFY_ROUNDS:2}
-    # 分镜不满意调整上限：连续「不满意→调整→重生成」达到该值后不再弹调整卡片
-    max-regenerate-rounds: ${AGENT_MAX_REGENERATE_ROUNDS:3}
-  laozhang:
+    intent-threshold: 0.6
+    max-clarify-rounds: 2
+    max-regenerate-rounds: 3
 
-    # MiniMax 模型与分辨率档位（768P 最低档 | 2K）
-    minimax-video-model: ${MINIMAX_VIDEO_MODEL:MiniMax-H3}
-
-    # ── Model routing ──
-    gemini-image-models: gemini-3-pro-image-preview
-    video-model-aliases: '{"veo-3.1-fast":"veo-3.1-fast-generate-preview","veo-3.1-fast-fl":"veo-3.1-fast-generate-preview","veo-3.1":"veo-3.1-generate-preview","veo-3.1-fl":"veo-3.1-generate-preview"}'
-
-    # ── Defaults ──
-    default-image-model: gpt-image-2
-    default-image-edit-model: ${DEFAULT_IMAGE_EDIT_MODEL:gpt-image-2}  # 图生图/图改图默认模型（独立于文生图）
-    default-vision-model: gemini-3-flash-preview
-    default-image-size: "1024x1024"
-    default-video-duration: "8"
-
-    # ── File storage ──
-    video-upload-dir: uploads/videos
-    video-file-extension: .mp4
-    video-url-prefix: /api/files/videos/
-
-  # ── LLM 网关（chat/文生图统一入口；edits 图改图保持直连）──
+  # ── LLM 网关兜底策略 ──
+  # 当网关不可达或未标记 is_default 时，以下值作为文本模型的兜底默认值。
+  # fallback-text-api-key 为兜底模型的独立 API Key（网关正常时由网关统一管理密钥，
+  # 仅当网关完全不可达且需直连模型厂商时才使用此 key）。
   gateway:
-    base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
-    api-key: ${LLM_GATEWAY_API_KEY:}
+    fallback-text-model: deepseek-v4-flash
+    fallback-text-api-key: ${LLM_GATEWAY_API_KEY:}
+
+  # ── 文件存储（与上游无关，纯本地路径）──
+  video-upload-dir: uploads/videos
+  video-file-extension: .mp4
+  video-url-prefix: /api/files/videos/

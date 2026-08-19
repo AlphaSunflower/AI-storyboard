@@ -10,7 +10,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,12 +39,11 @@ public class FileController {
         }
 
         var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-        FileInputStream fis = new FileInputStream(filePath.toFile());
-        InputStreamResource resource = new InputStreamResource(fis);
-
+        
         return ResponseEntity.ok()
                 .contentType(contentType)
-                .body(resource);
+                .contentLength(Files.size(filePath))
+                .body(new InputStreamResource(Files.newInputStream(filePath)));
     }
 
     @GetMapping("/videos/{filename}")
@@ -56,13 +54,11 @@ public class FileController {
         }
 
         var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-        FileInputStream fis = new FileInputStream(filePath.toFile());
-        InputStreamResource resource = new InputStreamResource(fis);
 
         return ResponseEntity.ok()
                 .contentType(contentType)
                 .contentLength(Files.size(filePath))
-                .body(resource);
+                .body(new InputStreamResource(Files.newInputStream(filePath)));
     }
 
     @GetMapping("/audios/{filename}")
@@ -73,12 +69,10 @@ public class FileController {
         }
 
         var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-        FileInputStream fis = new FileInputStream(filePath.toFile());
-        InputStreamResource resource = new InputStreamResource(fis);
 
         return ResponseEntity.ok()
                 .contentType(contentType)
                 .contentLength(Files.size(filePath))
-                .body(resource);
+                .body(new InputStreamResource(Files.newInputStream(filePath)));
     }
 }

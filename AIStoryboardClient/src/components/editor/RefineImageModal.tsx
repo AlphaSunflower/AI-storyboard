@@ -69,7 +69,7 @@ export function RefineImageModal({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-ink)' }}>✨ 完善图片</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-ink)' }}>完善图片</span>
           <button
             onClick={onClose}
             aria-label="关闭"
@@ -131,7 +131,7 @@ export function RefineImageModal({
               opacity: generatingImage ? 0.6 : 1,
             }}
           >
-            {generatingImage ? '⏳ 生成中...' : '🖼️ 生成完善图'}
+            {generatingImage ? '生成中...' : '生成完善图'}
           </button>
         </div>
       </div>

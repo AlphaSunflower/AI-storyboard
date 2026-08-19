@@ -8,6 +8,7 @@ import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.service.ai.GatewayModelService;
 import com.storyboard.service.ai.ImageGenerationService;
 import com.storyboard.service.ai.MultipartBuilder;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
+import com.storyboard.exception.BusinessException;
 
 /**
  * 图片生成服务实现 —— 负责调用 Laozhang API 进行生图/改图。
@@ -48,7 +50,11 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
      */
     private static final Set<String> VALID_IMAGE_SIZES = Set.of("1024x1024", "1536x1024", "1024x1536");
 
+    /** 生图尺寸兜底默认（网关 model_params.size_default 为权威源；此处仅本地白名单降级用） */
+    private static final String DEFAULT_IMAGE_SIZE = "1024x1024";
+
     private final AiConfigProperties config;
+    private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
@@ -105,10 +111,10 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                                  String mode, String generatedImageUrl, Integer n) {
         // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
-        if (sceneId != null && scene == null) throw new RuntimeException("分镜不存在: " + sceneId);
+        if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
-            throw new RuntimeException("图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
         }
 
         // 资产库注入：场景关联资产的文字卡 → imagePrompt（保证首帧图人物一致）
@@ -133,14 +139,12 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         try {
             List<String> localPaths = new ArrayList<>();
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
-            // 模型选择：显式传入 > 分镜覆盖 > 分支默认——图改图/编辑分支用 defaultImageEditModel（环境变量可配），纯文生图用 defaultImageModel
+            // 模型选择：显式传入 > 分镜覆盖 > 网关默认（文生图/图改图共用同一默认模型）
             String sceneModel = scene != null && scene.getImageModel() != null && !scene.getImageModel().isBlank()
                     ? scene.getImageModel() : null;
             String effectiveModel = model != null ? model
                     : sceneModel != null ? sceneModel
-                    : (hasReferenceImages || "edit".equals(mode))
-                            ? config.getDefaultImageEditModel()
-                            : config.getDefaultImageModel();
+                    : gatewayModelService.getDefaultImageModel();
             // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
             String effSize = size != null ? size
                     : (scene != null && scene.getImageSize() != null && !scene.getImageSize().isBlank()) ? scene.getImageSize() : null;
@@ -176,7 +180,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 scene.setImageStatus("failed");
                 sceneMapper.updateById(scene);
             }
-            throw new RuntimeException("AI 图片生成失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "AI 图片生成失败: " + e.getMessage(), e);
         }
     }
 
@@ -212,11 +216,12 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 .model(model)
                 // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
                 // 避免上游返回 400 "不合法的size"
-                .size(normalizeImageSize(size, config.getDefaultImageSize()))
+                .size(normalizeImageSize(size, DEFAULT_IMAGE_SIZE))
                 // 生成数量：请求显式传入且 >0 时透传，否则默认 1
                 .n((n != null && n > 0) ? n : 1)
-                // 超时 180s + 重试 1 次（Laozhang 偶发响应 >120s，实测多次出现；重试大概率成功）
-                .timeout(Duration.ofSeconds(180))
+                // 超时 300s + 重试 1 次（对齐网关 requestTimeoutMs=300s；上游 gpt-image-2 实测 60-107s，
+                // 偶发更慢，120s 曾致网关超时重试叠加、主后端 180s 等不到 Read timed out）
+                .timeout(Duration.ofSeconds(300))
                 .maxRetries(1);
         if (quality != null && !quality.isEmpty()) {
             builder.quality(quality);
@@ -233,7 +238,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             if (r != null && !r.isEmpty()) results.add(r);
         }
         if (results.isEmpty()) {
-            throw new RuntimeException("图片生成返回结果为空");
+            throw new BusinessException(40001, "图片生成返回结果为空");
         }
         return results;
     }
@@ -263,7 +268,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             String filename = extractFilename(generatedImageUrl);
             Path localFile = fileStorageService.resolveImage(filename);
             if (!Files.exists(localFile)) {
-                throw new RuntimeException("源图文件不存在: " + localFile);
+                throw new BusinessException(40401, "资源不存在: " + localFile);
             }
             imageBytes = Files.readAllBytes(localFile);
             imageFilename = filename;
@@ -276,7 +281,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 String filename = extractFilename(ref);
                 Path localFile = fileStorageService.resolveImage(filename);
                 if (!Files.exists(localFile)) {
-                    throw new RuntimeException("参考图文件不存在: " + localFile);
+                    throw new BusinessException(40401, "资源不存在: " + localFile);
                 }
                 imageBytes = Files.readAllBytes(localFile);
                 imageFilename = filename;
@@ -286,7 +291,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 imageFilename = "reference.png";
             }
         } else {
-            throw new RuntimeException("图改图模式下必须提供 generatedImageUrl 或 referenceImages");
+            throw new BusinessException(50201, "图改图模式下必须提供 generatedImageUrl 或 referenceImages");
         }
 
         // 2. 构建 multipart/form-data 请求体
@@ -307,7 +312,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
             .build());
         if (resp.statusCode() != 200) {
-            throw new RuntimeException("Image Edit API returned " + resp.statusCode() + ": " + resp.body());
+            throw new BusinessException(50201, "Image Edit API returned " + resp.statusCode() + ": " + resp.body());
         }
 
         // 4. 解析响应，提取 b64_json（需补齐 padding）
@@ -318,7 +323,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             b64Json = data.path("url").asText();
         }
         if (b64Json == null || b64Json.isEmpty()) {
-            throw new RuntimeException("Image Edit API 返回结果为空");
+            throw new BusinessException(40001, "Image Edit API 返回结果为空");
         }
 
         return cleanBase64(b64Json);

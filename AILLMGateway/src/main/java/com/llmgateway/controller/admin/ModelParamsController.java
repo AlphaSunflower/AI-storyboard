@@ -30,7 +30,7 @@ public class ModelParamsController {
     }
 
     private ModelParamsVO toVO(ModelParams e) {
-        return new ModelParamsVO(e.getId(), e.getModelName(), e.getType(), e.getTemperature(), e.getMaxTokens(),
+        return new ModelParamsVO(e.getId(), e.getModelName(), e.getType(), e.getIsDefault(), e.getTemperature(), e.getMaxTokens(),
                 e.getTopP(), e.getNMin(), e.getNMax(), e.getNDefault(), e.getSizes(), e.getSizeDefault(),
                 e.getQualities(), e.getQualityDefault(), e.getStyles(), e.getStyleDefault(),
                 e.getDurations(), e.getDurationDefault(), e.getResolutions(), e.getResolutionDefault(),

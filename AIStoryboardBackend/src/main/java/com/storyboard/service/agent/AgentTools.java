@@ -85,7 +85,7 @@ public class AgentTools {
      * @param conversationId 会话 ID（校验归属用）
      * @param prompt        生成提示词
      * @param picUrl        源图（参考图 / 已生成图 URL，走 edits 图改图）
-     * @param model         模型名（可空，默认配置——图改图走 defaultImageEditModel）
+     * @param model         模型名（可空，默认配置——图改图走网关默认生图模型）
      * @param size          图片尺寸如 1024x1024（可空，默认配置）
      * @return {ok, imageUrl, assetId} 或 {ok:false, code, message}
      */

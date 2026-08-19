@@ -543,7 +543,9 @@ export function PreviewPanel() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
                 }}
               >
-                {scene.imageStatus === 'generating' ? '⏳ 正在生成图片...' : '未生成图片'}
+                {scene.imageStatus === 'generating' ? '正在生成图片...'
+                  : scene.imageStatus === 'failed' ? '生成失败，点击下方重试'
+                  : '未生成图片'}
               </div>
             )}
           </div>
@@ -655,14 +657,14 @@ export function PreviewPanel() {
                 disabled={generatingImage}
                 onClick={() => handleGenerateImage(useRefImage && refImages.length ? 'edit' : undefined, useRefImage && refImages.length ? 'ref' : undefined)}
               >
-                {generatingImage ? '⏳ 生成中...' : '🖼️ 生成图片'}
+                {generatingImage ? '生成中...' : scene.imageStatus === 'failed' ? '重试生成' : '生成图片'}
               </SpecularButton>
               {scene.imageUrl && (
                 <button
                   onClick={() => setRefineTarget(scene.imageUrl)}
                   style={{ ...btnGhost, cursor: 'pointer' }}
                 >
-                  ✨ 完善图片
+                  完善图片
                 </button>
               )}
             </div>
@@ -698,7 +700,9 @@ export function PreviewPanel() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
                 }}
               >
-                {scene.videoStatus === 'generating' ? '⏳ 正在生成视频...' : '未生成视频'}
+                {scene.videoStatus === 'generating' ? '正在生成视频...'
+                  : scene.videoStatus === 'failed' ? '生成失败，点击下方重试'
+                  : '未生成视频'}
               </div>
             )}
           </div>
@@ -833,7 +837,7 @@ export function PreviewPanel() {
                 disabled={generatingVideo}
                 onClick={handleGenerateVideo}
               >
-                {generatingVideo ? '⏳ 生成中...' : '🎬 生成视频'}
+                {generatingVideo ? '生成中...' : scene.videoStatus === 'failed' ? '重试生成' : '生成视频'}
               </SpecularButton>
             </div>
           </div>

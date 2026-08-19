@@ -11,16 +11,18 @@ import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
 
-/** 首启自举：admin_user 表空且配置 LLM_GATEWAY_ADMIN_INIT_PASSWORD 时创建 admin（scrypt N=16384） */
+/** 首启自举：admin_user 表空且配置 gateway.admin-init-password 时创建 admin（scrypt N=16384） */
 @Component
 public class AdminInitRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AdminInitRunner.class);
 
     private final AdminUserMapper adminUserMapper;
+    private final GatewayConfig gatewayConfig;
 
-    public AdminInitRunner(AdminUserMapper adminUserMapper) {
+    public AdminInitRunner(AdminUserMapper adminUserMapper, GatewayConfig gatewayConfig) {
         this.adminUserMapper = adminUserMapper;
+        this.gatewayConfig = gatewayConfig;
     }
 
     @Override
@@ -28,9 +30,9 @@ public class AdminInitRunner implements ApplicationRunner {
         Long count = adminUserMapper.selectCount(null);
         if (count != null && count > 0) return;
 
-        String initPassword = System.getProperty("LLM_GATEWAY_ADMIN_INIT_PASSWORD");
+        String initPassword = gatewayConfig.getAdminInitPassword();
         if (initPassword == null || initPassword.isBlank()) {
-            log.warn("【网关初始化】admin_user 表为空且未设置 LLM_GATEWAY_ADMIN_INIT_PASSWORD，管理后台无法登录");
+            log.warn("【网关初始化】admin_user 表为空且未设置 gateway.admin-init-password，管理后台无法登录");
             return;
         }
 
