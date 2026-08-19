@@ -26,3 +26,6 @@ __pycache__/
 # 实习周记与竞赛材料（不提交 GitHub）
 docs/zhouji/
 ICAN/
+
+# E2E 测试临时凭据（含 token，禁止入库）
+scripts/e2e/.creds.json
