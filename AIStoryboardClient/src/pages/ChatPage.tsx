@@ -1,50 +1,45 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppHeader } from '../components/layout/AppHeader';
+import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { MessageBubble } from '../components/agent/MessageBubble';
 import { HumanInputCard } from '../components/agent/HumanInputCard';
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
-import TextType from '../components/TextType';
+import { ChatComposer, DS } from '../components/agent/ChatComposer';
+import { ProjectDropdown } from '../components/layout/ProjectDropdown';
+import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
+import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
 
-/** DeepSeek 设计 token（仿 deepseek-harness 浅色模式 design-platform.css） */
-const DS = {
-  brand: 'rgb(65, 118, 230)',          // --dsw-static-deepseek-500
-  bubble: 'rgb(237, 243, 254)',        // --dsw-static-deepseek-50（用户气泡）
-  ink: 'rgb(15, 17, 21)',              // --dsw-static-neutral-bluish-1000
-  textSecondary: 'rgb(84, 85, 87)',    // --dsw-static-neutral-bluish-700
-  textCaption: 'rgb(162, 164, 166)',   // --dsw-static-neutral-bluish-400
-  border: 'rgba(0, 0, 0, 0.10)',       // --dsw-alias-border-l2
-  hover: 'rgba(38, 49, 72, 0.06)',     // --dsw-alias-interactive-bg-hover
-};
+const RAIL_W = 56;
 
 /**
- * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端聊天视觉：
- * 左会话栏（可拖宽）｜右对话区：头部 + 748px 居中消息列 + 780px 悬浮胶囊输入卡。
- * 复用 agentStore（双入口共用会话），消息气泡用 deepseek 变体。
+ * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
+ * 最左图标导航（项目/资源库/左下角设置）｜会话列表（可拖宽）｜主区：
+ * 首次对话 = 名称居中 + hero 输入卡；有会话 = 头部名称 + 748px 消息列 + 底部输入卡。
  */
 export function ChatPage() {
+  const navigate = useNavigate();
+  const logout = useAuthStore((s) => s.logout);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
-    refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages,
-    confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets,
-    conversations, activeConversationId,
+    clearMessages, confirmResult, assets, loadAssets, conversations, activeConversationId,
   } = useAgentStore();
-  const [text, setText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
-  const [assetsOpen, setAssetsOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);       // 资源库（rail 🧩）
+  const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [convWidth, setConvWidth] = useState(240);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const loadedRef = useRef(false);
 
-  // 登录守卫（与 EditorPage 一致）
+  // 登录守卫
   useEffect(() => {
     useAuthStore.getState().checkAuth();
   }, []);
@@ -63,7 +58,7 @@ export function ChatPage() {
           useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
         }
       })
-      .catch(() => { /* 静默：列表失败时用户可经顶栏项目下拉选择 */ });
+      .catch(() => { /* 静默 */ });
   }, []);
 
   // 新消息自动滚底（近底才跟随）
@@ -72,28 +67,9 @@ export function ChatPage() {
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
 
-  // 切换会话清空草稿
-  useEffect(() => { setText(''); }, [activeConversationId]);
-
-  const handleSend = () => {
-    const content = text.trim();
-    if (!content || streaming || waitingHumanInput || waitingVideoPlan) return;
-    setText('');
-    sendMessage(content);
-  };
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      await uploadRefImage(file);
-    } catch {
-      alert('图片上传失败');
-    }
-    e.target.value = '';
-  };
-
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
+  const busy = streaming || !!waitingHumanInput || !!waitingVideoPlan;
+  const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
 
   // 会话栏宽度拖拽
   const handleConvDrag = useCallback((e: React.MouseEvent) => {
@@ -111,171 +87,169 @@ export function ChatPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [convWidth]);
 
-  const busy = streaming || !!waitingHumanInput || !!waitingVideoPlan;
-
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white' }}>
-      <AppHeader />
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <AgentConversationList width={convWidth} />
-        <div
-          onMouseDown={handleConvDrag}
-          style={{
-            width: 4, cursor: 'col-resize', background: 'transparent',
-            transition: 'background 0.15s', flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-        />
-        {/* ── 对话区 ── */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          {/* 头部：会话标题 + 操作 */}
-          <div style={{
-            padding: '14px 28px', borderBottom: `1px solid ${DS.border}`,
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
-          }}>
-            <span style={{ fontSize: 18, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentTitle}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button
-                onClick={() => { setAssetsOpen(true); void loadAssets(); }}
-                disabled={!activeConversationId}
-                style={headerBtn(activeConversationId ? 1 : 0.4)}
-              >📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
-              <button
-                onClick={() => setConfirmClear(true)}
-                disabled={busy || !activeConversationId || messages.length === 0}
-                style={headerBtn(busy || !activeConversationId || messages.length === 0 ? 0.4 : 1)}
-              >🧹 清除聊天记录</button>
-            </div>
+    <div style={{ height: '100vh', display: 'flex', background: 'white', overflow: 'hidden' }}>
+      {/* ── 最左图标导航 rail ── */}
+      <div style={{
+        width: RAIL_W, flexShrink: 0, background: 'white',
+        borderRight: `1px solid ${DS.border}`,
+        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+        alignItems: 'center', padding: '10px 0', zIndex: 50,
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          {/* 项目选择（弹出在 rail 右侧） */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+              title="项目选择"
+              style={railBtn(projectOpen)}
+            >🗂️</button>
+            <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} popupRight />
           </div>
-
-          {/* 消息列：748px 居中（DeepSeek 风格） */}
-          <div
-            ref={scrollRef}
-            onScroll={(e) => {
-              const el = e.target as HTMLElement;
-              nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            }}
-            style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
-          >
-            <div style={{ maxWidth: 748, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
-              {messages.length === 0 && !streaming && (
-                <TextType
-                  as="p"
-                  text="与 Moon 智能体对话，设计分镜、图片与视频方案"
-                  typingSpeed={55}
-                  initialDelay={200}
-                  pauseDuration={4000}
-                  loop={false}
-                  showCursor
-                  cursorCharacter="|"
-                  style={{ textAlign: 'center', color: DS.textCaption, fontSize: 15, marginTop: 72 }}
-                />
-              )}
-              {messages.map((m) => (
-                <MessageBubble
-                  key={m.id}
-                  role={m.role}
-                  content={m.content}
-                  variant="deepseek"
-                  streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
-                />
-              ))}
-              {streaming && !waitingHumanInput && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
-                  <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        style={{
-                          width: 6, height: 6, borderRadius: '50%', background: DS.brand, opacity: 0.35,
-                          animation: 'dsDot 1.1s ease-in-out infinite', animationDelay: `${i * 0.18}s`,
-                        }}
-                      />
-                    ))}
-                  </span>
-                  <span>{workflowHint || '正在生成'}</span>
-                  <style>{`@keyframes dsDot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }`}</style>
-                </div>
-              )}
-              {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
-              {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
-              {confirmResult && <ConfirmResultCard />}
-              {streamError && (
-                <div style={{ color: 'rgb(217, 45, 32)', fontSize: 14, margin: '10px 6px' }}>⚠ {streamError}</div>
-              )}
-            </div>
-          </div>
-
-          {/* 输入卡：780px 悬浮胶囊（DeepSeek 风格） */}
-          <div style={{ padding: '8px 16px 16px', background: 'white' }}>
+          {/* 资源库 */}
+          <button
+            onClick={() => setAssetsOpen(true)}
+            title="资源库"
+            style={railBtn(false)}
+          >🧩</button>
+        </div>
+        {/* 左下角：设置 */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
+            title="设置"
+            style={railBtn(settingsOpen)}
+          >⚙️</button>
+          {settingsOpen && (
             <div style={{
-              maxWidth: 780, margin: '0 auto',
-              border: `1px solid ${DS.border}`, borderRadius: 22,
-              background: 'white', boxShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
-              padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
+              position: 'absolute', bottom: 44, left: 48, width: 170,
+              background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.10)', padding: 6, zIndex: 300,
             }}>
-              {refImageUrl && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <img src={refImageUrl} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10 }} />
-                  <span style={{ fontSize: 14, color: DS.textSecondary }}>参考图已附</span>
-                  <button onClick={() => setRefImageUrl(null)} style={linkBtn(DS.textSecondary)}>移除</button>
-                </div>
-              )}
-              {pendingPicUrl && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 12px', borderRadius: 12, background: DS.hover, fontSize: 14, color: DS.textSecondary,
-                }}>
-                  <span>📎 已选当前图片作为参考，请输入你想完善的地方</span>
-                  <button onClick={() => cancelRefine()} style={linkBtn(DS.textSecondary)}>✕ 取消</button>
-                </div>
-              )}
-              <textarea
-                ref={inputRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  // I5：中文输入法组合期（选词中）按下 Enter 不发送
-                  if (e.nativeEvent.isComposing) return;
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                }}
-                placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-                disabled={busy}
-                rows={2}
-                style={{
-                  border: 'none', outline: 'none', resize: 'none', background: 'transparent',
-                  fontSize: 16, lineHeight: 1.6, color: DS.ink, fontFamily: 'inherit',
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {[
+                { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
+                { label: '📄 使用文档', onClick: () => navigate('/docs') },
+                { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
+                { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
+              ].map((it) => (
                 <button
-                  onClick={() => fileRef.current?.click()}
-                  title="上传参考图"
+                  key={it.label}
+                  onClick={it.onClick}
                   style={{
-                    width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
-                    fontSize: 17, cursor: 'pointer', color: DS.textSecondary, flexShrink: 0,
+                    width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
+                    background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+                    color: it.color ?? DS.ink,
                   }}
-                >📎</button>
-                <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                >{it.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 会话列表 ── */}
+      <AgentConversationList width={convWidth} />
+      <div
+        onMouseDown={handleConvDrag}
+        style={{
+          width: 4, cursor: 'col-resize', background: 'transparent',
+          transition: 'background 0.15s', flexShrink: 0,
+        }}
+        onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
+        onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+      />
+
+      {/* ── 主对话区 ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {isEmpty ? (
+          /* 首次对话 hero：名称居中 + 输入卡居中（DeepSeek harness 空态） */
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 28, fontWeight: 700, color: DS.ink, marginBottom: 8 }}>Moon 智能体</div>
+              <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
+            </div>
+            <ChatComposer />
+          </div>
+        ) : (
+          <>
+            {/* 头部：会话名称 + 操作 */}
+            <div style={{
+              padding: '14px 28px', borderBottom: `1px solid ${DS.border}`,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 18, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentTitle}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button
-                  onClick={handleSend}
-                  disabled={busy || !text.trim()}
-                  style={{
-                    height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
-                    background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-                    cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = 'rgb(86, 134, 254)'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-                >发送</button>
+                  onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
+                  disabled={!activeConversationId}
+                  style={headerBtn(activeConversationId ? 1 : 0.4)}
+                >📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
+                <button
+                  onClick={() => setConfirmClear(true)}
+                  disabled={busy || !activeConversationId || messages.length === 0}
+                  style={headerBtn(busy || !activeConversationId || messages.length === 0 ? 0.4 : 1)}
+                >🧹 清除聊天记录</button>
               </div>
             </div>
-          </div>
-        </div>
+
+            {/* 消息列：748px 居中 */}
+            <div
+              ref={scrollRef}
+              onScroll={(e) => {
+                const el = e.target as HTMLElement;
+                nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
+            >
+              <div style={{ maxWidth: 748, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+                {messages.map((m) => (
+                  <MessageBubble
+                    key={m.id}
+                    role={m.role}
+                    content={m.content}
+                    variant="deepseek"
+                    streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+                  />
+                ))}
+                {streaming && !waitingHumanInput && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          style={{
+                            width: 6, height: 6, borderRadius: '50%', background: DS.brand, opacity: 0.35,
+                            animation: 'dsDot 1.1s ease-in-out infinite', animationDelay: `${i * 0.18}s`,
+                          }}
+                        />
+                      ))}
+                    </span>
+                    <span>{workflowHint || '正在生成'}</span>
+                    <style>{`@keyframes dsDot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }`}</style>
+                  </div>
+                )}
+                {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+                {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
+                {confirmResult && <ConfirmResultCard />}
+                {streamError && (
+                  <div style={{ color: 'rgb(217, 45, 32)', fontSize: 14, margin: '10px 6px' }}>⚠ {streamError}</div>
+                )}
+              </div>
+            </div>
+
+            {/* 底部输入卡 */}
+            <div style={{ padding: '8px 16px 16px', background: 'white' }}>
+              <ChatComposer />
+            </div>
+          </>
+        )}
       </div>
 
       {/* 清除聊天记录二次确认 */}
@@ -312,9 +286,19 @@ export function ChatPage() {
           </div>
         </div>
       )}
-      <AgentAssetsModal open={assetsOpen} onClose={() => setAssetsOpen(false)} />
+      {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
+      {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+      <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
     </div>
   );
+}
+
+function railBtn(active: boolean): React.CSSProperties {
+  return {
+    width: 40, height: 40, borderRadius: 12, border: 'none',
+    background: active ? 'rgba(38, 49, 72, 0.06)' : 'transparent',
+    fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
 }
 
 function headerBtn(opacity: number): React.CSSProperties {
@@ -322,8 +306,4 @@ function headerBtn(opacity: number): React.CSSProperties {
     border: 'none', background: 'transparent', color: 'rgb(84, 85, 87)', fontSize: 14,
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
   };
-}
-
-function linkBtn(color: string): React.CSSProperties {
-  return { border: 'none', background: 'none', color, cursor: 'pointer', fontSize: 14 };
 }
