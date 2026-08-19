@@ -160,7 +160,7 @@ export function ChatPage() {
               <div style={{
                 position: 'fixed',
                 top: Math.max(8, settingsBtnRef.current.getBoundingClientRect().top - 170),
-                right: window.innerWidth - settingsBtnRef.current.getBoundingClientRect().right + 40,
+                left: settingsBtnRef.current.getBoundingClientRect().right + 8,
                 width: 170,
                 background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,

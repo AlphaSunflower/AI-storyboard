@@ -171,11 +171,11 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     overflow: 'hidden',
   };
 
-  // anchor 传入（/chat 会话栏内）：portal 到 body + fixed 定位，右缘对齐按钮右缘
+  // anchor 传入（/chat 会话栏内）：portal 到 body + fixed 定位，弹层向右展开（按钮右缘 +8），不被左缘裁剪
   if (anchor?.current) {
     const r = anchor.current.getBoundingClientRect();
     return createPortal(
-      <div ref={dropdownRef} style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, right: window.innerWidth - r.right }}>
+      <div ref={dropdownRef} style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, left: r.right + 8 }}>
         {menuContent}
       </div>,
       document.body,
