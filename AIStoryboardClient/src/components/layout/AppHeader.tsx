@@ -408,6 +408,7 @@ export function AppHeader() {
             displayItemNumbering={false}
             displaySocials={false}
             items={[
+              { label: 'AI 对话', ariaLabel: 'AI 对话', onClick: () => navigate('/chat') },
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
               { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
               { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
