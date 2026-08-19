@@ -187,15 +187,13 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
-      {/* 消息 meta 行：时间+复制，整行 hover 消息时显示（DeepSeek 风格） */}
+      {/* 消息 meta 行：时间 + 复制，直接常显 */}
       {!streaming && (
         <div
           style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
             padding: ds ? '0 2px' : '0 4px',
-            opacity: 0, transition: 'opacity 0.15s',
           }}
-          className="msg-meta"
         >
           <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
             {formatTime(createdAt)}
@@ -211,10 +209,6 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
           >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
         </div>
       )}
-      <style>{`
-        .msg-meta { opacity: 0; }
-        .msg-row:hover .msg-meta { opacity: 1; }
-      `}</style>
     </div>
     <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </>
