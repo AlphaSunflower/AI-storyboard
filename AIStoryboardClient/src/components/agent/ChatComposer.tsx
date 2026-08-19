@@ -25,6 +25,10 @@ export function ChatComposer() {
   const [text, setText] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const activeConversationId = useAgentStore((s) => s.activeConversationId);
+
+  // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
+  useEffect(() => { setText(''); }, [activeConversationId]);
 
   // 点击"继续完善"后聚焦输入框
   useEffect(() => {

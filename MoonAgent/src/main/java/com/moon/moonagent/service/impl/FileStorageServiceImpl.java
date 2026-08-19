@@ -1,7 +1,7 @@
 package com.moon.moonagent.service.impl;
 
 import com.moon.moonagent.service.FileStorageService;
-import com.moon.moonagent.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

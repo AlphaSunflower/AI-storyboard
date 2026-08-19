@@ -2,7 +2,7 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.CreateProjectRequest;
 import com.storyboard.dto.request.UpdateProjectRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.ProjectResponse;
 import com.storyboard.service.ProjectService;
 import lombok.RequiredArgsConstructor;

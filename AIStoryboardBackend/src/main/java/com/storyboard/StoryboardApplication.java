@@ -1,7 +1,7 @@
 package com.storyboard;
 
 import com.storyboard.config.JwtConfig;
-import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.ai.AiConfigProperties;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;

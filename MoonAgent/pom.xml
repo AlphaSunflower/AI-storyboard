@@ -79,6 +79,13 @@
             <version>2025.1.0.0</version>
         </dependency>
 
+        <!-- 公共模块（统一返回体/业务异常/全局异常处理/工具类） -->
+        <dependency>
+            <groupId>com.storyboard</groupId>
+            <artifactId>common-core</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+
         <!-- Actuator（健康检查，Nacos 注册需要） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -97,6 +104,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.storyboard</groupId>
+            <artifactId>common-core</artifactId>
+            <version>0.1.0</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
     <build>

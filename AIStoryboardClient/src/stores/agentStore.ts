@@ -444,27 +444,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 例如 HITL 期间分镜被其他操作修改；确认写库后 sceneCount(总数) > 此值才触发列表刷新）
     initialSceneCount = useProjectStore.getState().scenes.length;
 
-    // I2：HITL 续流复用同一 assistant 占位——续写原占位气泡（与后端消息合并对应）。
-    // sendMessage 流结束（receivedHumanInput=true）时 pendingAssistantId 已被 finally 清空，
-    // 故需兜底复用「最后一条空内容 assistant 占位」，避免新建重复气泡导致方案填错气泡。
-    let assistantId = get().pendingAssistantId ?? '';
-    if (!assistantId || !get().messages.some((m) => m.id === assistantId)) {
-      const lastEmptyAssistant = [...get().messages]
-        .reverse()
-        .find((m) => m.role === 'assistant' && !m.content);
-      assistantId = lastEmptyAssistant?.id ?? `tmp-assistant-${Date.now()}`;
-      if (!lastEmptyAssistant) {
-        const optimisticAssistant: AgentMessage = {
-          id: assistantId,
-          conversationId: id,
-          role: 'assistant',
-          content: '',
-          difyMessageId: null,
-          createdAt: new Date().toISOString(),
-        };
-        set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
-      }
+    // I2（2026-08-19 修正）：HITL 续流总是新建 assistant 气泡——与后端 persistAssistant
+    // 每次 insert 对齐，避免确认后内容续写在旧方案气泡里（用户期望 HITL 后从新气泡开始）。
+    // 方案文本（formContent）保留在 HITL 前的旧气泡：若旧气泡为空（方案未流式输出）则填入，
+    // 避免残留空"…"占位；若已有流式方案内容则不动。
+    const lastAssistant = [...get().messages].reverse().find((m) => m.role === 'assistant');
+    if (info.formContent && lastAssistant && !lastAssistant.content) {
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === lastAssistant.id ? { ...m, content: info.formContent as string } : m),
+      }));
     }
+    const assistantId = `tmp-assistant-${Date.now()}`;
+    const optimisticAssistant: AgentMessage = {
+      id: assistantId,
+      conversationId: id,
+      role: 'assistant',
+      content: '',
+      difyMessageId: null,
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
 
     const updateAssistant = (delta: string) =>
       set((s) => ({
@@ -485,7 +485,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 刷新后由后端持久化的同序消息替换本地临时项，顺序一致（方案在前、确认在后）。
     const act = info.actions.find((a) => a.id === actionId);
     const confirmTitle = act?.title ?? actionId;
-    if (info.formContent) updateAssistantFull(info.formContent);
     const confirmMsg: AgentMessage = {
       id: `tmp-user-${Date.now()}`,
       conversationId: id,

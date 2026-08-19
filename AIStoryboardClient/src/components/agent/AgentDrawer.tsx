@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
@@ -6,6 +7,7 @@ import { AgentConversationList } from './AgentConversationList';
 import { AgentChatPanel } from './AgentChatPanel';
 
 export function AgentDrawer() {
+  const navigate = useNavigate();
   const windowOpen = useAgentStore((s) => s.windowOpen);
   const setWindowOpen = useAgentStore((s) => s.setWindowOpen);
   const loadConversations = useAgentStore((s) => s.loadConversations);
@@ -121,7 +123,24 @@ export function AgentDrawer() {
           display: 'flex',
         }}
       >
-        <AgentConversationList width={convWidth} />
+        <div style={{ width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-surface-soft)' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+            <AgentConversationList width={convWidth} />
+          </div>
+          {/* 底部固定：全屏对话入口 → 独立 /chat 页（DeepSeek 品牌蓝 + hover 放大） */}
+          <button
+            onClick={() => { setWindowOpen(false); navigate('/chat'); }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+              border: 'none', borderTop: '1px solid var(--color-hairline)',
+              background: 'transparent', padding: '0 16px', height: 44, fontSize: 15,
+              color: 'rgb(65, 118, 230)', cursor: 'pointer', textAlign: 'left',
+              transition: 'transform 0.18s ease, background 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(65, 118, 230, 0.06)'; e.currentTarget.style.transform = 'scale(1.02)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'scale(1)'; }}
+          >↗ 全屏对话</button>
+        </div>
         <div
           onMouseDown={handleConvDrag}
           style={{

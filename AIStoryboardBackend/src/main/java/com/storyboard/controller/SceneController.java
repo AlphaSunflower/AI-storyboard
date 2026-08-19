@@ -1,7 +1,7 @@
 package com.storyboard.controller;
 
 import com.storyboard.dto.request.SceneRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.service.SceneService;

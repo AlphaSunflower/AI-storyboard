@@ -6,7 +6,7 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneReferenceImage;
-import com.storyboard.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.FileStorageService;

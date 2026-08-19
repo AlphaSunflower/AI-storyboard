@@ -1,4 +1,4 @@
-package com.storyboard.service.ai.impl;
+package com.storyboard.ai.impl;
 
 import org.junit.jupiter.api.Test;
 

@@ -47,26 +47,6 @@ export function ChatPage() {
     useAuthStore.getState().checkAuth();
   }, []);
 
-  // ── 临时 mock 预览：会话列表 + 消息气泡效果（确认后删除本段与 MOCK_DEMO 常量）──
-  const MOCK_DEMO = true;
-  useEffect(() => {
-    if (!MOCK_DEMO) return;
-    const now = new Date().toISOString();
-    const earlier = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    useAgentStore.setState({
-      conversations: [
-        { id: 'mock-1', userId: 'mock', projectId: 'mock', title: '雨夜侦探短片分镜', difyConversationId: null, status: 'active', createdAt: earlier, updatedAt: earlier },
-        { id: 'mock-2', userId: 'mock', projectId: 'mock', title: '火星种土豆的宇航员', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
-        { id: 'mock-3', userId: 'mock', projectId: 'mock', title: '产品宣传片分镜', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
-      ],
-      activeConversationId: 'mock-1',
-      messages: [
-        { id: 'mock-m1', conversationId: 'mock-1', role: 'user', content: '帮我设计一个雨夜侦探追逐的短片分镜', difyMessageId: null, createdAt: earlier },
-        { id: 'mock-m2', conversationId: 'mock-1', role: 'assistant', content: '好的，为你设计 6 个分镜方案：\n\n**场景 1** 雨夜霓虹街道，侦探撑伞疾走，镜头跟随推进。\n\n**场景 2** 黑衣人从暗巷冲出，快速变焦推近，雨滴反光。\n\n**场景 3** 天台对峙，闪电照亮两人剪影。\n\n后续可继续完善任意场景或直接生成图片/视频。', difyMessageId: null, createdAt: now },
-      ],
-    });
-  }, []);
-
   // 无项目上下文时自动选第一个项目（会话绑定项目是后端契约）
   useEffect(() => {
     if (loadedRef.current) return;
@@ -78,11 +58,19 @@ export function ChatPage() {
         const list = useProjectStore.getState().projects;
         if (list.length > 0) {
           useProjectStore.getState().loadProject(list[0].id);
-          useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
         }
       })
       .catch(() => { /* 静默 */ });
   }, []);
+
+  // 项目切换（含首次确定）→ 清掉旧会话状态并加载该项目会话列表。
+  // ProjectDropdown 选项目只更新 currentProject，不触发会话加载——这里统一兜底。
+  const projectId = currentProject?.id;
+  useEffect(() => {
+    if (!projectId) return;
+    useAgentStore.setState({ activeConversationId: null, messages: [] });
+    useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
+  }, [projectId]);
 
   // 新消息自动滚底（近底才跟随）
   useEffect(() => {
@@ -141,6 +129,13 @@ export function ChatPage() {
               >🗂️</button>
               <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
             </div>
+          </div>
+          <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <button
+              onClick={() => navigate('/editor')}
+              title="AI 分镜"
+              style={railIconBtn}
+            >🎬</button>
           </div>
           <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
             <button
@@ -246,11 +241,23 @@ export function ChatPage() {
           />
         </div>
 
-        {/* 底部：设置（左下角） */}
+        {/* 底部：AI 分镜（上）+ 设置（左下角） */}
         <div style={{
-          display: 'flex', alignItems: 'center',
+          display: 'flex', flexDirection: 'column',
           padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
         }}>
+          {/* AI 分镜：路由到编辑器（分镜编辑主界面） */}
+          <button
+            onClick={() => navigate('/editor')}
+            title="AI 分镜"
+            style={{
+              border: 'none', background: 'transparent', borderRadius: 10,
+              padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, textAlign: 'left',
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+          >🎬 AI 分镜</button>
           <div style={{ position: 'relative' }}>
             <button
               ref={settingsBtnRef}
@@ -356,7 +363,7 @@ export function ChatPage() {
               }}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
-              <div style={{ maxWidth: 748, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
                 {messages.map((m) => (
                   <MessageBubble
                     key={m.id}

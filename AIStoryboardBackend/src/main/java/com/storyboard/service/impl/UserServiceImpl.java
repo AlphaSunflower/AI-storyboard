@@ -8,7 +8,7 @@ import com.storyboard.dto.response.UserStatsResponse;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.User;
-import com.storyboard.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.UserMapper;

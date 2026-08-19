@@ -3,12 +3,12 @@ package com.storyboard.controller;
 import com.storyboard.dto.request.GenerateImageRequest;
 import com.storyboard.dto.request.GenerateScriptRequest;
 import com.storyboard.dto.request.GenerateVideoRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.TaskStatusResponse;
-import com.storyboard.service.ai.GatewayModelService;
-import com.storyboard.service.ai.ImageGenerationService;
-import com.storyboard.service.ai.ScriptGenerationService;
-import com.storyboard.service.ai.VideoGenerationService;
+import com.storyboard.ai.GatewayModelService;
+import com.storyboard.ai.ImageGenerationService;
+import com.storyboard.ai.ScriptGenerationService;
+import com.storyboard.ai.VideoGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
