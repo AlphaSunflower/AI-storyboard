@@ -14,8 +14,6 @@ import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
 
-const RAIL_W = 56;
-
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
  * 最左图标导航（项目/资源库/左下角设置）｜会话列表（可拖宽）｜主区：
@@ -24,6 +22,7 @@ const RAIL_W = 56;
 export function ChatPage() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
+  const currentProject = useProjectStore((s) => s.currentProject);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     clearMessages, confirmResult, assets, loadAssets, conversations, activeConversationId,
@@ -89,68 +88,85 @@ export function ChatPage() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', background: 'white', overflow: 'hidden' }}>
-      {/* ── 最左图标导航 rail ── */}
-      <div style={{
-        width: RAIL_W, flexShrink: 0, background: 'white',
-        borderRight: `1px solid ${DS.border}`,
-        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        alignItems: 'center', padding: '10px 0', zIndex: 50,
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          {/* 项目选择（弹出在 rail 右侧） */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
-              title="项目选择"
-              style={railBtn(projectOpen)}
-            >🗂️</button>
-            <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} popupRight />
-          </div>
-          {/* 资源库 */}
+      {/* ── 会话栏（项目选择/会话列表/底部资源库+设置）── */}
+      <div style={{ width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-surface-soft)' }}>
+        {/* 顶部：项目选择 */}
+        <div style={{ position: 'relative', padding: '10px 12px 8px', borderBottom: '1px solid var(--color-hairline)' }}>
+          <button
+            onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+              padding: '7px 10px', height: 34, border: '1px solid var(--color-hairline)',
+              borderRadius: 'var(--rounded-md)', background: 'white', font: 'var(--text-caption)',
+              color: 'var(--color-ink)', cursor: 'pointer',
+            }}
+          >
+            <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentProject?.name ?? '选择项目'}
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
+          </button>
+          <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
+        </div>
+
+        {/* 会话列表（flex:1 内部滚动） */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <AgentConversationList width={convWidth} />
+        </div>
+
+        {/* 底部：资源库 + 设置（左下角） */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 10px', borderTop: '1px solid var(--color-hairline)',
+        }}>
           <button
             onClick={() => setAssetsOpen(true)}
             title="资源库"
-            style={railBtn(false)}
-          >🧩</button>
-        </div>
-        {/* 左下角：设置 */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
-            title="设置"
-            style={railBtn(settingsOpen)}
-          >⚙️</button>
-          {settingsOpen && (
-            <div style={{
-              position: 'absolute', bottom: 44, left: 48, width: 170,
-              background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
-              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.10)', padding: 6, zIndex: 300,
-            }}>
-              {[
-                { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
-                { label: '📄 使用文档', onClick: () => navigate('/docs') },
-                { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
-                { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
-              ].map((it) => (
-                <button
-                  key={it.label}
-                  onClick={it.onClick}
-                  style={{
-                    width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
-                    background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                    color: it.color ?? DS.ink,
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >{it.label}</button>
-              ))}
-            </div>
-          )}
+            style={{
+              flex: 1, border: 'none', background: 'transparent', borderRadius: 8,
+              padding: '7px 10px', fontSize: 14, color: 'var(--color-muted)', cursor: 'pointer', textAlign: 'left',
+            }}
+          >🧩 资源库</button>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
+              title="设置"
+              style={{
+                border: 'none', background: 'transparent', borderRadius: 8,
+                padding: '7px 10px', fontSize: 14, color: 'var(--color-muted)', cursor: 'pointer',
+              }}
+            >⚙️</button>
+            {settingsOpen && (
+              <div style={{
+                position: 'absolute', bottom: 40, left: -60, width: 170,
+                background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
+                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.10)', padding: 6, zIndex: 300,
+              }}>
+                {[
+                  { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
+                  { label: '📄 使用文档', onClick: () => navigate('/docs') },
+                  { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
+                  { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
+                ].map((it) => (
+                  <button
+                    key={it.label}
+                    onClick={it.onClick}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
+                      background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+                      color: it.color ?? DS.ink,
+                    }}
+                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                  >{it.label}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── 会话列表 ── */}
-      <AgentConversationList width={convWidth} />
+      {/* 拖拽把手 */}
       <div
         onMouseDown={handleConvDrag}
         style={{
@@ -291,14 +307,6 @@ export function ChatPage() {
       <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
     </div>
   );
-}
-
-function railBtn(active: boolean): React.CSSProperties {
-  return {
-    width: 40, height: 40, borderRadius: 12, border: 'none',
-    background: active ? 'rgba(38, 49, 72, 0.06)' : 'transparent',
-    fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-  };
 }
 
 function headerBtn(opacity: number): React.CSSProperties {
