@@ -88,45 +88,53 @@ export function ChatPage() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', background: 'white', overflow: 'hidden' }}>
-      {/* ── 会话栏（项目选择/会话列表/底部资源库+设置）── */}
+      {/* ── 会话栏（标题/项目+资源库/会话列表/底部设置）── */}
       <div style={{ width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-surface-soft)' }}>
-        {/* 顶部：项目选择 */}
-        <div style={{ position: 'relative', padding: '10px 12px 8px', borderBottom: '1px solid var(--color-hairline)' }}>
-          <button
-            onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 10px', height: 34, border: '1px solid var(--color-hairline)',
-              borderRadius: 'var(--rounded-md)', background: 'white', font: 'var(--text-caption)',
-              color: 'var(--color-ink)', cursor: 'pointer',
-            }}
-          >
-            <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentProject?.name ?? '选择项目'}
-            </span>
-            <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
-          </button>
-          <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
-        </div>
-
-        {/* 会话列表（flex:1 内部滚动） */}
+        {/* 会话列表（toolbar 插槽注入 项目+资源库，位于新建对话上方；flex:1 内部滚动） */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <AgentConversationList width={convWidth} />
+          <AgentConversationList
+            width={convWidth}
+            toolbar={
+              <div style={{ display: 'flex', gap: 6, padding: '8px 14px' }}>
+                {/* 资源库 */}
+                <button
+                  onClick={() => setAssetsOpen(true)}
+                  title="资源库"
+                  style={{
+                    flexShrink: 0, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
+                    background: 'white', padding: '0 10px', height: 34, fontSize: 13,
+                    color: 'var(--color-muted)', cursor: 'pointer',
+                  }}
+                >🧩 资源库</button>
+                {/* 项目选择（与资源库并排，新建对话上方） */}
+                <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                  <button
+                    onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+                    title="项目选择"
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 4,
+                      border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
+                      background: 'white', padding: '0 10px', height: 34, fontSize: 13,
+                      color: 'var(--color-ink)', cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {currentProject?.name ?? '选择项目'}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
+                  </button>
+                  <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
+                </div>
+              </div>
+            }
+          />
         </div>
 
-        {/* 底部：资源库 + 设置（左下角） */}
+        {/* 底部：设置（左下角） */}
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '8px 10px', borderTop: '1px solid var(--color-hairline)',
+          display: 'flex', alignItems: 'center',
+          padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
         }}>
-          <button
-            onClick={() => setAssetsOpen(true)}
-            title="资源库"
-            style={{
-              flex: 1, border: 'none', background: 'transparent', borderRadius: 8,
-              padding: '7px 10px', fontSize: 14, color: 'var(--color-muted)', cursor: 'pointer', textAlign: 'left',
-            }}
-          >🧩 资源库</button>
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}

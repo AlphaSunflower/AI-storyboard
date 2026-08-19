@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import SpecularButton from '../SpecularButton';
 
-export function AgentConversationList({ width }: { width?: number }) {
+export function AgentConversationList({ width, toolbar }: { width?: number; toolbar?: React.ReactNode }) {
   const {
     conversations, activeConversationId, selectConversation,
     createConversation, renameConversation, setConversationStatus, deleteConversation,
@@ -67,6 +67,8 @@ export function AgentConversationList({ width }: { width?: number }) {
       >
         ☾ Moon 智能体
       </div>
+      {/* toolbar 插槽：/chat 页在此注入 项目选择+资源库（位于新建对话上方）；抽屉不传，零影响 */}
+      {toolbar}
       {/* 新建 */}
       <div style={{ padding: 14 }}>
         <SpecularButton
