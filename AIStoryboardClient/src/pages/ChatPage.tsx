@@ -35,6 +35,7 @@ export function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [convWidth, setConvWidth] = useState(240);
+  const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
@@ -111,14 +112,98 @@ export function ChatPage() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', background: 'white', overflow: 'hidden' }}>
-      {/* ── 会话栏（标题/项目+资源库/会话列表/底部设置）── */}
-      <div style={{ width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--color-surface-soft)' }}>
+      {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
+      {collapsed ? (
+        /* ── 收起态：图标 rail ── */
+        <div style={{
+          width: 48, flexShrink: 0, background: 'var(--color-surface-soft)',
+          borderRight: '1px solid var(--color-hairline)',
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          alignItems: 'center', padding: '10px 0', zIndex: 50,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => setCollapsed(false)}
+              title="展开侧边栏"
+              style={railIconBtn}
+            >☾</button>
+            <button
+              onClick={() => setAssetsOpen(true)}
+              title="资源库"
+              style={railIconBtn}
+            >🧩</button>
+            <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+              <button
+                ref={projectBtnRef}
+                onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+                title={currentProject?.name ?? '选择项目'}
+                style={railIconBtn}
+              >🗂️</button>
+              <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
+            </div>
+          </div>
+          <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <button
+              ref={settingsBtnRef}
+              onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
+              title="设置"
+              style={railIconBtn}
+            >⚙️</button>
+            {settingsOpen && settingsBtnRef.current && createPortal(
+              <div style={{
+                position: 'fixed',
+                top: Math.max(8, settingsBtnRef.current.getBoundingClientRect().top - 170),
+                left: settingsBtnRef.current.getBoundingClientRect().right + 8,
+                width: 170,
+                background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
+              }}>
+                {[
+                  { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
+                  { label: '📄 使用文档', onClick: () => navigate('/docs') },
+                  { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
+                  { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
+                ].map((it) => (
+                  <button
+                    key={it.label}
+                    onClick={it.onClick}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
+                      background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+                      color: it.color ?? DS.ink,
+                    }}
+                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                  >{it.label}</button>
+                ))}
+              </div>,
+              document.body,
+            )}
+          </div>
+        </div>
+      ) : (
+      <div style={{
+        width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
+        background: 'var(--color-surface-soft)', transition: 'width 0.2s ease',
+      }}>
         {/* 会话列表（toolbar 插槽注入 项目+资源库，位于新建对话上方；flex:1 内部滚动） */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <AgentConversationList
             width={convWidth}
             toolbar={
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 12px' }}>
+              <>
+                {/* 收起侧栏按钮（标题下方） */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 12px 0' }}>
+                  <button
+                    onClick={() => setCollapsed(true)}
+                    title="收起侧边栏"
+                    style={{
+                      border: 'none', background: 'transparent', cursor: 'pointer',
+                      fontSize: 13, color: 'var(--color-muted)', padding: '4px 8px', borderRadius: 8,
+                    }}
+                  >◀ 收起</button>
+                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
                 {/* 资源库（独立一行，DeepSeek ghost 风格，与新建按钮同高 40/字体 15） */}
                 <button
                   onClick={() => setAssetsOpen(true)}
@@ -156,6 +241,7 @@ export function ChatPage() {
                   <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
                 </div>
               </div>
+              </>
             }
           />
         </div>
@@ -209,6 +295,7 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* 拖拽把手 */}
       <div
@@ -220,6 +307,7 @@ export function ChatPage() {
         onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
         onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
       />
+      {collapsed && <div style={{ width: 4, flexShrink: 0 }} />}
 
       {/* ── 主对话区 ── */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
@@ -360,3 +448,10 @@ function headerBtn(opacity: number): React.CSSProperties {
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
   };
 }
+
+/** 收起态 rail 图标按钮 */
+const railIconBtn: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 10, border: 'none',
+  background: 'transparent', fontSize: 18, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
