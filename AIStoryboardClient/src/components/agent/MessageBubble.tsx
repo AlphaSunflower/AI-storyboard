@@ -91,8 +91,11 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
   });
 }
 
-export function MessageBubble({ role, content, streaming }: { role: 'user' | 'assistant'; content: string; streaming?: boolean }) {
+export function MessageBubble({ role, content, streaming, variant = 'default' }: {
+  role: 'user' | 'assistant'; content: string; streaming?: boolean; variant?: 'default' | 'deepseek';
+}) {
   const isUser = role === 'user';
+  const ds = variant === 'deepseek';
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -115,21 +118,36 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
 
   return (
     <>
-    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 18 }}>
+    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       <div
-        style={{
-          maxWidth: '82%',
-          padding: '12px 18px',
-          borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-          background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
-          color: isUser ? 'white' : 'var(--color-body)',
-          fontSize: 16,
-          lineHeight: 1.7,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
-          textAlign: 'left',
-        }}
+        style={ds
+          ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
+            {
+              maxWidth: isUser ? 'min(525px, 82%)' : '100%',
+              padding: isUser ? '10px 16px' : 0,
+              borderRadius: isUser ? 22 : 0,
+              background: isUser ? 'rgb(237, 243, 254)' : 'transparent',
+              color: 'rgb(15, 17, 21)',
+              fontSize: 16,
+              lineHeight: 1.6,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              textAlign: 'left',
+            }
+          : {
+              maxWidth: '82%',
+              padding: '12px 18px',
+              borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+              background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
+              color: isUser ? 'white' : 'var(--color-body)',
+              // 抽屉空间有限,正文 15px(全局 16px 偏大)
+              fontSize: 15,
+              lineHeight: 1.7,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
+              textAlign: 'left',
+            }}
       >
         {content ? renderContent(content, setPreviewUrl) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
@@ -140,7 +158,7 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
               width: 2, height: 16,
               marginLeft: 2,
               verticalAlign: 'text-bottom',
-              background: isUser ? 'white' : 'var(--color-primary)',
+              background: isUser ? (ds ? 'rgb(65, 118, 230)' : 'white') : (ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'),
               animation: 'typeCursor 1s steps(1) infinite',
             }}
           />
