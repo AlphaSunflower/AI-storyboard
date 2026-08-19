@@ -52,6 +52,7 @@ export function AgentConversationList({ width, toolbar }: { width?: number; tool
         display: 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
+        overflowX: 'hidden',
       }}
     >
       {/* ☾ Moon 智能体标题（迁移自对话窗口头部） */}

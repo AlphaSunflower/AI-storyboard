@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { MessageBubble } from '../components/agent/MessageBubble';
@@ -37,6 +38,8 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
+  const projectBtnRef = useRef<HTMLButtonElement>(null);
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
 
   // 登录守卫
   useEffect(() => {
@@ -95,35 +98,42 @@ export function ChatPage() {
           <AgentConversationList
             width={convWidth}
             toolbar={
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 14px' }}>
-                {/* 资源库（独立一行） */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 12px 14px' }}>
+                {/* 资源库（独立一行，DeepSeek ghost 风格） */}
                 <button
                   onClick={() => setAssetsOpen(true)}
                   title="资源库"
                   style={{
-                    width: '100%', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-                    background: 'white', padding: '0 10px', height: 34, fontSize: 13,
-                    color: 'var(--color-muted)', cursor: 'pointer', textAlign: 'left',
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    border: 'none', borderRadius: 10, background: 'transparent',
+                    padding: '0 12px', height: 38, fontSize: 14,
+                    color: DS.ink, cursor: 'pointer', textAlign: 'left',
                   }}
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
                 >🧩 资源库</button>
-                {/* 项目选择（独立一行，资源库下方） */}
+                {/* 项目选择（独立一行，资源库下方，ghost 风格；弹层 portal 右对齐不被裁剪） */}
                 <div style={{ position: 'relative', width: '100%' }}>
                   <button
+                    ref={projectBtnRef}
                     onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
                     title="项目选择"
                     style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: 4,
-                      border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-                      background: 'white', padding: '0 10px', height: 34, fontSize: 13,
-                      color: 'var(--color-ink)', cursor: 'pointer',
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                      border: 'none', borderRadius: 10, background: 'transparent',
+                      padding: '0 12px', height: 38, fontSize: 14,
+                      color: DS.ink, cursor: 'pointer',
                     }}
+                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
                   >
+                    <span style={{ fontSize: 15 }}>🗂️</span>
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {currentProject?.name ?? '选择项目'}
                     </span>
-                    <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
+                    <span style={{ fontSize: 10, color: DS.textCaption }}>▼</span>
                   </button>
-                  <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
+                  <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
                 </div>
               </div>
             }
@@ -137,6 +147,7 @@ export function ChatPage() {
         }}>
           <div style={{ position: 'relative' }}>
             <button
+              ref={settingsBtnRef}
               onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
               title="设置"
               style={{
@@ -145,11 +156,14 @@ export function ChatPage() {
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >⚙️ 设置</button>
-            {settingsOpen && (
+            {settingsOpen && settingsBtnRef.current && createPortal(
               <div style={{
-                position: 'absolute', bottom: 40, left: -60, width: 170,
+                position: 'fixed',
+                top: Math.max(8, settingsBtnRef.current.getBoundingClientRect().top - 170),
+                right: window.innerWidth - settingsBtnRef.current.getBoundingClientRect().right + 40,
+                width: 170,
                 background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.10)', padding: 6, zIndex: 300,
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
               }}>
                 {[
                   { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
@@ -169,7 +183,8 @@ export function ChatPage() {
                     onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
                   >{it.label}</button>
                 ))}
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>
