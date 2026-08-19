@@ -134,23 +134,25 @@ export const agentApi = {
     client.get<{ data: VideoTaskStatus }>(`/agent/tasks/${taskId}`),
 };
 
-/** 流式发送消息 */
+/** 流式发送消息;signal 传 AbortController.signal 可中断(停止生成) */
 export async function streamChat(
   conversationId: string,
   content: string,
   picUrl: string | undefined,
   onEvent: (e: SseEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ content, picUrl: picUrl ?? '' }),
+    signal,
   });
   await consumeSse(res, onEvent);
 }
 
-/** HITL 表单提交并续流 */
+/** HITL 表单提交并续流;signal 传 AbortController.signal 可中断 */
 export async function submitForm(
   conversationId: string,
   formToken: string,
@@ -160,12 +162,14 @@ export async function submitForm(
   customText?: string,
   params?: Record<string, string>,
   assetIds?: string[],
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {}, assetIds: assetIds ?? [] }),
+    signal,
   });
   await consumeSse(res, onEvent);
 }

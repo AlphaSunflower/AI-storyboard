@@ -115,16 +115,16 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
 
   return (
     <>
-    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
+    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 18 }}>
       <div
         style={{
           maxWidth: '82%',
-          padding: '8px 12px',
-          borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+          padding: '12px 18px',
+          borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
           background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
           color: isUser ? 'white' : 'var(--color-body)',
-          fontSize: 13,
-          lineHeight: 1.6,
+          fontSize: 16,
+          lineHeight: 1.7,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
@@ -137,7 +137,7 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
           <span
             style={{
               display: 'inline-block',
-              width: 2, height: 13,
+              width: 2, height: 16,
               marginLeft: 2,
               verticalAlign: 'text-bottom',
               background: isUser ? 'white' : 'var(--color-primary)',

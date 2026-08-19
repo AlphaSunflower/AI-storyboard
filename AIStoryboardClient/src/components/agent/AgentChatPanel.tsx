@@ -67,18 +67,18 @@ export function AgentChatPanel() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* 头部 */}
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-hairline)', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* 当前会话标题（☾ Moon 智能体标题已迁移至会话栏顶部） */}
         <span
           title={currentTitle}
           style={{
-            flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--color-ink)',
+            flex: 1, minWidth: 0, fontSize: 18, fontWeight: 600, color: 'var(--color-ink)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
           {currentTitle}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {/* 文件夹图标：查看当前对话的产出素材（弹窗） */}
           <button
             onClick={() => { setAssetsOpen(true); void loadAssets(); }}
@@ -86,8 +86,8 @@ export function AgentChatPanel() {
             title="查看当前对话的产出素材"
             style={{
               border: 'none', background: 'none', color: 'var(--color-muted)',
-              fontSize: 12, cursor: activeConversationId ? 'pointer' : 'not-allowed',
-              padding: '2px 6px', borderRadius: 4, opacity: activeConversationId ? 1 : 0.4,
+              fontSize: 14, cursor: activeConversationId ? 'pointer' : 'not-allowed',
+              padding: '4px 8px', borderRadius: 6, opacity: activeConversationId ? 1 : 0.4,
             }}
           >
             📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}
@@ -98,7 +98,7 @@ export function AgentChatPanel() {
             title={streaming || waitingHumanInput || waitingVideoPlan ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
             style={{
               border: 'none', background: 'none', color: 'var(--color-muted)',
-              fontSize: 11, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+              fontSize: 14, cursor: 'pointer', padding: '4px 8px', borderRadius: 6,
               opacity: streaming || !!waitingHumanInput || !!waitingVideoPlan || !activeConversationId || messages.length === 0 ? 0.4 : 1,
             }}
           >🧹 清除聊天记录</button>
@@ -113,7 +113,7 @@ export function AgentChatPanel() {
           const el = e.target as HTMLElement;
           nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: 'var(--color-canvas)' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20, background: 'var(--color-canvas)' }}
       >
         {messages.length === 0 && !streaming && (
           <TextType
@@ -125,7 +125,7 @@ export function AgentChatPanel() {
             loop={false}
             showCursor
             cursorCharacter="|"
-            style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}
+            style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 15, marginTop: 64 }}
           />
         )}
         {messages.map((m) => (
@@ -137,7 +137,7 @@ export function AgentChatPanel() {
           />
         ))}
         {streaming && !waitingHumanInput && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-muted)', fontSize: 12, marginLeft: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--color-muted)', fontSize: 14, marginLeft: 6 }}>
             <span>{workflowHint || '正在生成'}</span>
             {/* C 组：思考中三点依次跳动 */}
             <span style={{ display: 'inline-flex', gap: 2 }}>
@@ -165,19 +165,19 @@ export function AgentChatPanel() {
         {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
         {confirmResult && <ConfirmResultCard />}
         {streamError && (
-          <div style={{ color: 'var(--color-error)', fontSize: 12, margin: '8px 4px' }}>
+          <div style={{ color: 'var(--color-error)', fontSize: 14, margin: '10px 6px' }}>
             ⚠ {streamError}
           </div>
         )}
       </div>
 
       {/* 输入区 */}
-      <div style={{ padding: 10, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
+      <div style={{ padding: 16, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
         {refImageUrl && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <img src={refImageUrl} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8 }} />
-            <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>参考图已附</span>
-            <button onClick={() => setRefImageUrl(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 12 }}>移除</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <img src={refImageUrl} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
+            <span style={{ fontSize: 14, color: 'var(--color-muted)' }}>参考图已附</span>
+            <button onClick={() => setRefImageUrl(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 14 }}>移除</button>
           </div>
         )}
         {/* 继续完善提示条：点击"继续完善"后暂存参考图，等待用户输入完善需求 */}
@@ -185,25 +185,25 @@ export function AgentChatPanel() {
           <div
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '6px 10px', marginBottom: 8, borderRadius: 'var(--rounded-md)',
+              padding: '10px 14px', marginBottom: 10, borderRadius: 'var(--rounded-md)',
               background: 'var(--color-primary-soft, #fdf1ec)', border: '1px solid var(--color-hairline)',
-              fontSize: 12, color: 'var(--color-muted)',
+              fontSize: 14, color: 'var(--color-muted)',
             }}
           >
             <span>📎 已选当前图片作为参考，请输入你想完善的地方</span>
             <button
               onClick={() => cancelRefine()}
-              style={{ border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 12, marginLeft: 8 }}
+              style={{ border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 14, marginLeft: 10 }}
             >
               ✕ 取消
             </button>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
           <button
             onClick={() => fileRef.current?.click()}
             title="上传参考图"
-            style={{ width: 32, height: 32, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
+            style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0 }}
           >📎</button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
           <textarea
@@ -217,10 +217,10 @@ export function AgentChatPanel() {
             }}
             placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
             disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan}
-            rows={3}
+            rows={2}
             style={{
-              flex: 1, padding: '8px 10px', border: '1px solid var(--color-hairline)',
-              borderRadius: 'var(--rounded-md)', font: 'var(--text-body-sm)', color: 'var(--color-ink)',
+              flex: 1, padding: '12px 14px', border: '1px solid var(--color-hairline)',
+              borderRadius: 'var(--rounded-md)', fontSize: 16, lineHeight: 1.6, color: 'var(--color-ink)',
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />

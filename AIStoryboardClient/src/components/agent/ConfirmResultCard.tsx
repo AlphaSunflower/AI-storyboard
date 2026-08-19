@@ -23,12 +23,12 @@ export function ConfirmResultCard() {
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
       <div
         style={{
-          maxWidth: '82%', padding: 12, borderRadius: 12,
+          maxWidth: '82%', padding: 20, borderRadius: 16,
           background: 'white', border: '1px solid var(--color-hairline)',
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
         }}
       >
-        <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
+        <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1 }}>
           {isScript ? '分镜生成完成' : isVideo ? '视频生成完成' : '图片生成完成'}
         </div>
         {isVideo ? (
@@ -55,7 +55,7 @@ export function ConfirmResultCard() {
         ) : null}
         {!isScript && <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
         {isScript && (
-          <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 8 }}>
+          <div style={{ fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7, marginBottom: 10 }}>
             {typeof info.sceneCount === 'number' && info.sceneCount > 0
               ? `已生成 ${info.sceneCount} 个分镜，请查看左侧分镜列表`
               : '分镜已确认，请查看左侧分镜列表'}
@@ -67,8 +67,8 @@ export function ConfirmResultCard() {
               disabled={streaming}
               onClick={() => refineAsset()}
               style={{
-                padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-                background: 'var(--color-primary)', color: 'white', fontSize: 13,
+                padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
+                background: 'var(--color-primary)', color: 'white', fontSize: 15,
                 cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
               }}
             >
@@ -78,8 +78,8 @@ export function ConfirmResultCard() {
               disabled={streaming}
               onClick={() => dismissConfirm()}
               style={{
-                padding: '6px 16px', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-                background: 'white', color: 'var(--color-muted)', fontSize: 13,
+                padding: '10px 18px', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
+                background: 'white', color: 'var(--color-muted)', fontSize: 15,
                 cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
               }}
             >

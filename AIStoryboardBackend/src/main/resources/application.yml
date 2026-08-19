@@ -3,6 +3,11 @@ spring:
     name: ai-storyboard
   profiles:
     active: local            # 默认本地环境；生产用 --spring.profiles.active=prod 覆盖
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        enabled: true
   servlet:
     multipart:
       max-file-size: 20MB
@@ -61,3 +66,7 @@ ai:
   video-upload-dir: uploads/videos
   video-file-extension: .mp4
   video-url-prefix: /api/files/videos/
+
+# 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
+internal:
+  secret: ${INTERNAL_SECRET:moon-internal-secret-2024}

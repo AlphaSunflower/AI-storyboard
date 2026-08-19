@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/agentStore';
 import SpecularButton from '../SpecularButton';
 
-export function AgentConversationList() {
+export function AgentConversationList({ width }: { width?: number }) {
   const {
     conversations, activeConversationId, selectConversation,
     createConversation, renameConversation, setConversationStatus, deleteConversation,
@@ -45,8 +45,8 @@ export function AgentConversationList() {
     <div
       style={{
         position: 'relative',
-        width: 180,
-        minWidth: 180,
+        width: width ?? 180,
+        minWidth: 150,
         borderRight: '1px solid var(--color-hairline)',
         background: 'var(--color-surface-soft)',
         display: 'flex',
@@ -57,9 +57,9 @@ export function AgentConversationList() {
       {/* ☾ Moon 智能体标题（迁移自对话窗口头部） */}
       <div
         style={{
-          padding: '12px 12px 8px',
+          padding: '18px 16px 12px',
           borderBottom: '1px solid var(--color-hairline)',
-          fontSize: 14,
+          fontSize: 18,
           fontWeight: 600,
           color: 'var(--color-ink)',
           whiteSpace: 'nowrap',
@@ -68,7 +68,7 @@ export function AgentConversationList() {
         ☾ Moon 智能体
       </div>
       {/* 新建 */}
-      <div style={{ padding: 10 }}>
+      <div style={{ padding: 14 }}>
         <SpecularButton
           size="sm"
           radius={8}
@@ -89,8 +89,8 @@ export function AgentConversationList() {
       <button
         onClick={() => setShowArchived(!showArchived)}
         style={{
-          margin: '0 10px 6px', padding: '4px 0', border: 'none', background: 'none',
-          color: 'var(--color-muted)', fontSize: 11, cursor: 'pointer', textAlign: 'left',
+          margin: '0 14px 8px', padding: '6px 0', border: 'none', background: 'none',
+          color: 'var(--color-muted)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
         }}
       >
         {showArchived ? '◀ 返回进行中' : '🗂 已归档'}
@@ -103,7 +103,7 @@ export function AgentConversationList() {
           onClick={() => { if (waitingHumanInput || waitingVideoPlan) return; selectConversation(c.id); }}
           title={(waitingHumanInput || waitingVideoPlan) && c.id !== activeConversationId ? '请先完成当前确认' : undefined}
           style={{
-            padding: '8px 10px', cursor: 'pointer',
+            padding: '12px 14px', cursor: 'pointer',
             background: c.id === activeConversationId ? 'var(--color-surface-card)' : 'transparent',
             borderBottom: '1px solid var(--color-hairline-soft)',
             // I3：HITL 等待期/图生视频方案确认期未激活会话项置灰，提示先完成当前确认
@@ -127,26 +127,26 @@ export function AgentConversationList() {
                 }
               }}
               onClick={(e) => e.stopPropagation()}
-              style={{ width: '100%', fontSize: 12, padding: '2px 4px', border: '1px solid var(--color-primary)', borderRadius: 4 }}
+              style={{ width: '100%', fontSize: 14, padding: '4px 6px', border: '1px solid var(--color-primary)', borderRadius: 6 }}
             />
           ) : (
             <>
-              <div style={{ fontSize: 12, fontWeight: c.id === activeConversationId ? 600 : 400, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 15, fontWeight: c.id === activeConversationId ? 600 : 400, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {c.title}
               </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                 <span
                   onClick={(e) => { e.stopPropagation(); startRename(c.id, c.title); }}
-                  title="重命名" style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-muted)' }}
+                  title="重命名" style={{ fontSize: 13, cursor: 'pointer', color: 'var(--color-muted)' }}
                 >✏️</span>
                 <span
                   onClick={(e) => { e.stopPropagation(); setConversationStatus(c.id, c.status === 'archived' ? 'active' : 'archived'); }}
                   title={c.status === 'archived' ? '恢复' : '归档'}
-                  style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-muted)' }}
+                  style={{ fontSize: 13, cursor: 'pointer', color: 'var(--color-muted)' }}
                 >🗂</span>
                 <span
                   onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(c.id); }}
-                  title="删除" style={{ fontSize: 11, cursor: 'pointer', color: 'var(--color-error)' }}
+                  title="删除" style={{ fontSize: 13, cursor: 'pointer', color: 'var(--color-error)' }}
                 >🗑️</span>
               </div>
             </>
@@ -155,7 +155,7 @@ export function AgentConversationList() {
       ))}
 
       {visible.length === 0 && (
-        <p style={{ padding: 12, fontSize: 11, color: 'var(--color-muted-soft)', textAlign: 'center' }}>
+        <p style={{ padding: 16, fontSize: 13, color: 'var(--color-muted-soft)', textAlign: 'center' }}>
           {showArchived ? '暂无已归档对话' : '暂无对话'}
         </p>
       )}

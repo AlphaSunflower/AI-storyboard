@@ -1,7 +1,7 @@
 package com.storyboard.config;
 
 import com.storyboard.config.AccessLogFilter;
-import com.storyboard.security.JwtAuthenticationFilter;
+import com.storyboard.security.GatewayAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -21,11 +21,11 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtFilter;
+    private final GatewayAuthenticationFilter gatewayFilter;
     private final AccessLogFilter accessLogFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtFilter, AccessLogFilter accessLogFilter) {
-        this.jwtFilter = jwtFilter;
+    public SecurityConfig(GatewayAuthenticationFilter gatewayFilter, AccessLogFilter accessLogFilter) {
+        this.gatewayFilter = gatewayFilter;
         this.accessLogFilter = accessLogFilter;
     }
 
@@ -57,6 +57,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/files/**").permitAll()
+                .requestMatchers("/api/internal/**").permitAll()
                 .requestMatchers("/actuator/health").permitAll()  // 健康检查（部署探活，只暴露 health）
                 .anyRequest().authenticated()
             )
@@ -67,7 +68,7 @@ public class SecurityConfig {
                     response.getWriter().write("{\"code\":40101,\"message\":\"未授权，请先登录\"}");
                 })
             )
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(gatewayFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(accessLogFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

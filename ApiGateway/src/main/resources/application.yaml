@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          # gateway-server-webmvc 变体：配置前缀与 WebFlux 版不同，predicates 为 name+args 对象结构
+          routes:
+            # Agent 服务（lb:// 走 Nacos 服务发现）
+            - id: moon-agent
+              uri: lb://moon-agent
+              predicates:
+                - name: Path
+                  args:
+                    patterns: /api/agent/**
+            # 主后端
+            - id: ai-storyboard
+              uri: lb://ai-storyboard
+              predicates:
+                - name: Path
+                  args:
+                    patterns: /api/auth/**,/api/projects/**,/api/scenes/**,/api/files/**,/api/assets/**,/api/ai/**,/api/user/**
+    # Nacos 服务发现
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        enabled: true
+
+# JWT 配置（与主后端共享 secret）
+jwt:
+  access-secret: ${JWT_ACCESS_SECRET:d02f1779750841f8b4de65e47a913e89}
+  issuer: ${JWT_ISSUER:newworkflow-backend}
+
+# 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
+internal:
+  secret: ${INTERNAL_SECRET:moon-internal-secret-2024}

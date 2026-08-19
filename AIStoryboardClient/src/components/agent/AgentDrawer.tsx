@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
@@ -16,6 +16,23 @@ export function AgentDrawer() {
   const drawerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // 会话栏宽度（可拖拽调整）
+  const [convWidth, setConvWidth] = useState(200);
+  const handleConvDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = convWidth;
+    const onMouseMove = (ev: MouseEvent) => {
+      setConvWidth(Math.min(360, Math.max(180, startW + ev.clientX - startX)));
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [convWidth]);
 
   // 打开时挂载 + 加载会话列表
   useEffect(() => {
@@ -104,7 +121,19 @@ export function AgentDrawer() {
           display: 'flex',
         }}
       >
-        <AgentConversationList />
+        <AgentConversationList width={convWidth} />
+        <div
+          onMouseDown={handleConvDrag}
+          style={{
+            width: 4,
+            cursor: 'col-resize',
+            background: 'transparent',
+            transition: 'background 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'var(--color-primary)'; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+        />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <AgentChatPanel />
         </div>

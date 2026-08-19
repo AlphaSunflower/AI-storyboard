@@ -14,12 +14,12 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
       <div
         style={{
-          maxWidth: '82%', padding: 12, borderRadius: 12,
+          maxWidth: '82%', padding: 20, borderRadius: 16,
           background: 'white', border: '1px solid var(--color-hairline)',
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
         }}
       >
-        <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
+        <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1 }}>
           📹 视频方案已生成
         </div>
         {/* 参考图缩略图 + 参数行 */}
@@ -40,8 +40,8 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
         {/* 方案文本：完整展示，超出 8 行截断（50~120 字的视频方案 8 行足够） */}
         <div
           style={{
-            fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6,
-            marginBottom: 10, whiteSpace: 'pre-wrap', maxHeight: 208, overflow: 'hidden',
+            fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7,
+            marginBottom: 12, whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'hidden',
           }}
         >
           {info.message}
@@ -64,7 +64,7 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
                 disabled={streaming}
                 onClick={() => submitVideoPlan(a.id, selectedParams)}
                 style={{
-                  padding: '6px 16px', borderRadius: 'var(--rounded-md)', fontSize: 13,
+                  padding: '10px 18px', borderRadius: 'var(--rounded-md)', fontSize: 15,
                   background: primary ? 'var(--color-primary)' : 'white',
                   color: primary ? 'white' : 'var(--color-muted)',
                   border: primary ? 'none' : '1px solid var(--color-hairline)',

@@ -49,9 +49,9 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
 
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
-      <div style={{ maxWidth: '82%', padding: 12, borderRadius: 12, background: 'white', border: '1px solid var(--color-hairline)', boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left' }}>
-        <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>需要您确认</div>
-        <div style={{ fontSize: 13, color: 'var(--color-ink)', lineHeight: 1.6, marginBottom: 10, whiteSpace: 'pre-wrap' }}>
+      <div style={{ maxWidth: '82%', padding: 20, borderRadius: 16, background: 'white', border: '1px solid var(--color-hairline)', boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left' }}>
+        <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1 }}>需要您确认</div>
+        <div style={{ fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
           {info.formContent || '请确认是否继续？'}
         </div>
         {/* 资产勾选列表：默认全选，取消勾选则不投入；提交走 asset-confirm / asset-skip */}
@@ -115,7 +115,7 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
           />
         ) : null}
         {expired ? (
-          <div style={{ fontSize: 12, color: 'var(--color-warning)' }}>确认已过期，请重新发起对话</div>
+          <div style={{ fontSize: 14, color: 'var(--color-warning)' }}>确认已过期，请重新发起对话</div>
         ) : customOpen ? (
           <div>
             <input
@@ -139,8 +139,8 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
                 disabled={streaming || !customText.trim()}
                 onClick={() => submitHumanInput('custom', customText.trim(), selectedParams)}
                 style={{
-                  padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-primary)', color: 'white', fontSize: 13,
+                  padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
+                  background: 'var(--color-primary)', color: 'white', fontSize: 15,
                   cursor: streaming || !customText.trim() ? 'not-allowed' : 'pointer',
                   opacity: streaming || !customText.trim() ? 0.6 : 1,
                 }}
@@ -151,7 +151,7 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
                 disabled={streaming}
                 onClick={() => { setCustomOpen(false); setCustomText(''); }}
                 style={{
-                  padding: '6px 16px', border: '1px solid var(--color-hairline)',
+                  padding: '10px 18px', border: '1px solid var(--color-hairline)',
                   borderRadius: 'var(--rounded-md)', background: 'transparent',
                   color: 'var(--color-muted)', fontSize: 13,
                   cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
@@ -169,8 +169,8 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
                 disabled={streaming}
                 onClick={() => handleActionClick(a)}
                 style={{
-                  padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-primary)', color: 'white', fontSize: 13,
+                  padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
+                  background: 'var(--color-primary)', color: 'white', fontSize: 15,
                   cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
                 }}
               >

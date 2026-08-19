@@ -68,28 +68,28 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
-            width: 540, maxWidth: '94vw', maxHeight: '72vh',
+            width: 620, maxWidth: '94vw', maxHeight: '80vh',
             background: 'white', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
         >
           {/* 头部 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--color-hairline)' }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-ink)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid var(--color-hairline)' }}>
+            <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--color-ink)' }}>
               📁 产出素材（{total}）
             </span>
             <button
               onClick={onClose}
               aria-label="关闭素材面板"
-              style={{ width: 28, height: 28, border: 'none', borderRadius: '50%', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 34, height: 34, border: 'none', borderRadius: '50%', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               ✕
             </button>
           </div>
           {/* 网格 */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
             {records.length === 0 ? (
-              <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 12, marginTop: 40 }}>
+              <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
                 暂无产出素材——生成的图片/视频会出现在这里
               </p>
             ) : (
@@ -129,9 +129,9 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
           {/* 分页 */}
           {totalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '8px 0 12px', borderTop: '1px solid var(--color-hairline)' }}>
-              <button disabled={(assets?.page ?? 1) <= 1} onClick={() => void loadAssets((assets?.page ?? 1) - 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>上一页</button>
-              <span style={{ fontSize: 11, color: 'var(--color-muted)', alignSelf: 'center' }}>{assets?.page ?? 1} / {totalPages}</span>
-              <button disabled={(assets?.page ?? 1) >= totalPages} onClick={() => void loadAssets((assets?.page ?? 1) + 1)} style={{ fontSize: 11, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '2px 10px', background: 'white', cursor: 'pointer' }}>下一页</button>
+              <button disabled={(assets?.page ?? 1) <= 1} onClick={() => void loadAssets((assets?.page ?? 1) - 1)} style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'white', cursor: 'pointer' }}>上一页</button>
+              <span style={{ fontSize: 13, color: 'var(--color-muted)', alignSelf: 'center' }}>{assets?.page ?? 1} / {totalPages}</span>
+              <button disabled={(assets?.page ?? 1) >= totalPages} onClick={() => void loadAssets((assets?.page ?? 1) + 1)} style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'white', cursor: 'pointer' }}>下一页</button>
             </div>
           )}
         </div>
