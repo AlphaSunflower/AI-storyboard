@@ -108,6 +108,12 @@ interface AgentState {
   pendingPicUrl: string | null;
   cancelRefine: () => void;
   resetChatState: () => void;
+
+  // 页面级状态
+  activeModal: 'storyboard' | 'assets' | 'project' | 'settings' | null;
+  setActiveModal: (modal: AgentState['activeModal']) => void;
+  historyExpanded: boolean;
+  setHistoryExpanded: (v: boolean) => void;
 }
 
 let initialSceneCount = 0;
@@ -805,4 +811,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   resetChatState: () =>
     set({ messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, workflowHint: '', assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
+
+  activeModal: null,
+  setActiveModal: (modal) => set({ activeModal: modal }),
+  historyExpanded: false,
+  setHistoryExpanded: (v) => set({ historyExpanded: v }),
 }));
