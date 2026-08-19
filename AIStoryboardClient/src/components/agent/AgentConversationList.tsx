@@ -70,11 +70,11 @@ export function AgentConversationList({ width, toolbar }: { width?: number; tool
       </div>
       {/* toolbar 插槽：/chat 页在此注入 项目选择+资源库（位于新建对话上方）；抽屉不传，零影响 */}
       {toolbar}
-      {/* 新建 */}
+      {/* 新建（保留 Specular 发光特效；size sm→md 加大高度与字体） */}
       <div style={{ padding: 14 }}>
         <SpecularButton
-          size="sm"
-          radius={8}
+          size="md"
+          radius={10}
           tintOpacity={0}
           textColor="#cc785c"
           lineColor="#cc785c"

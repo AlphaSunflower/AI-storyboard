@@ -46,6 +46,25 @@ export function ChatPage() {
     useAuthStore.getState().checkAuth();
   }, []);
 
+  // ── 临时 mock 预览：会话列表 + 消息气泡效果（确认后删除本段与 MOCK_DEMO 常量）──
+  const MOCK_DEMO = true;
+  useEffect(() => {
+    if (!MOCK_DEMO) return;
+    const now = new Date().toISOString();
+    useAgentStore.setState({
+      conversations: [
+        { id: 'mock-1', userId: 'mock', projectId: 'mock', title: '雨夜侦探短片分镜', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
+        { id: 'mock-2', userId: 'mock', projectId: 'mock', title: '火星种土豆的宇航员', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
+        { id: 'mock-3', userId: 'mock', projectId: 'mock', title: '产品宣传片分镜', difyConversationId: null, status: 'active', createdAt: now, updatedAt: now },
+      ],
+      activeConversationId: 'mock-1',
+      messages: [
+        { id: 'mock-m1', conversationId: 'mock-1', role: 'user', content: '帮我设计一个雨夜侦探追逐的短片分镜', difyMessageId: null, createdAt: now },
+        { id: 'mock-m2', conversationId: 'mock-1', role: 'assistant', content: '好的，为你设计 6 个分镜方案：\n\n**场景 1** 雨夜霓虹街道，侦探撑伞疾走，镜头跟随推进。\n\n**场景 2** 黑衣人从暗巷冲出，快速变焦推近，雨滴反光。\n\n**场景 3** 天台对峙，闪电照亮两人剪影。\n\n后续可继续完善任意场景或直接生成图片/视频。', difyMessageId: null, createdAt: now },
+      ],
+    });
+  }, []);
+
   // 无项目上下文时自动选第一个项目（会话绑定项目是后端契约）
   useEffect(() => {
     if (loadedRef.current) return;
@@ -98,15 +117,15 @@ export function ChatPage() {
           <AgentConversationList
             width={convWidth}
             toolbar={
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '10px 12px 14px' }}>
-                {/* 资源库（独立一行，DeepSeek ghost 风格） */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 12px' }}>
+                {/* 资源库（独立一行，DeepSeek ghost 风格，与新建按钮同高 40/字体 15） */}
                 <button
                   onClick={() => setAssetsOpen(true)}
                   title="资源库"
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                     border: 'none', borderRadius: 10, background: 'transparent',
-                    padding: '0 12px', height: 38, fontSize: 14,
+                    padding: '0 12px', height: 40, fontSize: 15,
                     color: DS.ink, cursor: 'pointer', textAlign: 'left',
                   }}
                   onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
@@ -121,7 +140,7 @@ export function ChatPage() {
                     style={{
                       width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                       border: 'none', borderRadius: 10, background: 'transparent',
-                      padding: '0 12px', height: 38, fontSize: 14,
+                      padding: '0 12px', height: 40, fontSize: 15,
                       color: DS.ink, cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
@@ -151,8 +170,8 @@ export function ChatPage() {
               onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
               title="设置"
               style={{
-                border: 'none', background: 'transparent', borderRadius: 8,
-                padding: '7px 10px', fontSize: 14, color: 'var(--color-muted)', cursor: 'pointer',
+                border: 'none', background: 'transparent', borderRadius: 10,
+                padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >⚙️ 设置</button>
