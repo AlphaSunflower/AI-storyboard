@@ -140,7 +140,7 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
 
   return (
     <>
-    <div ref={bubbleRef} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
+    <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       <div
         style={ds
           ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
@@ -187,12 +187,13 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
-      {/* 消息 meta 行：发送时间常显 + 复制（行 hover 显示） */}
+      {/* 消息 meta 行：时间+复制，整行 hover 消息时显示（DeepSeek 风格） */}
       {!streaming && (
         <div
           style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
             padding: ds ? '0 2px' : '0 4px',
+            opacity: 0, transition: 'opacity 0.15s',
           }}
           className="msg-meta"
         >
@@ -202,18 +203,17 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
           <button
             onClick={handleCopy}
             title="复制内容"
-            className="msg-copy"
             style={{
               border: 'none', background: 'transparent', cursor: 'pointer',
               fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
               color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
-              opacity: 0, transition: 'opacity 0.15s',
             }}
           >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
         </div>
       )}
       <style>{`
-        .msg-meta:hover .msg-copy { opacity: 1; }
+        .msg-meta { opacity: 0; }
+        .msg-row:hover .msg-meta { opacity: 1; }
       `}</style>
     </div>
     <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
