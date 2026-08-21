@@ -133,3 +133,30 @@ SB 4.0.0 parent 编译/运行通过。
    逐 token 发 SSE——适配点在 P2 验证
 3. **切链语义**：resume 时"合法选项 vs 自定义文本 vs 新意图"的判定边界（现有 custom 在每张
    卡片语义不同：调整意见/自定义方向/新意图）——P3 路由函数保留这些差异
+
+## 评审补充（2026-08-21 落地后评审，三条隐形陷阱对策）
+
+### 1. 流式（SSE）与 Graph 节点原子性的调和——已按"双轨制"实现
+
+- **约定**：流式增量（message 打字机 / workflow）一律经**外部 emitter 直发**（emittersByThread 注册表），
+  **不进 OverAllState**；图节点只返回最终结构化结果（lastMessage）给 state。节点内异常 → sendFriendlyError
+  补发 message 收尾，图侧无回滚负担（SSE 已发不可回滚，但 handler 约定"发卡片即返回、卡片是最后副作用"，
+  之后无其他可回滚状态）。
+- 证据：e2e 打字机 41/45 段正常；P2 修复后 state 内零流式数据。
+
+### 2. 状态膨胀与 Checkpointer 性能——热冷分离已内建，K_CP_PLAN 为已知开销
+
+- **OverAllState 只存路由元数据 + 轻量标量**：conversation/content/intent/confidence/cpAction/
+  submitAction/customText/params/assetIds/routingHint/计数。history **从不进 state**（节点内查 DB 拼
+  最近 15 条进 prompt）；plan JSON 走 agent_checkpoints 业务表（非 graph Checkpointer，按 ID/plan 关联）。
+- **已知开销**：resume 时 K_CP_PLAN 把完整 plan JSON 作为 String 传入 state，graph invoke 序列化克隆
+  state 时复制一次。**约定：plan 很大时（几十镜 × 长 prompt）后续可改为只传 planId，节点内懒加载**
+  （懒加载需 handler 改造，YAGNI 暂缓——当前 e2e 无性能问题）。
+- 若未来上 graph Checkpointer/DB saver：必须自定义 saver 只存路由元数据，plan/history 懒加载（同热冷分离原则）。
+
+### 3. 意图判定边界显式固化——routingHint 已实现（5d7abc6）
+
+- **路由优先级（resume_route 条件边）**：`routingHint（前端显式）> 卡片合法 action > customText 语义意图识别`。
+- AgentFormSubmitRequest 增 `routingHint` 字段（目标 intentType），前端「换个话题」等按钮直接传——
+  切链零 LLM 调用，主动权交还前端交互（人在回路），避免大模型对自定义文本的意图误判。
+- 回退语义：无 routingHint 时维持 customText 语义识别切链（原有兜底）。

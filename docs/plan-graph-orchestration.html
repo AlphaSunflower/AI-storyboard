@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>MoonAgent PlanGraph 智能体链路图</title>
+<style>
+  body { margin:0; background:#020617; font-family:'JetBrains Mono',Consolas,monospace; color:#e2e8f0; }
+  svg { display:block; margin:0 auto; }
+  .card-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; max-width:1760px; margin:0 auto 40px; padding:0 24px; }
+  .card { background:#0f172a; border:1px solid #1e293b; border-radius:10px; padding:16px 18px; }
+  .card h3 { margin:0 0 8px; font-size:13px; color:#22d3ee; }
+  .card p { margin:0; font-size:11px; line-height:1.7; color:#94a3b8; }
+  .card b { color:#e2e8f0; }
+  .card .tag { display:inline-block; font-size:9px; padding:1px 7px; border-radius:4px; margin-right:4px; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1180" width="1800" height="1180">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#0f172a" stroke-width="1"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb923c"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#34d399"/>
+    </marker>
+  </defs>
+<rect width="1800" height="1180" fill="url(#grid)"/>
+<path d="M 900 100 L 900 152" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr)"/>
+<text x="914" y="84" font-size="10" fill="#94a3b8">run / resume</text>
+<path d="M 900 184 L 900 228" stroke="#34d399" stroke-width="1.6" marker-end="url(#arrG)"/>
+<text x="914" y="174" font-size="10" fill="#34d399">K_RESUME=false（新消息）</text>
+<path d="M 1040 166 L 1740 166 L 1740 844 L 1040 844" stroke="#fb923c" stroke-width="1.6" stroke-dasharray="6,5" fill="none" marker-end="url(#arrO)"/>
+<text x="1660" y="158" font-size="10" fill="#fb923c" text-anchor="end">K_RESUME=true（HITL 表单提交）→ resume 路径</text>
+<path d="M 900 290 L 900 340" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 750 352 L 190 352 L 190 390" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#arrA)"/>
+<text x="760" y="346" font-size="10" fill="#fbbf24">低置信度</text>
+<path d="M 900 374 L 900 426" stroke="#34d399" stroke-width="1.6" marker-end="url(#arrG)"/>
+<text x="914" y="366" font-size="10" fill="#34d399">置信度 ≥ 阈值 → 条件边分发</text>
+<path d="M 190 410 L 190 566" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrO)"/>
+<path d="M 230 482 L 230 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 500 482 L 500 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 770 482 L 770 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 1040 482 L 1040 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 1310 482 L 1310 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 1580 482 L 1580 566" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrG)"/>
+<path d="M 230 624 L 230 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<path d="M 500 624 L 500 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<path d="M 770 624 L 770 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<path d="M 1040 624 L 1040 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<path d="M 1310 624 L 1310 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<path d="M 1580 624 L 1580 640 L 900 640 L 900 706" stroke="#fb923c" stroke-width="1.2" marker-end="url(#arrO)"/>
+<text x="900" y="636" font-size="10" fill="#fb923c" text-anchor="middle">human_input 卡片确认</text>
+<path d="M 900 752 L 900 822" stroke="#fb923c" stroke-width="1.6" marker-end="url(#arrO)"/>
+<text x="914" y="742" font-size="10" fill="#fb923c">form/submit（formToken 一次性消费）</text>
+<path d="M 730 854 L 170 854 L 170 936" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#arrA)"/>
+<text x="720" y="846" font-size="10" fill="#fbbf24">★ 切链：customText 意图 ≠ 当前链</text>
+<path d="M 900 874 L 900 936" stroke="#34d399" stroke-width="1.6" marker-end="url(#arrG)"/>
+<text x="914" y="866" font-size="10" fill="#34d399">cpAction 路由（静态映射 / byAction / 动态特判）</text>
+<path d="M 1070 854 L 1640 854 L 1640 1016" stroke="#fb7185" stroke-width="1.6" marker-end="url(#arr)"/>
+<text x="1080" y="846" font-size="10" fill="#fb7185">未知 action → END</text>
+<path d="M 170 958 L 60 958 L 60 250 L 730 250" stroke="#fbbf24" stroke-width="1.6" stroke-dasharray="6,5" fill="none" marker-end="url(#arrA)"/>
+<text x="72" y="890" font-size="10" fill="#fbbf24">★ 切链闭环：重新意图识别 → 新链</text>
+<path d="M 1520 960 L 1520 1016" stroke="#34d399" stroke-width="1.6" marker-end="url(#arrG)"/>
+<rect x="690" y="40" width="420" height="60" rx="10" fill="#0f172a"/>
+<rect x="690" y="40" width="420" height="60" rx="10" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.2"/>
+<text x="900" y="68" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">前端 AgentChatPanel（SSE 流式）</text>
+<text x="900" y="84" font-size="8.5" fill="#22d3ee" text-anchor="middle">POST /messages/stream ｜ POST /form/submit ｜ 轮询 /tasks/{id}</text>
+<polygon points="900,136 1010,166 900,196 790,166" fill="#0f172a"/>
+<polygon points="900,136 1010,166 900,196 790,166" fill="rgba(251,191,36,.15)" stroke="#fbbf24" stroke-width="1.4"/>
+<text x="900" y="167" font-size="10" fill="#fbbf24" text-anchor="middle" font-weight="bold">entry 分流</text>
+<text x="900" y="181" font-size="8" fill="#fbbf24" text-anchor="middle">读 state.K_RESUME</text>
+<rect x="690" y="220" width="420" height="70" rx="10" fill="#0f172a"/>
+<rect x="690" y="220" width="420" height="70" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="900" y="244" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">intent_recognize（run 入口）</text>
+<text x="900" y="260" font-size="8.5" fill="#34d399" text-anchor="middle">规则前置（分镜/图片/视频强关键词）→ LLM + confidence ｜ 查最近 15 条消息拼上下文</text>
+<text x="900" y="275" font-size="8.5" fill="#34d399" text-anchor="middle">记忆 + 审计 Advisor ｜ 非 aisplit/pic 轮清零澄清计数</text>
+<polygon points="900,320 1020,352 900,384 780,352" fill="#0f172a"/>
+<polygon points="900,320 1020,352 900,384 780,352" fill="rgba(251,191,36,.15)" stroke="#fbbf24" stroke-width="1.4"/>
+<text x="900" y="356" font-size="10" fill="#fbbf24" text-anchor="middle" font-weight="bold">置信度 ≥ 阈值?</text>
+<rect x="65" y="392" width="250" height="56" rx="10" fill="#0f172a"/>
+<rect x="65" y="392" width="250" height="56" rx="10" fill="rgba(251,191,36,.15)" stroke="#fbbf24" stroke-width="1.2"/>
+<text x="190" y="418" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">intent_clarify 意图澄清卡片</text>
+<text x="190" y="434" font-size="8.5" fill="#fbbf24" text-anchor="middle">选项 id = intentType（分镜/图片/视频/…/自定义）</text>
+<rect x="125" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="125" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="230" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_aisplit 分镜链</text>
+<text x="230" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">资产选择→优化 gate→方案→写库</text>
+<text x="230" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">ScriptGenerationService</text>
+<rect x="395" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="395" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="500" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_pic 图片链</text>
+<text x="500" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">有图→视觉模型改图诉求</text>
+<text x="500" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">无图→文生图</text>
+<rect x="665" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="665" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="770" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_video 视频链</text>
+<text x="770" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">方案卡片→task_accepted</text>
+<text x="770" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">异步轮询 MiniMax</text>
+<rect x="935" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="935" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="1040" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_scene_review 审核链</text>
+<text x="1040" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">分镜审核/改进建议</text>
+<text x="1040" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">review 系列选项</text>
+<rect x="1205" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="1205" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="1310" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_delete 删除链</text>
+<text x="1310" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">删除分镜二次确认</text>
+<text x="1310" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">delete-confirm 卡片</text>
+<rect x="1475" y="420" width="210" height="62" rx="10" fill="#0f172a"/>
+<rect x="1475" y="420" width="210" height="62" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="1580" y="440" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">node_other 主回答</text>
+<text x="1580" y="456" font-size="8.5" fill="#34d399" text-anchor="middle">ChatClient 拼历史流式</text>
+<text x="1580" y="471" font-size="8.5" fill="#34d399" text-anchor="middle">打字机 message 增量</text>
+<rect x="130" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="130" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="230" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">human_input 卡片</text>
+<text x="230" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">asset-selection / 澄清</text>
+<text x="230" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">方案确认 / scene-regenerate</text>
+<rect x="400" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="400" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="500" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">human_input 卡片</text>
+<text x="500" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">pic-option / pic-clarify</text>
+<text x="500" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">generate_image 确认</text>
+<rect x="670" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="670" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="770" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">video_plan 卡片</text>
+<text x="770" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">模型/参数选择器</text>
+<text x="770" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">generate_video</text>
+<rect x="940" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="940" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="1040" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">human_input 卡片</text>
+<text x="1040" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">review-confirm</text>
+<text x="1040" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">review-optimize…</text>
+<rect x="1210" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="1210" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="1310" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">delete-confirm 卡片</text>
+<text x="1310" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">确认删除 / 取消</text>
+<text x="1310" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">二次确认防误删</text>
+<rect x="1480" y="560" width="200" height="64" rx="10" fill="#0f172a"/>
+<rect x="1480" y="560" width="200" height="64" rx="10" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.2"/>
+<text x="1580" y="581" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">纯文本流式回答</text>
+<text x="1580" y="597" font-size="8.5" fill="#fb923c" text-anchor="middle">message 增量 × N</text>
+<text x="1580" y="612" font-size="8.5" fill="#fb923c" text-anchor="middle">message_end</text>
+<rect x="660" y="700" width="480" height="52" rx="10" fill="#0f172a"/>
+<rect x="660" y="700" width="480" height="52" rx="10" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.2"/>
+<text x="900" y="724" font-size="12" fill="#fff" text-anchor="middle" font-weight="bold">前端确认提交（/form/submit）</text>
+<text x="900" y="740" font-size="8.5" fill="#22d3ee" text-anchor="middle">携带 formToken + action + content + params + assetIds</text>
+<polygon points="900,796 1120,842 900,888 680,842" fill="#0f172a"/>
+<polygon points="900,796 1120,842 900,888 680,842" fill="rgba(251,191,36,.15)" stroke="#fbbf24" stroke-width="1.6"/>
+<text x="900" y="843" font-size="10" fill="#fbbf24" text-anchor="middle" font-weight="bold">resume_route 条件边路由</text>
+<text x="900" y="857" font-size="8" fill="#fbbf24" text-anchor="middle">（替代原 12+ if/else）</text>
+<rect x="20" y="928" width="300" height="56" rx="10" fill="#0f172a"/>
+<rect x="20" y="928" width="300" height="56" rx="10" fill="rgba(251,191,36,.2)" stroke="#fbbf24" stroke-width="1.6"/>
+<text x="170" y="945" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">★ switch_to_run 切链出口</text>
+<text x="170" y="961" font-size="8.5" fill="#fbbf24" text-anchor="middle">customText → 意图识别 → 新意图</text>
+<text x="170" y="976" font-size="8.5" fill="#fbbf24" text-anchor="middle">→ 回 intent_recognize 重新分发</text>
+<rect x="760" y="928" width="400" height="56" rx="10" fill="#0f172a"/>
+<rect x="760" y="928" width="400" height="56" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.2"/>
+<text x="960" y="954" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">handler.resume（恢复对应 step）</text>
+<text x="960" y="970" font-size="8.5" fill="#34d399" text-anchor="middle">cpAction 静态映射 / byAction（agree/replace…）/ asset-selection 按 source</text>
+<rect x="1560" y="1010" width="160" height="40" rx="10" fill="#0f172a"/>
+<rect x="1560" y="1010" width="160" height="40" rx="10" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.2"/>
+<text x="1640" y="1034" font-size="11" fill="#fff" text-anchor="middle" font-weight="bold">END（message_end）</text>
+<rect x="1685" y="200" width="110" height="430" rx="10" fill="none" stroke="rgba(148,163,184,.5)" stroke-width="1.2" stroke-dasharray="5,4"/>
+<text x="1740" y="226" font-size="10" fill="#94a3b8" text-anchor="middle" font-weight="bold">视频异步</text>
+<text x="1740" y="250" font-size="8.5" fill="#94a3b8" text-anchor="middle">task_accepted</text>
+<text x="1740" y="266" font-size="8.5" fill="#94a3b8" text-anchor="middle">立即返回</text>
+<text x="1740" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">前端 5s 轮询</text>
+<text x="1740" y="314" font-size="8.5" fill="#94a3b8" text-anchor="middle">/tasks/{id}</text>
+<text x="1740" y="346" font-size="8.5" fill="#94a3b8" text-anchor="middle">MiniMax ~2min</text>
+<text x="1740" y="362" font-size="8.5" fill="#94a3b8" text-anchor="middle">图外轮询</text>
+<text x="1740" y="400" font-size="8.5" fill="#64748b" text-anchor="middle">不占图内</text>
+<text x="1740" y="416" font-size="8.5" fill="#64748b" text-anchor="middle">墙钟</text>
+<rect x="100" y="1078" width="1600" height="22" rx="6" fill="none" stroke="rgba(167,139,250,.4)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="900" y="1094" font-size="9" fill="#a78bfa" text-anchor="middle">agent_checkpoints 表：form_token 一次性消费（pending→used 原子）｜ 30min 过期 ｜ plan JSON 存方案 + _regenCount/_clarifyCount/_sessionAssets（重启恢复）</text>
+</svg>
+<div class="card-grid">
+  <div class="card">
+    <h3>★ 切链出口（P3 核心能力）</h3>
+    <p>任意卡片处提交 <b>customText</b> → 意图识别 → 若意图 ≠ 当前链（cpIntent 推导）→ <b>switch_to_run</b> → 回 intent_recognize 重新分发。用户中途改话题（如分镜链里说「我要生成图片」）不再被卡死在当前链。识别为同一链的输入（如调整意见）按原卡片语义处理。</p>
+  </div>
+  <div class="card">
+    <h3>状态恢复（P4）</h3>
+    <p>会话级计数 <b>_regenCount（不满意轮数）/ _clarifyCount（追问次数）/ _sessionAssets（本轮资产）</b>随 checkpoint.plan 落库，resume 时恢复——重启后上限判定与资产接力不丢。Graph 的 OverAllState 只存可序列化业务数据（SseEmitter 走外部注册表，防序列化克隆失效）。</p>
+  </div>
+  <div class="card">
+    <h3>SSE 事件协议（前端零改动）</h3>
+    <p><span class="tag" style="background:rgba(34,211,238,.15);color:#22d3ee">workflow</span>节点进度 <span class="tag" style="background:rgba(251,146,60,.2);color:#fb923c">message</span>打字机增量 <span class="tag" style="background:rgba(251,191,36,.15);color:#fbbf24">human_input</span>HITL 卡片 <span class="tag" style="background:rgba(167,139,250,.2);color:#a78bfa">task_accepted</span>视频异步受理 <span class="tag" style="background:rgba(251,113,133,.2);color:#fb7185">message_end / error</span>收尾。锁竞态：complete 由调用方统一执行（先释放锁再 complete）。</p>
+  </div>
+</div>
+</body>
+</html>
