@@ -4,6 +4,7 @@ import { VideoPresetSelector, resolveVideoPreset } from '../common/VideoPresetSe
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { IMAGE_SIZES, IMAGE_QUALITIES, type ImageModelParams } from '../../config';
 import SpecularButton from '../SpecularButton';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -146,7 +147,7 @@ export function ScriptInputPanel() {
             letterSpacing: 2,
           }}
         >
-          剧本输入 ▶
+          剧本输入 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </span>
       </div>
     );
@@ -191,27 +192,22 @@ export function ScriptInputPanel() {
             lineHeight: 1,
           }}
         >
-          ◀
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
       </div>
 
       {/* ═══════════ 剧本输入区域 ═══════════ */}
-      <div style={sectionHeaderStyle}>📝 剧本输入</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg> 剧本输入</div>
 
       {/* Creation type */}
       <div>
         <label style={labelStyle}>创作类型</label>
-        <select
-          value={creationType}
-          onChange={(e) => setCreationType(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {creationTypes.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
+        <Select value={creationType} onValueChange={(v) => v && setCreationType(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {creationTypes.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Custom type description (only when custom selected) */}
@@ -263,74 +259,66 @@ export function ScriptInputPanel() {
       </div>
 
       {/* ═══════════ 生图区域 ═══════════ */}
-      <div style={sectionHeaderStyle}>🎨 生图设置</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg> 生图设置</div>
 
       <div>
         <label style={labelStyle}>生图模型</label>
-        <select
-          value={imageModel}
-          onChange={(e) => {
-            const m = e.target.value;
+        <Select value={imageModel} onValueChange={(m) => {
+            if (!m) return;
             setImageModel(m);
-            // 切换模型：按新模型参数能力重置悬空值（尺寸/质量默认值，数量取 n 默认）
             const p = imageModelOptions.find((o) => o.value === m)?.params as ImageModelParams | undefined;
             if (p?.sizes?.length) setImageSize(p.sizeDefault && p.sizes.includes(p.sizeDefault) ? p.sizeDefault : p.sizes[0]);
             if (p?.qualities?.length) setImageQuality(p.qualityDefault && p.qualities.includes(p.qualityDefault) ? p.qualityDefault : p.qualities[0]);
             if (p?.n) setImageN(p.n.default ?? p.n.min ?? 1);
-          }}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {imageModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+          }}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {imageModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       <div>
         <label style={labelStyle}>生图尺寸</label>
-        <select
-          value={imageSize}
-          onChange={(e) => setImageSize(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <Select value={imageSize} onValueChange={(v) => v && setImageSize(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {sizeOptions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       <div>
         <label style={labelStyle}>生图质量</label>
-        <select
-          value={imageQuality}
-          onChange={(e) => setImageQuality(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {qualityOptions.map(q => <option key={q} value={q}>{q}</option>)}
-        </select>
+        <Select value={imageQuality} onValueChange={(v) => v && setImageQuality(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {qualityOptions.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       {/* 数量控件：仅当前模型 params 配置了 n 能力时渲染（min..max 范围，默认 n.default） */}
       {nRange && (
         <div>
           <label style={labelStyle}>生成数量</label>
-          <select
-            value={imageN}
-            onChange={(e) => setImageN(Number(e.target.value))}
-            style={{ ...sharedInputStyle, cursor: 'pointer' }}
-          >
-            {nOptions.map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
+          <Select value={String(imageN)} onValueChange={(v) => { if (v) setImageN(Number(v)); }}>
+            <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {nOptions.map((v) => <SelectItem key={v} value={String(v)}>{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       )}
 
       {/* ═══════════ 生视频区域 ═══════════ */}
-      <div style={sectionHeaderStyle}>🎬 生视频设置</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 生视频设置</div>
 
       <div>
         <label style={labelStyle}>生视频模型</label>
-        <select
-          value={videoModel}
-          onChange={(e) => setVideoModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {videoModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+        <Select value={videoModel} onValueChange={(v) => v && setVideoModel(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {videoModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Video preset — duration + aspect ratio */}

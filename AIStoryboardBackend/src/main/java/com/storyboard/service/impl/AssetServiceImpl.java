@@ -11,7 +11,7 @@ import com.storyboard.entity.AssetImage;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
-import com.storyboard.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.AssetImageMapper;
 import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;

@@ -9,15 +9,29 @@ import { ToastContainer } from '../components/common/Toast';
 import { AgentFab } from '../components/agent/AgentFab';
 import { AgentDrawer } from '../components/agent/AgentDrawer';
 import { TaskFab } from '../components/common/TaskFab';
+import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
+import { MobileSceneList } from '../components/editor/MobileSceneList';
+import { MobileScenePreview } from '../components/editor/MobileScenePreview';
+import { ScriptInputDrawer } from '../components/editor/ScriptInputDrawer';
+import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
+import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
 
 export function EditorPage() {
-  const { loadProjects, checkDraft, loadProject, fetchAiModels, createProject } = useProjectStore();
+  const { loadProjects, checkDraft, loadProject, fetchAiModels, createProject, selectScene } = useProjectStore();
+  const isMobile = useIsMobile();
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [draftProject, setDraftProject] = useState<ProjectResponse | null>(null);
   const [middleWidth, setMiddleWidth] = useState(380);
+  // 手机端状态
+  const [mobileView, setMobileView] = useState<'list' | 'preview'>('list');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -92,6 +106,56 @@ export function EditorPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [middleWidth]);
 
+  const logout = useAuthStore((s) => s.logout);
+
+  /* ═══════════════ 手机端布局（≤768px）═══════════════ */
+  if (isMobile) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
+        <MobileEditorHeader onMenuClick={() => setSidebarOpen(true)} onScript={() => setScriptOpen(true)} />
+
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {mobileView === 'list' ? (
+            <MobileSceneList onSelectScene={(id) => { selectScene(id); setMobileView('preview'); }} />
+          ) : (
+            <MobileScenePreview onBack={() => setMobileView('list')} />
+          )}
+        </div>
+
+        <MobileBottomNav onOpenAssets={() => setAssetsOpen(true)} />
+
+        {/* 侧栏 overlay（复用 /chat） */}
+        {sidebarOpen && (
+          <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.35)' }}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              position: 'absolute', top: 0, left: 0, bottom: 0,
+              width: '80vw', maxWidth: 320, background: 'var(--color-surface-soft)',
+              display: 'flex', flexDirection: 'column',
+              boxShadow: '4px 0 24px rgba(0,0,0,0.12)',
+              animation: 'mobileSlideIn 0.25s ease-out',
+            }}>
+              <MobileSidebarContent
+                onSelectConversation={() => {}} // /editor 无会话操作
+                onClose={() => setSidebarOpen(false)}
+                onOpenSettings={() => setSidebarOpen(false)}
+                onOpenAssets={() => { setAssetsOpen(true); setSidebarOpen(false); }}
+                onNavigate={(path) => { window.location.href = path; setSidebarOpen(false); }}
+                logout={logout}
+              />
+            </div>
+            <style>{`@keyframes mobileSlideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }`}</style>
+          </div>
+        )}
+
+        {scriptOpen && <ScriptInputDrawer onClose={() => setScriptOpen(false)} />}
+        {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
+        <ToastContainer />
+        <GenerationProgress />
+      </div>
+    );
+  }
+
+  /* ═══════════════ 桌面端布局（>768px）═══════════════ */
   return (
     <div
       style={{

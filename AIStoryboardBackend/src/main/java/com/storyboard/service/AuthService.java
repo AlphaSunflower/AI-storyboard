@@ -3,7 +3,7 @@ package com.storyboard.service;
 import com.storyboard.dto.request.LoginRequest;
 import com.storyboard.dto.request.RegisterRequest;
 import com.storyboard.dto.request.UnloginRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.LoginResponse;
 
 import java.util.Map;

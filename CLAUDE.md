@@ -26,17 +26,21 @@ From `claude/DESIGN.md` — Anthropic-inspired warm editorial:
 
 ```
 AI-storyboard/
-├── AIStoryboardBackend/          # Spring Boot backend
+├── CommonCore/                   # 公共模块（独立 jar，本地 install：com.storyboard:common-core:0.1.0）
+│   └── src/main/java/com/storyboard/common/   # ApiResponse / BusinessException / GlobalExceptionHandler / MultipartBuilder
+│                                              # 网关（AILLMGateway）保留自有契约（code=0 无 timestamp），不引用
+├── AIStoryboardBackend/          # Spring Boot 后端
 │   └── src/main/java/com/storyboard/
 │       ├── controller/           # REST controllers
-│       ├── service/              # Business logic
-│       │   └── ai/               # AI generation services
+│       ├── service/              # 业务逻辑
+│       ├── ai/                   # AI 生成服务（原 service/ai）
+│       │   └── impl/             # AI 服务实现
 │       ├── entity/               # JPA entities
 │       ├── dto/                  # Request/Response DTOs
 │       ├── mapper/               # MyBatis-Plus mappers
 │       ├── config/               # Security, CORS, MyBatis config
 │       ├── security/             # JWT provider, filters, scrypt
-│       └── exception/            # Global exception handler
+│       └── exception/            # 网关/本地异常（GlobalExceptionHandler 已抽公共）
 ├── AIStoryboardClient/           # React frontend
 │   └── src/
 │       ├── pages/                # EditorPage, LoginPage
@@ -316,7 +320,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 ### Spring AI 2.0 编排（2026-08-11 迁移，替代 Dify；2026-08-11 二次重构：策略注册 + HITL 模板）
 
 - **编排器**：`AgentOrchestratorImpl` 瘦身为**纯分发器**（策略模式注册）：`run()` = 意图识别（规则前置 → LLM + confidence → 阈值判断）→ 按 intentType 查 `Map<String, IntentHandler>` 分发；`resume()` = checkpoint 校验+一次性消费 → 按提交 action 查 handler 恢复。处理器注册表由 Spring 自动收集（`List<IntentHandler>` + `@PostConstruct buildRegistry`），**新增意图 = 新实现类 + @Component，核心零改动**。resume 分发前 `request.setAction(action)` 透传提交的选项 id；**动态选项卡片**（选项 id 由 LLM/场景生成，不进 byAction 注册表）按 checkpoint action 特判转对应 handler：`intent-clarify`（意图澄清）/ `clarify-option`（gate 澄清）/ `scene-mode`（分镜处理方式）/ `scene-regenerate`（分镜调整意见）
-- **处理器**（`service/agent/handler/` 包）：`IntentHandler` 接口（intentType/resumeActions/handle/resume）+ `OrchestrationRequest` 上下文（含 per-request lastMessage，修复多会话并发互踩）+ `AgentOrchestratorSupport` 共享组件（SSE 发送/checkpoint 落库/LLM 调用/瞬态重试）+ 4 个实现：AisplitIntentHandler / PicIntentHandler / VideoIntentHandler / OtherIntentHandler
+- **处理器**（`ai/agent/handler/` 包）：`IntentHandler` 接口（intentType/resumeActions/handle/resume）+ `OrchestrationRequest` 上下文（含 per-request lastMessage，修复多会话并发互踩）+ `AgentOrchestratorSupport` 共享组件（SSE 发送/checkpoint 落库/LLM 调用/瞬态重试）+ 4 个实现：AisplitIntentHandler / PicIntentHandler / VideoIntentHandler / OtherIntentHandler
 - **HITLStage 通用模板**：`runHITLStage`（workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件）+ `resumeStage`（workflow → 结果消息 → confirm_result → message_end）；三链只填「方案生成逻辑」与「执行工具」两个钩子（StagePlan record 承载差异），HITL/checkpoint/resume 全复用
 - **意图识别增强**：规则前置匹配（强关键词如「分镜/剧本」「生成视频」「生成图片」直接路由，免一次 LLM 调用，confidence=1.0）+ LLM 输出 JSON `{type, confidence}`；**低于 `ai.agent.intent-threshold`（默认 0.6）不硬路由，走澄清分支**；失败兜底 intent-other；LLM 调用瞬态失败（429/5xx/超时）重试 1 次（流式与 writeScenes 刻意不重试——非幂等/重复 delta）
 - **意图路由（决策 4，2026-08-11 全链实现）**：
@@ -385,8 +389,8 @@ cd AIStoryboardClient && npx tsc -p tsconfig.app.json --noEmit && npm run build
 
 - **Backend 分层规范（2026-08-11 重构，严格执行）**：
   - Controller 层：只做接收参数、参数校验、调用 Service、封装 `ApiResponse`，**禁止任何业务逻辑**（不持有 HttpClient/Mapper/对象组装）
-  - Service 层：必须「接口 `XxxService` + 实现 `XxxServiceImpl`」，接口在 `service` / `service/agent` / `service/ai` 原路径，Impl 在对应 `impl/` 子包；接口只放 public 方法 + 中文 javadoc，私有方法/常量/内部 record 留 Impl
-  - 依赖注入：lombok `@RequiredArgsConstructor`（final 字段），禁止字段 `@Autowired`、禁止手写构造器（例外：`AiConfigProperties` 构造器 `@Autowired` 是 SB4 配置绑定需要，保留）
+  - Service 层：必须「接口 `XxxService` + 实现 `XxxServiceImpl`」，接口在 `service` / `ai` / `ai/agent` 原路径，Impl 在对应 `impl/` 子包；接口只放 public 方法 + 中文 javadoc，私有方法/常量/内部 record 留 Impl
+  - 依赖注入：lombok `@RequiredArgsConstructor`（final 字段），禁止字段 `@Autowired`、禁止手写构造器（例外：`AiConfigProperties` 构造器 `@Autowired` 是 SB4 配置绑定需要，保留；`JwtTokenProvider` 用 `@RequiredArgsConstructor(onConstructor_ = @Autowired)`——多构造器歧义消解，测试构造器不标注）
   - Mapper 层：`mapper/` 包独立隔离，Service 通过 Mapper 访问数据，Controller 禁止直接注入 Mapper
   - DTO/VO：前端参数一律 `dto/request` 的 record 接收；返回一律 `dto/response` 的 VO/record，**禁止 Controller 直接返回 entity**（例外：生成类接口返回 `Map<String,String>` 属数据封装，可接受）
   - 单文件单类：嵌套 record 若被接口方法签名引用，提取为同包顶层类

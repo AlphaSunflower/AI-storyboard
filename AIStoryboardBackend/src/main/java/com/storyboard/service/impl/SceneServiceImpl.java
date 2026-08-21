@@ -6,7 +6,7 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneReferenceImage;
-import com.storyboard.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.FileStorageService;
@@ -101,6 +101,30 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
         sceneMapper.deleteById(sceneId);
+    }
+
+    @Override
+    @Transactional
+    public void reorderScenes(String projectId, List<String> sceneIds) {
+        // 校验：sceneIds 不能为空
+        if (sceneIds == null || sceneIds.isEmpty()) {
+            throw new BusinessException(40001, "排序列表不能为空");
+        }
+        // 校验：sceneIds 必须属于该项目
+        List<Scene> existing = sceneMapper.findByProjectIdOrdered(projectId);
+        if (existing.size() != sceneIds.size()) {
+            throw new BusinessException(40001, "排序列表数量与项目分镜数量不一致");
+        }
+        java.util.Set<String> existingIds = existing.stream().map(Scene::getId).collect(java.util.stream.Collectors.toSet());
+        for (String id : sceneIds) {
+            if (!existingIds.contains(id)) {
+                throw new BusinessException(40001, "分镜 " + id + " 不属于该项目");
+            }
+        }
+        // 批量更新 scene_number（1-based）
+        for (int i = 0; i < sceneIds.size(); i++) {
+            sceneMapper.updateSceneNumber(sceneIds.get(i), i + 1);
+        }
     }
 
     @Override

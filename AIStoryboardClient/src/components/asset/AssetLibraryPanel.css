@@ -11,3 +11,11 @@
   border-color: var(--color-primary) !important;
   background: var(--color-surface-card);
 }
+
+/* ── 手机端适配（≤768px）────────────────────────────── */
+@media (max-width: 768px) {
+  .asset-row:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}

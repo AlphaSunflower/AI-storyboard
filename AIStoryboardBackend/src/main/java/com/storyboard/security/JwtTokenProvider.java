@@ -3,6 +3,8 @@ package com.storyboard.security;
 import com.storyboard.config.JwtConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -14,17 +16,20 @@ import java.util.UUID;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class JwtTokenProvider {
 
-    private final SecretKey accessKey;
-    private final SecretKey refreshKey;
-    private final String issuer;
-    private final long accessTokenTtl;
-    private final long refreshTokenTtl;
+    private final JwtConfig config;
 
-    @Autowired
-    public JwtTokenProvider(JwtConfig config) {
+    private SecretKey accessKey;
+    private SecretKey refreshKey;
+    private String issuer;
+    private long accessTokenTtl;
+    private long refreshTokenTtl;
 
+    /** 构造器注入后派生密钥/参数（final 字段需构造器赋值，派生逻辑放 PostConstruct） */
+    @PostConstruct
+    void init() {
         this.accessKey = new SecretKeySpec(config.getAccessSecret().getBytes(), "HmacSHA256");
         this.refreshKey = new SecretKeySpec(config.getRefreshSecret().getBytes(), "HmacSHA256");
         this.issuer = config.getIssuer();
@@ -37,6 +42,7 @@ public class JwtTokenProvider {
      */
     JwtTokenProvider(String accessSecret, String refreshSecret, String issuer,
                      long accessTokenTtl, long refreshTokenTtl) {
+        this.config = null; // 测试直传密钥，不走 Spring 注入
         this.accessKey = new SecretKeySpec(accessSecret.getBytes(), "HmacSHA256");
         this.refreshKey = new SecretKeySpec(refreshSecret.getBytes(), "HmacSHA256");
         this.issuer = issuer;

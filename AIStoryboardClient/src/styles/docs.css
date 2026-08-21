@@ -415,3 +415,42 @@
     display: none;
   }
 }
+
+/* ── 手机端增强（≤480px）────────────────────────────── */
+@media (max-width: 480px) {
+  .docs-nav {
+    height: 52px;
+    padding: 0 12px;
+  }
+  .docs-nav__brand {
+    font-size: 18px;
+  }
+  .docs-hero {
+    padding: 48px 16px 36px;
+  }
+  .docs-container {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .docs-section {
+    padding: 24px 0;
+  }
+  .docs-mock {
+    font-size: 11px;
+  }
+}
+
+/* ── 手机端卡片缩小 ────────────────────────────────── */
+@media (max-width: 480px) {
+  .docs-mock {
+    font-size: 10px;
+    border-radius: 8px;
+  }
+  .docs-mock > div:first-child {
+    padding: 6px 10px;
+  }
+  .docs-mock > div:last-child {
+    padding: 8px 10px;
+    font-size: 10px;
+  }
+}

@@ -8,7 +8,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 
 /**
- * 分镜服务接口：分镜列表、新增、更新、删除、参考素材管理。
+ * 分镜服务接口：分镜列表、新增、更新、删除、排序、参考素材管理。
  */
 public interface SceneService {
 
@@ -23,6 +23,9 @@ public interface SceneService {
 
     /** 删除分镜（不存在抛 40401）。 */
     void deleteScene(String sceneId);
+
+    /** 批量重排分镜（按传入 ID 顺序重新编号）。 */
+    void reorderScenes(String projectId, List<String> sceneIds);
 
     /** 分镜参考素材列表（按 sort_order）。 */
     List<SceneReferenceResponse> listReferences(String sceneId);

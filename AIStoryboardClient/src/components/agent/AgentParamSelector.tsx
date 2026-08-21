@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { GatewayModelOption } from '../../api/ai';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 
 /**
  * 卡片生成参数选择器（human_input / video_plan 卡片复用）：
@@ -118,25 +119,23 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>模型</span>
-          <select value={model} onChange={(e) => setModel(e.target.value)} style={selectStyle}>
-            {models.map((m) => (
-              <option key={m.value} value={m.value}>{m.label || m.value}</option>
-            ))}
-          </select>
+          <Select value={model} onValueChange={(v) => v && setModel(v)}>
+            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {models.map((m) => <SelectItem key={m.value} value={m.value}>{m.label || m.value}</SelectItem>)}
+            </SelectContent>
+          </Select>
           {reasons[keyPrefix + 'model'] && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>{reasons[keyPrefix + 'model']}</span>}
         </div>
         {visibleMeta.map((meta) => (
           <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>{meta.label}</span>
-            <select
-              value={selected[keyPrefix + meta.key] ?? ''}
-              onChange={(e) => setSelected((s) => ({ ...s, [keyPrefix + meta.key]: e.target.value }))}
-              style={selectStyle}
-            >
-              {paramLists[meta.key].options.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
+            <Select value={selected[keyPrefix + meta.key] ?? ''} onValueChange={(v) => v && setSelected((s) => ({ ...s, [keyPrefix + meta.key]: v }))}>
+              <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {paramLists[meta.key].options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+              </SelectContent>
+            </Select>
             {reasons[keyPrefix + meta.key] && (
               <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reasons[keyPrefix + meta.key]}</span>
             )}

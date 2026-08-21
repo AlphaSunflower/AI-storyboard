@@ -91,11 +91,36 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
   });
 }
 
-export function MessageBubble({ role, content, streaming }: { role: 'user' | 'assistant'; content: string; streaming?: boolean }) {
+/** 消息时间格式化：今天 → HH:MM；跨天 → MM-DD HH:MM */
+function formatTime(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const today = new Date();
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  if (sameDay) return `${hh}:${mm}`;
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`;
+}
+
+export function MessageBubble({ role, content, streaming, variant = 'default', createdAt }: {
+  role: 'user' | 'assistant'; content: string; streaming?: boolean;
+  variant?: 'default' | 'deepseek'; createdAt?: string;
+}) {
   const isUser = role === 'user';
+  const ds = variant === 'deepseek';
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => { /* 剪贴板不可用时静默 */ });
+  };
 
   // 新消息入场：从下往上轻微浮入（仅挂载时播放一次）
   useGSAP(() => {
@@ -115,21 +140,36 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
 
   return (
     <>
-    <div ref={bubbleRef} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
+    <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       <div
-        style={{
-          maxWidth: '82%',
-          padding: '8px 12px',
-          borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-          background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
-          color: isUser ? 'white' : 'var(--color-body)',
-          fontSize: 13,
-          lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
-          textAlign: 'left',
-        }}
+        style={ds
+          ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
+            {
+              maxWidth: isUser ? 'min(525px, 82%)' : '100%',
+              padding: isUser ? '10px 16px' : 0,
+              borderRadius: isUser ? 22 : 0,
+              background: isUser ? 'rgb(237, 243, 254)' : 'transparent',
+              color: 'rgb(15, 17, 21)',
+              fontSize: 16,
+              lineHeight: 1.6,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              textAlign: 'left',
+            }
+          : {
+              maxWidth: '82%',
+              padding: '12px 18px',
+              borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+              background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
+              color: isUser ? 'white' : 'var(--color-body)',
+              // 抽屉空间有限,正文 15px(全局 16px 偏大)
+              fontSize: 15,
+              lineHeight: 1.7,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
+              textAlign: 'left',
+            }}
       >
         {content ? renderContent(content, setPreviewUrl) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
@@ -137,16 +177,38 @@ export function MessageBubble({ role, content, streaming }: { role: 'user' | 'as
           <span
             style={{
               display: 'inline-block',
-              width: 2, height: 13,
+              width: 2, height: 16,
               marginLeft: 2,
               verticalAlign: 'text-bottom',
-              background: isUser ? 'white' : 'var(--color-primary)',
+              background: isUser ? (ds ? 'rgb(65, 118, 230)' : 'white') : (ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'),
               animation: 'typeCursor 1s steps(1) infinite',
             }}
           />
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
+      {/* 消息 meta 行：时间 + 复制，直接常显 */}
+      {!streaming && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
+            padding: ds ? '0 2px' : '0 4px',
+          }}
+        >
+          <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
+            {formatTime(createdAt)}
+          </span>
+          <button
+            onClick={handleCopy}
+            title="复制内容"
+            style={{
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
+              color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
+            }}
+          >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+        </div>
+      )}
     </div>
     <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </>

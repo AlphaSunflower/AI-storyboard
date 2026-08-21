@@ -1,6 +1,6 @@
 package com.storyboard.controller;
 
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;

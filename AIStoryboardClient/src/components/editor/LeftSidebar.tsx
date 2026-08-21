@@ -4,6 +4,7 @@ import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { REFERENCE_LIMITS, type UnderstandingModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -44,6 +45,9 @@ const sectionHeaderStyle: React.CSSProperties = {
   letterSpacing: '.5px',
   paddingTop: 4,
   borderTop: '1px solid var(--color-hairline)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
 };
 
 export function LeftSidebar() {
@@ -157,7 +161,7 @@ export function LeftSidebar() {
             letterSpacing: 2,
           }}
         >
-          菜单 ▶
+          菜单 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </span>
       </div>
     );
@@ -203,7 +207,7 @@ export function LeftSidebar() {
             lineHeight: 1,
           }}
         >
-          ◀
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
       </div>
 
@@ -212,17 +216,12 @@ export function LeftSidebar() {
       {/* Creation type */}
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>创作类型</label>
-        <select
-          value={creationType}
-          onChange={(e) => setCreationType(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {creationTypes.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
+        <Select value={creationType} onValueChange={(v) => v && setCreationType(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {creationTypes.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Custom type description (only when custom selected) */}
@@ -266,8 +265,8 @@ export function LeftSidebar() {
           border: '1px dashed var(--color-hairline)', cursor: 'pointer',
           background: 'var(--color-canvas)',
         }} onClick={() => fileInputRef.current?.click()}>
-          <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
-            📎 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
+          <span style={{ fontSize: 11, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg> 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
           </span>
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleRefImages} />
@@ -305,45 +304,42 @@ export function LeftSidebar() {
       </div>
 
       {/* ═══════════ 生图区域（只保留模型）═══════════ */}
-      <div style={sectionHeaderStyle}>🎨 生图设置</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg> 生图设置</div>
 
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>生图模型</label>
-        <select
-          value={imageModel}
-          onChange={(e) => setImageModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {imageModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+        <Select value={imageModel} onValueChange={(v) => v && setImageModel(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {imageModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ═══════════ 生视频区域（只保留模型）═══════════ */}
-      <div style={sectionHeaderStyle}>🎬 生视频设置</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 生视频设置</div>
 
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>生视频模型</label>
-        <select
-          value={videoModel}
-          onChange={(e) => setVideoModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {videoModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+        <Select value={videoModel} onValueChange={(v) => v && setVideoModel(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {videoModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ═══════════ 理解设置 ═══════════ */}
-      <div style={sectionHeaderStyle}>🧠 理解设置</div>
+      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A5.5 5.5 0 004 7.5c0 1.1.4 2.2 1 3.1A5.48 5.48 0 004 14a5.5 5.5 0 004.5 5.4V22h3v-2.6A5.5 5.5 0 0020 14c0-1.3-.5-2.6-1.3-3.5.7-.9 1.1-2 1.1-3.2A5.5 5.5 0 0014.5 2h-5z"/><path d="M12 2v20"/></svg> 理解设置</div>
 
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>理解模型</label>
-        <select
-          value={understandingModel}
-          onChange={(e) => setUnderstandingModel(e.target.value)}
-          style={{ ...sharedInputStyle, cursor: 'pointer' }}
-        >
-          {understandingModelOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+        <Select value={understandingModel} onValueChange={(v) => v && setUnderstandingModel(v)}>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {understandingModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Generate button */}

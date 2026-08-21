@@ -140,6 +140,10 @@ export const agentApi = {
   // 视频异步任务状态（task_accepted 后前端 5s 轮询，取 status/url/error）
   getVideoTaskStatus: (taskId: string) =>
     client.get<{ data: VideoTaskStatus }>(`/agent/tasks/${taskId}`),
+
+  // 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）
+  getPendingCheckpoint: (conversationId: string) =>
+    client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
 };
 
 /** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */

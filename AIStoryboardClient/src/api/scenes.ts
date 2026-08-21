@@ -8,6 +8,9 @@ export const sceneApi = {
   update: (id: string, data: Record<string, unknown>) =>
     client.put<ApiResponse<SceneResponse>>(`/scenes/${id}`, data),
   delete: (id: string) => client.delete(`/scenes/${id}`),
+  /** 批量重排分镜顺序 */
+  reorder: (projectId: string, sceneIds: string[]) =>
+    client.put<ApiResponse<void>>(`/projects/${projectId}/scenes/reorder`, { sceneIds }),
   // 参考素材（图/视频/音频）
   listReferences: (sceneId: string) =>
     client.get<ApiResponse<SceneReferenceAsset[]>>(`/scenes/${sceneId}/references`),

@@ -6,7 +6,7 @@ import com.storyboard.dto.response.ProjectResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
-import com.storyboard.exception.BusinessException;
+import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.ProjectService;

@@ -17,6 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
+        <spring-cloud.version>2025.1.0</spring-cloud.version>
     </properties>
 
     <dependencyManagement>
@@ -25,6 +26,13 @@
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
                 <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -76,6 +84,12 @@
             <version>0.12.6</version>
             <scope>runtime</scope>
         </dependency>
+        <!-- Swagger UI / OpenAPI 文档（本地自文档化；prod 由 springdoc.enabled=false 关闭） -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.1.0</version>
+        </dependency>
         <dependency>
             <groupId>com.lambdaworks</groupId>
             <artifactId>scrypt</artifactId>
@@ -107,6 +121,25 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!-- StringSubstitutor（提示词 {{var}} 占位符替换） -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.12.0</version>
+        </dependency>
+        <!-- Nacos 服务发现 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+            <version>2025.1.0.0</version>
+        </dependency>
+
+        <!-- 公共模块（统一返回体/业务异常/全局异常处理/工具类） -->
+        <dependency>
+            <groupId>com.storyboard</groupId>
+            <artifactId>common-core</artifactId>
+            <version>0.1.0</version>
         </dependency>
     </dependencies>
 

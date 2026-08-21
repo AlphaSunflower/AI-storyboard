@@ -1,6 +1,6 @@
 package com.storyboard.config;
 
-import com.storyboard.service.ai.AiConfigProperties;
+import com.storyboard.ai.AiConfigProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;

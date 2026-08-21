@@ -1,7 +1,8 @@
 package com.storyboard.controller;
 
+import com.storyboard.dto.request.ReorderScenesRequest;
 import com.storyboard.dto.request.SceneRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.service.SceneService;
@@ -12,7 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 
 /**
- * 分镜端点：新增 / 更新 / 删除 / 参考素材（列表由 ProjectController 随项目返回）。
+ * 分镜端点：新增 / 更新 / 删除 / 排序 / 参考素材（列表由 ProjectController 随项目返回）。
  */
 @RestController
 @RequestMapping("/api")
@@ -35,6 +36,13 @@ public class SceneController {
     public ApiResponse<Void> delete(@PathVariable String id) {
         sceneService.deleteScene(id);
         return ApiResponse.ok("删除成功", null);
+    }
+
+    /** 批量重排分镜顺序。 */
+    @PutMapping("/projects/{projectId}/scenes/reorder")
+    public ApiResponse<Void> reorder(@PathVariable String projectId, @RequestBody ReorderScenesRequest request) {
+        sceneService.reorderScenes(projectId, request.sceneIds());
+        return ApiResponse.ok("排序成功", null);
     }
 
     /** 参考素材列表（type: image/video/audio）。 */

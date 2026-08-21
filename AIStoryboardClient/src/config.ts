@@ -2,7 +2,7 @@
  * 前端共享配置。
  *
  * BACKEND_URL — 后端基础地址。
- *   开发环境：Vite 代理将 /api 转发到 localhost:8082，设为空字符串。
+ *   开发环境：Vite 代理将 /api 转发到 localhost:8080，设为空字符串。
  *             （配置在 .env.development + vite.config.ts server.proxy）
  *   生产环境：前后端同域部署，设为空字符串（相对路径）。
  *   可通过 VITE_API_BASE_URL 环境变量覆盖（见 .env.development / .env.production）。
@@ -11,7 +11,7 @@
  */
 
 export const BACKEND_URL: string =
-  (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://localhost:8082';
+  (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
 // Dify 平台地址：工作流工具生成的文件（图片/视频）URL 是 /files/tools/ 相对路径，
 // 需拼 Dify base 才能访问；默认与后端 DIFY_BASE_URL 一致（本机 80 端口）

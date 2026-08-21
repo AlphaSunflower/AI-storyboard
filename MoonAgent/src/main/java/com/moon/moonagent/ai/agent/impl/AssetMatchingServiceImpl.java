@@ -1,0 +1,133 @@
+package com.moon.moonagent.ai.agent.impl;
+
+import com.moon.moonagent.dto.response.AssetVO;
+import com.moon.moonagent.ai.agent.AssetMatchingService;
+import com.moon.moonagent.ai.agent.AssetRelevanceResult;
+import com.moon.moonagent.ai.agent.SceneAssetMatch;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import com.moon.moonagent.ai.GatewayModelService;
+
+/**
+ * 资产判定服务实现：ChatClient 走 LLM 网关（对话模型从网关动态获取，超时 120s），
+ * 结构化输出用纯解析（不发 response_format，规避网关不兼容）。
+ *
+ * <p>降级语义：LLM 调用/解析失败 → judgeRelevance 返回「相关」（门禁放行，不阻塞生成）、
+ * matchScenes 返回空列表（不自动关联，分镜照常）——资产联动是增强，不是生成前置条件。
+ */
+@Service
+@RequiredArgsConstructor
+public class AssetMatchingServiceImpl implements AssetMatchingService {
+
+    private static final Logger log = LoggerFactory.getLogger(AssetMatchingServiceImpl.class);
+
+    /** 关联性判定结构化输出 */
+    public record RelevanceOutput(boolean relevant, String reason) {}
+
+    /** 分镜关联结构化输出（sceneNumber 与输入分镜列表的分镜号对齐） */
+    public record MatchOutput(List<SceneItem> scenes) {
+        public record SceneItem(int sceneNumber, List<String> assetIds) {}
+    }
+
+    private final ChatClient.Builder chatClientBuilder;
+    private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
+
+    /** 懒加载 ChatClient（复用网关默认对话模型，超时 120s） */
+    private volatile ChatClient chatClient;
+
+    @Override
+    public AssetRelevanceResult judgeRelevance(String prompt, List<AssetVO> assets) {
+        if (prompt == null || prompt.isBlank() || assets == null || assets.isEmpty()) {
+            return new AssetRelevanceResult(true, "");
+        }
+        try {
+            String raw = chatClient().prompt()
+                    .system(promptConfig.get("services/asset-matching"))
+                    .user("用户勾选的资产：\n" + assetSheetText(assets)
+                            + "\n\n用户提示词（含上下文）：\n" + prompt)
+                    .call()
+                    .content();
+            RelevanceOutput out = new BeanOutputConverter<>(RelevanceOutput.class).convert(raw);
+            if (out == null) return new AssetRelevanceResult(true, "");
+            return new AssetRelevanceResult(out.relevant(), out.reason() == null ? "" : out.reason());
+        } catch (Exception e) {
+            log.warn("关联性判定 LLM 调用失败，按相关放行: {}", e.getMessage());
+            return new AssetRelevanceResult(true, "");
+        }
+    }
+
+    @Override
+    public List<SceneAssetMatch> matchScenes(List<Map<String, Object>> scenes, List<AssetVO> assets) {
+        if (scenes == null || scenes.isEmpty() || assets == null || assets.isEmpty()) return List.of();
+        try {
+            StringBuilder sceneText = new StringBuilder();
+            for (int i = 0; i < scenes.size(); i++) {
+                Object n = scenes.get(i).get("sceneNumber");
+                Object c = scenes.get(i).get("scriptContent");
+                sceneText.append(i + 1).append(". [分镜").append(n == null ? i + 1 : n)
+                        .append("] ").append(c == null ? "" : c).append("\n");
+            }
+            String raw = chatClient().prompt()
+                    .system(promptConfig.get("services/scene-asset-matching"))
+                    .user("资产清单：\n" + assetSheetText(assets)
+                            + "\n\n分镜列表：\n" + sceneText)
+                    .call()
+                    .content();
+            MatchOutput out = new BeanOutputConverter<>(MatchOutput.class).convert(raw);
+            if (out == null || out.scenes() == null) return List.of();
+            List<SceneAssetMatch> result = new ArrayList<>();
+            for (MatchOutput.SceneItem item : out.scenes()) {
+                if (item == null || item.assetIds() == null) continue;
+                result.add(new SceneAssetMatch(item.sceneNumber(),
+                        item.assetIds().stream().filter(java.util.Objects::nonNull).toList()));
+            }
+            log.info("分镜自动关联判定完成: scenes={}, matches={}", scenes.size(), result.size());
+            return result;
+        } catch (Exception e) {
+            log.warn("分镜自动关联判定 LLM 调用失败，跳过关联: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** 资产清单文本（name/type/description/id，供 LLM 判定） */
+    private String assetSheetText(List<AssetVO> assets) {
+        StringBuilder sb = new StringBuilder();
+        for (AssetVO a : assets) {
+            sb.append("- [id=").append(a.id()).append("] 类型=").append(a.type())
+              .append(" 名称=").append(a.name());
+            if (a.description() != null && !a.description().isBlank()) {
+                sb.append("（").append(a.description().trim()).append("）");
+            }
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    /** 懒加载 ChatClient：对话模型从网关动态获取（与编排 planClient 一致），超时 120s */
+    private ChatClient chatClient() {
+        if (chatClient == null) {
+            synchronized (this) {
+                if (chatClient == null) {
+                    chatClient = chatClientBuilder
+                            .defaultOptions(OpenAiChatOptions.builder()
+                                    .model(gatewayModelService.getDefaultTextModel())
+                                    .timeout(Duration.ofSeconds(120)))
+                            .build();
+                }
+            }
+        }
+        return chatClient;
+    }
+}

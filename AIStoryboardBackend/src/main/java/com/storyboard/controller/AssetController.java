@@ -3,7 +3,7 @@ package com.storyboard.controller;
 import com.storyboard.dto.request.AssetCreateRequest;
 import com.storyboard.dto.request.AssetUpdateRequest;
 import com.storyboard.dto.request.SceneAssetsUpdateRequest;
-import com.storyboard.dto.response.ApiResponse;
+import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.SceneAssetsResponse;
