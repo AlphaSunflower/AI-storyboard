@@ -2,17 +2,22 @@ import { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
 import { SceneSelectorModal } from './SceneSelectorModal';
+import { MicButton } from './MicButton';
+import { agentApi } from '../../api/agent';
 import type { SceneResponse } from '../../api/projects';
 
-/** DeepSeek 设计 token（与 ChatPage 一致） */
+/** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局） */
 export const DS = {
   brand: 'rgb(65, 118, 230)',
-  bubble: 'rgb(237, 243, 254)',
+  brandHover: 'rgb(86, 134, 254)',
+  bubble: 'rgb(235, 240, 250)',
   ink: 'rgb(15, 17, 21)',
-  textSecondary: 'rgb(84, 85, 87)',
-  textCaption: 'rgb(162, 164, 166)',
-  border: 'rgba(0, 0, 0, 0.10)',
-  hover: 'rgba(38, 49, 72, 0.06)',
+  textSecondary: 'rgb(96, 100, 108)',
+  textCaption: 'rgb(152, 158, 168)',
+  border: 'rgba(0, 0, 0, 0.08)',
+  hover: 'rgba(65, 118, 230, 0.06)',
+  sidebarBg: '#f7f8fa',
+  maxContent: 780,
 };
 
 /**
@@ -26,6 +31,7 @@ export function ChatComposer() {
     pendingPicUrl, cancelRefine,
   } = useAgentStore();
   const [text, setText] = useState('');
+  const [sttBusy, setSttBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -75,6 +81,28 @@ export function ChatComposer() {
     e.target.value = '';
   };
 
+  // 语音识别：录音结束 → 上传 stt → 回填输入框（与 AgentChatPanel 抽屉同逻辑）
+  const handleRecorded = async (wav: Blob) => {
+    setSttBusy(true);
+    try {
+      const res = await agentApi.stt(wav);
+      const recognized = res.data?.data?.text ?? '';
+      if (recognized.trim()) {
+        setText((prev) => {
+          const base = prev.trim();
+          return base ? `${base} ${recognized}` : recognized;
+        });
+        inputRef.current?.focus();
+      } else {
+        alert('未识别到语音内容，请重试');
+      }
+    } catch {
+      alert('语音识别失败，请稍后重试');
+    } finally {
+      setSttBusy(false);
+    }
+  };
+
   const openMenu = () => {
     const btn = menuBtnRef.current;
     if (btn) {
@@ -97,7 +125,7 @@ export function ChatComposer() {
 
   return (
     <div style={{
-      width: '100%', maxWidth: 780, margin: '0 auto',
+      width: '100%', maxWidth: DS.maxContent, margin: '0 auto',
       border: `1px solid ${DS.border}`, borderRadius: 22,
       background: 'white', boxShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
@@ -187,18 +215,22 @@ export function ChatComposer() {
             document.body,
           )}
         </div>
-        <button
-          onClick={handleSend}
-          disabled={busy || !text.trim()}
-          style={{
-            height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
-            background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-            cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = 'rgb(86, 134, 254)'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-        >发送</button>
+        {/* 右侧：麦克风 + 发送，紧贴排列 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+          <MicButton onRecorded={handleRecorded} disabled={sttBusy || busy} />
+          <button
+            onClick={handleSend}
+            disabled={busy || !text.trim()}
+            style={{
+              height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
+              background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
+              cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
+          >发送</button>
+        </div>
       </div>
 
       {/* 分镜选择弹窗 */}
