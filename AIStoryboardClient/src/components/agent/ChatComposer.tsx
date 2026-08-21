@@ -81,18 +81,15 @@ export function ChatComposer() {
     e.target.value = '';
   };
 
-  // 语音识别：录音结束 → 上传 stt → 回填输入框（与 AgentChatPanel 抽屉同逻辑）
+  // 语音识别：录音结束 → stt → 直接作为消息发送（即说即发；vosk 中文词间空格已去除）
   const handleRecorded = async (wav: Blob) => {
     setSttBusy(true);
     try {
       const res = await agentApi.stt(wav);
-      const recognized = res.data?.data?.text ?? '';
+      const recognized = (res.data?.data?.text ?? '').replace(/\s+/g, '');
       if (recognized.trim()) {
-        setText((prev) => {
-          const base = prev.trim();
-          return base ? `${base} ${recognized}` : recognized;
-        });
-        inputRef.current?.focus();
+        setText('');
+        sendMessage(recognized);
       } else {
         alert('未识别到语音内容，请重试');
       }

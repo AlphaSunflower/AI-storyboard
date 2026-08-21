@@ -113,14 +113,11 @@ export function AgentChatPanel() {
     setSttBusy(true);
     try {
       const res = await agentApi.stt(wav);
-      const text = res.data?.data?.text ?? '';
+      // vosk 中文词间空格去除，即说即发（与 ChatComposer 一致）
+      const text = (res.data?.data?.text ?? '').replace(/\s+/g, '');
       if (text.trim()) {
-        // 已有内容时追加空格拼接，保持草稿完整
-        setText((prev) => {
-          const base = prev.trim();
-          return base ? `${base} ${text}` : text;
-        });
-        inputRef.current?.focus();
+        setText('');
+        sendMessage(text);
       } else {
         setStreamErrorLocal('未识别到语音内容，请重试');
       }
