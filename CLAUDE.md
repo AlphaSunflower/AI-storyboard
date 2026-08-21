@@ -60,6 +60,15 @@ AI-storyboard/
 └── claude/DESIGN.md              # Design tokens spec
 ```
 
+## Docker 部署目录（deploy/docker/）
+
+统一管理基础设施 Docker 部署（scripts/ 下有 setup/up/down/status 脚本）：
+
+- **nacos** `nacos/nacos-server:3.2.3` — standalone 服务发现（8848/9848/8850，数据卷 nacos-data）
+- **vosk** `alphacephei/vosk-server:latest` — 离线语音识别（2700，挂载 vosk-model-cn-0.22）
+
+首次部署：`./scripts/setup.sh`（下载 1.3GB 中文模型）→ `./scripts/up.sh`（自动接管旧容器）。
+
 ## Databases
 
 - **Primary**: PostgreSQL `newworkflow` (postgres/123456), shared `public.users` table
@@ -298,6 +307,7 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 | GET | `/api/agent/tasks/{taskId}` | 视频异步任务状态（前端 5s 轮询：`{taskId, assetId, status(queued/running/completed/failed), url, error}`；归属校验，未归属/无权 40401） |
 | PATCH | `/api/agent/conversations/{id}` | 重命名 title / 归档（status: `active`\|`archived`） |
 | DELETE | `/api/agent/assets/{id}` | 删除资产（未归属资产拒绝 40401） |
+| POST | `/api/agent/stt` | 语音识别（multipart `file`=WAV，16kHz 单声道）→ `{text}`；Moon 智能体语音输入，WebSocket 转发 vosk-server（`vosk.ws-url`，默认 ws://localhost:2700） |
 
 - 归属校验：`AgentChatService.getOwnedConversation(userId, id)`，所有端点复用；会话不存在与无权访问统一 40401 同文案（防 IDOR 枚举）
 - 校验错误用 `BusinessException`（40001/40301/40401），GlobalExceptionHandler 已映射对应 HTTP 状态码
