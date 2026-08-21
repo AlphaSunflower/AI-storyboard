@@ -45,7 +45,7 @@ function resampleTo16k(input: Float32Array, fromRate: number): Float32Array {
 }
 
 /** Web Audio API 麦克风音量 hook —— 返回实时音量频域数据 */
-export function useMicVolume(fftSize = 64) {
+export function useMicVolume(fftSize = 64, onPcm?: (pcm16k: Int16Array) => void) {
   const [volume, setVolume] = useState(0);
   const [isActive, setIsActive] = useState(false);
   const [freqData, setFreqData] = useState<number[]>(new Array(fftSize / 2).fill(0));
@@ -57,6 +57,9 @@ export function useMicVolume(fftSize = 64) {
   const bufRef = useRef(new Uint8Array(fftSize / 2));
   const chunksRef = useRef<Float32Array[]>([]);
   const recorderRef = useRef<ScriptProcessorNode | null>(null);
+  // onPcm 回调存 ref：MicButton 挂载后传入，避免 toggle 闭包捕获旧值
+  const onPcmRef = useRef(onPcm);
+  onPcmRef.current = onPcm;
 
   const isSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
@@ -90,7 +93,8 @@ export function useMicVolume(fftSize = 64) {
     if (isActive) { stop(); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new AudioContext();
+      // 指定 16kHz：浏览器自动重采样，ScriptProcessor 每块即 16k 采样，零手动重采样
+      const ctx = new AudioContext({ sampleRate: 16000 } as AudioContextOptions);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = fftSize;
       // 清空上一轮录音残留
@@ -100,6 +104,16 @@ export function useMicVolume(fftSize = 64) {
       recorder.onaudioprocess = (e) => {
         const ch = e.inputBuffer.getChannelData(0);
         chunksRef.current.push(new Float32Array(ch)); // 拷贝副本，避免引用同一缓冲
+        // 流式：Float32 → Int16 实时推给父组件（sttStream.push）
+        const onPcm = onPcmRef.current;
+        if (onPcm) {
+          const int16 = new Int16Array(ch.length);
+          for (let i = 0; i < ch.length; i++) {
+            const s = Math.max(-1, Math.min(1, ch[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          onPcm(int16);
+        }
       };
       const source = ctx.createMediaStreamSource(stream);
       source.connect(analyser);

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
-import { agentApi } from '../../api/agent';
+import { sttStream } from '../../api/agent';
 import type { SceneResponse } from '../../api/projects';
 
 /** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局） */
@@ -31,18 +31,45 @@ export function ChatComposer() {
     pendingPicUrl, cancelRefine,
   } = useAgentStore();
   const [text, setText] = useState('');
-  const [sttBusy, setSttBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
-  // 流式语音识别状态：麦克风快照 API + 已发送文本 + 采样定时器 + 采样中互斥
-  const micApiRef = useRef<{ getWavSnapshot: () => Promise<Blob | null> } | null>(null);
-  const sentTextRef = useRef('');
-  const micTimerRef = useRef<number | null>(null);
-  const samplingRef = useRef(false);
+  // 流式语音识别状态：活跃会话句柄
+  const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
+
+  // 实时收到识别文本 → 直接显示在输入框（打字机效果）；不发送，等用户确认
+  const handleSttPartial = useCallback((t: string) => {
+    setText(t.replace(/\s+/g, '')); // vosk 中文词间空格去除
+  }, []);
+
+  // 录音结束 → 后端 final 文本填入输入框（不发送）
+  const handleSttFinal = useCallback((t: string) => {
+    setText(t.replace(/\s+/g, ''));
+    sttRef.current = null;
+  }, []);
+
+  // 麦克风开关：开始录音 → 开流式识别会话；停止录音 → 关流（后端收 final）
+  const handleMicToggle = useCallback((active: boolean) => {
+    setRecording(active);
+    if (active) {
+      sttRef.current?.cancel();
+      setText('');
+      sttRef.current = sttStream(handleSttPartial, handleSttFinal);
+    } else {
+      sttRef.current?.close();
+    }
+  }, [handleSttPartial, handleSttFinal]);
+
+  // 实时 PCM 块 → 推给后端流式识别
+  const handlePcm = useCallback((pcm: Int16Array) => {
+    sttRef.current?.push(pcm);
+  }, []);
+
+  // 组件卸载：中断活跃识别
+  useEffect(() => () => { sttRef.current?.cancel(); }, []);
 
   // "+" 菜单状态
   const [menuOpen, setMenuOpen] = useState(false);
@@ -86,56 +113,6 @@ export function ChatComposer() {
     }
     e.target.value = '';
   };
-
-  // 流式语音识别：录音中每 3s 采样当前已录音频 → stt → 只发送新增文本（即说即发）
-  // 已发送文本作前缀匹配：vosk 对同一段音频重复识别时前面部分稳定，后面追加
-  const sampleAndSend = useCallback(async () => {
-    if (samplingRef.current) return; // 上一次采样未完成，跳过本轮
-    samplingRef.current = true;
-    setSttBusy(true);
-    try {
-      const wav = await micApiRef.current?.getWavSnapshot();
-      if (!wav) return;
-      const res = await agentApi.stt(wav);
-      const full = (res.data?.data?.text ?? '').replace(/\s+/g, '');
-      if (!full) return;
-      const sent = sentTextRef.current;
-      if (full.startsWith(sent)) {
-        const inc = full.slice(sent.length);
-        if (inc) {
-          sentTextRef.current = full;
-          sendMessage(inc);
-        }
-      } else {
-        // 前缀不匹配（识别修正/噪声）：不发，等下一轮对齐
-        sentTextRef.current = full;
-      }
-    } catch {
-      // 网络/服务错误：静默，下一轮重试
-    } finally {
-      samplingRef.current = false;
-      setSttBusy(false);
-    }
-  }, [sendMessage]);
-
-  // 麦克风开关：开始录音 → 启动定时采样；停止录音 → 停定时器（不再发送）
-  const handleMicToggle = useCallback((active: boolean) => {
-    setRecording(active);
-    if (active) {
-      sentTextRef.current = '';
-      micTimerRef.current = window.setInterval(() => { void sampleAndSend(); }, 3000);
-    } else {
-      if (micTimerRef.current !== null) {
-        clearInterval(micTimerRef.current);
-        micTimerRef.current = null;
-      }
-    }
-  }, [sampleAndSend]);
-
-  // 组件卸载清理定时器
-  useEffect(() => () => {
-    if (micTimerRef.current !== null) clearInterval(micTimerRef.current);
-  }, []);
 
   const openMenu = () => {
     const btn = menuBtnRef.current;
@@ -253,9 +230,9 @@ export function ChatComposer() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
           <MicButton
             onToggle={handleMicToggle}
-            onApiReady={(api) => { micApiRef.current = api; }}
-            // 录音中不禁用（流式发送会触发 streaming，禁了就没法点停止）；仅采样请求中禁用
-            disabled={sttBusy || (busy && !recording)}
+            onPcm={handlePcm}
+            // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
+            disabled={(busy && !recording)}
           />
           <button
             onClick={handleSend}

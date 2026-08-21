@@ -13,15 +13,17 @@ interface MicButtonProps {
   disabled?: boolean;
   /** 暴露麦克风 API（录音中取快照 WAV）——流式识别用 */
   onApiReady?: (api: { getWavSnapshot: () => Promise<Blob | null> }) => void;
+  /** 实时 PCM 回调（16kHz mono Int16，录音中每块触发）——流式识别推流用 */
+  onPcm?: (pcm16k: Int16Array) => void;
 }
 
 /**
  * 麦克风按钮：点击录音，canvas 径向波形随音量变化。
  * 不支持 getUserMedia 时返回 null。
  */
-export function MicButton({ onToggle, onRecorded, disabled, onApiReady }: MicButtonProps) {
+export function MicButton({ onToggle, onRecorded, disabled, onApiReady, onPcm }: MicButtonProps) {
   const isMobile = useIsMobile();
-  const { volume, freqData, isActive, isSupported, toggle, stopAndGetWav, getWavSnapshot } = useMicVolume(64);
+  const { volume, freqData, isActive, isSupported, toggle, stopAndGetWav, getWavSnapshot } = useMicVolume(64, onPcm);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
 

@@ -156,6 +156,83 @@ export const agentApi = {
     client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
 };
 
+/**
+ * 流式语音识别：录音中实时推 PCM 裸流（16kHz mono 16bit）到 /agent/stt/stream，
+ * SSE 收 partial（识别中文本，实时打字机）/ final（最终文本）。
+ * 返回 { push, close, cancel }：push 推 PCM 块；close 关流结束识别；cancel 中断。
+ */
+export function sttStream(onPartial: (text: string) => void, onFinal: (text: string) => void) {
+  const token = localStorage.getItem('accessToken') ?? '';
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let closed = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) { controller = c; },
+  });
+
+  const resPromise = fetch(`${BACKEND_URL}/api/agent/stt/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
+    body: stream,
+  });
+
+  // SSE 读取：partial 事件实时回调
+  void resPromise
+    .then(async (res) => {
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const lines = part.split('\n');
+          const eventLine = lines.find((l) => l.startsWith('event:'));
+          const dataLine = lines.find((l) => l.startsWith('data:'));
+          if (!dataLine) continue;
+          const eventName = eventLine ? eventLine.slice(6).trim() : '';
+          const data = dataLine.slice(5).trim();
+          if (eventName === 'partial') onPartial(data);
+          else if (eventName === 'final') onFinal(data);
+        }
+      }
+    })
+    .catch(() => { /* 前端主动取消或网络错误 */ });
+
+  return {
+    /** 推送 PCM 块（16kHz mono 16bit Int16Array） */
+    push: (pcm: Int16Array) => {
+      if (closed || !controller) return;
+      try {
+        // 转 Uint8Array：Int16 little-endian
+        const bytes = new Uint8Array(pcm.length * 2);
+        for (let i = 0; i < pcm.length; i++) {
+          bytes[i * 2] = pcm[i] & 0xff;
+          bytes[i * 2 + 1] = (pcm[i] >> 8) & 0xff;
+        }
+        controller.enqueue(bytes);
+      } catch { /* 流已关闭 */ }
+    },
+    /** 关闭请求体流（EOF）→ 后端发 eof 收最终结果 */
+    close: () => {
+      if (closed) return;
+      closed = true;
+      try { controller?.close(); } catch { /* ignore */ }
+    },
+    /** 中断：关闭请求体并取消响应流 */
+    cancel: () => {
+      if (closed) return;
+      closed = true;
+      try { controller?.close(); } catch { /* ignore */ }
+      void resPromise.then((r) => r?.body?.cancel()).catch(() => {});
+    },
+  };
+}
+
 /** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */
 export async function streamChat(
   conversationId: string,

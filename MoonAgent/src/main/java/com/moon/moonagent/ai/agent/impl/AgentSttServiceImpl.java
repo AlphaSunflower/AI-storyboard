@@ -7,8 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -104,6 +106,106 @@ public class AgentSttServiceImpl implements AgentSttService {
             offset += 8 + len + (len & 1); // 块按 2 字节对齐
         }
         throw new BusinessException(40001, "音频文件格式不正确（未找到 data 块）");
+    }
+
+    @Override
+    public void streamTranscribe(InputStream audioIn, SseEmitter emitter) {
+        // 识别完成 future：vosk onClose 时 complete，主线程等待后 complete emitter
+        CompletableFuture<String> done = new CompletableFuture<>();
+        // 最近一次识别的完整文本（final），partial 只推不存
+        List<String> finals = new ArrayList<>();
+
+        WebSocket.Listener listener = new WebSocket.Listener() {
+            private final StringBuilder buf = new StringBuilder();
+
+            @Override
+            public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+                buf.append(data);
+                if (!last) return WebSocket.Listener.super.onText(webSocket, data, false);
+                String msg = buf.toString();
+                buf.setLength(0);
+                try {
+                    // partial：实时推给前端（打字机效果）
+                    if (msg.contains("\"partial\"")) {
+                        String text = extractText(msg);
+                        if (text != null) {
+                            try {
+                                emitter.send(SseEmitter.event().name("partial").data(text));
+                            } catch (IOException | IllegalStateException e) {
+                                // 前端断开：终止识别
+                                done.completeExceptionally(e);
+                                webSocket.abort();
+                            }
+                        }
+                    } else {
+                        // final（vosk 原生 FinalResult 格式 {"text":...}）
+                        String text = extractText(msg);
+                        if (text != null) finals.add(text);
+                    }
+                } catch (Exception e) {
+                    log.debug("vosk 流式消息解析失败: {}", msg);
+                }
+                return WebSocket.Listener.super.onText(webSocket, data, true);
+            }
+
+            @Override
+            public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+                if (!done.isDone()) done.complete(finals.isEmpty() ? "" : finals.get(finals.size() - 1));
+                return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
+            }
+
+            @Override
+            public void onError(WebSocket webSocket, Throwable error) {
+                if (!done.isDone()) done.completeExceptionally(error);
+            }
+        };
+
+        try {
+            WebSocket ws = httpClient.newWebSocketBuilder()
+                    .buildAsync(URI.create(wsUrl), listener)
+                    .get(10, TimeUnit.SECONDS);
+            ws.sendText("{\"config\":{\"sample_rate\":16000}}", true).join();
+
+            // 实时转发输入流（前端录音中持续推 PCM 块；流结束=前端停止录音）
+            byte[] chunk = new byte[16000 * 2]; // 1 秒
+            int read;
+            try {
+                while ((read = audioIn.read(chunk)) != -1) {
+                    if (read > 0) {
+                        ws.sendBinary(ByteBuffer.wrap(chunk, 0, read), true).join();
+                    }
+                }
+            } catch (IOException e) {
+                // 前端断开连接：正常终止
+            }
+            ws.sendText("{\"eof\" : 1}", true).join(); // 注意空格：vosk-server 精确字符串匹配
+
+            String finalText = done.get(timeoutSeconds, TimeUnit.SECONDS);
+            try {
+                emitter.send(SseEmitter.event().name("final").data(finalText));
+                emitter.complete();
+            } catch (IOException | IllegalStateException e) {
+                log.debug("前端已断开，SSE 结束: {}", e.getMessage());
+            }
+        } catch (TimeoutException e) {
+            log.warn("vosk 流式识别超时: {}", wsUrl);
+            emitter.completeWithError(new BusinessException(50001, "语音识别服务暂不可用，请稍后重试"));
+        } catch (Exception e) {
+            log.warn("vosk 流式识别失败: {}", wsUrl, e);
+            emitter.completeWithError(new BusinessException(50001, "语音识别服务暂不可用，请稍后重试"));
+        }
+    }
+
+    /** 从 vosk 消息中提取 text/partial 字段值（{"partial":"..."} 或 {"text":"..."}） */
+    private String extractText(String msg) {
+        int textIdx = msg.indexOf("\"text\"");
+        if (textIdx < 0) textIdx = msg.indexOf("\"partial\"");
+        if (textIdx < 0) return null;
+        int colonIdx = msg.indexOf(':', textIdx + 6);
+        int start = msg.indexOf('"', colonIdx + 1);
+        int end = msg.indexOf('"', start + 1);
+        if (start < 0 || end < 0) return null;
+        return msg.substring(start + 1, end);
     }
 
     /** 经 WebSocket 转发 vosk-server 并取回识别文本 */
