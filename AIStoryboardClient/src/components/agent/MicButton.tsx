@@ -98,6 +98,13 @@ export function MicButton({ onToggle, onRecorded, disabled }: MicButtonProps) {
     }
   };
 
+  // 录音上限 60s：超时自动停止并触发识别（防麦克风长期占用 + 内存无限累积）
+  useEffect(() => {
+    if (!isActive) return;
+    const timer = setTimeout(() => { void handleClick(); }, 60_000);
+    return () => clearTimeout(timer);
+  }, [isActive]);
+
   return (
     <div style={{
       position: 'relative',
