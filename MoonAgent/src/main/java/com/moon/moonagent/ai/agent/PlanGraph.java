@@ -163,6 +163,11 @@ public class PlanGraph {
                 .addNode("intent_recognize", node_async(state -> {
                     AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
                     String content = state.<String>value(K_CONTENT).orElse("");
+                    // 发送"正在理解你的需求…"workflow 事件，避免意图识别期间前端只显示"正在生成"
+                    SseEmitter emitter = emittersByThread.get(conversation.getId());
+                    if (emitter != null) {
+                        try { emitter.send(SseEmitter.event().name("workflow").data(Map.of("title", "正在理解你的需求…", "status", "node_started"))); } catch (Exception ignored) {}
+                    }
                     List<AgentMessage> recent = messageMapper.selectList(
                             new LambdaQueryWrapper<AgentMessage>()
                                     .eq(AgentMessage::getConversationId, conversation.getId())
@@ -193,6 +198,7 @@ public class PlanGraph {
                                     Map.of("id", "intent-aisplit", "title", "生成分镜"),
                                     Map.of("id", "intent-pic", "title", "生成图片"),
                                     Map.of("id", "intent-video", "title", "生成视频"),
+                                    Map.of("id", "intent-scene-review", "title", "查看分镜"),
                                     Map.of("id", "intent-delete", "title", "删除分镜"),
                                     Map.of("id", "intent-other", "title", "其他 / 继续输入"),
                                     Map.of("id", "custom", "title", "✍ 自定义输入"))));

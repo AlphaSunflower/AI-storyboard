@@ -57,7 +57,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private static final List<Map.Entry<String, java.util.regex.Pattern>> RULE_TABLE = List.of(
             Map.entry("intent-delete", java.util.regex.Pattern.compile(
                     "(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空))).{0,6}(?:分镜|剧本|故事板)|(?:分镜|剧本|故事板).{0,8}(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空)))")),
-            Map.entry("intent-scene-review", java.util.regex.Pattern.compile("分析.{0,6}分镜|处理.{0,6}分镜|审查.{0,6}分镜|review.{0,6}scene|展示.{0,6}分镜|查看.{0,6}分镜|列出.{0,6}分镜|所有分镜|生成.{0,8}分镜.{0,6}(图|视频)|分镜.{0,8}生成")),
+            Map.entry("intent-scene-review", java.util.regex.Pattern.compile("分析.{0,6}分镜|处理.{0,6}分镜|审查.{0,6}分镜|review.{0,6}scene|" + "展示.{0,6}分镜|查看.{0,6}分镜|列出.{0,6}分镜|" + "看.{0,2}看.{0,4}分镜|看一下.{0,4}分镜|分镜列表|多少分镜|" + "所有分镜|" + "生成.{0,8}分镜.{0,6}(图|视频)|" + "分镜.{0,4}生成.{0,4}(图|视频)|分镜.{0,12}(图|视频)")),
             Map.entry("intent-aisplit", java.util.regex.Pattern.compile("分镜|故事板|剧本")),
             Map.entry("intent-video", java.util.regex.Pattern.compile("生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本")),
             Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
