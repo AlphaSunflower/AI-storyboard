@@ -1,0 +1,20 @@
+# deploy/docker/vosk/docker-compose.yml
+# Vosk 独立部署（离线语音识别）。与 nacos 完全分离，可单独启停、可连同 data/models 拷到其他机器。
+# 用法：cd vosk && docker compose up -d（或从上层 ./scripts/up.sh vosk；首次先 ./scripts/setup.sh 下载模型）
+services:
+  vosk:
+    image: alphacep/kaldi-vosk-server:latest   # vosk 官方 Kaldi vosk-server（alphacephei 镜像账号）
+    container_name: vosk-stt
+    entrypoint: ["python3", "/opt/vosk-server/websocket/asr_server.py"]
+    environment:
+      VOSK_MODEL_PATH: /opt/vosk-model/vosk-model-cn-0.22
+      VOSK_SAMPLE_RATE: "16000"                # 默认 8000，必须显式设 16k
+      VOSK_SERVER_PORT: "2700"
+    ports:
+      # 绑定 ${VOSK_BIND_IP:-127.0.0.1}：默认仅本机可连（前端直连场景）；
+      # 生产部署设 VOSK_BIND_IP 为内网 IP（如 192.168.x.x），配合防火墙禁止公网访问
+      - "${VOSK_BIND_IP:-127.0.0.1}:${VOSK_PORT:-2700}:2700"   # websocket 识别服务
+    volumes:
+      - ./data/models:/opt/vosk-model     # 挂载中文全量模型（setup.sh 下载到 vosk/data/models/）
+    mem_limit: 4g                          # 全量中文模型含 RNNLM 加载峰值约 2.5-3GB（2g 会 OOM 循环重启）
+    restart: unless-stopped

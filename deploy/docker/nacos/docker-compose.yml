@@ -1,0 +1,24 @@
+# deploy/docker/nacos/docker-compose.yml
+# Nacos 独立部署（服务发现/配置中心）。与 vosk 完全分离，可单独启停、单独拷到其他机器。
+# 用法：cd nacos && docker compose up -d（或从上层 ./scripts/up.sh nacos）
+services:
+  nacos:
+    image: nacos/nacos-server:v3.2.3
+    container_name: nacos-standalone
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"             # 内网开发环境，与旧容器一致
+      NACOS_AUTH_TOKEN: bmFjb3MtZGVmYXVsdC10b2tlbi1mb3ItZGV2LTIwMjQ=   # 3.2.x 必填（base64，auth 关闭时也校验存在）
+      NACOS_AUTH_IDENTITY_KEY: nacos
+      NACOS_AUTH_IDENTITY_VALUE: nacos
+      TIME_ZONE: Asia/Shanghai
+    ports:
+      - "8848:8848"                   # 服务发现/配置
+      - "9848:9848"                   # gRPC
+      - "8850:8080"                   # 控制台
+    volumes:
+      - nacos-data:/home/nacos/data   # 持久卷（旧容器无卷，重建即丢——已停旧建新）
+    restart: unless-stopped
+
+volumes:
+  nacos-data:

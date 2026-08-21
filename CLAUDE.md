@@ -62,12 +62,12 @@ AI-storyboard/
 
 ## Docker 部署目录（deploy/docker/）
 
-统一管理基础设施 Docker 部署（scripts/ 下有 setup/up/down/status 脚本）：
+基础设施 Docker 部署，**nacos 与 vosk 拆为两个独立 compose 项目**（`nacos/`、`vosk/` 子目录，可单独启停、单独拷到其他机器；scripts/ 下有 setup/up/down/status 脚本，均接受 `[nacos|vosk|all]` 参数）：
 
 - **nacos** `nacos/nacos-server:v3.2.3` — standalone 服务发现（8848/9848/8850，数据卷 nacos-data）
-- **vosk** `alphacep/kaldi-vosk-server:latest` — 离线语音识别（2700，挂载 vosk-model-cn-0.22；官方 vosk-server 镜像已下架改用 Kaldi 版，entrypoint 跑 websocket/asr_server.py，需 VOSK_SAMPLE_RATE=16000；端口默认绑定 127.0.0.1，生产设 `VOSK_BIND_IP` 内网 IP 配合防火墙禁公网）
+- **vosk** `alphacep/kaldi-vosk-server:latest` — 离线语音识别（2700，挂载 vosk/data/models/vosk-model-cn-0.22；官方 vosk-server 镜像已下架改用 Kaldi 版，entrypoint 跑 websocket/asr_server.py，需 VOSK_SAMPLE_RATE=16000；端口默认绑定 127.0.0.1，生产设 `VOSK_BIND_IP` 内网 IP 配合防火墙禁公网）
 
-首次部署：`./scripts/setup.sh`（下载 1.3GB 中文模型）→ `./scripts/up.sh`（自动接管旧容器）。
+首次部署：`./scripts/setup.sh`（下载 1.3GB 中文模型到 vosk/data/models/）→ `./scripts/up.sh`（自动接管旧容器）。
 
 ## Databases
 
