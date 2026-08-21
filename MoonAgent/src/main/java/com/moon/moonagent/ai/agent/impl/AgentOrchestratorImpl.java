@@ -87,6 +87,10 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 return "";
             }
 
+            // P4：从 checkpoint.plan 恢复会话级内存计数（regenCount/clarifyCount/sessionAssets）——
+            // 重启后 resume 上限判定与资产接力不丢（_regenCount/_clarifyCount/_sessionAssets 私有键）
+            support.restoreCountersFromPlan(conversation.getId(), cp.getPlan());
+
             // P3（2026-08-21）：resume 路由迁入 PlanGraph（StateGraph 条件边）——
             // 12+ if/else 硬编码分支收敛为图内条件边路由（cpAction/提交 action/customText → handler 节点），
             // 含切链出口（customText 识别为新意图 → 回 intent_recognize 重新分发）。

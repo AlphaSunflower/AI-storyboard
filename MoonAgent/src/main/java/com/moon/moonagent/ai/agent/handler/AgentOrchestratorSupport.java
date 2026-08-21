@@ -103,6 +103,76 @@ public class AgentOrchestratorSupport {
     /** 会话删除时清理全部内存态（clarifyCount） */
     public void cleanupOnDelete(String conversationId) {
         clarifyCount.remove(conversationId);
+        regenCount.remove(conversationId);
+        sessionAssets.remove(conversationId);
+    }
+
+    // ===== P4（2026-08-21）：regenCount/sessionAssets 由 AisplitIntentHandler 迁入统一管理，
+    // 随 checkpoint.plan JSON 持久化（_regenCount/_clarifyCount/_sessionAssets 私有键），resume 时恢复 =====
+
+    /** 连续不满意调整计数（写库成功/达上限清零） */
+    private final java.util.concurrent.ConcurrentHashMap<String, Integer> regenCount =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 本轮勾选资产：conversationId → assetIds（资产选择卡片确认后写入，HITL 链内接力） */
+    private final java.util.concurrent.ConcurrentHashMap<String, List<String>> sessionAssets =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 不满意调整 +1，返回新值 */
+    public int incrRegenCount(String conversationId) {
+        return regenCount.merge(conversationId, 1, Integer::sum);
+    }
+
+    /** 写库成功/达上限清零 */
+    public void clearRegenCount(String conversationId) {
+        regenCount.remove(conversationId);
+    }
+
+    /** 记录本轮勾选资产 */
+    public void setSessionAssets(String conversationId, List<String> ids) {
+        sessionAssets.put(conversationId, ids);
+    }
+
+    /** 本轮已确认资产 ID（无记录返回空列表） */
+    public List<String> getSessionAssets(String conversationId) {
+        return sessionAssets.getOrDefault(conversationId, List.of());
+    }
+
+    /** 本轮是否已选过资产（防 handle 重入重复弹资产卡片） */
+    public boolean hasSessionAssets(String conversationId) {
+        return sessionAssets.containsKey(conversationId);
+    }
+
+    /** 本轮结束清理 */
+    public void clearSessionAssets(String conversationId) {
+        sessionAssets.remove(conversationId);
+    }
+
+    /** 计数写入 checkpoint.plan（createCheckpoint 内调用）——重启/刷新后 resume 可恢复 */
+    void persistCountersToPlan(Map<String, Object> plan, String conversationId) {
+        plan.put("_regenCount", regenCount.getOrDefault(conversationId, 0));
+        plan.put("_clarifyCount", clarifyCount.getOrDefault(conversationId, 0));
+        plan.put("_sessionAssets", sessionAssets.getOrDefault(conversationId, List.of()));
+    }
+
+    /** 从 checkpoint.plan 恢复计数（resume 消费后调用）——重启后内存计数不丢 */
+    public void restoreCountersFromPlan(String conversationId, String planJson) {
+        try {
+            if (planJson == null || planJson.isBlank()) return;
+            Object root = objectMapper.readValue(planJson, Object.class);
+            if (!(root instanceof Map<?, ?> m)) return;
+            Object rc = m.get("_regenCount");
+            if (rc instanceof Number n) regenCount.put(conversationId, n.intValue());
+            Object cc = m.get("_clarifyCount");
+            if (cc instanceof Number n) clarifyCount.put(conversationId, n.intValue());
+            Object sa = m.get("_sessionAssets");
+            if (sa instanceof List<?> list) {
+                sessionAssets.put(conversationId, list.stream()
+                        .filter(String.class::isInstance).map(String.class::cast).toList());
+            }
+        } catch (Exception e) {
+            log.debug("restoreCountersFromPlan 解析失败（无害）: {}", e.getMessage());
+        }
     }
 
     // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
@@ -636,6 +706,8 @@ public class AgentOrchestratorSupport {
             if (imageModels != null && !imageModels.isEmpty()) plan.put("_imageModels", imageModels);
             if (videoModels != null && !videoModels.isEmpty()) plan.put("_videoModels", videoModels);
             if (assets != null && !assets.isEmpty()) plan.put("_assets", assets);
+            // P4：会话级内存计数随 checkpoint 持久化（重启后 resume 恢复上限判定/资产接力）
+            persistCountersToPlan(plan, conversation.getId());
             cp.setPlan(objectMapper.writeValueAsString(plan));
         } catch (Exception e) {
             log.warn("checkpoint plan 序列化失败: {}", e.getMessage());

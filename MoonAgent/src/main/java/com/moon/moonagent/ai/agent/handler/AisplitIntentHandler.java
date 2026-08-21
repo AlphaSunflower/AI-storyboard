@@ -47,21 +47,9 @@ public class AisplitIntentHandler implements IntentHandler {
     private final AssetMatchingService assetMatchingService;
 
     /**
-     * 不满意调整计数：conversationId → 连续「不满意→调整→重生成」轮次。
-     * 达 {@code maxRegenerateRounds} 上限后不再弹调整卡片，提示直接输入新需求；
-     * 写库成功（agree/replace/append）或达上限清零。
-     * ponytail: 内存态重启即失（无害）；多实例需落 DB 列。
+     * 连续不满意调整计数与本轮勾选资产已迁入 {@link AgentOrchestratorSupport}
+     * （P4 2026-08-21：随 checkpoint.plan JSON 持久化，重启后 resume 恢复）。
      */
-    private final java.util.concurrent.ConcurrentHashMap<String, Integer> regenCount =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /**
-     * 本轮勾选的资产：conversationId → assetIds（资产选择卡片确认后写入，HITL 链内
-     * scene-mode/clarify/regenerate 等 resume 重入接力使用；写库成功/取消/结束本轮时清除）。
-     * ponytail: 内存态重启即失（重新询问一次，无害）；多实例需落 DB 列。
-     */
-    private final java.util.concurrent.ConcurrentHashMap<String, List<String>> sessionAssets =
-            new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public String intentType() {
@@ -80,7 +68,7 @@ public class AisplitIntentHandler implements IntentHandler {
         // 资产库询问：项目有可用资产且本轮尚未勾选 → 弹资产选择卡片（勾选/跳过后才进入正式分镜链）
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         if (projectAssets != null && !projectAssets.isEmpty()
-                && !sessionAssets.containsKey(request.getConversation().getId())) {
+                && !support.hasSessionAssets(request.getConversation().getId())) {
             return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     "检测到资产库，本次生成分镜要使用哪些资产？（可多选）",
                     "asset-selection",
@@ -280,7 +268,7 @@ public class AisplitIntentHandler implements IntentHandler {
             String content = support.planField(checkpoint.getPlan(), "content");
             List<String> ids = "asset-skip".equals(request.getAction())
                     ? List.of() : request.getAssetIds() == null ? List.of() : request.getAssetIds();
-            sessionAssets.put(request.getConversation().getId(), ids);
+            support.setSessionAssets(request.getConversation().getId(), ids);
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), ids);
             // 关联性门禁：弱关联弹澄清卡片结束本轮；相关/判定失败/无资产放行
@@ -295,7 +283,7 @@ public class AisplitIntentHandler implements IntentHandler {
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), prevIds);
             AgentOrchestratorSupport.AssetGateResume r = support.resumeAssetGate(request, checkpoint, chosen);
             if (!r.proceed()) return request.getLastMessage();
-            sessionAssets.put(request.getConversation().getId(), r.assetIds());
+            support.setSessionAssets(request.getConversation().getId(), r.assetIds());
             return continueAisplit(request, r.prompt());
         }
 
@@ -377,7 +365,7 @@ public class AisplitIntentHandler implements IntentHandler {
         // / cancel=不写 / disagree=不满意→调整意见卡片；agree（无现有分镜）语义=新建，行为与现状一致
         String chosen = request.getAction();
         if ("cancel".equals(chosen)) {
-            sessionAssets.remove(request.getConversation().getId());
+            support.clearSessionAssets(request.getConversation().getId());
             return endWithoutScenes(request, "好的，已取消本次分镜导入，现有分镜保持不变。");
         }
         if ("disagree".equals(chosen)) {
@@ -407,7 +395,7 @@ public class AisplitIntentHandler implements IntentHandler {
                 : agentTools.writeScenes(request.getConversation().getProjectId(), items);
         int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
         // 写库成功：不满意调整计数清零（新一轮生成起点）+ 用户确认的整套推荐参数应用到全部分镜
-        regenCount.remove(request.getConversation().getId());
+        support.clearRegenCount(request.getConversation().getId());
         if (count > 0) {
             support.applySceneParamsToProject(request.getConversation().getProjectId(), request.getParams());
         }
@@ -419,7 +407,7 @@ public class AisplitIntentHandler implements IntentHandler {
             linkSceneAssetsByMatch(request, checkpoint);
         }
         // 本轮结束：勾选资产状态清理（下轮重新询问）
-        sessionAssets.remove(request.getConversation().getId());
+        support.clearSessionAssets(request.getConversation().getId());
         // sceneCount 传写库后项目分镜总数（writeScenes 为追加语义；前端用
         // sceneCount > 会话开始时数量 判断是否需要刷新分镜列表——总数才正确，replace 后即新数量）
         long totalScenes = storyboardClient.getProjectScenes(
@@ -443,7 +431,7 @@ public class AisplitIntentHandler implements IntentHandler {
 
     /** 本轮已确认的资产 ID（sessionAssets 快照；无记录返回空列表） */
     private List<String> currentAssetIds(OrchestrationRequest request) {
-        return sessionAssets.getOrDefault(request.getConversation().getId(), List.of());
+        return support.getSessionAssets(request.getConversation().getId());
     }
 
     /** 关联摘要文本（方案确认卡片展示）：每镜一行「镜N：资产名、资产名」 */
@@ -479,9 +467,9 @@ public class AisplitIntentHandler implements IntentHandler {
 
     /** 不满意调整上限判定：本次 +1；达上限返回 true（调用方提示后结束，不再弹卡片）并清零计数 */
     private boolean regenerateLimitReached(String conversationId) {
-        int n = regenCount.merge(conversationId, 1, Integer::sum);
+        int n = support.incrRegenCount(conversationId);
         if (n > agentConfig.getMaxRegenerateRounds()) {
-            regenCount.remove(conversationId);
+            support.clearRegenCount(conversationId);
             return true;
         }
         return false;
