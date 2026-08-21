@@ -42,6 +42,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
 
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /** 懒加载 ChatClient（复用网关默认对话模型，超时 120s） */
     private volatile ChatClient chatClient;
@@ -53,13 +54,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
         }
         try {
             String raw = chatClient().prompt()
-                    .system("你是影视资产统筹。用户为创作项目勾选了一批资产（人物/道具/场景设定），并给出创作提示词。"
-                            + "注意：提示词可能包含「重新生成/继续完善」等简短指令和【最近对话上下文】段落（按时间顺序的对话记录），"
-                            + "必须结合上下文判断本次创作是否会用这些资产（人物出场、道具出现、场景发生地等）——"
-                            + "只要上下文或历史需求提及了该资产（如指名道姓或明确描述），即判定强关联；"
-                            + "仅当整段提示词与上下文都完全未涉及该资产时才判定不相关。"
-                            + "输出 JSON：{\"relevant\": true/false, \"reason\": \"判定理由，中文 ≤30 字，说明为什么相关或不相关\"}。"
-                            + "只输出 JSON。")
+                    .system(promptConfig.get("services/asset-matching"))
                     .user("用户勾选的资产：\n" + assetSheetText(assets)
                             + "\n\n用户提示词（含上下文）：\n" + prompt)
                     .call()
@@ -85,12 +80,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
                         .append("] ").append(c == null ? "" : c).append("\n");
             }
             String raw = chatClient().prompt()
-                    .system("你是影视分镜资产匹配师。给定分镜列表（按剧情内容）和资产清单（人物/道具/场景），"
-                            + "判断每个分镜中会出现哪些资产（按剧情内容判断：人物出场、道具使用、场景发生地）。"
-                            + "只关联剧情明确出现的资产，不要臆测；某个分镜不出现任何资产时 assetIds 给空数组。"
-                            + "输出 JSON：{\"scenes\":[{\"sceneNumber\":1,\"assetIds\":[\"资产id\"]}]}，"
-                            + "sceneNumber 必须原样使用分镜列表中的分镜号、每个分镜都要有条目。"
-                            + "资产 ID 必须原样使用下方给出的 id。只输出 JSON。")
+                    .system(promptConfig.get("services/scene-asset-matching"))
                     .user("资产清单：\n" + assetSheetText(assets)
                             + "\n\n分镜列表：\n" + sceneText)
                     .call()

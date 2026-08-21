@@ -1,9 +1,11 @@
-import { useState, useRef, useLayoutEffect } from 'react';
+import { useState, useRef, useLayoutEffect, type ReactNode } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
+import { MoreMenu } from '../common/MoreMenu';
+import { ContextMenu } from '../common/ContextMenu';
 
 function Tag({ children }: { children: string }) {
   return (
@@ -23,16 +25,19 @@ function Tag({ children }: { children: string }) {
 }
 
 /** 状态徽标文案与配色（列表只读展示，生成/完善操作已移到预览面板） */
-function statusBadge(status: string | undefined, kind: 'image' | 'video'): { text: string; color: string } {
+const ImageIcon = <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>;
+const VideoIcon = <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>;
+
+function statusBadge(status: string | undefined, kind: 'image' | 'video'): { text: ReactNode; color: string } {
   switch (status) {
     case 'generating':
-      return { text: kind === 'image' ? '🖼️ 图片生成中' : '🎬 视频生成中', color: '#d97706' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片生成中' : '视频生成中'}</>, color: '#d97706' };
     case 'completed':
-      return { text: kind === 'image' ? '🖼️ 图片已生成' : '🎬 视频已生成', color: '#059669' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片已生成' : '视频已生成'}</>, color: '#059669' };
     case 'failed':
-      return { text: kind === 'image' ? '🖼️ 图片失败' : '🎬 视频失败', color: '#e53935' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片失败' : '视频失败'}</>, color: '#e53935' };
     default:
-      return { text: kind === 'image' ? '🖼️ 图片未生成' : '🎬 视频未生成', color: 'var(--color-muted-soft)' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片未生成' : '视频未生成'}</>, color: 'var(--color-muted-soft)' };
   }
 }
 
@@ -133,8 +138,7 @@ export function SceneCard({
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async () => {
     const el = cardRef.current;
     if (el) {
       // 先播收起动画（高度折叠 + 淡出），动画结束后再真正删除
@@ -221,8 +225,7 @@ export function SceneCard({
     setIsRenaming(false);
   };
 
-  const handleStartRename = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleStartRename = () => {
     const customName = scene.soundDesign && !scene.soundDesign.startsWith('{') && !scene.soundDesign.startsWith('分镜') ? scene.soundDesign : `分镜 ${scene.sceneNumber}`;
     setSceneLabel(customName);
     setIsRenaming(true);
@@ -232,6 +235,10 @@ export function SceneCard({
   const videoBadge = statusBadge(scene.videoStatus, 'video');
 
   return (
+    <ContextMenu items={[
+      { label: '✏️ 重命名', onClick: handleStartRename },
+      { label: '🗑️ 删除分镜', danger: true, onClick: handleDelete },
+    ]}>
     <div
       ref={cardRef}
       onClick={onSelect}
@@ -311,41 +318,15 @@ export function SceneCard({
                   />
                 )}
               </div>
-              <button
-                onClick={handleStartRename}
-                title="重命名"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  padding: '0 2px',
-                  color: 'var(--color-muted)',
-                  lineHeight: 1,
-                  opacity: 0.6,
-                }}
-              >
-                ✏️
-              </button>
             </>
           )}
         </div>
-        <button
-          onClick={handleDelete}
-          title="删除分镜"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 14,
-            padding: '1px 4px',
-            borderRadius: 'var(--rounded-sm)',
-            color: 'var(--color-muted)',
-            lineHeight: 1,
-          }}
-        >
-          🗑️
-        </button>
+        <MoreMenu
+          items={[
+            { label: '重命名', onClick: handleStartRename },
+            { label: '删除分镜', danger: true, onClick: handleDelete },
+          ]}
+        />
       </div>
 
       <div
@@ -509,5 +490,6 @@ export function SceneCard({
         </div>
       </div>
     </div>
+    </ContextMenu>
   );
 }

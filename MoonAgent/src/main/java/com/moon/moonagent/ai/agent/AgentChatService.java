@@ -115,4 +115,12 @@ public interface AgentChatService {
      * @return Map：{taskId, assetId, status(queued/running/completed/failed), url, error}
      */
     Map<String, Object> getVideoTaskStatus(String userId, String taskId);
+
+    /**
+     * 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）。
+     * 仅返回未过期、status=pending 的最新一条；无则返回 null。
+     *
+     * @return checkpoint 恢复数据（formToken/formContent/actions/expirationTime + 可选 models/assets）；null=无待处理
+     */
+    Map<String, Object> getPendingCheckpoint(String conversationId);
 }

@@ -35,6 +35,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     private final AiConfigProperties config;
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /** 主回答 ChatClient（懒加载，默认视觉模型，超时 60s） */
     private volatile ChatClient chatClient;
@@ -43,9 +44,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     public String generate(AgentConversation conversation, String content) {
         try {
             String answer = chatClient().prompt()
-                .system("你是 Moon 智能体，AI Storyboard 平台的创作助手。"
-                    + "你可以帮用户写分镜、生成图片、生成视频。回答简洁自然，使用中文。"
-                    + "如果用户请求的是分镜/图片/视频创作，引导对方用明确指令描述需求（如\"帮我做个清朝灭亡的分镜\"）。")
+                .system(promptConfig.get("services/agent-answer"))
                 .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
                 .call()
                 .content();
@@ -61,9 +60,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
         StringBuilder sb = new StringBuilder();
         try {
             chatClient().prompt()
-                .system("你是 Moon 智能体，AI Storyboard 平台的创作助手。"
-                    + "你可以帮用户写分镜、生成图片、生成视频。回答简洁自然，使用中文。"
-                    + "如果用户请求的是分镜/图片/视频创作，引导对方用明确指令描述需求（如\"帮我做个清朝灭亡的分镜\"）。")
+                .system(promptConfig.get("services/agent-answer"))
                 .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
                 .stream()
                 .content()

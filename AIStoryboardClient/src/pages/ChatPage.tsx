@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
+import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
 import { HumanInputCard } from '../components/agent/HumanInputCard';
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
@@ -11,9 +12,14 @@ import { ChatComposer, DS } from '../components/agent/ChatComposer';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
+import { MobileHeader } from '../components/agent/MobileHeader';
+import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
+import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
+import MoonLogo from '../components/agent/MoonLogo';
 
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
@@ -22,13 +28,14 @@ import { useAgentStore } from '../stores/agentStore';
  */
 export function ChatPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const logout = useAuthStore((s) => s.logout);
   const currentProject = useProjectStore((s) => s.currentProject);
+  const createConversation = useAgentStore((s) => s.createConversation);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
-    clearMessages, confirmResult, assets, loadAssets, conversations, activeConversationId,
+    confirmResult, assets, loadAssets, conversations, activeConversationId,
   } = useAgentStore();
-  const [confirmClear, setConfirmClear] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);       // 资源库（rail 🧩）
   const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
   const [projectOpen, setProjectOpen] = useState(false);
@@ -36,6 +43,7 @@ export function ChatPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [convWidth, setConvWidth] = useState(240);
   const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
@@ -79,8 +87,142 @@ export function ChatPage() {
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
-  const busy = streaming || !!waitingHumanInput || !!waitingVideoPlan;
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
+
+  // 手机端：选择会话后自动关闭侧栏
+  const handleMobileSelectConversation = (id: string) => {
+    useAgentStore.getState().selectConversation(id);
+    setMobileSidebarOpen(false);
+  };
+
+  // 手机端：新建对话后自动关闭侧栏
+  const handleMobileNewConversation = async () => {
+    await createConversation();
+    setMobileSidebarOpen(false);
+  };
+
+  /* ═══════════════ 手机端布局（≤768px）═══════════════ */
+  if (isMobile) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
+        {/* 顶部导航栏 */}
+        <MobileHeader
+          title={currentTitle}
+          onMenuClick={() => setMobileSidebarOpen(true)}
+          onNewConversation={handleMobileNewConversation}
+        />
+
+        {/* 会话列表 overlay 抽屉 */}
+        {mobileSidebarOpen && (
+          <div
+            onClick={() => setMobileSidebarOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 100,
+              background: 'rgba(0, 0, 0, 0.35)',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: 'absolute', top: 0, left: 0, bottom: 0,
+                width: '80vw', maxWidth: 320,
+                background: 'var(--color-surface-soft)',
+                display: 'flex', flexDirection: 'column',
+                boxShadow: '4px 0 24px rgba(0, 0, 0, 0.12)',
+                animation: 'mobileSlideIn 0.25s ease-out',
+              }}
+            >
+              {/* 侧栏内嵌会话列表（禁用宽度拖拽和收起按钮） */}
+              <MobileSidebarContent
+                onSelectConversation={handleMobileSelectConversation}
+                onClose={() => setMobileSidebarOpen(false)}
+                onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
+                onOpenAssets={() => { setAssetsOpen(true); setMobileSidebarOpen(false); }}
+                onNavigate={(path) => { navigate(path); setMobileSidebarOpen(false); }}
+                logout={logout}
+              />
+            </div>
+            <style>{`@keyframes mobileSlideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }`}</style>
+          </div>
+        )}
+
+        {/* 主对话区 */}
+        {isEmpty ? (
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 20, padding: '0 16px',
+          }}>
+            <LiveOrb variant="webgl" colors={["#1D4E89", "#81C3D7", "#D9E8F5"]} size={90} />
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ marginBottom: 6 }}><MoonLogo size={28} showText textColor={DS.ink} /></div>
+              <div style={{ fontSize: 13, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
+            </div>
+            <div style={{ width: '100%', maxWidth: 480 }}>
+              <ChatComposer />
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* 消息列 */}
+            <div
+              ref={scrollRef}
+              onScroll={(e) => {
+                const el = e.target as HTMLElement;
+                nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              }}
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
+            >
+              <div style={{ maxWidth: 720, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
+                {messages.map((m) => (
+                  <MessageBubble
+                    key={m.id}
+                    role={m.role}
+                    content={m.content}
+                    variant="deepseek"
+                    createdAt={m.createdAt}
+                    streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+                  />
+                ))}
+                {streaming && !waitingHumanInput && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      {[0, 1, 2].map((i) => (
+                        <span key={i} style={{
+                          width: 6, height: 6, borderRadius: '50%', background: DS.brand, opacity: 0.35,
+                          animation: 'dsDot 1.1s ease-in-out infinite', animationDelay: `${i * 0.18}s`,
+                        }} />
+                      ))}
+                    </span>
+                    <span>{workflowHint || '正在生成'}</span>
+                    <style>{`@keyframes dsDot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }`}</style>
+                  </div>
+                )}
+                {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+                {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
+                {confirmResult && <ConfirmResultCard />}
+                {streamError && (
+                  <div style={{ color: 'rgb(217, 45, 32)', fontSize: 14, margin: '10px 6px' }}>⚠ {streamError}</div>
+                )}
+              </div>
+            </div>
+
+            {/* 底部输入卡 */}
+            <div style={{ padding: '8px 12px 12px 12px', background: 'white' }}>
+              <ChatComposer />
+            </div>
+          </>
+        )}
+
+        <MobileBottomNav onOpenAssets={() => setAssetsOpen(true)} />
+
+        {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
+        {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+        <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
+      </div>
+    );
+  }
+
+  /* ═══════════════ 桌面端布局（>768px）═══════════════ */
 
   // 会话栏宽度拖拽
   const handleConvDrag = useCallback((e: React.MouseEvent) => {
@@ -119,23 +261,16 @@ export function ChatPage() {
               onClick={() => setAssetsOpen(true)}
               title="资源库"
               style={railIconBtn}
-            >🧩</button>
+            >{/** 资源库 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z"/></svg></button>
             <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
               <button
                 ref={projectBtnRef}
                 onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
                 title={currentProject?.name ?? '选择项目'}
                 style={railIconBtn}
-              >🗂️</button>
+              >{/** 项目 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M8 4v16M16 4v16"/></svg></button>
               <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
             </div>
-          </div>
-          <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
-            <button
-              onClick={() => navigate('/editor')}
-              title="AI 分镜"
-              style={railIconBtn}
-            >🎬</button>
           </div>
           <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
             <button
@@ -143,7 +278,7 @@ export function ChatPage() {
               onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
               title="设置"
               style={railIconBtn}
-            >⚙️</button>
+            >{/** 设置 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M10 2l1.5 2.5L14 3l-.5 2.8 2.5 1.2-1.5 2.3 2.3 1.5-2.8.5.5 2.8-2.5-1.2L10 17l-.5-2.8-2.5 1.2 1.5-2.3-2.3-1.5 2.8-.5L8.5 8.7 11 9.9z"/></svg></button>
             {settingsOpen && settingsBtnRef.current && createPortal(
               <div style={{
                 position: 'fixed',
@@ -154,10 +289,10 @@ export function ChatPage() {
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
               }}>
                 {[
-                  { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
-                  { label: '📄 使用文档', onClick: () => navigate('/docs') },
-                  { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
-                  { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
+                  { label: '个人信息', icon: 'user', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
+                  { label: '使用文档', icon: 'docs', onClick: () => navigate('/docs') },
+                  { label: '编辑器', icon: 'editor', onClick: () => navigate('/editor') },
+                  { label: '退出登录', icon: 'logout', onClick: logout, color: '#d92d20' },
                 ].map((it) => (
                   <button
                     key={it.label}
@@ -165,11 +300,11 @@ export function ChatPage() {
                     style={{
                       width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
                       background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                      color: it.color ?? DS.ink,
+                      color: it.color ?? DS.ink, display: 'flex', alignItems: 'center', gap: 8,
                     }}
                     onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                     onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                  >{it.label}</button>
+                  >{it.icon === 'user' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}{it.icon === 'docs' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>}{it.icon === 'editor' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>}{it.icon === 'logout' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>}{' '}{it.label}</button>
                 ))}
               </div>,
               document.body,
@@ -211,7 +346,7 @@ export function ChatPage() {
                   }}
                   onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                   onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >🧩 资源库</button>
+                >{/** 资源库 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z"/></svg> 资源库</button>
                 {/* 项目选择（独立一行，资源库下方，ghost 风格；弹层 portal 右对齐不被裁剪） */}
                 <div style={{ position: 'relative', width: '100%' }}>
                   <button
@@ -227,7 +362,7 @@ export function ChatPage() {
                     onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                     onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
                   >
-                    <span style={{ fontSize: 15 }}>🗂️</span>
+                    <span style={{ fontSize: 15 }}>{/** 项目 */}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M8 4v16M16 4v16"/></svg></span>
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {currentProject?.name ?? '选择项目'}
                     </span>
@@ -241,23 +376,11 @@ export function ChatPage() {
           />
         </div>
 
-        {/* 底部：AI 分镜（上）+ 设置（左下角） */}
+        {/* 底部：设置（左下角） */}
         <div style={{
           display: 'flex', flexDirection: 'column',
           padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
         }}>
-          {/* AI 分镜：路由到编辑器（分镜编辑主界面） */}
-          <button
-            onClick={() => navigate('/editor')}
-            title="AI 分镜"
-            style={{
-              border: 'none', background: 'transparent', borderRadius: 10,
-              padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6, textAlign: 'left',
-            }}
-            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-          >🎬 AI 分镜</button>
           <div style={{ position: 'relative' }}>
             <button
               ref={settingsBtnRef}
@@ -268,7 +391,7 @@ export function ChatPage() {
                 padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
-            >⚙️ 设置</button>
+            >{/** 设置 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M10 2l1.5 2.5L14 3l-.5 2.8 2.5 1.2-1.5 2.3 2.3 1.5-2.8.5.5 2.8-2.5-1.2L10 17l-.5-2.8-2.5 1.2 1.5-2.3-2.3-1.5 2.8-.5L8.5 8.7 11 9.9z"/></svg> 设置</button>
             {settingsOpen && settingsBtnRef.current && createPortal(
               <div style={{
                 position: 'fixed',
@@ -279,10 +402,10 @@ export function ChatPage() {
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
               }}>
                 {[
-                  { label: '👤 个人信息', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
-                  { label: '📄 使用文档', onClick: () => navigate('/docs') },
-                  { label: '✏️ 编辑器', onClick: () => navigate('/editor') },
-                  { label: '🚪 退出登录', onClick: logout, color: '#d92d20' },
+                  { label: '个人信息', icon: 'user', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
+                  { label: '使用文档', icon: 'docs', onClick: () => navigate('/docs') },
+                  { label: '编辑器', icon: 'editor', onClick: () => navigate('/editor') },
+                  { label: '退出登录', icon: 'logout', onClick: logout, color: '#d92d20' },
                 ].map((it) => (
                   <button
                     key={it.label}
@@ -290,11 +413,11 @@ export function ChatPage() {
                     style={{
                       width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
                       background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                      color: it.color ?? DS.ink,
+                      color: it.color ?? DS.ink, display: 'flex', alignItems: 'center', gap: 8,
                     }}
                     onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                     onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                  >{it.label}</button>
+                  >{it.icon === 'user' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}{it.icon === 'docs' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>}{it.icon === 'editor' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>}{it.icon === 'logout' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>}{' '}{it.label}</button>
                 ))}
               </div>,
               document.body,
@@ -324,8 +447,13 @@ export function ChatPage() {
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
           }}>
+            <LiveOrb
+              variant="webgl"
+              colors={["#1D4E89", "#81C3D7", "#D9E8F5"]}
+              size={120}
+            />
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: DS.ink, marginBottom: 8 }}>Moon 智能体</div>
+              <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} /></div>
               <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
             <ChatComposer />
@@ -346,11 +474,6 @@ export function ChatPage() {
                   disabled={!activeConversationId}
                   style={headerBtn(activeConversationId ? 1 : 0.4)}
                 >📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
-                <button
-                  onClick={() => setConfirmClear(true)}
-                  disabled={busy || !activeConversationId || messages.length === 0}
-                  style={headerBtn(busy || !activeConversationId || messages.length === 0 ? 0.4 : 1)}
-                >🧹 清除聊天记录</button>
               </div>
             </div>
 
@@ -408,40 +531,6 @@ export function ChatPage() {
         )}
       </div>
 
-      {/* 清除聊天记录二次确认 */}
-      {confirmClear && (
-        <div
-          onClick={() => setConfirmClear(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 16, boxShadow: '0 8px 32px rgba(0, 0, 0, 0.16)', padding: 24, minWidth: 320, maxWidth: 440 }}
-          >
-            <h3 style={{ margin: '0 0 12px', fontSize: 16, color: DS.ink }}>清除聊天记录</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 14, color: DS.textSecondary, lineHeight: 1.6 }}>
-              确定清除当前对话的聊天记录吗？AI 上下文将全部重置（可重新开始对话），此操作无法撤销。产出素材将保留。
-            </p>
-            <div style={{ textAlign: 'right' }}>
-              <button
-                onClick={() => setConfirmClear(false)}
-                style={{ padding: '6px 18px', height: 32, border: `1px solid ${DS.border}`, borderRadius: 10, background: 'white', color: DS.textSecondary, fontSize: 14, cursor: 'pointer', marginRight: 8 }}
-              >取消</button>
-              <button
-                onClick={async () => {
-                  setConfirmClear(false);
-                  try {
-                    await clearMessages();
-                  } catch {
-                    alert('清除失败，请重试');
-                  }
-                }}
-                style={{ padding: '6px 18px', height: 32, border: 'none', borderRadius: 10, background: 'rgb(217, 45, 32)', color: 'white', fontSize: 14, cursor: 'pointer' }}
-              >清除</button>
-            </div>
-          </div>
-        </div>
-      )}
       {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />

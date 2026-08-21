@@ -6,6 +6,7 @@ import { assetUrl } from '../../config';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
 import { ReferenceUploader } from './ReferenceUploader';
 import { RefineImageModal } from './RefineImageModal';
+import { ContextMenu } from '../common/ContextMenu';
 import ElasticSlider from '../ElasticSlider';
 import BounceCards from '../BounceCards';
 import SpecularButton from '../SpecularButton';
@@ -13,6 +14,7 @@ import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 import { assetApi, type Asset } from '../../api/assets';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 
 function downloadAsset(url: string, filename: string) {
   fetch(url)
@@ -364,6 +366,9 @@ export function PreviewPanel() {
     cursor: 'pointer',
     background: activeTab === tab ? 'var(--color-surface-card)' : 'transparent',
     color: activeTab === tab ? 'var(--color-ink)' : 'var(--color-muted)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
   });
 
   const btnDownload: React.CSSProperties = {
@@ -410,7 +415,7 @@ export function PreviewPanel() {
           gap: 8,
         }}
       >
-        <span style={{ fontSize: 32, opacity: 0.3 }}>🎞️</span>
+        <span style={{ fontSize: 32, opacity: 0.3 }}><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
         <span>选择左侧分镜查看预览</span>
       </div>
     );
@@ -451,10 +456,10 @@ export function PreviewPanel() {
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
         <button onClick={() => setActiveTab('image')} style={tabStyle('image')}>
-          🖼️ 图片
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片
         </button>
         <button onClick={() => setActiveTab('video')} style={tabStyle('video')}>
-          🎬 视频
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频
         </button>
       </div>
 
@@ -475,6 +480,11 @@ export function PreviewPanel() {
                     onImageClick={(url) => setPreviewUrl(url)}
                   />
                 ) : (
+                  <ContextMenu items={[
+                  { label: '🔍 预览', onClick: () => setPreviewUrl(imageList[0]) },
+                  { label: '⬇ 下载图片', onClick: () => downloadAsset(assetUrl(imageList[0]), `scene-${scene.sceneNumber}.png`) },
+                  { label: '✨ 完善图片', onClick: () => setRefineTarget(imageList[0]) },
+                ]}>
                   <img
                     src={assetUrl(imageList[0])}
                     alt={`分镜 ${scene.sceneNumber} 生成图`}
@@ -491,6 +501,7 @@ export function PreviewPanel() {
                       cursor: 'zoom-in',
                     }}
                   />
+                </ContextMenu>
                 )}
                 {/* 选择性下载（勾选框用主题色 accent，点击整行可勾选） */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -561,7 +572,7 @@ export function PreviewPanel() {
           {/* 生成参数区（只含图片生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🖼️ 图片生成参数</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片生成参数</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {Object.keys(imageDraft).length > 0 && (
                   <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>
@@ -574,9 +585,10 @@ export function PreviewPanel() {
                     background: Object.keys(imageDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
                     color: Object.keys(imageDraft).length === 0 ? 'var(--color-muted)' : 'white',
                     cursor: Object.keys(imageDraft).length === 0 ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
                   }}
                 >
-                  💾 保存参数
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存参数
                 </button>
                 <button
                   onClick={handleClearParams}
@@ -590,26 +602,31 @@ export function PreviewPanel() {
 
             <div style={fieldRow}>
               <span style={fieldLabel}>模型</span>
-              <select
-                value={effImageModel}
-                onChange={(e) => setImageDraft((d) => ({ ...d, imageModel: e.target.value }))}
-                style={selectStyle}
-              >
-                {imageModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              <Select value={effImageModel} onValueChange={(v) => { if (v) setImageDraft((d) => ({ ...d, imageModel: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {imageModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
               {!scene.imageModel && imageDraft.imageModel === undefined && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>尺寸</span>
-              <select value={effImageSize} onChange={(e) => setImageDraft((d) => ({ ...d, imageSize: e.target.value }))} style={selectStyle}>
-                {sizeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <Select value={effImageSize} onValueChange={(v) => { if (v) setImageDraft((d) => ({ ...d, imageSize: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {sizeOptions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>质量</span>
-              <select value={effImageQuality} onChange={(e) => setImageDraft((d) => ({ ...d, imageQuality: e.target.value }))} style={selectStyle}>
-                {qualityOptions.map((q) => <option key={q} value={q}>{q}</option>)}
-              </select>
+              <Select value={effImageQuality} onValueChange={(v) => { if (v) setImageDraft((d) => ({ ...d, imageQuality: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {qualityOptions.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             {imageParams.nRange && (
               <div style={fieldRow}>
@@ -678,7 +695,11 @@ export function PreviewPanel() {
           {/* 结果区 */}
           <div style={{ marginBottom: 12 }}>
             {scene.videoUrl ? (
-              <div>
+              <ContextMenu items={[
+                  { label: '🔍 预览', onClick: () => { /* video 已有 controls，点击即播放 */ } },
+                  { label: '⬇ 下载视频', onClick: () => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`) },
+                ]}>
+                <div>
                 <video
                   src={assetUrl(scene.videoUrl)}
                   controls
@@ -691,7 +712,8 @@ export function PreviewPanel() {
                 <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} style={btnDownload}>
                   ⬇ 下载视频
                 </button>
-              </div>
+                </div>
+                </ContextMenu>
             ) : (
               <div
                 style={{
@@ -718,7 +740,7 @@ export function PreviewPanel() {
           {/* 生成参数区（只含视频生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🎬 视频生成参数</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频生成参数</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {Object.keys(videoDraft).length > 0 && (
                   <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>
@@ -731,9 +753,10 @@ export function PreviewPanel() {
                     background: Object.keys(videoDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
                     color: Object.keys(videoDraft).length === 0 ? 'var(--color-muted)' : 'white',
                     cursor: Object.keys(videoDraft).length === 0 ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
                   }}
                 >
-                  💾 保存参数
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存参数
                 </button>
                 <button
                   onClick={handleClearParams}
@@ -747,9 +770,12 @@ export function PreviewPanel() {
 
             <div style={fieldRow}>
               <span style={fieldLabel}>模型</span>
-              <select value={effVideoModel} onChange={(e) => setVideoDraft((d) => ({ ...d, videoModel: e.target.value }))} style={selectStyle}>
-                {videoModelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              <Select value={effVideoModel} onValueChange={(v) => { if (v) setVideoDraft((d) => ({ ...d, videoModel: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {videoModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
               {!scene.videoModel && videoDraft.videoModel === undefined && <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>跟随全局</span>}
             </div>
             <div style={fieldRow}>
@@ -765,15 +791,21 @@ export function PreviewPanel() {
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>分辨率</span>
-              <select value={effVideoResolution} onChange={(e) => setVideoDraft((d) => ({ ...d, videoResolution: e.target.value }))} style={selectStyle}>
-                {resolutionOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
+              <Select value={effVideoResolution} onValueChange={(v) => { if (v) setVideoDraft((d) => ({ ...d, videoResolution: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {resolutionOptions.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div style={fieldRow}>
               <span style={fieldLabel}>画幅</span>
-              <select value={effVideoAspect} onChange={(e) => setVideoDraft((d) => ({ ...d, videoAspectRatio: e.target.value }))} style={selectStyle}>
-                {aspectOptions.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <Select value={effVideoAspect} onValueChange={(v) => { if (v) setVideoDraft((d) => ({ ...d, videoAspectRatio: v })); }}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {aspectOptions.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* 参考素材区（r2va 多模态参考）：与首帧互斥 */}
@@ -848,13 +880,13 @@ export function PreviewPanel() {
       {(scene.cameraMovement || scene.shotType) && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
           {scene.cameraMovement && (
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', color: 'var(--color-muted)' }}>
-              🎥 {scene.cameraMovement}
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg> {scene.cameraMovement}
             </span>
           )}
           {scene.shotType && (
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', color: 'var(--color-muted)' }}>
-              📐 {scene.shotType}
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.71 3.29a1 1 0 00-1.42 0l-18 18a1 1 0 001.42 1.42l18-18a1 1 0 000-1.42z"/><path d="M3 12h4M12 3v4"/></svg> {scene.shotType}
             </span>
           )}
         </div>
@@ -862,11 +894,11 @@ export function PreviewPanel() {
 
       {/* 关联资产（本分镜引用的人物/道具/场景设定，图片/视频生成时分别注入） */}
       <div style={{ marginTop: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 关联资产（{activeTab === 'image' ? '图片' : '视频'}生成时注入设定与参考图）</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/><path d="M10 7h4M7 10v4M17 10v4M10 17h4"/></svg> 关联资产（{activeTab === 'image' ? '图片' : '视频'}生成时注入设定与参考图）</span>
 
         {activeTab === 'image' && (
           <div style={{ marginTop: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🖼️ 图片关联资产</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片关联资产</span>
             {sceneImageAssets.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产</div>
             ) : (
@@ -876,10 +908,10 @@ export function PreviewPanel() {
                     {a.images[0] ? (
                       <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
                     ) : (
-                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
+                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/><path d="M10 7h4M7 10v4M17 10v4M10 17h4"/></svg></span>
                     )}
                     {a.name}
-                    <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
+                    <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   </span>
                 ))}
               </div>
@@ -892,7 +924,7 @@ export function PreviewPanel() {
 
         {activeTab === 'video' && (
           <div style={{ marginTop: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>🎬 视频关联资产</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频关联资产</span>
             {sceneVideoAssets.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产</div>
             ) : (
@@ -902,10 +934,10 @@ export function PreviewPanel() {
                     {a.images[0] ? (
                       <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
                     ) : (
-                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>🧩</span>
+                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/><path d="M10 7h4M7 10v4M17 10v4M10 17h4"/></svg></span>
                     )}
                     {a.name}
-                    <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
+                    <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   </span>
                 ))}
               </div>

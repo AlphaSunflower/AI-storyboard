@@ -39,15 +39,10 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
      * 优化 System Prompt：LLM 自行判断草稿类型（剧情/图片/视频/综合），
      * 输出一段优化后的专业提示词；不要求 JSON，直接给提示词文本。
      */
-    private static final String OPTIMIZE_PROMPT =
-        "你是一名专业的分镜提示词优化师。用户会给你一段需求草稿，可能是剧情脚本、"
-        + "图片设计或视频设计需求，也可能是综合需求。请你自行判断其类型，"
-        + "输出一段优化后的专业提示词：剧情类给出完整脉络与情绪基调；图片类给出构图、"
-        + "主体、环境、光线、色彩、风格、镜头类型；视频类给出运镜、节奏、转场、画面动势、时长感。"
-        + "直接输出优化后的提示词本身，不要 JSON、不要解释、不要编号前缀。";
 
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /**
      * 懒加载 ChatClient：默认模型从网关动态获取，超时 60s（与原 HttpClient timeout 一致）。
@@ -77,7 +72,7 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
             // 草稿截断 500 字：提示词优化只需要核心需求，防超长输入拖慢
             String userContent = content.length() > 500 ? content.substring(0, 500) : content;
             String optimized = chatClient().prompt()
-                    .system(OPTIMIZE_PROMPT)
+                    .system(promptConfig.get("services/prompt-optimize"))
                     .user(userContent)
                     .call()
                     .content();

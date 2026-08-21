@@ -31,6 +31,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/error").permitAll()
+                // Swagger UI / OpenAPI 文档（本地联调用；prod 由 springdoc.enabled=false 关闭）
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(gatewayFilter, UsernamePasswordAuthenticationFilter.class);

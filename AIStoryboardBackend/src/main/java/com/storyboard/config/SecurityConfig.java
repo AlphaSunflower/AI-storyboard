@@ -58,6 +58,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/files/**").permitAll()
                 .requestMatchers("/api/internal/**").permitAll()
+                // Swagger UI / OpenAPI 文档（本地联调用；prod 由 springdoc.enabled=false 关闭）
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .requestMatchers("/actuator/health").permitAll()  // 健康检查（部署探活，只暴露 health）
                 .anyRequest().authenticated()
             )

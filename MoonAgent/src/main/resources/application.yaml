@@ -49,3 +49,10 @@ storyboard:
 # 上传根目录：monorepo 本地指向主后端 uploads（文件共享，前端统一经主后端 /api/files/** 读取）；生产配共享存储
 ai:
   upload-root: ${UPLOAD_ROOT:../AIStoryboardBackend/uploads}
+  gateway:
+    base-url: ${LLM_GATEWAY_BASE_URL:}
+    api-key: ${LLM_GATEWAY_API_KEY:}
+
+# 提示词文件目录（文件系统路径，支持热刷新）
+prompts:
+  dir: src/main/resources/prompts

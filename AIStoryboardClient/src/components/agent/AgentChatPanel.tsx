@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
+import { SceneSelectorModal } from './SceneSelectorModal';
 import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
+import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, clearMessages, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
   const [text, setText] = useState('');
-  const [confirmClear, setConfirmClear] = useState(false);
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
+  // "+" 菜单状态
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sceneModalOpen, setSceneModalOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // M9：是否处于近底位置（距底部 <80px）；用户上翻查看历史时暂停自动滚底跟随
   const nearBottomRef = useRef(true);
@@ -36,11 +44,41 @@ export function AgentChatPanel() {
     }
   }, [pendingPicUrl]);
 
+  // 点击外部关闭"+"菜单
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!menuBtnRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+
   const handleSend = () => {
     const content = text.trim();
     if (!content || streaming || waitingHumanInput || waitingVideoPlan) return;
     setText('');
     sendMessage(content);
+  };
+
+  const openMenu = () => {
+    const btn = menuBtnRef.current;
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      setMenuPos({ top: r.top - 88, left: r.left });
+    }
+    setMenuOpen(!menuOpen);
+  };
+
+  const handleSceneConfirm = (selected: SceneResponse[]) => {
+    const summary = selected.map((s) => {
+      const desc = s.scriptContent?.slice(0, 60) || '无描述';
+      const img = s.imageUrl ? '[已有图]' : '[未生图]';
+      const vid = s.videoUrl ? '[已有视频]' : '[未生视频]';
+      return `分镜${s.sceneNumber}（${img}${vid}）：${desc}`;
+    }).join('\n');
+    sendMessage(`请分析以下分镜并给出优化和生成建议：\n${summary}`);
+    setSceneModalOpen(false);
   };
 
   // 当前会话标题：对话窗口顶部展示；无会话时占位
@@ -92,16 +130,6 @@ export function AgentChatPanel() {
           >
             📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}
           </button>
-          <button
-            onClick={() => setConfirmClear(true)}
-            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan || !activeConversationId || messages.length === 0}
-            title={streaming || waitingHumanInput || waitingVideoPlan ? '生成进行中，暂不可清除' : '清除当前对话的聊天记录（AI 上下文重置）'}
-            style={{
-              border: 'none', background: 'none', color: 'var(--color-muted)',
-              fontSize: 14, cursor: 'pointer', padding: '4px 8px', borderRadius: 6,
-              opacity: streaming || !!waitingHumanInput || !!waitingVideoPlan || !activeConversationId || messages.length === 0 ? 0.4 : 1,
-            }}
-          >🧹 清除聊天记录</button>
         </div>
       </div>
 
@@ -201,12 +229,52 @@ export function AgentChatPanel() {
           </div>
         )}
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-          <button
-            onClick={() => fileRef.current?.click()}
-            title="上传参考图"
-            style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0 }}
-          >📎</button>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+          <div style={{ position: 'relative' }}>
+            <button
+              ref={menuBtnRef}
+              onClick={openMenu}
+              title="上传"
+              style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
+            <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+            {/* 下拉菜单：portal 到 body */}
+            {menuOpen && menuPos && createPortal(
+              <div ref={menuRef} style={{
+                position: 'fixed', top: menuPos.top, left: menuPos.left,
+                background: 'white', border: '1px solid var(--color-hairline)',
+                borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                padding: 4, zIndex: 1000, minWidth: 140,
+              }}>
+                <button
+                  onClick={() => { setMenuOpen(false); setSceneModalOpen(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
+                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
+                    color: 'var(--color-ink)', borderRadius: 8,
+                  }}
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M10 12h4M12 10v4"/></svg>
+                  上传分镜
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
+                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
+                    color: 'var(--color-ink)', borderRadius: 8,
+                  }}
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                  上传图片
+                </button>
+              </div>,
+              document.body,
+            )}
+          </div>
           <textarea
             ref={inputRef}
             value={text}
@@ -244,62 +312,14 @@ export function AgentChatPanel() {
         </div>
       </div>
 
-      {/* 清除聊天记录二次确认模态 */}
-      {confirmClear && (
-        <div
-          onClick={() => setConfirmClear(false)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'white', borderRadius: 'var(--rounded-md)',
-              boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)', padding: 24,
-              minWidth: 320, maxWidth: 440,
-            }}
-          >
-            <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>
-              清除聊天记录
-            </h3>
-            <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>
-              确定清除当前对话的聊天记录吗？AI 上下文将全部重置（可重新开始对话），此操作无法撤销。产出素材将保留。
-            </p>
-            <div style={{ textAlign: 'right' }}>
-              <button
-                onClick={() => setConfirmClear(false)}
-                style={{
-                  padding: '6px 18px', height: 32,
-                  border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-                  background: 'white', color: 'var(--color-muted)', font: 'var(--text-caption)',
-                  cursor: 'pointer', marginRight: 8,
-                }}
-              >取消</button>
-              <button
-                onClick={async () => {
-                  setConfirmClear(false);
-                  try {
-                    await clearMessages();
-                  } catch {
-                    alert('清除失败，请重试');
-                  }
-                }}
-                style={{
-                  padding: '6px 18px', height: 32,
-                  border: 'none', borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-error)', color: 'white', font: 'var(--text-caption)',
-                  cursor: 'pointer',
-                }}
-              >清除</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 产出素材弹窗（文件夹图标入口） */}
       <AgentAssetsModal open={assetsOpen} onClose={() => setAssetsOpen(false)} />
+      {/* 分镜选择弹窗 */}
+      <SceneSelectorModal
+        open={sceneModalOpen}
+        onClose={() => setSceneModalOpen(false)}
+        onConfirm={handleSceneConfirm}
+      />
     </div>
   );
 }

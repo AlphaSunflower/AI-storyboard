@@ -12,6 +12,7 @@ import Particles from '../components/Particles';
 import ParticleText from '../components/ParticleText';
 import LineSidebar from '../components/LineSidebar';
 import Magnet from '../components/Magnet';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import '../styles/docs.css';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -1681,14 +1682,14 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">常见问题</div>
             <h2 className="docs-section__title">你可能想知道</h2>
           </div>
-          <div className="docs-faq">
-            {FAQS.map((f) => (
-              <div className="docs-faq__item" key={f.q}>
-                <div className="docs-faq__q">{f.q}</div>
-                <div className="docs-faq__a">{f.a}</div>
-              </div>
+          <Accordion defaultValue={['faq-0']} className="docs-faq">
+            {FAQS.map((f, i) => (
+              <AccordionItem key={f.q} value={`faq-${i}`} className="docs-faq__item">
+                <AccordionTrigger className="docs-faq__q">{f.q}</AccordionTrigger>
+                <AccordionContent className="docs-faq__a">{f.a}</AccordionContent>
+              </AccordionItem>
             ))}
-          </div>
+          </Accordion>
         </div>
       </section>
 

@@ -67,6 +67,15 @@ public class AgentConversationController {
         return ApiResponse.ok(Map.of("conversation", toVO(conversation), "messages", messages));
     }
 
+    /** 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用） */
+    @GetMapping("/conversations/{id}/pending-checkpoint")
+    public ApiResponse<Map<String, Object>> getPendingCheckpoint(
+            Authentication auth, @PathVariable String id) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        Map<String, Object> cp = chatService.getPendingCheckpoint(id);
+        return ApiResponse.ok(cp);
+    }
+
     /** 删除会话（级联删消息/资产） */
     @DeleteMapping("/conversations/{id}")
     public ApiResponse<Void> deleteConversation(Authentication auth, @PathVariable String id) {

@@ -70,3 +70,7 @@ ai:
 # 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
 internal:
   secret: ${INTERNAL_SECRET:moon-internal-secret-2024}
+
+# 提示词文件目录（文件系统路径，支持热刷新）
+prompts:
+  dir: src/main/resources/prompts

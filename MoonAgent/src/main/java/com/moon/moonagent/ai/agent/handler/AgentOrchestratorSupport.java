@@ -63,6 +63,7 @@ public class AgentOrchestratorSupport {
     private final StoryboardClient storyboardClient;
     private final com.moon.moonagent.ai.agent.AssetMatchingService assetMatchingService;
     private final com.moon.moonagent.mapper.AgentMessageMapper messageMapper;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -201,12 +202,7 @@ public class AgentOrchestratorSupport {
     public ScriptOptimizeResult callScriptOptimize(String content, OrchestrationRequest req) {
         try {
             String raw = streamPlanWithMessage(
-                    "你是分镜助手，先理解用户的分镜需求并给出优化后的剧本。"
-                        + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"script\":\"优化后的完整剧本\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                        + "。type=1 表示已理解可继续（此时 script 必填，options 为空数组）；"
-                        + "type=0 表示关键信息缺失需追问（此时 message 只问一个最关键的问题，script 为空，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）；"
-                        + "用户回复只要提供了任何有效信息（哪怕不完整），就直接用已有信息生成剧本（type=1），不要重复追问、不要一次问多个问题；"
-                        + "只有回复为空或与需求完全无关时才 type=0。",
+                    promptConfig.get("orchestrator/script-optimize"),
                     content, req);
             return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
         } catch (Exception e) {
@@ -222,18 +218,7 @@ public class AgentOrchestratorSupport {
     public ScriptOptimizeResult callRequirementClarify(String content, OrchestrationRequest req) {
         try {
             String raw = streamPlanWithMessage(
-                    "你是一位专业的分镜需求分析师。用户会给你一个模糊的分镜需求，你需要判断需求是否足够清晰。"
-                        + "\n\n分析维度：风格（写实/动漫/卡通/水墨/赛博朋克等）、调性（热血/搞笑/温馨/悬疑/史诗等）、"
-                        + "画面比例（16:9横版/9:16竖版/1:1方形等）、目标场景（广告/短片/教学/演示/宣传片等）、"
-                        + "镜头数量（3-5/6-10/10+）、是否需要文字/旁白/字幕等。"
-                        + "\n\n输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\","
-                        + "\"script\":\"\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                        + "\ntype=1 表示需求已足够清晰可直接进入剧本优化（此时 options 为空数组，message 简短确认）；"
-                        + "\ntype=0 表示需求模糊需澄清。此时："
-                        + "\n- message 先简短复述你理解的需求，再按维度分段列出所有不明确的点（每点一行，用 emoji 标记维度如🎨风格🎭调性📐比例），让用户一次看清全部待确认项；"
-                        + "\n- options 列出最常见的 2~4 个选项组合（title 用简洁中文，如'日系动漫·热血·16:9横版'），覆盖多个维度的典型搭配；"
-                        + "\n- 如果用户已明确说了某些维度（如'动漫风格'），跳过已明确的维度，只追问剩余的；"
-                        + "\n- 每次最多追问 3 个维度，不要一次罗列所有维度让用户选择困难。",
+                    promptConfig.get("orchestrator/requirement-clarify"),
                     content, req);
             return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
         } catch (Exception e) {
@@ -247,10 +232,7 @@ public class AgentOrchestratorSupport {
     public StoryboardPlanResult callStoryboardPlan(String script, OrchestrationRequest req) {
         try {
             String raw = streamPlanWithMessage(
-                    "你是分镜方案设计师。基于剧本给出分镜方案要点。"
-                        + "输出 JSON：{\"type\":1或0,\"message\":\"方案说明\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                        + "。type=1 方案已明确（options 为空数组）；type=0 需用户补充（message 只问一个最关键的问题，options 必须给出 2~4 个选项供用户选择，title 用简短中文动词短语）；"
-                        + "用户回复只要提供了任何有效信息就直接生成方案（type=1），不要重复追问。",
+                    promptConfig.get("orchestrator/storyboard-plan"),
                     script, req);
             return new BeanOutputConverter<>(StoryboardPlanResult.class).convert(raw);
         } catch (Exception e) {
@@ -322,8 +304,7 @@ public class AgentOrchestratorSupport {
     public String callImagePrompt(String content) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是 AI 绘画提示词工程师。根据用户的需求输出一条高质量图片生成提示词，"
-                    + "必须使用中文输出，只输出提示词文本本身，不要任何解释、引号或前后缀。")
+                .system(promptConfig.get("orchestrator/image-prompt"))
                 .user(content)
                 .call()
                 .content());
@@ -340,11 +321,8 @@ public class AgentOrchestratorSupport {
      */
     public ImagePlanResult callImagePromptWithParams(String content, String modelOptionsText) {
         boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-        String systemPrompt = "你是 AI 绘画提示词工程师。根据用户的需求输出一条高质量图片生成提示词，必须使用中文。"
-                + "输出 JSON：{\"prompt\":\"图片生成提示词\""
-                + (withParams ? ",\"params\":{\"model\":\"所选模型名\",\"size\":\"所选尺寸\",\"quality\":\"所选质量\"},\"reasons\":{\"model\":\"推荐理由\",\"size\":\"推荐理由\",\"quality\":\"推荐理由\"}}" : "}")
-                + (withParams ? "。可用模型与参数选项：\n" + modelOptionsText : "")
-                + (withParams ? "。根据用户需求选择最合适的模型和参数，推荐理由≤15字。只输出 JSON。" : "。只输出 JSON。");
+        String systemPrompt = promptConfig.get("orchestrator/image-prompt-with-params")
+                .replace("{{modelOptionsText}}", withParams ? modelOptionsText : "");
         try {
             String raw = retryTransient(() -> planClient().prompt()
                     .system(systemPrompt)
@@ -377,17 +355,7 @@ public class AgentOrchestratorSupport {
     public ImageClarifyResult callImageClarify(String content) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是 AI 绘画需求确认助手。判断用户的描述是否足以生成一张明确的图片。"
-                    + "分析维度：画面主体（人物/风景/动物/产品等）、风格（写实/动漫/水彩/油画/赛博朋克/扁平插画等）、"
-                    + "调性（明亮/暗黑/温馨/科技感/复古等）、构图（特写/全景/俯视/仰视等）、"
-                    + "色调（暖色/冷色/高对比/低饱和等）。"
-                    + "输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\",\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                    + "。type=1 表示需求明确可继续（options 为空数组）；"
-                    + "type=0 表示需澄清——此时："
-                    + "message 先简短复述你理解的画面，再按维度列出不明确的点（每点一行，用 emoji 标记如🎨风格🎭调性🖼构图），"
-                    + "options 列出 2~4 个常见选项组合（如'动漫·热血·特写'、'写实·清新·全景'），覆盖多个维度的典型搭配；"
-                    + "如果用户已明确某些维度，跳过已明确的，只追问剩余的；最多追问 3 个维度；"
-                    + "用户回复只要提供了任何有效信息就直接按已有信息生成方案（type=1），不要重复追问。只输出 JSON。")
+                .system(promptConfig.get("orchestrator/image-clarify"))
                 .user(content)
                 .call()
                 .content());
@@ -409,18 +377,7 @@ public class AgentOrchestratorSupport {
     public ImageClarifyResult callVideoClarify(String content, OrchestrationRequest req) {
         try {
             String raw = streamPlanWithMessage(
-                    "你是视频创作需求确认助手。判断用户的视频描述是否足够明确。"
-                        + "分析维度：风格（写实/动漫/电影感/Vlog/动画MG等）、调性（热血/搞笑/温馨/悬疑/科技感等）、"
-                        + "时长（短视频5-15s/标准30s/长片60s+）、画面比例（16:9横版/9:16竖版/1:1方形）、"
-                        + "镜头运动（固定/推拉/跟拍/航拍/快速切换等）、节奏（快切/慢镜/叙事节奏等）。"
-                        + "\n输出 JSON：{\"type\":1或0,\"message\":\"给用户的回复\","
-                        + "\"options\":[{\"id\":\"opt1\",\"title\":\"选项文案\"}]}"
-                        + "\ntype=1 表示需求已足够明确（options 为空数组，message 简短确认）；"
-                        + "\ntype=0 表示需澄清——此时："
-                        + "\n- message 先简短复述你理解的视频需求，再按维度列出不明确的点（每点一行，用 emoji 标记如🎬风格⏱时长📷镜头运动），让用户一次看清全部待确认项；"
-                        + "\n- options 列出 2~4 个常见选项组合（如'电影感·热血·30s·快切'、'Vlog·清新·15s·慢镜'），覆盖多个维度的典型搭配；"
-                        + "\n- 如果用户已明确某些维度，跳过已明确的，只追问剩余的；最多追问 3 个维度；"
-                        + "\n- 用户回复只要提供了任何有效信息就直接按已有信息生成方案（type=1），不要重复追问。",
+                    promptConfig.get("orchestrator/video-clarify"),
                     content, req);
             return new BeanOutputConverter<>(ImageClarifyResult.class).convert(raw);
         } catch (Exception e) {
@@ -442,10 +399,8 @@ public class AgentOrchestratorSupport {
     public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是图片修改方向设计师。基于当前图片方案，从不同修改维度给出 2~4 个具体可执行的修改方向选项。"
-                    + (hasSource ? "注意图片有参考图（图改图场景），选项要能基于原图调整。" : "")
-                    + "输出 JSON：{\"message\":\"给用户的简短引导语（≤20 字）\",\"options\":[{\"id\":\"opt1\",\"title\":\"维度-具体方向（≤10 字）\"}]}。"
-                    + "title 用「维度-方向」格式，如 场景-婚礼现场、氛围-更浪漫、画风-Q版、服装-中式礼服。只输出 JSON。")
+                .system(promptConfig.get("orchestrator/pic-refine-options")
+                    .replace("{{hasSourceNote}}", hasSource ? promptConfig.get("orchestrator/pic-refine-options-source-note") : ""))
                 .user("当前图片方案：" + basePrompt)
                 .call()
                 .content());
@@ -477,13 +432,8 @@ public class AgentOrchestratorSupport {
     public VideoPlanResult callVideoPlan(String content, String modelOptionsText) {
         try {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-            String system = "你是视频生成方案设计师。根据用户需求设计视频 prompt。"
-                    + "输出 JSON：{\"message\":\"视频生成 prompt，中文 50~120 字，描述动作/运镜/光线/氛围\",\"duration\":4~15 整数"
-                    + (withParams ? ",\"params\":{\"model\":\"所选模型名\",\"resolution\":\"所选分辨率\",\"aspectRatio\":\"所选画幅\"},\"reasons\":{\"model\":\"推荐理由\",\"resolution\":\"推荐理由\",\"aspectRatio\":\"推荐理由\"}}" : "")
-                    + "}"
-                    + (withParams ? "。可用模型与参数选项：\n" + modelOptionsText
-                        + "。从上述选项中为每个参数选择最合适的值，理由简短（≤15 字）。" : "")
-                    + " 只输出 JSON。";
+            String system = promptConfig.get("orchestrator/video-plan")
+                    .replace("{{modelOptionsText}}", withParams ? modelOptionsText : "");
             String raw = retryTransient(() -> planClient().prompt()
                 .system(system)
                 .user(content)
@@ -609,12 +559,7 @@ public class AgentOrchestratorSupport {
             String imageOpts = buildModelOptionsText("image");
             String videoOpts = buildModelOptionsText("video");
             String raw = retryTransient(() -> planClient().prompt()
-                .system("你是分镜生成参数推荐官。根据整套分镜剧情的整体风格与内容，从给定选项中选择一套适合整套分镜的图片生成参数和视频生成参数。"
-                    + "必须严格从给定选项中取值，只输出 JSON："
-                    + "{\"image\":{\"model\":\"生图模型\",\"size\":\"尺寸\",\"quality\":\"质量\"},"
-                    + "\"video\":{\"model\":\"视频模型\",\"duration\":\"时长秒数\",\"resolution\":\"分辨率\",\"aspectRatio\":\"画幅\"},"
-                    + "\"reasons\":{\"imageModel\":\"推荐理由(≤15字)\",\"imageSize\":\"理由\",\"imageQuality\":\"理由\","
-                    + "\"videoModel\":\"理由\",\"videoDuration\":\"理由\",\"videoResolution\":\"理由\",\"videoAspectRatio\":\"理由\"}}。")
+                .system(promptConfig.get("orchestrator/scene-params-recommend"))
                 .user("剧本：\n" + script
                     + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
                     + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
@@ -661,9 +606,18 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /** 创建 HITL checkpoint（pending，30min 过期），返回 form_token */
+    /** 创建 HITL checkpoint（pending，30min 过期），返回 form_token。
+     * 同时把 actions/formContent/models/assets 等恢复所需字段存进 plan JSON，
+     * 供页面刷新后 pending-checkpoint 端点重建 human_input 事件。 */
     public String createCheckpoint(AgentConversation conversation, String action,
-                                   List<Map<String, Object>> planPayload, String step) {
+                                   List<Map<String, Object>> planPayload, String step,
+                                   String formContent, List<Map<String, Object>> actions,
+                                   List<Map<String, Object>> models,
+                                   Map<String, String> recommended,
+                                   Map<String, String> reasons,
+                                   List<Map<String, Object>> imageModels,
+                                   List<Map<String, Object>> videoModels,
+                                   List<Map<String, Object>> assets) {
         AgentCheckpoint cp = new AgentCheckpoint();
         cp.setConversationId(conversation.getId());
         cp.setAction(action);
@@ -672,7 +626,17 @@ public class AgentOrchestratorSupport {
         cp.setStatus("pending");
         cp.setExpirationTime(OffsetDateTime.now().plus(CHECKPOINT_TTL));
         try {
-            cp.setPlan(objectMapper.writeValueAsString(Map.of("items", planPayload)));
+            Map<String, Object> plan = new java.util.LinkedHashMap<>();
+            plan.put("items", planPayload);
+            plan.put("_formContent", formContent);
+            plan.put("_actions", actions);
+            if (models != null && !models.isEmpty()) plan.put("_models", models);
+            if (recommended != null && !recommended.isEmpty()) plan.put("_recommended", recommended);
+            if (reasons != null && !reasons.isEmpty()) plan.put("_reasons", reasons);
+            if (imageModels != null && !imageModels.isEmpty()) plan.put("_imageModels", imageModels);
+            if (videoModels != null && !videoModels.isEmpty()) plan.put("_videoModels", videoModels);
+            if (assets != null && !assets.isEmpty()) plan.put("_assets", assets);
+            cp.setPlan(objectMapper.writeValueAsString(plan));
         } catch (Exception e) {
             log.warn("checkpoint plan 序列化失败: {}", e.getMessage());
         }
@@ -706,7 +670,9 @@ public class AgentOrchestratorSupport {
         if (!skipMessage) {
             sendEvent(req, "message", Map.of("content", plan.planText()));
         }
-        String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE);
+        String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE,
+                plan.planText(), plan.actions(), plan.models(), plan.recommended(), plan.reasons(),
+                plan.imageModels(), plan.videoModels(), plan.assets());
         Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
             "formToken", formToken, "taskId", "",
             "formContent", plan.planText(),
@@ -1082,11 +1048,7 @@ public class AgentOrchestratorSupport {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
             String content = planClient().prompt()
-                    .system("你是用户友好的 AI 创作助手。上游 AI 生成服务返回了错误，请把错误翻译成对用户友好的中文回复：\n"
-                            + "- 如果是内容安全审核拒绝（错误含 safety/rejected/violations/审核 等关键词）：告诉用户提示词可能触及了内容审核限制（如暴力等类别），建议修改措辞后重试，不要展开敏感细节。\n"
-                            + "- 如果是网络/服务不可用（错误含 timeout/connect/refused/5xx/429 等）：告诉用户服务暂时繁忙，请稍后重试。\n"
-                            + "- 其他错误：简短说明生成失败了，建议稍后重试或调整描述。\n"
-                            + "要求：2~4 句自然口语中文，不要出现原始错误码或英文原文，不要提“上游/渠道”等技术词。")
+                    .system(promptConfig.get("orchestrator/friendly-error"))
                     .user(raw)
                     .call()
                     .content();
@@ -1116,13 +1078,7 @@ public class AgentOrchestratorSupport {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
             String content = planClient().prompt()
-                    .system("你是图片生成错误修复助手。用户提交的图片提示词被上游 AI 生成服务拒绝，请判断错误并处理：\n"
-                            + "- 如果错误是内容安全审核拒绝（错误含 safety/rejected/violations/审核 等关键词）：重写提示词，"
-                            + "保留用户原本的创作意图（主体/构图/氛围），剔除可能触发审核的元素（暴力/血腥等），用更温和的措辞表达。\n"
-                            + "- 其他错误（网络/超时/服务不可用等）：不重写。\n"
-                            + "只输出 JSON：{\\\"recoverable\\\": true/false, \\\"rewrittenPrompt\\\": \\\"重写后的提示词（不可恢复时为空串）\\\", "
-                            + "\\\"message\\\": \\\"给用户看的简短中文说明（可恢复时如：你的描述可能触及暴力内容，我帮你调整了措辞重新生成；不可恢复时如：服务暂时繁忙，请稍后重试）\\\"}。"
-                            + "禁止任何解释、代码块或多余字符。")
+                    .system(promptConfig.get("orchestrator/image-recovery"))
                     .user("原提示词：\n" + originalPrompt + "\n\n上游错误：\n" + raw)
                     .call()
                     .content();

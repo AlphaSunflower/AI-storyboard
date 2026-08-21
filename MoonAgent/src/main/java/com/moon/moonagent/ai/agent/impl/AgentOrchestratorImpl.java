@@ -216,7 +216,14 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 request.setAction(action);
                 request.setCustomText(customText);
                 String source = support.planField(cp.getPlan(), "source");
-                IntentHandler target = byIntent.get("video".equals(source) ? "intent-video" : "intent-aisplit");
+                IntentHandler target;
+                if ("video".equals(source)) {
+                    target = byIntent.get("intent-video");
+                } else if ("review-video".equals(source)) {
+                    target = byIntent.get("intent-scene-review");
+                } else {
+                    target = byIntent.get("intent-aisplit");
+                }
                 if (target == null) target = byIntent.get("intent-aisplit");
                 target.resume(request, cp);
                 return request.getLastMessage();

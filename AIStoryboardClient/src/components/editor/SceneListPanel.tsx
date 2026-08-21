@@ -1,15 +1,100 @@
-import { useRef } from 'react';
+import { useRef, useState, useCallback } from 'react';
+import type { SceneResponse } from '../../api/projects';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
+import { LiveOrb } from '../ui/live-orb';
+
+/** 排序模式下的可拖拽卡片包裹 */
+function SortableSceneCard({
+  scene,
+  isSelected,
+  onSelect,
+}: {
+  scene: SceneResponse;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: scene.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: 'relative',
+    zIndex: isDragging ? 999 : 'auto' as unknown as number,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      {/* 拖拽把手 + 卡片 */}
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
+        <div
+          {...listeners}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            cursor: 'grab',
+            color: 'var(--color-muted)',
+            flexShrink: 0,
+            touchAction: 'none',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="6" r="1.5" />
+            <circle cx="15" cy="6" r="1.5" />
+            <circle cx="9" cy="12" r="1.5" />
+            <circle cx="15" cy="12" r="1.5" />
+            <circle cx="9" cy="18" r="1.5" />
+            <circle cx="15" cy="18" r="1.5" />
+          </svg>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SceneCard
+            scene={scene}
+            isSelected={isSelected}
+            onSelect={onSelect}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function SceneListPanel({ width }: { width: number }) {
-  const { scenes, selectedSceneId, selectScene, addScene, currentProject } =
+  const { scenes, selectedSceneId, selectScene, addScene, currentProject, reorderScenes } =
     useProjectStore();
 
   const listRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
+  const [sortMode, setSortMode] = useState(false);
 
   // 新增分镜时（AI 生成脚本 / 手动添加），新卡片依次浮入；初始加载同样生效
   useGSAP(() => {
@@ -34,6 +119,23 @@ export function SceneListPanel({ width }: { width: number }) {
       },
     });
   }, { dependencies: [scenes.length], scope: listRef });
+
+  // dnd-kit 传感器
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = scenes.findIndex(s => s.id === active.id);
+    const newIndex = scenes.findIndex(s => s.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(scenes, oldIndex, newIndex);
+    // 乐观更新 + 持久化
+    reorderScenes(reordered.map(s => s.id));
+  }, [scenes, reorderScenes]);
 
   return (
     <div
@@ -67,24 +169,45 @@ export function SceneListPanel({ width }: { width: number }) {
         >
           分镜列表
         </h2>
-        {currentProject && (
-          <button
-            onClick={() => addScene(currentProject.id)}
-            style={{
-              padding: '4px 14px',
-              height: 28,
-              fontSize: 12,
-              borderRadius: 'var(--rounded-md)',
-              border: '1px solid var(--color-hairline)',
-              background: 'white',
-              cursor: 'pointer',
-              color: 'var(--color-body)',
-              fontWeight: 500,
-            }}
-          >
-            + 添加
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 6 }}>
+          {scenes.length > 1 && (
+            <button
+              onClick={() => setSortMode(!sortMode)}
+              style={{
+                padding: '4px 14px',
+                height: 28,
+                fontSize: 12,
+                borderRadius: 'var(--rounded-md)',
+                border: sortMode ? '1px solid var(--color-primary)' : '1px solid var(--color-hairline)',
+                background: sortMode ? 'var(--color-primary)' : 'white',
+                cursor: 'pointer',
+                color: sortMode ? 'white' : 'var(--color-body)',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+              }}
+            >
+              {sortMode ? '✓ 完成排序' : '↕ 排序'}
+            </button>
+          )}
+          {currentProject && !sortMode && (
+            <button
+              onClick={() => addScene(currentProject.id)}
+              style={{
+                padding: '4px 14px',
+                height: 28,
+                fontSize: 12,
+                borderRadius: 'var(--rounded-md)',
+                border: '1px solid var(--color-hairline)',
+                background: 'white',
+                cursor: 'pointer',
+                color: 'var(--color-body)',
+                fontWeight: 500,
+              }}
+            >
+              + 添加
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Empty state */}
@@ -97,16 +220,21 @@ export function SceneListPanel({ width }: { width: number }) {
             justifyContent: 'center',
           }}
         >
-          <p
-            style={{
-              color: 'var(--color-muted-soft)',
-              fontSize: 13,
-              textAlign: 'center',
-              padding: 'var(--space-lg)',
-              animation: 'emptyGuideFloat 2.6s ease-in-out infinite',
-            }}
-          >
-            <span style={{ fontSize: 26, display: 'block', marginBottom: 8 }}>🎬</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <LiveOrb
+              variant="webgl"
+              colors={["#A33A18", "#D4682A", "#E8B45A"]}
+              size={80}
+            />
+            <p
+              style={{
+                color: 'var(--color-muted-soft)',
+                fontSize: 13,
+                textAlign: 'center',
+                animation: 'emptyGuideFloat 2.6s ease-in-out infinite',
+              }}
+            >
+            <span style={{ display: 'block', marginBottom: 8 }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
             暂无分镜
             <br />
             请输入剧本并点击"生成分镜脚本"
@@ -116,10 +244,32 @@ export function SceneListPanel({ width }: { width: number }) {
                 50% { transform: translateY(-6px); opacity: 1; }
               }
             `}</style>
-          </p>
+            </p>
+          </div>
         </div>
+      ) : sortMode ? (
+        /* 排序模式：拖拽列表 */
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={scenes.map(s => s.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {scenes.map((scene) => (
+              <SortableSceneCard
+                key={scene.id}
+                scene={scene}
+                isSelected={selectedSceneId === scene.id}
+                onSelect={() => selectScene(scene.id)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       ) : (
-        /* Scene cards */
+        /* 普通模式：场景卡片 */
         scenes.map((scene) => (
           <SceneCard
             key={scene.id}

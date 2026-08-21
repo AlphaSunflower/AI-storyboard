@@ -70,7 +70,7 @@ export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, 
         style={boxStyle}
         title={disabled ? '开启「以本分镜图片为首帧」时不可用' : undefined}
       >
-        <span style={{ fontSize: 14 }}>{type === 'image' ? '🖼️' : type === 'video' ? '🎞️' : '🎵'}</span>
+        <span style={{ fontSize: 14, display: 'inline-flex', alignItems: 'center' }}>{type === 'image' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> : type === 'video' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>}</span>
         <span>
           {items.length > 0 ? `${items.length}/${count} 个` : `添加${TYPE_LABEL[type]}（可选）`}
           {` · 单文件 ≤ ${sizeMB}MB`}
@@ -85,7 +85,7 @@ export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, 
               {it.type === 'image' ? (
                 <img src={assetUrl(it.url)} alt="参考图" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} />
               ) : (
-                <span style={{ fontSize: 16, padding: '0 6px' }}>{it.type === 'video' ? '🎞️' : '🎵'}</span>
+                <span style={{ fontSize: 16, padding: '0 6px', display: 'inline-flex', alignItems: 'center' }}>{it.type === 'video' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>}</span>
               )}
               <span style={{ fontSize: 10, color: 'var(--color-muted)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {it.fileName || it.url.split('/').pop()}

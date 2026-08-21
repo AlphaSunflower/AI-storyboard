@@ -47,6 +47,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
     /** 懒加载：首次调用时用默认视觉模型构建（@RequiredArgsConstructor 无法承载原构造器内的构建逻辑） */
     private volatile ChatClient chatClient;
 
@@ -160,8 +161,9 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             case "custom" -> customTypeDesc != null ? customTypeDesc : "";
             default -> "电影化叙事";
         };
-        return "你是一个专业的分镜师。创作风格：" + style + "。画幅：" + aspectRatio +
-            "。请以 JSON 数组格式返回分镜列表，每个分镜包含：sceneNumber(整数), scriptContent, imagePrompt, videoPrompt, negativePrompt, cameraMovement, shotType, soundDesign。";
+        return promptConfig.get("script/storyboard-system")
+            .replace("{{style}}", style)
+            .replace("{{aspectRatio}}", aspectRatio);
     }
 
     private String callLLM(String model, String systemPrompt, String userPrompt) {
@@ -199,7 +201,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 .media(medias.toArray(new Media[0]))
                 .build();
         return chatClient().prompt()
-                .system("你是分镜前期视觉理解助手，擅长提炼参考图的关键视觉要素。")
+                .system(promptConfig.get("script/visual-understanding"))
                 .messages(msg)
                 .options(OpenAiChatOptions.builder().model(effModel))
                 .call()
@@ -208,7 +210,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     /** 组装分镜生成 user prompt：有理解描述时前置参考图视觉要素，否则仅剧本。 */
     private String buildUserPrompt(String scriptText, String understanding) {
-        String base = "请根据以下剧本内容生成分镜脚本，每个分镜包含：镜头号、剧本内容、生图提示词（格式：【镜头构图】→【场景主体】→【环境细节/道具】→【光线与色彩】→【氛围情绪】→【画质/风格】）、生视频提示词、反向提示词、机位和运动、镜头类型、声音设计。\n\n";
+        String base = promptConfig.get("script/storyboard-user");
         if (understanding != null && !understanding.isBlank()) {
             base += "参考图视觉要素（请在分镜中体现这些风格与要素）：\n" + understanding + "\n\n";
         }

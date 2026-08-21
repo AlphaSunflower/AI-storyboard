@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
+import MoonLogo from './MoonLogo';
 
 export function AgentFab() {
   const windowOpen = useAgentStore((s) => s.windowOpen);
@@ -52,7 +53,7 @@ export function AgentFab() {
         transformOrigin: 'center',
       }}
     >
-      ☾
+      <MoonLogo size={26} />
     </button>
   );
 }

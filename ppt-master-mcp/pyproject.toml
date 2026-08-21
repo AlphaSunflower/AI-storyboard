@@ -1,0 +1,9 @@
+[project]
+name = "ppt-master-mcp"
+version = "0.1.0"
+description = "MCP server wrapping ppt-master for LLM-driven PPT generation"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.0"]
+
+[project.scripts]
+ppt-master-mcp = "server:main"

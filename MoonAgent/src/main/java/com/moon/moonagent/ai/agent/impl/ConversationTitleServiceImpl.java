@@ -47,14 +47,11 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
 
 
     /** 标题生成 prompt：约束输出为 6-15 字中文（或 3-8 英文词）的纯标题 */
-    private static final String TITLE_PROMPT =
-        "你是一名对话标题命名助手。根据用户的第一条消息，为这段 AI 对话生成一个简洁标题。"
-        + "要求：6-15 个汉字（或 3-8 个英文单词）；概括对话主题；不要标点、引号、书名号；"
-        + "不要“对话”“聊天”“标题”等字眼；只输出标题本身，不要任何解释或前后缀。\n\n用户消息：";
 
     private final AgentConversationMapper conversationMapper;
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /**
      * 懒加载 ChatClient：标题是锦上添花，超时比脚本生成（120s）收紧，不值得长等（与原 HttpClient timeout 一致）。
@@ -102,7 +99,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
             String truncated = userContent != null && userContent.length() > 200
                     ? userContent.substring(0, 200) : userContent;
             String raw = chatClient().prompt()
-                    .system(TITLE_PROMPT)
+                    .system(promptConfig.get("services/conversation-title"))
                     .user(truncated)
                     .call()
                     .content();

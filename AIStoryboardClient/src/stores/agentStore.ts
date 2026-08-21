@@ -195,6 +195,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       initialSceneCount = useProjectStore.getState().scenes.length;
       void get().loadAssets(1);
     }
+    // 页面刷新恢复：检查是否有待处理的 HITL checkpoint，恢复 waitingHumanInput
+    try {
+      const cpRes = await agentApi.getPendingCheckpoint(id);
+      const cp = cpRes.data.data as HumanInputInfo | null;
+      if (cp && cp.formToken && cp.actions && cp.actions.length > 0) {
+        set({ waitingHumanInput: cp });
+      }
+    } catch { /* 静默失败，不影响正常加载 */ }
   },
 
   messages: [],

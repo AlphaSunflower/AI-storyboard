@@ -45,8 +45,8 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     public static final String FALLBACK_TYPE = "intent-other";
 
     /** 五类合法意图（与 Dify 工作流「意图路由」if-else 分支一一对应） */
-    private static final Set<String> VALID_TYPES = Set.of(
-            "intent-aisplit", "intent-pic", "intent-video", "intent-delete", "intent-other");
+        private static final Set<String> VALID_TYPES = Set.of(
+            "intent-aisplit", "intent-pic", "intent-video", "intent-delete", "intent-scene-review", "intent-other");
 
     /**
      * 规则前置匹配表：强关键词命中直接路由（免一次 LLM 调用）。
@@ -57,6 +57,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private static final List<Map.Entry<String, java.util.regex.Pattern>> RULE_TABLE = List.of(
             Map.entry("intent-delete", java.util.regex.Pattern.compile(
                     "(删|清)(除|掉|光|空)?.{0,6}(分镜|剧本|故事板)|(分镜|剧本|故事板).{0,8}(删|清)(除|掉|光|空)?")),
+            Map.entry("intent-scene-review", java.util.regex.Pattern.compile("分析.{0,6}分镜|处理.{0,6}分镜|审查.{0,6}分镜|review.{0,6}scene|展示.{0,6}分镜|查看.{0,6}分镜|列出.{0,6}分镜|所有分镜|生成.{0,8}分镜.{0,6}(图|视频)|分镜.{0,8}生成")),
             Map.entry("intent-aisplit", java.util.regex.Pattern.compile("分镜|故事板|剧本")),
             Map.entry("intent-video", java.util.regex.Pattern.compile("生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本")),
             Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
@@ -65,25 +66,6 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
      * 意图识别 prompt：移植自 Dify 工作流「意图识别」节点。
      * 与原版差异：只输出 type（意图标识符），不再生成 message（后端只透传 type）。
      */
-    private static final String INTENT_PROMPT =
-        "你是意图识别器，结合【用户当前输入】与【历史对话记录】识别用户意图。\n"
-        + "## 意图分类\n"
-        + "- intent-aisplit = 剧本/分镜制作：用户提供剧本、故事、文案，要求生成分镜脚本/故事板，"
-        + "或对剧本、分镜方案进行优化完善。\n"
-        + "- intent-pic = 全新图片生成，或对已有图片的修改/完善（更亮/换风格/改构图/去掉某元素/"
-        + "继续完善/不满意等，或携带参考图且内容是修改诉求）\n"
-        + "- intent-video = 视频生成：用户要求生成短视频、动画片段，或设计视频方案\n"
-        + "- intent-delete = 删除/清空分镜：用户要求删除当前项目的分镜（含省略说法「全删了」「都删掉吧」「清空」等）\n"
-        + "- intent-other = 打招呼、闲聊、询问功能等非创作需求\n"
-        + "## 判断规则\n"
-        + "1. 明确意图词优先：删除/清空分镜 → intent-delete（优先于其他分镜相关意图）；剧本/分镜/故事板 → intent-aisplit；"
-        + "视频/动画/短片 → intent-video；图片/海报/插画 → intent-pic\n"
-        + "2. 用户说\"继续/接着上次\"时，结合历史对话判断：在完善分镜 → intent-aisplit；在完善图片 → intent-pic\n"
-        + "3. 分镜相关\"优化/完善剧本\"也归 intent-aisplit（剧本优化设计分支处理）\n"
-        + "4. 无法明确区分时，输出 intent-other\n"
-        + "## 输出约束\n"
-        + "只输出 JSON：{\\\"type\\\":\\\"intent-pic\\\",\\\"confidence\\\":0.9}，"
-        + "type 为四类意图之一，confidence 为 0~1 的置信度。禁止任何解释、代码块、标点或多余字符。";
 
     /** 宽松提取 JSON 中的 {type, confidence}（LLM 常带空格/代码块包裹，正则兜底） */
     private static final java.util.regex.Pattern INTENT_JSON = java.util.regex.Pattern.compile(
@@ -91,6 +73,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
 
     /**
      * 懒加载 ChatClient：识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等，
@@ -171,9 +154,9 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     /** 拼接 system prompt：基础规则 + 历史对话段（支撑"继续/接着上次"判断） */
     private String buildPrompt(List<AgentMessage> recentMessages) {
         if (recentMessages == null || recentMessages.isEmpty()) {
-            return INTENT_PROMPT;
+            return promptConfig.get("services/intent-recognition");
         }
-        StringBuilder sb = new StringBuilder(INTENT_PROMPT);
+        StringBuilder sb = new StringBuilder(promptConfig.get("services/intent-recognition"));
         sb.append("\n\n## 历史对话（供\"继续/接着上次\"判断）\n");
         int total = 0;
         for (AgentMessage m : recentMessages) { // 时间升序：从最旧到最新

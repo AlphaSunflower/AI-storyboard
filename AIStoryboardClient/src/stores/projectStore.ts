@@ -102,6 +102,7 @@ interface ProjectState {
   addScene: (projectId: string) => Promise<void>;
   deleteScene: (sceneId: string) => Promise<void>;
   markDirty: () => void;
+  reorderScenes: (sceneIds: string[]) => Promise<void>;
   updateSceneInStore: (sceneId: string, data: Record<string, unknown>) => void;
 }
 
@@ -532,4 +533,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     get().markDirty();
   },
+
+  reorderScenes: async (sceneIds) => {
+    const { currentProject, scenes } = get();
+    if (!currentProject) return;
+    // 乐观更新本地状态（按新顺序重排）
+    const sceneMap = new Map(scenes.map(s => [s.id, s]));
+    const reordered = sceneIds.map((id, i) => {
+      const s = sceneMap.get(id);
+      return s ? { ...s, sceneNumber: i + 1 } : null;
+    }).filter(Boolean) as typeof scenes;
+    set({ scenes: reordered });
+    // 持久化到后端
+    try {
+      await sceneApi.reorder(currentProject.id, sceneIds);
+      get().markDirty();
+    } catch {
+      // 失败时回滚：重新加载项目
+      await get().loadProject(currentProject.id);
+    }
+  },
+
 }));

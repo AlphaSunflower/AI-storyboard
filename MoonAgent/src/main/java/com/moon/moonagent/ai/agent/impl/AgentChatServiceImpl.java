@@ -740,4 +740,60 @@ public class AgentChatServiceImpl implements AgentChatService {
         log.info("HITL 确认动作已落库: conversationId={}, action={}, title={}",
                 conversation.getId(), action, title);
     }
+
+    @Override
+    public Map<String, Object> getPendingCheckpoint(String conversationId) {
+        // 查最新一条 pending + 未过期的 checkpoint
+        var cp = checkpointMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.moon.moonagent.entity.AgentCheckpoint>()
+                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getConversationId, conversationId)
+                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getStatus, "pending")
+                        .gt(com.moon.moonagent.entity.AgentCheckpoint::getExpirationTime, java.time.OffsetDateTime.now())
+                        .orderByDesc(com.moon.moonagent.entity.AgentCheckpoint::getCreatedAt)
+                        .last("LIMIT 1"));
+        if (cp == null) return null;
+        try {
+            JsonNode plan = objectMapper.readTree(cp.getPlan());
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("formToken", cp.getFormToken());
+            result.put("taskId", "");
+            result.put("expirationTime", cp.getExpirationTime().toEpochSecond());
+            // 从 plan 的 _ 前缀字段恢复（新 checkpoint 格式）
+            result.put("formContent", plan.has("_formContent") ? plan.get("_formContent").asText() : "");
+            if (plan.has("_actions")) {
+                result.put("actions", objectMapper.convertValue(plan.get("_actions"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}));
+            } else {
+                result.put("actions", List.of());
+            }
+            if (plan.has("_models") && !plan.get("_models").isEmpty()) {
+                result.put("models", objectMapper.convertValue(plan.get("_models"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}));
+            }
+            if (plan.has("_recommended") && !plan.get("_recommended").isEmpty()) {
+                result.put("recommended", objectMapper.convertValue(plan.get("_recommended"),
+                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {}));
+            }
+            if (plan.has("_reasons") && !plan.get("_reasons").isEmpty()) {
+                result.put("reasons", objectMapper.convertValue(plan.get("_reasons"),
+                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {}));
+            }
+            if (plan.has("_imageModels") && !plan.get("_imageModels").isEmpty()) {
+                result.put("imageModels", objectMapper.convertValue(plan.get("_imageModels"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}));
+            }
+            if (plan.has("_videoModels") && !plan.get("_videoModels").isEmpty()) {
+                result.put("videoModels", objectMapper.convertValue(plan.get("_videoModels"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}));
+            }
+            if (plan.has("_assets") && !plan.get("_assets").isEmpty()) {
+                result.put("assets", objectMapper.convertValue(plan.get("_assets"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}));
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("解析 pending checkpoint 失败: conversationId={}, error={}", conversationId, e.getMessage());
+            return null;
+        }
+    }
 }

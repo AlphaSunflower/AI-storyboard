@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
+import { MoreMenu } from '../common/MoreMenu';
 
 const modalOverlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.35)',
@@ -140,19 +141,12 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
                   {p.status === 'draft' ? '草稿' : ''}
                 </span>
               </button>
-              <div style={{ display: 'flex', alignItems: 'center', paddingRight: 4, flexShrink: 0 }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setRenameTarget(p); setRenameName(p.name); }}
-                  title="重命名"
-                  style={{ width: 28, height: 28, border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, color: 'var(--color-muted)' }}
-                >✏️</button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(p); }}
-                  disabled={projects.length <= 1}
-                  title={projects.length <= 1 ? '默认项目不可删除' : '删除'}
-                  style={{ width: 28, height: 28, border: 'none', background: 'none', cursor: projects.length <= 1 ? 'not-allowed' : 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, color: 'var(--color-muted)', opacity: projects.length <= 1 ? 0.35 : 1 }}
-                >🗑️</button>
-              </div>
+              <MoreMenu
+                items={[
+                  { label: '重命名', onClick: () => { setRenameTarget(p); setRenameName(p.name); } },
+                  { label: '删除', danger: true, disabled: projects.length <= 1, onClick: () => setDeleteTarget(p) },
+                ]}
+              />
             </div>
           ))
         )}
@@ -175,16 +169,32 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
   if (anchor?.current) {
     const r = anchor.current.getBoundingClientRect();
     return createPortal(
-      <div ref={dropdownRef} style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, left: r.right + 8 }}>
-        {menuContent}
+      <div ref={dropdownRef}>
+        <div style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, left: r.right + 8 }}>
+          {menuContent}
+        </div>
+        {deleteTarget && (
+          <div style={modalOverlayStyle} onClick={() => setDeleteTarget(null)}>
+            <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>删除项目</h3>
+              <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>
+                确定要删除项目「{deleteTarget.name}」吗？此操作无法撤销。
+              </p>
+              <div style={{ textAlign: 'right' }}>
+                <button style={secondaryBtnStyle} onClick={() => setDeleteTarget(null)}>取消</button>
+                <button style={{ ...primaryBtnStyle, background: '#e53e3e' }} onClick={handleDeleteExecute}>删除</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>,
       document.body,
     );
   }
 
   return (
-    <>
-      <div ref={dropdownRef} style={{ ...menuStyle, position: 'absolute', top: 40, left: popupRight ? 60 : 0 }}>
+    <div ref={dropdownRef}>
+      <div style={{ ...menuStyle, position: 'absolute', top: 40, left: popupRight ? 60 : 0 }}>
         {menuContent}
       </div>
 
@@ -222,6 +232,6 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

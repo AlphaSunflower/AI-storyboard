@@ -8,6 +8,7 @@ import StaggeredMenu from '../StaggeredMenu';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 import { ProjectDropdown } from './ProjectDropdown';
+import { ContextMenu } from '../common/ContextMenu';
 
 const headerHeight = 64;
 
@@ -21,8 +22,12 @@ export function AppHeader() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-
+  const [renameProjectOpen, setRenameProjectOpen] = useState(false);
+  const [renameProjectName, setRenameProjectName] = useState('');
+  const deleteProject = useProjectStore((s) => s.deleteProject);
+  
   // Ctrl/Cmd+S 保存当前项目（与「💾 保存」按钮同逻辑）
+  
   const handleSave = () => {
     if (currentProject) updateProject(currentProject.id, { status: 'active' });
   };
@@ -97,6 +102,10 @@ export function AppHeader() {
 
           {/* Project dropdown（提取组件，编辑器/聊天页共用） */}
           <div style={{ position: 'relative' }}>
+            <ContextMenu items={[
+              { label: '✏️ 重命名', onClick: () => { if (currentProject) { setRenameProjectName(currentProject.name); setRenameProjectOpen(true); } } },
+              { label: '🗑️ 删除项目', danger: true, disabled: !currentProject, onClick: () => { if (currentProject && confirm(`确定要删除项目「${currentProject.name}」吗？`)) deleteProject(currentProject.id); } },
+            ]}>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
               style={{
@@ -119,6 +128,7 @@ export function AppHeader() {
               </span>
               <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
             </button>
+            </ContextMenu>
             <ProjectDropdown open={dropdownOpen} onClose={() => setDropdownOpen(false)} />
           </div>
         </div>
@@ -150,7 +160,7 @@ export function AppHeader() {
               { label: 'Moon Chat', ariaLabel: 'Moon Chat', onClick: () => navigate('/chat') },
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
               { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
-              { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
+                            { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
             ]}
           />
         </div>
@@ -160,6 +170,25 @@ export function AppHeader() {
       {assetLibraryOpen && <AssetLibraryPanel onClose={() => setAssetLibraryOpen(false)} />}
       {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+      {renameProjectOpen && currentProject && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setRenameProjectOpen(false)}>
+          <div style={{ background: 'white', borderRadius: 12, padding: 24, minWidth: 300 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>重命名项目</h3>
+            <input
+              autoFocus
+              value={renameProjectName}
+              onChange={(e) => setRenameProjectName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && renameProjectName.trim()) { updateProject(currentProject.id, { name: renameProjectName.trim() }); setRenameProjectOpen(false); } }}
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
+              placeholder="输入项目名称"
+            />
+            <div style={{ marginTop: 16, textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setRenameProjectOpen(false)} style={{ padding: '6px 16px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', fontSize: 13 }}>取消</button>
+              <button disabled={!renameProjectName.trim()} onClick={() => { updateProject(currentProject.id, { name: renameProjectName.trim() }); setRenameProjectOpen(false); }} style={{ padding: '6px 16px', border: 'none', borderRadius: 8, background: 'var(--color-primary)', color: '#fff', cursor: 'pointer', fontSize: 13, opacity: renameProjectName.trim() ? 1 : 0.5 }}>确定</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

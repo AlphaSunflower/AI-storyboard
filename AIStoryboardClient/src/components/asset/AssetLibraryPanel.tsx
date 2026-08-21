@@ -5,6 +5,7 @@ import DepthCarousel from '../DepthCarousel';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { assetUrl } from '../../config';
 import { useProjectStore } from '../../stores/projectStore';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import './AssetLibraryPanel.css';
 
 const TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -39,6 +40,7 @@ const ghostBtn: React.CSSProperties = {
 };
 
 export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' }: { onClose: () => void; mode?: 'manage' | 'pick'; purpose?: 'image' | 'video' }) {
+  const isMobile = useIsMobile();
   const currentProject = useProjectStore((s) => s.currentProject);
   const selectedSceneId = useProjectStore((s) => s.selectedSceneId);
 
@@ -109,6 +111,11 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
   }, { dependencies: [view], scope: panelRef });
 
   const filtered = typeFilter === 'all' ? assets : assets.filter((a) => a.type === typeFilter);
+
+  // 手机端：面板全屏
+  const responsivePanelStyle: React.CSSProperties = isMobile
+    ? { ...panelStyle, width: '100vw', height: '100vh', borderRadius: 0 }
+    : panelStyle;
 
   const openWorkbench = (a: Asset) => { setSelectedId(a.id); setCurrentIndex(0); setView('workbench'); };
 
@@ -239,7 +246,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
           </p>
         </div>
         {!compact && mode === 'manage' && (
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' as const }} onClick={(e) => e.stopPropagation()}>
             <label style={{ ...ghostBtn, cursor: 'pointer' }}>
               📷 上传
               <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(a.id, e.target.files); e.target.value = ''; }} />
@@ -267,7 +274,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
   if (mode === 'pick') {
     return (
       <div ref={overlayRef} style={overlayStyle} onClick={onClose}>
-        <div ref={panelRef} style={panelStyle} onClick={(e) => e.stopPropagation()}>
+        <div ref={panelRef} style={responsivePanelStyle} onClick={(e) => e.stopPropagation()}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', gap: 12 }}>
             <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>选择要关联的{purpose === 'image' ? '图片' : '视频'}资产</h2>
             {typeFilterRow}
@@ -290,13 +297,14 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
   // ── MANAGE 模式：列表 ↔ 工作台 ──
   return (
     <div ref={overlayRef} style={overlayStyle} onClick={onClose}>
-      <div ref={panelRef} style={panelStyle} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} style={responsivePanelStyle} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>AI 资产库</h2>
-          {typeFilterRow}
-          <button style={primaryBtn} onClick={() => setCreateOpen(true)}>＋ 新建资产</button>
-          <button style={{ ...ghostBtn, border: 'none', fontSize: 16 }} onClick={onClose}>✕</button>
+        <div style={{ padding: isMobile ? '10px 12px' : '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 8 : 12 }}>
+          <h2 style={{ margin: 0, font: isMobile ? 'var(--text-body)' : 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>AI 资产库</h2>
+          {!isMobile && typeFilterRow}
+          <button style={primaryBtn} onClick={() => setCreateOpen(true)}>＋ {isMobile ? '新建' : '新建资产'}</button>
+          <button style={{ ...ghostBtn, border: 'none', fontSize: 16, padding: '4px 8px' }} onClick={onClose}>✕</button>
+          {isMobile && <div style={{ width: '100%' }}>{typeFilterRow}</div>}
         </div>
 
         {/* 列表视图：竖向卡片网格 */}
@@ -312,15 +320,29 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
           </div>
         )}
 
-        {/* 工作台视图：左列表 + 右预览 */}
+        {/* 工作台视图：桌面=左列表+右预览，手机=全屏预览+返回 */}
         {view === 'workbench' && selected && (
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--color-hairline)', overflowY: 'auto', padding: 12 }}>
-              <button style={{ ...ghostBtn, marginBottom: 10, width: '100%' }} onClick={() => setView('list')}>← 返回列表</button>
-              {filtered.map((a) => renderCard(a, true))}
-            </div>
-            <div ref={previewRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: 16 }}>
+            {/* 桌面端：左侧列表 */}
+            {!isMobile && (
+              <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--color-hairline)', overflowY: 'auto', padding: 12 }}>
+                <button style={{ ...ghostBtn, marginBottom: 10, width: '100%' }} onClick={() => setView('list')}>← 返回列表</button>
+                {filtered.map((a) => renderCard(a, true))}
+              </div>
+            )}
+            {/* 预览区 */}
+            <div ref={previewRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: isMobile ? 12 : 16 }}>
+              {/* 手机端：返回按钮 + 标题行 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                {isMobile && (
+                  <button onClick={() => setView('list')} style={{
+                    width: 32, height: 32, border: 'none', background: 'transparent',
+                    borderRadius: 8, cursor: 'pointer', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+                  </button>
+                )}
                 <h3 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>{selected.name}</h3>
                 <span style={{ fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 8px', borderRadius: 999 }}>
                   {TYPE_LABEL[selected.type]}{selected.projectId ? '' : ' · 全局'}
@@ -330,7 +352,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
 
               {selected.images.length > 0 ? (
                 <>
-                  <div style={{ height: 360, position: 'relative', flexShrink: 0 }}>
+                  <div style={{ height: isMobile ? 300 : 360, position: 'relative', flexShrink: 0 }}>
                     <DepthCarousel
                       key={selected.id}
                       items={selected.images.map((img) => ({ image: assetUrl(img.url), alt: img.fileName || img.url }))}
@@ -339,7 +361,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
                       visibleCards={4} falloff={0.2} blur={6} loop
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, position: 'relative', zIndex: 2 }}>
                     <span style={{ font: 'var(--text-caption)', color: 'var(--color-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       当前图片：{selected.images[currentIndex]?.fileName || '未命名'}
                     </span>

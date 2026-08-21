@@ -32,17 +32,6 @@ public class ImageRefinePromptServiceImpl implements ImageRefinePromptService {
     private static final Logger log = LoggerFactory.getLogger(ImageRefinePromptServiceImpl.class);
 
     /** System Prompt：要求视觉模型结构化输出（现状/修改点/改图提示词） */
-    private static final String REFINE_SYSTEM_PROMPT =
-            """
-                    你是一名专业的图片编辑提示词设计师。用户会给你一张图片和一句修改诉求。
-                    请先仔细观察图片内容（主体、构图、色调、光线、风格、环境），再结合用户诉求，\
-                    输出一个 JSON 对象，包含三个字段：
-                    1. image_analysis：对图片现状的简要描述（你实际看到了什么）；
-                    2. modifications：根据用户诉求确定的修改点列表（要改什么、怎么改）；
-                    3. refined_prompt：一段可直接投喂给图生图模型的完整改图提示词（中文，包含：\
-                    保留的既有元素 + 修改点 + 修改后期望效果 + 风格/光线/构图约束）。
-                    只输出 JSON，不要输出其他内容。""";
-
     /**
      * 结构化输出定义（字段名与 AI 返回 JSON 键一致，snake_case）。
      * modifications 用 Object：模型可能输出数组（修改点列表）或字符串，两种形状都能反序列化，
@@ -54,6 +43,7 @@ public class ImageRefinePromptServiceImpl implements ImageRefinePromptService {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
+    private final com.moon.moonagent.config.PromptConfig promptConfig;
     /** 懒加载：首次调用时用默认视觉模型构建（@RequiredArgsConstructor 无法承载原构造器内的构建逻辑） */
     private volatile ChatClient chatClient;
 
@@ -91,7 +81,7 @@ public class ImageRefinePromptServiceImpl implements ImageRefinePromptService {
             // 3. 调用视觉模型（ChatClient 统一走 LLM 网关）
             String content = chatClient()
                     .prompt()
-                    .system(REFINE_SYSTEM_PROMPT)
+                    .system(promptConfig.get("services/image-refine-prompt"))
                     .messages(userMessage)
                     .call()
                     .content();
