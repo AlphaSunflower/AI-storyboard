@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MicButton } from './MicButton';
+import { agentApi } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
@@ -14,6 +16,10 @@ import type { SceneResponse } from '../../api/projects';
 export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
   const [text, setText] = useState('');
+  // 录音中（禁用发送/流转等）
+  const [recording, setRecording] = useState(false);
+  // 语音识别请求中（禁用麦克风防重复触发）
+  const [sttBusy, setSttBusy] = useState(false);
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
   // "+" 菜单状态
@@ -100,6 +106,29 @@ export function AgentChatPanel() {
     // 轻量提示：直接复用 streamError 展示
     void msg;
     alert(msg);
+  };
+
+  // 麦克风录制完成 → 上传识别 → 回填输入框
+  const handleRecorded = async (wav: Blob) => {
+    setSttBusy(true);
+    try {
+      const res = await agentApi.stt(wav);
+      const text = res.data?.data?.text ?? '';
+      if (text.trim()) {
+        // 已有内容时追加空格拼接，保持草稿完整
+        setText((prev) => {
+          const base = prev.trim();
+          return base ? `${base} ${text}` : text;
+        });
+        inputRef.current?.focus();
+      } else {
+        setStreamErrorLocal('未识别到语音内容，请重试');
+      }
+    } catch {
+      setStreamErrorLocal('语音识别失败，请稍后重试');
+    } finally {
+      setSttBusy(false);
+    }
   };
 
   return (
@@ -293,22 +322,29 @@ export function AgentChatPanel() {
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />
-          {/* 右侧发送按钮 */}
-          <SpecularButton
-            size="sm"
-            radius={8}
-            tint="#cc785c"
-            tintOpacity={1}
-            textColor="#ffffff"
-            lineColor="#ffffff"
-            baseColor="#ffffff"
-            intensity={1}
-            thickness={1.2}
-            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
-            onClick={handleSend}
-          >
-            发送
-          </SpecularButton>
+          {/* 右侧：麦克风 + 发送，紧贴排列 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+            <MicButton
+              onToggle={setRecording}
+              onRecorded={handleRecorded}
+              disabled={sttBusy || streaming || !!waitingHumanInput || !!waitingVideoPlan}
+            />
+            <SpecularButton
+              size="sm"
+              radius={8}
+              tint="#cc785c"
+              tintOpacity={1}
+              textColor="#ffffff"
+              lineColor="#ffffff"
+              baseColor="#ffffff"
+              intensity={1}
+              thickness={1.2}
+              disabled={recording || streaming || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
+              onClick={handleSend}
+            >
+              发送
+            </SpecularButton>
+          </div>
         </div>
       </div>
 
