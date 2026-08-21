@@ -1,0 +1,4 @@
+# deploy/docker/.gitignore
+# 模型目录（1.3GB，setup.sh 下载），不入库
+data/
+.env
