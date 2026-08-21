@@ -81,6 +81,7 @@ public class PlanGraph {
     private static final String K_PARAMS = "params";            // 生成参数（model/resolution/...）
     private static final String K_ASSET_IDS = "assetIds";       // 资产选择卡片勾选
     private static final String K_SWITCH = "switch";            // 切链出口标记：重路由 intent_recognize
+    private static final String K_ROUTING_HINT = "routingHint"; // 前端显式切链提示（目标 intentType，优先级最高）
 
     private final IntentRecognitionService intentRecognitionService;
     private final AgentMessageMapper messageMapper;
@@ -151,6 +152,7 @@ public class PlanGraph {
             m.put(K_PARAMS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_ASSET_IDS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_SWITCH, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
+            m.put(K_ROUTING_HINT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             return m;
         };
 
@@ -206,9 +208,12 @@ public class PlanGraph {
                             K_CP_ACTION, "",
                             K_SUBMIT_ACTION, "");
                 }))
-                // ---- intent-clarify 点选目标意图：清 resume 标记 + 锁定意图 → 走 run 路由（重新 handle，非 resume） ----
+                // ---- intent-clarify 点选目标意图 / 显式 routingHint 切链：清 resume 标记 + 锁定意图 → 走 run 路由（重新 handle，非 resume） ----
                 .addNode("rerun_selected", node_async(state -> {
-                    String selected = state.<String>value(K_SUBMIT_ACTION).orElse(IntentRecognitionService.FALLBACK_TYPE);
+                    String hint = state.<String>value(K_ROUTING_HINT).orElse("");
+                    String selected = hint.isBlank()
+                            ? state.<String>value(K_SUBMIT_ACTION).orElse(IntentRecognitionService.FALLBACK_TYPE)
+                            : hint;
                     return Map.of(
                             K_INTENT, selected,
                             K_CONFIDENCE, 1.0,
@@ -236,6 +241,13 @@ public class PlanGraph {
                             String customText = state.<String>value(K_CUSTOM_TEXT).orElse("");
                             // 当前链：由 cpAction 推导（CP_ACTION_TO_INTENT 静态映射 + 动态特判）
                             String intent = cpIntent(cpAction);
+                            // ★★ 显式 routingHint（前端「换个话题」等按钮）优先——免去 customText 语义意图识别误判：
+                            // 直达目标链（rerun_selected 锁 intent 走 handle），把切链主动权交还前端（人在回路）
+                            String routingHint = state.<String>value(K_ROUTING_HINT).orElse("");
+                            if (!routingHint.isBlank()) {
+                                log.info("PlanGraph: resume 显式 routingHint={} currentIntent={} → rerun_selected", routingHint, intent);
+                                return "rerun_selected";
+                            }
 
                             // ★ 切链出口：customText 非空 → 意图识别 → 意图 ≠ 当前链 → 回 intent_recognize
                             if (!customText.isBlank()) {
@@ -366,21 +378,23 @@ public class PlanGraph {
      */
     public String resume(AgentConversation conversation, AgentCheckpoint checkpoint,
                          String action, String customText, Map<String, String> params,
-                         java.util.List<String> assetIds, SseEmitter emitter) {
+                         java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
-            Optional<OverAllState> result = compiledGraph.invoke(Map.of(
-                    K_CONVERSATION, conversation,
-                    K_CONTENT, support.planField(checkpoint.getPlan(), "content"),
-                    K_RESUME, true,
-                    K_CP_ACTION, checkpoint.getAction() == null ? "" : checkpoint.getAction(),
-                    K_CP_PLAN, checkpoint.getPlan() == null ? "" : checkpoint.getPlan(),
-                    K_SUBMIT_ACTION, action == null ? "" : action,
-                    K_CUSTOM_TEXT, customText == null ? "" : customText,
-                    K_PARAMS, params == null ? Map.of() : params,
-                    K_ASSET_IDS, assetIds == null ? List.of() : assetIds,
-                    K_LAST_MESSAGE, ""), config);
+            Map<String, Object> inputs = new HashMap<>();
+            inputs.put(K_CONVERSATION, conversation);
+            inputs.put(K_CONTENT, support.planField(checkpoint.getPlan(), "content"));
+            inputs.put(K_RESUME, true);
+            inputs.put(K_CP_ACTION, checkpoint.getAction() == null ? "" : checkpoint.getAction());
+            inputs.put(K_CP_PLAN, checkpoint.getPlan() == null ? "" : checkpoint.getPlan());
+            inputs.put(K_SUBMIT_ACTION, action == null ? "" : action);
+            inputs.put(K_CUSTOM_TEXT, customText == null ? "" : customText);
+            inputs.put(K_PARAMS, params == null ? Map.of() : params);
+            inputs.put(K_ASSET_IDS, assetIds == null ? List.of() : assetIds);
+            inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
+            inputs.put(K_LAST_MESSAGE, "");
+            Optional<OverAllState> result = compiledGraph.invoke(inputs, config);
             return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
         } finally {
             emittersByThread.remove(conversation.getId());
@@ -422,10 +436,11 @@ public class PlanGraph {
         return m;
     }
 
-    /** 条件边输出 → 节点映射（resume 路由：handler 节点 + switch_to_run + END） */
+    /** 条件边输出 → 节点映射（resume 路由：handler 节点 + switch_to_run + rerun_selected + END） */
     private Map<String, String> allNodeTargetsWithEnd() {
         Map<String, String> m = allNodeTargets();
         m.put("switch_to_run", "switch_to_run");
+        m.put("rerun_selected", "rerun_selected");
         m.put("END", END);
         return m;
     }

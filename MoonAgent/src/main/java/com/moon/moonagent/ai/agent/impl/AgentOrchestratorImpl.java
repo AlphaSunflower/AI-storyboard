@@ -57,7 +57,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     }
 
     @Override
-    public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, SseEmitter emitter) {
+    public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
         request.setParams(params == null ? Map.of() : params);
         request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
@@ -95,9 +95,9 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             // 12+ if/else 硬编码分支收敛为图内条件边路由（cpAction/提交 action/customText → handler 节点），
             // 含切链出口（customText 识别为新意图 → 回 intent_recognize 重新分发）。
             // checkpoint 校验/一次性消费保留在此（表单协议不变）；handler 内部零改动。
-            String answer = planGraph.resume(conversation, cp, action, customText, params, assetIds, emitter);
-            log.info("AgentOrchestrator(PlanGraph).resume: conversationId={} cpAction={} action={} 完成",
-                    conversation.getId(), cp.getAction(), action);
+            String answer = planGraph.resume(conversation, cp, action, customText, params, assetIds, routingHint, emitter);
+            log.info("AgentOrchestrator(PlanGraph).resume: conversationId={} cpAction={} action={} routingHint={} 完成",
+                    conversation.getId(), cp.getAction(), action, routingHint);
             return answer;
         } catch (Exception e) {
             log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);

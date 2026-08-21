@@ -39,9 +39,12 @@ public interface AgentOrchestrator {
      * @param action       用户确认动作（agree / disagree / generate_image / generate_video / refine / custom）
      * @param customText   自定义输入文本（action=custom 时必填，其余可空）
      * @param params       卡片参数选择器提交的生成参数（model/resolution/duration 等；空=未选择）
+     * @param routingHint  显式路由提示（可空）：前端主动切链时传目标 intentType（如 intent-pic）。
+     *                     路由优先级：routingHint > 卡片合法 action > customText 语义意图识别——将切链主动权交还前端，
+     *                     避免大模型对自定义文本的意图误判（人在回路）
      * @param emitter      SSE 输出
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息，与 {@link #run} 同契约；
      *         异步任务/失败分支返回空串）
      */
-    String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, SseEmitter emitter);
+    String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
 }

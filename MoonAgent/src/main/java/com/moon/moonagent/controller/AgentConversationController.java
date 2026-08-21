@@ -174,7 +174,8 @@ public class AgentConversationController {
         chatService.submitFormAndResume(auth.getName(), id,
             request.formToken(), request.taskId(), request.action(), request.content(),
             request.params() == null ? java.util.Map.of() : request.params(),
-            request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter);
+            request.assetIds() == null ? java.util.List.of() : request.assetIds(),
+            request.routingHint(), emitter);
         return emitter;
     }
 
