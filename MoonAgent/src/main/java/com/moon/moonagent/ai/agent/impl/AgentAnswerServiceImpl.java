@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -121,6 +122,8 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
             synchronized (this) {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
+                            // P1: 主回答挂审计日志 advisor（验证 Advisor Chain 管线；历史仍手拼，不挂记忆 advisor 防双份）
+                            .defaultAdvisors(new SimpleLoggerAdvisor())
                             .defaultOptions(OpenAiChatOptions.builder()
                                     // 对话交流统一网关默认文本模型（动态获取）
                                     .model(gatewayModelService.getDefaultTextModel())
