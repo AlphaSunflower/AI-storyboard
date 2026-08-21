@@ -42,8 +42,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorImpl.class);
 
-    private final IntentRecognitionService intentRecognitionService;
-    private final AgentMessageMapper messageMapper;
+    private final com.moon.moonagent.ai.agent.PlanGraph planGraph;
     private final AgentCheckpointMapper checkpointMapper;
     private final AgentAiConfigProperties agentConfig;
     private final AgentOrchestratorSupport support;
@@ -75,46 +74,11 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     public String run(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrl, emitter);
         try {
-            // 1. 意图识别（历史拼最近 8 条）
-            List<AgentMessage> recent = messageMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentMessage>()
-                    .eq(AgentMessage::getConversationId, conversation.getId())
-                    .orderByDesc(AgentMessage::getCreatedAt)
-                    .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
-            IntentResult intentResult = intentRecognitionService.recognize(content, recent);
-            String intent = intentResult.type();
-            log.info("AgentOrchestrator: conversationId={} intent={} confidence={} source={}",
-                    conversation.getId(), intent, intentResult.confidence(), intentResult.source());
-
-            // 2. 低置信度：不硬路由，走意图澄清卡片（选项 id = intentType，resume 时按所选意图重新分发）
-            if (intentResult.confidence() < agentConfig.getIntentThreshold()) {
-                return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                        "没太确定你想做什么，请选择：",
-                        "intent-clarify",
-                        List.of(Map.of("content", content)),
-                        "human_input",
-                        List.of(
-                                Map.of("id", "intent-aisplit", "title", "生成分镜"),
-                                Map.of("id", "intent-pic", "title", "生成图片"),
-                                Map.of("id", "intent-video", "title", "生成视频"),
-                                Map.of("id", "intent-delete", "title", "删除分镜"),
-                                Map.of("id", "intent-other", "title", "其他 / 继续输入"),
-                                Map.of("id", "custom", "title", "✍ 自定义输入"))));
-            }
-
-            // 2.5 非 aisplit/pic 轮清零澄清计数（澄清追问次数只在分镜链/图片链内连续累计）
-            if (!"intent-aisplit".equals(intent) && !"intent-pic".equals(intent)) {
-                support.resetClarify(conversation.getId());
-            }
-
-            // 3. intent → handler 分发（未知意图兜底 intent-other）
-            IntentHandler handler = byIntent.get(intent);
-            if (handler == null) {
-                log.warn("AgentOrchestrator: 未知意图 {}，兜底分发 intent-other", intent);
-                handler = byIntent.get(IntentRecognitionService.FALLBACK_TYPE);
-            }
-            String answer = handler.handle(request);
-            log.info("AgentOrchestrator: conversationId={} 编排完成", conversation.getId());
+            // P2（2026-08-21）：run 路径迁入 PlanGraph（StateGraph 主图）——
+            // 意图识别（intent_recognize 节点）→ 条件边路由（低置信度 → intent_clarify 卡片 / 否则 → handler 适配器节点）
+            // 图内节点调用与原先完全相同的 handler/support，SSE 事件协议零变化
+            String answer = planGraph.run(conversation, content, picUrl, emitter);
+            log.info("AgentOrchestrator(PlanGraph): conversationId={} 编排完成", conversation.getId());
             return answer;
         } catch (Exception e) {
             log.error("AgentOrchestrator 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
