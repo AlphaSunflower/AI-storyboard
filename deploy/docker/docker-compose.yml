@@ -3,11 +3,14 @@
 # 用法：./scripts/up.sh（首次先 ./scripts/setup.sh 下载模型）
 services:
   nacos:
-    image: nacos/nacos-server:3.2.3
+    image: nacos/nacos-server:v3.2.3
     container_name: nacos-standalone
     environment:
       MODE: standalone
-      NACOS_AUTH_ENABLE: "false"      # 内网开发环境，与旧容器一致
+      NACOS_AUTH_ENABLE: "false"             # 内网开发环境，与旧容器一致
+      NACOS_AUTH_TOKEN: bmFjb3MtZGVmYXVsdC10b2tlbi1mb3ItZGV2LTIwMjQ=   # 3.2.x 必填（base64，auth 关闭时也校验存在）
+      NACOS_AUTH_IDENTITY_KEY: nacos
+      NACOS_AUTH_IDENTITY_VALUE: nacos
       TIME_ZONE: Asia/Shanghai
     ports:
       - "8848:8848"                   # 服务发现/配置
@@ -18,15 +21,18 @@ services:
     restart: unless-stopped
 
   vosk:
-    image: alphacephei/vosk-server:latest
+    image: alphacep/kaldi-vosk-server:latest   # vosk 官方 Kaldi vosk-server（alphacephei 镜像账号）
     container_name: vosk-stt
+    entrypoint: ["python3", "/opt/vosk-server/websocket/asr_server.py"]
     environment:
-      VOSK_MODEL_PATH: /opt/vosk-model
+      VOSK_MODEL_PATH: /opt/vosk-model/vosk-model-cn-0.22
+      VOSK_SAMPLE_RATE: "16000"                # 默认 8000，必须显式设 16k
+      VOSK_SERVER_PORT: "2700"
     ports:
-      - "${VOSK_PORT:-2700}:2700"     # websocket 识别服务
+      - "${VOSK_PORT:-2700}:2700"              # websocket 识别服务
     volumes:
-      - ./data/vosk/models:/opt/vosk-model
-    mem_limit: 2g                     # 全量中文模型加载约 1.5-2GB
+      - ./data/vosk/models:/opt/vosk-model     # 挂载中文全量模型（setup.sh 下载）
+    mem_limit: 4g                              # 全量中文模型含 RNNLM 加载峰值约 2.5-3GB（2g 会 OOM 循环重启）
     restart: unless-stopped
 
 volumes:

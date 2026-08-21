@@ -130,7 +130,9 @@ public class AgentSttServiceImpl implements AgentSttService {
             @Override
             public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
                 if (!result.isDone()) {
-                    result.complete(String.join("", texts).trim());
+                    // vosk 中间词结果（AcceptWaveform 命中）与最终结果同为 {"text":...} 格式，
+                    // 中间结果文本是最终结果的子集——只取最后一条避免重复拼接
+                    result.complete(texts.isEmpty() ? "" : texts.get(texts.size() - 1).trim());
                 }
                 return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
             }
@@ -156,7 +158,7 @@ public class AgentSttServiceImpl implements AgentSttService {
                 System.arraycopy(pcm, off, part, 0, part.length);
                 ws.sendBinary(ByteBuffer.wrap(part), true).join();
             }
-            ws.sendText("{\"eof\":1}", true).join();
+            ws.sendText("{\"eof\" : 1}", true).join(); // 注意空格：vosk-server 精确字符串匹配 '{"eof" : 1}'，无空格会当音频数据
             return result.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             log.warn("vosk 识别超时: {}", wsUrl, e);
@@ -177,12 +179,15 @@ public class AgentSttServiceImpl implements AgentSttService {
     }
 
     /**
-     * 解析 vosk 返回消息：{"result":{"text":"..."}} 或 {"partial":{"text":"..."}}。
-     * 仅当消息含 "result" 键（最终结果）才计入文本，partial 中间结果丢弃。
+     * 解析 vosk 返回消息：partial 为 {"partial":"..."}，最终结果为 {"text":"..."}（vosk 原生 FinalResult 格式，
+     * 无 "result" 包装键——实测 vosk-server 直传）。仅收集最终结果：含 "text" 键且不含 "partial" 键。
      * 子串扫描零依赖（vosk 输出结构固定；文本不含引号，跳过转义处理）。
      */
     private void handleMessage(String msg, List<String> texts) {
         try {
+            if (msg.contains("\"partial\"")) {
+                return; // 中间结果丢弃
+            }
             int textIdx = msg.indexOf("\"text\"");
             if (textIdx < 0) {
                 return;
@@ -194,7 +199,7 @@ public class AgentSttServiceImpl implements AgentSttService {
                 return;
             }
             String text = msg.substring(start + 1, end);
-            if (msg.contains("\"result\"") && !text.isEmpty()) {
+            if (!text.isEmpty()) {
                 texts.add(text);
             }
         } catch (Exception e) {
