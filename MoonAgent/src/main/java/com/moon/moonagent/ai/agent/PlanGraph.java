@@ -57,7 +57,6 @@ public class PlanGraph {
     private static final String K_CONVERSATION = "conversation";
     private static final String K_CONTENT = "content";
     private static final String K_PIC_URL = "picUrl";
-    private static final String K_EMITTER = "emitter";
     private static final String K_INTENT = "intent";
     private static final String K_CONFIDENCE = "confidence";
     private static final String K_LOW_CONFIDENCE = "lowConfidence";
@@ -68,6 +67,14 @@ public class PlanGraph {
     private final AgentAiConfigProperties agentConfig;
     private final AgentOrchestratorSupport support;
     private final List<IntentHandler> intentHandlers;
+
+    /**
+     * emitter 外部注册表：threadId(=conversationId) → SseEmitter。
+     * ★ 不能放进 OverAllState——graph-core invoke 会对 state 做序列化克隆（cloneState），
+     * SseEmitter 克隆后身份改变，send 到克隆对象上 Tomcat 收不到 → SSE 空流（2026-08-21 实测根因）
+     */
+    private final java.util.concurrent.ConcurrentHashMap<String, SseEmitter> emittersByThread =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /** intent → handler 适配器节点名（node_aisplit / node_pic / ...） */
     private Map<String, String> intentToNode = Map.of();
@@ -94,7 +101,6 @@ public class PlanGraph {
             m.put(K_CONVERSATION, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_CONTENT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_PIC_URL, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
-            m.put(K_EMITTER, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_INTENT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_CONFIDENCE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_LOW_CONFIDENCE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
@@ -178,14 +184,19 @@ public class PlanGraph {
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息）
      */
     public String run(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
-        RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
-        Optional<OverAllState> result = compiledGraph.invoke(Map.of(
-                K_CONVERSATION, conversation,
-                K_CONTENT, content,
-                K_PIC_URL, picUrl == null ? "" : picUrl,
-                K_EMITTER, emitter,
-                K_LAST_MESSAGE, ""), config);
-        return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+        // emitter 走外部注册表（不经过 OverAllState 序列化克隆）
+        emittersByThread.put(conversation.getId(), emitter);
+        try {
+            RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
+            Optional<OverAllState> result = compiledGraph.invoke(Map.of(
+                    K_CONVERSATION, conversation,
+                    K_CONTENT, content,
+                    K_PIC_URL, picUrl == null ? "" : picUrl,
+                    K_LAST_MESSAGE, ""), config);
+            return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+        } finally {
+            emittersByThread.remove(conversation.getId());
+        }
     }
 
     /** state → OrchestrationRequest（handler 适配器用） */
@@ -193,7 +204,10 @@ public class PlanGraph {
         AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
         String content = state.<String>value(K_CONTENT).orElse("");
         String picUrl = state.<String>value(K_PIC_URL).orElse("");
-        SseEmitter emitter = state.<SseEmitter>value(K_EMITTER).orElseThrow();
+        SseEmitter emitter = emittersByThread.get(conversation.getId());
+        if (emitter == null) {
+            throw new IllegalStateException("PlanGraph: emitter 未注册 conversationId=" + conversation.getId());
+        }
         return new OrchestrationRequest(conversation, content,
                 picUrl == null || picUrl.isBlank() ? null : picUrl, emitter);
     }
