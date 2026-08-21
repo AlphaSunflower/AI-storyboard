@@ -12,6 +12,7 @@ import { assetUrl } from '../../config';
  */
 export function HumanInputCard({ info }: { info: HumanInputInfo }) {
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
+  const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
   const streaming = useAgentStore((s) => s.streaming);
   const expired = info.expirationTime > 0 && Date.now() / 1000 > info.expirationTime;
   // 自定义输入展开态：点「自定义输入」按钮展开内联输入框，确认后 submitHumanInput('custom', text)
@@ -178,23 +179,38 @@ export function HumanInputCard({ info }: { info: HumanInputInfo }) {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {info.actions.map((a) => (
-              <button
-                key={a.id}
-                disabled={streaming}
-                onClick={() => handleActionClick(a)}
-                style={{
-                  padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-primary)', color: 'white', fontSize: 15,
-                  cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
-                  width: '100%', textAlign: 'center',
-                }}
-              >
-                {a.title}
-              </button>
-            ))}
-          </div>
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+              {info.actions.map((a) => (
+                <button
+                  key={a.id}
+                  disabled={streaming}
+                  onClick={() => handleActionClick(a)}
+                  style={{
+                    padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
+                    background: 'var(--color-primary)', color: 'white', fontSize: 15,
+                    cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                    width: '100%', textAlign: 'center',
+                  }}
+                >
+                  {a.title}
+                </button>
+              ))}
+            </div>
+            {/* 跳过按钮：允许用户切换话题（checkpoint 30 分钟后自动过期） */}
+            <button
+              disabled={streaming}
+              onClick={skipCurrentHITL}
+              style={{
+                padding: '6px 12px', border: 'none', borderRadius: 'var(--rounded-md)',
+                background: 'transparent', color: 'var(--color-muted)', fontSize: 12,
+                cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                width: '100%', textAlign: 'center',
+              }}
+            >
+              跳过，换个话题
+            </button>
+          </>
         )}
       </div>
     </div>

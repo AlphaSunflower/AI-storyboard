@@ -1,0 +1,5 @@
+name: orchestrator/pic-refine-options-source-note
+version: "1.0"
+description: 图片修改方向-参考图备注
+template: |
+  注意图片有参考图（图改图场景），选项要能基于原图调整。

@@ -162,9 +162,8 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             case "custom" -> customTypeDesc != null ? customTypeDesc : "";
             default -> "电影化叙事";
         };
-        return promptConfig.get("script/storyboard-system")
-            .replace("{{style}}", style)
-            .replace("{{aspectRatio}}", aspectRatio);
+        return promptConfig.get("script/storyboard-system",
+            Map.of("style", style, "aspectRatio", aspectRatio));
     }
 
     private String callLLM(String model, String systemPrompt, String userPrompt) {

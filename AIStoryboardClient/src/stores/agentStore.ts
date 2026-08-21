@@ -100,7 +100,9 @@ interface AgentState {
   submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
-  submitVideoPlan: (actionId: string, params?: Record<string, string>) => Promise<void>;
+  submitVideoPlan: (actionId: string, params?: Record<string, string>, customText?: string) => Promise<void>;
+  // 跳过当前 HITL 卡片（用户想切换话题时使用，checkpoint 30 分钟后自动过期）
+  skipCurrentHITL: () => void;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
   refineAsset: () => void;
   dismissConfirm: () => void;
@@ -629,13 +631,95 @@ export const useAgentStore = create<AgentState>((set, get) => ({
    * - 继续完善：本地关闭卡片，参考图转 pendingPicUrl 保留（与图片完善 refine 同语义），
    *   用户输入完善需求后随下一条消息发送（重新分流 → 再设计）。
    */
-  submitVideoPlan: async (actionId, params) => {
+  submitVideoPlan: async (actionId, params, customText) => {
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
     // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，后端容器内可访问）
     if (actionId === 'refine') {
       set({ waitingVideoPlan: null, pendingPicUrl: assetUrl(info.picUrl) });
+      return;
+    }
+    // 自定义输入：走 submitForm 发送 custom action + 自定义文本，与 HumanInputCard 的 custom 流程对齐
+    if (actionId === 'custom') {
+      set({ streaming: true, waitingVideoPlan: null, streamError: null });
+      const assistantId = `tmp-assistant-${Date.now()}`;
+      set((s) => ({
+        messages: [...s.messages, {
+          id: `tmp-user-${Date.now()}`, conversationId: id, role: 'user' as const,
+          content: customText || '', difyMessageId: null, createdAt: new Date().toISOString(),
+        }, {
+          id: assistantId, conversationId: id, role: 'assistant' as const,
+          content: '', difyMessageId: null, createdAt: new Date().toISOString(),
+        }],
+        pendingAssistantId: assistantId,
+      }));
+      const updateAssistant = (delta: string) =>
+        set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: m.content + delta } : m) }));
+      const updateAssistantFull = (full: string) =>
+        set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: full } : m) }));
+      const snapshotId = id;
+      let receivedMessageEnd = false;
+      let receivedHumanInput = false;
+      try {
+        await submitForm(id, info.planToken, '', 'custom', (e: SseEvent) => {
+          switch (e.type) {
+            case 'message': updateAssistant(e.content ?? ''); break;
+            case 'workflow': set({ workflowHint: e.title ?? '' }); break;
+            case 'human_input':
+              if (get().activeConversationId !== snapshotId) break;
+              receivedHumanInput = true;
+              set({
+                workflowHint: '',
+                waitingHumanInput: {
+                  formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
+                  actions: e.actions ?? [], expirationTime: e.expirationTime ?? 0,
+                  models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
+                  recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
+                },
+              });
+              break;
+            case 'video_plan':
+              if (get().activeConversationId !== snapshotId) break;
+              set({
+                waitingVideoPlan: {
+                  planToken: e.formToken ?? e.planToken ?? '', message: e.message ?? '',
+                  duration: e.duration ?? 8, picUrl: e.picUrl ?? '', actions: e.actions ?? [],
+                  models: e.models, recommended: e.recommended, reasons: e.reasons,
+                },
+              });
+              break;
+            case 'message_end':
+              if (get().activeConversationId !== snapshotId) break;
+              receivedMessageEnd = true;
+              if (e.content) updateAssistantFull(e.content);
+              if (e.title) {
+                set((s) => ({
+                  conversations: s.conversations.map((c) => c.id === id && c.title !== e.title ? { ...c, title: e.title! } : c),
+                }));
+              }
+              if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
+                const proj = useProjectStore.getState().currentProject;
+                if (proj) void useProjectStore.getState().loadProject(proj.id);
+              }
+              break;
+            case 'error':
+              if (get().activeConversationId === snapshotId) set({ streamError: e.message ?? '对话出错，请重试' });
+              break;
+          }
+        }, customText, params);
+      } catch (err) {
+        if (get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      } finally {
+        const stillSame = get().activeConversationId === snapshotId;
+        const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
+        set((s) => ({
+          streaming: false, pendingAssistantId: null, workflowHint: '',
+          messages: stillSame
+            ? s.messages.map((m) => m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput ? { ...m, content: failedText } : m)
+            : s.messages,
+        }));
+      }
       return;
     }
     // 开始生成视频：与 submitHumanInput 一致——提交时清除上次 streamError
@@ -783,6 +867,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : s.messages,
       }));
     }
+  },
+
+  /** 跳过当前 HITL 卡片：清除等待状态，让用户继续输入其他话题（checkpoint 30 分钟后自动过期） */
+  skipCurrentHITL: () => {
+    set({ waitingHumanInput: null, waitingVideoPlan: null });
   },
 
   /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */

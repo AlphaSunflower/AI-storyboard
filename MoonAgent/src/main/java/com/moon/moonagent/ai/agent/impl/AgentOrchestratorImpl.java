@@ -242,6 +242,12 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 byIntent.get("intent-pic").resume(request, cp);
                 return request.getLastMessage();
             }
+            // 5.6) delete-confirm：分镜删除二次确认卡片 → 转 delete handler
+            if ("delete-confirm".equals(cp.getAction())) {
+                request.setAction(action);
+                byIntent.get("intent-delete").resume(request, cp);
+                return request.getLastMessage();
+            }
             // 6) custom 自定义输入：图片/视频方案卡片（generate_image/generate_video）与视频调整意见卡片（video-opinion）
             //    → 合并自定义文本重新设计方案（转对应 handler，customText 透传）
             if ("custom".equals(action)) {

@@ -321,8 +321,8 @@ public class AgentOrchestratorSupport {
      */
     public ImagePlanResult callImagePromptWithParams(String content, String modelOptionsText) {
         boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-        String systemPrompt = promptConfig.get("orchestrator/image-prompt-with-params")
-                .replace("{{modelOptionsText}}", withParams ? modelOptionsText : "");
+        String systemPrompt = promptConfig.get("orchestrator/image-prompt-with-params",
+                Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
         try {
             String raw = retryTransient(() -> planClient().prompt()
                     .system(systemPrompt)
@@ -399,8 +399,8 @@ public class AgentOrchestratorSupport {
     public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource) {
         try {
             String raw = retryTransient(() -> planClient().prompt()
-                .system(promptConfig.get("orchestrator/pic-refine-options")
-                    .replace("{{hasSourceNote}}", hasSource ? promptConfig.get("orchestrator/pic-refine-options-source-note") : ""))
+                .system(promptConfig.get("orchestrator/pic-refine-options",
+                    Map.of("hasSourceNote", hasSource ? promptConfig.get("orchestrator/pic-refine-options-source-note") : "")))
                 .user("当前图片方案：" + basePrompt)
                 .call()
                 .content());
@@ -432,8 +432,8 @@ public class AgentOrchestratorSupport {
     public VideoPlanResult callVideoPlan(String content, String modelOptionsText) {
         try {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-            String system = promptConfig.get("orchestrator/video-plan")
-                    .replace("{{modelOptionsText}}", withParams ? modelOptionsText : "");
+            String system = promptConfig.get("orchestrator/video-plan",
+                    Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
             String raw = retryTransient(() -> planClient().prompt()
                 .system(system)
                 .user(content)
