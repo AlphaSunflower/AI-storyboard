@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MicButton } from './MicButton';
 import { agentApi } from '../../api/agent';
@@ -20,6 +20,11 @@ export function AgentChatPanel() {
   const [recording, setRecording] = useState(false);
   // 语音识别请求中（禁用麦克风防重复触发）
   const [sttBusy, setSttBusy] = useState(false);
+  // 流式语音识别状态：麦克风快照 API + 已发送文本 + 采样定时器 + 采样中互斥
+  const micApiRef = useRef<{ getWavSnapshot: () => Promise<Blob | null> } | null>(null);
+  const sentTextRef = useRef('');
+  const micTimerRef = useRef<number | null>(null);
+  const samplingRef = useRef(false);
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
   // "+" 菜单状态
@@ -109,24 +114,55 @@ export function AgentChatPanel() {
   };
 
   // 麦克风录制完成 → 上传识别 → 回填输入框
-  const handleRecorded = async (wav: Blob) => {
+  // 流式语音识别：录音中每 3s 采样当前已录音频 → stt → 只发送新增文本（即说即发，与 ChatComposer 一致）
+  const sampleAndSend = useCallback(async () => {
+    if (samplingRef.current) return; // 上一次采样未完成，跳过本轮
+    samplingRef.current = true;
     setSttBusy(true);
     try {
+      const wav = await micApiRef.current?.getWavSnapshot();
+      if (!wav) return;
       const res = await agentApi.stt(wav);
-      // vosk 中文词间空格去除，即说即发（与 ChatComposer 一致）
-      const text = (res.data?.data?.text ?? '').replace(/\s+/g, '');
-      if (text.trim()) {
-        setText('');
-        sendMessage(text);
+      // vosk 中文词间空格去除
+      const full = (res.data?.data?.text ?? '').replace(/\s+/g, '');
+      if (!full) return;
+      const sent = sentTextRef.current;
+      if (full.startsWith(sent)) {
+        const inc = full.slice(sent.length);
+        if (inc) {
+          sentTextRef.current = full;
+          sendMessage(inc);
+        }
       } else {
-        setStreamErrorLocal('未识别到语音内容，请重试');
+        // 前缀不匹配（识别修正/噪声）：不发，等下一轮对齐
+        sentTextRef.current = full;
       }
     } catch {
-      setStreamErrorLocal('语音识别失败，请稍后重试');
+      // 网络/服务错误：静默，下一轮重试
     } finally {
+      samplingRef.current = false;
       setSttBusy(false);
     }
-  };
+  }, [sendMessage]);
+
+  // 麦克风开关：开始录音 → 启动定时采样；停止录音 → 停定时器（不再发送）
+  const handleMicToggle = useCallback((active: boolean) => {
+    setRecording(active);
+    if (active) {
+      sentTextRef.current = '';
+      micTimerRef.current = window.setInterval(() => { void sampleAndSend(); }, 3000);
+    } else {
+      if (micTimerRef.current !== null) {
+        clearInterval(micTimerRef.current);
+        micTimerRef.current = null;
+      }
+    }
+  }, [sampleAndSend]);
+
+  // 组件卸载清理定时器
+  useEffect(() => () => {
+    if (micTimerRef.current !== null) clearInterval(micTimerRef.current);
+  }, []);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -322,9 +358,10 @@ export function AgentChatPanel() {
           {/* 右侧：麦克风 + 发送，紧贴排列 */}
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
             <MicButton
-              onToggle={setRecording}
-              onRecorded={handleRecorded}
-              disabled={sttBusy || streaming || !!waitingHumanInput || !!waitingVideoPlan}
+              onToggle={handleMicToggle}
+              onApiReady={(api) => { micApiRef.current = api; }}
+              // 录音中不禁用（流式发送会触发 streaming，禁了就没法点停止）；仅采样请求中禁用
+              disabled={sttBusy || ((streaming || !!waitingHumanInput || !!waitingVideoPlan) && !recording)}
             />
             <SpecularButton
               size="sm"

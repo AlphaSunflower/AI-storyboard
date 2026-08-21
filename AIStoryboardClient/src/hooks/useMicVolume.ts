@@ -119,10 +119,9 @@ export function useMicVolume(fftSize = 64) {
 
   useEffect(() => () => stop(), [stop]);
 
-  // 停止录音并返回 16kHz 单声道 WAV Blob（无数据返回 null）
-  const stopAndGetWav = useCallback(async (): Promise<Blob | null> => {
+  // 取当前已录音频的快照 WAV（不清空累积数据）——流式识别用：录音中定时采样识别增量
+  const getWavSnapshot = useCallback(async (): Promise<Blob | null> => {
     const chunks = chunksRef.current;
-    chunksRef.current = [];
     if (chunks.length === 0) return null;
     let total = 0;
     for (const c of chunks) total += c.length;
@@ -134,5 +133,12 @@ export function useMicVolume(fftSize = 64) {
     return encodeWav(samples, 16000);
   }, []);
 
-  return { volume, freqData, isActive, isSupported, toggle, stopAndGetWav };
+  // 停止录音并返回 16kHz 单声道 WAV Blob（无数据返回 null）——取走并清空累积数据
+  const stopAndGetWav = useCallback(async (): Promise<Blob | null> => {
+    const wav = await getWavSnapshot();
+    chunksRef.current = [];
+    return wav;
+  }, [getWavSnapshot]);
+
+  return { volume, freqData, isActive, isSupported, toggle, stopAndGetWav, getWavSnapshot };
 }
