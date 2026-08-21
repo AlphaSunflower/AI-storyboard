@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useAgentStore } from '../../stores/agentStore';
+import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
 import { MoreMenu } from '../common/MoreMenu';
@@ -119,8 +120,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
         position: 'relative',
         width: width ?? '100%',
         minWidth: width ? 150 : undefined,
-        borderRight: width ? '1px solid var(--color-hairline)' : undefined,
-        background: 'var(--color-surface-soft)',
+        borderRight: width ? `1px solid ${DS.border}` : undefined,
+        background: DS.sidebarBg,
         display: 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
@@ -129,7 +130,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
     >
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
       {!hideHeader && (
-        <div style={{ padding: '18px 16px 12px', borderBottom: '1px solid var(--color-hairline)' }}>
+        <div style={{ padding: '18px 16px 12px', borderBottom: `1px solid ${DS.border}` }}>
           <MoonLogo size={22} showText />
         </div>
       )}
@@ -157,7 +158,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 14px 8px' }}>
         <button
           onClick={() => setShowArchived(!showArchived)}
-          style={{ padding: '6px 0', border: 'none', background: 'none', color: 'var(--color-muted)', fontSize: 13, cursor: 'pointer' }}
+          style={{ padding: '6px 0', border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer' }}
         >
           {showArchived ? '◀ 返回进行中' : '🗂 已归档'}
         </button>
@@ -166,7 +167,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             onClick={() => { setMultiSelect(!multiSelect); setSelectedIds(new Set()); }}
             style={{
               padding: '4px 0', border: 'none', background: 'none',
-              color: multiSelect ? '#cc785c' : 'var(--color-muted)',
+              color: multiSelect ? '#cc785c' : DS.textCaption,
               fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
             }}
             title={multiSelect ? '取消多选' : '多选删除'}
@@ -184,7 +185,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* 按时间分组的会话列表 */}
       {groups.map((g) => (
         <div key={g.label}>
-          <div style={{ padding: '10px 14px 4px', fontSize: 12, fontWeight: 600, color: 'var(--color-muted)', letterSpacing: '0.02em', textAlign: 'left' }}>
+          <div style={{ padding: '10px 14px 4px', fontSize: 12, fontWeight: 600, color: DS.textCaption, letterSpacing: '0.02em', textAlign: 'left' }}>
             {g.label}
           </div>
           {g.items.map((c) => {
@@ -205,8 +206,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  background: c.id === activeConversationId ? 'var(--color-surface-card)' : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
-                  borderBottom: '1px solid var(--color-hairline-soft)',
+                  background: c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
+                  borderBottom: `1px solid ${DS.border}`,
                   opacity: (waitingHumanInput || waitingVideoPlan) && c.id !== activeConversationId ? 0.5 : 1,
                 }}
               >
@@ -259,7 +260,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       ))}
 
       {visible.length === 0 && (
-        <p style={{ padding: 16, fontSize: 13, color: 'var(--color-muted-soft)', textAlign: 'center' }}>
+        <p style={{ padding: 16, fontSize: 13, color: DS.textCaption, textAlign: 'center' }}>
           {showArchived ? '暂无已归档对话' : '暂无对话'}
         </p>
       )}
@@ -273,7 +274,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             bottom: 0,
             padding: '12px 14px',
             background: 'white',
-            borderTop: '1px solid var(--color-hairline)',
+            borderTop: `1px solid ${DS.border}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -281,7 +282,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             zIndex: 10,
           }}
         >
-          <span style={{ fontSize: 13, color: 'var(--color-muted)' }}>
+          <span style={{ fontSize: 13, color: DS.textCaption }}>
             已选 {selectedCount} 项
           </span>
           <button

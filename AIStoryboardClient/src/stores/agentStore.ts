@@ -466,15 +466,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }));
     }
     const assistantId = `tmp-assistant-${Date.now()}`;
-    const optimisticAssistant: AgentMessage = {
-      id: assistantId,
-      conversationId: id,
-      role: 'assistant',
-      content: '',
-      difyMessageId: null,
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
 
     const updateAssistant = (delta: string) =>
       set((s) => ({
@@ -493,6 +484,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 1) 方案文本（formContent）填入 assistant 占位——后端在 HITL 暂停时已将其落库为 assistant 消息；
     // 2) 用户确认动作 push 为 user 消息——后端 submitFormAndResume 同步落库「确认：{标题}」。
     // 刷新后由后端持久化的同序消息替换本地临时项，顺序一致（方案在前、确认在后）。
+    // 顺序：先 push 用户确认消息，再 push assistant 占位气泡——确认在前、回复在后
     const act = info.actions.find((a) => a.id === actionId);
     const confirmTitle = act?.title ?? actionId;
     const confirmMsg: AgentMessage = {
@@ -505,6 +497,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, confirmMsg] }));
+
+    const optimisticAssistant: AgentMessage = {
+      id: assistantId,
+      conversationId: id,
+      role: 'assistant',
+      content: '',
+      difyMessageId: null,
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;

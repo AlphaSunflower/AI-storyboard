@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
@@ -9,6 +8,7 @@ import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
+import { SettingsPopover } from '../components/agent/SettingsPopover';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
@@ -101,10 +101,26 @@ export function ChatPage() {
     setMobileSidebarOpen(false);
   };
 
-  /* ═══════════════ 手机端布局（≤768px）═══════════════ */
-  if (isMobile) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
+  // 会话栏宽度拖拽（桌面端）
+  const handleConvDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = convWidth;
+    const onMouseMove = (ev: MouseEvent) => {
+      setConvWidth(Math.min(360, Math.max(180, startW + ev.clientX - startX)));
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [convWidth]);
+
+  return (
+    <>
+    {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
+      <div style={{ height: '100vh', display: isMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
         {/* 顶部导航栏 */}
         <MobileHeader
           title={currentTitle}
@@ -126,7 +142,7 @@ export function ChatPage() {
               style={{
                 position: 'absolute', top: 0, left: 0, bottom: 0,
                 width: '80vw', maxWidth: 320,
-                background: 'var(--color-surface-soft)',
+                background: DS.sidebarBg,
                 display: 'flex', flexDirection: 'column',
                 boxShadow: '4px 0 24px rgba(0, 0, 0, 0.12)',
                 animation: 'mobileSlideIn 0.25s ease-out',
@@ -160,6 +176,28 @@ export function ChatPage() {
             <div style={{ width: '100%', maxWidth: 480 }}>
               <ChatComposer />
             </div>
+            {/* 快捷提示 chips（手机端） */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', padding: '0 8px' }}>
+              {['帮我设计一个科幻分镜', '生成一张概念海报'].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    const st = useAgentStore.getState();
+                    if (!st.activeConversationId) {
+                      st.createConversation().then(() => {
+                        setTimeout(() => useAgentStore.getState().sendMessage(t), 200);
+                      });
+                    } else {
+                      st.sendMessage(t);
+                    }
+                  }}
+                  style={{
+                    padding: '6px 14px', borderRadius: 16, border: `1px solid ${DS.border}`,
+                    background: 'white', fontSize: 12, color: DS.textSecondary, cursor: 'pointer',
+                  }}
+                >{t}</button>
+              ))}
+            </div>
           </div>
         ) : (
           <>
@@ -172,7 +210,7 @@ export function ChatPage() {
               }}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
-              <div style={{ maxWidth: 720, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
                 {messages.map((m) => (
                   <MessageBubble
                     key={m.id}
@@ -201,7 +239,17 @@ export function ChatPage() {
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
-                  <div style={{ color: 'rgb(217, 45, 32)', fontSize: 14, margin: '10px 6px' }}>⚠ {streamError}</div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 8, margin: '10px 6px', padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(217, 45, 32, 0.06)', border: '1px solid rgba(217, 45, 32, 0.15)',
+                  }}>
+                    <span style={{ color: 'rgb(217, 45, 32)', fontSize: 13 }}>{streamError}</span>
+                    <button
+                      onClick={() => useAgentStore.setState({ streamError: null })}
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'rgb(217, 45, 32)', fontSize: 16, padding: '0 2px', lineHeight: 1 }}
+                    ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                  </div>
                 )}
               </div>
             </div>
@@ -219,34 +267,13 @@ export function ChatPage() {
         {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
         <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
       </div>
-    );
-  }
-
-  /* ═══════════════ 桌面端布局（>768px）═══════════════ */
-
-  // 会话栏宽度拖拽
-  const handleConvDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = convWidth;
-    const onMouseMove = (ev: MouseEvent) => {
-      setConvWidth(Math.min(360, Math.max(180, startW + ev.clientX - startX)));
-    };
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [convWidth]);
-
-  return (
-    <div style={{ height: '100vh', display: 'flex', background: 'white', overflow: 'hidden' }}>
+    {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
+    <div style={{ height: '100vh', display: isMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden' }}>
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
       {collapsed ? (
         /* ── 收起态：图标 rail ── */
         <div style={{
-          width: 48, flexShrink: 0, background: 'var(--color-surface-soft)',
+          width: 48, flexShrink: 0, background: DS.sidebarBg,
           borderRight: '1px solid var(--color-hairline)',
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
           alignItems: 'center', padding: '10px 0', zIndex: 50,
@@ -279,42 +306,21 @@ export function ChatPage() {
               title="设置"
               style={railIconBtn}
             >{/** 设置 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M10 2l1.5 2.5L14 3l-.5 2.8 2.5 1.2-1.5 2.3 2.3 1.5-2.8.5.5 2.8-2.5-1.2L10 17l-.5-2.8-2.5 1.2 1.5-2.3-2.3-1.5 2.8-.5L8.5 8.7 11 9.9z"/></svg></button>
-            {settingsOpen && settingsBtnRef.current && createPortal(
-              <div style={{
-                position: 'fixed',
-                top: Math.max(8, settingsBtnRef.current.getBoundingClientRect().top - 170),
-                left: settingsBtnRef.current.getBoundingClientRect().right + 8,
-                width: 170,
-                background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
-              }}>
-                {[
-                  { label: '个人信息', icon: 'user', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
-                  { label: '使用文档', icon: 'docs', onClick: () => navigate('/docs') },
-                  { label: '编辑器', icon: 'editor', onClick: () => navigate('/editor') },
-                  { label: '退出登录', icon: 'logout', onClick: logout, color: '#d92d20' },
-                ].map((it) => (
-                  <button
-                    key={it.label}
-                    onClick={it.onClick}
-                    style={{
-                      width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
-                      background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                      color: it.color ?? DS.ink, display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                  >{it.icon === 'user' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}{it.icon === 'docs' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>}{it.icon === 'editor' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>}{it.icon === 'logout' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>}{' '}{it.label}</button>
-                ))}
-              </div>,
-              document.body,
+            {settingsOpen && (
+              <SettingsPopover
+                anchorRef={settingsBtnRef}
+                onProfile={() => { setProfileOpen(true); setSettingsOpen(false); }}
+                onDocs={() => { navigate('/docs'); setSettingsOpen(false); }}
+                onEditor={() => { navigate('/editor'); setSettingsOpen(false); }}
+                onLogout={() => { logout(); setSettingsOpen(false); }}
+              />
             )}
           </div>
         </div>
       ) : (
       <div style={{
         width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
-        background: 'var(--color-surface-soft)', transition: 'width 0.2s ease',
+        background: DS.sidebarBg, transition: 'width 0.2s ease',
       }}>
         {/* 会话列表（toolbar 插槽注入 项目+资源库，位于新建对话上方；flex:1 内部滚动） */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -331,7 +337,7 @@ export function ChatPage() {
                       border: 'none', background: 'transparent', cursor: 'pointer',
                       fontSize: 13, color: 'var(--color-muted)', padding: '4px 8px', borderRadius: 8,
                     }}
-                  >◀ 收起</button>
+                  ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg> 收起</button>
                 </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
                 {/* 资源库（独立一行，DeepSeek ghost 风格，与新建按钮同高 40/字体 15） */}
@@ -366,7 +372,7 @@ export function ChatPage() {
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {currentProject?.name ?? '选择项目'}
                     </span>
-                    <span style={{ fontSize: 10, color: DS.textCaption }}>▼</span>
+                    <span style={{ fontSize: 10, color: DS.textCaption }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
                   </button>
                   <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
                 </div>
@@ -388,55 +394,37 @@ export function ChatPage() {
               title="设置"
               style={{
                 border: 'none', background: 'transparent', borderRadius: 10,
-                padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
+                padding: '0 12px', height: 42, fontSize: 15, color: DS.textSecondary, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 6,
               }}
             >{/** 设置 */}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M10 2l1.5 2.5L14 3l-.5 2.8 2.5 1.2-1.5 2.3 2.3 1.5-2.8.5.5 2.8-2.5-1.2L10 17l-.5-2.8-2.5 1.2 1.5-2.3-2.3-1.5 2.8-.5L8.5 8.7 11 9.9z"/></svg> 设置</button>
-            {settingsOpen && settingsBtnRef.current && createPortal(
-              <div style={{
-                position: 'fixed',
-                top: Math.max(8, settingsBtnRef.current.getBoundingClientRect().top - 170),
-                left: settingsBtnRef.current.getBoundingClientRect().right + 8,
-                width: 170,
-                background: 'white', border: `1px solid ${DS.border}`, borderRadius: 12,
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)', padding: 6, zIndex: 2000,
-              }}>
-                {[
-                  { label: '个人信息', icon: 'user', onClick: () => { setProfileOpen(true); setSettingsOpen(false); } },
-                  { label: '使用文档', icon: 'docs', onClick: () => navigate('/docs') },
-                  { label: '编辑器', icon: 'editor', onClick: () => navigate('/editor') },
-                  { label: '退出登录', icon: 'logout', onClick: logout, color: '#d92d20' },
-                ].map((it) => (
-                  <button
-                    key={it.label}
-                    onClick={it.onClick}
-                    style={{
-                      width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
-                      background: 'transparent', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                      color: it.color ?? DS.ink, display: 'flex', alignItems: 'center', gap: 8,
-                    }}
-                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                  >{it.icon === 'user' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}{it.icon === 'docs' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>}{it.icon === 'editor' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>}{it.icon === 'logout' && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>}{' '}{it.label}</button>
-                ))}
-              </div>,
-              document.body,
+            {settingsOpen && (
+              <SettingsPopover
+                anchorRef={settingsBtnRef}
+                onProfile={() => { setProfileOpen(true); setSettingsOpen(false); }}
+                onDocs={() => { navigate('/docs'); setSettingsOpen(false); }}
+                onEditor={() => { navigate('/editor'); setSettingsOpen(false); }}
+                onLogout={() => { logout(); setSettingsOpen(false); }}
+              />
             )}
           </div>
         </div>
       </div>
       )}
 
-      {/* 拖拽把手 */}
+      {/* 拖拽把手（6px 宽 + 竖线纹理提示可拖拽） */}
       <div
         onMouseDown={handleConvDrag}
         style={{
-          width: 4, cursor: 'col-resize', background: 'transparent',
-          transition: 'background 0.15s', flexShrink: 0,
+          width: 6, cursor: 'col-resize', background: 'transparent', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.15s',
         }}
         onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
         onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-      />
+      >
+        <div style={{ width: 2, height: 20, borderRadius: 1, background: 'rgba(0,0,0,0.12)' }} />
+      </div>
       {collapsed && <div style={{ width: 4, flexShrink: 0 }} />}
 
       {/* ── 主对话区 ── */}
@@ -457,6 +445,31 @@ export function ChatPage() {
               <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
             <ChatComposer />
+            {/* 快捷提示 chips */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: DS.maxContent, padding: '0 16px' }}>
+              {['帮我设计一个科幻分镜', '生成一张概念海报', '优化现有分镜脚本', '制作短视频方案'].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    const st = useAgentStore.getState();
+                    if (!st.activeConversationId) {
+                      st.createConversation().then(() => {
+                        setTimeout(() => useAgentStore.getState().sendMessage(t), 200);
+                      });
+                    } else {
+                      st.sendMessage(t);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px', borderRadius: 20, border: `1px solid ${DS.border}`,
+                    background: 'white', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
+                    transition: 'border-color 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = DS.brand; el.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = DS.border; el.style.color = DS.textSecondary; }}
+                >{t}</button>
+              ))}
+            </div>
           </div>
         ) : (
           <>
@@ -473,7 +486,7 @@ export function ChatPage() {
                   onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
                   disabled={!activeConversationId}
                   style={headerBtn(activeConversationId ? 1 : 0.4)}
-                >📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
+                ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z"/></svg> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
               </div>
             </div>
 
@@ -486,7 +499,7 @@ export function ChatPage() {
               }}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
-              <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
                 {messages.map((m) => (
                   <MessageBubble
                     key={m.id}
@@ -518,7 +531,20 @@ export function ChatPage() {
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
-                  <div style={{ color: 'rgb(217, 45, 32)', fontSize: 14, margin: '10px 6px' }}>⚠ {streamError}</div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 10, margin: '10px 6px', padding: '10px 14px', borderRadius: 10,
+                    background: 'rgba(217, 45, 32, 0.06)', border: '1px solid rgba(217, 45, 32, 0.15)',
+                  }}>
+                    <span style={{ color: 'rgb(217, 45, 32)', fontSize: 14 }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: -2, marginRight: 6 }}><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                      {streamError}
+                    </span>
+                    <button
+                      onClick={() => useAgentStore.setState({ streamError: null })}
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'rgb(217, 45, 32)', fontSize: 18, padding: '0 4px', lineHeight: 1 }}
+                    ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                  </div>
                 )}
               </div>
             </div>
@@ -535,13 +561,15 @@ export function ChatPage() {
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
     </div>
+    </>
   );
 }
 
 function headerBtn(opacity: number): React.CSSProperties {
   return {
-    border: 'none', background: 'transparent', color: 'rgb(84, 85, 87)', fontSize: 14,
+    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 14,
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
+    display: 'flex', alignItems: 'center', gap: 4,
   };
 }
 

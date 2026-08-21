@@ -563,7 +563,7 @@ public class AgentOrchestratorSupport {
                     planClient = chatClientBuilder
                         .defaultOptions(OpenAiChatOptions.builder()
                             .model(gatewayModelService.getDefaultTextModel())
-                            .timeout(Duration.ofSeconds(120)))
+                            .timeout(Duration.ofSeconds(300)))
                         .build();
                 }
             }

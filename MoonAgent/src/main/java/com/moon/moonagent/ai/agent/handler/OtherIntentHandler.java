@@ -31,6 +31,8 @@ public class OtherIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
+        // 发送"正在思考…"workflow 事件，避免闲聊回答期间前端只显示"正在生成"
+        support.sendEvent(request, "workflow", Map.of("title", "正在思考…", "status", "node_started"));
         // streamAnswer 内部逐 token 发 message 事件（打字机效果），返回完整文本
         String answer = answerService.streamAnswer(
                 request.getConversation(), request.getContent(), request.getEmitter());

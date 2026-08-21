@@ -72,7 +72,7 @@ export function MobileSidebarContent({
             <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {currentProject?.name ?? '选择项目'}
             </span>
-            <span style={{ fontSize: 10, color: DS.textCaption }}>▼</span>
+            <span style={{ fontSize: 10, color: DS.textCaption }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
           </button>
           <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
         </div>
@@ -120,7 +120,7 @@ export function MobileSidebarContent({
           onClick={() => setSettingsOpen(!settingsOpen)}
           style={{
             width: '100%', border: 'none', background: 'transparent', borderRadius: 10,
-            padding: '0 12px', height: 42, fontSize: 15, color: 'var(--color-muted)', cursor: 'pointer',
+            padding: '0 12px', height: 42, fontSize: 15, color: DS.textSecondary, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 6,
           }}
         >

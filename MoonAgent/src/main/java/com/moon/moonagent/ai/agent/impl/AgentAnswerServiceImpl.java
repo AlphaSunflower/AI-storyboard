@@ -127,7 +127,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                             .defaultOptions(OpenAiChatOptions.builder()
                                     // 对话交流统一网关默认文本模型（动态获取）
                                     .model(gatewayModelService.getDefaultTextModel())
-                                    .timeout(Duration.ofSeconds(120)))
+                                    .timeout(Duration.ofSeconds(300)))
                             .build();
                 }
             }
