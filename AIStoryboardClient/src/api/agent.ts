@@ -133,16 +133,6 @@ export const agentApi = {
     });
   },
 
-  // 语音识别：上传 WAV（16kHz 单声道）→ 返回识别文本
-  stt: (file: Blob) => {
-    const form = new FormData();
-    form.append('file', file, 'voice.wav');
-    return client.post<{ data: { text: string } }>('/agent/stt', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 60000,
-    });
-  },
-
   // 满意完成：清空 Dify 会话的 storage_pic_talk 变量（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>
     client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/confirm-done`),
@@ -162,7 +152,6 @@ export const agentApi = {
  * 返回 { push, close, cancel }：push 推 PCM 块；close 关流结束识别；cancel 中断。
  */
 export function sttStream(onPartial: (text: string) => void, onFinal: (text: string) => void) {
-  console.log('[stt-diag] sttStream() 被调用（WS 直连 vosk）');
   // 前端直连 vosk-server（本机开发：ws://localhost:2700；生产部署时应走后端代理并加鉴权）
   // 不用 HTTP 流式上传：Chrome 对流式 body（fetch/XHR）强制 HTTP/2，对 HTTP/1.1 的
   // localhost（Vite/Tomcat）会 ALPN 协商失败（ERR_ALPN_NEGOTIATION_FAILED）。
@@ -196,8 +185,8 @@ export function sttStream(onPartial: (text: string) => void, onFinal: (text: str
       onFinal(extractText(msg));
     }
   };
-  ws.onerror = () => console.log('[stt-diag] vosk WS 错误');
-  ws.onclose = () => console.log('[stt-diag] vosk WS 关闭');
+  ws.onerror = () => { /* 连接错误：静默，录音中无提示 */ };
+  ws.onclose = () => { /* 关闭：正常结束 */ };
 
   return {
     /** 推送 PCM 块（16kHz mono 16bit Int16Array） */

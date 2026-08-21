@@ -56,8 +56,3 @@ ai:
 # 提示词文件目录（文件系统路径，支持热刷新）
 prompts:
   dir: src/main/resources/prompts
-
-# Vosk 语音识别（vosk-server 容器，deploy/docker 部署）
-vosk:
-  ws-url: ${VOSK_WS_URL:ws://localhost:2700}
-  timeout: ${VOSK_TIMEOUT:30}

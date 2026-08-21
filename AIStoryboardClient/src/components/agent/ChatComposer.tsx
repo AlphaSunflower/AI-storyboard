@@ -68,13 +68,11 @@ export function ChatComposer() {
 
   // 麦克风开关：开始录音 → 开流式识别会话（继续追加输入框已有内容）；停止录音 → 关流（不清空已识别文本）
   const handleMicToggle = useCallback((active: boolean) => {
-    console.log('[stt-diag] handleMicToggle', active);
     setRecording(active);
     if (active) {
       sttRef.current?.cancel();
       confirmedRef.current = textRef.current; // 输入框已有内容作为累积 base（继续追加）
       sttRef.current = sttStream(handleSttPartial, handleSttFinal);
-      console.log('[stt-diag] sttStream 已创建');
     } else {
       sttRef.current?.close();
     }
