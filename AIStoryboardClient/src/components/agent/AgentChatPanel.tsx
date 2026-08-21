@@ -18,8 +18,12 @@ export function AgentChatPanel() {
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
-  // 流式语音识别状态：活跃会话句柄
+  // 流式语音识别状态：活跃会话句柄 + 已确认文本（增量追加，不清空）
   const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
+  const confirmedRef = useRef(''); // 已确认片段累积（vosk 每条 text 是增量，片段间逗号分隔）
+  // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
+  const textRef = useRef('');
+  textRef.current = text;
   // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
   const [assetsOpen, setAssetsOpen] = useState(false);
   // "+" 菜单状态
@@ -109,23 +113,34 @@ export function AgentChatPanel() {
   };
 
   // 麦克风录制完成 → 上传识别 → 回填输入框
-  // 实时收到识别文本 → 直接显示在输入框（打字机效果）；不发送，等用户确认
+  // partial（预览全文）→ 显示「已确认 + 新片段」临时预览（新片段会随识别修正变化）
   const handleSttPartial = useCallback((t: string) => {
-    setText(t.replace(/\s+/g, '')); // vosk 中文词间空格去除
+    const clean = t.replace(/\s+/g, '');
+    if (!clean) return;
+    const base = confirmedRef.current;
+    if (!base) { setText(clean); return; }
+    // partial 全文含历史：去掉已确认前缀，剩余作为新片段预览（逗号分隔）
+    const rest = clean.startsWith(base) ? clean.slice(base.length) : clean;
+    setText(rest ? `${base}，${rest}` : base);
   }, []);
 
-  // 录音结束 → 后端 final 文本填入输入框（不发送）
+  // vosk 确认片段（实测为增量，每段确认触发）→ 追加到已确认文本，片段间逗号分隔；停止后保留不清空
   const handleSttFinal = useCallback((t: string) => {
-    setText(t.replace(/\s+/g, ''));
-    sttRef.current = null;
+    const clean = t.replace(/\s+/g, '');
+    if (!clean) return;
+    const base = confirmedRef.current;
+    if (base.includes(clean)) return; // 防重复（partial 预览已含）
+    const next = base ? `${base}，${clean}` : clean;
+    confirmedRef.current = next;
+    setText(next);
   }, []);
 
-  // 麦克风开关：开始录音 → 开流式识别会话；停止录音 → 关流（后端收 final）
+  // 麦克风开关：开始录音 → 开流式识别会话（继续追加输入框已有内容）；停止录音 → 关流（不清空已识别文本）
   const handleMicToggle = useCallback((active: boolean) => {
     setRecording(active);
     if (active) {
       sttRef.current?.cancel();
-      setText('');
+      confirmedRef.current = textRef.current; // 输入框已有内容作为累积 base（继续追加）
       sttRef.current = sttStream(handleSttPartial, handleSttFinal);
     } else {
       sttRef.current?.close();

@@ -162,73 +162,66 @@ export const agentApi = {
  * 返回 { push, close, cancel }：push 推 PCM 块；close 关流结束识别；cancel 中断。
  */
 export function sttStream(onPartial: (text: string) => void, onFinal: (text: string) => void) {
-  const token = localStorage.getItem('accessToken') ?? '';
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  console.log('[stt-diag] sttStream() 被调用（WS 直连 vosk）');
+  // 前端直连 vosk-server（本机开发：ws://localhost:2700；生产部署时应走后端代理并加鉴权）
+  // 不用 HTTP 流式上传：Chrome 对流式 body（fetch/XHR）强制 HTTP/2，对 HTTP/1.1 的
+  // localhost（Vite/Tomcat）会 ALPN 协商失败（ERR_ALPN_NEGOTIATION_FAILED）。
+  // WebSocket 握手是 HTTP/1.1 Upgrade，推流用 WS 帧，无此限制。
+  const VOSK_WS_URL = (import.meta as { env?: Record<string, string> }).env?.VITE_VOSK_WS_URL ?? 'ws://localhost:2700';
+  const ws = new WebSocket(VOSK_WS_URL);
+  let opened = false;
   let closed = false;
+  const pending: Int16Array[] = []; // 连接建立前缓冲 PCM
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(c) { controller = c; },
-  });
+  ws.onopen = () => {
+    opened = true;
+    // 显式下发 config 更稳（vosk 默认即 16k）
+    ws.send(JSON.stringify({ config: { sample_rate: 16000 } }));
+    // 补发连接建立前的缓冲
+    for (const p of pending) ws.send(p.buffer as ArrayBuffer);
+    pending.length = 0;
+  };
 
-  const resPromise = fetch(`${BACKEND_URL}/api/agent/stt/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
-    body: stream,
-  });
+  // 从 vosk 消息中提取 partial/text 字段值
+  const extractText = (msg: string): string => {
+    const m = msg.match(/"partial"\s*:\s*"([^"]*)"|"text"\s*:\s*"([^"]*)"/);
+    return m ? (m[1] ?? m[2] ?? '') : '';
+  };
 
-  // SSE 读取：partial 事件实时回调
-  void resPromise
-    .then(async (res) => {
-      if (!res.ok || !res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
-        for (const part of parts) {
-          const lines = part.split('\n');
-          const eventLine = lines.find((l) => l.startsWith('event:'));
-          const dataLine = lines.find((l) => l.startsWith('data:'));
-          if (!dataLine) continue;
-          const eventName = eventLine ? eventLine.slice(6).trim() : '';
-          const data = dataLine.slice(5).trim();
-          if (eventName === 'partial') onPartial(data);
-          else if (eventName === 'final') onFinal(data);
-        }
-      }
-    })
-    .catch(() => { /* 前端主动取消或网络错误 */ });
+  ws.onmessage = (e) => {
+    const msg = String(e.data);
+    if (msg.includes('"partial"')) {
+      onPartial(extractText(msg));
+    } else if (msg.includes('"text"')) {
+      onFinal(extractText(msg));
+    }
+  };
+  ws.onerror = () => console.log('[stt-diag] vosk WS 错误');
+  ws.onclose = () => console.log('[stt-diag] vosk WS 关闭');
 
   return {
     /** 推送 PCM 块（16kHz mono 16bit Int16Array） */
     push: (pcm: Int16Array) => {
-      if (closed || !controller) return;
-      try {
-        // 转 Uint8Array：Int16 little-endian
-        const bytes = new Uint8Array(pcm.length * 2);
-        for (let i = 0; i < pcm.length; i++) {
-          bytes[i * 2] = pcm[i] & 0xff;
-          bytes[i * 2 + 1] = (pcm[i] >> 8) & 0xff;
-        }
-        controller.enqueue(bytes);
-      } catch { /* 流已关闭 */ }
+      if (closed) return;
+      if (!opened) { pending.push(pcm); return; }
+      try { ws.send(pcm.buffer as ArrayBuffer); } catch { /* 连接已关 */ }
     },
-    /** 关闭请求体流（EOF）→ 后端发 eof 收最终结果 */
+    /** 停止录音：发 eof 结束识别（vosk 回 final 后自行关闭） */
     close: () => {
       if (closed) return;
       closed = true;
-      try { controller?.close(); } catch { /* ignore */ }
+      if (opened) {
+        // 注意空格：vosk-server 精确字符串匹配 '{"eof" : 1}'，无空格会当音频数据
+        try { ws.send('{"eof" : 1}'); } catch { /* ignore */ }
+      } else {
+        try { ws.close(); } catch { /* ignore */ }
+      }
     },
-    /** 中断：关闭请求体并取消响应流 */
+    /** 中断：直接关闭连接 */
     cancel: () => {
       if (closed) return;
       closed = true;
-      try { controller?.close(); } catch { /* ignore */ }
-      void resPromise.then((r) => r?.body?.cancel()).catch(() => {});
+      try { ws.close(); } catch { /* ignore */ }
     },
   };
 }
