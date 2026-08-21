@@ -4,8 +4,8 @@
 
 | 服务 | 镜像 | 端口 | 说明 |
 |------|------|------|------|
-| nacos | nacos/nacos-server:3.2.3 | 8848/9848/8850 | 服务发现（standalone，内网开发） |
-| vosk | alphacephei/vosk-server:latest | 2700 | 离线语音识别（中文全量模型） |
+| nacos | nacos/nacos-server:v3.2.3 | 8848/9848/8850 | 服务发现（standalone，内网开发） |
+| vosk | alphacep/kaldi-vosk-server:latest | 2700 | 离线语音识别（中文全量模型，官方 vosk-server 镜像已下架改用 Kaldi 版） |
 
 ## 首次部署
 

@@ -64,8 +64,8 @@ AI-storyboard/
 
 统一管理基础设施 Docker 部署（scripts/ 下有 setup/up/down/status 脚本）：
 
-- **nacos** `nacos/nacos-server:3.2.3` — standalone 服务发现（8848/9848/8850，数据卷 nacos-data）
-- **vosk** `alphacephei/vosk-server:latest` — 离线语音识别（2700，挂载 vosk-model-cn-0.22）
+- **nacos** `nacos/nacos-server:v3.2.3` — standalone 服务发现（8848/9848/8850，数据卷 nacos-data）
+- **vosk** `alphacep/kaldi-vosk-server:latest` — 离线语音识别（2700，挂载 vosk-model-cn-0.22；官方 vosk-server 镜像已下架改用 Kaldi 版，entrypoint 跑 websocket/asr_server.py，需 VOSK_SAMPLE_RATE=16000）
 
 首次部署：`./scripts/setup.sh`（下载 1.3GB 中文模型）→ `./scripts/up.sh`（自动接管旧容器）。
 
