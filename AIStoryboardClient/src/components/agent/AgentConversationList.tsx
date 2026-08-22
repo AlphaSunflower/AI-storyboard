@@ -4,6 +4,7 @@ import { useAgentStore } from '../../stores/agentStore';
 import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
+import { Archive } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
 import MoonLogo from './MoonLogo';
 
@@ -158,9 +159,9 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 14px 8px' }}>
         <button
           onClick={() => setShowArchived(!showArchived)}
-          style={{ padding: '6px 0', border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer' }}
+          style={{ padding: '6px 0', border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
         >
-          {showArchived ? '◀ 返回进行中' : '🗂 已归档'}
+          {showArchived ? '◀ 返回进行中' : <><Archive size={13} strokeWidth={1.8} /> 已归档</>}
         </button>
         {visible.length > 0 && (
           <button

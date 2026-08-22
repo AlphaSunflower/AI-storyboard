@@ -1,6 +1,7 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
+import { Pencil, Trash2 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
@@ -11,7 +12,7 @@ function Tag({ children }: { children: string }) {
   return (
     <span
       style={{
-        fontSize: 10,
+        fontSize: 12,
         padding: '1px 6px',
         borderRadius: 'var(--rounded-sm)',
         background: 'var(--color-surface-card)',
@@ -31,11 +32,11 @@ const VideoIcon = <svg width="11" height="11" viewBox="0 0 24 24" fill="none" st
 function statusBadge(status: string | undefined, kind: 'image' | 'video'): { text: ReactNode; color: string } {
   switch (status) {
     case 'generating':
-      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片生成中' : '视频生成中'}</>, color: '#d97706' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片生成中' : '视频生成中'}</>, color: 'var(--color-warning)' };
     case 'completed':
-      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片已生成' : '视频已生成'}</>, color: '#059669' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片已生成' : '视频已生成'}</>, color: 'var(--color-success)' };
     case 'failed':
-      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片失败' : '视频失败'}</>, color: '#e53935' };
+      return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片失败' : '视频失败'}</>, color: 'var(--color-error)' };
     default:
       return { text: <>{kind === 'image' ? ImageIcon : VideoIcon}{' '}{kind === 'image' ? '图片未生成' : '视频未生成'}</>, color: 'var(--color-muted-soft)' };
   }
@@ -236,8 +237,8 @@ export function SceneCard({
 
   return (
     <ContextMenu items={[
-      { label: '✏️ 重命名', onClick: handleStartRename },
-      { label: '🗑️ 删除分镜', danger: true, onClick: handleDelete },
+      { label: '重命名', icon: <Pencil size={13} strokeWidth={1.8} />, onClick: handleStartRename },
+      { label: '删除分镜', icon: <Trash2 size={13} strokeWidth={1.8} />, danger: true, onClick: handleDelete },
     ]}>
     <div
       ref={cardRef}
@@ -351,7 +352,7 @@ export function SceneCard({
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 'var(--rounded-sm)',
             background: 'var(--color-surface-soft)',
@@ -362,7 +363,7 @@ export function SceneCard({
         </span>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             padding: '1px 6px',
             borderRadius: 'var(--rounded-sm)',
             background: 'var(--color-surface-soft)',

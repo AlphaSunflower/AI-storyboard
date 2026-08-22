@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
+import { Image as ImageIcon, Video, MessageSquare, FileText, Zap } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { buildTasks, type TaskItem } from './taskItems';
@@ -11,11 +13,11 @@ import { buildTasks, type TaskItem } from './taskItems';
  * 纯展示组件：直接订阅两个 store 的瞬态状态，无自己的任务记录层（只显示进行中）。
  */
 
-const ICONS: Record<TaskItem['kind'], string> = {
-  image: '🖼',
-  video: '🎬',
-  agent: '💬',
-  script: '📝',
+const ICONS: Record<TaskItem['kind'], ReactNode> = {
+  image: <ImageIcon size={15} strokeWidth={1.8} />,
+  video: <Video size={15} strokeWidth={1.8} />,
+  agent: <MessageSquare size={15} strokeWidth={1.8} />,
+  script: <FileText size={15} strokeWidth={1.8} />,
 };
 
 export function TaskFab() {
@@ -141,7 +143,7 @@ export function TaskFab() {
           transformOrigin: 'center',
         }}
       >
-        ⚡
+        <Zap size={20} strokeWidth={2} />
         {count > 0 && (
           <span
             ref={badgeRef}
@@ -210,7 +212,7 @@ export function TaskFab() {
                     transition: 'background 0.15s',
                   }}
                 >
-                  <span style={{ fontSize: 16 }}>{ICONS[t.kind]}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>{ICONS[t.kind]}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, color: '#141413', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {t.title}

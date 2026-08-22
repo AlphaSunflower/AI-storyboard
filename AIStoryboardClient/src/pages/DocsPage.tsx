@@ -7,20 +7,25 @@ import SpecularButton from '../components/SpecularButton';
 import TextType from '../components/TextType';
 import CardSwap, { Card } from '../components/CardSwap';
 import Carousel from '../components/Carousel';
-import WarpText from '../components/WarpText';
 import Particles from '../components/Particles';
 import ParticleText from '../components/ParticleText';
 import LineSidebar from '../components/LineSidebar';
 import Magnet from '../components/Magnet';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
+import {
+  AlertTriangle, Archive, Bot, Brain, Camera, Clock, Eraser, Film, Folder, Handshake, Hash,
+  Image as ImageIcon, MessageSquare, Moon, Music, Package, Palette, Paperclip, Pencil, PenLine,
+  Loader, Puzzle, RotateCcw, Ruler, Save, Sparkles, Store, Trash2, User, Video, Zap,
+} from 'lucide-react';
 import '../styles/docs.css';
+import AmbientGlow from '../components/AmbientGlow';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 /* ─────────────────────────────────────────────────────────────
  *  示意窗口（产品界面 mock）：统一视觉语言，帮助用户对照真实界面。
  * ──────────────────────────────────────────────────────────── */
-function MockWindow({ title, children, light = false }: { title: string; children: ReactNode; light?: boolean }) {
+function MockWindow({ title, children, light = false }: { title: ReactNode; children: ReactNode; light?: boolean }) {
   return (
     <div
       className="docs-mock"
@@ -113,7 +118,7 @@ function DemoGenerateButton({ children }: { children: ReactNode }) {
       style={{ ...mBtn, cursor: 'pointer', opacity: busy ? 0.7 : 1, transition: 'opacity 0.15s ease, transform 0.12s ease' }}
       onClick={() => { if (busy) return; setBusy(true); setTimeout(() => setBusy(false), 1200); }}
     >
-      {busy ? '⏳ 生成中…' : children}
+      {busy ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Loader size={12} strokeWidth={1.8} /> 生成中…</span> : children}
     </button>
   );
 }
@@ -142,7 +147,7 @@ function DemoProjectSwitcher() {
             color: saved ? '#fff' : 'var(--color-primary)',
           }}
         >
-          {saved ? '✓ 已保存' : '💾 保存'}
+          {saved ? '✓ 已保存' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存</span>}
         </button>
       </div>
       {open && (
@@ -262,7 +267,7 @@ function DemoAssetLibrary() {
   };
 
   const a = assets[active];
-  const emoji = (t: string) => (t === '人物' ? '👤' : t === '道具' ? '🏺' : '🏪');
+  const emoji = (t: string) => (t === '人物' ? <User size={15} strokeWidth={1.8} /> : t === '道具' ? <Package size={15} strokeWidth={1.8} /> : <Store size={15} strokeWidth={1.8} />);
 
   const card = (i: number) => {
     const x = assets[i];
@@ -328,10 +333,10 @@ function DemoAssetLibrary() {
                   {a.imgs[0] ? <img src={a.imgs[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : '暂无图片 · 上传一张作为参考图'}
                 </div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                  <button onClick={() => inputRef.current?.click()} style={{ ...mChip, cursor: 'pointer' }}>📷 上传</button>
-                  <button onClick={() => { setEditName(a.name); setEditDesc(a.desc); setEditing(true); }} style={{ ...mChip, cursor: 'pointer' }}>✏️ 编辑</button>
+                  <button onClick={() => inputRef.current?.click()} style={{ ...mChip, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Camera size={12} strokeWidth={1.8} /> 上传</span></button>
+                  <button onClick={() => { setEditName(a.name); setEditDesc(a.desc); setEditing(true); }} style={{ ...mChip, cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Pencil size={12} strokeWidth={1.8} /> 编辑</span></button>
                   <button onClick={delImage} disabled={a.imgs.length === 0} style={{ ...mChip, cursor: 'pointer', background: 'transparent', border: '1px solid var(--color-hairline)', color: a.imgs.length ? 'var(--color-error)' : 'var(--color-muted-soft)' }}>删除当前图</button>
-                  <button onClick={delAsset} style={{ ...mChip, cursor: 'pointer', background: 'transparent', border: '1px solid var(--color-hairline)', color: 'var(--color-error)' }}>🗑 删除资产</button>
+                  <button onClick={delAsset} style={{ ...mChip, cursor: 'pointer', background: 'transparent', border: '1px solid var(--color-hairline)', color: 'var(--color-error)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Trash2 size={12} strokeWidth={1.8} /> 删除资产</span></button>
                 </div>
               </>
             )}
@@ -353,12 +358,12 @@ function DemoTaskCenter() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>进行中的任务</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)' }}>
-        <span>🖼</span>
+        <ImageIcon size={12} strokeWidth={1.8} />
         <div style={{ flex: 1, fontSize: 11, color: 'var(--color-ink)' }}>分镜 3 · 生成图片</div>
         <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid rgba(204,120,92,0.25)', borderTopColor: 'var(--color-primary)' }} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)' }}>
-        <span>🎬</span>
+        <Video size={12} strokeWidth={1.8} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, color: 'var(--color-ink)' }}>分镜 5 · 生成视频</div>
           <div style={{ height: 4, background: 'rgba(20,20,19,0.08)', borderRadius: 2, marginTop: 4 }}>
@@ -368,7 +373,7 @@ function DemoTaskCenter() {
         <span style={{ fontSize: 10, color: 'var(--color-muted)', minWidth: 30, textAlign: 'right' }}>{progress}%</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)' }}>
-        <span>💬</span>
+        <MessageSquare size={12} strokeWidth={1.8} />
         <div style={{ flex: 1, fontSize: 11, color: 'var(--color-ink)' }}>Moon · 正在设计视频方案</div>
         <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>…</span>
       </div>
@@ -420,7 +425,7 @@ function DemoMoonChat() {
 
       {/* 人工确认卡片（HITL）：确认生成 / 自定义 / 不满意再改 */}
       <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--color-surface-dark-soft)', fontSize: 11, color: 'var(--color-on-dark)' }}>
-        🖼️ 图片生成参数（已按推荐选择，可修改）
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 图片生成参数（已按推荐选择，可修改）</span>
         <div style={{ color: 'var(--color-on-dark-soft)', marginTop: 2 }}>模型 GPT Image 2 · 尺寸 1024×1024 · 个数 2 · 分辨率建议 768P</div>
         {customOpen && (
           <input
@@ -431,10 +436,10 @@ function DemoMoonChat() {
         )}
         <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
           <button onClick={confirm} style={{ ...mChip, cursor: 'pointer', border: '1px solid rgba(204,120,92,0.5)' }}>
-            {stage === 'plan' ? '✓ 确认生成' : stage === 'running' ? '⏳ 生成中…' : '✓ 已生成'}
+            {stage === 'plan' ? '✓ 确认生成' : stage === 'running' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Loader size={12} strokeWidth={1.8} /> 生成中…</span> : '✓ 已生成'}
           </button>
           <button onClick={() => setCustomOpen((o) => !o)} style={{ ...mChip, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(204,120,92,0.5)' }}>
-            ✍ 自定义
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><PenLine size={12} strokeWidth={1.8} /> 自定义</span>
           </button>
           <button
             onClick={() => setMsgs((prev) => [...prev, { role: 'ai', text: '已按你的意见重新调整方案，请再次确认。' }])}
@@ -447,7 +452,7 @@ function DemoMoonChat() {
 
       {/* 产出素材 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: 8, background: 'var(--color-surface-dark-soft)', fontSize: 11, color: 'var(--color-on-dark-soft)' }}>
-        📁 产出素材 · 已生成 2 张图 / 1 段视频
+        <Folder size={12} strokeWidth={1.8} /> 产出素材 · 已生成 2 张图 / 1 段视频
       </div>
 
       {/* 底部输入 */}
@@ -486,8 +491,8 @@ function DemoImagePanel({ i2i = false }: { i2i?: boolean }) {
         雨夜，女主撑着伞在巷口等人，远处霓虹闪烁。
       </div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-card)', color: 'var(--color-ink)' }}>🖼️ 图片</span>
-        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', color: 'var(--color-muted)' }}>🎬 视频</span>
+        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-card)', color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 图片</span></span>
+        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 视频</span></span>
       </div>
       {hasImage ? (
         <div style={{ height: 160, borderRadius: 'var(--rounded-md)', background: 'linear-gradient(135deg,#f0e8da,#e2d4bd)', border: '1px solid var(--color-hairline)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-muted-soft)', fontSize: 12 }}>
@@ -504,10 +509,10 @@ function DemoImagePanel({ i2i = false }: { i2i?: boolean }) {
       </div>
       <div style={{ padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🖼️ 图片生成参数</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 图片生成参数</span></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {!saved && <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>}
-            <button onClick={() => setSaved(true)} style={{ padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none', background: saved ? 'var(--color-primary-disabled)' : 'var(--color-primary)', color: saved ? 'var(--color-muted)' : 'white', cursor: 'pointer' }}>💾 保存参数</button>
+            <button onClick={() => setSaved(true)} style={{ padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none', background: saved ? 'var(--color-primary-disabled)' : 'var(--color-primary)', color: saved ? 'var(--color-muted)' : 'white', cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存参数</span></button>
             <button onClick={() => { setSaved(false); setRefImage(false); }} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}>恢复全局默认</button>
           </div>
         </div>
@@ -527,18 +532,18 @@ function DemoImagePanel({ i2i = false }: { i2i?: boolean }) {
         )}
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <button onClick={() => { setBusy(true); setTimeout(() => { setBusy(false); setHasImage(true); }, 1200); }} style={{ ...pBtnPrimary, opacity: busy ? 0.6 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
-            {busy ? '⏳ 生成中...' : '🖼️ 生成图片'}
+            {busy ? '⏳ 生成中...' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 生成图片</span>}
           </button>
-          {hasImage && <button onClick={() => setHasImage(false)} style={pBtnGhost}>✨ 完善图片</button>}
+          {hasImage && <button onClick={() => setHasImage(false)} style={pBtnGhost}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Sparkles size={12} strokeWidth={1.8} /> 完善图片</span></button>}
         </div>
 
         {/* 关联资产（生成时注入设定与参考图） */}
         <div style={{ marginTop: 12, padding: 10, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 图片关联资产（生成时注入设定与参考图）</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 图片关联资产（生成时注入设定与参考图）</span></div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             {linked.map((name) => (
               <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px 3px 6px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 11, color: 'var(--color-ink)' }}>
-                <span style={{ width: 16, height: 16, borderRadius: 4, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}>🧩</span>
+                <span style={{ width: 16, height: 16, borderRadius: 4, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}><Puzzle size={12} strokeWidth={1.8} /></span>
                 {name}
                 <button onClick={() => setLinked((prev) => prev.filter((n) => n !== name))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 11, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
               </span>
@@ -570,8 +575,8 @@ function DemoVideoPanel({ i2v = false }: { i2v?: boolean }) {
         雨夜，女主撑着伞在巷口等人，远处霓虹闪烁。
       </div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', color: 'var(--color-muted)' }}>🖼️ 图片</span>
-        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-card)', color: 'var(--color-ink)' }}>🎬 视频</span>
+        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 图片</span></span>
+        <span style={{ padding: '6px 14px', fontSize: 12, fontWeight: 500, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-card)', color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 视频</span></span>
       </div>
       {hasVideo ? (
         <div style={{ height: 160, borderRadius: 'var(--rounded-md)', background: '#181715', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -588,10 +593,10 @@ function DemoVideoPanel({ i2v = false }: { i2v?: boolean }) {
       </div>
       <div style={{ padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🎬 视频生成参数</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 视频生成参数</span></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {!saved && <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>}
-            <button onClick={() => setSaved(true)} style={{ padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none', background: saved ? 'var(--color-primary-disabled)' : 'var(--color-primary)', color: saved ? 'var(--color-muted)' : 'white', cursor: 'pointer' }}>💾 保存参数</button>
+            <button onClick={() => setSaved(true)} style={{ padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none', background: saved ? 'var(--color-primary-disabled)' : 'var(--color-primary)', color: saved ? 'var(--color-muted)' : 'white', cursor: 'pointer' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存参数</span></button>
             <button onClick={() => { setSaved(false); setFirstFrame(false); }} style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}>恢复全局默认</button>
           </div>
         </div>
@@ -600,9 +605,9 @@ function DemoVideoPanel({ i2v = false }: { i2v?: boolean }) {
         <div style={pFieldRow}><span style={pFieldLabel}>分辨率</span><select defaultValue="768P" style={pSelect}><option>768P</option><option>2K</option></select></div>
         <div style={pFieldRow}><span style={pFieldLabel}>画幅</span><select defaultValue="16:9" style={pSelect}><option>16:9</option><option>9:16</option><option>4:3</option><option>1:1</option></select></div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2, marginBottom: 4 }}>
-          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}>📎 参考图片</span>
-          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}>🎞 参考视频</span>
-          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}>🎵 参考音频</span>
+          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Paperclip size={12} strokeWidth={1.8} /> 参考图片</span></span>
+          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Film size={12} strokeWidth={1.8} /> 参考视频</span></span>
+          <span style={{ flex: 1, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)', fontSize: 10, color: 'var(--color-muted)', background: 'white' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Music size={12} strokeWidth={1.8} /> 参考音频</span></span>
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-muted)', cursor: 'pointer', marginTop: 4 }}>
           <input type="checkbox" checked={firstFrame} onChange={(e) => setFirstFrame(e.target.checked)} style={{ margin: 0, cursor: 'pointer', accentColor: 'var(--color-primary)' }} />
@@ -610,17 +615,17 @@ function DemoVideoPanel({ i2v = false }: { i2v?: boolean }) {
         </label>
         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
           <button onClick={() => { setBusy(true); setTimeout(() => { setBusy(false); setHasVideo(true); }, 1200); }} style={{ ...pBtnPrimary, opacity: busy ? 0.6 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
-            {busy ? '⏳ 生成中...' : '🎬 生成视频'}
+            {busy ? '⏳ 生成中...' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 生成视频</span>}
           </button>
         </div>
 
         {/* 关联资产（视频生成时注入文字卡 + 参考图） */}
         <div style={{ marginTop: 12, padding: 10, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>🧩 视频关联资产（注入文字卡 + 主图参考图）</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 视频关联资产（注入文字卡 + 主图参考图）</span></div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             {linked.map((name) => (
               <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px 3px 6px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 11, color: 'var(--color-ink)' }}>
-                <span style={{ width: 16, height: 16, borderRadius: 4, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}>🧩</span>
+                <span style={{ width: 16, height: 16, borderRadius: 4, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}><Puzzle size={12} strokeWidth={1.8} /></span>
                 {name}
                 <button onClick={() => setLinked((prev) => prev.filter((n) => n !== name))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 11, padding: 0, lineHeight: 1 }} title="取消关联">✕</button>
               </span>
@@ -655,7 +660,7 @@ function DemoMoonScenes() {
     setMsgs((prev) => [...prev, { role: 'user', text: t }]);
     if (/清空|删除/.test(t)) {
       setCleared(true);
-      setMsgs((prev) => [...prev, { role: 'ai', text: '✅ 已删除全部 6 个分镜，分镜列表已清空。' }]);
+      setMsgs((prev) => [...prev, { role: 'ai', text: '已删除全部 6 个分镜，分镜列表已清空。' }]);
     } else {
       setMsgs((prev) => [...prev, { role: 'ai', text: '收到，我来安排。（演示回复）' }]);
     }
@@ -665,8 +670,8 @@ function DemoMoonScenes() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: 'var(--color-body)' }}>
       {/* 抽屉顶部 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--color-hairline)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>☾ Moon 智能体</span>
-        <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>📁 产出素材</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体</span></span>
+        <span style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Folder size={12} strokeWidth={1.8} /> 产出素材</span></span>
       </div>
 
       {/* 消息气泡 */}
@@ -688,7 +693,7 @@ function DemoMoonScenes() {
       {!writeResult && (
         <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)', fontSize: 11.5, color: 'var(--color-body)' }}>
           <div style={{ fontWeight: 600, color: 'var(--color-ink)', marginBottom: 4 }}>分镜方案确认</div>
-          <div style={{ fontSize: 10.5, color: 'var(--color-muted)', marginBottom: 8 }}>⚠️ 覆盖导入将清空现有 6 个分镜后写入新方案</div>
+          <div style={{ fontSize: 10.5, color: 'var(--color-muted)', marginBottom: 8 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><AlertTriangle size={12} strokeWidth={1.8} /> 覆盖导入将清空现有 6 个分镜后写入新方案</span></div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button onClick={() => setWriteResult('已覆盖导入：清空旧分镜并写入新方案（8 个分镜）')} style={pBtnPrimary}>覆盖导入</button>
             <button onClick={() => setWriteResult('已追加：在现有分镜后追加 8 个新分镜')} style={pBtnGhost}>追加</button>
@@ -701,7 +706,7 @@ function DemoMoonScenes() {
       {/* 写库结果 / 清空结果 */}
       {(writeResult || cleared) && (
         <div style={{ maxWidth: '86%', padding: '7px 11px', borderRadius: 10, background: 'var(--color-surface-card)', color: 'var(--color-body)', fontSize: 11.5, lineHeight: 1.55, borderBottomLeftRadius: 4 }}>
-          {writeResult || '✅ 已删除全部 6 个分镜，分镜列表已清空。'}
+          {writeResult || '已删除全部 6 个分镜，分镜列表已清空。'}
         </div>
       )}
 
@@ -710,7 +715,7 @@ function DemoMoonScenes() {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 10.5, color: 'var(--color-muted)' }}>试试说「清空分镜」：</span>
           <button
-            onClick={() => { setCleared(true); setMsgs((prev) => [...prev, { role: 'user', text: '清空分镜' }, { role: 'ai', text: '✅ 已删除全部 6 个分镜，分镜列表已清空。' }]); }}
+            onClick={() => { setCleared(true); setMsgs((prev) => [...prev, { role: 'user', text: '清空分镜' }, { role: 'ai', text: '已删除全部 6 个分镜，分镜列表已清空。' }]); }}
             style={{ padding: '4px 12px', fontSize: 11, borderRadius: 999, border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer' }}
           >
             清空分镜
@@ -734,7 +739,7 @@ function DemoMoonScenes() {
 }
 
 /** 卡片顶部迷你编辑器标题栏（三点 + 标题） */
-function CardBar({ title }: { title: string }) {
+function CardBar({ title }: { title: ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 12px', borderBottom: '1px solid var(--color-hairline)', background: 'var(--color-surface-card)' }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)' }} />
@@ -790,45 +795,45 @@ const FEATURES = [
 ];
 
 const PARAMS = [
-  { icon: '🧠', name: '模型', desc: '生图 / 生视频使用的 AI 模型，不同模型支持的参数可能不同。' },
-  { icon: '📐', name: '尺寸 / 质量', desc: '图片的像素尺寸与画质档位（低 / 中 / 高 / 自动）。' },
-  { icon: '🔢', name: '生成个数', desc: '一次生成几张图片，拖动滑杆选择。' },
-  { icon: '⏱️', name: '时长 / 分辨率 / 画幅', desc: '视频的秒数、清晰度与横竖屏比例。' },
-  { icon: '💾', name: '保存参数', desc: '调整完点一次，把当前参数保存到该镜头（不会每动一下就请求后端）。' },
-  { icon: '↩️', name: '恢复全局默认', desc: '清除当前镜头的参数覆盖，跟随全局默认设置。' },
+  { icon: <Brain size={14} strokeWidth={1.8} />, name: '模型', desc: '生图 / 生视频使用的 AI 模型，不同模型支持的参数可能不同。' },
+  { icon: <Ruler size={14} strokeWidth={1.8} />, name: '尺寸 / 质量', desc: '图片的像素尺寸与画质档位（低 / 中 / 高 / 自动）。' },
+  { icon: <Hash size={14} strokeWidth={1.8} />, name: '生成个数', desc: '一次生成几张图片，拖动滑杆选择。' },
+  { icon: <Clock size={14} strokeWidth={1.8} />, name: '时长 / 分辨率 / 画幅', desc: '视频的秒数、清晰度与横竖屏比例。' },
+  { icon: <Save size={14} strokeWidth={1.8} />, name: '保存参数', desc: '调整完点一次，把当前参数保存到该镜头（不会每动一下就请求后端）。' },
+  { icon: <RotateCcw size={14} strokeWidth={1.8} />, name: '恢复全局默认', desc: '清除当前镜头的参数覆盖，跟随全局默认设置。' },
 ];
 
 const ABILITIES = [
-  { icon: '🤖', tag: '文生', name: 'AI 分镜', desc: '剧本 → 分镜方案 → 确认后写入（可覆盖 / 追加 / 不生成），不满意可持续调整。' },
-  { icon: '🖼️', tag: '文生图', name: '文字生成图片', desc: '描述画面，直接生成图片（无参考图时自动完成）。' },
-  { icon: '🎨', tag: '图生图', name: '参考图改图', desc: '上传参考图 + 修改诉求（如「色调调暖」），在原图基础上改出新图。' },
-  { icon: '🎬', tag: '文生视频', name: '文字生成视频', desc: '描述内容 → 视频方案 → 确认后生成。' },
-  { icon: '🎞️', tag: '图生视频', name: '参考图生成视频', desc: '参考图作首帧 + 视频方案 → 确认后生成。' },
-  { icon: '🗑️', tag: '清空', name: '清空 / 删除分镜', desc: '说「清空分镜 / 删除分镜」→ 直接删除当前项目全部分镜。' },
-  { icon: '🤝', tag: 'HITL', name: '人工介入', desc: '方案确认卡片 + 参数预选与推荐理由 + 自定义输入（确认 30 分钟过期）。' },
-  { icon: '✨', tag: '完善', name: '继续完善', desc: '结果不满意 → 点「继续完善」→ 输入新诉求，Moon 重新调整再生成。' },
+  { icon: <Bot size={14} strokeWidth={1.8} />, tag: '文生', name: 'AI 分镜', desc: '剧本 → 分镜方案 → 确认后写入（可覆盖 / 追加 / 不生成），不满意可持续调整。' },
+  { icon: <ImageIcon size={14} strokeWidth={1.8} />, tag: '文生图', name: '文字生成图片', desc: '描述画面，直接生成图片（无参考图时自动完成）。' },
+  { icon: <Palette size={14} strokeWidth={1.8} />, tag: '图生图', name: '参考图改图', desc: '上传参考图 + 修改诉求（如「色调调暖」），在原图基础上改出新图。' },
+  { icon: <Video size={14} strokeWidth={1.8} />, tag: '文生视频', name: '文字生成视频', desc: '描述内容 → 视频方案 → 确认后生成。' },
+  { icon: <Film size={14} strokeWidth={1.8} />, tag: '图生视频', name: '参考图生成视频', desc: '参考图作首帧 + 视频方案 → 确认后生成。' },
+  { icon: <Trash2 size={14} strokeWidth={1.8} />, tag: '清空', name: '清空 / 删除分镜', desc: '说「清空分镜 / 删除分镜」→ 直接删除当前项目全部分镜。' },
+  { icon: <Handshake size={14} strokeWidth={1.8} />, tag: 'HITL', name: '人工介入', desc: '方案确认卡片 + 参数预选与推荐理由 + 自定义输入（确认 30 分钟过期）。' },
+  { icon: <Sparkles size={14} strokeWidth={1.8} />, tag: '完善', name: '继续完善', desc: '结果不满意 → 点「继续完善」→ 输入新诉求，Moon 重新调整再生成。' },
 ];
 
 /** 计划模式（HITL）四步：理解 → 方案 → 人工确认 → 执行 */
 const PLAN_STEPS = [
   { name: '理解意图', desc: '识别你要的是分镜 / 图片 / 视频 / 删除分镜，还是闲聊。' },
   { name: '出方案', desc: '给出方案并预选模型参数 + 推荐理由（如「分辨率建议 768P」）。' },
-  { name: '人工确认', desc: '弹确认卡片：确认生成 / ✍ 自定义输入 / 不满意再改（30 分钟过期）。' },
+  { name: '人工确认', desc: <>弹确认卡片：确认生成 / <PenLine size={12} strokeWidth={1.8}  /> 自定义输入 / 不满意再改（30 分钟过期）。</> },
   { name: '执行', desc: '确认后才写分镜（覆盖 / 追加 / 不生成）、生图、生视频；不确认不执行。' },
 ];
 
 const CONV_POINTS = [
   { name: '新建对话', desc: '会话栏顶部「+ 新建对话」，一个项目可开多个独立会话。' },
-  { name: '归档 / 恢复', desc: '会话项 🗂 归档，归档后可切换「🗂 已归档」查看并恢复。' },
-  { name: '重命名 / 删除', desc: '✏️ 重命名，🗑️ 删除（不可撤销）。' },
-  { name: '清除聊天记录', desc: '对话区右上「🧹 清除聊天记录」，重置 AI 上下文，产出素材保留。' },
+  { name: '归档 / 恢复', desc: <>会话项 <Archive size={12} strokeWidth={1.8}  /> 归档，归档后可切换「<Archive size={12} strokeWidth={1.8}  /> 已归档」查看并恢复。</> },
+  { name: '重命名 / 删除', desc: <><Pencil size={12} strokeWidth={1.8}  /> 重命名，<Trash2 size={12} strokeWidth={1.8}  /> 删除（不可撤销）。</> },
+  { name: '清除聊天记录', desc: <>对话区右上「<Eraser size={12} strokeWidth={1.8}  /> 清除聊天记录」，重置 AI 上下文，产出素材保留。</> },
 ];
 
 const FAQS = [
-  { q: '参数改了怎么没生效？', a: '调整后需点「💾 保存参数」；点「生成」前也会自动保存未保存的参数。' },
+  { q: '参数改了怎么没生效？', a: <>调整后需点「<Save size={12} strokeWidth={1.8}  /> 保存参数」；点「生成」前也会自动保存未保存的参数。</> },
   { q: '上传参考图后分镜更准吗？', a: '是的。理解模型会先「看图」，把画面风格 / 内容提炼进描述，再结合你的提示词生成分镜。' },
   { q: '视频生成要多久？', a: '通常 2~5 分钟。生成期间可切换其他镜头继续操作，进度会自动恢复。' },
-  { q: '生成图片想调整？', a: '点「✨ 完善图片」，输入修改诉求即可在原图基础上改。' },
+  { q: '生成图片想调整？', a: <>点「<Sparkles size={12} strokeWidth={1.8}  /> 完善图片」，输入修改诉求即可在原图基础上改。</> },
   { q: 'Moon 智能体和手动生成冲突吗？', a: 'Moon 生成分镜后，手动剧本输入会暂时禁用（避免覆盖），刷新页面可恢复。' },
   { q: '如何用参考图生图 / 生视频？', a: '图片参数区勾选「参考图生图」上传参考图；或在 Moon 上传参考图后让它图生图 / 图生视频。' },
   { q: '同一个人物在不同分镜里长得不一样？', a: '把它建成「资产库 · 人物」资产（多图 + 文字约束），再在分镜里关联，生成时会自动注入，保证全片一致。' },
@@ -861,6 +866,8 @@ export function DocsPage() {
 
   return (
     <div ref={rootRef} className="docs-page">
+      {/* 页面氛围光晕（fixed 最底层，pointer-events none） */}
+      <AmbientGlow />
       {/* 左侧章节导航（fixed 悬浮，不占主内容宽度；窄屏隐藏） */}
       <div className="docs-sidebar">
         <LineSidebar
@@ -1094,10 +1101,10 @@ export function DocsPage() {
 
                 {/* 卡 6：资产库 → 人物 / 道具 / 场景设定卡 */}
                 <Card style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'pointer', background: 'var(--color-canvas)' }}>
-                  <CardBar title="🧩 资产库" />
+                  <CardBar title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 资产库</span> />
                   <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: '#fff' }}>
-                      <span style={{ width: 40, height: 40, borderRadius: 8, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>👤</span>
+                      <span style={{ width: 40, height: 40, borderRadius: 8, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}><User size={18} strokeWidth={1.8} /></span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>阿伟</span>
@@ -1123,7 +1130,7 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">界面总览</div>
             <h2 className="docs-section__title">一个三栏工作台</h2>
             <p className="docs-section__lead">
-              整个编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，右下角还有两个悬浮球：⚡ 任务中心与 ☾ Moon 智能体。
+              整个编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，右下角还有两个悬浮球：<Zap size={12} strokeWidth={1.8}  /> 任务中心与 <Moon size={12} strokeWidth={1.8}  /> Moon 智能体。
             </p>
           </div>
           <div className="docs-split">
@@ -1132,7 +1139,7 @@ export function DocsPage() {
                 { name: '左侧 · 剧本输入', desc: '创作类型、剧本 / 描述、参考图上传、生图 / 生视频 / 理解模型，以及历史项目。' },
                 { name: '中间 · 分镜列表', desc: 'AI 拆解出的分镜镜头，点击切换，可增删镜头。' },
                 { name: '右侧 · 预览', desc: '查看剧本、填写提示词、调整参数、生成图片与视频。' },
-                { name: '右下角 · 两个悬浮球', desc: '⚡ 任务中心聚合进行中的生成任务；☾ 打开 Moon 智能体抽屉。' },
+                { name: '右下角 · 两个悬浮球', desc: <><Zap size={12} strokeWidth={1.8}  /> 任务中心聚合进行中的生成任务；<Moon size={12} strokeWidth={1.8}  /> 打开 Moon 智能体抽屉。</> },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1148,7 +1155,7 @@ export function DocsPage() {
                 {/* 顶栏 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 10px', borderBottom: '1px solid var(--color-hairline)', background: '#fff' }}>
                   <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--color-primary)', whiteSpace: 'nowrap' }}>AlphaSunflower AI分镜</span>
-                  <span style={{ ...mChip, background: 'transparent', border: '1px solid var(--color-primary)', padding: '1px 8px' }}>💾 保存</span>
+                  <span style={{ ...mChip, background: 'transparent', border: '1px solid var(--color-primary)', padding: '1px 8px' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存</span></span>
                   <span style={{ ...mChip, cursor: 'default' }}>我的短片项目 ▾</span>
                   <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--color-muted)' }}>使用文档</span>
                   <span style={{ fontSize: 9, color: 'var(--color-muted)' }}>admin</span>
@@ -1168,12 +1175,12 @@ export function DocsPage() {
                       <div style={{ fontSize: 8, color: 'var(--color-muted)', marginBottom: 2 }}>剧本 / 描述</div>
                       <div style={{ height: 44, fontSize: 8, padding: 3, border: '1px solid var(--color-hairline)', borderRadius: 4, background: '#fff', color: 'var(--color-muted-soft)', lineHeight: 1.4 }}>雨夜，女主撑着伞在巷口等人…</div>
                     </div>
-                    <div style={{ fontSize: 8, color: 'var(--color-muted)' }}>📎 参考图</div>
+                    <div style={{ fontSize: 8, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Paperclip size={12} strokeWidth={1.8} /> 参考图</span></div>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <span style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3 }}>🎨 生图模型</span>
-                      <span style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3 }}>🎬 生视频模型</span>
+                      <span style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Palette size={12} strokeWidth={1.8} /> 生图模型</span></span>
+                      <span style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3 }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 生视频模型</span></span>
                     </div>
-                    <div style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3, width: 'fit-content' }}>🧠 理解模型</div>
+                    <div style={{ fontSize: 8, color: 'var(--color-body)', padding: '1px 4px', border: '1px solid var(--color-hairline)', borderRadius: 3, width: 'fit-content' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Brain size={12} strokeWidth={1.8} /> 理解模型</span></div>
                     <div style={{ fontSize: 9, textAlign: 'center', padding: '3px', borderRadius: 4, background: 'var(--color-primary)', color: '#fff' }}>生成分镜脚本</div>
                     <div style={{ fontSize: 8, color: 'var(--color-muted-soft)', marginTop: 'auto' }}>历史项目 ▾</div>
                   </div>
@@ -1201,15 +1208,15 @@ export function DocsPage() {
                     </div>
                     <div style={{ flex: 1, borderRadius: 4, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', border: '1px solid var(--color-hairline)', minHeight: 70 }} />
                     <div style={{ fontSize: 8, color: 'var(--color-muted)' }}>图片提示词 · 黄昏的雨巷，霓虹倒影…</div>
-                    <div style={{ fontSize: 8, color: 'var(--color-muted)' }}>🖼️ 图片生成参数 · 模型 / 尺寸 / 质量 / 个数</div>
+                    <div style={{ fontSize: 8, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 图片生成参数 · 模型 / 尺寸 / 质量 / 个数</span></div>
                     <div style={{ fontSize: 9, textAlign: 'center', padding: '3px', borderRadius: 4, background: 'var(--color-primary)', color: '#fff', width: '55%' }}>生成图片</div>
                   </div>
                 </div>
 
                 {/* 右下角悬浮球 */}
                 <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}>⚡</span>
-                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}>☾</span>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}><Zap size={12} strokeWidth={1.8} /></span>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}><Moon size={12} strokeWidth={1.8} /></span>
                 </div>
               </div>
             </MockWindow>
@@ -1263,11 +1270,11 @@ export function DocsPage() {
                   />
                 </div>
                 <div>
-                  <div style={mLabel}>📎 上传参考图（可选，最多 10 张）</div>
+                  <div style={mLabel}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Paperclip size={12} strokeWidth={1.8} /> 上传参考图（可选，最多 10 张）</span></div>
                   <DemoUpload label="＋ 选择图片（演示，不真上传）" />
                 </div>
                 <div>
-                  <div style={mLabel}>🧠 理解模型</div>
+                  <div style={mLabel}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Brain size={12} strokeWidth={1.8} /> 理解模型</span></div>
                   <DemoUnderstandingModel />
                 </div>
                 <DemoGenerateButton>生成分镜脚本</DemoGenerateButton>
@@ -1299,13 +1306,13 @@ export function DocsPage() {
             ))}
           </div>
           <div className="docs-note">
-            <strong>提示：</strong>调整参数（尤其是拖动「生成个数」「时长」滑杆）不会实时请求后端；改完点右上角「💾 保存参数」统一保存，
+            <strong>提示：</strong>调整参数（尤其是拖动「生成个数」「时长」滑杆）不会实时请求后端；改完点右上角「<Save size={12} strokeWidth={1.8}  /> 保存参数」统一保存，
             直接点「生成」也会自动先保存未保存的改动再开始生成。
           </div>
           <div className="docs-split" style={{ marginTop: 'var(--space-xl)' }}>
             <MockWindow title="预览 · 图片生成" light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <div style={{ height: 90, borderRadius: 6, background: 'var(--color-canvas)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🖼️</div>
+                <div style={{ height: 90, borderRadius: 6, background: 'var(--color-canvas)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}><ImageIcon size={26} strokeWidth={1.8} /></div>
                 <div>
                   <div style={mLabel}>图片提示词</div>
                   <textarea defaultValue="黄昏的雨巷，霓虹倒影在积水里…" rows={2} style={{ ...mInput, color: 'var(--color-body)', resize: 'vertical' }} />
@@ -1314,15 +1321,15 @@ export function DocsPage() {
                   <span style={mChip}>模型</span><span style={mChip}>尺寸</span><span style={mChip}>质量</span><span style={mChip}>个数 ▸ 3</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <DemoGenerateButton>🖼️ 生成图片</DemoGenerateButton>
-                  <button style={{ ...mBtn, background: 'transparent', border: '1px solid var(--color-primary)', color: 'var(--color-primary)' }}>✨ 完善图片</button>
-                  <span style={{ fontSize: 10, color: 'var(--color-muted)', alignSelf: 'center' }}>💾 保存参数</span>
+                  <DemoGenerateButton><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><ImageIcon size={12} strokeWidth={1.8} /> 生成图片</span></DemoGenerateButton>
+                  <button style={{ ...mBtn, background: 'transparent', border: '1px solid var(--color-primary)', color: 'var(--color-primary)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Sparkles size={12} strokeWidth={1.8} /> 完善图片</span></button>
+                  <span style={{ fontSize: 10, color: 'var(--color-muted)', alignSelf: 'center' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存参数</span></span>
                 </div>
               </div>
             </MockWindow>
             <MockWindow title="预览 · 视频生成" light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <div style={{ height: 90, borderRadius: 6, background: 'var(--color-surface-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🎬</div>
+                <div style={{ height: 90, borderRadius: 6, background: 'var(--color-surface-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}><Video size={26} strokeWidth={1.8} /></div>
                 <div>
                   <div style={mLabel}>视频提示词</div>
                   <textarea defaultValue="镜头缓慢推进，雨滴落在伞面…" rows={2} style={{ ...mInput, color: 'var(--color-body)', resize: 'vertical' }} />
@@ -1331,8 +1338,8 @@ export function DocsPage() {
                   <span style={mChip}>模型</span><span style={mChip}>时长 ▸ 8s</span><span style={mChip}>分辨率</span><span style={mChip}>画幅</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <DemoGenerateButton>🎬 生成视频</DemoGenerateButton>
-                  <span style={{ fontSize: 10, color: 'var(--color-muted)', alignSelf: 'center' }}>💾 保存参数</span>
+                  <DemoGenerateButton><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Video size={12} strokeWidth={1.8} /> 生成视频</span></DemoGenerateButton>
+                  <span style={{ fontSize: 10, color: 'var(--color-muted)', alignSelf: 'center' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存参数</span></span>
                 </div>
               </div>
             </MockWindow>
@@ -1370,7 +1377,7 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title="🧩 资产库（点卡片进工作台、上传可回显）" light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 资产库（点卡片进工作台、上传可回显）</span> light>
               <DemoAssetLibrary />
             </MockWindow>
           </div>
@@ -1379,8 +1386,8 @@ export function DocsPage() {
           <div className="docs-split docs-split--wide-left">
             <div className="docs-points">
               {[
-                { name: '新建资产', desc: '顶栏「🧩 资产库」→「＋ 新建资产」，选类型、填名称与文字约束、上传相片（可多张、可反复添加）；勾「全局」则跨项目可用。' },
-                { name: '关联到分镜', desc: '预览面板下方「🧩 关联资产」，图片 / 视频两个标签分别管理；点「＋ 添加资产」打开资产库勾选（同一资产可分别用于图片、视频两种用途）。' },
+                { name: '新建资产', desc: <>顶栏「<Puzzle size={12} strokeWidth={1.8}  /> 资产库」→「＋ 新建资产」，选类型、填名称与文字约束、上传相片（可多张、可反复添加）；勾「全局」则跨项目可用。</> },
+                { name: '关联到分镜', desc: <>预览面板下方「<Puzzle size={12} strokeWidth={1.8}  /> 关联资产」，图片 / 视频两个标签分别管理；点「＋ 添加资产」打开资产库勾选（同一资产可分别用于图片、视频两种用途）。</> },
                 { name: '生成时自动注入', desc: '无需额外操作：分镜脚本、图片、视频生成时后端自动带上关联资产，保证一致。' },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
@@ -1427,7 +1434,7 @@ export function DocsPage() {
                 { name: '文生图 · 要素齐全', desc: '主体 + 动作 + 环境 + 光线 + 风格 + 构图六要素写全；如「阿伟在暖木吧台前冲咖啡，晨光从左侧打入，浅景深电影感」。' },
                 { name: '文生图 · 结合资产库', desc: '把重复出现的人物 / 道具建成资产卡并关联到分镜，文字约束自动注入 imagePrompt，人不变样。' },
                 { name: '图生图 · 参考图改图', desc: '勾选「参考图生图」上传参考图，再给明确诉求（如「色调调暖、背景换成雨夜」），在原图基础上改。' },
-                { name: '图生图 · 完善图片', desc: '生成后不满意，点「✨ 完善图片」输入修改意见，逐轮逼近想要的效果。' },
+                { name: '图生图 · 完善图片', desc: <>生成后不满意，点「<Sparkles size={12} strokeWidth={1.8}  /> 完善图片」输入修改意见，逐轮逼近想要的效果。</> },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1511,13 +1518,13 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">进行中的任务</div>
             <h2 className="docs-section__title">生成进度，一球尽收</h2>
             <p className="docs-section__lead">
-              右下角 ⚡ 悬浮球聚合所有进行中的任务：图片 / 视频生成、脚本生成、智能体交流与视频任务。角标显示数量，视频带进度条。
+              右下角 <Zap size={12} strokeWidth={1.8}  /> 悬浮球聚合所有进行中的任务：图片 / 视频生成、脚本生成、智能体交流与视频任务。角标显示数量，视频带进度条。
             </p>
           </div>
           <div className="docs-split">
             <div className="docs-points">
               {[
-                { name: '角标数字', desc: '⚡ 球右上角的红点数字 = 当前进行中的任务数。' },
+                { name: '角标数字', desc: <><Zap size={12} strokeWidth={1.8}  /> 球右上角的红点数字 = 当前进行中的任务数。</> },
                 { name: '进度条', desc: '视频任务显示实时进度百分比，生成完自动消失。' },
                 { name: '点击跳转', desc: '点任务项 → 分镜任务跳转到对应镜头；智能体任务打开 Moon 抽屉。' },
               ].map((p, i) => (
@@ -1530,7 +1537,7 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title="⚡ 任务中心（悬浮球正上方 · 进度条自动变化）" light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Zap size={12} strokeWidth={1.8} /> 任务中心（悬浮球正上方 · 进度条自动变化）</span> light>
               <DemoTaskCenter />
             </MockWindow>
           </div>
@@ -1543,15 +1550,15 @@ export function DocsPage() {
           <div className="docs-section__head">
             <div className="docs-section__eyebrow">项目管理</div>
             <h2 className="docs-section__title">多项目切换与保存</h2>
-            <p className="docs-section__lead">顶栏的项目下拉管理你的所有项目；「💾 保存」把草稿存为正式版，Ctrl/Cmd+S 快捷键同效。</p>
+            <p className="docs-section__lead">顶栏的项目下拉管理你的所有项目；「<Save size={12} strokeWidth={1.8}  /> 保存」把草稿存为正式版，Ctrl/Cmd+S 快捷键同效。</p>
           </div>
           <div className="docs-split">
             <div className="docs-points">
               {[
                 { name: '切换项目', desc: '点顶栏项目名展开列表，选择即切换；当前项目高亮。' },
                 { name: '新建项目', desc: '下拉顶部「+ 新建项目」，自动创建并切换。' },
-                { name: '重命名 / 删除', desc: '项目项右侧 ✏️ / 🗑️（默认项目不可删除）。' },
-                { name: '保存项目', desc: '「💾 保存」把草稿（draft）存为正式版（active）。' },
+                { name: '重命名 / 删除', desc: <>项目项右侧 <Pencil size={12} strokeWidth={1.8}  /> / <Trash2 size={12} strokeWidth={1.8}  />（默认项目不可删除）。</> },
+                { name: '保存项目', desc: <>「<Save size={12} strokeWidth={1.8}  /> 保存」把草稿（draft）存为正式版（active）。</> },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1606,11 +1613,11 @@ export function DocsPage() {
                 </div>
               ))}
               <div className="docs-note" style={{ marginTop: 0 }}>
-                <strong>参考图：</strong>输入框左侧 📎 上传图片 → 图生图 / 图生视频（以参考图为首帧）。
-                生成结果在抽屉顶部「📁 产出素材」统一查看、下载、删除。
+                <strong>参考图：</strong>输入框左侧 <Paperclip size={12} strokeWidth={1.8}  /> 上传图片 → 图生图 / 图生视频（以参考图为首帧）。
+                生成结果在抽屉顶部「<Folder size={12} strokeWidth={1.8}  /> 产出素材」统一查看、下载、删除。
               </div>
             </div>
-            <MockWindow title="☾ Moon 智能体 · 对话示意（试试确认 / 再改 / 发送）">
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体 · 对话示意（试试确认 / 再改 / 发送）</span>>
               <DemoMoonChat />
             </MockWindow>
           </div>
@@ -1658,16 +1665,16 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title="☾ Moon · 会话栏" light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon · 会话栏</span> light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}>☾ Moon 智能体</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体</span></div>
                 <div style={{ padding: '6px', border: '1px dashed var(--color-hairline)', borderRadius: 6, fontSize: 11, color: 'var(--color-primary)', textAlign: 'center' }}>+ 新建对话</div>
-                <div style={{ fontSize: 10, color: 'var(--color-muted)' }}>🗂 已归档</div>
+                <div style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Archive size={12} strokeWidth={1.8} /> 已归档</span></div>
                 <div style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)', fontSize: 11, color: 'var(--color-ink)', display: 'flex', justifyContent: 'space-between' }}>
-                  分镜方案讨论 <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>✏️ 🗂 🗑️</span>
+                  分镜方案讨论 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--color-muted)' }}><Pencil size={11} strokeWidth={1.8} /><Archive size={11} strokeWidth={1.8} /><Trash2 size={11} strokeWidth={1.8} /></span>
                 </div>
                 <div style={{ padding: '6px 8px', borderRadius: 6, fontSize: 11, color: 'var(--color-body)', display: 'flex', justifyContent: 'space-between' }}>
-                  海报图生成 <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>✏️ 🗂 🗑️</span>
+                  海报图生成 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--color-muted)' }}><Pencil size={11} strokeWidth={1.8} /><Archive size={11} strokeWidth={1.8} /><Trash2 size={11} strokeWidth={1.8} /></span>
                 </div>
               </div>
             </MockWindow>
@@ -1697,20 +1704,19 @@ export function DocsPage() {
       <footer className="docs-footer">
         <div className="docs-footer__inner">
           <div className="docs-footer__brand">
-            <WarpText
-              text="AlphaSunflower AI分镜"
-              color="#cc785c"
-              fontSize={22}
-              fontWeight={700}
-              warpStrength={0.05}
-              warpScale={1.4}
-              speed={0.4}
-              pointerInfluence={0.3}
-              pointerStrength={0.25}
-              refraction={0.01}
-              ripple
-              style={{ width: 320, height: 48, margin: '0 auto' }}
-            />
+            <span
+              style={{
+                fontSize: 20,
+                fontWeight: 650,
+                letterSpacing: '-0.4px',
+                color: 'var(--color-on-dark)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              AlphaSunflower <span style={{ color: 'var(--color-primary)' }}>AI 分镜</span>
+            </span>
           </div>
           <div className="docs-footer__text">从剧本到分镜，再到图片与视频——让每个故事都拥有画面。</div>
         </div>

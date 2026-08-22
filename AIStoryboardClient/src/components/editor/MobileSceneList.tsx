@@ -5,6 +5,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
 import { LiveOrb } from '../ui/live-orb';
 import { DS } from '../agent/ChatComposer';
+import { FileText } from 'lucide-react';
 
 interface MobileSceneListProps {
   onSelectScene: (id: string) => void;
@@ -71,7 +72,7 @@ export function MobileSceneList({ onSelectScene }: MobileSceneListProps) {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             <LiveOrb variant="webgl" colors={["#A33A18", "#D4682A", "#E8B45A"]} size={70} />
             <p style={{ color: DS.textCaption, fontSize: 13, textAlign: 'center', margin: 0 }}>
-              暂无分镜<br />点击右上角 📝 输入剧本生成
+              暂无分镜<br />点击右上角 <FileText size={12} strokeWidth={1.8} /> 输入剧本生成
             </p>
           </div>
         </div>

@@ -5,6 +5,7 @@ import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { AgentConversationList } from './AgentConversationList';
 import { AgentChatPanel } from './AgentChatPanel';
+import { ExternalLink } from 'lucide-react';
 
 export function AgentDrawer() {
   const navigate = useNavigate();
@@ -139,7 +140,7 @@ export function AgentDrawer() {
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(65, 118, 230, 0.06)'; e.currentTarget.style.transform = 'scale(1.02)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'scale(1)'; }}
-          >↗ 全屏对话</button>
+          ><ExternalLink size={14} strokeWidth={1.8} /> 全屏对话</button>
         </div>
         <div
           onMouseDown={handleConvDrag}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAgentStore, type VideoPlanInfo } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
 import { AgentParamSelector } from './AgentParamSelector';
+import { Video } from 'lucide-react';
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
 export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
@@ -23,8 +24,8 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
         }}
       >
-        <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1 }}>
-          📹 视频方案已生成
+        <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Video size={13} strokeWidth={1.8} /> 视频方案已生成
         </div>
         {/* 参考图缩略图 + 参数行 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>

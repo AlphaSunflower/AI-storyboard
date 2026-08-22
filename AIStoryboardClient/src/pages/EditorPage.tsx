@@ -16,6 +16,7 @@ import { ScriptInputDrawer } from '../components/editor/ScriptInputDrawer';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
+import AmbientGlow from '../components/AmbientGlow';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
@@ -111,7 +112,8 @@ export function EditorPage() {
   /* ═══════════════ 手机端布局（≤768px）═══════════════ */
   if (isMobile) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
+      <div className="page-in" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden', animation: 'page-in 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+        <AmbientGlow />
         <MobileEditorHeader onMenuClick={() => setSidebarOpen(true)} onScript={() => setScriptOpen(true)} />
 
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -158,13 +160,17 @@ export function EditorPage() {
   /* ═══════════════ 桌面端布局（>768px）═══════════════ */
   return (
     <div
+      className="page-in"
       style={{
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
         overflow: 'hidden',
+        animation: 'page-in 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
       }}
     >
+      {/* 页面氛围光晕（fixed 最底层，pointer-events none） */}
+      <AmbientGlow />
       {/* Top bar */}
       <AppHeader />
 

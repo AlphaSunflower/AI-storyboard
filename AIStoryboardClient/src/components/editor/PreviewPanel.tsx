@@ -15,6 +15,7 @@ import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 import { assetApi, type Asset } from '../../api/assets';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { Eye, Download, Sparkles } from 'lucide-react';
 
 function downloadAsset(url: string, filename: string) {
   fetch(url)
@@ -379,10 +380,11 @@ export function PreviewPanel() {
     border: '1px solid var(--color-primary)',
     background: 'transparent',
     color: 'var(--color-primary)',
-    cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
+    justifyContent: 'center',
+    cursor: 'pointer',
     transition: 'all 0.18s ease',
   };
 
@@ -428,7 +430,7 @@ export function PreviewPanel() {
         flex: 1,
         padding: 'var(--space-md)',
         overflowY: 'auto',
-        background: 'white',
+        background: 'var(--color-canvas)',
       }}
     >
       {/* Title */}
@@ -481,9 +483,9 @@ export function PreviewPanel() {
                   />
                 ) : (
                   <ContextMenu items={[
-                  { label: '🔍 预览', onClick: () => setPreviewUrl(imageList[0]) },
-                  { label: '⬇ 下载图片', onClick: () => downloadAsset(assetUrl(imageList[0]), `scene-${scene.sceneNumber}.png`) },
-                  { label: '✨ 完善图片', onClick: () => setRefineTarget(imageList[0]) },
+                  { label: '预览', icon: <Eye size={13} strokeWidth={1.8} />, onClick: () => setPreviewUrl(imageList[0]) },
+                  { label: '下载图片', icon: <Download size={13} strokeWidth={1.8} />, onClick: () => downloadAsset(assetUrl(imageList[0]), `scene-${scene.sceneNumber}.png`) },
+                  { label: '完善图片', icon: <Sparkles size={13} strokeWidth={1.8} />, onClick: () => setRefineTarget(imageList[0]) },
                 ]}>
                   <img
                     src={assetUrl(imageList[0])}
@@ -536,12 +538,12 @@ export function PreviewPanel() {
                       onMouseEnter={(e) => { e.currentTarget.style.background = '#b9654b'; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }}
                     >
-                      ⬇ 下载当前
+                      <Download size={12} strokeWidth={2} /> 下载当前
                     </button>
                   )}
                   {selectedDownloads.size > 0 && (
                     <button onClick={downloadSelected} style={btnDownload}>
-                      ⬇ 下载选中 ({selectedDownloads.size})
+                      <Download size={12} strokeWidth={2} /> 下载选中 ({selectedDownloads.size})
                     </button>
                   )}
                 </div>
@@ -696,8 +698,8 @@ export function PreviewPanel() {
           <div style={{ marginBottom: 12 }}>
             {scene.videoUrl ? (
               <ContextMenu items={[
-                  { label: '🔍 预览', onClick: () => { /* video 已有 controls，点击即播放 */ } },
-                  { label: '⬇ 下载视频', onClick: () => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`) },
+                  { label: '预览', icon: <Eye size={13} strokeWidth={1.8} />, onClick: () => { /* video 已有 controls，点击即播放 */ } },
+                  { label: '下载视频', icon: <Download size={13} strokeWidth={1.8} />, onClick: () => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`) },
                 ]}>
                 <div>
                 <video
@@ -710,7 +712,7 @@ export function PreviewPanel() {
                   }}
                 />
                 <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} style={btnDownload}>
-                  ⬇ 下载视频
+                  <Download size={12} strokeWidth={2} /> 下载视频
                 </button>
                 </div>
                 </ContextMenu>

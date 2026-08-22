@@ -11,6 +11,7 @@ import { AgentAssetsModal } from './AgentAssetsPanel';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
+import { Folder, Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
@@ -179,9 +180,10 @@ export function AgentChatPanel() {
               border: 'none', background: 'none', color: 'var(--color-muted)',
               fontSize: 14, cursor: activeConversationId ? 'pointer' : 'not-allowed',
               padding: '4px 8px', borderRadius: 6, opacity: activeConversationId ? 1 : 0.4,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
             }}
           >
-            📁 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}
+            <Folder size={13} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}
           </button>
         </div>
       </div>
@@ -272,7 +274,9 @@ export function AgentChatPanel() {
               fontSize: 14, color: 'var(--color-muted)',
             }}
           >
-            <span>📎 已选当前图片作为参考，请输入你想完善的地方</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Paperclip size={13} strokeWidth={1.8} /> 已选当前图片作为参考，请输入你想完善的地方
+            </span>
             <button
               onClick={() => cancelRefine()}
               style={{ border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer', fontSize: 14, marginLeft: 10 }}

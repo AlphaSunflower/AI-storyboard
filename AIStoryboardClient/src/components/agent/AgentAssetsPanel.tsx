@@ -4,6 +4,7 @@ import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { Folder } from 'lucide-react';
 
 /**
  * 当前对话的产出素材弹窗（文件夹图标入口，不再常驻底部）：
@@ -75,8 +76,8 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
         >
           {/* 头部 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid var(--color-hairline)' }}>
-            <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--color-ink)' }}>
-              📁 产出素材（{total}）
+            <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--color-ink)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Folder size={15} strokeWidth={1.8} /> 产出素材（{total}）
             </span>
             <button
               onClick={onClose}

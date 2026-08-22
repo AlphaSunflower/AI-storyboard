@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
 import { LiveOrb } from '../ui/live-orb';
+import { Check, ArrowUpDown } from 'lucide-react';
 
 /** 排序模式下的可拖拽卡片包裹 */
 function SortableSceneCard({
@@ -144,7 +145,7 @@ export function SceneListPanel({ width }: { width: number }) {
         width: `${width}px`,
         minWidth: `${width}px`,
         borderRight: '1px solid var(--color-hairline)',
-        background: 'white',
+        background: 'var(--color-canvas)',
         padding: 'var(--space-md)',
         overflowY: 'auto',
         display: 'flex',
@@ -184,9 +185,14 @@ export function SceneListPanel({ width }: { width: number }) {
                 color: sortMode ? 'white' : 'var(--color-body)',
                 fontWeight: 500,
                 transition: 'all 0.2s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
               }}
             >
-              {sortMode ? '✓ 完成排序' : '↕ 排序'}
+              {sortMode
+                ? <><Check size={12} strokeWidth={2} /> 完成排序</>
+                : <><ArrowUpDown size={12} strokeWidth={2} /> 排序</>}
             </button>
           )}
           {currentProject && !sortMode && (

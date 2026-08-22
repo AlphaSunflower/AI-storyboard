@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AgentConversationList } from './AgentConversationList';
 import { DS } from './ChatComposer';
 import { ProjectDropdown } from '../layout/ProjectDropdown';
+import { Moon } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 
 interface MobileSidebarContentProps {
@@ -32,7 +33,9 @@ export function MobileSidebarContent({
         borderBottom: '1px solid var(--color-hairline)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <span style={{ fontSize: 17, fontWeight: 700, color: DS.ink }}>☾ Moon 智能体</span>
+        <span style={{ fontSize: 17, fontWeight: 700, color: DS.ink, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Moon size={15} strokeWidth={1.8} /> Moon 智能体
+        </span>
         <button
           onClick={onClose}
           style={{

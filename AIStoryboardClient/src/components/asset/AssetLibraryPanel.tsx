@@ -7,6 +7,7 @@ import { assetUrl } from '../../config';
 import { useProjectStore } from '../../stores/projectStore';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import './AssetLibraryPanel.css';
+import { Camera, Pencil, Trash2 } from 'lucide-react';
 
 const TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
 const TYPES: { value: AssetType; label: string }[] = [
@@ -37,6 +38,7 @@ const primaryBtn: React.CSSProperties = {
 const ghostBtn: React.CSSProperties = {
   padding: '5px 10px', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
   background: 'white', color: 'var(--color-muted)', font: 'var(--text-caption)', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'center',
 };
 
 export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' }: { onClose: () => void; mode?: 'manage' | 'pick'; purpose?: 'image' | 'video' }) {
@@ -248,11 +250,11 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
         {!compact && mode === 'manage' && (
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' as const }} onClick={(e) => e.stopPropagation()}>
             <label style={{ ...ghostBtn, cursor: 'pointer' }}>
-              📷 上传
+              <Camera size={12} strokeWidth={1.8} /> 上传
               <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(a.id, e.target.files); e.target.value = ''; }} />
             </label>
-            <button style={ghostBtn} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}>✏️ 编辑</button>
-            <button style={ghostBtn} onClick={() => handleDelete(a)}>🗑 删除</button>
+            <button style={ghostBtn} onClick={() => { setEditTarget(a); setEditName(a.name); setEditDesc(a.description); }}><Pencil size={12} strokeWidth={1.8} /> 编辑</button>
+            <button style={ghostBtn} onClick={() => handleDelete(a)}><Trash2 size={12} strokeWidth={1.8} /> 删除</button>
           </div>
         )}
       </div>
@@ -284,7 +286,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
             {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
             {!loading && filtered.length === 0 && (
               <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
-                暂无资产——先到「🧩 资产库」创建人物/道具/场景卡
+                暂无资产——先到「资产库」创建人物/道具/场景卡
               </p>
             )}
             {filtered.map((a) => renderCard(a, false))}
@@ -366,7 +368,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
                       当前图片：{selected.images[currentIndex]?.fileName || '未命名'}
                     </span>
                     <label style={{ ...ghostBtn, cursor: 'pointer' }}>
-                      📷 上传图片
+                      <Camera size={12} strokeWidth={1.8} /> 上传图片
                       <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(selected.id, e.target.files); e.target.value = ''; }} />
                     </label>
                     <button
@@ -382,15 +384,15 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
                 <div style={{ height: 200, background: 'var(--color-surface-card)', borderRadius: 'var(--rounded-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--color-muted-soft)', font: 'var(--text-caption)' }}>
                   暂无图片
                   <label style={{ ...ghostBtn, cursor: 'pointer' }}>
-                    📷 上传一张作为参考图
+                    <Camera size={12} strokeWidth={1.8} /> 上传一张作为参考图
                     <input type="file" accept="image/*" multiple hidden onChange={(e) => { void handleUpload(selected.id, e.target.files); e.target.value = ''; }} />
                   </label>
                 </div>
               )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 14 }}>
-                <button style={ghostBtn} onClick={() => { setEditTarget(selected); setEditName(selected.name); setEditDesc(selected.description); }}>✏️ 编辑资产</button>
-                <button style={{ ...ghostBtn, color: 'var(--color-error)' }} onClick={() => handleDelete(selected)}>🗑 删除资产</button>
+                <button style={ghostBtn} onClick={() => { setEditTarget(selected); setEditName(selected.name); setEditDesc(selected.description); }}><Pencil size={12} strokeWidth={1.8} /> 编辑资产</button>
+                <button style={{ ...ghostBtn, color: 'var(--color-error)' }} onClick={() => handleDelete(selected)}><Trash2 size={12} strokeWidth={1.8} /> 删除资产</button>
               </div>
             </div>
           </div>
@@ -417,7 +419,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
                 <input style={inputStyle} placeholder="名称（如 阿伟）" value={createName} onChange={(e) => setCreateName(e.target.value)} />
                 <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder="文字约束（外貌/外观/构成描述，生成时注入）" value={createDesc} onChange={(e) => setCreateDesc(e.target.value)} />
                 <label style={{ ...ghostBtn, cursor: 'pointer', textAlign: 'center' }}>
-                  📷 选择相片（可多选，可反复添加）
+                  <Camera size={12} strokeWidth={1.8} /> 选择相片（可多选，可反复添加）
                   <input
                     type="file"
                     accept="image/*"

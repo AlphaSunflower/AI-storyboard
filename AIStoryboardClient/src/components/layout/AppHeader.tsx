@@ -2,17 +2,18 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
-import WarpText from '../WarpText';
-import SpecularButton from '../SpecularButton';
-import StaggeredMenu from '../StaggeredMenu';
+import { Save, Puzzle, Pencil, Trash2, ChevronDown } from 'lucide-react';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 import { ProjectDropdown } from './ProjectDropdown';
 import { ContextMenu } from '../common/ContextMenu';
+import StaggeredMenu from '../StaggeredMenu';
 
 const headerHeight = 64;
 
 // ── component ────────────────────────────────────────────────────────
+// 设计回归（2026-08-22）：去除标题栏装饰性特效（WarpText/SpecularButton/StaggeredMenu），
+// 回归 tokens.css 设计系统——canvas 画布底色、hairline 控件、inline SVG 图标、静态品牌字。
 
 export function AppHeader() {
   const navigate = useNavigate();
@@ -25,9 +26,8 @@ export function AppHeader() {
   const [renameProjectOpen, setRenameProjectOpen] = useState(false);
   const [renameProjectName, setRenameProjectName] = useState('');
   const deleteProject = useProjectStore((s) => s.deleteProject);
-  
-  // Ctrl/Cmd+S 保存当前项目（与「💾 保存」按钮同逻辑）
-  
+
+  // Ctrl/Cmd+S 保存当前项目（与「保存」按钮同逻辑）
   const handleSave = () => {
     if (currentProject) updateProject(currentProject.id, { status: 'active' });
   };
@@ -61,32 +61,33 @@ export function AppHeader() {
           justifyContent: 'space-between',
           padding: '0 var(--space-md)',
           borderBottom: '1px solid var(--color-hairline)',
-          background: 'white',
+          background: 'var(--color-canvas)',
           zIndex: 10,
         }}
       >
-        {/* Left: project selector */}
+        {/* Left: 品牌字 + 保存 + 项目选择 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <WarpText
-            text="AlphaSunflower AI分镜"
-            color="#cc785c"
-            fontSize={26}
-            fontWeight={700}
-            warpStrength={0.06}
-            warpScale={1.4}
-            speed={0.4}
-            pointerInfluence={0.35}
-            pointerStrength={0.3}
-            refraction={0.012}
-            ripple
-            style={{ width: 360, height: 64, minHeight: 64, flexShrink: 0 }}
-          />
+          <span
+            style={{
+              fontSize: 19,
+              fontWeight: 650,
+              letterSpacing: '-0.4px',
+              color: 'var(--color-ink)',
+              whiteSpace: 'nowrap',
+              paddingRight: 4,
+            }}
+          >
+            AlphaSunflower <span style={{ color: 'var(--color-primary)' }}>AI 分镜</span>
+          </span>
 
           {/* Save button */}
           {currentProject && (
             <button
               onClick={handleSave}
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
                 padding: '4px 10px',
                 fontSize: 12,
                 background: 'transparent',
@@ -96,58 +97,84 @@ export function AppHeader() {
                 cursor: 'pointer',
               }}
             >
-              💾 保存
+              <Save size={12} strokeWidth={1.8} />
+              保存
             </button>
           )}
 
           {/* Project dropdown（提取组件，编辑器/聊天页共用） */}
           <div style={{ position: 'relative' }}>
-            <ContextMenu items={[
-              { label: '✏️ 重命名', onClick: () => { if (currentProject) { setRenameProjectName(currentProject.name); setRenameProjectOpen(true); } } },
-              { label: '🗑️ 删除项目', danger: true, disabled: !currentProject, onClick: () => { if (currentProject && confirm(`确定要删除项目「${currentProject.name}」吗？`)) deleteProject(currentProject.id); } },
-            ]}>
-            <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 12px',
-                height: 32,
-                border: '1px solid var(--color-hairline)',
-                borderRadius: 'var(--rounded-md)',
-                background: 'white',
-                font: 'var(--text-caption)',
-                color: 'var(--color-ink)',
-                cursor: 'pointer',
-                minWidth: 140,
-              }}
+            <ContextMenu
+              items={[
+                {
+                  label: '重命名',
+                  icon: <Pencil size={13} strokeWidth={1.8} />,
+                  onClick: () => {
+                    if (currentProject) {
+                      setRenameProjectName(currentProject.name);
+                      setRenameProjectOpen(true);
+                    }
+                  },
+                },
+                {
+                  label: '删除项目',
+                  icon: <Trash2 size={13} strokeWidth={1.8} />,
+                  danger: true,
+                  disabled: !currentProject,
+                  onClick: () => {
+                    if (currentProject && confirm(`确定要删除项目「${currentProject.name}」吗？`)) deleteProject(currentProject.id);
+                  },
+                },
+              ]}
             >
-              <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {currentName}
-              </span>
-              <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>▼</span>
-            </button>
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 12px',
+                  height: 32,
+                  border: '1px solid var(--color-hairline)',
+                  borderRadius: 'var(--rounded-md)',
+                  background: 'var(--color-canvas)',
+                  font: 'var(--text-caption)',
+                  color: 'var(--color-ink)',
+                  cursor: 'pointer',
+                  minWidth: 140,
+                }}
+              >
+                <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentName}
+                </span>
+                <ChevronDown size={12} strokeWidth={2} color="var(--color-muted)" />
+              </button>
             </ContextMenu>
             <ProjectDropdown open={dropdownOpen} onClose={() => setDropdownOpen(false)} />
           </div>
         </div>
 
         {/* Right: 资产库 + 菜单 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <SpecularButton
-            size="sm"
-            radius={10}
-            tintOpacity={0}
-            textColor="#cc785c"
-            lineColor="#cc785c"
-            baseColor="#cc785c"
-            intensity={0.9}
-            thickness={1.2}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
             onClick={() => setAssetLibraryOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 14px',
+              height: 32,
+              border: '1px solid var(--color-hairline)',
+              borderRadius: 'var(--rounded-md)',
+              background: 'var(--color-canvas)',
+              font: 'var(--text-caption)',
+              color: 'var(--color-ink)',
+              cursor: 'pointer',
+            }}
           >
-            🧩 资产库
-          </SpecularButton>
+            <Puzzle size={14} strokeWidth={1.8} />
+            资产库
+          </button>
           <StaggeredMenu
             position="right"
             menuButtonColor="#141413"
@@ -160,7 +187,7 @@ export function AppHeader() {
               { label: 'Moon Chat', ariaLabel: 'Moon Chat', onClick: () => navigate('/chat') },
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
               { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
-                            { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
+              { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
             ]}
           />
         </div>
@@ -171,20 +198,48 @@ export function AppHeader() {
       {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       {renameProjectOpen && currentProject && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setRenameProjectOpen(false)}>
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setRenameProjectOpen(false)}
+        >
           <div style={{ background: 'white', borderRadius: 12, padding: 24, minWidth: 300 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>重命名项目</h3>
             <input
               autoFocus
               value={renameProjectName}
               onChange={(e) => setRenameProjectName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && renameProjectName.trim()) { updateProject(currentProject.id, { name: renameProjectName.trim() }); setRenameProjectOpen(false); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renameProjectName.trim()) {
+                  updateProject(currentProject.id, { name: renameProjectName.trim() });
+                  setRenameProjectOpen(false);
+                }
+              }}
               style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
               placeholder="输入项目名称"
             />
             <div style={{ marginTop: 16, textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setRenameProjectOpen(false)} style={{ padding: '6px 16px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', fontSize: 13 }}>取消</button>
-              <button disabled={!renameProjectName.trim()} onClick={() => { updateProject(currentProject.id, { name: renameProjectName.trim() }); setRenameProjectOpen(false); }} style={{ padding: '6px 16px', border: 'none', borderRadius: 8, background: 'var(--color-primary)', color: '#fff', cursor: 'pointer', fontSize: 13, opacity: renameProjectName.trim() ? 1 : 0.5 }}>确定</button>
+              <button onClick={() => setRenameProjectOpen(false)} style={{ padding: '6px 16px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', fontSize: 13 }}>
+                取消
+              </button>
+              <button
+                disabled={!renameProjectName.trim()}
+                onClick={() => {
+                  updateProject(currentProject.id, { name: renameProjectName.trim() });
+                  setRenameProjectOpen(false);
+                }}
+                style={{
+                  padding: '6px 16px',
+                  border: 'none',
+                  borderRadius: 8,
+                  background: 'var(--color-primary)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  opacity: renameProjectName.trim() ? 1 : 0.5,
+                }}
+              >
+                确定
+              </button>
             </div>
           </div>
         </div>

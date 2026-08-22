@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 export interface ContextMenuItem {
   label: string;
-  icon?: string;
+  icon?: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
   onClick: () => void;

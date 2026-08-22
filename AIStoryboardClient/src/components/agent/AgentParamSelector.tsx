@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { GatewayModelOption } from '../../api/ai';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { Image as ImageIcon, Video } from 'lucide-react';
 
 /**
  * 卡片生成参数选择器（human_input / video_plan 卡片复用）：
@@ -112,8 +113,8 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
         borderRadius: 8, border: '1px solid var(--color-hairline)', fontSize: 12,
       }}
     >
-      <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1 }}>
-        {keyPrefix === 'image' ? '🖼️ 图片生成参数' : keyPrefix === 'video' ? '🎬 视频生成参数' : '生成参数'}
+      <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {keyPrefix === 'image' ? (<><ImageIcon size={12} strokeWidth={1.8} /> 图片生成参数</>) : keyPrefix === 'video' ? (<><Video size={12} strokeWidth={1.8} /> 视频生成参数</>) : '生成参数'}
         （已按推荐选择，可直接确认或修改）
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

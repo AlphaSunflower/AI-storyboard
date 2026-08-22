@@ -4,6 +4,8 @@ import { useAgentStore } from '../../stores/agentStore';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { sttStream } from '../../api/agent';
+import { Paperclip } from 'lucide-react';
+import { Image as ImageIcon, PlusCircle, FileText } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 /** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局） */
@@ -169,7 +171,9 @@ export function ChatComposer() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '8px 12px', borderRadius: 12, background: DS.hover, fontSize: 14, color: DS.textSecondary,
         }}>
-          <span>📎 已选当前图片作为参考，请输入你想完善的地方</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Paperclip size={13} strokeWidth={1.8} /> 已选当前图片作为参考，请输入你想完善的地方
+          </span>
           <button onClick={() => cancelRefine()} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>✕ 取消</button>
         </div>
       )}
@@ -201,7 +205,7 @@ export function ChatComposer() {
               fontSize: 17, cursor: 'pointer', color: DS.textSecondary, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
-          >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
+          >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
           {menuOpen && menuPos && createPortal(
@@ -221,7 +225,7 @@ export function ChatComposer() {
                 onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                 onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M10 12h4M12 10v4"/></svg>
+                <FileText size={16} strokeWidth={2} />
                 上传分镜
               </button>
               <button
@@ -234,7 +238,7 @@ export function ChatComposer() {
                 onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
                 onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                <ImageIcon size={16} strokeWidth={2} />
                 上传图片
               </button>
             </div>,
