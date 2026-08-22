@@ -16,5 +16,5 @@ services:
       - "${VOSK_BIND_IP:-127.0.0.1}:${VOSK_PORT:-2700}:2700"   # websocket 识别服务
     volumes:
       - ./data/models:/opt/vosk-model     # 挂载中文全量模型（setup.sh 下载到 vosk/data/models/）
-    mem_limit: 4g                          # 全量中文模型含 RNNLM 加载峰值约 2.5-3GB（2g 会 OOM 循环重启）
+    mem_limit: 6g                          # 全量中文模型含 RNNLM 加载峰值约 3-4GB（4g 会 OOM 卡死在 RNNLM 加载）
     restart: unless-stopped
