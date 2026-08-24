@@ -21,9 +21,11 @@ import com.llmgateway.service.UpstreamClient;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -46,6 +48,11 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     /** 渠道转发结果：上游 HTTP 状态码 + 响应体（forward 内部用，避免匿名 HttpResponse 实现） */
     private record ForwardResult(int status, String body) {}
 
+    /** 模型列表缓存 key 前缀：gateway:models:{type|all} → /v1/models JSON 响应 */
+    private static final String MODELS_CACHE_PREFIX = "gateway:models:";
+    /** 模型列表缓存 TTL：配置变更走 DB 真源，此处只缓解 /v1/models 高频三表全扫，短 TTL 自愈 */
+    private static final Duration MODELS_CACHE_TTL = Duration.ofSeconds(60);
+
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
     private final ModelParamsMapper modelParamsMapper;
@@ -53,6 +60,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     private final UpstreamClient upstreamClient;
     private final GeminiFormatConverter geminiConverter;
     private final CallLogService callLogService;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -65,10 +73,17 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
                 .eq(ModelRoute::getModelName, modelName));
         if (routes == null || routes.isEmpty()) throw new BusinessException(40401, "no route for model: " + modelName);
+        // 按 is_default 降序 + priority 升序选渠道（默认路由优先）
         List<Channel> candidates = routes.stream()
-                .map(r -> channelMapper.selectById(r.getChannelId()))
-                .filter(c -> c != null && Boolean.TRUE.equals(c.getEnabled()))
-                .sorted(Comparator.comparingInt(c -> c.getPriority() == null ? 0 : c.getPriority()))
+                .map(r -> {
+                    Channel ch = channelMapper.selectById(r.getChannelId());
+                    return ch != null ? new Object[]{r, ch} : null;
+                })
+                .filter(arr -> arr != null && Boolean.TRUE.equals(((Channel) arr[1]).getEnabled()))
+                .sorted(Comparator
+                        .<Object[], Boolean>comparing(arr -> Boolean.TRUE.equals(((ModelRoute) arr[0]).getIsDefault())).reversed()
+                        .thenComparingInt(arr -> ((Channel) arr[1]).getPriority() == null ? 0 : ((Channel) arr[1]).getPriority()))
+                .map(arr -> (Channel) arr[1])
                 .toList();
         if (candidates.isEmpty()) throw new BusinessException(50301, "no available channel for model: " + modelName);
 
@@ -147,10 +162,17 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             }
 
             // 2. 候选渠道（路由指向的 enabled 渠道，按 priority 升序）
+            // 按 is_default 降序 + priority 升序选渠道（默认路由优先）
             List<Channel> candidates = routes.stream()
-                    .map(r -> channelMapper.selectById(r.getChannelId()))
-                    .filter(c -> c != null && Boolean.TRUE.equals(c.getEnabled()))
-                    .sorted(Comparator.comparingInt(c -> c.getPriority() == null ? 0 : c.getPriority()))
+                    .map(r -> {
+                        Channel ch = channelMapper.selectById(r.getChannelId());
+                        return ch != null ? new Object[]{r, ch} : null;
+                    })
+                    .filter(arr -> arr != null && Boolean.TRUE.equals(((Channel) arr[1]).getEnabled()))
+                    .sorted(Comparator
+                            .<Object[], Boolean>comparing(arr -> Boolean.TRUE.equals(((ModelRoute) arr[0]).getIsDefault())).reversed()
+                            .thenComparingInt(arr -> ((Channel) arr[1]).getPriority() == null ? 0 : ((Channel) arr[1]).getPriority()))
+                    .map(arr -> (Channel) arr[1])
                     .toList();
             if (candidates.isEmpty()) {
                 throw new BusinessException(50301, "no available channel for model: " + model);
@@ -258,6 +280,14 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     @Override
     public String fetchModels(String type) {
+        // 读缓存（miss/Redis 异常一律降级查库）；避免前端每个参数卡片渲染都触发 model_route+channel+model_params 三表全扫
+        String cacheKey = MODELS_CACHE_PREFIX + (type == null || type.isBlank() ? "all" : type);
+        try {
+            String cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) return cached;
+        } catch (Exception e) {
+            log.warn("Redis 读模型列表失败，降级查库: key={}, error={}", cacheKey, e.getMessage());
+        }
         // 从 model_route 返回可用模型列表（OpenAI 风格 {data:[{id,type}]}），供调用方（如 AI 分镜前端）动态获取生图/生视频模型
         // type 过滤（image/video/text/vision）；渠道须启用；同一模型多渠道轮换时去重保留首个
         List<ModelRoute> routes = routeMapper.selectList(null);
@@ -266,11 +296,14 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 .map(Channel::getId)
                 .collect(Collectors.toSet());
         Map<String, String> modelTypeMap = new LinkedHashMap<>();   // modelName -> type
+        Map<String, Boolean> modelDefaultMap = new LinkedHashMap<>(); // modelName -> is_default（从 model_route 读取）
         for (ModelRoute r : routes) {
             if (r.getChannelId() == null || !enabledChannels.contains(r.getChannelId())) continue;
             String t = r.getType() == null || r.getType().isBlank() ? "text" : r.getType();
             if (type != null && !type.isBlank() && !type.equals(t)) continue;
             modelTypeMap.putIfAbsent(r.getModelName(), t);
+            // 任一路由标记为默认即视为默认（同类型只有一个默认路由）
+            if (Boolean.TRUE.equals(r.getIsDefault())) modelDefaultMap.put(r.getModelName(), true);
         }
         // 查全量模型参数表，按 modelName 建立索引（组装 data[] 时逐模型取参）
         Map<String, ModelParams> paramsMap = modelParamsMapper.selectList(null).stream()
@@ -284,7 +317,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             m.put("object", "model");
             m.put("type", t);
             // 默认模型标记（每类型至多一个，后端拉取作为兜底默认模型）
-            m.put("is_default", mp != null && Boolean.TRUE.equals(mp.getIsDefault()));
+            m.put("is_default", Boolean.TRUE.equals(modelDefaultMap.get(name)));
             // 按 model_name 组装 params（能力+默认值；未配置 → null）
             m.put("params", buildParams(mp));
             data.add(m);
@@ -293,7 +326,13 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         result.put("object", "list");
         result.put("data", data);
         try {
-            return objectMapper.writeValueAsString(result);
+            String json = objectMapper.writeValueAsString(result);
+            try {
+                redisTemplate.opsForValue().set(cacheKey, json, MODELS_CACHE_TTL);
+            } catch (Exception e) {
+                log.warn("Redis 写模型列表缓存失败（忽略，靠 TTL 自愈）: key={}, error={}", cacheKey, e.getMessage());
+            }
+            return json;
         } catch (Exception e) {
             throw new RuntimeException("模型列表序列化失败", e);
         }
