@@ -5,7 +5,7 @@ import {
   type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
-import { assetUrl } from '../config';
+import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 
 export interface HumanInputInfo {
@@ -197,7 +197,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }));
   },
 
-  // 清空当前会话聊天记录：删消息 + 重置 AI 上下文（Dify 会话），会话/资产保留
+  // 清空当前会话聊天记录：删消息 + 重置 AI 上下文（会话），会话/资产保留
   clearMessages: async () => {
     const id = get().activeConversationId;
     // 守卫：无会话 / 流式生成中 / HITL 等待期 / 图生视频方案确认期禁止清空（防止删除进行中的上下文导致流事件污染）
@@ -254,7 +254,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         conversationId: cid,
         role: 'user',
         content: url,
-        difyMessageId: null,
+        
         createdAt: new Date().toISOString(),
       };
       set((s) => ({ messages: [...s.messages, refMsg] }));
@@ -297,7 +297,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     if (!id) return;
     // 继续完善参考图：点"继续完善"后暂存的 PicUrl，随本条用户消息发送并消费（只带一次，
-    // 避免后续普通消息也误带图片导致 Dify 误判 pic-refine 意图）
+    // 避免后续普通消息也误带图片导致误判 pic-refine 意图）
     const pendingPic = get().pendingPicUrl;
     if (pendingPic) set({ pendingPicUrl: null });
 
@@ -307,7 +307,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'user',
       content,
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     set((s) => ({
@@ -325,7 +325,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'assistant',
       content: '',
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     // I2：记录本轮 assistant 占位 id，HITL 续流时复用同一气泡追加（与后端消息合并对应）
@@ -338,7 +338,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }));
 
     // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
-    // （增量拼接的 Dify 签名 URL 已被后端替换为 /api/files/images/ 永久地址）
+    // （增量拼接的签名 URL 已被后端替换为 /api/files/images/ 永久地址）
     const updateAssistantFull = (full: string) =>
       set((s) => ({
         messages: s.messages.map((m) =>
@@ -386,7 +386,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换会话则跳过互斥判断与刷新
             if (get().activeConversationId !== snapshotId) break;
-            // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
+            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
             if (typeof e.title === 'string' && e.title) {
@@ -513,7 +513,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       role: 'user',
       // 自定义输入：落库用户原文（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
       content: actionId === 'custom' ? customText : `确认：${confirmTitle}`,
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, confirmMsg] }));
@@ -523,7 +523,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'assistant',
       content: '',
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
@@ -569,7 +569,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换会话则跳过互斥判断与刷新
             if (get().activeConversationId !== snapshotId) break;
-            // I5：后端已把消息里的 Dify 签名 URL 本地化，用完整文本覆盖占位气泡
+            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
             if (typeof e.title === 'string' && e.title) {
@@ -669,10 +669,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set((s) => ({
         messages: [...s.messages, {
           id: `tmp-user-${Date.now()}`, conversationId: id, role: 'user' as const,
-          content: customText || '', difyMessageId: null, createdAt: new Date().toISOString(),
+          content: customText || '',  createdAt: new Date().toISOString(),
         }, {
           id: assistantId, conversationId: id, role: 'assistant' as const,
-          content: '', difyMessageId: null, createdAt: new Date().toISOString(),
+          content: '',  createdAt: new Date().toISOString(),
         }],
         pendingAssistantId: assistantId,
       }));
@@ -753,7 +753,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'user',
       content: '确认：开始生成视频',
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, confirmMsg] }));
@@ -766,7 +766,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'assistant',
       content: '',
-      difyMessageId: null,
+      
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, optimisticAssistant], pendingAssistantId: assistantId }));
@@ -836,7 +836,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         } catch {
           // 单次轮询失败不终止：下一 tick 重试（后端瞬时故障容错）
         }
-      }, 5000);
+      }, VIDEO_POLL_INTERVAL);
     };
 
     try {
@@ -900,16 +900,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   refineAsset: () => {
     const { confirmResult } = get();
     if (!confirmResult || confirmResult.kind === 'script') return;
-    // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），Dify 容器内无法访问；
-    // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给 Dify
+    // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），容器内无法访问；
+    // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给后端
     const picUrl = assetUrl(confirmResult.url);
     set({ confirmResult: null, pendingPicUrl: picUrl });
   },
   /** 取消继续完善：清空暂存参考图（输入框提示条上的 ✕ 触发） */
   cancelRefine: () => set({ pendingPicUrl: null }),
   /**
-   * 看图确认卡片：满意完成 → 通知后端清空 Dify storage_pic_talk 变量（下次图片需求走全新设计）。
-   * 成功收起卡片 + 刷新资产；失败保留卡片并提示（可重试）。纯前端收起（旧行为）会让 Dify
+   * 看图确认卡片：满意完成 → 通知后端清空图片上下文变量（下次图片需求走全新设计）。
+   * 成功收起卡片 + 刷新资产；失败保留卡片并提示（可重试）。纯前端收起（旧行为）会
    * 变量残留 → 下次图片需求误走完善路径。
    */
   dismissConfirm: async () => {

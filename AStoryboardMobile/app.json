@@ -1,25 +1,33 @@
 {
   "expo": {
-    "name": "AStoryboardMobile",
-    "slug": "AStoryboardMobile",
+    "name": "AI Storyboard",
+    "slug": "aistoryboard",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "aistoryboard",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.storyboard.mobile"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#faf9f5",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.storyboard.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-sharing",
+      ["expo-media-library", { "savePhotosPermission": "允许 AI Storyboard 保存图片/视频到相册" }]
+    ]
   }
 }

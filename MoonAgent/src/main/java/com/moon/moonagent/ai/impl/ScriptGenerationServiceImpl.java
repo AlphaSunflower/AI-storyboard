@@ -9,6 +9,7 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.ScriptGenerationService;
+import com.moon.moonagent.ai.AiConfigProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -43,6 +44,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                             String shotType, String soundDesign) {}
 
     private final GatewayModelService gatewayModelService;
+    private final AiConfigProperties config;
     private final StoryboardClient storyboardClient;
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -143,7 +145,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
                                     .model(gatewayModelService.getDefaultVisionModel())
-                                    .timeout(Duration.ofSeconds(120)))
+                                    .timeout(Duration.ofSeconds(config.getScriptTimeout())))
                             .build();
                 }
             }

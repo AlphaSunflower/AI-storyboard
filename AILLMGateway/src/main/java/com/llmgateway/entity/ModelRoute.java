@@ -19,6 +19,8 @@ public class ModelRoute {
     private String type;
     /** JSON：size/temperature 等默认参数 */
     private String defaultParams;
+    /** 该类型兜底默认模型（每类型至多一个默认路由） */
+    private Boolean isDefault;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
     @TableLogic

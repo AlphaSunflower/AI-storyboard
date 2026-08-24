@@ -6,7 +6,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 /**
  * Agent 主回答服务（intent-other 闲聊/引导分支）。
  *
- * 用 ChatClient 拼会话历史生成回答（等价原 Dify 应用「引导回复」，体验升级），
+ * 用 ChatClient 拼会话历史生成回答（等价原应用「引导回复」，体验升级），
  * 非流式一次 message 事件（前端打字机按 message 事件逐段拼接，整段兼容；
  * 流式列为后续增强）。
  *

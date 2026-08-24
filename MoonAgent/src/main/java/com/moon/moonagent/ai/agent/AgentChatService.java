@@ -41,9 +41,9 @@ public interface AgentChatService {
     void clearMessages(String userId, String conversationId);
 
     /**
-     * 满意完成：清空会话图片上下文（原 Dify storage_pic_talk 语义）。
+     * 满意完成：清空会话图片上下文（原图片上下文语义）。
      *
-     * @return true（语义与旧 Dify 路径兼容：始终视为已完成）
+     * @return true（语义与旧路径兼容：始终视为已完成）
      */
     boolean confirmImageDone(String userId, String conversationId);
 

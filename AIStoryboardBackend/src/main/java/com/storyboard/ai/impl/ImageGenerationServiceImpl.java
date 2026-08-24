@@ -56,7 +56,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             .build();
 
     /**
-     * 生成/编辑图片入口方法（旧签名，n 默认 1；Dify 工作流等调用方使用）。
+     * 生成/编辑图片入口方法（旧签名，n 默认 1）。
      */
     @Override
     public String generateImage(String sceneId, String prompt, String model,
@@ -103,7 +103,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
-            throw new BusinessException(40001, "图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "图片生成 prompt 不能为空");
         }
 
         // 资产库注入：场景关联资产的文字卡 → imagePrompt（保证首帧图人物一致）
@@ -336,7 +336,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     /**
      * 生图尺寸白名单归一化（包内静态，便于直接单测）：
      * 1. 传入值本身在白名单 → 原样返回
-     * 2. 传入值是"多选列表"（LLM 常把模板备选输出成一串，实测 Dify 工作流传出
+     * 2. 传入值是"多选列表"（LLM 常把模板备选输出成一串，实测上游传出
      *    "1024x1024 / 1536x1024 / 1024x1536"）→ 按 | / 逗号（含中文）等分隔符
      *    拆分，取第一个白名单内的值
      * 3. 拆不出合法值（2K/4K/DALL-E 3 尺寸 1792x1024 等）→ 降级 fallback

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# deploy/docker/scripts/up.sh [nacos|vosk|all]
-# 幂等接管旧 nacos 容器（存在则停删）→ 对应子目录 compose up → 健康检查
+# deploy/docker/scripts/up.sh [nacos|vosk|redis|all]
+# 幂等接管旧容器 → 对应子目录 compose up → 健康检查
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SVC="${1:-all}"
@@ -42,11 +42,25 @@ up_vosk() {
   done
 }
 
+up_redis() {
+  (cd redis && docker compose up -d)
+  echo "[等待] redis 健康检查…"
+  for i in $(seq 1 15); do
+    if docker exec redis-ai redis-cli ping 2>/dev/null | grep -q PONG; then
+      echo "[OK] redis 已就绪"
+      break
+    fi
+    [ "$i" = 15 ] && echo "[警告] redis 15s 内未就绪，可稍候重试 status.sh"
+    sleep 1
+  done
+}
+
 case "$SVC" in
   nacos) up_nacos ;;
   vosk)  up_vosk ;;
-  all|"") up_nacos; up_vosk ;;
-  *) echo "用法: $0 [nacos|vosk|all]"; exit 1 ;;
+  redis) up_redis ;;
+  all|"") up_nacos; up_vosk; up_redis ;;
+  *) echo "用法: $0 [nacos|vosk|redis|all]"; exit 1 ;;
 esac
 
 ./scripts/status.sh "$SVC"

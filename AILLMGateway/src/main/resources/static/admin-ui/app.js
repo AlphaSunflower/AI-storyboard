@@ -644,6 +644,8 @@ async function loadRoutes() {
   try {
     await ensureChannels();   // 渠道 id→name 映射（停用渠道灰显）
     const routes = await api('/admin/routes');
+    // 同模型名按默认优先排序（isDefault=true 排前面），避免同名路由顺序随机导致误点
+    routes.sort((a, b) => (a.modelName || '').localeCompare(b.modelName || '') || (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
     routesCache = routes;     // 缓存供测试弹窗模型候选
     view.innerHTML =
       '<div class="view-head"><h2>模型路由</h2>'
@@ -651,7 +653,7 @@ async function loadRoutes() {
       + '<div class="card table-card">'
       + (routes.length
         ? '<table class="table"><thead><tr>'
-          + '<th>模型名</th><th>类型</th><th>渠道</th><th>默认参数 (JSON)</th><th>创建时间</th><th class="td-actions">操作</th>'
+          + '<th>模型名</th><th>类型</th><th>渠道</th><th>默认</th><th>默认参数 (JSON)</th><th>创建时间</th><th class="td-actions">操作</th>'
           + '</tr></thead><tbody>'
           + routes.map((r) => {
             const ch = channelMap[r.channelId];
@@ -660,6 +662,7 @@ async function loadRoutes() {
               + '<td class="td-strong">' + esc(r.modelName) + '</td>'
               + '<td>' + typeBadge(r.type) + '</td>'
               + '<td class="' + (ch && ch.enabled === false ? 'td-muted' : '') + '">' + esc(channelName) + '</td>'
+              + '<td>' + (r.isDefault ? '<span class="badge badge-success">✓</span>' : '<span class="td-muted">-</span>') + '</td>'
               + '<td class="td-params" title="' + esc(r.defaultParams || '') + '">'
               + (r.defaultParams ? esc(trunc(r.defaultParams, 48)) : '<span class="td-muted">-</span>') + '</td>'
               + '<td class="td-muted">' + fmtTime(r.createdAt) + '</td>'
@@ -804,6 +807,11 @@ function openRouteModal(route) {
   };
   // 初始渲染后绑定滑块（input 实时值 + min<=max 联动）
   bindParamSliders();
+  // 编辑回显：默认模型 toggle 从路由数据加载（is_default 在 model_route 表）
+  if (isEdit) {
+    const cb = $('#r-isdefault');
+    if (cb) cb.checked = !!route.isDefault;
+  }
   // 编辑回显：模型名存在 → 拉取已保存参数填当前类型组（type 与路由一致才填）
   if (isEdit && route.modelName) {
     loadModelParamsForEdit(route.modelName, curType);
@@ -819,8 +827,7 @@ async function loadModelParamsForEdit(modelName, type) {
   try {
     const mp = await api('/admin/model-params/' + encodeURIComponent(modelName));
     if (!mp || (mp.type && mp.type !== type)) return;
-    const cb = $('#r-isdefault');
-    if (cb) cb.checked = !!mp.isDefault;
+    // isDefault 由路由数据回显（见 openRouteModal 编辑分支），此处不覆盖
     // 设置控件值：滑块同时更新右侧值显示；字符串输入直接赋值
     const set = (id, v) => {
       if (v === null || v === undefined || v === '') return;
@@ -899,7 +906,7 @@ async function submitRoute(id) {
     }
   }
 
-  const body = { modelName, channelId, type: $('#r-type').value, defaultParams };
+  const body = { modelName, channelId, type: $('#r-type').value, defaultParams, isDefault: $('#r-isdefault') ? $('#r-isdefault').checked : false };
   const btn = $('#form-submit');
   btn.disabled = true;
   try {
@@ -931,7 +938,7 @@ async function saveModelParams(modelName, type) {
   const val = (id) => { const el = $('#' + id); const s = el ? el.value.trim() : ''; return s === '' ? null : s; };
   const num = (id) => { const s = val(id); return s === null ? null : Number(s); };
   const req = { modelName, type };
-  req.isDefault = $('#r-isdefault') ? $('#r-isdefault').checked : false;
+  // isDefault 已随路由保存（PUT /admin/routes），此处不再重复
   if (type === 'text') {
     req.temperature = val('p-temperature');
     req.maxTokens = num('p-maxtokens');

@@ -43,6 +43,6 @@ public class AdminRouteController {
 
     private ModelRouteVO toVO(ModelRoute e) {
         return new ModelRouteVO(e.getId(), e.getModelName(), e.getChannelId(), e.getType(),
-                e.getDefaultParams(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getDefaultParams(), e.getIsDefault(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

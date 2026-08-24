@@ -89,6 +89,34 @@ public class AiConfigProperties {
     @Getter
     private String videoUrlPrefix = "/api/files/videos/";
 
+    // ═══════════════════════════════════════════════════════════
+    //  超时 / 重试配置（可外部化到 application.yml 覆盖默认值）
+    // ═══════════════════════════════════════════════════════════
+
+    // ── 图片生成超时 ──
+    /** 文生图请求超时（秒，Spring AI ImageModel /v1/images/generations） */
+    @Setter @Getter private int imageRequestTimeout = 300;
+    /** 图改图请求超时（秒，/v1/images/edits multipart） */
+    @Setter @Getter private int imageEditTimeout = 180;
+
+    // ── 视频生成超时 ──
+    /** 视频创建 / 轮询 GET 请求超时（秒） */
+    @Setter @Getter private int videoRequestTimeout = 120;
+    /** 视频内容下载超时（秒） */
+    @Setter @Getter private int videoDownloadTimeout = 180;
+    /** 视频下载重试间隔（毫秒，单次轮询内重试窗口约 3×该值） */
+    @Setter @Getter private long videoRetryDelayMs = 15_000;
+
+    // ── 脚本生成超时 ──
+    /** 脚本生成 ChatClient 超时（秒） */
+    @Setter @Getter private int scriptTimeout = 120;
+
+    // ── 网关模型服务超时 ──
+    /** 网关模型列表请求超时（秒，connect + request 共用） */
+    @Setter @Getter private int gatewayModelTimeout = 10;
+    /** 网关不可达冷却时间（毫秒，冷却期内直接走兜底模型） */
+    @Setter @Getter private long gatewayCooldownMs = 300_000;
+
 
     // ═══════════════════════════════════════════════════════════
     //  标准 Getter / Setter（Spring Boot 配置绑定需要）

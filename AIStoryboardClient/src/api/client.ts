@@ -1,9 +1,9 @@
 import axios from 'axios';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, API_TIMEOUT } from '../config';
 
 const client = axios.create({
   baseURL: BACKEND_URL + '/api',
-  timeout: 120000,
+  timeout: API_TIMEOUT,
   headers: { 'Content-Type': 'application/json' },
 });
 

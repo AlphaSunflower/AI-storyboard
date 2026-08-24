@@ -58,13 +58,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Agent 对话服务 —— 代理 Dify /v1/chat-messages（blocking + streaming）。
- * 负责：会话校验、消息落库、Dify 调用、conversation_id 回填、SSE 流式转发、HITL 表单提交续流。
+ * Agent 对话服务 —— 代理 AI 编排（blocking + streaming）。
+ * 负责：会话校验、消息落库、编排调用、conversation_id 回填、SSE 流式转发、HITL 表单提交续流。
  *
  * 事务边界说明（I1）：
  * - user 消息用独立事务（REQUIRES_NEW）保存并立即提交；
- * - Dify 调用失败时 user 消息保留（独立事务已提交），assistant 消息不落库；
- * - Dify 成功后，回填 difyConversationId + 保存 assistant 消息在同一事务内完成。
+ * - 编排调用失败时 user 消息保留（独立事务已提交），assistant 消息不落库；
+ * - 编排成功后，回填会话ID + 保存 assistant 消息在同一事务内完成。
  */
 @Service
 @RequiredArgsConstructor
@@ -107,14 +107,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final Map<String, String> renamedTitleByConversation = new ConcurrentHashMap<>();
 
     /**
-     * 匹配 Dify 工具文件 URL：http(s)://host/files/tools/xxx.ext?签名，或裸 /files/tools/xxx.ext?签名。
-     * 字符集限定 RFC 3986 子集，避免 markdown 语法字符（) ] !）与中文标点被吞入。
-     */
-    private static final Pattern DIFY_TOOLS_URL_PATTERN = Pattern.compile(
-            "(?:https?://[A-Za-z0-9\\-._~:]+)?/files/tools/[A-Za-z0-9\\-._~:/?&=+%]+");
-
-    /**
-     * 完善图片自动生成信号节点标题（Dify 工作流 answer 节点）。
+     * 完善图片自动生成信号节点标题（工作流 answer 节点）。
      * 工作流已删除「完善图片设计方案」LLM 与 HITL 人工介入，改为：用户诉求 → user_finishing(code)
      * → 赋值 → 本 answer 节点（文案"结合用户输入理解图片优化提示词中..."）。后端监听到该节点
      * node_finished 即自动触发：视觉模型看图 + 用户诉求 → refined_prompt → 图生图 edits。
@@ -123,7 +116,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private static final String AUTO_REFINE_SIGNAL_TITLE = "后端执行识别图片加人工介入流程";
 
     /**
-     * 图生视频方案设计信号节点标题（Dify 工作流 answer 节点）。
+     * 图生视频方案设计信号节点标题（工作流 answer 节点）。
      * 工作流「视频类型分流」判断携带参考图（conversation.picture 非空）→ 走本 answer 节点
      * （文案"结合你上传的参考图设计视频方案中..."）。后端监听到该节点 node_finished 即触发：
      * 视觉模型看图 + 用户诉求 → 视频方案（prompt + 时长）→ 推 video_plan 事件 →
@@ -134,7 +127,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /**
      * 懒加载 TransactionTemplate（REQUIRES_NEW）：user 消息保存使用独立事务，即使外层存在事务也单独提交，
-     * 保证 Dify 调用失败时 user 消息不被回滚。构造器内构建逻辑迁移至此，统一 @RequiredArgsConstructor 注入。
+     * 保证编排调用失败时 user 消息不被回滚。构造器内构建逻辑迁移至此，统一 @RequiredArgsConstructor 注入。
      */
     private final PlatformTransactionManager transactionManager;
     private volatile TransactionTemplate transactionTemplate;
@@ -188,7 +181,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /**
      * 清空会话聊天记录（上下文重置）：
-     * 删除该会话全部消息 + 清空 difyConversationId —— 下一条消息会开启全新的 Dify 会话，
+     * 删除该会话全部消息 + 清空会话ID —— 下一条消息会开启全新的会话，
      * AI 不再记得任何历史。会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
      */
     public void clearMessages(String userId, String conversationId) {
@@ -202,16 +195,16 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
-     * 满意完成：清空会话图片上下文（原 Dify storage_pic_talk 语义）。
+     * 满意完成：清空会话图片上下文（原图片上下文语义）。
      *
      * 触发点：前端 confirm_result 卡片「满意完成」；图片方案状态重置，
      * 下次图片需求走全新设计（而非继续完善）。
      *
-     * @return true（语义与旧 Dify 路径兼容：始终视为已完成）
+     * @return true（语义与旧路径兼容：始终视为已完成）
      */
     public boolean confirmImageDone(String userId, String conversationId) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
-        // 满意完成：清空会话图片上下文（原 Dify storage_pic_talk 语义）——
+        // 满意完成：清空会话图片上下文（原图片上下文语义）——
         // 图片方案状态重置，下次图片需求走全新设计（而非继续完善）
         lastPicUrlByConversation.remove(conversationId);
         log.info("满意完成：已清空会话图片上下文: conversationId={}", conversationId);
@@ -221,7 +214,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 首条消息异步 AI 重命名标题：
      * 判定「该消息是会话第一条消息 + 标题仍为默认值 + 并发去重成功」三条件，
-     * 满足则向 agentExecutor 提交异步任务（不阻塞 Dify 主流程，失败仅日志）；
+     * 满足则向 agentExecutor 提交异步任务（不阻塞编排主流程，失败仅日志）；
      * 落库成功的新标题暂存供 message_end 一次性推送，失败静默降级。
      *
      * ⚠ 调用时机硬性要求：必须在本次 user 消息【落库前】调用——落库后
@@ -356,12 +349,12 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
-     * 发送消息：落库 user 消息（独立事务）→ 调 Dify chat-messages → 回填 + 落库 assistant 消息。
+     * 发送消息：落库 user 消息（独立事务）→ 调 AI 编排 → 回填 + 落库 assistant 消息。
      *
      * 事务语义（I1）：
      * - user 消息在独立事务（REQUIRES_NEW）中立即提交；
-     * - Dify 失败时 user 消息保留（独立事务已提交），assistant 消息不落库，抛业务异常；
-     * - Dify 成功后，"回填 difyConversationId + 保存 assistant 消息"在同一事务内完成。
+     * - 编排失败时 user 消息保留（独立事务已提交），assistant 消息不落库，抛业务异常；
+     * - 编排成功后，"回填会话ID + 保存 assistant 消息"在同一事务内完成。
      *
      * @return assistant 消息
      */
@@ -419,9 +412,9 @@ public class AgentChatServiceImpl implements AgentChatService {
 
 
     /**
-     * 流式发送消息：user 消息独立事务提交 → 代理 Dify streaming → 事件裁剪转发到 SseEmitter。
-     * 收到 human_input_required → 转发 human_input 事件 → 结束流（Dify 侧 pause 自动关闭）。
-     * message_end → 落库 assistant 消息 + 回填 dify_conversation_id + 附带 sceneCount。
+     * 流式发送消息：user 消息独立事务提交 → 代理 AI 编排流式 → 事件裁剪转发到 SseEmitter。
+     * 收到 human_input_required → 转发 human_input 事件 → 结束流（编排侧 pause 自动关闭）。
+     * message_end → 落库 assistant 消息 + 回填 conversation_id + 附带 sceneCount。
      */
     public void streamMessage(String userId, String conversationId, String content, String picUrl, SseEmitter emitter) {
         if (content == null || content.isBlank()) {
@@ -532,12 +525,12 @@ public class AgentChatServiceImpl implements AgentChatService {
 
 
     /**
-     * 落库 assistant 消息（事务内原子完成：回填 difyConversationId + 保存消息 + 刷新会话 updatedAt）。
-     * Z1：difyConversationId 回填必须与 assistant 落库同处一个事务——若分两段，回填事务失败时
-     * assistant 已落库而 conversation_id 未更新，下一条消息会错误地开启新的 Dify 会话。
+     * 落库 assistant 消息（事务内原子完成：回填会话ID + 保存消息 + 刷新会话 updatedAt）。
+     * Z1：会话ID 回填必须与 assistant 落库同处一个事务——若分两段，回填事务失败时
+     * assistant 已落库而 conversation_id 未更新，下一条消息会错误地开启新的会话。
      *
      * I2：HITL 续流消息合并——若该会话最后一条 assistant 消息是 HITL 暂停时落库的"未完成"消息
-     * （difyMessageId 为 null），则把续流新内容追加到它上面并回填 messageId，避免同一轮
+     * （消息ID 为 null），则把续流新内容追加到它上面并回填 messageId，避免同一轮
      * HITL 对话在数据库里碎成两条记录；否则（上一条已完成/无消息）正常 insert。
      */
     private void persistAssistant(AgentConversation conversation, String content) {
@@ -655,7 +648,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
 
     /**
-     * HITL 表单提交并续流（编排 checkpoint 驱动，替代 Dify form API）：
+     * HITL 表单提交并续流（编排 checkpoint 驱动，替代 form API）：
      * 校验 form_token 归属/未过期 → 一次性消费（status pending→used）→ orchestrator.resume 恢复对应 step。
      */
     public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {

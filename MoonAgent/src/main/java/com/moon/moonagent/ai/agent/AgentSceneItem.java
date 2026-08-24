@@ -1,9 +1,9 @@
 package com.moon.moonagent.ai.agent;
 
 /**
- * Agent 编排分镜条目（agent 自有类型，替代 DifyGenerateScriptRequest.SceneItem）。
+ * Agent 编排分镜条目（agent 自有类型，替代 GenerateScriptRequest.SceneItem）。
  *
- * 8 字段对齐原 Dify SceneItem / scenes 表结构；由编排 LLM 结构化输出直接解析，
+ * 8 字段对齐原 SceneItem / scenes 表结构；由编排 LLM 结构化输出直接解析，
  * 经 AgentTools.writeScenes 复用 AgentGenerationService.writeScript 批量写库。
  */
 public record AgentSceneItem(

@@ -9,6 +9,7 @@ public record ModelRouteVO(
         String channelId,
         String type,
         String defaultParams,
+        Boolean isDefault,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {}

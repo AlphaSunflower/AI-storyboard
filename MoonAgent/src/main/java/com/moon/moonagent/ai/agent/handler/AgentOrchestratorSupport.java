@@ -322,7 +322,7 @@ public class AgentOrchestratorSupport {
         // 已转发的 message 字段值（增量对比基准）
         AtomicReference<String> emitted = new AtomicReference<>("");
         try {
-            planClient().prompt()
+            planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(systemPrompt)
                 .user(userContent)
                 .stream()
@@ -373,7 +373,7 @@ public class AgentOrchestratorSupport {
     /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次；强制中文输出——方案卡片直接展示给用户） */
     public String callImagePrompt(String content) {
         try {
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("orchestrator/image-prompt"))
                 .user(content)
                 .call()
@@ -394,7 +394,7 @@ public class AgentOrchestratorSupport {
         String systemPrompt = promptConfig.get("orchestrator/image-prompt-with-params",
                 Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
         try {
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(systemPrompt)
                     .user(content)
                     .call()
@@ -424,7 +424,7 @@ public class AgentOrchestratorSupport {
      */
     public ImageClarifyResult callImageClarify(String content) {
         try {
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("orchestrator/image-clarify"))
                 .user(content)
                 .call()
@@ -468,7 +468,7 @@ public class AgentOrchestratorSupport {
      */
     public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource) {
         try {
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("orchestrator/pic-refine-options",
                     Map.of("hasSourceNote", hasSource ? promptConfig.get("orchestrator/pic-refine-options-source-note") : "")))
                 .user("当前图片方案：" + basePrompt)
@@ -504,7 +504,7 @@ public class AgentOrchestratorSupport {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
             String system = promptConfig.get("orchestrator/video-plan",
                     Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(system)
                 .user(content)
                 .call()
@@ -562,7 +562,6 @@ public class AgentOrchestratorSupport {
                 if (planClient == null) {
                     planClient = chatClientBuilder
                         .defaultOptions(OpenAiChatOptions.builder()
-                            .model(gatewayModelService.getDefaultTextModel())
                             .timeout(Duration.ofSeconds(300)))
                         .build();
                 }
@@ -628,7 +627,7 @@ public class AgentOrchestratorSupport {
         try {
             String imageOpts = buildModelOptionsText("image");
             String videoOpts = buildModelOptionsText("video");
-            String raw = retryTransient(() -> planClient().prompt()
+            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("orchestrator/scene-params-recommend"))
                 .user("剧本：\n" + script
                     + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
@@ -1119,7 +1118,7 @@ public class AgentOrchestratorSupport {
     public String friendlyErrorText(String rawError, String fallback) {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
-            String content = planClient().prompt()
+            String content = planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("orchestrator/friendly-error"))
                     .user(raw)
                     .call()
@@ -1149,7 +1148,7 @@ public class AgentOrchestratorSupport {
     public ImageRecoveryResult attemptImageRecovery(String originalPrompt, String rawError) {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
-            String content = planClient().prompt()
+            String content = planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("orchestrator/image-recovery"))
                     .user("原提示词：\n" + originalPrompt + "\n\n上游错误：\n" + raw)
                     .call()

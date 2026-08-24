@@ -29,20 +29,16 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.modelName() == null || req.modelName().isBlank()) {
             throw new BusinessException(40001, "模型名不能为空");
         }
-        // type 校验：空默认 text，非空须 ∈ {text,image,video,vision}
         String type = normalizeType(req.type());
-        // 数量范围校验：nMin/nMax 均非空时 nMin 必须 <= nMax
         if (req.nMin() != null && req.nMax() != null && req.nMin() > req.nMax()) {
             throw new BusinessException(40001, "数量范围不合法");
         }
-        // 输入约束范围校验：5 组 min/max 均非空时 min 必须 <= max
         validateRange(req.refImagesMin(), req.refImagesMax(), "可参考图范围");
         validateRange(req.refVideosMin(), req.refVideosMax(), "可参考视频范围");
         validateRange(req.audioCountMin(), req.audioCountMax(), "音频个数范围");
         validateRange(req.audioSegmentDurationMin(), req.audioSegmentDurationMax(), "音频单段时长范围");
         validateRange(req.videoSegmentDurationMin(), req.videoSegmentDurationMax(), "视频单段时长范围");
 
-        // 单一权威源：设为默认时，先清掉同类型其它模型的默认标记（每类型至多一个默认）
         if (Boolean.TRUE.equals(req.isDefault())) {
             modelParamsMapper.update(null, new LambdaUpdateWrapper<ModelParams>()
                     .eq(ModelParams::getType, type)
@@ -54,19 +50,17 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, req.modelName().trim()));
         if (existing != null) {
-            // 已存在：非 null 字段更新 + 刷新 updatedAt
             applyNonNull(existing, req);
             existing.setUpdatedAt(OffsetDateTime.now());
             modelParamsMapper.updateById(existing);
             return existing;
         }
 
-        // 不存在：insert（id 由 @TableId(ASSIGN_UUID) 自动生成）
         ModelParams entity = new ModelParams();
         entity.setModelName(req.modelName().trim());
         entity.setType(type);
         applyNonNull(entity, req);
-        entity.setIsDefault(Boolean.TRUE.equals(req.isDefault()));   // null → false（insert 显式落库）
+        entity.setIsDefault(Boolean.TRUE.equals(req.isDefault()));
         OffsetDateTime now = OffsetDateTime.now();
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
@@ -74,14 +68,12 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         return entity;
     }
 
-    /** GET /admin/model-params/{modelName}：表单编辑回显（不存在返回 null 不报错） */
     @Override
     public ModelParams getByModelName(String modelName) {
         return modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, modelName.trim()));
     }
 
-    /** 归一化模型类型：空默认 text，非法值抛 40001 */
     private String normalizeType(String type) {
         if (type == null || type.isBlank()) return "text";
         String t = type.trim().toLowerCase();
@@ -89,7 +81,6 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         return t;
     }
 
-    /** 将请求中非 null 字段拷贝到实体（upsert 更新语义） */
     private void applyNonNull(ModelParams entity, ModelParamsRequest req) {
         if (req.type() != null) entity.setType(req.type().trim().toLowerCase());
         if (req.isDefault() != null) entity.setIsDefault(req.isDefault());
@@ -130,7 +121,6 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
     }
 
-    /** 范围校验：min/max 均非空且 min > max → 40001 */
     private void validateRange(Integer min, Integer max, String label) {
         if (min != null && max != null && min > max) {
             throw new BusinessException(40001, label + "不合法：min 不能大于 max");

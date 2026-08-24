@@ -3,12 +3,12 @@ package com.moon.moonagent.ai;
 /**
  * 图片完善提示词增强服务 —— 图生图前先用视觉模型"看图"。
  *
- * <p>背景：Dify 工作流的 DeepSeek 无视觉能力，之前「完善图片设计方案」节点只能基于
+ * <p>背景：DeepSeek 无视觉能力，之前「完善图片设计方案」节点只能基于
  * 用户口述 + 上次文字 prompt 盲猜改图方案，与真实图片脱节。本服务把视觉理解放到后端：
  * 视觉模型（默认 gemini-3-flash-preview）直接看源图 + 用户诉求，输出结构化改图提示词
  * （图片现状 / 修改点 / 改后效果），再投喂给图生图 edits 接口——保证改图提示词与真实图片对齐。
  *
- * <p>调用链（Agent 对话完善图片路径）：Dify 工作流删掉了「完善图片设计方案」LLM 与 HITL 确认，
+ * <p>调用链（Agent 对话完善图片路径）：工作流删掉了「完善图片设计方案」LLM 与 HITL 确认，
  * 由信号节点触发后端 → 本服务生成 refined_prompt → {@link ImageGenerationService}（mode=edit）图生图。
  *
  * <p>设计要点：

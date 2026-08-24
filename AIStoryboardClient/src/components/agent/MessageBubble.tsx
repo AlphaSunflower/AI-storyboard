@@ -6,7 +6,7 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 
 /**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
- * 防御历史消息里残留的 Dify 签名 URL（/files/tools/ 带 timestamp+sign，过期后 403）
+ * 防御历史消息里残留的带签名 URL（/files/tools/ 带 timestamp+sign，过期后 403）
  * 渲染成裂图 + alt 文件名的难看效果。
  * onClick 可选：点击图片放大预览（灯箱）。
  */
@@ -65,7 +65,7 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
       );
     }
     // 裸图片 URL（整行为 .png/.jpg/.jpeg/.gif/.webp 链接或 data: URI）直接渲染——
-    // Dify 工作流生图节点常直接输出 URL 文本而非 markdown 图片语法
+    // 生图节点常直接输出 URL 文本而非 markdown 图片语法
     const rawImg = line.trim().match(/^(https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|data:image\/[a-z+]+;base64,\S+)$/i);
     if (rawImg) {
       const raw = rawImg[0];

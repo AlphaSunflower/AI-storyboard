@@ -53,7 +53,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
             return new AssetRelevanceResult(true, "");
         }
         try {
-            String raw = chatClient().prompt()
+            String raw = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("services/asset-matching"))
                     .user("用户勾选的资产：\n" + assetSheetText(assets)
                             + "\n\n用户提示词（含上下文）：\n" + prompt)
@@ -79,7 +79,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
                 sceneText.append(i + 1).append(". [分镜").append(n == null ? i + 1 : n)
                         .append("] ").append(c == null ? "" : c).append("\n");
             }
-            String raw = chatClient().prompt()
+            String raw = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("services/scene-asset-matching"))
                     .user("资产清单：\n" + assetSheetText(assets)
                             + "\n\n分镜列表：\n" + sceneText)
@@ -122,7 +122,6 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(120)))
                             .build();
                 }

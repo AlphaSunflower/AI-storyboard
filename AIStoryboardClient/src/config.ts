@@ -13,20 +13,24 @@
 export const BACKEND_URL: string =
   (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
-// Dify 平台地址：工作流工具生成的文件（图片/视频）URL 是 /files/tools/ 相对路径，
-// 需拼 Dify base 才能访问；默认与后端 DIFY_BASE_URL 一致（本机 80 端口）
-export const DIFY_BASE_URL: string =
-  (import.meta as { env?: Record<string, string> }).env?.VITE_DIFY_BASE_URL ?? 'http://localhost';
+// ── 轮询 / 超时配置（可通过 VITE_* 环境变量覆盖）──
+/** Axios 全局请求超时（毫秒） */
+export const API_TIMEOUT: number =
+  Number((import.meta as { env?: Record<string, string> }).env?.VITE_API_TIMEOUT) || 120_000;
+/** 视频任务轮询间隔（毫秒） */
+export const VIDEO_POLL_INTERVAL: number =
+  Number((import.meta as { env?: Record<string, string> }).env?.VITE_VIDEO_POLL_INTERVAL) || 5000;
+/** 图片状态恢复轮询间隔（毫秒） */
+export const IMAGE_POLL_INTERVAL: number =
+  Number((import.meta as { env?: Record<string, string> }).env?.VITE_IMAGE_POLL_INTERVAL) || 3000;
 
 /**
  * Resolve an asset path (image, video) to a full URL.
  */
 export function assetUrl(path: string | null): string {
   if (!path) return '';
-  // http(s) 绝对 URL 与 data: URI 原样返回（data: 来自 Dify 内联 base64 图片）
+  // http(s) 绝对 URL 与 data: URI 原样返回
   if (path.startsWith('http') || path.startsWith('data:')) return path;
-  // Dify 工具文件（/files/tools/ 签名 URL）需拼 Dify 平台地址而非后端地址
-  if (path.startsWith('/files/tools/')) return DIFY_BASE_URL + path;
   return BACKEND_URL + path;
 }
 

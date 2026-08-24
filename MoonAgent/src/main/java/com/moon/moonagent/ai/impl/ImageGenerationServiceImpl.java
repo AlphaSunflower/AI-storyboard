@@ -44,7 +44,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     /**
      * 合法生图尺寸白名单（OpenAI gpt-image 系列，Laozhang 网关仅认这些）。
-     * Dify 工作流的 LLM 可能输出 DALL-E 3 尺寸（1792x1024 / 1024x1792）或
+     * LLM 可能输出 DALL-E 3 尺寸（1792x1024 / 1024x1792）或
      * "2K"/"4K" 等变体，上游返回 400 "不合法的size"（实测 2026-08-04 复现），
      * 故白名单之外的尺寸一律降级为默认值，保证请求必达。
      */
@@ -67,7 +67,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             .build();
 
     /**
-     * 生成/编辑图片入口方法（旧签名，n 默认 1；Dify 工作流等调用方使用）。
+     * 生成/编辑图片入口方法（旧签名，n 默认 1）。
      */
     @Override
     public String generateImage(String sceneId, String prompt, String model,
@@ -114,7 +114,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
-            throw new BusinessException(40001, "图片生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "图片生成 prompt 不能为空");
         }
 
         // 资产库注入：场景关联资产的文字卡 → imagePrompt（保证首帧图人物一致）
@@ -221,7 +221,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 .n((n != null && n > 0) ? n : 1)
                 // 超时 300s + 重试 1 次（对齐网关 requestTimeoutMs=300s；上游 gpt-image-2 实测 60-107s，
                 // 偶发更慢，120s 曾致网关超时重试叠加、主后端 180s 等不到 Read timed out）
-                .timeout(Duration.ofSeconds(300))
+                .timeout(Duration.ofSeconds(config.getImageRequestTimeout()))
                 .maxRetries(1);
         if (quality != null && !quality.isEmpty()) {
             builder.quality(quality);
@@ -308,7 +308,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             // Spring 解析器消费 body（实测 500），网关侧从 body 提取 boundary 重建转发头
             .header("Content-Type", "application/octet-stream")
             .header("Authorization", "Bearer " + config.getGatewayApiKey())      // 改：网关业务 Key
-            .timeout(Duration.ofSeconds(180))
+            .timeout(Duration.ofSeconds(config.getImageEditTimeout()))
             .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
             .build());
         if (resp.statusCode() != 200) {
@@ -347,7 +347,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     /**
      * 生图尺寸白名单归一化（包内静态，便于直接单测）：
      * 1. 传入值本身在白名单 → 原样返回
-     * 2. 传入值是"多选列表"（LLM 常把模板备选输出成一串，实测 Dify 工作流传出
+     * 2. 传入值是"多选列表"（LLM 常把模板备选输出成一串，实测上游传出
      *    "1024x1024 / 1536x1024 / 1024x1536"）→ 按 | / 逗号（含中文）等分隔符
      *    拆分，取第一个白名单内的值
      * 3. 拆不出合法值（2K/4K/DALL-E 3 尺寸 1792x1024 等）→ 降级 fallback

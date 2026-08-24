@@ -7,7 +7,6 @@ export interface AgentConversation {
   userId: string;
   projectId: string;
   title: string;
-  difyConversationId: string | null;
   status: 'active' | 'archived';
   createdAt: string;
   updatedAt: string;
@@ -18,7 +17,6 @@ export interface AgentMessage {
   conversationId: string;
   role: 'user' | 'assistant';
   content: string;
-  difyMessageId: string | null;
   createdAt: string;
 }
 
@@ -133,7 +131,7 @@ export const agentApi = {
     });
   },
 
-  // 满意完成：清空 Dify 会话的 storage_pic_talk 变量（生成结果确认卡片「满意完成」按钮）
+  // 满意完成：清空会话图片上下文（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>
     client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/confirm-done`),
 

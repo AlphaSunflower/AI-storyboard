@@ -23,7 +23,7 @@ import java.util.Map;
  * Agent 生成编排服务（智能体生成后端化重构）。
  *
  * 在 HITL 表单提交事件后由后端直接执行生成（写分镜 / 生图 / 生视频），
- * 替代原 Dify 工作流内 HTTP 节点回调（/api/ai/dify/**）。
+ * 替代原工作流内 HTTP 节点回调（/api/**）。
  * 归属校验一律以 conversation.getProjectId() 为准。
  */
 @Service
@@ -38,7 +38,7 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     private final AgentAssetMapper agentAssetMapper;
 
 
-    /** 清洗外部传入参数：未解析的 Dify 变量引用（含 structured_output.）视为无效值返回 null（原 DifyAgentController.sanitize 迁移） */
+    /** 清洗外部传入参数：未解析的变量引用（含 structured_output.）视为无效值返回 null） */
     private static String sanitize(String value) {
         if (value == null || value.isBlank()) return null;
         if (value.contains("structured_output.")) return null;

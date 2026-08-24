@@ -1,0 +1,16 @@
+# deploy/docker/redis/docker-compose.yml
+# Redis 独立部署（跨服务共享缓存：默认模型等）。与 nacos/vosk 完全分离，可单独启停。
+# 用法：cd redis && docker compose up -d（或从上层 ./scripts/up.sh redis）
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis-ai
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6379:6379"     # 仅本机访问，生产设 REDIS_BIND_IP 内网
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:

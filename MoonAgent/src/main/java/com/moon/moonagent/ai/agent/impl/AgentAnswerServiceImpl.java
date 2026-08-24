@@ -44,7 +44,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     @Override
     public String generate(AgentConversation conversation, String content) {
         try {
-            String answer = chatClient().prompt()
+            String answer = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("services/agent-answer"))
                 .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
                 .call()
@@ -60,7 +60,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     public String streamAnswer(AgentConversation conversation, String content, SseEmitter emitter) {
         StringBuilder sb = new StringBuilder();
         try {
-            chatClient().prompt()
+            chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("services/agent-answer"))
                 .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
                 .stream()
@@ -126,7 +126,6 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                             .defaultAdvisors(new SimpleLoggerAdvisor())
                             .defaultOptions(OpenAiChatOptions.builder()
                                     // 对话交流统一网关默认文本模型（动态获取）
-                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(300)))
                             .build();
                 }

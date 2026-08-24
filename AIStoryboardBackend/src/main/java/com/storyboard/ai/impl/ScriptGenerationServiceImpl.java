@@ -9,6 +9,7 @@ import com.storyboard.mapper.SceneMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ScriptGenerationService;
+import com.storyboard.ai.AiConfigProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -43,6 +44,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                             String shotType, String soundDesign) {}
 
     private final GatewayModelService gatewayModelService;
+    private final AiConfigProperties config;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final AssetService assetService;
@@ -151,7 +153,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
                                     .model(gatewayModelService.getDefaultVisionModel())
-                                    .timeout(Duration.ofSeconds(120)))
+                                    .timeout(Duration.ofSeconds(config.getScriptTimeout())))
                             .build();
                 }
             }

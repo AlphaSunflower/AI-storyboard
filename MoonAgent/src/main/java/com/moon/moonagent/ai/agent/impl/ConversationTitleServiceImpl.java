@@ -24,14 +24,14 @@ import com.storyboard.common.BusinessException;
  * 并条件更新 conversations.title（仅当标题仍为默认值「新对话」时，避免覆盖用户手动重命名）。
  *
  * 设计要点：
- * - 全程在虚拟线程中异步执行，任何失败只记日志、绝不抛出（不阻塞 Dify 对话主流程）；
+ * - 全程在虚拟线程中异步执行，任何失败只记日志、绝不抛出（不阻塞对话主流程）；
  * - 模型固定用 {@code TITLE_MODEL}（gemini-3.5-flash-lite，默认零思考 token——实测老张网关
  *   无法关闭 preview 系模型的思考，故选 flash-lite 实现"不思考模式"，见常量注释）；
  * - thinking_level 不思考参数（"minimal"，flash-lite 接受，语义自文档化）通过 Spring AI
  *   OpenAiChatOptions.extraBody 透传——字节码级验证会 merge 进 ChatCompletionCreateParams 的
  *   additionalBodyProperties，即请求体顶层字段（与原手写 body.put("thinking_level", ...) 等价）；
  * - 更新用 LambdaUpdateWrapper 只动 title/updatedAt 两列，并带「仍为默认值」原子条件——
- *   Dify 线程持有同一 AgentConversation 实体实例并会整实体 updateById（回填
+ *   编排线程持有同一 AgentConversation 实体实例并会整实体 updateById（回填
  *
  * 实现说明：已从手写 JDK HttpClient 直连网关 /v1/chat/completions 改为
  * Spring AI ChatClient（spring.ai.openai.base-url 已指向网关 /v1，纯文本调用，无结构化输出）。
@@ -65,7 +65,6 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(30)))
                             .build();
                 }
@@ -98,7 +97,7 @@ public class ConversationTitleServiceImpl implements ConversationTitleService {
             // 首条消息截断到 200 字：标题生成只需要主题线索，避免超长输入拖慢/抬高成本
             String truncated = userContent != null && userContent.length() > 200
                     ? userContent.substring(0, 200) : userContent;
-            String raw = chatClient().prompt()
+            String raw = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("services/conversation-title"))
                     .user(truncated)
                     .call()

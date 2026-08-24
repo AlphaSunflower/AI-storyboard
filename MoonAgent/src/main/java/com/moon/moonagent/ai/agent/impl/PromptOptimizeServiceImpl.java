@@ -57,7 +57,6 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
                                     // 对话交流统一网关默认文本模型（动态获取）
-                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(60)))
                             .build();
                 }
@@ -71,7 +70,7 @@ public class PromptOptimizeServiceImpl implements PromptOptimizeService {
         try {
             // 草稿截断 500 字：提示词优化只需要核心需求，防超长输入拖慢
             String userContent = content.length() > 500 ? content.substring(0, 500) : content;
-            String optimized = chatClient().prompt()
+            String optimized = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("services/prompt-optimize"))
                     .user(userContent)
                     .call()

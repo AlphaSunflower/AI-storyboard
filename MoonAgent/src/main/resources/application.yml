@@ -13,6 +13,10 @@ spring:
         enabled: true
   datasource:
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
     # 注意：不用 ${DB_URL:...} 占位符——本机存在其他项目遗留的 DB_URL/DB_USERNAME/DB_PASSWORD 全局环境变量（MySQL），会被污染
     # 生产部署用 SPRING_DATASOURCE_URL / SPRING_DATASOURCE_USERNAME / SPRING_DATASOURCE_PASSWORD 覆盖（环境变量优先级高于 yaml）
     # 本地开发凭据在 application-local.yml
@@ -52,6 +56,16 @@ ai:
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
+
+  # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
+  image-request-timeout: 310
+  image-edit-timeout: 180
+  video-request-timeout: 120
+  video-download-timeout: 180
+  video-retry-delay-ms: 15000
+  script-timeout: 120
+  gateway-model-timeout: 10
+  gateway-cooldown-ms: 300000
 
 # 提示词文件目录（文件系统路径，支持热刷新）
 prompts:

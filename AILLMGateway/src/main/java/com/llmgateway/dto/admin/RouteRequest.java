@@ -11,4 +11,5 @@ public class RouteRequest {
     private String type;
     /** JSON：size/temperature 等默认参数，可选 */
     private String defaultParams;
+    private Boolean isDefault;
 }

@@ -5,11 +5,11 @@ import com.moon.moonagent.entity.AgentMessage;
 import java.util.List;
 
 /**
- * 意图识别服务：把意图识别从 Dify 工作流提取到后端。
+ * 意图识别服务：把意图识别提取到后端。
  *
  * 职责：用户发消息时，后端调 LLM 网关识别用户输入意图 → 返回 type（intent-aisplit /
- * intent-pic / intent-video / intent-other），随 chat-messages 请求的 inputs 传给 Dify
- * start 节点 type 变量，「意图路由」if-else 直接按 type 分流（Dify 侧已删除「意图识别」LLM 节点）。
+ * intent-pic / intent-video / intent-other），随请求的 inputs 传给
+ * start 节点 type 变量，「意图路由」if-else 直接按 type 分流（工作流侧已删除「意图识别」LLM 节点）。
  *
  * 历史上下文：最多携带最近 {@link #HISTORY_LIMIT} 条消息，支撑"继续/接着上次"判断。
  *

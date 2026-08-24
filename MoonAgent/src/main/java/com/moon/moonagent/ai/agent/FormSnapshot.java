@@ -15,7 +15,7 @@ public record FormSnapshot(String formContent, List<Map<String, String>> actions
                            Map<String, Object> plan, String conversationId,
                            String projectId, long createdAt) {
 
-    /** 表单快照 TTL（与 Dify form_token 过期时间对齐，30 分钟） */
+    /** 表单快照 TTL（与 form_token 过期时间对齐，30 分钟） */
     private static final long FORM_SNAPSHOT_TTL_MS = 30 * 60 * 1000L;
 
     /** 是否已过期（实现类在 .impl 子包，需 public 跨包调用） */

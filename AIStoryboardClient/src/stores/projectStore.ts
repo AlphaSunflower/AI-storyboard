@@ -3,7 +3,7 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneReferenceAsset, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
-import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, DEFAULT_UNDERSTANDING_MODEL, IMAGE_MODELS, VIDEO_MODELS, UNDERSTANDING_MODELS, type ModelOption } from '../config';
+import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, DEFAULT_UNDERSTANDING_MODEL, IMAGE_MODELS, VIDEO_MODELS, UNDERSTANDING_MODELS, type ModelOption, VIDEO_POLL_INTERVAL, IMAGE_POLL_INTERVAL } from '../config';
 import { resolveVideoPreset } from '../components/common/VideoPresetSelector';
 
 // 生成完成后的 toast 通知
@@ -342,7 +342,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       } else if (status.status === 'failed') {
         videoFailed = true;
       } else if (attempts < 120) {
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL));
         await poll();
       }
     };
@@ -413,7 +413,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         return;
       }
       await get().refreshScenes();
-    }, 3000);
+    }, IMAGE_POLL_INTERVAL);
     // ponytail: 10 分钟硬上限，防后端异常导致 imageStatus 卡 generating 时无限轮询
     setTimeout(() => {
       if (!imageResumeTimer) return;

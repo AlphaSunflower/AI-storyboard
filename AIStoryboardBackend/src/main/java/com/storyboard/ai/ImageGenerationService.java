@@ -12,7 +12,7 @@ import java.util.List;
 public interface ImageGenerationService {
 
     /**
-     * 生成/编辑图片入口方法（旧签名，n 默认 1；Dify 工作流等调用方使用）。
+     * 生成/编辑图片入口方法（旧签名，n 默认 1）。
      */
     String generateImage(String sceneId, String prompt, String model,
                          String size, String quality, String aspectRatio,

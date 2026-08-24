@@ -8,7 +8,7 @@ import java.time.OffsetDateTime;
 /**
  * AI Agent HITL 人工确认 checkpoint（表 agent_checkpoints）。
  *
- * 替代原 Dify form 快照内存 Map（formSnapshots/videoPlanSnapshots，重启即失）：
+ * 替代原 form 快照内存 Map（formSnapshots/videoPlanSnapshots，重启即失）：
  * 编排流程需要人工确认时落一行，表单提交端点校验 form_token + 归属 + 未过期后
  * 置为 used 并恢复对应 step 执行。
  */

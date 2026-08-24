@@ -71,7 +71,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
         Scene scene = sceneId != null ? storyboardClient.getScene(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
         if (prompt == null || prompt.isBlank()) {
-            throw new BusinessException(40001, "视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "视频生成 prompt 不能为空");
         }
 
         String actualModel = alias != null
@@ -117,7 +117,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                 .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
@@ -214,14 +214,14 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
     /** 从网关下载视频流并转存本地 uploads/videos（重试 3 次，每次间隔 15s） */
     private String downloadVideoContent(String taskId) {
         int maxRetries = 3;
-        long retryDelayMs = 15_000;
+        long retryDelayMs = config.getVideoRetryDelayMs();
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos/" + taskId + "/content"))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(180))
+                    .timeout(Duration.ofSeconds(config.getVideoDownloadTimeout()))
                     .GET().build();
                 HttpResponse<InputStream> resp = httpClient.send(req,
                         HttpResponse.BodyHandlers.ofInputStream());
@@ -290,7 +290,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
                 .GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 200) return resp.body();

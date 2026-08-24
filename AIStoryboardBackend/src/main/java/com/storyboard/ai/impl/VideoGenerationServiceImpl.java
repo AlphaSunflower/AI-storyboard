@@ -90,7 +90,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
-            throw new BusinessException(40001, "视频生成 prompt 不能为空（Dify 变量可能未正确设置）");
+            throw new BusinessException(40001, "视频生成 prompt 不能为空");
         }
 
         String actualModel = alias != null

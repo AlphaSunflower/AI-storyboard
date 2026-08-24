@@ -17,11 +17,11 @@ import java.util.Set;
 import com.moon.moonagent.ai.GatewayModelService;
 
 /**
- * 意图识别服务：把意图识别从 Dify 工作流提取到后端。
+ * 意图识别服务：把意图识别提取到后端。
  *
  * 职责：用户发消息时，后端调 LLM 网关识别用户输入意图 → 返回 type（intent-aisplit /
- * intent-pic / intent-video / intent-other），随 chat-messages 请求的 inputs 传给 Dify
- * start 节点 type 变量，「意图路由」if-else 直接按 type 分流（Dify 侧已删除「意图识别」LLM 节点）。
+ * intent-pic / intent-video / intent-other），随请求的 inputs 传给
+ * start 节点 type 变量，「意图路由」if-else 直接按 type 分流（工作流侧已删除「意图识别」LLM 节点）。
  *
  * 设计要点：
  * - 复用 ConversationTitleService 的 Spring AI ChatClient 调用模式（纯文本调用，
@@ -44,7 +44,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     /** 兜底意图：识别失败/解析失败/白名单外 → 引导分支，不阻塞对话 */
     public static final String FALLBACK_TYPE = "intent-other";
 
-    /** 五类合法意图（与 Dify 工作流「意图路由」if-else 分支一一对应） */
+    /** 五类合法意图（与工作流「意图路由」if-else 分支一一对应） */
         private static final Set<String> VALID_TYPES = Set.of(
             "intent-aisplit", "intent-pic", "intent-video", "intent-delete", "intent-scene-review", "intent-other");
 
@@ -63,7 +63,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
 
     /**
-     * 意图识别 prompt：移植自 Dify 工作流「意图识别」节点。
+     * 意图识别 prompt：移植自工作流「意图识别」节点。
      * 与原版差异：只输出 type（意图标识符），不再生成 message（后端只透传 type）。
      */
 
@@ -87,7 +87,6 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(30)))
                             .build();
                 }
@@ -116,7 +115,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             String truncated = query != null && query.length() > 500
                     ? query.substring(0, 500) : query;
             // 瞬态失败重试 1 次（LLM 调用幂等；识别失败本就兜底，多一次重试降低误判概率）
-            String raw = retryTransient(() -> chatClient().prompt()
+            String raw = retryTransient(() -> chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(buildPrompt(recentMessages))
                     .user(truncated)
                     .call()
