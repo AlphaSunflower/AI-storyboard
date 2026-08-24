@@ -203,7 +203,7 @@ export function ScriptInputPanel() {
       <div>
         <label style={labelStyle}>创作类型</label>
         <Select value={creationType} onValueChange={(v) => v && setCreationType(v)}>
-          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue>{(v) => creationTypes.find((t) => t.value === v)?.label ?? v}</SelectValue></SelectTrigger>
           <SelectContent>
             {creationTypes.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
           </SelectContent>

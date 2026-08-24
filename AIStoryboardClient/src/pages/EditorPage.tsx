@@ -18,7 +18,7 @@ import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import AmbientGlow from '../components/AmbientGlow';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { useProjectStore } from '../stores/projectStore';
+import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
 
@@ -42,8 +42,11 @@ export function EditorPage() {
       // 无项目时自动创建「默认项目」并进入（保证始终有项目可加分镜/与智能体沟通）
       const { projects, currentProject, createProject } = useProjectStore.getState();
       if (!currentProject) {
-        if (projects.length > 0) {
-          await loadProject(projects[0].id);
+        // 优先恢复「最近进入」的项目（刷新/重登），再到最近修改的（projects[0]）
+        const lastId = getLastOpenedProjectId();
+        const target = projects.find((p) => p.id === lastId) ?? projects[0];
+        if (target) {
+          await loadProject(target.id);
         } else {
           const p = await createProject('默认项目', 'movie', '16:9');
           await loadProject(p.id);

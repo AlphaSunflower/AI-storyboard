@@ -192,7 +192,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                     }
                 }
                 if (localPath != null || giveUp) {
-                    updateTaskOwner(taskId, localPath, localPath != null ? "completed" : "failed",
+                    safeUpdateTaskOwner(taskId, localPath, localPath != null ? "completed" : "failed",
                             result.get("error"));
                 }
             } else if ("failed".equals(status)) {
@@ -200,7 +200,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                 // 网关统一响应 failed 时带 error 字段，直接透传
                 String err = root.path("error").asText("");
                 result.put("error", err.isBlank() ? "视频生成失败" : err);
-                updateTaskOwner(taskId, null, "failed", result.get("error"));
+                safeUpdateTaskOwner(taskId, null, "failed", result.get("error"));
             } else {
                 result.put("status", "processing");
                 result.put("progress", root.path("progress").asText(""));
@@ -272,6 +272,15 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
             asset.setStatus(status);
             asset.setError(error);
             agentAssetMapper.updateById(asset);
+        }
+    }
+
+    /** 安全调用 updateTaskOwner：失败仅打 warn，不阻断 pollVideoTask 返回值 */
+    private void safeUpdateTaskOwner(String taskId, String videoUrl, String status, String error) {
+        try {
+            updateTaskOwner(taskId, videoUrl, status, error);
+        } catch (Exception e) {
+            log.warn("updateTaskOwner 失败(不影响视频结果): taskId={}, 原因: {}", taskId, e.getMessage());
         }
     }
 

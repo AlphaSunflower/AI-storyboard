@@ -19,7 +19,7 @@ import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info }
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuthStore } from '../stores/authStore';
-import { useProjectStore } from '../stores/projectStore';
+import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
@@ -34,7 +34,7 @@ export function ChatPage() {
   const isMobile = useIsMobile();
   const logout = useAuthStore((s) => s.logout);
   const currentProject = useProjectStore((s) => s.currentProject);
-  const createConversation = useAgentStore((s) => s.createConversation);
+  const newConversation = useAgentStore((s) => s.newConversation);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     confirmResult, assets, loadAssets, conversations, activeConversationId,
@@ -68,7 +68,9 @@ export function ChatPage() {
       .then(() => {
         const list = useProjectStore.getState().projects;
         if (list.length > 0) {
-          useProjectStore.getState().loadProject(list[0].id);
+          const lastId = getLastOpenedProjectId();
+          const target = list.find((p) => p.id === lastId) ?? list[0];
+          useProjectStore.getState().loadProject(target.id);
         }
       })
       .catch(() => { /* 静默 */ });
@@ -100,7 +102,7 @@ export function ChatPage() {
 
   // 手机端：新建对话后自动关闭侧栏
   const handleMobileNewConversation = async () => {
-    await createConversation();
+    newConversation();
     setMobileSidebarOpen(false);
   };
 
@@ -120,12 +122,52 @@ export function ChatPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [convWidth]);
 
+  // ── 拖拽图片到智能体窗口 === 上传参考图 ──
+  // 全局阻止浏览器默认打开文件（避免拖到非目标区直接导航/下载）
+  useEffect(() => {
+    const block = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
+  const dragDepth = useRef(0);
+  const [dropActive, setDropActive] = useState(false);
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      dragDepth.current++;
+      setDropActive(true);
+    }
+  }, []);
+  const handleDragLeave = useCallback(() => {
+    dragDepth.current--;
+    if (dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false); }
+  }, []);
+  const handleDropImage = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDropActive(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f && f.type.startsWith('image/')) {
+      useAgentStore.getState().uploadRefImage(f).catch(() => alert('图片上传失败'));
+    }
+  }, []);
+
   return (
     <>
     {/* 页面氛围光晕（fixed 覆盖手机/桌面两分支，pointer-events none） */}
     <AmbientGlow />
     {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
-      <div style={{ height: '100vh', display: isMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}>
+      <div
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDropImage}
+      style={{ height: '100vh', display: isMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
+    >
+      {/* 拖拽图片时的提示浮层 */}
+      {dropActive && <DropHint />}
         {/* 顶部导航栏 */}
         <MobileHeader
           title={currentTitle}
@@ -187,14 +229,7 @@ export function ChatPage() {
                 <button
                   key={t}
                   onClick={() => {
-                    const st = useAgentStore.getState();
-                    if (!st.activeConversationId) {
-                      st.createConversation().then(() => {
-                        setTimeout(() => useAgentStore.getState().sendMessage(t), 200);
-                      });
-                    } else {
-                      st.sendMessage(t);
-                    }
+                    useAgentStore.getState().sendMessage(t);
                   }}
                   style={{
                     padding: '6px 14px', borderRadius: 16, border: `1px solid ${DS.border}`,
@@ -274,7 +309,13 @@ export function ChatPage() {
         <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
-    <div style={{ height: '100vh', display: isMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden' }}>
+    <div
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDropImage}
+      style={{ height: '100vh', display: isMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden' }}
+    >
+      {dropActive && <DropHint />}
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
       {collapsed ? (
         /* ── 收起态：图标 rail ── */
@@ -457,14 +498,7 @@ export function ChatPage() {
                 <button
                   key={t}
                   onClick={() => {
-                    const st = useAgentStore.getState();
-                    if (!st.activeConversationId) {
-                      st.createConversation().then(() => {
-                        setTimeout(() => useAgentStore.getState().sendMessage(t), 200);
-                      });
-                    } else {
-                      st.sendMessage(t);
-                    }
+                    useAgentStore.getState().sendMessage(t);
                   }}
                   style={{
                     padding: '8px 16px', borderRadius: 20, border: `1px solid ${DS.border}`,
@@ -578,6 +612,25 @@ function headerBtn(opacity: number): React.CSSProperties {
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
     display: 'flex', alignItems: 'center', gap: 4,
   };
+}
+
+/** 拖拽图片到智能体窗口时的全屏提示浮层（pointer-events none，不拦截 drop） */
+function DropHint() {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000, pointerEvents: 'none',
+      background: 'rgba(255,255,255,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        border: `2px dashed ${DS.brand}`, borderRadius: 16, background: 'rgba(255,255,255,0.95)',
+        padding: '24px 48px', fontSize: 15, color: DS.brand, fontWeight: 500,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+      }}>
+        松开鼠标上传图片
+      </div>
+    </div>
+  );
 }
 
 /** 收起态 rail 图标按钮 */

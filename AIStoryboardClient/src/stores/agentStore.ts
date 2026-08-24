@@ -59,6 +59,9 @@ interface AgentState {
   activeConversationId: string | null;
   loadingConversations: boolean;
   loadConversations: () => Promise<void>;
+  /** 新建对话：仅重置本地为空白草稿（不落库、不进列表）。真正建会话在首次发送消息时由 sendMessage 自动完成。 */
+  newConversation: () => void;
+  /** 真正创建并落库一个会话（sendMessage 首次发送时自动调用）：POST 后端 + 插到列表头 + 选中。 */
   createConversation: () => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationStatus: (id: string, status: 'active' | 'archived') => Promise<void>;
@@ -138,6 +141,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (list.length > 0 && !get().activeConversationId) {
       await get().selectConversation(list[0].id);
     }
+  },
+
+  // 新建对话：仅重置本地为空白草稿，不落库、不进列表——避免反复点「新对话」堆积空会话。
+  // 真正建会话在 sendMessage 首次发送时由 createConversation 完成。
+  newConversation: () => {
+    set({
+      activeConversationId: null,
+      messages: [],
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      streamError: null,
+      pendingAssistantId: null,
+      confirmResult: null,
+      pendingPicUrl: null,
+      refImageUrl: null,
+      workflowHint: '',
+    });
   },
 
   createConversation: async () => {

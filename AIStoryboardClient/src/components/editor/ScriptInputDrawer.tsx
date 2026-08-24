@@ -4,6 +4,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { AssetScriptPicker } from './AssetScriptPicker';
 
 interface ScriptInputDrawerProps {
   onClose: () => void;
@@ -18,13 +19,11 @@ const sharedInputStyle: React.CSSProperties = {
   background: 'white', color: 'var(--color-body)', outline: 'none',
 };
 
-/** 手机端右侧剧本输入抽屉（80vw, max 360px）：含模型选择 */
+/** 手机端右侧剧本输入抽屉（80vw, max 360px） */
 export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
   const {
-    currentProject, generateScript, createProject, videoPreset,
-    imageModel, videoModel, understandingModel,
-    imageModelOptions, videoModelOptions, understandingModelOptions,
-    setImageModel, setVideoModel, setUnderstandingModel,
+    currentProject, scenes, generateScript, createProject, videoPreset,
+    understandingModel, understandingModelOptions, setUnderstandingModel,
   } = useProjectStore();
   const agentGeneratedScenes = useAgentStore((s) => s.agentGeneratedScenes);
 
@@ -32,6 +31,8 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
   const [generating, setGenerating] = useState(false);
   const [refImages, setRefImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
 
   const handleRefImages = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -46,6 +47,16 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
 
   const handleGenerate = async () => {
     if (!scriptText.trim() || generating) return;
+    // 项目已有分镜 → 弹 覆盖更新/追加/不生成 确认
+    if ((scenes?.length ?? 0) > 0) {
+      setConfirmOverwrite('pending');
+      return;
+    }
+    await doGenerate();
+  };
+
+  const doGenerate = async (mode?: string) => {
+    if (!scriptText.trim() || generating) return;
     setGenerating(true);
     try {
       let projectId = currentProject?.id;
@@ -55,10 +66,12 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
         projectId = p.id;
       }
       const preset = resolveVideoPreset(videoPreset);
+      const assetIds = selectedAssetIds.length > 0 ? selectedAssetIds : undefined;
       await generateScript(
         projectId, scriptText, 'movie', preset.aspectRatio, undefined,
         refImages.length ? understandingModel : undefined,
         refImages.length ? refImages : undefined,
+        assetIds, mode,
       );
       onClose();
     } catch { /* store 已处理 */ } finally {
@@ -91,35 +104,13 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
 
           {/* 内容 */}
           <div style={{ flex: 1, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* 理解模型 */}
+            {/* 理解模型：驱动图片/视频理解的看图模型 */}
             <div>
-              <label style={labelStyle}>理解模型（分析参考图）</label>
+              <label style={labelStyle}>理解模型</label>
               <Select value={understandingModel} onValueChange={(v) => v && setUnderstandingModel(v)}>
                 <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {understandingModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 生图模型 */}
-            <div>
-              <label style={labelStyle}>生图模型</label>
-              <Select value={imageModel} onValueChange={(v) => v && setImageModel(v)}>
-                <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {imageModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* 生视频模型 */}
-            <div>
-              <label style={labelStyle}>生视频模型</label>
-              <Select value={videoModel} onValueChange={(v) => v && setVideoModel(v)}>
-                <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {videoModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -170,6 +161,9 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
                 智能体已生成分镜，手动输入暂时禁用
               </p>
             )}
+
+            {/* 资产生成（可选） */}
+            <AssetScriptPicker projectId={currentProject?.id} value={selectedAssetIds} onChange={setSelectedAssetIds} />
           </div>
 
           {/* 底部按钮 */}
@@ -188,6 +182,21 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
         </div>
         <style>{`@keyframes scriptDrawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
       </div>
+
+      {/* 覆盖/追加/不生成 确认弹窗 */}
+      {confirmOverwrite && (
+        <div onClick={() => setConfirmOverwrite(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(20,20,19,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 10, boxShadow: '0 8px 32px rgba(20,20,19,0.18)', padding: 24, minWidth: 300, maxWidth: 380 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 15, color: DS.ink }}>项目已有 {scenes.length} 个分镜</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: DS.textSecondary }}>选择如何处理本次生成：</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} style={{ padding: 10, borderRadius: 10, border: 'none', background: DS.brand, color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.ink, fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
+              <button onClick={() => setConfirmOverwrite(null)} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.textSecondary, fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

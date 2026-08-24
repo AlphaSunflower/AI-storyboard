@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import type { SceneReferenceAsset } from '../../api/projects';
 import { assetUrl, REFERENCE_LIMITS } from '../../config';
 
@@ -34,19 +34,25 @@ function formatSize(bytes: number): string {
 
 export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, onDelete, disabled }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
   const limit = REFERENCE_LIMITS[type];
   const count = maxCount ?? limit.maxCount;
   const sizeMB = maxSizeMB ?? limit.maxSizeMB;
   const remain = Math.max(0, count - items.length);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ''; // 允许重复选择同一文件
+  // 文件校验 + 回调统一入口（文件选择 / 拖拽共用，保证计数与大小限制一致）
+  const processFiles = (files: File[]) => {
     for (const f of files) {
       if (items.length >= count) { alert(`${TYPE_LABEL[type]}最多 ${count} 个`); break; }
       if (f.size > sizeMB * 1024 * 1024) { alert(`「${f.name}」超过大小限制 ${sizeMB}MB`); continue; }
       onUpload(f);
     }
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // 允许重复选择同一文件
+    processFiles(files);
   };
 
   const boxStyle: CSSProperties = {
@@ -67,8 +73,16 @@ export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, 
     <div>
       <div
         onClick={() => !disabled && inputRef.current?.click()}
-        style={boxStyle}
-        title={disabled ? '开启「以本分镜图片为首帧」时不可用' : undefined}
+        onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (disabled) return;
+          processFiles(Array.from(e.dataTransfer.files || []));
+        }}
+        style={{ ...boxStyle, borderColor: dragOver ? 'var(--color-primary)' : 'var(--color-hairline)', background: dragOver ? 'rgba(204, 120, 92, 0.07)' : 'var(--color-canvas)' }}
+        title={disabled ? '开启「以本分镜图片为首帧」时不可用' : `拖拽或在框内选择${TYPE_LABEL[type]}`}
       >
         <span style={{ fontSize: 14, display: 'inline-flex', alignItems: 'center' }}>{type === 'image' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> : type === 'video' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>}</span>
         <span>

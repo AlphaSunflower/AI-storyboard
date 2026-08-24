@@ -15,6 +15,13 @@ export interface ToastMessage {
   kind: 'image' | 'video';
 }
 
+// 持久化「最近进入」的项目 id（刷新/重登后恢复，而不是每次回到 projects[0]）。
+// 仅作记忆：真实归属校验在加载前按当前用户的项目列表过滤（存过的 id 不在列表内则回退 projects[0]）。
+const LAST_PROJECT_KEY = 'lastOpenedProjectId';
+export function getLastOpenedProjectId(): string | null {
+  try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+}
+
 /** 解析网关下发的 params JSON 字符串为参数对象（解析失败/非对象返回 null，前端回退静态默认） */
 function safeParseParams(json: string): ModelOption['params'] {
   try {
@@ -86,7 +93,7 @@ interface ProjectState {
   deleteProject: (id: string) => Promise<void>;
   checkDraft: () => Promise<ProjectResponse | null>;
   selectScene: (sceneId: string) => void;
-  generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string, understandingModel?: string, referenceImages?: string[]) => Promise<void>;
+  generateScript: (projectId: string, scriptText: string, creationType: string, aspectRatio: string, model?: string, understandingModel?: string, referenceImages?: string[], assetIds?: string[], mode?: string) => Promise<void>;
   generateImage: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], mode?: string, generatedImageUrl?: string) => Promise<string>;
   generateVideo: (sceneId: string, prompt: string, model?: string, referenceImages?: string[], generatedImageUrl?: string, referenceVideos?: string[], referenceAudios?: string[]) => Promise<string>;
   /** 轮询单个视频任务直到终态（复用：新生成 + 刷新/重登后恢复）；不管理 generatingVideo 标志，由调用方负责 */
@@ -180,6 +187,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedSceneId: null,
       isLoading: false,
     });
+    // 记录「最近进入」的项目，刷新/重登后恢复用
+    try { localStorage.setItem(LAST_PROJECT_KEY, id); } catch { /* 忽略 */ }
     // 恢复刷新/重登前仍在生成中的视频任务（续接轮询，不重复生成新任务）
     get().resumePendingVideos();
     // 同上：恢复仍在生成中的图片任务
@@ -215,14 +224,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().markSceneRead(sceneId);
   },
 
-  generateScript: async (projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages) => {
+  generateScript: async (projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages, assetIds, mode) => {
     set({
       isLoading: true,
       scriptGenerationStatus: 'generating',
       scriptGenerationMessage: '正在连接 AI...',
     });
     try {
-      await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages });
+      await aiApi.generateScript({ projectId, scriptText, creationType, aspectRatio, model, understandingModel, referenceImages, assetIds, mode });
       set({
         scriptGenerationStatus: 'generating',
         scriptGenerationMessage: 'AI 正在分析剧本...',

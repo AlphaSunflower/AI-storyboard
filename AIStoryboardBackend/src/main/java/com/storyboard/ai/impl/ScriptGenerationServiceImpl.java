@@ -69,18 +69,18 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                                                       List<String> assetIds) {
         String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
 
-        // 资产库设定集注入：项目资产 + 用户全局资产 → 文字卡塞进 system prompt 约束分镜
-        //（资产为可选增强，注入失败仅告警跳过，不影响分镜生成；
-        //  assetIds 非 null 时只注入指定子集——空列表=不注入，null=全量注入旧行为）
+        // 资产库设定集注入：仅当调用方显式传入 assetIds 时注入对应资产的文字卡；
+        // 默认（assetIds 为 null 或空列表）不注入任何资产 —— 生成剧本默认与资产库无关，
+        // 需通过「选择资产生成」显式指定（旧版 null=全量注入已废弃，避免用户未选择却被资产约束）。
         try {
-            List<AssetVO> assets = assetService.projectAssets(projectId);
-            if (assets != null && !assets.isEmpty()) {
-                if (assetIds != null) {
-                    assets = assets.stream().filter(a -> assetIds.contains(a.id())).toList();
-                }
-                if (!assets.isEmpty()) {
-                    systemPrompt += assetService.buildSheetText(assets);
-                }
+            List<AssetVO> assets = List.of();
+            if (assetIds != null && !assetIds.isEmpty()) {
+                assets = assetService.projectAssets(projectId).stream()
+                        .filter(a -> assetIds.contains(a.id()))
+                        .toList();
+            }
+            if (!assets.isEmpty()) {
+                systemPrompt += assetService.buildSheetText(assets);
             }
         } catch (Exception e) {
             log.warn("资产库设定集注入失败，跳过: {}", e.getMessage());
@@ -111,11 +111,18 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     public Map<String, Object> generateAndSaveScenes(String projectId, String scriptText,
                                                      String creationType, String customTypeDesc,
                                                      String aspectRatio, String model,
-                                                     String understandingModel, List<String> referenceImages) {
+                                                     String understandingModel, List<String> referenceImages,
+                                                     List<String> assetIds, String mode) {
         // 先生成分镜（复用 generateScenes 的 LLM 调用 + 双路解析）
         List<Map<String, Object>> scenes = generateScenes(
                 projectId, scriptText, creationType, customTypeDesc, aspectRatio, model,
-                understandingModel, referenceImages);
+                understandingModel, referenceImages, assetIds);
+        // 覆盖写：先清空项目现有分镜 + 其级联资源（scene_assets/scene_refs 由 DB 级联删），再批量写入。
+        // 仅在 LLM 生成成功后才删除，避免生成失败时把旧分镜清掉。
+        if ("overwrite".equalsIgnoreCase(mode)) {
+            sceneMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Scene>()
+                    .eq(Scene::getProjectId, projectId));
+        }
         // 批量写库（原 AIController.generateScript 的循环落库逻辑下沉至此）
         for (Map<String, Object> s : scenes) {
             Scene scene = new Scene();

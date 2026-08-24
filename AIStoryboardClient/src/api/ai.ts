@@ -25,6 +25,8 @@ export const aiApi = {
     model?: string;
     understandingModel?: string;
     referenceImages?: string[];
+    assetIds?: string[];
+    mode?: string;
   }) => client.post('/ai/generate-script', data),
 
   generateImage: (data: {

@@ -50,7 +50,7 @@ function CheckIcon({ checked }: { checked: boolean }) {
 export function AgentConversationList({ width, toolbar, onSelectOverride, hideHeader }: { width?: number; toolbar?: React.ReactNode; onSelectOverride?: (id: string) => void; hideHeader?: boolean }) {
   const {
     conversations, activeConversationId, selectConversation,
-    createConversation, renameConversation, setConversationStatus, deleteConversation,
+    newConversation, renameConversation, setConversationStatus, deleteConversation,
     waitingHumanInput, waitingVideoPlan,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
@@ -149,7 +149,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           intensity={0.9}
           thickness={1.2}
           className="specular-button--block"
-          onClick={() => createConversation()}
+          onClick={() => newConversation()}
         >
           + 新建对话
         </SpecularButton>

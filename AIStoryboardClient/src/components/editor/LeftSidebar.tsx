@@ -4,6 +4,7 @@ import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { REFERENCE_LIMITS, type UnderstandingModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
+import { AssetScriptPicker } from './AssetScriptPicker';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 
 const creationTypes = [
@@ -37,35 +38,17 @@ const sharedInputStyle: React.CSSProperties = {
   outline: 'none',
 };
 
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--color-muted)',
-  textTransform: 'uppercase' as React.CSSProperties['textTransform'],
-  letterSpacing: '.5px',
-  paddingTop: 4,
-  borderTop: '1px solid var(--color-hairline)',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-};
-
 export function LeftSidebar() {
   const {
     currentProject,
+    scenes,
     isLoading,
     generateScript,
     createProject,
-    imageModel,
-    videoModel,
-    imageModelOptions,
-    videoModelOptions,
     understandingModel,
     understandingModelOptions,
-    videoPreset,
-    setImageModel,
-    setVideoModel,
     setUnderstandingModel,
+    videoPreset,
   } = useProjectStore();
 
   // 智能体已生成分镜时，手动剧本输入与生成按钮互斥禁用
@@ -78,6 +61,9 @@ export function LeftSidebar() {
   // 参考图（base64 data URI 列表；作为理解模型的看图输入）
   const [refImages, setRefImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 资产生成（可选）：勾选的资产 id；先生成分镜已存在分镜时弹覆盖确认
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
 
   // 上传约束：优先当前理解模型 params（网关 model_params refImages/maxImageSizeMB），未配置回退静态兜底
   const uParams = understandingModelOptions.find((m) => m.value === understandingModel)?.params as UnderstandingModelParams | undefined;
@@ -113,6 +99,15 @@ export function LeftSidebar() {
   const handleGenerate = async () => {
     if (!scriptText.trim()) return;
 
+    // 项目已有分镜 → 弹 覆盖更新/追加/不生成 确认（避免无提示直接追加或误覆盖）
+    if ((scenes?.length ?? 0) > 0) {
+      setConfirmOverwrite('pending');
+      return;
+    }
+    await doGenerate();
+  };
+
+  const doGenerate = async (mode?: string) => {
     let projectId = currentProject?.id;
 
     // If no current project, create one first
@@ -128,10 +123,12 @@ export function LeftSidebar() {
     }
 
     const preset = resolveVideoPreset(videoPreset);
+    const assetIds = selectedAssetIds.length > 0 ? selectedAssetIds : undefined;
     await generateScript(
       projectId, scriptText, creationType, preset.aspectRatio, undefined,
       refImages.length ? understandingModel : undefined,
-      refImages.length ? refImages : undefined
+      refImages.length ? refImages : undefined,
+      assetIds, mode
     );
   };
 
@@ -217,7 +214,7 @@ export function LeftSidebar() {
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>创作类型</label>
         <Select value={creationType} onValueChange={(v) => v && setCreationType(v)}>
-          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
+          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue>{(v) => creationTypes.find((t) => t.value === v)?.label ?? v}</SelectValue></SelectTrigger>
           <SelectContent>
             {creationTypes.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
           </SelectContent>
@@ -303,35 +300,10 @@ export function LeftSidebar() {
         )}
       </div>
 
-      {/* ═══════════ 生图区域（只保留模型）═══════════ */}
-      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg> 生图设置</div>
+      {/* 资产生成（可选） */}      
+      <AssetScriptPicker projectId={currentProject?.id} value={selectedAssetIds} onChange={setSelectedAssetIds} />
 
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生图模型</label>
-        <Select value={imageModel} onValueChange={(v) => v && setImageModel(v)}>
-          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {imageModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* ═══════════ 生视频区域（只保留模型）═══════════ */}
-      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 生视频设置</div>
-
-      <div style={{ flexShrink: 0 }}>
-        <label style={labelStyle}>生视频模型</label>
-        <Select value={videoModel} onValueChange={(v) => v && setVideoModel(v)}>
-          <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {videoModelOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* ═══════════ 理解设置 ═══════════ */}
-      <div style={sectionHeaderStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A5.5 5.5 0 004 7.5c0 1.1.4 2.2 1 3.1A5.48 5.48 0 004 14a5.5 5.5 0 004.5 5.4V22h3v-2.6A5.5 5.5 0 0020 14c0-1.3-.5-2.6-1.3-3.5.7-.9 1.1-2 1.1-3.2A5.5 5.5 0 0014.5 2h-5z"/><path d="M12 2v20"/></svg> 理解设置</div>
-
+      {/* 理解模型：驱动图片/视频理解的看图模型（剧本输入在这里选，分镜生图分别可选） */}
       <div style={{ flexShrink: 0 }}>
         <label style={labelStyle}>理解模型</label>
         <Select value={understandingModel} onValueChange={(v) => v && setUnderstandingModel(v)}>
@@ -365,6 +337,32 @@ export function LeftSidebar() {
       >
         {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
+
+      {confirmOverwrite && (
+        <div
+          onClick={() => setConfirmOverwrite(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: 'var(--rounded-md)',
+              boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)', padding: 24, minWidth: 320, maxWidth: 400,
+            }}
+          >
+            <h3 style={{ margin: '0 0 8px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>项目已有 {scenes.length} 个分镜</h3>
+            <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>选择如何处理本次生成：</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: 'none', background: 'var(--color-primary)', color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)', fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
+              <button onClick={() => setConfirmOverwrite(null)} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Divider + project history — independently scrollable */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'scroll', minHeight: 120 }}>

@@ -35,7 +35,8 @@ public class AIController {
         return ApiResponse.ok(scriptService.generateAndSaveScenes(
             request.projectId(), request.scriptText(), request.creationType(),
             request.customTypeDesc(), request.aspectRatio(), request.model(),
-            request.understandingModel(), request.referenceImages()
+            request.understandingModel(), request.referenceImages(), request.assetIds(),
+            request.mode()
         ));
     }
 
