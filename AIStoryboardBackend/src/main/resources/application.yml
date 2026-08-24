@@ -61,11 +61,35 @@ ai:
   gateway:
     fallback-text-model: deepseek-v4-flash
     fallback-text-api-key: ${LLM_GATEWAY_API_KEY:}
+    fallback-image-model: gpt-image-2
+    fallback-video-model: MiniMax-H3
+    fallback-vision-model: gemini-3-flash-preview
 
   # ── 文件存储（与上游无关，纯本地路径）──
+  image-upload-dir: uploads/images
   video-upload-dir: uploads/videos
+  audio-upload-dir: uploads/audios
   video-file-extension: .mp4
+  image-url-prefix: /api/files/images/
   video-url-prefix: /api/files/videos/
+  audio-url-prefix: /api/files/audios/
+
+  # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
+  image-request-timeout: 300
+  image-edit-timeout: 180
+  video-request-timeout: 120
+  video-download-timeout: 180
+  video-retry-delay-ms: 15000
+  script-timeout: 120
+  gateway-model-timeout: 10
+  gateway-cooldown-ms: 300000
+
+  # ── 图片尺寸 / 重试 ──
+  image-default-size: 1024x1024
+  image-valid-sizes: [1024x1024, 1536x1024, 1024x1536]
+  image-max-retries: 1
+  video-download-retries: 3
+  ref-upload-timeout: 300
 
 # 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
 internal:

@@ -1,5 +1,6 @@
 package com.storyboard.service.impl;
 
+import com.storyboard.ai.AiConfigProperties;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.common.BusinessException;
 import org.slf4j.Logger;
@@ -28,20 +29,30 @@ import java.util.UUID;
 public class FileStorageServiceImpl implements FileStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(FileStorageServiceImpl.class);
-    private static final Path IMAGES_DIR = Paths.get("uploads/images");
-    private static final Path VIDEOS_DIR = Paths.get("uploads/videos");
-    private static final Path AUDIOS_DIR = Paths.get("uploads/audios");
+
+    private final Path imagesDir;
+    private final Path videosDir;
+    private final Path audiosDir;
+    private final String imageUrlPrefix;
+    private final String videoUrlPrefix;
+    private final String audioUrlPrefix;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
-    /** 构造时确保上传目录存在（无注入依赖；建目录属初始化副作用，保留显式无参构造器，非手写注入构造器例外） */
-    public FileStorageServiceImpl() {
+    /** 构造时按应用配置（ai.image/video/audio-upload-dir & -url-prefix）确定目录并确保存在（建目录属初始化副作用，保留显式构造器注入配置文件） */
+    public FileStorageServiceImpl(AiConfigProperties config) {
+        this.imagesDir = Paths.get(config.getImageUploadDir());
+        this.videosDir = Paths.get(config.getVideoUploadDir());
+        this.audiosDir = Paths.get(config.getAudioUploadDir());
+        this.imageUrlPrefix = config.getImageUrlPrefix();
+        this.videoUrlPrefix = config.getVideoUrlPrefix();
+        this.audioUrlPrefix = config.getAudioUrlPrefix();
         try {
-            Files.createDirectories(IMAGES_DIR);
-            Files.createDirectories(VIDEOS_DIR);
-            Files.createDirectories(AUDIOS_DIR);
+            Files.createDirectories(imagesDir);
+            Files.createDirectories(videosDir);
+            Files.createDirectories(audiosDir);
         } catch (IOException e) {
             log.error("Failed to create upload directories", e);
         }
@@ -49,7 +60,7 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     @Override
     public String saveImage(String sourceUrl) {
-        return downloadAndSave(sourceUrl, IMAGES_DIR, "/api/files/images/", "image/png");
+        return downloadAndSave(sourceUrl, imagesDir, imageUrlPrefix, "image/png");
     }
 
     @Override
@@ -63,10 +74,10 @@ public class FileStorageServiceImpl implements FileStorageService {
             byte[] bytes = Base64.getDecoder().decode(clean);
             String extension = "png"; // Gemini returns PNG by default
             String filename = UUID.randomUUID().toString() + "." + extension;
-            Path target = IMAGES_DIR.resolve(filename);
+            Path target = imagesDir.resolve(filename);
             Files.write(target, bytes);
             log.debug("Saved base64 image: {}", target);
-            return "/api/files/images/" + filename;
+            return imageUrlPrefix + filename;
         } catch (IOException e) {
             throw new BusinessException(50201, "Failed to save base64 image: " + e.getMessage(), e);
         }
@@ -98,19 +109,19 @@ public class FileStorageServiceImpl implements FileStorageService {
                     if (contentType == null || !(contentType.startsWith("video/") || contentType.contains("quicktime"))) {
                         throw new BusinessException(40001, "仅支持上传视频文件");
                     }
-                    targetDir = VIDEOS_DIR; urlPrefix = "/api/files/videos/"; allowedExts = ALLOWED_VIDEO_EXTENSIONS;
+                    targetDir = videosDir; urlPrefix = videoUrlPrefix; allowedExts = ALLOWED_VIDEO_EXTENSIONS;
                 }
                 case "audio" -> {
                     if (contentType == null || !contentType.startsWith("audio/")) {
                         throw new BusinessException(40001, "仅支持上传音频文件");
                     }
-                    targetDir = AUDIOS_DIR; urlPrefix = "/api/files/audios/"; allowedExts = ALLOWED_AUDIO_EXTENSIONS;
+                    targetDir = audiosDir; urlPrefix = audioUrlPrefix; allowedExts = ALLOWED_AUDIO_EXTENSIONS;
                 }
                 default -> {
                     if (contentType == null || !contentType.startsWith("image/")) {
                         throw new BusinessException(40001, "仅支持上传图片文件");
                     }
-                    targetDir = IMAGES_DIR; urlPrefix = "/api/files/images/"; allowedExts = ALLOWED_IMAGE_EXTENSIONS;
+                    targetDir = imagesDir; urlPrefix = imageUrlPrefix; allowedExts = ALLOWED_IMAGE_EXTENSIONS;
                 }
             }
             String original = file.getOriginalFilename();
@@ -152,10 +163,10 @@ public class FileStorageServiceImpl implements FileStorageService {
                 extension = ALLOWED_IMAGE_EXTENSIONS.contains(raw) ? raw : "png";
             }
             String filename = UUID.randomUUID().toString() + "." + extension;
-            Path target = IMAGES_DIR.resolve(filename);
+            Path target = imagesDir.resolve(filename);
             Files.write(target, file.getBytes());
             log.debug("Saved uploaded image: {}", target);
-            return "/api/files/images/" + filename;
+            return imageUrlPrefix + filename;
         } catch (IOException e) {
             throw new BusinessException(50201, "保存上传图片失败: " + e.getMessage(), e);
         }
@@ -168,11 +179,11 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw new BusinessException(40001, "Empty video URL");
         }
         if (sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://")) {
-            return downloadAndSave(sourceUrl, VIDEOS_DIR, "/api/files/videos/", "video/mp4");
+            return downloadAndSave(sourceUrl, videosDir, videoUrlPrefix, "video/mp4");
         }
         // Might be a data URI or raw base64 — log and try direct URI as fallback
         log.warn("saveVideo received non-HTTP source (len={}), attempting direct URI", sourceUrl.length());
-        return downloadAndSave(sourceUrl, VIDEOS_DIR, "/api/files/videos/", "video/mp4");
+        return downloadAndSave(sourceUrl, videosDir, videoUrlPrefix, "video/mp4");
     }
 
     private String downloadAndSave(String sourceUrl, Path targetDir, String urlPrefix, String defaultContentType) {
@@ -236,17 +247,17 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     @Override
     public Path resolveImage(String filename) {
-        return safeResolve(IMAGES_DIR, filename);
+        return safeResolve(imagesDir, filename);
     }
 
     @Override
     public Path resolveVideo(String filename) {
-        return safeResolve(VIDEOS_DIR, filename);
+        return safeResolve(videosDir, filename);
     }
 
     @Override
     public Path resolveAudio(String filename) {
-        return safeResolve(AUDIOS_DIR, filename);
+        return safeResolve(audiosDir, filename);
     }
 
     /** 路径穿越防护：resolve + normalize 后校验必须在目标目录下 */

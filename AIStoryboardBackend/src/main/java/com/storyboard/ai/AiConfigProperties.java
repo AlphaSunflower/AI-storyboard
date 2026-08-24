@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -89,6 +90,66 @@ public class AiConfigProperties {
     @Getter
     private String videoUrlPrefix = "/api/files/videos/";
 
+    // ── 文件存储路径（image / audio，与 video 对齐）──
+    /** 图片文件本地存储目录 */
+    @Setter
+    @Getter
+    private String imageUploadDir = "uploads/images";
+    /** 音频文件本地存储目录 */
+    @Setter
+    @Getter
+    private String audioUploadDir = "uploads/audios";
+    /** 图片文件对外访问 URL 前缀 */
+    @Setter
+    @Getter
+    private String imageUrlPrefix = "/api/files/images/";
+    /** 音频文件对外访问 URL 前缀 */
+    @Setter
+    @Getter
+    private String audioUrlPrefix = "/api/files/audios/";
+
+    // ═══════════════════════════════════════════════════════════
+    //  超时 / 重试配置（可外部化到 application.yml 覆盖默认值）
+    // ═══════════════════════════════════════════════════════════
+
+    // ── 图片生成超时 ──
+    /** 文生图请求超时（秒，Spring AI ImageModel /v1/images/generations） */
+    @Setter @Getter private int imageRequestTimeout = 300;
+    /** 图改图请求超时（秒，/v1/images/edits multipart） */
+    @Setter @Getter private int imageEditTimeout = 180;
+
+    // ── 视频生成超时 ──
+    /** 视频创建 / 轮询 GET 请求超时（秒） */
+    @Setter @Getter private int videoRequestTimeout = 120;
+    /** 视频内容下载超时（秒） */
+    @Setter @Getter private int videoDownloadTimeout = 180;
+    /** 视频下载重试间隔（毫秒，单次轮询内重试窗口约 3×该值） */
+    @Setter @Getter private long videoRetryDelayMs = 15_000;
+
+    // ── 图片尺寸 / 重试 ──
+    /** 合法生图尺寸白名单（OpenAI gpt-image 系列，Laozhang/网关仅认这些；白名单外降级默认值） */
+    @Setter @Getter private List<String> imageValidSizes = List.of("1024x1024", "1536x1024", "1024x1536");
+    /** 生图尺寸兜底默认 */
+    @Setter @Getter private String imageDefaultSize = "1024x1024";
+    /** 生图请求重试次数 */
+    @Setter @Getter private int imageMaxRetries = 1;
+
+    // ── 视频下载重试次数 / 参考素材上传 ──
+    /** 视频内容下载重试次数（配套 videoRetryDelayMs，默认 3 次 × 15s） */
+    @Setter @Getter private int videoDownloadRetries = 3;
+    /** 参考素材上传网关超时（秒，大文件经 /v1/files/upload 换 mm_file://） */
+    @Setter @Getter private int refUploadTimeout = 300;
+
+    // ── 脚本生成超时 ──
+    /** 脚本生成 ChatClient 超时（秒） */
+    @Setter @Getter private int scriptTimeout = 120;
+
+    // ── 网关模型服务超时 ──
+    /** 网关模型列表请求超时（秒，connect + request 共用） */
+    @Setter @Getter private int gatewayModelTimeout = 10;
+    /** 网关不可达冷却时间（毫秒，冷却期内直接走兜底模型） */
+    @Setter @Getter private long gatewayCooldownMs = 300_000;
+
 
     // ═══════════════════════════════════════════════════════════
     //  标准 Getter / Setter（Spring Boot 配置绑定需要）
@@ -121,6 +182,11 @@ public class AiConfigProperties {
 
         /** 兜底文本模型独立 API Key（网关正常时由网关管理密钥，仅直连兜底时使用） */
         private String fallbackTextApiKey;
+
+        /** 兜底图片/视频/视觉模型名（网关不可达或未标记 is_default 时使用） */
+        private String fallbackImageModel = "gpt-image-2";
+        private String fallbackVideoModel = "MiniMax-H3";
+        private String fallbackVisionModel = "gemini-3-flash-preview";
 
     }
 

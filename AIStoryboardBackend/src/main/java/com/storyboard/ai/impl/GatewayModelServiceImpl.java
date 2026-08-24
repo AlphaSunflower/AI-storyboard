@@ -23,23 +23,20 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * LLM 网关模型列表实现：JDK HttpClient 直连网关 /v1/models?type=X 拉取模型列表，
  * 并缓存「默认模型」（网关 model_params.is_default=true 标记，单一权威源）。
- * 网关不可达时回退硬编码兜底常量（与前端静态兜底列表同义，仅离线引导用）。
+ * 网关不可达时回退配置驱动的兜底模型名（ai.gateway.fallback-*，仅离线引导用）。
  */
 @Service
 @RequiredArgsConstructor
 public class GatewayModelServiceImpl implements GatewayModelService {
 
-    /** 网关不可达时的兜底默认模型（每类型一个；权威源在网关 model_params.is_default） */
-    private static final Map<String, String> FALLBACK_DEFAULTS = Map.of(
-            "image", "gpt-image-2",
-            "video", "MiniMax-H3",
-            "vision", "gemini-3-flash-preview");
+    /** 网关不可达时逐个预热的模型类型（各类型兜底模型名由 ai.gateway.fallback-* 配置驱动） */
+    private static final List<String> FALLBACK_TYPES = List.of("image", "video", "vision");
 
     private final AiConfigProperties config;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofSeconds(10))  // ponytail: connect timeout 极少调，保常量
             .build();
 
     /** 默认模型缓存：type → 默认模型名（启动预热 + 首次使用时惰性回填） */
@@ -54,7 +51,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/models?type=" + type))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(config.getGatewayModelTimeout()))
                     .GET()
                     .build();
             HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -91,7 +88,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     /** 启动预热：提前拉取各类型默认模型进缓存（网关未就绪时静默跳过，首次使用再惰性回填） */
     @EventListener(ApplicationReadyEvent.class)
     public void warmDefaultModels() {
-        for (String type : FALLBACK_DEFAULTS.keySet()) {
+        for (String type : FALLBACK_TYPES) {
             String d = fetchDefaultModel(type);
             if (d != null) defaultCache.put(type, d);
         }
@@ -129,15 +126,20 @@ public class GatewayModelServiceImpl implements GatewayModelService {
             }
             String fetched = fetchDefaultModel(t);
             if (fetched != null) return fetched;
-            // 网关不可达：标记冷却 5 分钟
-            gatewayUnavailableUntil = System.currentTimeMillis() + 300_000;
+            // 网关不可达：标记冷却
+            gatewayUnavailableUntil = System.currentTimeMillis() + config.getGatewayCooldownMs();
             return fallbackFor(t);
         });
     }
 
     private String fallbackFor(String type) {
-        if ("text".equals(type)) return config.getGateway().getFallbackTextModel();
-        return FALLBACK_DEFAULTS.getOrDefault(type, "");
+        return switch (type) {
+            case "text" -> config.getGateway().getFallbackTextModel();
+            case "image" -> config.getGateway().getFallbackImageModel();
+            case "video" -> config.getGateway().getFallbackVideoModel();
+            case "vision" -> config.getGateway().getFallbackVisionModel();
+            default -> "";
+        };
     }
 
     /** 从网关 /v1/models 列表中找 is_default=true 的模型名（无则 null） */

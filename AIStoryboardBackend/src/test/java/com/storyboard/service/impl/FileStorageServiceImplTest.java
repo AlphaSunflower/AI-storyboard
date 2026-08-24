@@ -1,5 +1,6 @@
 package com.storyboard.service.impl;
 
+import com.storyboard.ai.AiConfigProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -18,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class FileStorageServiceImplTest {
 
-    private final FileStorageServiceImpl service = new FileStorageServiceImpl();
+    private final FileStorageServiceImpl service = new FileStorageServiceImpl(new AiConfigProperties(new AiConfigProperties.Gateway()));
     private final List<String> createdUrls = new ArrayList<>();
 
     @AfterEach

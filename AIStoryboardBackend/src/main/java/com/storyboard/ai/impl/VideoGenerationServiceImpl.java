@@ -202,7 +202,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
@@ -301,17 +301,17 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         }
     }
 
-    /** 从网关下载视频流并转存本地 uploads/videos（重试 3 次，每次间隔 15s） */
+    /** 从网关下载视频流并转存本地 uploads/videos（重试次数/间隔取自 ai.video-download-retries / ai.video-retry-delay-ms） */
     private String downloadVideoContent(String taskId) {
-        int maxRetries = 3;
-        long retryDelayMs = 15_000; // 单次轮询内重试窗口约 45s；跨轮询由 pollVideoTask 持续重试
+        int maxRetries = config.getVideoDownloadRetries();
+        long retryDelayMs = config.getVideoRetryDelayMs(); // 单次轮询内重试窗口约 3×该值；跨轮询由 pollVideoTask 持续重试
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos/" + taskId + "/content"))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(180))
+                    .timeout(Duration.ofSeconds(config.getVideoDownloadTimeout()))
                     .GET().build();
                 HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
 
@@ -376,7 +376,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(120))
+                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
                 .GET().build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 200) return resp.body();
@@ -436,7 +436,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/files/upload"))
                     .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(300))
+                    .timeout(Duration.ofSeconds(config.getRefUploadTimeout()))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
