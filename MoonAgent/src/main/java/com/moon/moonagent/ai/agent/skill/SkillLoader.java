@@ -129,7 +129,7 @@ public class SkillLoader {
     }
 
     /** markdown body 按 {@code ### 步骤id} 分段 → {nodeId: promptText}（无 ### 分段则整段归 name） */
-    private static Map<String, String> parseNodePrompts(String body) {
+    static Map<String, String> parseNodePrompts(String body) {
         Map<String, String> out = new LinkedHashMap<>();
         if (body == null || body.isBlank()) return out;
         Matcher m = Pattern.compile("^###\\s+([\\w-]+)\\s*\\n(.*?)(?=^###\\s+[\\w-]+|\\z)", Pattern.MULTILINE | Pattern.DOTALL)
