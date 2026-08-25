@@ -270,15 +270,8 @@ public class AgentOrchestratorSupport {
 
     /** 剧本优化：手动澄清循环的单步调用（message 字段流式增量转发） */
     public ScriptOptimizeResult callScriptOptimize(String content, OrchestrationRequest req) {
-        try {
-            String raw = streamPlanWithMessage(
-                    promptConfig.get("orchestrator/script-optimize"),
-                    content, req);
-            return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
-        } catch (Exception e) {
-            log.warn("剧本优化 LLM 调用失败: {}", e.getMessage());
-            return new ScriptOptimizeResult(0, "已理解你的需求，请继续补充。", null, List.of());
-        }
+        return callStructuredGate("orchestrator/script-optimize", content, req,
+                ScriptOptimizeResult.class, new ScriptOptimizeResult(0, "已理解你的需求，请继续补充。", null, List.of()));
     }
 
     /**
@@ -286,28 +279,75 @@ public class AgentOrchestratorSupport {
      * 复用 ScriptOptimizeResult 结构（type=0 需澄清 / type=1 已明确直接跳过）。
      */
     public ScriptOptimizeResult callRequirementClarify(String content, OrchestrationRequest req) {
-        try {
-            String raw = streamPlanWithMessage(
-                    promptConfig.get("orchestrator/requirement-clarify"),
-                    content, req);
-            return new BeanOutputConverter<>(ScriptOptimizeResult.class).convert(raw);
-        } catch (Exception e) {
-            log.warn("需求澄清 LLM 调用失败（降级跳过）: {}", e.getMessage());
-            // 失败直接跳过澄清，不阻塞主流程
-            return new ScriptOptimizeResult(1, "", null, List.of());
-        }
+        // 失败直接跳过澄清，不阻塞主流程
+        return callStructuredGate("orchestrator/requirement-clarify", content, req,
+                ScriptOptimizeResult.class, new ScriptOptimizeResult(1, "", null, List.of()));
     }
 
     /** 分镜方案设计（message 字段流式增量转发） */
     public StoryboardPlanResult callStoryboardPlan(String script, OrchestrationRequest req) {
+        return callStructuredGate("orchestrator/storyboard-plan", script, req,
+                StoryboardPlanResult.class, new StoryboardPlanResult(1, "已根据剧本生成方案。", List.of()));
+    }
+
+    // ===== 结构化输出容错（gate/方案 LLM 偶发吐人话而非 JSON，e2e 实测「好的」撞车）=====
+
+    /**
+     * 结构化 gate 统一调用：流式调 LLM → 容错解析；若 LLM 输出纯人话（非 JSON）导致解析失败，
+     * 安静地带「只输出 JSON」重试一次（不转发 message 字段、不重复流式），仍失败回退 fallback。
+     */
+    private <T> T callStructuredGate(String promptKey, String content, OrchestrationRequest req,
+                                     Class<T> type, T fallback) {
         try {
-            String raw = streamPlanWithMessage(
-                    promptConfig.get("orchestrator/storyboard-plan"),
-                    script, req);
-            return new BeanOutputConverter<>(StoryboardPlanResult.class).convert(raw);
+            String raw = streamPlanWithMessage(promptConfig.get(promptKey), content, req);
+            return convertStructured(raw, type);
         } catch (Exception e) {
-            log.warn("分镜方案 LLM 调用失败: {}", e.getMessage());
-            return new StoryboardPlanResult(1, "已根据剧本生成方案。", List.of());
+            log.warn("{} LLM 输出非 JSON，修复重试一次: {}", promptKey, e.getMessage());
+            try {
+                // 只重试一次：追加「只输出 JSON」约束的安静调用（非流式，不再向用户转发 message）
+                String raw2 = callQuiet(promptConfig.get(promptKey)
+                        + "\n\n注意：你上一次输出不是 JSON。现在请只输出一个 JSON 对象，不要任何说明、思考或前言。",
+                        content, req);
+                if (raw2 != null && !raw2.isBlank()) return convertStructured(raw2, type);
+            } catch (Exception e2) {
+                log.warn("{} LLM 修复重试仍失败: {}", promptKey, e2.getMessage());
+            }
+            return fallback;
+        }
+    }
+
+    /** 容错解析：直接转换；失败则剥掉 JSON 对象前后的人话再试（如「好的，方案如下：{...}」） */
+    private <T> T convertStructured(String raw, Class<T> type) {
+        try {
+            return new BeanOutputConverter<>(type).convert(raw);
+        } catch (Exception e) {
+            String json = stripJsonObject(raw);
+            if (json != null && !json.equals(raw)) {
+                try { return new BeanOutputConverter<>(type).convert(json); }
+                catch (Exception e2) { /* 落到最外层抛给调用方做修复重试 */ }
+            }
+            throw new RuntimeException("LLM 未输出合法 JSON: " + e.getMessage(), e);
+        }
+    }
+
+    /** 摘取 raw 中第一个 {@code {} 到最后一个 {@code } 之间的 JSON 对象；无对象（纯人话）返回 null */
+    static String stripJsonObject(String raw) {
+        if (raw == null) return null;
+        int a = raw.indexOf('{'), b = raw.lastIndexOf('}');
+        return (a >= 0 && b > a) ? raw.substring(a, b + 1) : null;
+    }
+
+    /** 安静调用（非流式、不转发 message 字段）：供修复重试用 */
+    private String callQuiet(String systemPrompt, String userContent, OrchestrationRequest req) {
+        try {
+            return planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                    .system(systemPrompt)
+                    .user(userContent)
+                    .call()
+                    .content();
+        } catch (Exception e) {
+            log.warn("修复重试 LLM 调用失败: {}", e.getMessage());
+            return "";
         }
     }
 
