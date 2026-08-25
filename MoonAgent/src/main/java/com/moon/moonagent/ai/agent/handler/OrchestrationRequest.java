@@ -39,4 +39,7 @@ public class OrchestrationRequest {
 
     /** resume 阶段用户勾选的资产 ID 列表（资产选择卡片提交；空=未勾选/未涉及资产，由 Orchestrator.resume 设置） */
     private java.util.List<String> assetIds = java.util.List.of();
+
+    /** 当前意图类型（如 intent-aisplit；由 Orchestrator 分发/续流时设置，供 Skill 按需取提示词） */
+    private String intentType = "";
 }

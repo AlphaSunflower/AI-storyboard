@@ -333,6 +333,7 @@ public class PlanGraph {
             String nodeName = "node_" + handler.intentType().replace("intent-", "");
             graph.addNode(nodeName, node_async(state -> {
                 OrchestrationRequest request = stateRequest(state);
+                request.setIntentType(handler.intentType());
                 // resume 路径：从 state 标量重建 checkpoint（handler 只用 getAction/getPlan）
                 if (Boolean.TRUE.equals(state.value(K_RESUME).orElse(false))) {
                     request.setAction(state.<String>value(K_SUBMIT_ACTION).orElse(""));

@@ -64,6 +64,7 @@ public class AgentOrchestratorSupport {
     private final com.moon.moonagent.ai.agent.AssetMatchingService assetMatchingService;
     private final com.moon.moonagent.mapper.AgentMessageMapper messageMapper;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
+    private final com.moon.moonagent.ai.agent.skill.SkillLoader skillLoader;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -270,7 +271,7 @@ public class AgentOrchestratorSupport {
 
     /** 剧本优化：手动澄清循环的单步调用（message 字段流式增量转发） */
     public ScriptOptimizeResult callScriptOptimize(String content, OrchestrationRequest req) {
-        return callStructuredGate("orchestrator/script-optimize", content, req,
+        return callStructuredGate("script-optimize", "orchestrator/script-optimize", content, req,
                 ScriptOptimizeResult.class, new ScriptOptimizeResult(0, "已理解你的需求，请继续补充。", null, List.of()));
     }
 
@@ -280,13 +281,13 @@ public class AgentOrchestratorSupport {
      */
     public ScriptOptimizeResult callRequirementClarify(String content, OrchestrationRequest req) {
         // 失败直接跳过澄清，不阻塞主流程
-        return callStructuredGate("orchestrator/requirement-clarify", content, req,
+        return callStructuredGate("requirement-clarify", "orchestrator/requirement-clarify", content, req,
                 ScriptOptimizeResult.class, new ScriptOptimizeResult(1, "", null, List.of()));
     }
 
     /** 分镜方案设计（message 字段流式增量转发） */
     public StoryboardPlanResult callStoryboardPlan(String script, OrchestrationRequest req) {
-        return callStructuredGate("orchestrator/storyboard-plan", script, req,
+        return callStructuredGate("storyboard-plan", "orchestrator/storyboard-plan", script, req,
                 StoryboardPlanResult.class, new StoryboardPlanResult(1, "已根据剧本生成方案。", List.of()));
     }
 
@@ -295,22 +296,23 @@ public class AgentOrchestratorSupport {
     /**
      * 结构化 gate 统一调用：流式调 LLM → 容错解析；若 LLM 输出纯人话（非 JSON）导致解析失败，
      * 安静地带「只输出 JSON」重试一次（不转发 message 字段、不重复流式），仍失败回退 fallback。
+     * 系统提示词按需加载：skill body {@code ### stepId} 优先，未命中回退 promptConfig {@code fallbackKey}。
      */
-    private <T> T callStructuredGate(String promptKey, String content, OrchestrationRequest req,
+    private <T> T callStructuredGate(String stepId, String fallbackKey, String content, OrchestrationRequest req,
                                      Class<T> type, T fallback) {
         try {
-            String raw = streamPlanWithMessage(promptConfig.get(promptKey), content, req);
+            String raw = streamPlanWithMessage(prompt(req, stepId, fallbackKey, null), content, req);
             return convertStructured(raw, type);
         } catch (Exception e) {
-            log.warn("{} LLM 输出非 JSON，修复重试一次: {}", promptKey, e.getMessage());
+            log.warn("{} LLM 输出非 JSON，修复重试一次: {}", fallbackKey, e.getMessage());
             try {
                 // 只重试一次：追加「只输出 JSON」约束的安静调用（非流式，不再向用户转发 message）
-                String raw2 = callQuiet(promptConfig.get(promptKey)
+                String raw2 = callQuiet(prompt(req, stepId, fallbackKey, null)
                         + "\n\n注意：你上一次输出不是 JSON。现在请只输出一个 JSON 对象，不要任何说明、思考或前言。",
                         content, req);
                 if (raw2 != null && !raw2.isBlank()) return convertStructured(raw2, type);
             } catch (Exception e2) {
-                log.warn("{} LLM 修复重试仍失败: {}", promptKey, e2.getMessage());
+                log.warn("{} LLM 修复重试仍失败: {}", fallbackKey, e2.getMessage());
             }
             return fallback;
         }
@@ -349,6 +351,31 @@ public class AgentOrchestratorSupport {
             log.warn("修复重试 LLM 调用失败: {}", e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * 当前请求对应的能力 skill（按 req.intentType 解析；未知返回 null）。
+     * 供 gate/方案提示词「按需加载」——skill body 未命中时回退 promptConfig。
+     */
+    public com.moon.moonagent.ai.agent.skill.AgentSkill skill(OrchestrationRequest req) {
+        return req == null ? null : skillLoader.byIntent(req.getIntentType());
+    }
+
+    /**
+     * Skill 提示词按需加载：优先当前能力 SKILL.md body 的 {@code ### stepId} 段（单一来源——改提示词不用碰 Java），
+     * 未命中回退 promptConfig {@code fallbackKey}（迁移期安全网）；两者都替换 {@code {{var}}}。
+     */
+    public String prompt(OrchestrationRequest req, String stepId, String fallbackKey, Map<String, String> vars) {
+        com.moon.moonagent.ai.agent.skill.AgentSkill sk = skill(req);
+        String text = sk == null ? null : sk.nodePrompts().get(stepId);
+        if (text == null || text.isBlank()) {
+            return promptConfig.get(fallbackKey, vars == null ? Map.of() : vars);
+        }
+        Map<String, String> v = vars == null ? Map.of() : vars;
+        for (Map.Entry<String, String> e : v.entrySet()) {
+            text = text.replace("{{" + e.getKey() + "}}", e.getValue() == null ? "" : e.getValue());
+        }
+        return text;
     }
 
     /**
@@ -487,7 +514,7 @@ public class AgentOrchestratorSupport {
     public ImageClarifyResult callVideoClarify(String content, OrchestrationRequest req) {
         try {
             String raw = streamPlanWithMessage(
-                    promptConfig.get("orchestrator/video-clarify"),
+                    prompt(req, "video-clarify", "orchestrator/video-clarify", null),
                     content, req);
             return new BeanOutputConverter<>(ImageClarifyResult.class).convert(raw);
         } catch (Exception e) {
@@ -731,7 +758,7 @@ public class AgentOrchestratorSupport {
             String imageOpts = buildModelOptionsText("image");
             String videoOpts = buildModelOptionsText("video");
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(promptConfig.get("orchestrator/scene-params-recommend"))
+                .system(prompt(req, "scene-params-recommend", "orchestrator/scene-params-recommend", null))
                 .user("剧本：\n" + script
                     + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
                     + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
