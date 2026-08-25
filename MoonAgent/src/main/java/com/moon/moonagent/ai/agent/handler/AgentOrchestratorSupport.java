@@ -11,6 +11,7 @@ import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.AssetRelevanceResult;
 import com.moon.moonagent.ai.GatewayModelService;
@@ -1012,8 +1013,8 @@ public class AgentOrchestratorSupport {
      */
     public AssetGateResume resumeAssetGate(OrchestrationRequest req, AgentCheckpoint cp, List<AssetVO> chosenAssets) {
         String action = req.getAction();
-        String originPrompt = planField(cp.getPlan(), "content");
-        List<String> ids = parseAssetIds(planField(cp.getPlan(), "assetIds"));
+        String originPrompt = planField(cp.getPlan(), PlanField.CONTENT);
+        List<String> ids = parseAssetIds(planField(cp.getPlan(), PlanField.ASSET_IDS));
         if ("asset-skip".equals(action)) return new AssetGateResume(true, originPrompt, List.of());
         if ("asset-force".equals(action)) return new AssetGateResume(true, originPrompt, ids);
         // custom：重新描述需求 → 重判
@@ -1030,9 +1031,9 @@ public class AgentOrchestratorSupport {
                         + "\n\n请进一步讲清楚资产在本次创作中的用途，或选择不使用资产。";
                 runHITLStage(req, null, new StagePlan(
                         planText, "asset-gate",
-                        List.of(Map.of("source", planField(cp.getPlan(), "source"),
+                        List.of(Map.of("source", planField(cp.getPlan(), PlanField.SOURCE),
                                 "content", newPrompt, "assetIds", String.join(",", ids),
-                                "picUrl", planField(cp.getPlan(), "picUrl"))),
+                                "picUrl", planField(cp.getPlan(), PlanField.PIC_URL))),
                         "human_input",
                         List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
                                 Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),
@@ -1164,6 +1165,11 @@ public class AgentOrchestratorSupport {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** 枚举重载：planField(planJson, PlanField.CONTENT) */
+    public String planField(String planJson, PlanField field) {
+        return planField(planJson, field.key());
     }
 
     /** checkpoint plan JSON 取 items[0] 的 List 字段（宽松解析，缺失/失败返回空 list） */

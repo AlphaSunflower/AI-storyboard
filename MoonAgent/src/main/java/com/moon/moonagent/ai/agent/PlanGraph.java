@@ -11,6 +11,11 @@ import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
+import com.moon.moonagent.ai.agent.specialist.SpecialistAgentRegistry;
+import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
+import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
+import com.moon.moonagent.ai.agent.skill.AgentSkill;
 import com.moon.moonagent.ai.agent.skill.SkillLoader;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
@@ -83,6 +88,9 @@ public class PlanGraph {
     private static final String K_ASSET_IDS = "assetIds";       // 资产选择卡片勾选
     private static final String K_SWITCH = "switch";            // 切链出口标记：重路由 intent_recognize
     private static final String K_ROUTING_HINT = "routingHint"; // 前端显式切链提示（目标 intentType，优先级最高）
+    // Phase 3: 移交状态键
+    private static final String K_HANDOFF_TARGET = "handoffTarget"; // 移交目标 intentType（null=完成）
+    private static final String K_HANDOFF_STATE = "handoffState";   // 移交传递的状态
 
     private final IntentRecognitionService intentRecognitionService;
     private final AgentMessageMapper messageMapper;
@@ -90,6 +98,7 @@ public class PlanGraph {
     private final AgentOrchestratorSupport support;
     private final List<IntentHandler> intentHandlers;
     private final SkillLoader skillLoader;
+    private final SpecialistAgentRegistry specialistRegistry;
 
     /**
      * emitter 外部注册表：threadId(=conversationId) → SseEmitter。
@@ -107,15 +116,18 @@ public class PlanGraph {
     private Map<String, IntentHandler> byAction = Map.of();
 
     /** P3 静态映射：checkpoint.action → 目标 intent（其余走动态特判/byAction） */
-    private static final Map<String, String> CP_ACTION_TO_INTENT = Map.of(
-            "clarify-option", "intent-aisplit",
-            "scene-mode", "intent-aisplit",
-            "requirement-clarify", "intent-aisplit",
-            "scene-regenerate", "intent-aisplit",
-            "video-clarify", "intent-video",
-            "pic-option", "intent-pic",
-            "pic-clarify", "intent-pic",
-            "delete-confirm", "intent-delete");
+    private static final Map<String, String> CP_ACTION_TO_INTENT = Map.ofEntries(
+            Map.entry("clarify-option", "intent-aisplit"),
+            Map.entry("scene-mode", "intent-aisplit"),
+            Map.entry("requirement-clarify", "intent-aisplit"),
+            Map.entry("scene-regenerate", "intent-aisplit"),
+            Map.entry("script-source", "intent-aisplit"),
+            Map.entry("video-clarify", "intent-video"),
+            Map.entry("video-source", "intent-video"),
+            Map.entry("pic-option", "intent-pic"),
+            Map.entry("pic-clarify", "intent-pic"),
+            Map.entry("prompt-source", "intent-pic"),
+            Map.entry("delete-confirm", "intent-delete"));
 
     private CompiledGraph compiledGraph;
 
@@ -155,6 +167,8 @@ public class PlanGraph {
             m.put(K_ASSET_IDS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_SWITCH, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_ROUTING_HINT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
+            m.put(K_HANDOFF_TARGET, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
+            m.put(K_HANDOFF_STATE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             return m;
         };
 
@@ -328,28 +342,67 @@ public class PlanGraph {
                         }),
                         allNodeTargets());
 
-        // handler 适配器节点：node_aisplit / node_pic / ... → handler.handle(request) 或 handler.resume(request, cp)
+        // handler 适配器节点：通过 SpecialistAgent 执行（有 specialist 用 specialist，否则自动包装 handler）
         for (IntentHandler handler : intentHandlers) {
-            String nodeName = "node_" + handler.intentType().replace("intent-", "");
+            String intent = handler.intentType();
+            String nodeName = "node_" + intent.replace("intent-", "");
             graph.addNode(nodeName, node_async(state -> {
-                OrchestrationRequest request = stateRequest(state);
-                request.setIntentType(handler.intentType());
-                // resume 路径：从 state 标量重建 checkpoint（handler 只用 getAction/getPlan）
-                if (Boolean.TRUE.equals(state.value(K_RESUME).orElse(false))) {
-                    request.setAction(state.<String>value(K_SUBMIT_ACTION).orElse(""));
-                    request.setCustomText(state.<String>value(K_CUSTOM_TEXT).orElse(""));
-                    request.setParams(state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()));
-                    request.setAssetIds(state.<List<String>>value(K_ASSET_IDS).orElse(List.of()));
-                    AgentCheckpoint cp = new AgentCheckpoint();
-                    cp.setAction(state.<String>value(K_CP_ACTION).orElse(""));
-                    cp.setPlan(state.<String>value(K_CP_PLAN).orElse(""));
-                    String last = handler.resume(request, cp);
-                    return Map.of(K_LAST_MESSAGE, last);
+                // Phase 3: 通过 SpecialistAgentRegistry 获取 specialist（自动包装 handler）
+                SpecialistAgent specialist = specialistRegistry.get(intent).orElse(null);
+                if (specialist == null) {
+                    log.warn("PlanGraph: 无 specialist 覆盖 {}", intent);
+                    // 降级：直接调 handler（保持兼容）
+                    OrchestrationRequest request = stateRequest(state);
+                    request.setIntentType(intent);
+                    if (Boolean.TRUE.equals(state.value(K_RESUME).orElse(false))) {
+                        request.setAction(state.<String>value(K_SUBMIT_ACTION).orElse(""));
+                        request.setCustomText(state.<String>value(K_CUSTOM_TEXT).orElse(""));
+                        request.setParams(state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()));
+                        request.setAssetIds(state.<List<String>>value(K_ASSET_IDS).orElse(List.of()));
+                        AgentCheckpoint cp = new AgentCheckpoint();
+                        cp.setAction(state.<String>value(K_CP_ACTION).orElse(""));
+                        cp.setPlan(state.<String>value(K_CP_PLAN).orElse(""));
+                        return Map.of(K_LAST_MESSAGE, handler.resume(request, cp));
+                    }
+                    return Map.of(K_LAST_MESSAGE, handler.handle(request));
                 }
-                String last = handler.handle(request);
-                return Map.of(K_LAST_MESSAGE, last);
+
+                // 构建 SpecialistContext
+                AgentSkill skill = skillLoader.byIntent(intent);
+                SpecialistContext ctx = new SpecialistContext(
+                        state.<AgentConversation>value(K_CONVERSATION).orElseThrow(),
+                        state.<String>value(K_CONTENT).orElse(""),
+                        state.<String>value(K_PIC_URL).orElse(""),
+                        emittersByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()),
+                        null,  // previousResult（单步，无链式）
+                        skill,
+                        state.<String>value(K_SUBMIT_ACTION).orElse(""),
+                        state.<String>value(K_CUSTOM_TEXT).orElse(""),
+                        state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
+                        state.<String>value(K_CP_ACTION).orElse(""),
+                        state.<String>value(K_CP_PLAN).orElse("")
+                );
+                SpecialistResult result = specialist.execute(ctx);
+                if (result.needsHandoff()) {
+                    log.info("PlanGraph: {} 移交到 {} 原因={}", intent, result.handoffTarget(), result.handoffReason());
+                    return Map.of(
+                            K_LAST_MESSAGE, result.message() != null ? result.message() : "",
+                            K_HANDOFF_TARGET, result.handoffTarget(),
+                            K_HANDOFF_STATE, result.handoffState() != null ? result.handoffState() : Map.of());
+                }
+                return Map.of(K_LAST_MESSAGE, result.message() != null ? result.message() : "");
             }));
-            graph.addEdge(nodeName, END);
+            // 移交检查条件边：有移交目标 → 目标 specialist 节点；否则 → END
+            graph.addConditionalEdges(nodeName,
+                    edge_async(state -> {
+                        String target = state.<String>value(K_HANDOFF_TARGET).orElse("");
+                        if (!target.isBlank()) {
+                            String targetNode = intentToNode.get(target);
+                            if (targetNode != null) return targetNode;
+                        }
+                        return "END";
+                    }),
+                    allNodeTargetsWithEnd());
         }
 
         compiledGraph = graph.compile();

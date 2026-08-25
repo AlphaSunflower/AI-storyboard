@@ -67,6 +67,17 @@ ai:
   gateway-model-timeout: 10
   gateway-cooldown-ms: 300000
 
+# ── MCP Server（暴露 agent 工具给外部 MCP 客户端）──
+spring.ai.mcp.server.enabled: true
+spring.ai.mcp.server.name: moon-agent
+spring.ai.mcp.server.version: 1.0.0
+spring.ai.mcp.server.type: SYNC
+spring.ai.mcp.server.protocol: STREAMABLE
+# ── MCP Client（接入外部 MCP 服务器）──
+spring.ai.mcp.client.enabled: true
+spring.ai.mcp.client.type: SYNC
+spring.ai.mcp.client.toolcallback.enabled: true
+
 # 提示词文件目录（文件系统路径，支持热刷新）
 prompts:
   dir: src/main/resources/prompts

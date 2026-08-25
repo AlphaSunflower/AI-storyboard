@@ -5,6 +5,7 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
@@ -123,8 +124,22 @@ public class AisplitIntentHandler implements IntentHandler {
                     "human_input", options), true);
             return request.getLastMessage();
         }
-        // 需求已明确 → 直接进剧本优化
-        return handleFromScriptGate(request, content, assetIds);
+        // 需求已明确 → 剧本来源人工介入（有剧本先填写 / 没有帮我生成）
+        return showScriptSourceGate(request, content, assetIds);
+    }
+
+    /**
+     * 剧本来源人工介入：需求已明确后，问用户有没有现成剧本/提示词。
+     * 有 → 用户填写后进剧本优化；没有 → LLM 自由生成。
+     */
+    private String showScriptSourceGate(OrchestrationRequest request, String content, List<String> assetIds) {
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                "你有现成的剧本或提示词吗？有的话可以先填写，没有也没关系，我来帮你生成。",
+                "script-source",
+                List.of(Map.of("content", content, "assetIds", assetIds == null ? List.of() : assetIds)),
+                "human_input",
+                List.of(Map.of("id", "has-script", "title", "有，我来填写"),
+                        Map.of("id", "no-script", "title", "没有，帮我生成"))));
     }
 
     /**
@@ -267,7 +282,7 @@ public class AisplitIntentHandler implements IntentHandler {
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 进入正式分镜链（source=aisplit 由 Orchestrator 分派）
         if ("asset-selection".equals(checkpoint.getAction())) {
-            String content = support.planField(checkpoint.getPlan(), "content");
+            String content = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             List<String> ids = "asset-skip".equals(request.getAction())
                     ? List.of() : request.getAssetIds() == null ? List.of() : request.getAssetIds();
             support.setSessionAssets(request.getConversation().getId(), ids);
@@ -292,8 +307,8 @@ public class AisplitIntentHandler implements IntentHandler {
         // 澄清选项续流：所选选项标题拼入需求，重走对应 gate（kind=script 从剧本优化重走；plan 从分镜方案重走）。
         // action=custom（自定义输入）：直接用用户输入文本作为补充，不查 options 表
         if ("clarify-option".equals(checkpoint.getAction())) {
-            String kind = support.planField(checkpoint.getPlan(), "kind");
-            String original = support.planField(checkpoint.getPlan(), "originalContent");
+            String kind = support.planField(checkpoint.getPlan(), PlanField.KIND);
+            String original = support.planField(checkpoint.getPlan(), PlanField.ORIGINAL_CONTENT);
             String chosenId = request.getAction();
             String title = "custom".equals(chosenId)
                     ? request.getCustomText()
@@ -309,7 +324,7 @@ public class AisplitIntentHandler implements IntentHandler {
 
         // 需求澄清卡片续流：用户选择/自定义输入 → 拼入需求 → 进剧本优化（跳过二次澄清）
         if ("requirement-clarify".equals(checkpoint.getAction())) {
-            String original = support.planField(checkpoint.getPlan(), "content");
+            String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             String chosenId = request.getAction();
             String title = "custom".equals(chosenId)
                     ? request.getCustomText()
@@ -318,11 +333,11 @@ public class AisplitIntentHandler implements IntentHandler {
                             .map(o -> String.valueOf(o.getOrDefault("title", "")))
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
-            // 澄清后直接进剧本优化，不再重复澄清 gate
+            // 澄清后 → 剧本来源人工介入（跳过二次澄清）
             List<String> assetIds = currentAssetIds(request);
             if (assetIds.isEmpty()) {
                 // plan 里可能存了 assetIds
-                String stored = support.planField(checkpoint.getPlan(), "assetIds");
+                String stored = support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS);
                 if (stored != null && !stored.isBlank() && !"[]".equals(stored)) {
                     try {
                         @SuppressWarnings("unchecked")
@@ -332,13 +347,42 @@ public class AisplitIntentHandler implements IntentHandler {
                     } catch (Exception ignored) {}
                 }
             }
+            return showScriptSourceGate(request, supplemented, assetIds);
+        }
+
+        // 剧本来源卡片续流：has-script → 用户填写剧本 → 进剧本优化；no-script → LLM 自由生成
+        if ("script-source".equals(checkpoint.getAction())) {
+            String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
+            List<String> assetIds = currentAssetIds(request);
+            if (assetIds.isEmpty()) {
+                String stored = support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS);
+                if (stored != null && !stored.isBlank() && !"[]".equals(stored)) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                                .readValue(stored, java.util.List.class);
+                        assetIds = parsed.stream().map(String::valueOf).toList();
+                    } catch (Exception ignored) {}
+                }
+            }
+            String supplemented;
+            if ("has-script".equals(request.getAction())) {
+                String custom = request.getCustomText();
+                supplemented = (custom != null && !custom.isBlank())
+                        ? original + "\n（用户提供的剧本：\n" + custom + "）" : original;
+            } else {
+                // no-script：内容太短时补充方向引导，让 LLM 有东西可写
+                supplemented = original.length() < 20
+                        ? "用户想生成分镜但没有具体内容，请自由发挥创作一个有趣的分镜剧本。用户原始需求：" + original
+                        : original;
+            }
             return handleFromScriptGate(request, supplemented, assetIds);
         }
 
         // 卡片1：分镜处理方式（scene-mode）——基于现有优化 / 全新创建 / 不生成
         if ("scene-mode".equals(checkpoint.getAction())) {
             String action = request.getAction();
-            String original = support.planField(checkpoint.getPlan(), "content");
+            String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             if ("scene-mode-cancel".equals(action)) {
                 return endWithoutScenes(request, "好的，本次不生成分镜。需要时可以随时再让我生成。");
             }
@@ -356,7 +400,7 @@ public class AisplitIntentHandler implements IntentHandler {
 
         // 调整意见（scene-regenerate）：上一轮方案文本 + 用户意见 → 重走生成链（LLM 基于意见重新优化）
         if ("scene-regenerate".equals(checkpoint.getAction())) {
-            String prevPlan = support.planField(checkpoint.getPlan(), "content");
+            String prevPlan = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             String opinion = request.getCustomText();
             String supplemented = prevPlan + "\n【用户调整意见】\n"
                     + (opinion == null || opinion.isBlank() ? "请重新生成一版更合适的方案" : opinion);
@@ -393,8 +437,8 @@ public class AisplitIntentHandler implements IntentHandler {
         // 执行写分镜（EXECUTE step）；replace=同事务清空现有再写（覆盖）/ 其余=追加（现状）
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
         Map<String, Object> writeResult = "replace".equals(chosen)
-                ? agentTools.replaceScenes(request.getConversation().getProjectId(), items)
-                : agentTools.writeScenes(request.getConversation().getProjectId(), items);
+                ? safeReplaceScenes(request.getConversation().getProjectId(), items)
+                : safeWriteScenes(request.getConversation().getProjectId(), items);
         int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
         // 写库成功：不满意调整计数清零（新一轮生成起点）+ 用户确认的整套推荐参数应用到全部分镜
         support.clearRegenCount(request.getConversation().getId());
@@ -494,5 +538,15 @@ public class AisplitIntentHandler implements IntentHandler {
             }
         }
         return sb.toString();
+    }
+
+    /** 包装 AgentTools：捕获异常转 error Map（保持 handler 错误处理语义） */
+    private Map<String, Object> safeWriteScenes(String projectId, List<AgentSceneItem> scenes) {
+        try { return agentTools.writeScenes(projectId, scenes); }
+        catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
+    }
+    private Map<String, Object> safeReplaceScenes(String projectId, List<AgentSceneItem> scenes) {
+        try { return agentTools.replaceScenes(projectId, scenes); }
+        catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
     }
 }

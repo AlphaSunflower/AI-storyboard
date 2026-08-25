@@ -6,6 +6,7 @@ import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
@@ -155,7 +156,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
         if ("asset-gate".equals(cpAction)) {
             List<Integer> sceneNums = extractSceneNumsFromPlan(checkpoint);
             List<Scene> targetScenes = resolveTargetScenes(projectId, sceneNums);
-            List<String> prevIds = parseAssetIds(support.planField(checkpoint.getPlan(), "assetIds"));
+            List<String> prevIds = parseAssetIds(support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS));
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(projectId), prevIds);
             AgentOrchestratorSupport.AssetGateResume r = support.resumeAssetGate(request, checkpoint, chosen);

@@ -1,51 +1,63 @@
 package com.moon.moonagent.ai.agent;
 
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 会话级互斥锁：同一 conversation 同时只允许一个活跃编排实例。
+ * 会话级互斥锁（Redis 分布式版本）：同一 conversation 同时只允许一个活跃编排实例。
  *
- * <p>约定：锁获取在 Controller 线程同步完成（runAsync 调度之前，防双实例同时启动），
- * 释放发生在异步任务线程 finally——故用 {@link Semaphore}（无线程所有权语义，
- * 跨线程 release 安全；ReentrantLock 会因 isHeldByCurrentThread 守卫导致锁残留）。
- * 获取失败 → SSE error 40901「当前对话正在处理中，请稍候」/ blocking 抛 40901。
- *
- * <p>ponytail: JVM 内锁，单实例部署正确；多实例部署需换 PostgreSQL SELECT ... FOR UPDATE
- * 或 Redis 分布式锁（当前 pom 无 Redis 依赖，暂不预建）。
+ * <p>使用 Redis SETNX 实现原子锁，TTL 自动过期防死锁。
+ * 获取失败 → SSE error 40901「当前对话正在处理中，请稍候」。
  */
 @Component
+@RequiredArgsConstructor
 public class ConversationLock {
 
-    private final ConcurrentHashMap<String, Semaphore> locks = new ConcurrentHashMap<>();
+    private static final Logger log = LoggerFactory.getLogger(ConversationLock.class);
 
-    /** 尝试获取会话锁（3s 超时）；失败返回 false（已有编排实例在跑） */
+    private final StringRedisTemplate redisTemplate;
+
+    private static final String PREFIX = "agent:lock:conversation:";
+    /** 5 分钟自动过期——编排最长不超过此值，超时自动释放防死锁 */
+    private static final long TTL_SECONDS = 300;
+
+    /**
+     * 尝试获取会话锁（原子 SETNX，无阻塞等待）。
+     * @return true=获取成功；false=已有编排实例在跑
+     */
     public boolean tryAcquire(String conversationId) {
-        Semaphore semaphore = locks.computeIfAbsent(conversationId, k -> new Semaphore(1));
+        String key = PREFIX + conversationId;
         try {
-            return semaphore.tryAcquire(3, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
+            Boolean ok = redisTemplate.opsForValue()
+                    .setIfAbsent(key, "1", TTL_SECONDS, TimeUnit.SECONDS);
+            boolean acquired = Boolean.TRUE.equals(ok);
+            if (!acquired) {
+                log.debug("ConversationLock: 会话 {} 已被锁定", conversationId);
+            }
+            return acquired;
+        } catch (Exception e) {
+            // Redis 不可用时降级为允许通过（可用性优先）
+            log.warn("ConversationLock: Redis 不可用，降级放行 conversationId={} error={}", conversationId, e.getMessage());
+            return true;
         }
     }
 
-    /** 释放会话锁（仅 tryAcquire 成功路径调用；Semaphore 无所有权，跨线程安全） */
+    /** 释放会话锁 */
     public void release(String conversationId) {
-        Semaphore semaphore = locks.get(conversationId);
-        if (semaphore != null) {
-            semaphore.release();
+        try {
+            redisTemplate.delete(PREFIX + conversationId);
+        } catch (Exception e) {
+            log.warn("ConversationLock: 释放锁失败 conversationId={} error={}", conversationId, e.getMessage());
         }
     }
 
-    /** 释放锁并移除条目（会话删除时调用，防止内存泄漏） */
+    /** 释放锁并移除条目（语义同 release，Redis 无内存条目需清理） */
     public void releaseAndRemove(String conversationId) {
-        Semaphore semaphore = locks.remove(conversationId);
-        if (semaphore != null) {
-            semaphore.release();
-        }
+        release(conversationId);
     }
 }
