@@ -9,6 +9,7 @@ limits: { max_clarify_rounds: 2, max_regenerate_rounds: 3 }
 triggers:
   - '分镜|故事板|剧本'
 priority: 30
+menu_order: 10
 hitl:
   - { id: agree, title: 满意 }
   - { id: disagree, title: 不满意 }

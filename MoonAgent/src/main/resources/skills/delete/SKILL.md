@@ -9,6 +9,7 @@ limits: {}
 triggers:
   - '(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空))).{0,6}(?:分镜|剧本|故事板)|(?:分镜|剧本|故事板).{0,8}(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空)))'
 priority: 10
+menu_order: 50
 hitl:
   - { id: confirm-delete, title: 确认删除全部分镜 }
   - { id: cancel-delete, title: 取消，保留分镜 }

@@ -9,6 +9,7 @@ limits: { max_clarify_rounds: 2 }
 triggers:
   - '生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化'
 priority: 50
+menu_order: 20
 hitl:
   - { id: generate_image, title: 生成图片 }
   - { id: refine, title: 继续完善 }

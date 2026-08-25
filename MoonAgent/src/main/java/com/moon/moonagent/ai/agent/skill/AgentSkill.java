@@ -24,6 +24,7 @@ import java.util.Map;
  * @param limits    行为上限（max_clarify_rounds / max_regenerate_rounds 等）
  * @param triggers  路由触发正则/关键词（有序，priority 升序先查——delete 须先于 aisplit 的「分镜」）
  * @param priority  触发优先级（数字越小越先匹配；当前 delete=10/scene-review=20/aisplit=30/video=40/pic=50）
+ * @param menuOrder 澄清菜单显示顺序（数字越小越靠前；当前 aisplit=10/pic=20/video=30/scene-review=40/delete=50/other=60）
  * @param hitlManifest HITL 卡按钮清单（[{id, title}]；LLM 声明卡的 id 必须落在该清单内，保留 resume 路由确定性）
  * @param nodePrompts markdown body 按 {@code ### 步骤id} 分段的知识提示词（暂仅供步骤 6 合并；当前不消费）
  */
@@ -37,6 +38,7 @@ public record AgentSkill(
         Map<String, Integer> limits,
         List<String> triggers,
         int priority,
+        int menuOrder,
         List<Map<String, Object>> hitlManifest,
         Map<String, String> nodePrompts) {
 
@@ -63,6 +65,7 @@ public record AgentSkill(
                 toIntMap(frontmatter.get("limits")),
                 triggers,
                 intVal(frontmatter.get("priority"), 100),
+                intVal(frontmatter.get("menu_order"), 100),
                 hitl == null ? List.of() : hitl,
                 nodePrompts == null ? Map.of() : nodePrompts);
     }

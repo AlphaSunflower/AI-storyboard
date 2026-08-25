@@ -94,6 +94,13 @@ public class SkillLoader {
         return ordered;
     }
 
+    /** 按 menu_order 升序（澄清菜单显示顺序）的全部 skill */
+    public List<AgentSkill> allMenuOrdered() {
+        return skills.values().stream()
+                .sorted(Comparator.comparingInt(AgentSkill::menuOrder))
+                .toList();
+    }
+
     /** 按 name 取 skill */
     public AgentSkill get(String name) {
         return skills.get(name);

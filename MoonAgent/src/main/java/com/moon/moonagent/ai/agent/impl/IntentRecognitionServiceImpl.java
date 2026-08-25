@@ -10,10 +10,16 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import com.moon.moonagent.ai.agent.skill.AgentSkill;
+import com.moon.moonagent.ai.agent.skill.SkillLoader;
+import jakarta.annotation.PostConstruct;
+
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import com.moon.moonagent.ai.GatewayModelService;
 
 /**
@@ -44,23 +50,15 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     /** 兜底意图：识别失败/解析失败/白名单外 → 引导分支，不阻塞对话 */
     public static final String FALLBACK_TYPE = "intent-other";
 
-    /** 五类合法意图（与工作流「意图路由」if-else 分支一一对应） */
-        private static final Set<String> VALID_TYPES = Set.of(
-            "intent-aisplit", "intent-pic", "intent-video", "intent-delete", "intent-scene-review", "intent-other");
+    /** 合法意图集（由 Skill 推导：各 skill.intentType + 兜底意图） */
+    private Set<String> validTypes;
 
     /**
      * 规则前置匹配表：强关键词命中直接路由（免一次 LLM 调用）。
-     * 仅放无歧义强信号词；列表顺序即优先级（删除意图必须排在 aisplit 的「分镜」词之前，
-     * 否则「删除分镜」会被分镜词先命中误入 aisplit 生成链）。
+     * 由 Skill 推导（priority 升序 = delete 先于 aisplit 的「分镜」词之前，否则「删除分镜」误入 aisplit 生成链）。
      * 歧义/未命中交给 LLM 判断（LLM prompt 仍含完整分类规则）。
      */
-    private static final List<Map.Entry<String, java.util.regex.Pattern>> RULE_TABLE = List.of(
-            Map.entry("intent-delete", java.util.regex.Pattern.compile(
-                    "(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空))).{0,6}(?:分镜|剧本|故事板)|(?:分镜|剧本|故事板).{0,8}(?:(?:删(?:去|掉|了)?)|(?=清(?:除|掉|光|空)))")),
-            Map.entry("intent-scene-review", java.util.regex.Pattern.compile("分析.{0,6}分镜|处理.{0,6}分镜|审查.{0,6}分镜|review.{0,6}scene|" + "展示.{0,6}分镜|查看.{0,6}分镜|列出.{0,6}分镜|" + "看.{0,2}看.{0,4}分镜|看一下.{0,4}分镜|分镜列表|多少分镜|" + "所有分镜|" + "生成.{0,8}分镜.{0,6}(图|视频)|" + "分镜.{0,4}生成.{0,4}(图|视频)|分镜.{0,12}(图|视频)")),
-            Map.entry("intent-aisplit", java.util.regex.Pattern.compile("分镜|故事板|剧本")),
-            Map.entry("intent-video", java.util.regex.Pattern.compile("生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本")),
-            Map.entry("intent-pic", java.util.regex.Pattern.compile("生成图片|画一张|画个|海报|插画|改图|修图|换背景|去掉.{0,4}(元素|人物|物体)|图片优化")));
+    private List<Map.Entry<String, Pattern>> ruleTable;
 
     /**
      * 意图识别 prompt：移植自工作流「意图识别」节点。
@@ -74,6 +72,29 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
+    private final SkillLoader skillLoader;
+
+    /** 由 Skill 推导规则前置表 + 合法意图集（priority 升序：delete 先于 aisplit 的「分镜」；menu 顺序用于澄清菜单） */
+    @PostConstruct
+    void initRules() {
+        List<Map.Entry<String, Pattern>> rules = new ArrayList<>();
+        Set<String> types = new java.util.LinkedHashSet<>();
+        for (AgentSkill skill : skillLoader.all()) {          // priority 升序
+            if (!skill.triggers().isEmpty()) {
+                for (String t : skill.triggers()) {
+                    if (t == null || t.isBlank()) continue;
+                    try { rules.add(Map.entry(skill.intentType(), Pattern.compile(t))); } catch (Exception e) {
+                        log.warn("意图规则编译失败: intent={}, trigger={}", skill.intentType(), t);
+                    }
+                }
+            }
+            types.add(skill.intentType());
+        }
+        types.add(FALLBACK_TYPE);
+        ruleTable = rules;
+        validTypes = types;
+        log.info("意图识别规则表已加载: {} 条规则, {} 个合法意图", ruleTable.size(), validTypes);
+    }
 
     /**
      * 懒加载 ChatClient：识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等，
@@ -103,7 +124,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
         // 0) 规则前置：强关键词命中直接路由（免一次 LLM 调用，置信度 1.0）
         if (query != null && !query.isBlank()) {
             String q = query.trim();
-            for (Map.Entry<String, java.util.regex.Pattern> rule : RULE_TABLE) {
+            for (Map.Entry<String, Pattern> rule : ruleTable) {
                 if (rule.getValue().matcher(q).find()) {
                     log.info("意图识别规则命中: type={} query={}", rule.getKey(), q);
                     return IntentResult.rule(rule.getKey());
@@ -131,13 +152,13 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                     } catch (NumberFormatException ignore) {
                         // confidence 非法 → 0.5（视为不明确，交由阈值判断）
                     }
-                    if (VALID_TYPES.contains(type)) {
+                    if (validTypes.contains(type)) {
                         return IntentResult.llm(type, conf);
                     }
                 }
                 // 2) 兼容裸标识符（LLM 未按 JSON 输出时）
                 String type = cleanType(raw);
-                if (VALID_TYPES.contains(type)) {
+                if (validTypes.contains(type)) {
                     return IntentResult.llm(type, 0.5);
                 }
                 log.warn("意图识别结果不在白名单，兜底 intent-other: raw={}", raw);

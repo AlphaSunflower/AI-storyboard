@@ -11,6 +11,7 @@ import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.skill.SkillLoader;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
@@ -88,6 +89,7 @@ public class PlanGraph {
     private final AgentAiConfigProperties agentConfig;
     private final AgentOrchestratorSupport support;
     private final List<IntentHandler> intentHandlers;
+    private final SkillLoader skillLoader;
 
     /**
      * emitter 外部注册表：threadId(=conversationId) → SseEmitter。
@@ -185,23 +187,21 @@ public class PlanGraph {
                             K_LOW_CONFIDENCE, intentResult.confidence() < agentConfig.getIntentThreshold(),
                             K_SWITCH, false);
                 }))
-                // ---- 低置信度澄清卡片节点 ----
+                // ---- 低置信度澄清卡片节点（菜单由 Skill 推导，新增能力自动出现） ----
                 .addNode("intent_clarify", node_async(state -> {
                     OrchestrationRequest request = stateRequest(state);
                     String content = state.<String>value(K_CONTENT).orElse("");
+                    java.util.List<Map<String, Object>> actions = new java.util.ArrayList<>();
+                    for (var skill : skillLoader.allMenuOrdered()) {
+                        actions.add(Map.of("id", skill.intentType(), "title", skill.label()));
+                    }
+                    actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
                     String last = support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                             "没太确定你想做什么，请选择：",
                             "intent-clarify",
                             List.of(Map.of("content", content)),
                             "human_input",
-                            List.of(
-                                    Map.of("id", "intent-aisplit", "title", "生成分镜"),
-                                    Map.of("id", "intent-pic", "title", "生成图片"),
-                                    Map.of("id", "intent-video", "title", "生成视频"),
-                                    Map.of("id", "intent-scene-review", "title", "查看分镜"),
-                                    Map.of("id", "intent-delete", "title", "删除分镜"),
-                                    Map.of("id", "intent-other", "title", "其他 / 继续输入"),
-                                    Map.of("id", "custom", "title", "✍ 自定义输入"))));
+                            actions));
                     return Map.of(K_LAST_MESSAGE, last);
                 }))
                 // ---- 切链出口节点（resume 检测到新意图时：用 customText 重新走 run 编排） ----

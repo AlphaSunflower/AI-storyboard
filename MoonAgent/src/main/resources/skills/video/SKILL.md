@@ -9,6 +9,7 @@ limits: { max_clarify_rounds: 2 }
 triggers:
   - '生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本'
 priority: 40
+menu_order: 30
 hitl:
   - { id: generate_video, title: 开始生成视频 }
   - { id: refine, title: 继续完善 }
