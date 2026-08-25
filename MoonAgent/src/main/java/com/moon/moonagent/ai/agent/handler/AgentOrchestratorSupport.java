@@ -621,21 +621,19 @@ public class AgentOrchestratorSupport {
     }
 
     /**
-     * 专职 HITL 卡构造 LLM：给定状态感知的按钮 manifest，LLM 挑选要呈现的按钮并拟简短中文文案。
+     * 专职 HITL 卡构造 LLM：为 manifest 中每个按钮拟定简短中文文案（自由表达），但<b>按钮 id 集合保持完整</b>——
+     * 绝不遗漏（e2e 实测：LLM 若被允许丢弃按钮，会把 aisplit 确认卡降级成只剩「取消」，用户无法确认/导入）。
      *
-     * <p>id 必须落在 manifest 内（保留 resume 路由确定性），title 由 LLM 自由拟定；
-     * LLM 失败/非法输出 → 回退静态 manifest（当前行为，绝不空卡）。
-     * 卡正文（planText）保持权威内容不受影响——本方法仅改按钮，不改方案文本，避免丢失分镜/方案细节。
+     * <p>实现：LLM 输出 {actions:[{id,title}]} 仅作为 title 覆盖来源；最终按 manifest 全量 id 生成，
+     * title 优先取 LLM 拟的（缺失回退 manifest 原标题）。LLM 失败 → 回退静态 manifest（当前行为，绝不空卡）。
      *
      * @param planText        方案正文（仅作 LLM 上下文；卡正文仍用原值，不替换）
      * @param manifestActions 状态感知的可选按钮清单（[{id,title}]）
-     * @return LLM 挑选后的按钮（id ⊆ manifest）；失败回退 manifestActions
+     * @return 全量 manifest 按钮（title 经 LLM 拟词；失败回退 manifestActions）
      */
     public List<Map<String, Object>> buildHITLCard(OrchestrationRequest req, String planText,
                                                    List<Map<String, Object>> manifestActions) {
         if (manifestActions == null || manifestActions.isEmpty()) return manifestActions;
-        java.util.Set<String> allowed = new java.util.HashSet<>();
-        for (Map<String, Object> a : manifestActions) allowed.add(String.valueOf(a.get("id")));
         String manifestText = manifestActions.stream()
                 .map(a -> a.get("id") + "=" + a.get("title"))
                 .collect(java.util.stream.Collectors.joining("；"));
@@ -647,17 +645,22 @@ public class AgentOrchestratorSupport {
                     .call()
                     .content());
             CardResult r = new BeanOutputConverter<>(CardResult.class).convert(raw);
-            if (r != null && r.actions() != null && !r.actions().isEmpty()) {
-                java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+            java.util.Map<String, String> llmTitle = new java.util.HashMap<>();
+            if (r != null && r.actions() != null) {
                 for (CardResult.CardAction a : r.actions()) {
-                    if (a.id() != null && allowed.contains(a.id())) {
-                        out.add(Map.of("id", a.id(),
-                                "title", a.title() == null || a.title().isBlank() ? a.id() : a.title()));
+                    if (a.id() != null && a.title() != null && !a.title().isBlank()) {
+                        llmTitle.putIfAbsent(a.id(), a.title());
                     }
                 }
-                if (!out.isEmpty()) return out;
             }
-            return manifestActions;
+            // 保持全量 manifest id 集合，title 优先用 LLM 拟词（缺失回退 manifest 原标题）+ 按 manifest 顺序
+            java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+            for (Map<String, Object> m : manifestActions) {
+                String id = String.valueOf(m.get("id"));
+                String title = llmTitle.getOrDefault(id, String.valueOf(m.getOrDefault("title", id)));
+                out.add(Map.of("id", id, "title", title.isBlank() ? id : title));
+            }
+            return out;
         } catch (Exception e) {
             log.warn("HITL 卡 LLM 构造失败，回退静态按钮清单: {}", e.getMessage());
             return manifestActions;
