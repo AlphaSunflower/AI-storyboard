@@ -654,17 +654,26 @@ public class AgentOrchestratorSupport {
                 }
             }
             // 保持全量 manifest id 集合，title 优先用 LLM 拟词（缺失回退 manifest 原标题）+ 按 manifest 顺序
-            java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
-            for (Map<String, Object> m : manifestActions) {
-                String id = String.valueOf(m.get("id"));
-                String title = llmTitle.getOrDefault(id, String.valueOf(m.getOrDefault("title", id)));
-                out.add(Map.of("id", id, "title", title.isBlank() ? id : title));
-            }
-            return out;
+            return mergeCardActions(manifestActions, llmTitle);
         } catch (Exception e) {
             log.warn("HITL 卡 LLM 构造失败，回退静态按钮清单: {}", e.getMessage());
             return manifestActions;
         }
+    }
+
+    /**
+     * 合并 LLM 拟词与 manifest：<b>保持全量 manifest id 集合</b>（绝不丢按钮），title 优先 LLM 拟词、
+     * 缺失回退 manifest 原标题、再回退 id；按 manifest 顺序输出。包可见供离线验证 harness 直接调用。
+     */
+    static java.util.List<Map<String, Object>> mergeCardActions(
+            java.util.List<Map<String, Object>> manifestActions, java.util.Map<String, String> llmTitle) {
+        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (Map<String, Object> m : manifestActions) {
+            String id = String.valueOf(m.get("id"));
+            String title = llmTitle.getOrDefault(id, String.valueOf(m.getOrDefault("title", id)));
+            out.add(Map.of("id", id, "title", title.isBlank() ? id : title));
+        }
+        return out;
     }
 
     // ===== HITL checkpoint =====
