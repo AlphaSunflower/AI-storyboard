@@ -2,6 +2,8 @@ package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.ai.agent.AgentTools;
+import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.ImageRefinePromptService;
 import lombok.RequiredArgsConstructor;
@@ -101,9 +103,19 @@ public class PicIntentHandler implements IntentHandler {
                     List.of(Map.of("originalContent", content, "options", clarify.options() == null ? List.of() : clarify.options())),
                     "human_input", actions));
         }
-        // 2. 需求明确/达上限：LLM 生成图片提示词 + 推荐参数 → HITL 方案确认卡片
+        // 2. 需求明确/达上限 → 直接用用户内容生成图片提示词（用户已提供描述，无需再问一轮"有没有提示词"）
+        return handleImagePrompt(request, content);
+    }
+
+
+
+    /**
+     * LLM 生成图片提示词 + 推荐参数 → HITL 方案确认卡片（prompt-source resume 与 clarify 放行共用）。
+     */
+    private String handleImagePrompt(OrchestrationRequest request, String content) {
+        String ctx = support.historyContext(request.getConversation().getId(), 15);
+        String contentWithCtx = content + ctx;
         support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
-        // 带参数推荐的方案生成：LLM 同时输出提示词 + 推荐模型/尺寸/质量
         List<Map<String, Object>> models = support.buildModels("image");
         String modelOptionsText = support.buildModelOptionsText("image");
         AgentOrchestratorSupport.ImagePlanResult plan = support.callImagePromptWithParams(contentWithCtx, modelOptionsText, request);
@@ -123,7 +135,7 @@ public class PicIntentHandler implements IntentHandler {
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         // 分支 0：需求澄清卡（pic-clarify）——所选选项标题/自定义文本拼入需求，重走澄清 gate（可循环，达上限放行）
         if ("pic-clarify".equals(checkpoint.getAction())) {
-            String original = support.planField(checkpoint.getPlan(), "originalContent");
+            String original = support.planField(checkpoint.getPlan(), PlanField.ORIGINAL_CONTENT);
             String chosenId = request.getAction();
             String title = "custom".equals(chosenId)
                     ? request.getCustomText()
@@ -133,6 +145,22 @@ public class PicIntentHandler implements IntentHandler {
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
             return handleNoSource(request, supplemented);
+        }
+        // 分支 0.5：图片来源卡片（prompt-source）——has-prompt → 用户填写描述 → 生成提示词；no-prompt → LLM 自由生成
+        if ("prompt-source".equals(checkpoint.getAction())) {
+            String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
+            String supplemented;
+            if ("has-prompt".equals(request.getAction())) {
+                String custom = request.getCustomText();
+                supplemented = (custom != null && !custom.isBlank())
+                        ? original + "\n（用户提供的描述：" + custom + "）" : original;
+            } else {
+                // no-prompt：内容太短时补充方向引导
+                supplemented = original.length() < 20
+                        ? "用户想生成图片但没有具体描述，请自由发挥设计一个有创意的图片方案。用户原始需求：" + original
+                        : original;
+            }
+            return handleImagePrompt(request, supplemented);
         }
         // 分支 1：继续完善 → LLM 生成修改方向选项卡片（人工介入点选，替代让用户打字）
         if ("refine".equals(request.getAction())) {
@@ -148,14 +176,27 @@ public class PicIntentHandler implements IntentHandler {
             return resumeRefineOption(request, checkpoint);
         }
         // 分支 3（默认 generate_image）：方案确认 → 图改图执行（checkpoint plan 存 prompt+source）
-        String prompt = support.planField(checkpoint.getPlan(), "prompt");
-        String source = support.planField(checkpoint.getPlan(), "source");
+        String prompt = support.planField(checkpoint.getPlan(), PlanField.PROMPT);
+        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
+        // 安全网：prompt 为空（旧 checkpoint / 数据异常）→ 用 originalContent 兜底生成提示词
+        if (prompt == null || prompt.isBlank()) {
+            String fallback = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
+            if (fallback == null || fallback.isBlank()) {
+                fallback = support.planField(checkpoint.getPlan(), PlanField.ORIGINAL_CONTENT);
+            }
+            if (fallback != null && !fallback.isBlank()) {
+                log.warn("PicIntentHandler.resume: prompt 为空，用 content/originalContent 兜底");
+                return handleImagePrompt(request, fallback);
+            }
+            return support.sendFriendlyError(request, "prompt 为空",
+                    "没有找到图片描述，请重新描述你想要的画面内容。");
+        }
         // 用户提交的模型/尺寸/质量/数量参数（卡片选择）优先，未提交走默认（图改图默认模型=网关默认生图模型）
         String model = request.getParams().getOrDefault("model", null);
         String size = request.getParams().getOrDefault("size", null);
         String quality = request.getParams().getOrDefault("quality", null);
         String n = request.getParams().getOrDefault("n", null);
-        Map<String, Object> result = agentTools.refineImage(request.getConversation().getId(), prompt, source, model, size, quality, n);
+        Map<String, Object> result = safeRefineImage(request.getConversation().getId(), prompt, source, model, size, quality, n);
         if (Boolean.TRUE.equals(result.get("ok"))) {
             return presentImages(request, urlsOf(result), assetIdsOf(result), null);
         }
@@ -163,7 +204,7 @@ public class PicIntentHandler implements IntentHandler {
         String rawError = String.valueOf(result.getOrDefault("message", ""));
         AgentOrchestratorSupport.ImageRecoveryResult recovery = support.attemptImageRecovery(prompt, rawError);
         if (recovery.recoverable() && recovery.rewrittenPrompt() != null && !recovery.rewrittenPrompt().isBlank()) {
-            Map<String, Object> retry = agentTools.refineImage(
+            Map<String, Object> retry = safeRefineImage(
                     request.getConversation().getId(), recovery.rewrittenPrompt(), source, model, size, quality, n);
             if (Boolean.TRUE.equals(retry.get("ok"))) {
                 return presentImages(request, urlsOf(retry), assetIdsOf(retry), recovery.message());
@@ -211,8 +252,8 @@ public class PicIntentHandler implements IntentHandler {
      * 用户点选或自定义输入，均走 pic-option checkpoint 续流。
      */
     private String resumeRefineOptions(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        String basePrompt = support.planField(checkpoint.getPlan(), "prompt");
-        String source = support.planField(checkpoint.getPlan(), "source");
+        String basePrompt = support.planField(checkpoint.getPlan(), PlanField.PROMPT);
+        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
         boolean hasSource = source != null && !source.isBlank();
         AgentOrchestratorSupport.PicRefineOptionsResult opt = support.callPicRefineOptions(basePrompt, hasSource, request);
         List<Map<String, Object>> actions = new ArrayList<>();
@@ -235,8 +276,8 @@ public class PicIntentHandler implements IntentHandler {
      * （先展示调整后的新方案，用户确认后才生成——「不断完善方案」交互）。
      */
     private String resumeRefineOption(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        String basePrompt = support.planField(checkpoint.getPlan(), "prompt");
-        String source = support.planField(checkpoint.getPlan(), "source");
+        String basePrompt = support.planField(checkpoint.getPlan(), PlanField.PROMPT);
+        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
         // 所选方向：custom 输入优先，否则按 action id 查 plan options 的 title
         String chosen = request.getCustomText();
         if (chosen == null || chosen.isBlank()) {
@@ -265,5 +306,15 @@ public class PicIntentHandler implements IntentHandler {
                 List.of(Map.of("id", "generate_image", "title", "生成图片"),
                         Map.of("id", "refine", "title", "继续完善")),
                 List.of(), Map.of(), Map.of()));
+    }
+
+    /** 包装 AgentTools.refineImage：捕获异常转 error Map（保持 PicIntentHandler 的 LLM 自救重试逻辑） */
+    private Map<String, Object> safeRefineImage(String conversationId, String prompt, String picUrl,
+                                                 String model, String size, String quality, String n) {
+        try {
+            return agentTools.refineImage(conversationId, prompt, picUrl, model, size, quality, n);
+        } catch (IllegalArgumentException e) {
+            return Map.of("ok", false, "message", e.getMessage());
+        }
     }
 }
