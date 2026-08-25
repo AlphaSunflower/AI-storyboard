@@ -185,7 +185,7 @@ public class VideoIntentHandler implements IntentHandler {
                 reasons = plan.reasons() == null ? Map.of() : plan.reasons();
             } else {
                 // 无图：LLM 生成视频方案（prompt + 时长 + 推荐参数）
-                AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(enriched, modelOptionsText);
+                AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(enriched, modelOptionsText, request);
                 message = plan.message();
                 duration = plan.duration();
                 recommended = plan.params();

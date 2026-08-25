@@ -290,7 +290,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
             }
 
             String optimized = support.streamPlanWithMessage(
-                    promptConfig.get("services/scene-review"),
+                    support.prompt(request, "scene-review", "services/scene-review", null),
                     context.toString(), request);
 
             // 流式失败/返回空 → 友好提示，不发空 HITL 卡片

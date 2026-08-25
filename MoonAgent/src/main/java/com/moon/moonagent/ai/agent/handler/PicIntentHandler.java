@@ -85,7 +85,7 @@ public class PicIntentHandler implements IntentHandler {
         String contentWithCtx = content + ctx;
         // 1. 需求澄清 gate：LLM 判断描述是否足以生成明确图片；不明确 → 弹澄清卡（pic-clarify）结束本轮；
         //    达澄清上限 → 提示后放行（以现有描述直接出方案，复用 clarifyLimitReached 的提示消息）
-        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callImageClarify(contentWithCtx);
+        AgentOrchestratorSupport.ImageClarifyResult clarify = support.callImageClarify(contentWithCtx, request);
         if (clarify.type() == 0 && !support.clarifyLimitReached(request.getConversation().getId(), request)) {
             List<Map<String, Object>> actions = new ArrayList<>();
             if (clarify.options() != null) {
@@ -106,7 +106,7 @@ public class PicIntentHandler implements IntentHandler {
         // 带参数推荐的方案生成：LLM 同时输出提示词 + 推荐模型/尺寸/质量
         List<Map<String, Object>> models = support.buildModels("image");
         String modelOptionsText = support.buildModelOptionsText("image");
-        AgentOrchestratorSupport.ImagePlanResult plan = support.callImagePromptWithParams(contentWithCtx, modelOptionsText);
+        AgentOrchestratorSupport.ImagePlanResult plan = support.callImagePromptWithParams(contentWithCtx, modelOptionsText, request);
         String prompt = plan.prompt();
         String planText = "🖼 图片生成方案：\n" + prompt + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
@@ -214,7 +214,7 @@ public class PicIntentHandler implements IntentHandler {
         String basePrompt = support.planField(checkpoint.getPlan(), "prompt");
         String source = support.planField(checkpoint.getPlan(), "source");
         boolean hasSource = source != null && !source.isBlank();
-        AgentOrchestratorSupport.PicRefineOptionsResult opt = support.callPicRefineOptions(basePrompt, hasSource);
+        AgentOrchestratorSupport.PicRefineOptionsResult opt = support.callPicRefineOptions(basePrompt, hasSource, request);
         List<Map<String, Object>> actions = new ArrayList<>();
         for (Map<String, Object> o : opt.options()) {
             actions.add(Map.of("id", String.valueOf(o.get("id")), "title", String.valueOf(o.get("title"))));
@@ -255,7 +255,7 @@ public class PicIntentHandler implements IntentHandler {
         if (source != null && !source.isBlank()) {
             refinedPrompt = imageRefinePromptService.buildRefinedPrompt(source, basePrompt + "，调整方向：" + chosen);
         } else {
-            refinedPrompt = support.callImagePrompt(basePrompt + "，调整方向：" + chosen);
+            refinedPrompt = support.callImagePrompt(basePrompt + "，调整方向：" + chosen, request);
         }
         String planText = "🖼 调整后的图片方案：\n" + refinedPrompt
                 + "\n\n点击「生成图片」开始生成，或「继续完善」再次调整。";

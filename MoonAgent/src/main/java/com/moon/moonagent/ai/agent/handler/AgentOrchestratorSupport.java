@@ -438,10 +438,10 @@ public class AgentOrchestratorSupport {
     }
 
     /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次；强制中文输出——方案卡片直接展示给用户） */
-    public String callImagePrompt(String content) {
+    public String callImagePrompt(String content, OrchestrationRequest req) {
         try {
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(promptConfig.get("orchestrator/image-prompt"))
+                .system(prompt(req, "image-prompt", "orchestrator/image-prompt", null))
                 .user(content)
                 .call()
                 .content());
@@ -456,9 +456,9 @@ public class AgentOrchestratorSupport {
      * 带参数推荐的图片方案生成：LLM 同时输出提示词 + 推荐生成参数（模型/尺寸/质量）。
      * 复用 callVideoPlan 的结构化输出模式，返回 ImagePlanResult。
      */
-    public ImagePlanResult callImagePromptWithParams(String content, String modelOptionsText) {
+    public ImagePlanResult callImagePromptWithParams(String content, String modelOptionsText, OrchestrationRequest req) {
         boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-        String systemPrompt = promptConfig.get("orchestrator/image-prompt-with-params",
+        String systemPrompt = prompt(req, "image-prompt-with-params", "orchestrator/image-prompt-with-params",
                 Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
         try {
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
@@ -470,7 +470,7 @@ public class AgentOrchestratorSupport {
             ImagePlanResult result = new BeanOutputConverter<>(ImagePlanResult.class).convert(raw);
             if (result == null || result.prompt() == null || result.prompt().isBlank()) {
                 // 解析失败：退化为纯文本提示词（与 callImagePrompt 行为一致）
-                String fallback = callImagePrompt(content);
+                String fallback = callImagePrompt(content, req);
                 return new ImagePlanResult(fallback);
             }
             return new ImagePlanResult(result.prompt(),
@@ -478,7 +478,7 @@ public class AgentOrchestratorSupport {
                     result.reasons() == null ? Map.of() : result.reasons());
         } catch (Exception e) {
             log.warn("图片方案 LLM 调用失败，退化为纯提示词: {}", e.getMessage());
-            String fallback = callImagePrompt(content);
+            String fallback = callImagePrompt(content, req);
             return new ImagePlanResult(fallback);
         }
     }
@@ -489,10 +489,10 @@ public class AgentOrchestratorSupport {
      * 用户回复只要提供了任何有效信息就直接生成方案；仅回复为空或与图片生成完全无关才 type=0。
      * LLM 调用失败 → type=1 放行（不阻塞出方案）。
      */
-    public ImageClarifyResult callImageClarify(String content) {
+    public ImageClarifyResult callImageClarify(String content, OrchestrationRequest req) {
         try {
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(promptConfig.get("orchestrator/image-clarify"))
+                .system(prompt(req, "image-clarify", "orchestrator/image-clarify", null))
                 .user(content)
                 .call()
                 .content());
@@ -524,8 +524,8 @@ public class AgentOrchestratorSupport {
     }
 
     /** 无参考图视频：LLM 生成视频方案（无模型选项，兼容现状调用） */
-    public VideoPlanResult callVideoPlan(String content) {
-        return callVideoPlan(content, null);
+    public VideoPlanResult callVideoPlan(String content, OrchestrationRequest req) {
+        return callVideoPlan(content, null, req);
     }
 
     /**
@@ -533,11 +533,13 @@ public class AgentOrchestratorSupport {
      * LLM 从不同维度（场景/服装/氛围/画风等，按方案内容动态）给出 2~4 个修改方向选项。
      * 解析失败/空输出 → 兜底通用 4 方向（保证卡片始终有选项可点）。
      */
-    public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource) {
+    public PicRefineOptionsResult callPicRefineOptions(String basePrompt, boolean hasSource, OrchestrationRequest req) {
         try {
+            String sourceNote = hasSource
+                    ? prompt(req, "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note", null) : "";
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(promptConfig.get("orchestrator/pic-refine-options",
-                    Map.of("hasSourceNote", hasSource ? promptConfig.get("orchestrator/pic-refine-options-source-note") : "")))
+                .system(prompt(req, "pic-refine-options", "orchestrator/pic-refine-options",
+                    Map.of("hasSourceNote", sourceNote)))
                 .user("当前图片方案：" + basePrompt)
                 .call()
                 .content());
@@ -566,10 +568,10 @@ public class AgentOrchestratorSupport {
      *
      * @param modelOptionsText 可选的模型与参数枚举文本（来自 {@link #buildModelOptionsText}；空=不要求 LLM 选参）
      */
-    public VideoPlanResult callVideoPlan(String content, String modelOptionsText) {
+    public VideoPlanResult callVideoPlan(String content, String modelOptionsText, OrchestrationRequest req) {
         try {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
-            String system = promptConfig.get("orchestrator/video-plan",
+            String system = prompt(req, "video-plan", "orchestrator/video-plan",
                     Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
             String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(system)
