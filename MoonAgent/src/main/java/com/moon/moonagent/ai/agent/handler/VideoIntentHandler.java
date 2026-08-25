@@ -82,28 +82,11 @@ public class VideoIntentHandler implements IntentHandler {
                     "human_input", options), true);
             return request.getLastMessage();
         }
-        return showVideoSourceGate(request, content, assetIds, source);
+        // 需求明确/达上限 → 直接用用户内容设计视频方案
+        return handleVideoPlan(request, content, assetIds, source);
     }
 
-    /**
-     * 视频来源人工介入：需求明确后，问用户有没有现成描述/提示词。
-     * 有参考图时直接跳过（图本身即来源）。
-     */
-    private String showVideoSourceGate(OrchestrationRequest request, String content,
-                                        List<String> assetIds, String source) {
-        // 有参考图 → 跳过来源询问（图就是来源）
-        if (source != null && !source.isBlank()) {
-            return handleVideoPlan(request, content, assetIds, source);
-        }
-        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                "你有现成的视频描述或提示词吗？有的话可以先填写，没有也没关系，我来帮你设计。",
-                "video-source",
-                List.of(Map.of("content", content, "assetIds", String.join(",", assetIds),
-                        "source", "")),
-                "human_input",
-                List.of(Map.of("id", "has-prompt", "title", "有，我来填写"),
-                        Map.of("id", "no-prompt", "title", "没有，帮我生成"))));
-    }
+
 
     // ===== resume =====
 
@@ -145,7 +128,7 @@ public class VideoIntentHandler implements IntentHandler {
                             .map(o -> String.valueOf(o.getOrDefault("title", "")))
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
-            return showVideoSourceGate(request, supplemented, assetIds, source);
+            return handleVideoPlan(request, supplemented, assetIds, source);
         }
         // 视频来源卡片续流（video-source）：has-prompt → 用户填写描述 → 视频方案；no-prompt → LLM 自由生成
         if ("video-source".equals(cpAction)) {
