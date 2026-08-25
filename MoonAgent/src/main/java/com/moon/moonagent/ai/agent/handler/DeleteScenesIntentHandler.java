@@ -50,9 +50,9 @@ public class DeleteScenesIntentHandler implements IntentHandler {
                 "delete-confirm",
                 List.of(Map.of("existingCount", existing)),
                 "human_input",
-                List.of(
+                support.buildHITLCard(request, "当前项目共有 " + existing + " 个分镜（含已生成的图片/视频素材），确认要全部删除吗？\n此操作不可撤销。", List.of(
                         Map.of("id", "confirm-delete", "title", "确认删除全部分镜"),
-                        Map.of("id", "cancel-delete", "title", "取消，保留分镜"))));
+                        Map.of("id", "cancel-delete", "title", "取消，保留分镜")))));
     }
 
     @Override

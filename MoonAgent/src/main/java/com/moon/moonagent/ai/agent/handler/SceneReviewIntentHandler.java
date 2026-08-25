@@ -308,9 +308,10 @@ public class SceneReviewIntentHandler implements IntentHandler {
                     planText, "review-confirm",
                     List.of(Map.of("optimized", optimized, "sceneNums", sceneNumsStr(scenes))),
                     "human_input",
-                    List.of(Map.of("id", "review-confirm", "title", "确认更新"),
+                    support.buildHITLCard(request, planText, List.of(
+                            Map.of("id", "review-confirm", "title", "确认更新"),
                             Map.of("id", "review-disagree", "title", "不满意"),
-                            Map.of("id", "custom", "title", "自定义输入")),
+                            Map.of("id", "custom", "title", "自定义输入"))),
                     List.of(), Map.of(), Map.of()));
         } catch (Exception e) {
             log.error("SceneReviewIntentHandler.handleOptimize 失败: {}", e.getMessage(), e);
@@ -329,9 +330,10 @@ public class SceneReviewIntentHandler implements IntentHandler {
                 "review-gen",
                 List.of(Map.of("sceneNums", sceneNums)),
                 "human_input",
-                List.of(Map.of("id", "review-gen-image", "title", "生成图片"),
+                support.buildHITLCard(request, "是否需要继续生成图片或视频？", List.of(
+                        Map.of("id", "review-gen-image", "title", "生成图片"),
                         Map.of("id", "review-gen-video", "title", "生成视频"),
-                        Map.of("id", "review-skip", "title", "不需要")),
+                        Map.of("id", "review-skip", "title", "不需要"))),
                 List.of(), Map.of(), Map.of()));
     }
 
