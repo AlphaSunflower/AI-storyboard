@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer, type VideoPlayer } from 'expo-video';
 import { File, Paths } from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { tokens } from '../../src/tokens';
 import { useProjectStore } from '../../src/stores/projectStore';
@@ -30,6 +29,7 @@ async function downloadToCache(url: string): Promise<string> {
 // 保存到手机相册（图片/视频），写权限，失败提示
 async function saveToPhone(rawUrl: string): Promise<void> {
   try {
+    const MediaLibrary = await import('expo-media-library');
     const perm = await MediaLibrary.requestPermissionsAsync(true);
     if (!perm.granted) { Alert.alert('提示', '未获得相册权限，无法保存'); return; }
     const uri = await downloadToCache(assetUrl(rawUrl));
