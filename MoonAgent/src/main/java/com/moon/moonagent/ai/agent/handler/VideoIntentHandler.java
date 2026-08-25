@@ -203,9 +203,10 @@ public class VideoIntentHandler implements IntentHandler {
                             "source", source == null ? "" : source,
                             "assetIds", String.join(",", assetIds))),
                     "video_plan",
-                    List.of(Map.of("id", "generate_video", "title", "开始生成视频"),
+                    support.buildHITLCard(request, planText, List.of(
+                            Map.of("id", "generate_video", "title", "开始生成视频"),
                             Map.of("id", "refine", "title", "继续完善"),
-                            Map.of("id", "custom", "title", "✍ 自定义输入")),
+                            Map.of("id", "custom", "title", "✍ 自定义输入"))),
                     models, recommended, reasons));
         } catch (Exception e) {
             log.error("VideoIntentHandler.handleVideoPlan 失败: conversationId={}, error={}",

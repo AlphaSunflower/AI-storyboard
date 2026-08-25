@@ -57,9 +57,10 @@ public class PicIntentHandler implements IntentHandler {
                 return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                         planText, "generate_image",
                         List.of(Map.of("prompt", refinedPrompt, "source", source)), "human_input",
-                        List.of(Map.of("id", "generate_image", "title", "生成图片"),
+                        support.buildHITLCard(request, planText, List.of(
+                                Map.of("id", "generate_image", "title", "生成图片"),
                                 Map.of("id", "refine", "title", "继续完善"),
-                                Map.of("id", "custom", "title", "✍ 自定义输入")),
+                                Map.of("id", "custom", "title", "✍ 自定义输入"))),
                         models, Map.of(), Map.of()));
             } else {
                 // 无参考图：需求澄清 gate（LLM 判断描述是否足以生成明确图片；不明确 → 弹澄清卡追问，
@@ -111,9 +112,10 @@ public class PicIntentHandler implements IntentHandler {
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 planText, "generate_image",
                 List.of(Map.of("prompt", prompt, "source", "")), "human_input",
-                List.of(Map.of("id", "generate_image", "title", "生成图片"),
+                support.buildHITLCard(request, planText, List.of(
+                        Map.of("id", "generate_image", "title", "生成图片"),
                         Map.of("id", "refine", "title", "继续完善"),
-                        Map.of("id", "custom", "title", "✍ 自定义输入")),
+                        Map.of("id", "custom", "title", "✍ 自定义输入"))),
                 models, plan.params(), plan.reasons()));
     }
 

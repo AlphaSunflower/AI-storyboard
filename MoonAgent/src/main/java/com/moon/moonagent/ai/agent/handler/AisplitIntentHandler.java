@@ -224,6 +224,8 @@ public class AisplitIntentHandler implements IntentHandler {
         }
         // 5. 整套统一推荐一套生成参数（图片+视频，LLM 预选 + 用户可改；推荐失败静默回退，卡片照常）
         AgentOrchestratorSupport.SceneParamsRecommendation rec = support.recommendSceneParams(script, request);
+        // 步骤 4：确认卡按钮由 LLM 声明（id 落在上方状态感知 manifest 内；LLM 失败回退静态列表）
+        actions = support.buildHITLCard(request, planText, actions);
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 planText, "agree", scenes, "human_input", actions,
                 List.of(), rec.recommended(), rec.reasons(), rec.imageModels(), rec.videoModels()));
