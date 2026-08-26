@@ -789,9 +789,12 @@ function openRouteModal(route) {
       + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
     + field('参数 Schema（JSON，可选）',
-        '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button></div>'
-        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">字段：key/label/type(enum|range|number|bool|string|object|arrayofobject)/options(枚举,逗号隔)/min+max(可调范围)/default/show(false=隐藏但带默认值)。留空=走固定列。</div>'
-        + '<textarea class="input" id="r-schema" rows="12" spellcheck="false" placeholder=\'{"modes":["text-to-image"],"promptKey":"prompt","request":[{"key":"aspect_ratio","label":"画幅","type":"enum","options":["1:1","4:3","16:9"],"default":"4:3","show":true},{"key":"n","label":"个数","type":"range","min":1,"max":8,"default":2,"show":true},{"key":"prompt_optimizer","label":"优化","type":"bool","default":false,"show":false}]}\'></textarea>');
+        '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button><button type="button" class="btn btn-sm" id="r-schema-example">填入示例</button></div>'
+        + '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.8">'
+        + '枚举(画幅/尺寸/风格)→改 options：<code>"options":["1:1","4:3","16:9"]</code><br>'
+        + '范围(个数/时长/强度)→改 min 和 max：<code>"min":1,"max":8</code><br>'
+        + '是否展示→改 show：<code>"show":true</code>(显示) / <code>"show":false</code>(隐藏但带默认值)</div>'
+        + '<textarea class="input" id="r-schema" rows="12" spellcheck="false" placeholder=\'点「填入示例」得到可改的完整样例；留空=走固定列\'></textarea>');
 
   openModal(isEdit ? '编辑路由' : '新建路由', body, footerHtml('保存'));
   // 按默认渠道拉取模型列表（编辑时预填路由配置的模型名）
@@ -821,6 +824,8 @@ function openRouteModal(route) {
   $('#form-submit').onclick = () => submitRoute(isEdit ? route.id : null);
   const impBtn = $('#r-import-schema');
   if (impBtn) impBtn.onclick = importSchemaFromRequest;
+  const exBtn = $('#r-schema-example');
+  if (exBtn) exBtn.onclick = fillSchemaExample;
 }
 
 /**
@@ -1034,6 +1039,25 @@ function importSchemaFromRequest() {
   const sc = $('#r-schema');
   if (sc) sc.value = JSON.stringify(spec, null, 2);
   toast('已生成 Schema 骨架，请补充 enum 选项/range 范围/角色标注后保存', 'success');
+}
+
+/** 填入一个可直接修改的完整示例（涵盖枚举/范围/布尔/展示），供「借鉴」后改数字 */
+function fillSchemaExample() {
+  const ex = '{\n'
+    + '  "modes": ["text-to-image", "image-to-image"],\n'
+    + '  "promptKey": "prompt",\n'
+    + '  "request": [\n'
+    + '    {"key": "aspect_ratio", "label": "画幅", "type": "enum", "options": ["1:1", "4:3", "16:9", "21:9"], "default": "4:3", "show": true},\n'
+    + '    {"key": "n", "label": "生成个数", "type": "range", "min": 1, "max": 4, "default": 1, "show": true},\n'
+    + '    {"key": "style", "label": "风格", "type": "object", "fields": [\n'
+    + '      {"key": "style_type", "label": "风格类型", "type": "enum", "options": ["www", "photo"], "default": "www", "show": true},\n'
+    + '      {"key": "style_weight", "label": "强度", "type": "range", "min": 1, "max": 10, "default": 5, "show": true}],\n'
+    + '    "show": true},\n'
+    + '    {"key": "prompt_optimizer", "label": "提示词优化", "type": "bool", "default": true, "show": false}\n'
+    + '  ]\n'
+    + '}';
+  const sc = $('#r-schema');
+  if (sc) sc.value = ex;
 }
 
 /** 路由页按钮委托（新建/编辑/删除/测试） */
