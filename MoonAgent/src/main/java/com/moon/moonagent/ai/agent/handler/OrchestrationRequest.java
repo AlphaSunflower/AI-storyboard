@@ -42,4 +42,13 @@ public class OrchestrationRequest {
 
     /** 当前意图类型（如 intent-aisplit；由 Orchestrator 分发/续流时设置，供 Skill 按需取提示词） */
     private String intentType = "";
+
+    /**
+     * resume 阶段 handler 声明的移交目标 intentType（非空=本环节已完成、请交给下一专家）。
+     * per-request 可变状态，修复多会话并发互踩；由 Specialist 读后转 {@code SpecialistResult.handoff}。
+     */
+    private String handoffTarget = "";
+
+    /** 移交附带的下游状态（如 projectId / sceneNums）；与 {@link #handoffTarget} 一起被下一专家消费 */
+    private Map<String, Object> handoffState = Map.of();
 }

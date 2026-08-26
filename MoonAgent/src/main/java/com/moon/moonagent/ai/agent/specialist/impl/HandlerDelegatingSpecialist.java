@@ -43,6 +43,7 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
 
             String lastMessage;
             if (context.action() != null && !context.action().isBlank()) {
+                log.info("Agent[{}] 续流(resume): action={} cpAction={} 会话={}", handler.intentType(), context.action(), context.cpAction(), context.conversation().getId());
                 // resume 路径
                 request.setAction(context.action());
                 request.setCustomText(context.customText() != null ? context.customText() : "");
@@ -52,9 +53,17 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
                 cp.setPlan(context.cpPlan());
                 lastMessage = handler.resume(request, cp);
             } else {
+                log.info("Agent[{}] 处理(handle): 会话={}", handler.intentType(), context.conversation().getId());
                 lastMessage = handler.handle(request);
             }
 
+            // 4.3 移交通电：handler 在 request 上声明了移交目标 → 转 SpecialistResult.handoff（默认 done 保持现状）
+            String handoffTarget = request.getHandoffTarget();
+            if (handoffTarget != null && !handoffTarget.isBlank()) {
+                log.info("HandlerDelegatingSpecialist({}): handler 声明移交 → {}", handler.intentType(), handoffTarget);
+                return SpecialistResult.handoff(handoffTarget, "环节完成，自动移交",
+                        request.getHandoffState() != null ? request.getHandoffState() : java.util.Map.of());
+            }
             return SpecialistResult.done(lastMessage != null ? lastMessage : "");
         } catch (Exception e) {
             log.error("HandlerDelegatingSpecialist({}) 执行失败: {}", handler.intentType(), e.getMessage(), e);

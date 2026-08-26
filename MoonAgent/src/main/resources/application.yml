@@ -57,6 +57,12 @@ ai:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
 
+  agent:
+    # 自动审查链：链首意图写库成功后自动 handoff 给 scene-review 出「分镜审查」卡（暴露缺图缺视频/补图补视频）。
+    # 空数组=关闭（默认，行为与现状一致）；示例 [aisplit] 开启分镜写库后自动审查。
+    auto-review-chains:
+      - aisplit
+
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
   image-request-timeout: 310
   image-edit-timeout: 180

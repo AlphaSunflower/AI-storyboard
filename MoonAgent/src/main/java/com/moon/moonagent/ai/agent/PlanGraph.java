@@ -182,7 +182,7 @@ public class PlanGraph {
                     // 发送"正在理解你的需求…"workflow 事件，避免意图识别期间前端只显示"正在生成"
                     SseEmitter emitter = emittersByThread.get(conversation.getId());
                     if (emitter != null) {
-                        try { emitter.send(SseEmitter.event().name("workflow").data(Map.of("title", "正在理解你的需求…", "status", "node_started"))); } catch (Exception ignored) {}
+                        try { emitter.send(SseEmitter.event().name("workflow").data(AgentOrchestratorSupport.sseJson(Map.of("title", "正在理解你的需求…", "status", "node_started")))); } catch (Exception ignored) {}
                     }
                     List<AgentMessage> recent = messageMapper.selectList(
                             new LambdaQueryWrapper<AgentMessage>()
@@ -385,12 +385,20 @@ public class PlanGraph {
                 SpecialistResult result = specialist.execute(ctx);
                 if (result.needsHandoff()) {
                     log.info("PlanGraph: {} 移交到 {} 原因={}", intent, result.handoffTarget(), result.handoffReason());
+                    // 移交语义：上一专家完成 → 交给下一专家走 handle（新环节）。清 resume 痕迹，
+                    // 避免下一专家继承上游表单提交的 action/cpAction 误走 resume（如 scene-review 收到 action=replace）。
                     return Map.of(
                             K_LAST_MESSAGE, result.message() != null ? result.message() : "",
                             K_HANDOFF_TARGET, result.handoffTarget(),
-                            K_HANDOFF_STATE, result.handoffState() != null ? result.handoffState() : Map.of());
+                            K_HANDOFF_STATE, result.handoffState() != null ? result.handoffState() : Map.of(),
+                            K_RESUME, false,
+                            K_SUBMIT_ACTION, "",
+                            K_CP_ACTION, "");
                 }
-                return Map.of(K_LAST_MESSAGE, result.message() != null ? result.message() : "");
+                // 非移交：清空 handoff 目标，防止上一节点（如 aisplit）残留的 K_HANDOFF_TARGET
+                // 把本节点自路由成死循环（scene-review 反复 self-loop）
+                return Map.of(K_LAST_MESSAGE, result.message() != null ? result.message() : "",
+                        K_HANDOFF_TARGET, "");
             }));
             // 移交检查条件边：有移交目标 → 目标 specialist 节点；否则 → END
             graph.addConditionalEdges(nodeName,

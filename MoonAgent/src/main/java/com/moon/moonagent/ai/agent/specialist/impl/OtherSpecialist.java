@@ -71,7 +71,7 @@ public class OtherSpecialist implements SpecialistAgent {
             // 发送消息增量（模拟流式：一次性发送）
             if (emitter != null && answer != null && !answer.isBlank()) {
                 emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                        .name("message").data(Map.of("content", answer)));
+                        .name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(Map.of("content", answer))));
             }
 
             return SpecialistResult.done(answer != null ? answer : "");

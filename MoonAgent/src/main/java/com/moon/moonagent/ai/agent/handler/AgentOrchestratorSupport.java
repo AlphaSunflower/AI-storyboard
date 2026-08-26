@@ -1300,13 +1300,20 @@ public class AgentOrchestratorSupport {
         return new ImageRecoveryResult(false, "", "图片没生成出来，请稍后重试或调整一下描述。");
     }
 
+    /** SSE data 统一序列化为 JSON 字符串（SSE 规范 data 为文本；避免经 api-gateway 转发时无 text/event-stream converter 崩溃） */
+    private static final ObjectMapper SSE_JSON = new ObjectMapper();
+    public static String sseJson(Object data) {
+        try { return SSE_JSON.writeValueAsString(data); }
+        catch (Exception e) { return String.valueOf(data); }
+    }
+
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {
         if ("message".equals(eventName) && data.get("content") != null) {
             req.setLastMessage(String.valueOf(data.get("content")));
         }
         try {
-            req.getEmitter().send(SseEmitter.event().name(eventName).data(data));
+            req.getEmitter().send(SseEmitter.event().name(eventName).data(sseJson(data)));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
         }

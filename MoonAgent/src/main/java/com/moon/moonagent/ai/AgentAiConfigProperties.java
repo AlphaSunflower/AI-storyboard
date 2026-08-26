@@ -23,4 +23,10 @@ public class AgentAiConfigProperties {
 
     /** 分镜不满意调整最大轮数：连续「不满意→调整→重生成」达到该值后不再弹调整卡片，提示直接输入新需求（默认 3） */
     private int maxRegenerateRounds = 3;
+
+    /**
+     * 自动审查链：链首意图（如 aisplit）写库成功后自动 handoff 给 intent-scene-review 出审查卡。
+     * 空=关闭（默认，行为与现状一致）；示例 {@code [aisplit]}。
+     */
+    private java.util.List<String> autoReviewChains = java.util.List.of();
 }

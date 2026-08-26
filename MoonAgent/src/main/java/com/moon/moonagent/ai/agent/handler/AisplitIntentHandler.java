@@ -461,6 +461,15 @@ public class AisplitIntentHandler implements IntentHandler {
         String msg = count > 0
                 ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
                 : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
+        // 4.3 自动审查：写库成功且本链开启 auto-review → 不本链 resumeStage 收尾，
+        // 改在 request 上声明 handoff 到 intent-scene-review（HandlerDelegatingSpecialist 读后转
+        // SpecialistResult.handoff），scene-review 接管发「📋 分镜审查结果」卡（暴露缺图缺视频、补图补视频）。
+        // 开关默认关闭 → 走现状 resumeStage，行为零变化。
+        if (count > 0 && agentConfig.getAutoReviewChains().contains("aisplit")) {
+            request.setHandoffTarget("intent-scene-review");
+            request.setHandoffState(Map.<String, Object>of("projectId", request.getConversation().getProjectId()));
+            return msg;
+        }
         support.resumeStage(request, "正在写入分镜…", Map.of(
                 "content", msg,
                 "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),

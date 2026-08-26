@@ -496,7 +496,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     /** SseEmitter 事件发送（捕获 IOException 忽略——前端已断开） */
     private void sendEvent(SseEmitter emitter, String eventName, Map<String, Object> data) {
         try {
-            emitter.send(SseEmitter.event().name(eventName).data(data));
+            emitter.send(SseEmitter.event().name(eventName).data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(data)));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
         }

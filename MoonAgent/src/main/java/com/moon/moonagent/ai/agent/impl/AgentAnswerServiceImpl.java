@@ -69,7 +69,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                     if (chunk == null || chunk.isBlank()) return;
                     sb.append(chunk);
                     try {
-                        emitter.send(SseEmitter.event().name("message").data(java.util.Map.of("content", chunk)));
+                        emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", chunk))));
                     } catch (Exception e) {
                         log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
                     }
@@ -83,7 +83,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
             // LLM 失败或流中断：降级文案补发一条 message（前端打字机仍需内容收尾）
             full = "服务开小差了，请稍后再试。";
             try {
-                emitter.send(SseEmitter.event().name("message").data(java.util.Map.of("content", full)));
+                emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", full))));
             } catch (Exception ignore) { }
         }
         return full;
@@ -93,7 +93,7 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     public String answer(AgentConversation conversation, String content, SseEmitter emitter) {
         String answer = generate(conversation, content);
         try {
-            emitter.send(SseEmitter.event().name("message").data(java.util.Map.of("content", answer)));
+            emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", answer))));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
         }
