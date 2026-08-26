@@ -5,9 +5,11 @@ import { Image as ImageIcon, Video } from 'lucide-react';
 
 /**
  * 卡片生成参数选择器（human_input / video_plan 卡片复用）：
- * 模型下拉 + 参数联动（尺寸/质量/分辨率/时长/画幅，来自网关模型 params 能力）；
+ * 新逻辑按网关 model.params.spec（自描述参数 schema）通用渲染——enum→下拉 / range→数字 / bool→开关 /
+ * string→文本 / object→嵌套分组；show:false 参数只带默认值不渲染；model/prompt 绝不渲染；
+ * 嵌套参数以点路径扁平化为 Record<string,string>（如 style.style_type），提交给后端。
+ * 无 spec（旧模型/网关不可用）→ 回退原 PARAM_META 硬编码渲染（零回归）。
  * 默认选中 LLM 推荐值（recommended），旁示推荐理由（reasons），用户可修改。
- * 无 models（网关不可用/未配置）时返回 null，卡片行为与旧版一致。
  */
 
 interface Props {
@@ -19,8 +21,20 @@ interface Props {
   keyPrefix?: string;
 }
 
-/** 参数元信息：key=提交键名，field=网关 params 中的枚举数组字段，defaultField=默认值字段 */
-const PARAM_META = [
+/** spec 参数项（对应网关 params_schema.request[]） */
+interface SpecParam {
+  key: string;
+  label?: string;
+  type?: string;                        // enum/range/number/bool/string/object/array/arrayofobject
+  options?: string[];
+  min?: number;
+  max?: number;
+  default?: unknown;
+  show?: boolean;                       // 缺省 true
+  fields?: SpecParam[];
+}
+
+const LEGACY_PARAM_META = [
   { key: 'resolution', label: '分辨率', field: 'resolutions', defaultField: 'resolutionDefault' },
   { key: 'duration', label: '时长(秒)', field: 'durations', defaultField: 'durationDefault' },
   { key: 'aspectRatio', label: '画幅', field: 'aspectRatios', defaultField: 'aspectRatioDefault' },
@@ -29,11 +43,11 @@ const PARAM_META = [
   { key: 'n', label: '生成个数', field: 'n', defaultField: 'nDefault' },
 ] as const;
 
-type ParamLists = Record<string, { options: string[]; default?: string }>;
+type LegacyParamLists = Record<string, { options: string[]; default?: string }>;
 
-/** 解析模型 params（JSON 字符串或对象）→ 各参数的可用枚举与默认值 */
-function parseParamLists(model?: GatewayModelOption): ParamLists {
-  const out: ParamLists = {};
+/** 解析 model.props.params（JSON 字符串或对象）→ 各参数的可用枚举与默认值（旧版 fallback） */
+function parseLegacyParamLists(model?: GatewayModelOption): LegacyParamLists {
+  const out: LegacyParamLists = {};
   if (!model?.params) return out;
   let p: Record<string, unknown>;
   try {
@@ -41,8 +55,7 @@ function parseParamLists(model?: GatewayModelOption): ParamLists {
   } catch {
     return out;
   }
-  for (const meta of PARAM_META) {
-    // 生成个数：网关 params 的 n 是 {min,max,default} 对象（非枚举数组），特判为连续整数范围
+  for (const meta of LEGACY_PARAM_META) {
     if (meta.key === 'n') {
       const nObj = p['n'];
       if (nObj && typeof nObj === 'object' && !Array.isArray(nObj)) {
@@ -65,8 +78,49 @@ function parseParamLists(model?: GatewayModelOption): ParamLists {
   return out;
 }
 
-/** 计算某模型的参数初始值：LLM 推荐 > 模型默认 > 首选项 */
-function initialValues(lists: ParamLists, recommended: Record<string, string>, prefix: string): Record<string, string> {
+/** 解析 spec（model.params.spec.request[]）；无 spec 返回空数组 */
+function parseSpec(model?: GatewayModelOption): SpecParam[] {
+  if (!model?.params) return [];
+  let p: Record<string, unknown>;
+  try {
+    p = typeof model.params === 'string' ? (JSON.parse(model.params) as Record<string, unknown>) : (model.params as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+  const spec = p['spec'] as Record<string, unknown> | undefined;
+  const req = spec?.['request'];
+  return Array.isArray(req) ? (req as SpecParam[]) : [];
+}
+
+/** 递归把 spec 参数展开成「点路径 key → 初始值」扁平 Map（推荐 > 默认 > 首选项；show:false 也带上默认） */
+function flattenInit(params: SpecParam[], prefix: string, recommended: Record<string, string>, out: Record<string, string>) {
+  for (const prm of params || []) {
+    const key = prefix + prm.key;
+    const show = prm.show !== false;
+    if (prm.type === 'object' && prm.fields) {
+      flattenInit(prm.fields, key + '.', recommended, out);
+      continue;
+    }
+    const rec = recommended[key];
+    let def: string | undefined;
+    if (prm.type === 'enum') def = Array.isArray(prm.options) && prm.options.length ? String(prm.default ?? prm.options[0]) : String(prm.default ?? '');
+    else if (prm.default !== undefined && prm.default !== null) def = String(prm.default);
+    const val = rec ?? def;
+    // show:false 参数：仍带默认识别，不渲染（渲染层靠 show 过滤）
+    if (val !== undefined && val !== '') out[key] = val;
+    else if (!show && prm.default !== undefined && prm.default !== null) out[key] = String(prm.default);
+  }
+}
+
+/** initValues：走 spec 时的初始扁平值 + 模型值 */
+function initSpecValues(spec: SpecParam[], recommended: Record<string, string>, prefix: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  flattenInit(spec, prefix, recommended, out);
+  return out;
+}
+
+/** 旧版 initialValues：LLM 推荐 > 模型默认 > 首选项 */
+function initLegacyValues(lists: LegacyParamLists, recommended: Record<string, string>, prefix: string): Record<string, string> {
   const init: Record<string, string> = {};
   for (const [key, v] of Object.entries(lists)) {
     const rec = recommended[prefix + key];
@@ -76,35 +130,100 @@ function initialValues(lists: ParamLists, recommended: Record<string, string>, p
 }
 
 export function AgentParamSelector({ models, recommended = {}, reasons = {}, onParamsChange, keyPrefix = '' }: Props) {
-  // 模型：默认 LLM 推荐（在选项中）否则首个
   const [model, setModel] = useState(() => {
     const rec = recommended[keyPrefix + 'model'];
     if (rec && models.some((m) => m.value === rec)) return rec;
     return models[0]?.value ?? '';
   });
   const current = useMemo(() => models.find((m) => m.value === model), [models, model]);
-  const paramLists = useMemo(() => parseParamLists(current), [current]);
+  const spec = useMemo(() => parseSpec(current), [current]);
+  const hasSpec = spec.length > 0;
+  const legacyLists = useMemo(() => (!hasSpec ? parseLegacyParamLists(current) : {}), [current, hasSpec]);
+
   const [selected, setSelected] = useState<Record<string, string>>(() =>
-    initialValues(parseParamLists(models[0]), recommended, keyPrefix));
+    hasSpec
+      ? initSpecValues(spec, recommended, keyPrefix)
+      : initLegacyValues(parseLegacyParamLists(models[0]), recommended, keyPrefix));
 
-  // 模型切换：参数重置为该模型推荐/默认值（旧参数如 2K 不适配新模型时清掉）
   useEffect(() => {
-    setSelected(initialValues(paramLists, recommended, keyPrefix));
-  }, [model, paramLists, recommended, keyPrefix]);
+    setSelected(hasSpec
+      ? initSpecValues(spec, recommended, keyPrefix)
+      : initLegacyValues(legacyLists, recommended, keyPrefix));
+  }, [model, spec, legacyLists, recommended, keyPrefix, hasSpec]);
 
-  // 选择变化 → 上报全量参数（模型 + 各参数，键带前缀）
   useEffect(() => {
     onParamsChange({ ...selected, [keyPrefix + 'model']: model });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, model]);
 
   if (!models.length) return null;
-  const visibleMeta = PARAM_META.filter((m) => paramLists[m.key]);
+
+  const setVal = (key: string, v: string) => setSelected((s) => ({ ...s, [key]: v }));
 
   const selectStyle: CSSProperties = {
     padding: '4px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)',
     fontSize: 12, background: 'white', color: 'var(--color-ink)', outline: 'none',
   };
+  const labelStyle: CSSProperties = { color: 'var(--color-muted)', width: 72, flexShrink: 0, fontSize: 12 };
+
+  // ===== spec 驱动的参数行 =====
+  const renderSpecRow = (prm: SpecParam, prefix: string) => {
+    if (prm.show === false) return null; // 只带默认值，不渲染
+    const key = prefix + prm.key;
+    const value = selected[key] ?? '';
+    const reason = reasons[key];
+    if (prm.type === 'object' && prm.fields) {
+      return (
+        <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, borderLeft: '2px solid var(--color-hairline)', paddingLeft: 8 }}>
+          <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>{prm.label || prm.key}</span>
+          {(prm.fields || []).map((f) => renderSpecRow(f, key + '.'))}
+        </div>
+      );
+    }
+    const control = (() => {
+      if (prm.type === 'enum') {
+        const opts = (prm.options || []).map(String);
+        return (
+          <Select value={value} onValueChange={(v) => v && setVal(key, v)}>
+            <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {opts.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        );
+      }
+      if (prm.type === 'bool') {
+        return (
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <input type="checkbox" checked={value === 'true'} onChange={(e) => setVal(key, e.target.checked ? 'true' : 'false')} />
+            {value === 'true' ? '开' : '关'}
+          </label>
+        );
+      }
+      return (
+        <input
+          style={{ ...selectStyle, width: 'auto', flex: 1 }}
+          type={prm.type === 'range' || prm.type === 'number' ? 'number' : 'text'}
+          min={prm.type === 'range' ? prm.min : undefined}
+          max={prm.type === 'range' ? prm.max : undefined}
+          value={value}
+          placeholder={prm.type === 'range' ? `${prm.min ?? ''}~${prm.max ?? ''}` : prm.type === 'array' ? '逗号分隔' : prm.type === 'arrayofobject' ? 'JSON 数组' : ''}
+          onChange={(e) => setVal(key, e.target.value)}
+        />
+      );
+    })();
+
+    return (
+      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={labelStyle}>{prm.label || prm.key}</span>
+        {control}
+        {reason && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reason}</span>}
+      </div>
+    );
+  };
+
+  // ===== 旧版 PARAM_META 驱动 =====
+  const legacyVisible = LEGACY_PARAM_META.filter((m) => legacyLists[m.key]);
 
   return (
     <div
@@ -119,7 +238,7 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>模型</span>
+          <span style={labelStyle}>模型</span>
           <Select value={model} onValueChange={(v) => v && setModel(v)}>
             <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -128,20 +247,24 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
           </Select>
           {reasons[keyPrefix + 'model'] && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>{reasons[keyPrefix + 'model']}</span>}
         </div>
-        {visibleMeta.map((meta) => (
-          <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>{meta.label}</span>
-            <Select value={selected[keyPrefix + meta.key] ?? ''} onValueChange={(v) => v && setSelected((s) => ({ ...s, [keyPrefix + meta.key]: v }))}>
-              <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {paramLists[meta.key].options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {reasons[keyPrefix + meta.key] && (
-              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reasons[keyPrefix + meta.key]}</span>
-            )}
-          </div>
-        ))}
+
+        {hasSpec ? spec.map((p) => renderSpecRow(p, keyPrefix)) : legacyVisible.map((meta) => {
+          const key = keyPrefix + meta.key;
+          const value = selected[key] ?? '';
+          const reason = reasons[key];
+          return (
+            <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={labelStyle}>{meta.label}</span>
+              <Select value={value} onValueChange={(v) => v && setVal(key, v)}>
+                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {legacyLists[meta.key].options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {reason && (<span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reason}</span>)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

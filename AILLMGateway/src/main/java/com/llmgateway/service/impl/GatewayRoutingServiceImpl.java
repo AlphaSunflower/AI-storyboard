@@ -399,6 +399,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         putInt(params, "maxAudioSizeMB", mp.getMaxAudioSizeMb());
         putInt(params, "maxRequestBodyMB", mp.getMaxRequestBodyMb());
         putInt(params, "maxPromptChars", mp.getMaxPromptChars());
+        // self-describing spec：把 params_schema 解析后作为 spec 附到 params（供前端/Agent 通用渲染）
+        String ps = mp.getParamsSchema();
+        if (ps != null && !ps.isBlank()) {
+            JsonNode specNode = ModelParamsSpecNormalizer.spec(ps);
+            if (specNode != null) params.put("spec", specNode);
+        }
         return params.isEmpty() ? null : params;
     }
 
