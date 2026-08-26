@@ -69,7 +69,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                                                       String aspectRatio, String model,
                                                       String understandingModel, List<String> referenceImages,
                                                       List<String> assetIds) {
-        String systemPrompt = buildSystemPrompt(creationType, customTypeDesc, aspectRatio);
+        String systemPrompt = buildSystemPrompt();
 
         // 资产库设定集注入：仅当调用方显式传入 assetIds 时注入对应资产的文字卡；
         // 默认（assetIds 为 null 或空列表）不注入任何资产 —— 生成剧本默认与资产库无关，
@@ -143,7 +143,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     }
 
     /**
-     * 懒加载获取 ChatClient：默认模型固定为网关默认视觉模型（getDefaultVisionModel），超时 120s
+     * 懒加载获取 ChatClient：默认模型固定为网关默认文本模型（getDefaultTextModel），超时 120s
      * （与原 HttpClient timeout 一致）；双重检查锁保证线程安全。
      */
     private ChatClient chatClient() {
@@ -152,7 +152,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(gatewayModelService.getDefaultVisionModel())
+                                    .model(gatewayModelService.getDefaultTextModel())
                                     .timeout(Duration.ofSeconds(config.getScriptTimeout())))
                             .build();
                 }
@@ -161,18 +161,8 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         return chatClient;
     }
 
-    private String buildSystemPrompt(String creationType, String customTypeDesc, String aspectRatio) {
-        String style = switch (creationType) {
-            case "movie" -> "电影化叙事、氛围渲染、视觉对比";
-            case "short_video" -> "快节奏、竖屏为主、3秒抓人";
-            case "ad" -> "品牌调性、卖点突出、光影质感";
-            case "drama" -> "情绪递进、角色刻画、叙事完整";
-            case "documentary" -> "稳重、旁白驱动、信息密度高";
-            case "custom" -> customTypeDesc != null ? customTypeDesc : "";
-            default -> "电影化叙事";
-        };
-        return promptConfig.get("script/storyboard-system",
-            Map.of("style", style, "aspectRatio", aspectRatio));
+    private String buildSystemPrompt() {
+        return promptConfig.get("script/storyboard-system");
     }
 
     private String callLLM(String model, String systemPrompt, String userPrompt) {

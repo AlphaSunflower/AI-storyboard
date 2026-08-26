@@ -36,7 +36,10 @@ function ImgWithFallback({
 
 /** 轻量渲染：**加粗**、换行、![]() 图片、[]() 链接、视频 URL 直接识别；onImgClick 为图片点击预览回调 */
 function renderContent(content: string, onImgClick: (url: string) => void) {
-  const lines = content.split('\n');
+  // LLM 输出的 JSON 字符串中 \n 可能被转义为字面 \\n，split('\n') 无法匹配；
+  // 统一将字面 \\n（及 \r\n）归一为真正换行后再拆行
+  const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
   return lines.map((line, i) => {
     // 图片 ![alt](url)
     const imgMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);

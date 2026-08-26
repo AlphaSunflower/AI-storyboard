@@ -347,6 +347,10 @@ public class AisplitIntentHandler implements IntentHandler {
                     } catch (Exception ignored) {}
                 }
             }
+            // 用户已提供内容（自定义输入或选项文本）→ 跳过"有剧本吗"直接进剧本优化
+            if (!title.isBlank()) {
+                return handleFromScriptGate(request, supplemented, assetIds);
+            }
             return showScriptSourceGate(request, supplemented, assetIds);
         }
 

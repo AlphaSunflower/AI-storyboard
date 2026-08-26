@@ -66,13 +66,16 @@ public class AssetServiceImpl implements AssetService {
             return idx >= 0 ? idx : 99;
         }));
         List<String> result = new ArrayList<>();
+        int maxRef = 9; // H3 参考图硬上限
         for (AssetVO a : sorted) {
-            if (result.size() >= 9) break;
-            if (a.images() != null && !a.images().isEmpty()) {
-                // 主图 = sortOrder 最小的那张
-                a.images().stream()
-                        .min(Comparator.comparingInt(img -> img.sortOrder() != null ? img.sortOrder() : Integer.MAX_VALUE))
-                        .ifPresent(img -> result.add(img.url()));
+            if (result.size() >= maxRef) break;
+            if (a.images() == null || a.images().isEmpty()) continue;
+            // 每资产取全部参考图（按 sortOrder 升序，主图优先），累计 ≤ maxRef
+            for (AssetImageVO img : a.images().stream()
+                    .sorted(Comparator.comparingInt(i -> i.sortOrder() != null ? i.sortOrder() : Integer.MAX_VALUE))
+                    .toList()) {
+                if (result.size() >= maxRef) break;
+                result.add(img.url());
             }
         }
         return result;

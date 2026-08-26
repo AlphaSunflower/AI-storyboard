@@ -217,8 +217,13 @@ public class AssetServiceImpl implements AssetService {
         List<String> refs = new ArrayList<>();
         for (AssetVO a : sorted) {
             if (refs.size() >= MAX_REFERENCE_IMAGES) break;
-            if (a.images() != null && !a.images().isEmpty()) {
-                refs.add(a.images().getFirst().url());
+            if (a.images() == null || a.images().isEmpty()) continue;
+            // 每资产取全部参考图（按 sortOrder 升序，主图优先），累计 ≤ MAX_REFERENCE_IMAGES（H3 硬上限）
+            for (AssetImageVO img : a.images().stream()
+                    .sorted(Comparator.comparingInt(i -> i.sortOrder() != null ? i.sortOrder() : Integer.MAX_VALUE))
+                    .toList()) {
+                if (refs.size() >= MAX_REFERENCE_IMAGES) break;
+                refs.add(img.url());
             }
         }
         return refs;

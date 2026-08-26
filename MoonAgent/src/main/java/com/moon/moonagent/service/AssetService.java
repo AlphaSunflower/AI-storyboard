@@ -52,6 +52,6 @@ public interface AssetService {
     /** 拼「设定集」文字块（空列表返回空串），注入分镜脚本 system prompt 与视频/图片 prompt。 */
     String buildSheetText(List<AssetVO> assets);
 
-    /** 资产参考图列表：每资产取主图 1 张，按 character > prop > scene 优先级，累计 ≤ 9（H3 硬上限）。 */
+    /** 资产参考图列表：每资产取全部参考图（按 sortOrder 升序），character > prop > scene 优先级，累计 ≤ 9（H3 硬上限）。 */
     List<String> buildReferenceImages(List<AssetVO> assets);
 }
