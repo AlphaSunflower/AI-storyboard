@@ -1,3 +1,58 @@
+server:
+  port: 9090
+
 spring:
   application:
-    name: XiaoYueCanvas
+    name: xiaoyue-canvas
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    # 注意：不用 ${DB_URL:...} 占位符（本机存在其他项目遗留的 DB_URL/DB_USERNAME/DB_PASSWORD 全局环境变量指向 MySQL，会被污染）
+    # 本地开发凭据/库名在此；生产用 SPRING_DATASOURCE_* 环境变量覆盖（优先级高于 yaml）
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ai_storyboard}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:123456}
+  servlet:
+    multipart:
+      max-file-size: 256MB
+      max-request-size: 256MB
+  ai:
+    openai:
+      # 统一走 LLM 网关 8083（Spring AI 自动拼 /chat/completions、/images/generations 等）
+      base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
+      api-key: ${LLM_GATEWAY_API_KEY:}
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: assign_uuid
+      logic-delete-field: deleted
+
+# 上传根目录：复用主后端 uploads（文件共享，前端经主后端 /api/files/** 或本文 /assets/{id} 读取）
+ai:
+  upload-root: ${UPLOAD_ROOT:../AIStoryboardBackend/uploads}
+  gateway:
+    base-url: ${LLM_GATEWAY_BASE_URL:}
+    api-key: ${LLM_GATEWAY_API_KEY:}
+  # ── 超时/重试（默认值对齐 agent-core 行为）──
+  image-request-timeout: 310
+  image-edit-timeout: 180
+  video-request-timeout: 120
+  video-download-timeout: 180
+  video-retry-delay-ms: 15000
+  gateway-model-timeout: 10
+  gateway-cooldown-ms: 300000
+
+# ── JWT 鉴权（与 ai分镜/MoonAgent 同算法 HS256；secret 需与 ai分镜 access-secret 一致——见 application-local.yml，不进 git）──
+auth:
+  jwt-secret: ${JWT_ACCESS_SECRET:}
+  jwt-expire-minutes: 720
+
+# 跨域：Morrow 画布 dev 3000
+app:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000}

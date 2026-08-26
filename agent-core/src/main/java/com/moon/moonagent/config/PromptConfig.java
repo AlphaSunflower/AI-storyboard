@@ -33,7 +33,8 @@ public class PromptConfig {
     void loadAll() {
         try {
             var resolver = new PathMatchingResourcePatternResolver();
-            Resource[] resources = resolver.getResources("classpath:prompts/**/*.yaml");
+            // classpath* = 容忍 prompts/ 目录缺失（XiaoYueCanvas 无提示词目录时返回空数组，不抛错）
+            Resource[] resources = resolver.getResources("classpath*:prompts/**/*.yaml");
             Yaml yaml = new Yaml();
             for (Resource res : resources) {
                 try {

@@ -15,7 +15,7 @@ import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { Moon } from 'lucide-react';
-import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info } from 'lucide-react';
+import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info, Frame } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuthStore } from '../stores/authStore';
@@ -52,6 +52,19 @@ export function ChatPage() {
   const loadedRef = useRef(false);
   const projectBtnRef = useRef<HTMLButtonElement>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
+
+  // 进入画布：携带 ai分镜 access token（与画布同 JWT secret）+ userId/name 跳转 Morrow（无需再登录）
+  const openCanvas = () => {
+    const token = localStorage.getItem('accessToken');
+    if (!token) return;
+    let userId = ''; let name = '';
+    try { const u = JSON.parse(localStorage.getItem('user') ?? '{}') as { userId?: string; displayName?: string }; userId = u.userId ?? ''; name = u.displayName ?? ''; } catch { /* ignore */ }
+    const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:3000';
+    const params = new URLSearchParams({ token });
+    if (userId) params.set('userId', userId);
+    if (name) params.set('name', name);
+    window.open(`${base}?${params.toString()}`, '_blank');
+  };
 
   // 登录守卫
   useEffect(() => {
@@ -527,6 +540,11 @@ export function ChatPage() {
                   disabled={!activeConversationId}
                   style={headerBtn(activeConversationId ? 1 : 0.4)}
                 ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
+                <button
+                  onClick={openCanvas}
+                  title="进入画布"
+                  style={headerBtn(1)}
+                ><Frame size={16} strokeWidth={1.8} /> 进入画布</button>
               </div>
             </div>
 
