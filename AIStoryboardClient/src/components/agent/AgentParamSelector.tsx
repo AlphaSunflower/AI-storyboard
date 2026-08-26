@@ -87,7 +87,10 @@ function parseSpec(model?: GatewayModelOption): SpecParam[] {
   } catch {
     return [];
   }
-  const spec = p['spec'] as Record<string, unknown> | undefined;
+  let spec = p['spec'] as Record<string, unknown> | undefined;
+  if (typeof spec === 'string') {
+    try { spec = JSON.parse(spec) as Record<string, unknown>; } catch { return []; }
+  }
   const req = spec?.['request'];
   return Array.isArray(req) ? (req as SpecParam[]) : [];
 }
@@ -172,10 +175,10 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
     const key = prefix + prm.key;
     const value = selected[key] ?? '';
     const reason = reasons[key];
-    if (prm.type === 'object' && prm.fields) {
+    if ((prm.type === 'object' || prm.type === 'arrayofobject') && prm.fields) {
       return (
         <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 6, borderLeft: '2px solid var(--color-hairline)', paddingLeft: 8 }}>
-          <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>{prm.label || prm.key}</span>
+          <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>{prm.label || prm.key}{prm.type === 'arrayofobject' ? '（列表项，按一项填写）' : ''}</span>
           {(prm.fields || []).map((f) => renderSpecRow(f, key + '.'))}
         </div>
       );
@@ -200,6 +203,16 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
           </label>
         );
       }
+      if (prm.type === 'array') {
+        return (
+          <textarea
+            style={{ ...selectStyle, flex: 1, minHeight: 48, fontFamily: 'monospace', fontSize: 12 }}
+            value={value}
+            placeholder="每行一个 URL 或逗号分隔"
+            onChange={(e) => setVal(key, e.target.value)}
+          />
+        );
+      }
       return (
         <input
           style={{ ...selectStyle, width: 'auto', flex: 1 }}
@@ -207,7 +220,7 @@ export function AgentParamSelector({ models, recommended = {}, reasons = {}, onP
           min={prm.type === 'range' ? prm.min : undefined}
           max={prm.type === 'range' ? prm.max : undefined}
           value={value}
-          placeholder={prm.type === 'range' ? `${prm.min ?? ''}~${prm.max ?? ''}` : prm.type === 'array' ? '逗号分隔' : prm.type === 'arrayofobject' ? 'JSON 数组' : ''}
+          placeholder={prm.type === 'range' ? `${prm.min ?? ''}~${prm.max ?? ''}` : ''}
           onChange={(e) => setVal(key, e.target.value)}
         />
       );

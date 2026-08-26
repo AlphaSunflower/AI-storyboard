@@ -788,8 +788,6 @@ function openRouteModal(route) {
       + '<label class="switch"><input type="checkbox" id="r-isdefault"><span class="slider"></span></label>'
       + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
-    + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
-      + esc(route ? route.defaultParams || '' : '') + '</textarea>')
     + field('参数 Schema（JSON，可选）',
         '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button></div>'
         + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">自描述参数契约：modes/promptKey/request[](支持嵌套、show、role:image_upload/reference、cardinality)。留空=走固定列。</div>'
@@ -898,7 +896,7 @@ async function loadModelParamsForEdit(modelName, type) {
 async function submitRoute(id) {
   const modelName = $('#r-model').value.trim();
   const channelId = $('#r-channel').value;
-  const paramsText = $('#r-params').value.trim();
+  const paramsText = (function () { const el = $('#r-params'); return el ? el.value.trim() : ''; })();
 
   if (!modelName) { toast('模型名不能为空', 'error'); return; }
   if (!channelId) { toast('请选择渠道（需先在渠道管理创建）', 'error'); return; }
