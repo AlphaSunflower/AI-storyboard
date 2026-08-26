@@ -16,6 +16,7 @@ import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.GeminiFormatConverter;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelParamsSpecNormalizer;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
 import lombok.RequiredArgsConstructor;
@@ -183,6 +184,15 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 try {
                     ForwardResult fwd = forward(channel, path, requestBody);
                     status = fwd.status();
+                    // 图响应归一化（openai_compatible 直传模型配了 response.sync 才处理；gemini 已由 forward 转换不再动）
+                    if (fwd.status() == 200 && path.contains("images/generations") && !"gemini".equals(channel.getType())) {
+                        ModelParams mp = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                                .eq(ModelParams::getModelName, model));
+                        com.fasterxml.jackson.databind.JsonNode ispec = mp != null ? ModelParamsSpecNormalizer.spec(mp.getParamsSchema()) : null;
+                        if (ispec != null && ispec.path("response").path("sync").isObject()) {
+                            fwd = new ForwardResult(200, ModelParamsSpecNormalizer.normalizeImageSync(fwd.body(), ispec));
+                        }
+                    }
                     channelId = channel.getId();
                     String bodyStr = fwd.body();
                     if (status >= 400) {

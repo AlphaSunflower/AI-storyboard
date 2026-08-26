@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.config.GatewayConfig;
 import com.llmgateway.entity.Channel;
+import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ChannelMapper;
@@ -14,6 +15,8 @@ import com.llmgateway.mapper.CallLogMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelParamsService;
+import com.llmgateway.service.ModelParamsSpecNormalizer;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +50,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     private final KeyService keyService;
     private final CallLogService callLogService;
     private final CallLogMapper callLogMapper;
+    private final ModelParamsService modelParamsService;
     private final GatewayConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -365,6 +369,27 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
                             callLogService.log("video", channel.getId(), "polled",
                                     System.currentTimeMillis() - start, null, null, taskId);
                         }
+                        // spec 驱动：按 taskId 反查 model → params_schema → 归一化（无 spec 走下方硬编码兜底）
+                        String specModel = resolveModelByTaskId(taskId);
+                        com.fasterxml.jackson.databind.JsonNode spec = null;
+                        if (specModel != null) {
+                            ModelParams mp = modelParamsService.getByModelName(specModel);
+                            spec = (mp != null) ? ModelParamsSpecNormalizer.spec(mp.getParamsSchema()) : null;
+                        }
+                        if (spec != null && spec.path("response").path("async").isObject()) {
+                            String norm = ModelParamsSpecNormalizer.normalizeVideoPoll(resp.body(), spec, taskId);
+                            JsonNode normNode = objectMapper.readTree(norm);
+                            String mediaUrl = normNode.path("_mediaUrl").asText("");
+                            if (mediaUrl.isBlank() && "succeeded".equals(normNode.path("status").asText())) {
+                                mediaUrl = task.path("content").path("url").asText("");   // 兜底 minimax 直链
+                            }
+                            if (!mediaUrl.isBlank()) {
+                                callLogService.log(specModel, channel.getId(), "succeeded",
+                                        System.currentTimeMillis() - start, null, mediaUrl, taskId);
+                            }
+                            ((com.fasterxml.jackson.databind.node.ObjectNode) normNode).remove("_mediaUrl");
+                            return new VideoResult(200, objectMapper.writeValueAsString(normNode));
+                        }
                         // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
                         return new VideoResult(200, normalizePoll(task));
                     }
@@ -432,6 +457,23 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
             throw be;
         } catch (Exception e) {
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
+        }
+    }
+
+    /** 按 taskId 反查最新 call_log 记录的 model（poll 取该模型 params_schema 做 spec 归一化用）。 */
+    private String resolveModelByTaskId(String taskId) {
+        if (taskId == null || taskId.isBlank()) return null;
+        try {
+            com.llmgateway.entity.CallLog latest = callLogMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.llmgateway.entity.CallLog>()
+                            .eq(com.llmgateway.entity.CallLog::getTaskId, taskId)
+                            .isNotNull(com.llmgateway.entity.CallLog::getModel)
+                            .orderByDesc(com.llmgateway.entity.CallLog::getCreatedAt)
+                            .last("LIMIT 1"));
+            return latest != null ? latest.getModel() : null;
+        } catch (Exception e) {
+            log.warn("resolveModelByTaskId 查询失败（无害，走硬编码兜底）: taskId={}, error={}", taskId, e.getMessage());
+            return null;
         }
     }
 
