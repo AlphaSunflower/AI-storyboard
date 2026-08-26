@@ -789,7 +789,11 @@ function openRouteModal(route) {
       + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
-      + esc(route ? route.defaultParams || '' : '') + '</textarea>');
+      + esc(route ? route.defaultParams || '' : '') + '</textarea>')
+    + field('参数 Schema（JSON，可选）',
+        '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button></div>'
+        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">自描述参数契约：modes/promptKey/request[](支持嵌套、show、role:image_upload/reference、cardinality)。留空=走固定列。</div>'
+        + '<textarea class="input" id="r-schema" rows="10" spellcheck="false" placeholder=\'{"modes":["text-to-image","image-to-image"],"promptKey":"prompt","request":[{"key":"aspect_ratio","label":"画幅","type":"enum","options":["1:1","4:3","16:9"],"default":"4:3","show":true}]}\'></textarea>');
 
   openModal(isEdit ? '编辑路由' : '新建路由', body, footerHtml('保存'));
   // 按默认渠道拉取模型列表（编辑时预填路由配置的模型名）
@@ -817,6 +821,8 @@ function openRouteModal(route) {
     loadModelParamsForEdit(route.modelName, curType);
   }
   $('#form-submit').onclick = () => submitRoute(isEdit ? route.id : null);
+  const impBtn = $('#r-import-schema');
+  if (impBtn) impBtn.onclick = importSchemaFromRequest;
 }
 
 /**
@@ -880,6 +886,9 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-maxaudiosize', mp.maxAudioSizeMb);
     set('p-maxbody', mp.maxRequestBodyMb);
     set('p-maxprompt', mp.maxPromptChars);
+    // 自描述 schema 回显（编辑弹窗已渲染该字段时）
+    const scEl = $('#r-schema');
+    if (scEl && mp.paramsSchema) scEl.value = mp.paramsSchema;
     // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
   } catch (e) {
     console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
@@ -984,7 +993,49 @@ async function saveModelParams(modelName, type) {
     req.maxRequestBodyMb = num('p-maxbody');
     req.maxPromptChars = num('p-maxprompt');
   }
+  // 自描述 schema：非空须为合法 JSON，空 → null（留空走固定列）
+  const schemaText = (function () { const el = $('#r-schema'); return el ? el.value.trim() : ''; })();
+  if (schemaText) {
+    try { JSON.parse(schemaText); } catch (e) { toast('参数 Schema 不是合法 JSON：' + (e.message || e), 'error'); return; }
+    req.paramsSchema = schemaText;
+  } else {
+    req.paramsSchema = null;
+  }
   await api('/admin/model-params', { method: 'PUT', body: JSON.stringify(req) });
+}
+
+/** 从请求体 JSON 一键生成参数 Schema 骨架（request[]；model/prompt 标为内建跳过；值类型推断 + 嵌套 + image_upload/reference 识别） */
+function _isUrlLike(v) { return typeof v === 'string' && /^(https?:\/\/|data:image)/i.test(v.trim()); }
+function _guessField(k, val) {
+  const p = { key: k, label: k };
+  if (typeof val === 'string') {
+    if (_isUrlLike(val)) { p.type = 'string'; p.role = 'image_upload'; p.cardinality = 'single'; }
+    else p.type = 'string';   // 自由文本/枚举（管理员可改成 enum+options）
+  } else if (typeof val === 'number') {
+    p.type = 'range'; p.min = 1; p.max = val; p.default = val;   // 数字 → 取最大范围
+  } else if (typeof val === 'boolean') {
+    p.type = 'bool'; p.default = val;
+  } else if (Array.isArray(val)) {
+    if (val.length && typeof val[0] === 'object') { p.type = 'arrayofobject'; p.fields = _guessFields(val[0]); }
+    else if (val.length && _isUrlLike(val[0])) { p.type = 'array'; p.role = 'image_upload'; p.cardinality = 'multi'; }
+    else p.type = 'array';
+  } else if (val && typeof val === 'object') {
+    p.type = 'object'; p.fields = _guessFields(val);
+  }
+  return p;
+}
+function _guessFields(obj) {
+  return Object.entries(obj || {}).filter((e) => e[0] !== 'model' && e[0] !== 'prompt').map((e) => _guessField(e[0], e[1]));
+}
+function importSchemaFromRequest() {
+  const raw = prompt('粘贴完整请求体 JSON（含 model/prompt 等键值对），自动解析生成参数 Schema 骨架：');
+  if (raw === null) return;
+  let req;
+  try { req = JSON.parse(raw); } catch (e) { toast('请求体不是合法 JSON：' + (e.message || e), 'error'); return; }
+  const spec = { modes: [], promptKey: 'prompt', request: _guessFields(req) };
+  const sc = $('#r-schema');
+  if (sc) sc.value = JSON.stringify(spec, null, 2);
+  toast('已生成 Schema 骨架，请补充 enum 选项/range 范围/角色标注后保存', 'success');
 }
 
 /** 路由页按钮委托（新建/编辑/删除/测试） */
