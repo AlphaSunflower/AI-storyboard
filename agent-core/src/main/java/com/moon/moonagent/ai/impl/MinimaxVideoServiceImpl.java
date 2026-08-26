@@ -4,13 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.AgentAsset;
-import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.mapper.AgentAssetMapper;
-import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.MinimaxVideoService;
+import com.moon.moonagent.ai.SceneGenerationBridge;
+import com.moon.moonagent.ai.SceneView;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,9 +45,9 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
 
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
-    private final StoryboardClient storyboardClient;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
+    private final SceneGenerationBridge sceneBridge;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -68,7 +68,7 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
                                   String resolution, String size, String aspectRatio,
                                   Integer duration, String negativePrompt, Long seed,
                                   List<String> referenceImages, String generatedImageUrl) {
-        Scene scene = sceneId != null ? storyboardClient.getScene(sceneId) : null;
+        SceneView scene = sceneId != null ? sceneBridge.getScene(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
         if (prompt == null || prompt.isBlank()) {
             throw new BusinessException(40001, "视频生成 prompt 不能为空");
@@ -134,17 +134,17 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
             }
 
             if (scene != null) {
-                scene.setVideoTaskId(taskId);
-                scene.setVideoStatus("generating");
-                storyboardClient.updateScene(scene);
+                scene.videoTaskId = taskId;
+                scene.videoStatus = "generating";
+                sceneBridge.updateScene(scene);
             }
             log.info("视频任务已创建(网关): taskId={}, model={}, resolution={}, duration={}",
                     taskId, actualModel, resolution, duration);
             return taskId;
         } catch (Exception e) {
             if (scene != null) {
-                scene.setVideoStatus("failed");
-                storyboardClient.updateScene(scene);
+                scene.videoStatus = "failed";
+                sceneBridge.updateScene(scene);
             }
             throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
@@ -257,11 +257,11 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
 
     /** 终态更新 scene / agent_asset（双通道反查，scene.videoTaskId 优先） */
     private void updateTaskOwner(String taskId, String videoUrl, String status, String error) {
-        Scene scene = storyboardClient.getSceneByVideoTaskId(taskId);
+        SceneView scene = sceneBridge.getSceneByVideoTaskId(taskId);
         if (scene != null) {
-            scene.setVideoUrl(videoUrl);
-            scene.setVideoStatus(status);
-            storyboardClient.updateScene(scene);
+            scene.videoUrl = videoUrl;
+            scene.videoStatus = status;
+            sceneBridge.updateScene(scene);
             return;
         }
         var assets = agentAssetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()

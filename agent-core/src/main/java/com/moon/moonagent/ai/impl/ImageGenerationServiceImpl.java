@@ -2,14 +2,12 @@ package com.moon.moonagent.ai.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moon.moonagent.dto.response.AssetVO;
-import com.moon.moonagent.entity.Scene;
-import com.moon.moonagent.client.StoryboardClient;
-import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.ImageGenerationService;
+import com.moon.moonagent.ai.SceneGenerationBridge;
+import com.moon.moonagent.ai.SceneView;
 import com.storyboard.common.MultipartBuilder;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -55,9 +53,8 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
-    private final StoryboardClient storyboardClient;
     private final FileStorageService fileStorageService;
-    private final AssetService assetService;
+    private final SceneGenerationBridge sceneBridge;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 生图走 Spring AI ImageModel（自动装配的 OpenAiImageModel，spring.ai.openai.* 指向网关，文生图 /v1/images/generations） */
     private final ImageModel imageModel;
@@ -110,7 +107,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                                  List<String> referenceImages,
                                  String mode, String generatedImageUrl, Integer n) {
         // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
-        Scene scene = sceneId != null ? storyboardClient.getScene(sceneId) : null;
+        SceneView scene = sceneId != null ? sceneBridge.getScene(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
 
         if (prompt == null || prompt.isBlank()) {
@@ -121,37 +118,34 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         String effectivePrompt = prompt;
         if (scene != null) {
             try {
-                List<AssetVO> sceneAssets = assetService.sceneAssets(sceneId, "image");
-                if (sceneAssets != null && !sceneAssets.isEmpty()) {
-                    String sheet = assetService.buildSheetText(sceneAssets);
-                    if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;
-                }
+                String sheet = sceneBridge.sceneAssetSheet(sceneId, "image");
+                if (sheet != null && !sheet.isBlank()) effectivePrompt = sheet + "\n\n" + prompt;
             } catch (Exception e) {
                 log.warn("资产库文字卡注入失败，跳过: {}", e.getMessage());
             }
         }
 
         if (scene != null) {
-            scene.setImageStatus("generating");
-            storyboardClient.updateScene(scene);
+            scene.imageStatus = "generating";
+            sceneBridge.updateScene(scene);
         }
 
         try {
             List<String> localPaths = new ArrayList<>();
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
             // 模型选择：显式传入 > 分镜覆盖 > 网关默认（文生图/图改图共用同一默认模型）
-            String sceneModel = scene != null && scene.getImageModel() != null && !scene.getImageModel().isBlank()
-                    ? scene.getImageModel() : null;
+            String sceneModel = scene != null && scene.imageModel != null && !scene.imageModel.isBlank()
+                    ? scene.imageModel : null;
             String effectiveModel = model != null ? model
                     : sceneModel != null ? sceneModel
                     : gatewayModelService.getDefaultImageModel();
             // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
             String effSize = size != null ? size
-                    : (scene != null && scene.getImageSize() != null && !scene.getImageSize().isBlank()) ? scene.getImageSize() : null;
+                    : (scene != null && scene.imageSize != null && !scene.imageSize.isBlank()) ? scene.imageSize : null;
             String effQuality = quality != null ? quality
-                    : (scene != null && scene.getImageQuality() != null && !scene.getImageQuality().isBlank()) ? scene.getImageQuality() : null;
+                    : (scene != null && scene.imageQuality != null && !scene.imageQuality.isBlank()) ? scene.imageQuality : null;
             Integer effN = (n != null && n > 0) ? n
-                    : (scene != null && scene.getImageN() != null && scene.getImageN() > 0) ? scene.getImageN() : null;
+                    : (scene != null && scene.imageN != null && scene.imageN > 0) ? scene.imageN : null;
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
             if (hasReferenceImages || "edit".equals(mode)) {
@@ -168,17 +162,17 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             }
 
             if (scene != null) {
-                scene.setImageUrl(localPaths.getFirst());
+                scene.imageUrl = localPaths.getFirst();
                 // 多图结果：逗号分隔存入 image_urls（imageUrl 保留首图，兼容旧逻辑/Agent 链路）
-                scene.setImageUrls(String.join(",", localPaths));
-                scene.setImageStatus("completed");
-                storyboardClient.updateScene(scene);
+                scene.imageUrls = String.join(",", localPaths);
+                scene.imageStatus = "completed";
+                sceneBridge.updateScene(scene);
             }
             return localPaths;
         } catch (Exception e) {
             if (scene != null) {
-                scene.setImageStatus("failed");
-                storyboardClient.updateScene(scene);
+                scene.imageStatus = "failed";
+                sceneBridge.updateScene(scene);
             }
             throw new BusinessException(50201, "AI 图片生成失败: " + e.getMessage(), e);
         }
