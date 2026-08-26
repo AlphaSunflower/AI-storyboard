@@ -81,7 +81,7 @@ export function ChatPage() {
   const projectId = currentProject?.id;
   useEffect(() => {
     if (!projectId) return;
-    useAgentStore.setState({ activeConversationId: null, messages: [] });
+    useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, streaming: false, workflowHint: '' });
     useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
   }, [projectId]);
 

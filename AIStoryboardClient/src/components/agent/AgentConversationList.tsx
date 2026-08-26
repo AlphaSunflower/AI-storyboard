@@ -51,7 +51,6 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
   const {
     conversations, activeConversationId, selectConversation,
     newConversation, renameConversation, setConversationStatus, deleteConversation,
-    waitingHumanInput, waitingVideoPlan,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -195,12 +194,11 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
               <div
                 key={c.id}
                 onClick={() => {
-                  if (waitingHumanInput || waitingVideoPlan) return;
                   if (multiSelect) { toggleSelect(c.id); return; }
                   if (onSelectOverride) { onSelectOverride(c.id); return; }
                   selectConversation(c.id);
                 }}
-                title={(waitingHumanInput || waitingVideoPlan) && c.id !== activeConversationId ? '请先完成当前确认' : undefined}
+                title={undefined}
                 style={{
                   padding: '12px 14px',
                   cursor: 'pointer',
@@ -209,7 +207,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                   gap: 8,
                   background: c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
                   borderBottom: `1px solid ${DS.border}`,
-                  opacity: (waitingHumanInput || waitingVideoPlan) && c.id !== activeConversationId ? 0.5 : 1,
+                  opacity: 1,
                 }}
               >
                 {/* 勾选框（仅多选模式显示，scale 弹入动画） */}

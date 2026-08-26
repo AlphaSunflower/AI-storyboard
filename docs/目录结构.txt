@@ -1,0 +1,42 @@
+src/
+└── main/
+    ├── java/
+    │   └── com/example/ai/
+    │       ├── config/                    # 基础设施层：配置类
+    │       │   ├── AiConfig.java          # 全局AI配置（如ChatClient Bean）[reference:17]
+    │       │   └── ProviderConfig.java    # 多模型提供商配置[reference:18]
+    │       ├── controller/                # 表现层：API控制器
+    │       │   └── ChatController.java    # 处理Chat相关请求[reference:19]
+    │       ├── service/                   # 应用层：业务服务
+    │       │   ├── ChatService.java       # 编排聊天业务流程[reference:20]
+    │       │   └── KnowledgeBaseService.java
+    │       ├── ai/                        # AI层：核心AI组件
+    │       │   ├── chat/
+    │       │   │   └── ChatClientProvider.java # 提供定制的ChatClient[reference:21]
+    │       │   ├── prompt/
+    │       │   │   ├── PromptTemplateManager.java
+    │       │   │   └── templates/         # 存放提示词模板文件[reference:22]
+    │       │   ├── memory/
+    │       │   │   └── ChatMemoryConfig.java   # 聊天记忆配置[reference:23]
+    │       │   ├── tools/                 # 工具定义 (Function Calling)
+    │       │   │   ├── ToolDefinitions.java
+    │       │   │   └── WeatherTool.java   # 具体工具实现[reference:24]
+    │       │   ├── advisors/              # 自定义Advisor
+    │       │   │   └── LoggingAdvisor.java
+    │       │   └── providers/             # 多模型支持
+    │       │       ├── openai/
+    │       │       ├── ollama/
+    │       │       └── azure/             # 不同模型提供商的配置[reference:25]
+    │       ├── rag/                       # RAG相关模块
+    │       │   ├── ingestion/             # 数据摄取（文档解析、清洗）[reference:26]
+    │       │   ├── chunking/              # 文档分块[reference:27]
+    │       │   ├── embedding/             # 向量化[reference:28]
+    │       │   ├── retrieval/             # 检索策略[reference:29]
+    │       │   └── reranking/             # 重排序[reference:30]
+    │       ├── vectorstore/               # 数据层：向量数据库访问
+    │       │   └── VectorStoreProvider.java[reference:31]
+    │       └── agent/                     # Agent相关
+    │           ├── AgentService.java      # Agent执行服务[reference:32]
+    │           └── plans/                 # 规划相关的定义
+    └── resources/
+        └── prompts/                       # 提示词模板文件 (.st, .txt等)
