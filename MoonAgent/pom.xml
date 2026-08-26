@@ -128,6 +128,12 @@
             <artifactId>common-core</artifactId>
             <version>0.1.0</version>
         </dependency>
+        <!-- Moon 智能体共享核心（agent 数据层 + 解耦的 AI 生成服务；本地 install） -->
+        <dependency>
+            <groupId>com.moon</groupId>
+            <artifactId>agent-core</artifactId>
+            <version>0.1.0</version>
+        </dependency>
 
         <!-- Actuator（健康检查，Nacos 注册需要） -->
         <dependency>

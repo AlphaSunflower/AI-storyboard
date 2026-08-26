@@ -7,6 +7,7 @@ import com.moon.moonagent.ai.GatewayModelService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -42,7 +43,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
             "vision", "gemini-3-flash-preview");
 
     private final AiConfigProperties config;
-    private final StringRedisTemplate redisTemplate;
+    private final ObjectProvider<StringRedisTemplate> redisTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -110,9 +111,10 @@ public class GatewayModelServiceImpl implements GatewayModelService {
 
     /** Redis 优先 → HTTP 兜底 → 硬编码兜底 */
     private String getDefaultModel(String type) {
-        // 1) Redis（网关 admin 切换后实时生效）
+        // 1) Redis（网关 admin 切换后实时生效）；Redis 未配置/不可达时静默降级 HTTP
         try {
-            String cached = redisTemplate.opsForValue().get(REDIS_KEY_PREFIX + type);
+            StringRedisTemplate r = redisTemplate.getIfAvailable();
+            String cached = r != null ? r.opsForValue().get(REDIS_KEY_PREFIX + type) : null;
             if (cached != null && !cached.isBlank()) return cached;
         } catch (Exception e) {
             log.debug("Redis 读取默认模型失败: type={}, error={}", type, e.getMessage());
