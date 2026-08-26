@@ -788,13 +788,12 @@ function openRouteModal(route) {
       + '<label class="switch"><input type="checkbox" id="r-isdefault"><span class="slider"></span></label>'
       + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
-    + field('参数 Schema（可选，结构化编辑，无需手改 JSON）',
+    + field('参数 Schema（JSON，可选）',
         '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button></div>'
-        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">每个参数：类型/范围(min-max)/枚举选项/默认值/是否展示，可增删；对象·数组递归子项。留空=走固定列。</div>'
-        + '<div id="schema-editor"></div>');
+        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">字段：key/label/type(enum|range|number|bool|string|object|arrayofobject)/options(枚举,逗号隔)/min+max(可调范围)/default/show(false=隐藏但带默认值)。留空=走固定列。</div>'
+        + '<textarea class="input" id="r-schema" rows="12" spellcheck="false" placeholder=\'{"modes":["text-to-image"],"promptKey":"prompt","request":[{"key":"aspect_ratio","label":"画幅","type":"enum","options":["1:1","4:3","16:9"],"default":"4:3","show":true},{"key":"n","label":"个数","type":"range","min":1,"max":8,"default":2,"show":true},{"key":"prompt_optimizer","label":"优化","type":"bool","default":false,"show":false}]}\'></textarea>');
 
   openModal(isEdit ? '编辑路由' : '新建路由', body, footerHtml('保存'));
-  renderSchemaEditor(null);   // 先渲染空结构化编辑区（编辑回显随后 loadModelParamsForEdit 覆盖）
   // 按默认渠道拉取模型列表（编辑时预填路由配置的模型名）
   loadModelsFor(selCh, 'r-model', route ? route.modelName : '');
   // 渠道切换 → 重新拉取该渠道模型列表
@@ -885,8 +884,9 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-maxaudiosize', mp.maxAudioSizeMb);
     set('p-maxbody', mp.maxRequestBodyMb);
     set('p-maxprompt', mp.maxPromptChars);
-    // 自描述 schema：结构化编辑器回显（编辑弹窗已渲染该编辑区时）
-    if (mp.paramsSchema) renderSchemaEditor(mp.paramsSchema);
+    // 自描述 schema 回显（编辑弹窗已渲染该字段时）
+    const scEl = $('#r-schema');
+    if (scEl && mp.paramsSchema) scEl.value = mp.paramsSchema;
     // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
   } catch (e) {
     console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
@@ -991,8 +991,14 @@ async function saveModelParams(modelName, type) {
     req.maxRequestBodyMb = num('p-maxbody');
     req.maxPromptChars = num('p-maxprompt');
   }
-  // 自描述 schema：从结构化编辑器读回生成 JSON；空 → null（留空走固定列）
-  req.paramsSchema = readSchemaEditor();
+  // 自描述 schema：非空须为合法 JSON，空 → null（留空走固定列）
+  const schemaText = (function () { const el = $('#r-schema'); return el ? el.value.trim() : ''; })();
+  if (schemaText) {
+    try { JSON.parse(schemaText); } catch (e) { toast('参数 Schema 不是合法 JSON：' + (e.message || e), 'error'); return; }
+    req.paramsSchema = schemaText;
+  } else {
+    req.paramsSchema = null;
+  }
   await api('/admin/model-params', { method: 'PUT', body: JSON.stringify(req) });
 }
 
@@ -1025,96 +1031,9 @@ function importSchemaFromRequest() {
   let req;
   try { req = JSON.parse(raw); } catch (e) { toast('请求体不是合法 JSON：' + (e.message || e), 'error'); return; }
   const spec = { modes: [], promptKey: 'prompt', request: _guessFields(req) };
-  renderSchemaEditor(JSON.stringify(spec));
-  toast('已生成 Schema 骨架，请在下面结构化编辑范围/选项/默认后保存', 'success');
-}
-
-// ===== 结构化 Schema 编辑器（request[] → 可编辑表单行，保存时从 DOM 读回生成 JSON，无需手改 JSON） =====
-const SCHEMA_TYPES = ['enum', 'range', 'number', 'bool', 'string', 'object', 'array', 'arrayofobject'];
-
-function _numOr(s) { if (s === null || s === undefined || s === '') return undefined; const n = Number(s); return isNaN(n) ? undefined : n; }
-
-function schemaCardHtml(p) {
-  const t = p.type || 'string';
-  let extra = '';
-  if (t === 'enum') extra = '<input class="pc-options" placeholder="枚举选项，逗号分隔" value="' + esc((p.options || []).join(',')) + '">';
-  else if (t === 'range') extra = '<input class="pc-min" type="number" placeholder="min" value="' + esc(p.min === undefined ? '' : p.min) + '"><input class="pc-max" type="number" placeholder="max" value="' + esc(p.max === undefined ? '' : p.max) + '">';
-  const dv = (p.default === undefined || p.default === null || typeof p.default === 'object') ? '' : String(p.default);
-  const fields = (t === 'object' || t === 'arrayofobject') && p.fields ? p.fields.map(schemaCardHtml).join('') : '';
-  return '<div class="param-card" data-type="' + t + '" style="border:1px solid var(--hairline,#e5e0d5);border-radius:6px;padding:6px;margin-bottom:6px;background:#fff">'
-    + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
-    + '<input class="pc-key" placeholder="key" value="' + esc(p.key || '') + '" style="width:90px">'
-    + '<select class="pc-type" style="width:110px">' + SCHEMA_TYPES.map(x => '<option value="' + x + '"' + (x === t ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>'
-    + '<input class="pc-label" placeholder="标签" value="' + esc(p.label || '') + '" style="width:80px">'
-    + extra
-    + '<input class="pc-default" placeholder="默认" value="' + esc(dv) + '" style="width:80px">'
-    + '<label style="font-size:12px;white-space:nowrap">展示<input type="checkbox" class="pc-show"' + (p.show === false ? '' : ' checked') + '></label>'
-    + '<button type="button" class="pc-add-fld btn btn-sm" title="加子项">+子项</button>'
-    + '<button type="button" class="pc-del btn btn-sm btn-table-danger" title="删除">×</button>'
-    + '</div>'
-    + (fields ? '<div class="pc-fields" style="margin-left:14px;margin-top:6px">' + fields + '</div>' : '')
-    + '</div>';
-}
-
-function renderSchemaEditor(jsonOrNull) {
-  const host = $('#schema-editor');
-  if (!host) return;
-  let arr = [];
-  if (jsonOrNull) {
-    try { const spec = JSON.parse(jsonOrNull); arr = Array.isArray(spec.request) ? spec.request : []; } catch (e) { arr = []; }
-  }
-  host.innerHTML = (arr.length ? arr.map(schemaCardHtml).join('')
-      : '<div style="color:var(--muted);font-size:12px;padding:8px">暂无参数。点「从请求体 JSON 一键生成」或「+ 添加参数」。</div>')
-    + '<button type="button" id="pc-add" class="btn btn-sm" style="margin-top:6px">+ 添加参数</button>';
-  bindSchemaEditor();
-}
-
-/** 从 #schema-editor 的 DOM 读回参数数组 → 生成 schema JSON；空返回 null */
-function readSchemaEditor() {
-  const host = $('#schema-editor');
-  if (!host) return null;
-  const cards = host.querySelectorAll(':scope > .param-card');
-  if (!cards.length) return null;
-  const readCard = (card) => {
-    const t = card.querySelector('.pc-type').value;
-    const p = { key: card.querySelector('.pc-key').value.trim(), label: card.querySelector('.pc-label').value.trim(), type: t };
-    if (t === 'enum') p.options = (card.querySelector('.pc-options').value || '').split(',').map(s => s.trim()).filter(Boolean);
-    else if (t === 'range') { p.min = _numOr(card.querySelector('.pc-min').value); p.max = _numOr(card.querySelector('.pc-max').value); }
-    const dv = card.querySelector('.pc-default').value.trim();
-    if (dv !== '') p.default = (t === 'bool') ? (dv === 'true') : (t === 'range' || t === 'number') ? Number(dv) : dv;
-    p.show = card.querySelector('.pc-show').checked;
-    if (t === 'object' || t === 'arrayofobject') {
-      const fs = card.querySelectorAll(':scope > .pc-fields > .param-card');
-      if (fs.length) p.fields = Array.from(fs).map(readCard);
-    }
-    return p;
-  };
-  return JSON.stringify({ modes: [], promptKey: 'prompt', request: Array.from(cards).map(readCard) });
-}
-
-function bindSchemaEditor() {
-  const host = $('#schema-editor');
-  if (!host) return;
-  host.onclick = (e) => {
-    const del = e.target.closest('.pc-del');
-    if (del) { del.closest('.param-card').remove(); return; }
-    const addf = e.target.closest('.pc-add-fld');
-    if (addf) {
-      const card = addf.closest('.param-card');
-      let f = card.querySelector('.pc-fields');
-      if (!f) { f = document.createElement('div'); f.className = 'pc-fields'; f.style.margin = '14px 0 0 14px'; card.appendChild(f); }
-      f.insertAdjacentHTML('beforeend', schemaCardHtml({ type: 'string' }));
-      return;
-    }
-    if (e.target.id === 'pc-add') { host.insertAdjacentHTML('beforeend', schemaCardHtml({ type: 'string' })); return; }
-  };
-  host.onchange = (e) => {
-    // 类型切换 → 重建该参数的类型专属输入（enum→options / range→min/max）
-    if (e.target.classList && e.target.classList.contains('pc-type')) {
-      const js = readSchemaEditor();
-      renderSchemaEditor(js);
-    }
-  };
+  const sc = $('#r-schema');
+  if (sc) sc.value = JSON.stringify(spec, null, 2);
+  toast('已生成 Schema 骨架，请补充 enum 选项/range 范围/角色标注后保存', 'success');
 }
 
 /** 路由页按钮委托（新建/编辑/删除/测试） */
