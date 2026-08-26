@@ -119,6 +119,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.maxAudioSizeMb() != null) entity.setMaxAudioSizeMb(req.maxAudioSizeMb());
         if (req.maxRequestBodyMb() != null) entity.setMaxRequestBodyMb(req.maxRequestBodyMb());
         if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
+        if (req.paramsSchema() != null) entity.setParamsSchema(req.paramsSchema());
     }
 
     private void validateRange(Integer min, Integer max, String label) {

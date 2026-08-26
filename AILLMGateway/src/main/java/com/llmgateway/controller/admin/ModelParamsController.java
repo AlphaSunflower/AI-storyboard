@@ -43,6 +43,7 @@ public class ModelParamsController {
                 e.getMaxTotalDuration(), e.getMaxTotalFiles(),
                 e.getMaxVideoSizeMb(), e.getMaxImageSizeMb(), e.getMaxAudioSizeMb(),
                 e.getMaxRequestBodyMb(), e.getMaxPromptChars(),
+                e.getParamsSchema(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 }

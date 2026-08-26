@@ -56,6 +56,8 @@ public class ModelParams {
     private Integer maxAudioSizeMb;
     private Integer maxRequestBodyMb;
     private Integer maxPromptChars;
+    /** 自描述参数 Schema JSON（request + response.sync/async），模型级参数能力与适配契约；空=未配置走固定列/默认 */
+    private String paramsSchema;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }
