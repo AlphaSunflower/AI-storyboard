@@ -8,14 +8,12 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 画布后端(9090)：登录也走它（本服务转调 ai分镜 /api/auth/login），前端不直连 ai分镜
-  const AUTH_API = (import.meta.env.VITE_JOB_API_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:9090';
-
+  // 登录走网关 → ai-storyboard（dev 靠 vite proxy，生产靠网关同域）
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`${AUTH_API}/api/auth/login`, {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         credentials: 'omit',
         headers: { 'Content-Type': 'application/json' },

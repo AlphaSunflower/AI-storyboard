@@ -291,6 +291,7 @@ export interface JobAdapter {
   cancel(jobId: string): Promise<void>;
   fetchAsset(asset: JobAssetDescriptor): Promise<File>;
   sendToolResult?(jobId: string, result: AgentToolResult): Promise<void>;
+  listConversations?(projectId: string): Promise<Array<{ id: string; title: string; status: string; updatedAt: string }>>;
   getConversation?(projectId: string): Promise<{ id: string; title: string } | null>;
   getConversationMessages?(conversationId: string): Promise<Array<{ role: string; content: string; createdAt: string }>>;
 }

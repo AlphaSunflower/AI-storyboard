@@ -48,7 +48,7 @@ public class AccessLogFilter extends OncePerRequestFilter {
         }
     }
 
-    /** 已认证用户 id（JwtAuthenticationFilter 写入）；匿名/未认证为 "-" */
+    /** 已认证用户 id（GatewayAuthenticationFilter 写入）；匿名/未认证为 "-" */
     private String currentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {

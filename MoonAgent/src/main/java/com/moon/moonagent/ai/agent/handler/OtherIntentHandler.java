@@ -35,7 +35,7 @@ public class OtherIntentHandler implements IntentHandler {
         support.sendEvent(request, "workflow", Map.of("title", "正在思考…", "status", "node_started"));
         // streamAnswer 内部逐 token 发 message 事件（打字机效果），返回完整文本
         String answer = answerService.streamAnswer(
-                request.getConversation(), request.getContent(), request.getEmitter());
+                request.getConversation(), request.getContent(), request.getPicUrl(), request.getEmitter());
         // 完整文本作为本轮最后一条 message（streamAnswer 的增量不走 support.sendEvent，需显式记录）
         request.setLastMessage(answer);
         support.sendEvent(request, "message_end",

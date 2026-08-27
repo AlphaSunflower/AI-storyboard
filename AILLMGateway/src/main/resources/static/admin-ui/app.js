@@ -298,7 +298,7 @@ async function ensureChannels() {
 
 /* ================= 仪表盘 #/dashboard ================= */
 
-const loadingHtml = '<div class="loading">加载中…</div>';
+const loadingHtml = '<div class="loading"><div class="spinner"></div>加载中…</div>';
 
 function errHtml(msg) {
   return '<div class="empty">加载失败：' + esc(msg || '未知错误') + '</div>';
@@ -352,6 +352,23 @@ function renderTrendChart(container, trend) {
   });
   svg += '</svg>';
   container.innerHTML = svg;
+  // hover tooltip
+  const tip = document.createElement('div');
+  tip.className = 'chart-tooltip';
+  tip.style.display = 'none';
+  document.body.appendChild(tip);
+  container.querySelectorAll('.bar').forEach((bar, i) => {
+    bar.addEventListener('mouseenter', () => {
+      const t = trend[i];
+      tip.textContent = (t.date || '') + ': ' + (t.count || 0) + ' 次';
+      tip.style.display = 'block';
+    });
+    bar.addEventListener('mousemove', (e) => {
+      tip.style.left = e.clientX + 'px';
+      tip.style.top = (e.clientY - 10) + 'px';
+    });
+    bar.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
 }
 
 async function loadDashboard() {
@@ -701,21 +718,28 @@ const paramsGroups = {
        + '<label>质量默认 <input class="input" id="p-qualitydefault" placeholder="hd"></label>'
        + '<label>风格(逗号) <input class="input" id="p-styles" placeholder="vivid,natural"></label>'
        + '<label>风格默认 <input class="input" id="p-styledefault" placeholder="vivid"></label>',
-  video: sliderField('p-dmin', '时长min(秒)', '4', '15', '1', '4')
+  video: '<details open><summary>基础参数</summary>'
+       + sliderField('p-dmin', '时长min(秒)', '4', '15', '1', '4')
        + sliderField('p-dmax', '时长max(秒)', '4', '15', '1', '8')
        + sliderField('p-durationdefault', '时长默认(秒)', '4', '15', '1', '6')
        + '<label>分辨率(逗号) <input class="input" id="p-resolutions" placeholder="768P,2K"></label>'
        + '<label>分辨率默认 <input class="input" id="p-resolutiondefault" placeholder="768P"></label>'
        + '<label>画幅(逗号) <input class="input" id="p-aspects" placeholder="16:9,9:16,4:3,1:1"></label>'
        + '<label>画幅默认 <input class="input" id="p-aspectdefault" placeholder="16:9"></label>'
+       + '</details>'
+       + '<details open><summary>参考素材</summary>'
        + sliderField('p-refimagesmin', '参考图min(张)', '0', '10', '1', '0')
        + sliderField('p-refimagesmax', '参考图max(张)', '0', '10', '1', '3')
        + sliderField('p-refvideosmin', '参考视频min(个)', '0', '5', '1', '0')
        + sliderField('p-refvideosmax', '参考视频max(个)', '0', '5', '1', '1')
+       + '</details>'
+       + '<details><summary>音频参数</summary>'
        + sliderField('p-audiocountmin', '音频个数min', '0', '10', '1', '0')
        + sliderField('p-audiocountmax', '音频个数max', '0', '10', '1', '2')
        + sliderField('p-audiodmin', '音频单段min(秒)', '1', '300', '1', '5')
        + sliderField('p-audiodmax', '音频单段max(秒)', '1', '300', '1', '60')
+       + '</details>'
+       + '<details><summary>高级限制</summary>'
        + sliderField('p-videodmin', '视频单段min(秒)', '1', '300', '1', '5')
        + sliderField('p-videodmax', '视频单段max(秒)', '1', '300', '1', '60')
        + sliderField('p-maxtotalduration', '总时长上限(秒)', '1', '3600', '1', '300')
@@ -724,7 +748,8 @@ const paramsGroups = {
        + sliderField('p-maximagesize', '图片单个(MB)', '1', '100', '1', '10')
        + sliderField('p-maxaudiosize', '音频单个(MB)', '1', '100', '1', '15')
        + sliderField('p-maxbody', '请求体上限(MB)', '1', '200', '1', '64')
-       + sliderField('p-maxprompt', '提示词上限(字符)', '100', '20000', '100', '2000'),
+       + sliderField('p-maxprompt', '提示词上限(字符)', '100', '20000', '100', '2000')
+       + '</details>',
 };
 
 /** 新建/编辑路由弹窗：渠道下拉（停用渠道灰显）+ defaultParams JSON 校验 */
@@ -1214,11 +1239,13 @@ function renderLogs(view, data) {
     + '<input class="input" id="log-model" placeholder="按模型筛选，如 gpt-image-2" value="' + esc(logQuery.model) + '">'
     + '<button type="button" class="btn btn-primary" id="log-search">查询</button>'
     + '<button type="button" class="btn" id="log-reset">重置</button>'
+    + '<button type="button" class="btn" id="log-refresh">刷新</button>'
+    + '<label class="field-inline" style="font-size:13px;color:var(--ink-soft);cursor:pointer"><input type="checkbox" id="log-autopoll" style="accent-color:var(--primary)"> 自动刷新</label>'
     + '</div></div>'
     + '<div class="card table-card">'
     + (records.length
       ? '<table class="table"><thead><tr>'
-        + '<th>模型</th><th>渠道</th><th>状态</th><th>耗时</th><th>错误</th><th>时间</th>'
+        + '<th>模型</th><th>渠道</th><th>状态</th><th>HTTP</th><th>耗时</th><th>Tokens</th><th>错误</th><th>时间</th>'
         + '</tr></thead><tbody>'
         + records.map((r, idx) => {
           const ch = channelMap[r.channelId];
@@ -1229,12 +1256,14 @@ function renderLogs(view, data) {
             + '<td class="td-strong">' + esc(r.model || '-') + '</td>'
             + '<td class="td-muted">' + esc(channelName) + '</td>'
             + '<td>' + statusBadge(r.status) + '</td>'
+            + '<td class="td-muted">' + (r.httpStatus ? esc(r.httpStatus) : '-') + '</td>'
             + '<td>' + (r.durationMs === null || r.durationMs === undefined ? '-' : esc(r.durationMs) + ' ms') + '</td>'
+            + '<td class="td-muted">' + (r.totalTokens ? esc(r.totalTokens) : '-') + '</td>'
             + '<td class="td-error">' + (hasError ? esc(trunc(r.error, 60)) : '<span class="td-muted">-</span>') + '</td>'
             + '<td class="td-muted">' + fmtTime(r.createdAt) + '</td>'
             + '</tr>'
             + (hasError
-              ? '<tr class="log-detail" id="log-detail-' + idx + '" hidden><td colspan="6">' + esc(r.error) + '</td></tr>'
+              ? '<tr class="log-detail" id="log-detail-' + idx + '" hidden><td colspan="8">' + esc(r.error) + '</td></tr>'
               : '');
         }).join('')
         + '</tbody></table>'
@@ -1256,6 +1285,21 @@ function renderLogs(view, data) {
   $('#log-model').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') { logQuery.model = ev.target.value.trim(); logQuery.page = 1; loadLogs(); }
   });
+  // 刷新按钮
+  const refreshBtn = $('#log-refresh');
+  if (refreshBtn) refreshBtn.onclick = () => loadLogs();
+  // 自动轮询（30s）
+  const autoPoll = $('#log-autopoll');
+  if (autoPoll) {
+    let pollTimer = null;
+    autoPoll.onchange = () => {
+      if (autoPoll.checked) {
+        pollTimer = setInterval(() => { if (currentSection() === 'logs') loadLogs(); }, 30000);
+      } else {
+        clearInterval(pollTimer); pollTimer = null;
+      }
+    };
+  }
 }
 
 /** 日志行点击：错误行展开/收起全文 */
@@ -1342,6 +1386,7 @@ function openResetPwdModal(userId, username) {
     const pwd = $('#u-newpwd').value;
     const pwd2 = $('#u-newpwd2').value;
     if (!pwd) { toast('新密码不能为空', 'error'); return; }
+    if (pwd.length < 8) { toast('密码至少8位', 'error'); return; }
     if (pwd !== pwd2) { toast('两次输入的密码不一致', 'error'); return; }
     const btn = $('#form-submit');
     btn.disabled = true;
@@ -1404,9 +1449,10 @@ async function loadConfig() {
   try {
     const items = await api('/admin/config');
     view.innerHTML =
-      '<div class="view-head"><h2>系统配置</h2></div>'
+      '<div class="view-head"><h2>系统配置</h2>'
+      + '<div class="filter-bar"><input class="input" id="cfg-search" placeholder="搜索配置键或说明…" style="width:240px"></div></div>'
       + '<div class="card table-card">'
-      + '<table class="table"><thead><tr><th style="width:34%">配置键</th><th>说明</th><th>值</th><th style="width:14%">更新时间</th></tr></thead><tbody>'
+      + '<table class="table" id="cfg-table"><thead><tr><th style="width:34%">配置键</th><th>说明</th><th>值</th><th style="width:14%">更新时间</th></tr></thead><tbody>'
       + (items.length
         ? items.map((c) => '<tr>'
             + '<td class="td-strong"><code>' + esc(c.key) + '</code></td>'
@@ -1505,6 +1551,15 @@ function init() {
   $('#view-users').addEventListener('click', onUsersClick);
   $('#view-users').addEventListener('change', onUsersChange);
   $('#view-config').addEventListener('click', onConfigClick);
+  // 配置搜索过滤
+  $('#view-config').addEventListener('input', (e) => {
+    if (e.target.id !== 'cfg-search') return;
+    const q = e.target.value.toLowerCase();
+    const rows = document.querySelectorAll('#cfg-table tbody tr');
+    rows.forEach((tr) => {
+      tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
 
   // Esc 关闭（plainKey 弹层优先，其次普通弹窗）
   document.addEventListener('keydown', onGlobalKeydown);

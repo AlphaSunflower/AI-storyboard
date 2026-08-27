@@ -16,23 +16,23 @@ public interface SceneService {
     List<SceneResponse> listByProject(String projectId);
 
     /** 新增分镜（编号自动 +1，缺失字段用空串默认值）。 */
-    SceneResponse addScene(String projectId, SceneRequest request);
+    SceneResponse addScene(String userId, String projectId, SceneRequest request);
 
     /** 更新分镜（仅更新 request 中非 null 字段）。 */
-    SceneResponse updateScene(String sceneId, SceneRequest request);
+    SceneResponse updateScene(String userId, String sceneId, SceneRequest request);
 
     /** 删除分镜（不存在抛 40401）。 */
-    void deleteScene(String sceneId);
+    void deleteScene(String userId, String sceneId);
 
     /** 批量重排分镜（按传入 ID 顺序重新编号）。 */
-    void reorderScenes(String projectId, List<String> sceneIds);
+    void reorderScenes(String userId, String projectId, List<String> sceneIds);
 
     /** 分镜参考素材列表（按 sort_order）。 */
-    List<SceneReferenceResponse> listReferences(String sceneId);
+    List<SceneReferenceResponse> listReferences(String userId, String sceneId);
 
     /** 上传参考素材（type: image/video/audio；校验类型/数量上限/单文件大小上限），返回记录。 */
-    SceneReferenceResponse uploadReference(String sceneId, String type, String purpose, MultipartFile file);
+    SceneReferenceResponse uploadReference(String userId, String sceneId, String type, String purpose, MultipartFile file);
 
     /** 删除参考素材（含本地文件）。 */
-    void deleteReference(String referenceId);
+    void deleteReference(String userId, String referenceId);
 }

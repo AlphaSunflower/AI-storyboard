@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -38,6 +39,10 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     @Override
     public String upload(String contentType, byte[] bodyBytes) {
+        // 调用方以 octet-stream 发送 multipart 字节流（@RequestBody byte[] 收 multipart 会被 Spring 解析器
+        // 消费 body → 500，图改图 edits 同款 workaround）；转发前须从 body 提取 boundary 重建上游 multipart
+        // Content-Type——否则上游按 octet-stream 解析收不到文件 part。
+        String upstreamContentType = buildMultipartContentType(bodyBytes);
         // 文件上传固定走 minimax 渠道（mm_file:// 生态；Laozhang 无对应机制）
         List<Channel> minimaxChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                 .eq(Channel::getType, "minimax")
@@ -53,36 +58,54 @@ public class FileUploadServiceImpl implements FileUploadService {
                 : channel.getBaseUrl();
 
         Exception lastErr = null;
-        // 先不带 purpose 上传；上游 400 提示参数/purpose 必填时，换带 purpose=video_generation 重试一次
-        for (String suffix : new String[] { "/v1/files/upload", "/v1/files/upload?purpose=video_generation" }) {
-            try {
-                HttpResponse<String> resp = upstreamClient.postMultipart(
-                        base, suffix, apiKey, contentType, bodyBytes, UPLOAD_TIMEOUT_MS);
-                if (resp.statusCode() != 200) {
-                    String err = upstreamClient.extractError(resp.body());
-                    log.warn("MiniMax 文件上传返回 {}: {}", resp.statusCode(), err);
-                    boolean retryable = resp.statusCode() == 400
-                            && (resp.body().contains("purpose") || resp.body().contains("param"));
-                    if (!retryable) {
-                        throw new BusinessException(50201, "upstream file upload failed: " + err);
-                    }
-                    continue;
-                }
-                JsonNode root = objectMapper.readTree(resp.body());
-                String fileId = root.path("file").path("file_id").asText(
-                        root.path("file_id").asText(""));
-                if (fileId.isBlank()) {
-                    throw new BusinessException(50201, "upstream file upload missing file_id: " + resp.body());
-                }
-                log.info("MiniMax 文件上传成功: file_id={}", fileId);
-                return "mm_file://" + fileId;
-            } catch (BusinessException be) {
-                throw be;
-            } catch (Exception e) {
-                lastErr = e;
+        // 必带 purpose：MiniMax 缺 purpose 时返回 HTTP 200 + base_resp:2013 "invalid file purpose"（不是 HTTP 400），
+        // 故首个请求即带 purpose=video_generation（参考图/视频用于视频生成），不再发无 purpose 请求（2026-08-27 修复）
+        String suffix = "/v1/files/upload?purpose=video_generation";
+        try {
+            HttpResponse<String> resp = upstreamClient.postMultipart(
+                    base, suffix, apiKey, upstreamContentType, bodyBytes, UPLOAD_TIMEOUT_MS);
+            String body = resp.body();
+            if (resp.statusCode() != 200) {
+                String err = upstreamClient.extractError(body);
+                log.warn("MiniMax 文件上传返回 {}: {}", resp.statusCode(), err);
+                throw new BusinessException(50201, "upstream file upload failed: " + err);
             }
+            JsonNode root = objectMapper.readTree(body);
+            // 200 也可能带 base_resp 逻辑错误（如 invalid file purpose）→ 明确抛错而非笼统 missing file_id
+            JsonNode baseResp = root.path("base_resp");
+            if (baseResp.has("status_code") && baseResp.path("status_code").asInt(-1) != 0) {
+                throw new BusinessException(50201, "upstream file upload rejected: "
+                        + baseResp.path("status_msg").asText("") + " (status_code=" + baseResp.path("status_code").asInt() + ")");
+            }
+            String fileId = root.path("file").path("file_id").asText(
+                    root.path("file_id").asText(""));
+            if (fileId.isBlank()) {
+                throw new BusinessException(50201, "upstream file upload missing file_id: " + body);
+            }
+            log.info("MiniMax 文件上传成功: file_id={}", fileId);
+            return "mm_file://" + fileId;
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            lastErr = e;
         }
         throw new BusinessException(50201, "upstream file upload failed: "
                 + (lastErr == null ? "unknown" : lastErr.getMessage()));
+    }
+
+    /** 从 multipart 字节流提取 boundary，重建上游 multipart Content-Type（与 ImageEditServiceImpl 同款 workaround）。 */
+    private String buildMultipartContentType(byte[] body) {
+        // 前两字节必须是 "--"（multipart 规范），否则无 boundary 可提取
+        if (body.length < 2 || body[0] != '-' || body[1] != '-') {
+            throw new BusinessException(40001, "multipart body 必须以 boundary 开头");
+        }
+        for (int i = 2; i < body.length - 1; i++) {
+            if (body[i] == '\r' && body[i + 1] == '\n') {
+                // 跳过前导 "--"，取纯 boundary（Content-Type boundary 参数不含 --）
+                String boundary = new String(body, 2, i - 2, StandardCharsets.ISO_8859_1);
+                return "multipart/form-data; boundary=" + boundary;
+            }
+        }
+        throw new BusinessException(40001, "multipart body 缺少 boundary 结束符");
     }
 }

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.config.GatewayConfig;
+import com.llmgateway.entity.CallLog;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
@@ -22,9 +23,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -181,6 +184,9 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
             imgPart.put("image_url", objectMapper.createObjectNode().put("url", imageUrl));
             imgPart.put("role", "first_frame");
         }
+        // ── 定位日志：网关收到的参考素材是否真的进了 MiniMax content（grep [参考图]）──
+        log.info("[参考图] 网关拼装 MiniMax content: referenceImages={} | referenceVideos={} | referenceAudios={} | imageUrl(first_frame)={}",
+                refImages, refVideos, refAudios, imageUrl);
 
         // 分辨率：调用方显式传值则透传（人工选择生效，如卡片选 2K），未传回落默认档（省钱，默认 768P）
         String resolution = body.path("resolution").asText("");
@@ -304,71 +310,31 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
-    /** 轮询视频状态。taskId 反查渠道：查 call_log 最新一条该 model 的记录不够精确，
-     *  改为按 taskId 前缀存 channel 标识：简化方案——轮询时遍历该 model 的路由渠道逐个尝试，
-     *  命中 200 即返回。 */
+    /**
+     * 轮询视频状态。taskId 反查渠道：优先用 call_log 的「created」记录定位实际创建渠道（taskId→channelId），
+     * 只查该渠道——避免遍历时被其他渠道类型误中：MiniMax 任务被 priority 更高的 laozhang 渠道返回 200 抢占，
+     * 拿到非终态 status（日志 status=polled）→ 前端以为仍在生成、无限轮询（2026-08-27 修复）。
+     * 无 created 记录（历史任务）才回退遍历 enabled 渠道逐个尝试。
+     */
     @Override
     public VideoResult poll(String taskId) {
         long start = System.currentTimeMillis();
         try {
-            // 反查渠道：遍历所有 enabled 渠道，尝试查询（Laozhang GET /videos/{id}，MiniMax GET /v2/query/video_generation/{id}）
-            // 精确反查需要路由表记录 taskId→channel，第一版用"遍历渠道尝试"简化
+            // 1. 用 call_log「created」记录定位实际创建渠道，只查该渠道
+            Channel taskChannel = resolveChannelByTaskId(taskId);
+            if (taskChannel != null) {
+                VideoResult r = pollChannel(taskChannel, taskId, start);
+                if (r != null) return r;
+                // 该渠道返回非 200（404 等）→ 回退遍历
+            }
+            // 2. 兜底：遍历所有 enabled 渠道逐个尝试（老任务无 created 记录时走原逻辑）
             List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                     .eq(Channel::getEnabled, true)
                     .orderByAsc(Channel::getPriority));
             for (Channel channel : allChannels) {
                 try {
-                    String apiKey = keyService.decrypt(channel.getApiKey());
-                    String url;
-                    if ("minimax".equals(channel.getType())) {
-                        url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/query/video_generation/" + taskId;
-                    } else {
-                        url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId;
-                    }
-                    HttpResponse<String> resp = httpClient().send(HttpRequest.newBuilder()
-                            .uri(URI.create(url))
-                            .header("Authorization", "Bearer " + apiKey)
-                            .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                            .GET().build(), HttpResponse.BodyHandlers.ofString());
-                    if (!"minimax".equals(channel.getType())
-                            && (resp.statusCode() == 404 || resp.body().isBlank())) {
-                        // Laozhang fallback 端点（设计 §6.2）：主端点 404/空响应时再试 /video/generations/{taskId}
-                        String fbUrl = stripTrailingSlash(channel.getBaseUrl()) + "/video/generations/" + taskId;
-                        HttpResponse<String> fbResp = httpClient().send(HttpRequest.newBuilder()
-                                .uri(URI.create(fbUrl))
-                                .header("Authorization", "Bearer " + apiKey)
-                                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                                .GET().build(), HttpResponse.BodyHandlers.ofString());
-                        if (fbResp.statusCode() == 200) {
-                            resp = fbResp;
-                        }
-                    }
-
-                    if (resp.statusCode() == 200) {
-                        JsonNode json = objectMapper.readTree(resp.body());
-                        // MiniMax 响应为 {"task":{...}} 包裹结构（实测 2026-08-08 联调踩坑），
-                        // 取 task 子节点作为实际状态载体；Laozhang 无包裹层，直接取顶层
-                        JsonNode task = "minimax".equals(channel.getType()) ? json.path("task") : json;
-                        // MiniMax succeeded → 暂存 video_url 供下载端点使用（从原始 JsonNode 提取）
-                        if ("minimax".equals(channel.getType())) {
-                            String status = task.path("status").asText("");
-                            String contentUrl = task.path("content").path("url").asText("");
-                            if ("succeeded".equals(status) && !contentUrl.isBlank()) {
-                                callLogService.log(task.path("model").asText("video"), channel.getId(), "succeeded",
-                                        System.currentTimeMillis() - start, null, contentUrl, taskId);
-                            } else if ("failed".equals(status)) {
-                                String err = task.path("error").path("message").asText("video generation failed");
-                                callLogService.log(task.path("model").asText("video"), channel.getId(), "failed",
-                                        System.currentTimeMillis() - start, err, null, taskId);
-                            }
-                        } else {
-                            callLogService.log("video", channel.getId(), "polled",
-                                    System.currentTimeMillis() - start, null, null, taskId);
-                        }
-                        // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
-                        return new VideoResult(200, normalizePoll(task));
-                    }
-                    // 404 = 该渠道无此任务，尝试下一个
+                    VideoResult r = pollChannel(channel, taskId, start);
+                    if (r != null) return r;
                 } catch (Exception e) {
                     log.warn("轮询渠道 {} 异常: {}", channel.getName(), e.getMessage());
                 }
@@ -381,48 +347,118 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
+    /** 按 taskId 反查创建渠道：call_log「created」记录优先，无则取最近一条；返回 null 表示无法定位。 */
+    private Channel resolveChannelByTaskId(String taskId) {
+        try {
+            CallLog created = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
+                    .eq(CallLog::getTaskId, taskId)
+                    .eq(CallLog::getStatus, "created")
+                    .orderByAsc(CallLog::getCreatedAt)
+                    .last("LIMIT 1"));
+            if (created != null && created.getChannelId() != null && !created.getChannelId().isBlank()) {
+                return channelMapper.selectById(created.getChannelId());
+            }
+            CallLog latest = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
+                    .eq(CallLog::getTaskId, taskId)
+                    .orderByDesc(CallLog::getCreatedAt)
+                    .last("LIMIT 1"));
+            if (latest != null && latest.getChannelId() != null && !latest.getChannelId().isBlank()) {
+                return channelMapper.selectById(latest.getChannelId());
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("反查任务渠道失败: taskId={}, error={}", taskId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 单渠道轮询：命中 200 返回 VideoResult（含归一化状态），否则返回 null（该渠道无此任务）。 */
+    private VideoResult pollChannel(Channel channel, String taskId, long start) throws Exception {
+        String apiKey = keyService.decrypt(channel.getApiKey());
+        String url;
+        if ("minimax".equals(channel.getType())) {
+            url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/query/video_generation/" + taskId;
+        } else {
+            url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId;
+        }
+        HttpResponse<String> resp = httpClient().send(HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (!"minimax".equals(channel.getType())
+                && (resp.statusCode() == 404 || resp.body().isBlank())) {
+            // Laozhang fallback 端点（设计 §6.2）：主端点 404/空响应时再试 /video/generations/{taskId}
+            String fbUrl = stripTrailingSlash(channel.getBaseUrl()) + "/video/generations/" + taskId;
+            HttpResponse<String> fbResp = httpClient().send(HttpRequest.newBuilder()
+                    .uri(URI.create(fbUrl))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (fbResp.statusCode() == 200) {
+                resp = fbResp;
+            }
+        }
+
+        if (resp.statusCode() != 200) return null;   // 404/非 200 → 该渠道无此任务
+        JsonNode json = objectMapper.readTree(resp.body());
+        // MiniMax 响应为 {"task":{...}} 包裹结构（实测 2026-08-08 联调踩坑），
+        // 取 task 子节点作为实际状态载体；Laozhang 无包裹层，直接取顶层
+        JsonNode task = "minimax".equals(channel.getType())
+                ? (json.has("task") ? json.path("task") : json) : json;
+        // MiniMax succeeded → 暂存 video_url 供下载端点使用（从原始 JsonNode 提取）
+        if ("minimax".equals(channel.getType())) {
+            String status = task.path("status").asText("");
+            String contentUrl = task.path("content").path("url").asText("");
+            if (isSucceeded(status)) {
+                if (contentUrl.isBlank()) {
+                    String fileId = task.path("file_id").asText("");
+                    if (!fileId.isBlank()) {
+                        contentUrl = fetchMiniMaxDownloadUrl(channel, apiKey, fileId);
+                    }
+                }
+                if (!contentUrl.isBlank()) {
+                    callLogService.log(task.path("model").asText("video"), channel.getId(), "succeeded",
+                            System.currentTimeMillis() - start, null, contentUrl, taskId);
+                }
+            } else if (isFailed(status)) {
+                String err = task.path("error").path("message").asText("");
+                if (err.isBlank()) err = task.path("base_resp").path("status_msg").asText("video generation failed");
+                callLogService.log(task.path("model").asText("video"), channel.getId(), "failed",
+                        System.currentTimeMillis() - start, err, null, taskId);
+            }
+        } else {
+            callLogService.log("video", channel.getId(), "polled",
+                    System.currentTimeMillis() - start, null, null, taskId);
+        }
+        // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
+        return new VideoResult(200, normalizePoll(task));
+    }
+
     /** 视频下载：流式代理（业务只认本端点，永不接触上游 URL/Key） */
     @Override
     public org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             download(String taskId) {
         try {
-            // 按 priority 升序遍历渠道，优先命中高优先级渠道（与 poll 一致）
+            // 1. 按 taskId 反查创建渠道，只从该渠道取内容——避免遍历时被其他 openai_compatible 渠道误中：
+            //    minimax-pic(type=openai_compatible, base=api.minimaxi.com/v1)走 else 分支打
+            //    /videos/{taskId}/content → MiniMax 返回 HTTP 200 + {base_resp:2013 invalid params}，
+            //    被当成 200 视频流透传 → 前端拿到 79 字节假视频(2026-08-27 修复)
+            Channel taskChannel = resolveChannelByTaskId(taskId);
+            if (taskChannel != null) {
+                org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> r =
+                        downloadChannel(taskChannel, taskId);
+                if (r != null) return r;
+            }
+            // 2. 兜底：遍历所有 enabled 渠道逐个尝试（老任务无 call_log 创建记录时走原逻辑）
             List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                     .eq(Channel::getEnabled, true)
                     .orderByAsc(Channel::getPriority));
             for (Channel channel : allChannels) {
                 try {
-                    String apiKey = keyService.decrypt(channel.getApiKey());
-                    if ("minimax".equals(channel.getType())) {
-                        // 从 call_log 取该渠道该 taskId 最近一条限时直链
-                        // （taskId+channelId 双条件过滤，同渠道并发任务不串号）
-                        com.llmgateway.entity.CallLog latest = callLogMapper.selectOne(
-                                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.llmgateway.entity.CallLog>()
-                                        .eq(com.llmgateway.entity.CallLog::getChannelId, channel.getId())
-                                        .eq(com.llmgateway.entity.CallLog::getTaskId, taskId)
-                                        .isNotNull(com.llmgateway.entity.CallLog::getVideoUrl)
-                                        .orderByDesc(com.llmgateway.entity.CallLog::getCreatedAt)
-                                        .last("LIMIT 1"));
-                        if (latest == null || latest.getVideoUrl().isBlank()) continue;
-                        java.net.URI uri = java.net.URI.create(latest.getVideoUrl());
-                        HttpRequest req = HttpRequest.newBuilder().uri(uri)
-                                .timeout(Duration.ofSeconds(180)).GET().build();
-                        HttpResponse<java.io.InputStream> resp = httpClient().send(req,
-                                HttpResponse.BodyHandlers.ofInputStream());
-                        if (resp.statusCode() == 200) {
-                            return streamResponse(resp.body());
-                        }
-                    } else {
-                        String url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId + "/content";
-                        HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
-                                .header("Authorization", "Bearer " + apiKey)
-                                .timeout(Duration.ofSeconds(180)).GET().build();
-                        HttpResponse<java.io.InputStream> resp = httpClient().send(req,
-                                HttpResponse.BodyHandlers.ofInputStream());
-                        if (resp.statusCode() == 200) {
-                            return streamResponse(resp.body());
-                        }
-                    }
+                    org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> r =
+                            downloadChannel(channel, taskId);
+                    if (r != null) return r;
                 } catch (Exception e) {
                     log.warn("下载渠道 {} 异常: {}", channel.getName(), e.getMessage());
                 }
@@ -435,6 +471,83 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
+    /** 单渠道下载：命中 200 返回流式响应，否则返回 null（该渠道无此内容）。 */
+    private org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
+            downloadChannel(Channel channel, String taskId) throws Exception {
+        String apiKey = keyService.decrypt(channel.getApiKey());
+        if ("minimax".equals(channel.getType())) {
+            // 从 call_log 取该渠道该 taskId 最近一条限时直链
+            // （taskId+channelId 双条件过滤，同渠道并发任务不串号）
+            CallLog latest = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
+                    .eq(CallLog::getChannelId, channel.getId())
+                    .eq(CallLog::getTaskId, taskId)
+                    .isNotNull(CallLog::getVideoUrl)
+                    .orderByDesc(CallLog::getCreatedAt)
+                    .last("LIMIT 1"));
+            if (latest == null || latest.getVideoUrl().isBlank()) return null;
+            URI uri = URI.create(latest.getVideoUrl());
+            HttpRequest req = HttpRequest.newBuilder().uri(uri)
+                    .timeout(Duration.ofSeconds(180)).GET().build();
+            HttpResponse<java.io.InputStream> resp = httpClient().send(req,
+                    HttpResponse.BodyHandlers.ofInputStream());
+            if (resp.statusCode() == 200) {
+                return streamResponse(resp.body());
+            }
+        } else {
+            String url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId + "/content";
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofSeconds(180)).GET().build();
+            HttpResponse<java.io.InputStream> resp = httpClient().send(req,
+                    HttpResponse.BodyHandlers.ofInputStream());
+            if (resp.statusCode() == 200) {
+                return streamResponse(resp.body());
+            }
+        }
+        return null;
+    }
+
+    /** MiniMax 状态成功判定：兼容新版 H3 的 Success/success 与旧版 succeeded/completed/done */
+    private static boolean isSucceeded(String status) {
+        switch (status == null ? "" : status.toLowerCase()) {
+            case "succeeded", "success", "completed", "done": return true;
+            default: return false;
+        }
+    }
+
+    /** MiniMax 状态失败判定：failed/fail */
+    private static boolean isFailed(String status) {
+        switch (status == null ? "" : status.toLowerCase()) {
+            case "failed", "fail": return true;
+            default: return false;
+        }
+    }
+
+    /**
+     * 新版 H3 契约：任务查询只回 file_id，需再调 /v1/files/retrieve?file_id= 取限时 download_url 存下
+     * （2026-08-27 用户反馈：仅拿 task_id/file_id 取不到视频；下载直链过期须立即转存）。
+     * 失败返回空串（调用方按 old content.url 缺失处理，下轮轮询重试）。
+     */
+    private String fetchMiniMaxDownloadUrl(Channel channel, String apiKey, String fileId) {
+        try {
+            String url = stripTrailingSlash(channel.getBaseUrl()) + "/v1/files/retrieve?file_id="
+                    + URLEncoder.encode(fileId, StandardCharsets.UTF_8);
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                    .GET().build();
+            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) {
+                return objectMapper.readTree(resp.body()).path("file").path("download_url").asText("");
+            }
+            log.warn("MiniMax file retrieve returned {}: {}", resp.statusCode(),
+                    resp.body().length() > 200 ? resp.body().substring(0, 200) : resp.body());
+        } catch (Exception e) {
+            log.warn("MiniMax file retrieve failed: fileId={}, error={}", fileId, e.getMessage());
+        }
+        return "";
+    }
+
     /** 归一化轮询响应：统一输出 {taskId, status, progress?, error?}（设计 §5.1，兼容 minimax/laozhang 双协议） */
     private String normalizePoll(JsonNode json) {
         ObjectNode out = objectMapper.createObjectNode();
@@ -444,10 +557,9 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         // status 归一化映射：succeeded/completed→succeeded，failed→failed，queued/running/未知→processing
         String raw = json.path("status").asText("");
         String status;
-        switch (raw) {
-            case "succeeded":
-            case "completed": status = "succeeded"; break;
-            case "failed": status = "failed"; break;
+        switch (raw.toLowerCase()) {
+            case "succeeded", "success", "completed", "done": status = "succeeded"; break;
+            case "failed", "fail": status = "failed"; break;
             default: status = "processing"; break;
         }
         out.put("status", status);

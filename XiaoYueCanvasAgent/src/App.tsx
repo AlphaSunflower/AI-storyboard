@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Maximize2, MessageCircle, SlidersHorizontal } from 'lucide-react';
 import type { Viewport } from '@xyflow/react';
 import { startCanvasBridge } from './canvas/bridgeClient';
-import { AgentPanel } from './components/AgentPanel';
+import { MoonChatWindow } from './components/MoonChatWindow';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { HomePage } from './components/HomePage';
 import { InspectorPanel } from './components/InspectorPanel';
@@ -40,11 +41,13 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [sideView, setSideView] = useState<SideView>('agent');
   const [sideOpen, setSideOpen] = useState(true);
+  const [panelWidth, setPanelWidth] = useState(400); // 执行服务面板宽度（可拖拽）
   const [notice, setNotice] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const canvasRef = useRef<CanvasDocumentV1 | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const pendingSave = useRef<CanvasDocumentV1 | null>(null);
   const saveInFlight = useRef<Promise<CanvasDocumentV1 | null> | null>(null);
   const revision = useCanvasStore((state) => state.revision);
@@ -55,6 +58,41 @@ export default function App() {
   const notify = useCallback((message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 2200);
+  }, []);
+
+  // 画布 ↔ 执行服务面板 拖拽拉伸。健壮性要点：
+  // - onMove 里 ev.buttons===0 直接停止 → 鼠标松开（含在 iframe 上松开导致 mouseup 未送达 document）后，悬浮不会再触发 resize；
+  // - 拖拽期间直改 DOM 宽度（不 setState 每帧），避免 App 全树 re-render 与 react-flow 重排卡顿；mouseup/mouseleave 才 commit state；
+  // - ponytail: react-flow 对容器尺寸的 ResizeObserver 重排在所难免，若仍卡顿，升级路径是面板改绝对定位覆盖画布（不挤占 canvas 宽度）。
+  const startPanelResize = useCallback((e: ReactMouseEvent<HTMLElement>) => {
+    e.preventDefault();
+    const el = panelRef.current;
+    const startX = e.clientX;
+    const startWidth = el?.offsetWidth ?? 440;
+    const clamp = (w: number) => Math.min(680, Math.max(360, w));
+    let lastWidth = startWidth;
+    if (el) el.style.transition = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const stop = () => {
+      const cur = panelRef.current;
+      if (cur) cur.style.transition = '';
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', stop);
+      document.removeEventListener('mouseleave', stop);
+      setPanelWidth(lastWidth);
+    };
+    const onMove = (ev: MouseEvent) => {
+      if (ev.buttons === 0) { stop(); return; }
+      lastWidth = clamp(startWidth + (startX - ev.clientX));
+      const cur = panelRef.current;
+      if (cur) { cur.style.width = `${lastWidth}px`; cur.style.flexBasis = `${lastWidth}px`; }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', stop);
+    document.addEventListener('mouseleave', stop);
   }, []);
 
   const refreshProjects = useCallback(async () => {
@@ -333,7 +371,20 @@ export default function App() {
         isExporting={isExporting}
         onNotify={notify}
       />
-      <aside className="chat-workspace">
+      {sideOpen && (
+        <div
+          className="panel-resize-handle"
+          onMouseDown={startPanelResize}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整面板宽度"
+        ><span className="panel-resize-grip" /></div>
+      )}
+      <aside
+        ref={panelRef}
+        className="chat-workspace"
+        style={sideOpen ? { width: panelWidth, flexBasis: panelWidth } : undefined}
+      >
         <header className="chat-topbar">
           <button className={sideView === 'inspector' ? 'is-active' : ''} onClick={() => setSideView(sideView === 'inspector' ? 'agent' : 'inspector')} aria-label="画布设置"><SlidersHorizontal size={18} /></button>
           <strong className="workspace-side-title">{sideView === 'agent' ? '执行服务' : '节点属性'}</strong>
@@ -341,7 +392,7 @@ export default function App() {
           <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
-          <div className="chat-view" hidden={sideView !== 'agent'}><AgentPanel key={project.id} project={project} /></div>
+          <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>
           <div className="chat-view" hidden={sideView !== 'inspector'}><InspectorPanel /></div>
         </div>
       </aside>

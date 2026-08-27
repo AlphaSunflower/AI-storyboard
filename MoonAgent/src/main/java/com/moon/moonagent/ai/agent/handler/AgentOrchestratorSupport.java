@@ -1,6 +1,5 @@
 package com.moon.moonagent.ai.agent.handler;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -66,6 +65,8 @@ public class AgentOrchestratorSupport {
     private final com.moon.moonagent.mapper.AgentMessageMapper messageMapper;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     private final com.moon.moonagent.ai.agent.skill.SkillLoader skillLoader;
+    private final AgentSessionState sessionState;
+    private final ModelOptionsAssembler modelOptionsAssembler;
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -75,106 +76,67 @@ public class AgentOrchestratorSupport {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 澄清计数：conversationId → 连续追问次数（跨用户消息持续）。
-     * 每轮 gate（剧本优化/分镜方案）type=0 时 +1；type=1（有进展）或非 aisplit 轮清零。
-     * 达到 {@code maxClarifyRounds} 上限后不再追问，直接给默认方案让用户选。
-     * ponytail: 内存态重启即失（计数清零，用户重新获得追问额度，无害）；多实例需落 DB 列。
-     */
-    private final java.util.concurrent.ConcurrentHashMap<String, Integer> clarifyCount =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /**
      * 澄清上限判定：本次 type=0 记 +1；未达上限返回 false（调用方正常追问并结束本轮）；
      * 已达上限返回 true（调用方跳过追问，以用户原始需求为默认方案继续）。
      */
     public boolean clarifyLimitReached(String conversationId, OrchestrationRequest req) {
-        int n = clarifyCount.merge(conversationId, 1, Integer::sum);
+        int n = sessionState.incrClarifyCount(conversationId);
         if (n > agentConfig.getMaxClarifyRounds()) {
-            clarifyCount.remove(conversationId);
+            sessionState.resetClarify(conversationId);
             sendMessage(req, "已按你的原始需求直接生成方案，可在确认卡片上调整。");
             return true;
         }
         return false;
     }
 
-    /** 澄清计数清零（type=1 有进展 / 非 aisplit 轮调用） */
+    /** 澄清计数清零（type=1 有进展 / 非 aisplit 轮调用）——委托 AgentSessionState */
     public void resetClarify(String conversationId) {
-        clarifyCount.remove(conversationId);
+        sessionState.resetClarify(conversationId);
     }
 
-    /** 会话删除时清理全部内存态（clarifyCount） */
+    /** 会话删除时清理全部内存态——委托 AgentSessionState */
     public void cleanupOnDelete(String conversationId) {
-        clarifyCount.remove(conversationId);
-        regenCount.remove(conversationId);
-        sessionAssets.remove(conversationId);
+        sessionState.cleanupOnDelete(conversationId);
     }
 
-    // ===== P4（2026-08-21）：regenCount/sessionAssets 由 AisplitIntentHandler 迁入统一管理，
-    // 随 checkpoint.plan JSON 持久化（_regenCount/_clarifyCount/_sessionAssets 私有键），resume 时恢复 =====
-
-    /** 连续不满意调整计数（写库成功/达上限清零） */
-    private final java.util.concurrent.ConcurrentHashMap<String, Integer> regenCount =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** 本轮勾选资产：conversationId → assetIds（资产选择卡片确认后写入，HITL 链内接力） */
-    private final java.util.concurrent.ConcurrentHashMap<String, List<String>> sessionAssets =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** 不满意调整 +1，返回新值 */
+    /** 不满意调整 +1，返回新值——委托 AgentSessionState */
     public int incrRegenCount(String conversationId) {
-        return regenCount.merge(conversationId, 1, Integer::sum);
+        return sessionState.incrRegenCount(conversationId);
     }
 
-    /** 写库成功/达上限清零 */
+    /** 写库成功/达上限清零——委托 AgentSessionState */
     public void clearRegenCount(String conversationId) {
-        regenCount.remove(conversationId);
+        sessionState.clearRegenCount(conversationId);
     }
 
-    /** 记录本轮勾选资产 */
+    /** 记录本轮勾选资产——委托 AgentSessionState */
     public void setSessionAssets(String conversationId, List<String> ids) {
-        sessionAssets.put(conversationId, ids);
+        sessionState.setSessionAssets(conversationId, ids);
     }
 
-    /** 本轮已确认资产 ID（无记录返回空列表） */
+    /** 本轮已确认资产 ID（无记录返回空列表）——委托 AgentSessionState */
     public List<String> getSessionAssets(String conversationId) {
-        return sessionAssets.getOrDefault(conversationId, List.of());
+        return sessionState.getSessionAssets(conversationId);
     }
 
-    /** 本轮是否已选过资产（防 handle 重入重复弹资产卡片） */
+    /** 本轮是否已选过资产（防 handle 重入重复弹资产卡片）——委托 AgentSessionState */
     public boolean hasSessionAssets(String conversationId) {
-        return sessionAssets.containsKey(conversationId);
+        return sessionState.hasSessionAssets(conversationId);
     }
 
-    /** 本轮结束清理 */
+    /** 本轮结束清理——委托 AgentSessionState */
     public void clearSessionAssets(String conversationId) {
-        sessionAssets.remove(conversationId);
+        sessionState.clearSessionAssets(conversationId);
     }
 
     /** 计数写入 checkpoint.plan（createCheckpoint 内调用）——重启/刷新后 resume 可恢复 */
     void persistCountersToPlan(Map<String, Object> plan, String conversationId) {
-        plan.put("_regenCount", regenCount.getOrDefault(conversationId, 0));
-        plan.put("_clarifyCount", clarifyCount.getOrDefault(conversationId, 0));
-        plan.put("_sessionAssets", sessionAssets.getOrDefault(conversationId, List.of()));
+        sessionState.persistCountersToPlan(plan, conversationId);
     }
 
     /** 从 checkpoint.plan 恢复计数（resume 消费后调用）——重启后内存计数不丢 */
     public void restoreCountersFromPlan(String conversationId, String planJson) {
-        try {
-            if (planJson == null || planJson.isBlank()) return;
-            Object root = objectMapper.readValue(planJson, Object.class);
-            if (!(root instanceof Map<?, ?> m)) return;
-            Object rc = m.get("_regenCount");
-            if (rc instanceof Number n) regenCount.put(conversationId, n.intValue());
-            Object cc = m.get("_clarifyCount");
-            if (cc instanceof Number n) clarifyCount.put(conversationId, n.intValue());
-            Object sa = m.get("_sessionAssets");
-            if (sa instanceof List<?> list) {
-                sessionAssets.put(conversationId, list.stream()
-                        .filter(String.class::isInstance).map(String.class::cast).toList());
-            }
-        } catch (Exception e) {
-            log.debug("restoreCountersFromPlan 解析失败（无害）: {}", e.getMessage());
-        }
+        sessionState.restoreCountersFromPlan(conversationId, planJson);
     }
 
     // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
@@ -642,45 +604,14 @@ public class AgentOrchestratorSupport {
 
     // ===== 模型能力选项（网关 fetchModels 透传，卡片/LLM 选参共用） =====
 
-    /** 卡片模型选项：网关 fetchModels(type) → [{value,label,params(JSON字符串)}]（网关不可用返回空列表，前端回退静态兜底） */
+    /** 网关模型列表（卡片下拉用）——委托 ModelOptionsAssembler */
     public List<Map<String, Object>> buildModels(String type) {
-        try {
-            List<Map<String, Object>> out = new java.util.ArrayList<>();
-            for (Map<String, String> m : gatewayModelService.fetchModels(type)) {
-                out.add(new java.util.LinkedHashMap<>(m));
-            }
-            return out;
-        } catch (Exception e) {
-            log.warn("网关模型列表获取失败: type={}, error={}", type, e.getMessage());
-            return List.of();
-        }
+        return modelOptionsAssembler.buildModels(type);
     }
 
-    /** LLM 选参用的人类可读选项文本：模型名 + 参数枚举（来自网关 params JSON 字符串；无选项返回空串） */
+    /** LLM 选参用的人类可读选项文本——委托 ModelOptionsAssembler */
     public String buildModelOptionsText(String type) {
-        List<Map<String, Object>> models = buildModels(type);
-        if (models.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (Map<String, Object> m : models) {
-            sb.append("- ").append(m.get("value"));
-            String paramsJson = m.get("params") instanceof String s ? s : null;
-            if (paramsJson != null && !paramsJson.isBlank()) {
-                try {
-                    JsonNode p = objectMapper.readTree(paramsJson);
-                    List<String> parts = new java.util.ArrayList<>();
-                    if (p.has("resolutions")) parts.add("分辨率 " + p.get("resolutions"));
-                    if (p.has("durations")) parts.add("时长 " + p.get("durations") + " 秒");
-                    if (p.has("aspectRatios")) parts.add("画幅 " + p.get("aspectRatios"));
-                    if (p.has("sizes")) parts.add("尺寸 " + p.get("sizes"));
-                    if (p.has("qualities")) parts.add("质量 " + p.get("qualities"));
-                    if (!parts.isEmpty()) sb.append("（").append(String.join("；", parts)).append("）");
-                } catch (Exception ignored) {
-                    // params 解析失败忽略，仅保留模型名
-                }
-            }
-            sb.append("\n");
-        }
-        return sb.toString();
+        return modelOptionsAssembler.buildModelOptionsText(type);
     }
 
     // ===== LLM 声明式 HITL 卡（步骤 4：按钮由 LLM 挑选/拟文案，id 须落在 manifest 内，回退静态） =====

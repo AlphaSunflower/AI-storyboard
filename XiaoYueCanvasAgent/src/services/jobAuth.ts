@@ -15,7 +15,8 @@ export function captureUrlAuth(): void {
   params.delete('userId');
   params.delete('name');
   const qs = params.toString();
-  window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+  // 保留 hash（#project=... 供画布自动打开指定项目），只清 query 里的 token/userId/name
+  window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
 }
 
 export function getJobToken(): string | null {

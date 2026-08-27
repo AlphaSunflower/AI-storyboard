@@ -17,6 +17,13 @@ spring:
                 - name: Path
                   args:
                     patterns: /api/agent/**
+            # 画布服务
+            - id: xiaoyue-canvas
+              uri: lb://xiaoyue-canvas
+              predicates:
+                - name: Path
+                  args:
+                    patterns: /api/canvas/**
             # 主后端
             - id: ai-storyboard
               uri: lb://ai-storyboard

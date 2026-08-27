@@ -151,6 +151,16 @@ public class DesignJobService {
         }
     }
 
+    /** 按项目列全部会话（画布侧边栏对话列表）。 */
+    public List<AgentConversation> listConversations(String userId, String projectId) {
+        String aiProjectId = projectService.get(userId, projectId).getId();
+        return agentConversationMapper.selectList(
+                new LambdaQueryWrapper<AgentConversation>()
+                        .eq(AgentConversation::getUserId, userId)
+                        .eq(AgentConversation::getProjectId, aiProjectId)
+                        .orderByDesc(AgentConversation::getUpdatedAt));
+    }
+
     /** 取或建共享会话：按项目键映射 ai分镜 project + 该项目的活跃 conversation。 */
     public AgentConversation getOrCreateConversation(String userId, String projectId) {
         String aiProjectId = projectService.get(userId, projectId).getId();

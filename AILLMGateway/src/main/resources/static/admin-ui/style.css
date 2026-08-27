@@ -556,6 +556,7 @@ body.main-mode #login-view { display: none; }
 
 /* ---------- 状态 ---------- */
 
+.loading { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .loading, .empty {
   padding: 42px 20px;
   text-align: center;
@@ -563,6 +564,36 @@ body.main-mode #login-view { display: none; }
   font-size: 14px;
 }
 .empty { font-size: 13.5px; }
+
+/* CSS spinner */
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 参数分组折叠 */
+.params-grid details { margin-bottom: 4px; }
+.params-grid details summary {
+  cursor: pointer; font-weight: 600; font-size: 13px;
+  padding: 6px 0; color: var(--ink-soft);
+}
+.params-grid details[open] summary { margin-bottom: 8px; }
+
+/* 表格溢出 */
+.table-card { overflow-x: auto; }
+
+/* 图表 hover tooltip */
+.chart-tooltip {
+  position: fixed; pointer-events: none; z-index: 500;
+  background: var(--ink); color: #f7f2e9; font-size: 12px;
+  padding: 5px 10px; border-radius: 6px; white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  transform: translate(-50%, -100%);
+}
 
 /* ---------- 筛选与分页 ---------- */
 
@@ -585,9 +616,16 @@ body.main-mode #login-view { display: none; }
 
 @media (max-width: 760px) {
   .sidebar { width: 64px; }
-  .sidebar-brand span, .nav-item, .sidebar-user .user-name { display: none; }
-  .nav-item { padding: 12px; font-size: 0; }
-  .nav-item::first-letter { font-size: 14px; }
+  .sidebar-brand span:not(.brand-dot), .sidebar-user .user-name { display: none; }
+  .nav-item { padding: 10px; font-size: 0; text-align: center; }
+  .nav-item::before { font-size: 16px; line-height: 1; }
   .content { padding: 20px 16px 40px; }
   .filter-bar .input { width: 100%; }
+}
+
+/* 侧边栏窄屏 icon（::before content 由 CSS 类控制） */
+.nav-item[data-icon]::before { content: attr(data-icon); }
+.nav-item[data-icon] { display: flex; align-items: center; justify-content: center; }
+@media (min-width: 761px) {
+  .nav-item[data-icon]::before { content: attr(data-icon) " "; font-size: 13px; }
 }

@@ -19,6 +19,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.Duration;
 import java.util.List;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.service.FileStorageService;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import org.springframework.util.MimeType;
 
 /**
  * Agent 主回答实现：ChatClient 拼历史，非流式。
@@ -37,16 +41,17 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
+    private final FileStorageService fileStorageService;
 
     /** 主回答 ChatClient（懒加载，默认视觉模型，超时 60s） */
     private volatile ChatClient chatClient;
 
     @Override
-    public String generate(AgentConversation conversation, String content) {
+    public String generate(AgentConversation conversation, String content, String picUrl) {
         try {
             String answer = chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("services/agent-answer"))
-                .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
+                .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
                 .call()
                 .content();
             return answer != null && !answer.isBlank() ? answer : "我在的，请描述你的创作需求～";
@@ -57,12 +62,12 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     }
 
     @Override
-    public String streamAnswer(AgentConversation conversation, String content, SseEmitter emitter) {
+    public String streamAnswer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
         StringBuilder sb = new StringBuilder();
         try {
             chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("services/agent-answer"))
-                .user("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content)
+                .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
                 .stream()
                 .content()
                 .doOnNext(chunk -> {
@@ -90,14 +95,30 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     }
 
     @Override
-    public String answer(AgentConversation conversation, String content, SseEmitter emitter) {
-        String answer = generate(conversation, content);
+    public String answer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
+        String answer = generate(conversation, content, picUrl);
         try {
             emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", answer))));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
         }
         return answer;
+    }
+
+    /** 构造用户消息：picUrl 非空时读本地图转 data URI 作为多模态图片加入；读图失败降级纯文本 */
+    private UserMessage buildUserMessage(String text, String picUrl) {
+        if (picUrl != null && !picUrl.isBlank()) {
+            try {
+                String dataUri = fileStorageService.toImageDataUri(picUrl);
+                int sep = dataUri.indexOf(';');
+                String mime = dataUri.startsWith("data:") && sep > 5 ? dataUri.substring(5, sep) : "image/png";
+                Media media = Media.builder().mimeType(MimeType.valueOf(mime)).data(dataUri).build();
+                return UserMessage.builder().text(text).media(media).build();
+            } catch (Exception e) {
+                log.warn("参考图加入主回答失败，降级纯文本: {}", e.getMessage());
+            }
+        }
+        return UserMessage.builder().text(text).build();
     }
 
     /** 会话历史（最近 8 条，时间升序） */

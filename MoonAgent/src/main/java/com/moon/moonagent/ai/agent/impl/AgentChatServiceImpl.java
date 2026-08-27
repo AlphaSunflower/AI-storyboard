@@ -402,7 +402,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     /** blocking 编排：直接走主回答服务（intent-other 语义；前端实际走 streamMessage SSE，此路为通用入口） */
     private String runBlocking(AgentConversation conversation, String content) {
         try {
-            return answerService.answer(conversation, content, new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L));
+            return answerService.answer(conversation, content, null, new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L));
         } catch (Exception e) {
             log.error("blocking 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             // 友好化：返回给用户的文案由 LLM 翻译，不直接展示英文报错
@@ -435,6 +435,12 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 严格限定在"带图的当轮"内生效，防跨轮误用）
         if (picUrl != null && !picUrl.isBlank()) {
             lastPicUrlByConversation.put(conversationId, picUrl);
+            // 首会话上传时无 convId → agent_assets.conversation_id=null；本条消息带上该 url 即认领归属（仅改未归属资产，防误抢其他会话）
+            assetMapper.update(null,
+                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentAsset>()
+                            .eq(AgentAsset::getUrl, picUrl)
+                            .isNull(AgentAsset::getConversationId)
+                            .set(AgentAsset::getConversationId, conversationId));
         } else {
             lastPicUrlByConversation.remove(conversationId);
         }

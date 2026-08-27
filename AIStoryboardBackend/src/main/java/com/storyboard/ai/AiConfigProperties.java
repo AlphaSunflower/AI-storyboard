@@ -108,6 +108,11 @@ public class AiConfigProperties {
     @Getter
     private String audioUrlPrefix = "/api/files/audios/";
 
+    /** 本服务内部地址（资产/图片 `/api/files/**` 拉取用；参考素材本地缺失时回退构造本地址取） */
+    @Setter
+    @Getter
+    private String storyboardBaseUrl = "http://localhost:8082";
+
     // ═══════════════════════════════════════════════════════════
     //  超时 / 重试配置（可外部化到 application.yml 覆盖默认值）
     // ═══════════════════════════════════════════════════════════

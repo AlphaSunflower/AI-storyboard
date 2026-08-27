@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
-  AlertTriangle, CircleStop,
+  AlertTriangle, ChevronDown, CircleStop,
   LoaderCircle, Paperclip, RefreshCw, Send, Trash2,
 } from 'lucide-react';
 import { jobAdapter } from '../services/capabilities';
 import { saveAsset } from '../services/projectStorage';
-import { useAgentStore, type AgentJobState } from '../store/agentStore';
+import { useAgentStore, type AgentJobState, type ConversationSummary } from '../store/agentStore';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import type { JobAdapter, JobEvent, PersistedAsset, ProjectDocumentV2 } from '../types';
@@ -49,8 +49,14 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
   const updateJob = useAgentStore((state) => state.updateJob);
   const clearSession = useAgentStore((state) => state.clearSession);
   const updateToolCall = useAgentStore((state) => state.updateToolCall);
+  const conversationLists = useAgentStore((state) => state.conversationLists);
+  const loadConversations = useAgentStore((state) => state.loadConversations);
+  const selectConversation = useAgentStore((state) => state.selectConversation);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [convDropdownOpen, setConvDropdownOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
   const threadEndRef = useRef<HTMLDivElement>(null);
   const subscriptionsRef = useRef(new Map<string, () => void>());
   const jobContextRef = useRef(new Map<string, { prompt: string; sourceNodeId?: string; capabilityId: string }>());
@@ -61,6 +67,7 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
 
   useEffect(() => {
     ensureSession(project.id);
+    void loadConversations(project.id, adapter);
     // 数据同步：拉取共享会话 + 历史回显（画布后端按项目 createOrGet，保证与 MoonAgent 同一条 conversation）
     (async () => {
       if (!adapter.getConversation || !adapter.getConversationMessages) return;
@@ -79,6 +86,14 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
     subscriptionsRef.current.forEach((unsubscribe) => unsubscribe());
     subscriptionsRef.current.clear();
   }, []);
+
+  // 点击外部关闭对话列表下拉
+  useEffect(() => {
+    if (!convDropdownOpen) return;
+    const close = () => setConvDropdownOpen(false);
+    document.addEventListener('click', close, { once: true });
+    return () => document.removeEventListener('click', close);
+  }, [convDropdownOpen]);
 
   useEffect(() => {
     if (typeof threadEndRef.current?.scrollIntoView === 'function') {
@@ -257,6 +272,19 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
     }
   };
 
+  const convList = conversationLists[project.id] ?? [];
+
+  const handleSelectConversation = useCallback(async (conv: ConversationSummary) => {
+    if (conv.id === session?.conversationId) return;
+    if (!adapter.getConversationMessages) return;
+    try {
+      const history = await adapter.getConversationMessages(conv.id);
+      selectConversation(project.id, conv.id, history.map((m) => ({
+        id: createId(), role: m.role === 'user' ? 'user' : 'agent', text: m.content, createdAt: Date.now(),
+      })));
+    } catch { /* 静默 */ }
+  }, [adapter, project.id, selectConversation, session?.conversationId]);
+
   const messages = session?.messages ?? [];
   const jobs = session ? Object.values(session.jobs) : [];
   const activeJobs = jobs.filter((job) => !terminalStatuses.has(job.status));
@@ -264,8 +292,45 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
 
   return (
     <div className="connection-panel agent-panel-ready">
+      <div className="agent-conv-bar">
+        <button
+          type="button"
+          ref={triggerRef}
+          className="agent-conv-trigger"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!convDropdownOpen && triggerRef.current) {
+              const r = triggerRef.current.getBoundingClientRect();
+              setDropdownPos({ top: r.bottom + 2, left: r.left, width: r.width });
+            }
+            setConvDropdownOpen(!convDropdownOpen);
+          }}
+        >
+          <strong>{convList.find((c) => c.id === session?.conversationId)?.title || '新会话'}</strong>
+          <ChevronDown size={12} />
+        </button>
+        {convDropdownOpen && convList.length > 0 && (
+          <div className="agent-conv-dropdown" style={{ position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, minWidth: 280 }} onClick={(e) => e.stopPropagation()}>
+            {convList.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`agent-conv-item${c.id === session?.conversationId ? ' is-active' : ''}`}
+                onClick={() => { setConvDropdownOpen(false); void handleSelectConversation(c); }}
+                title={c.title || '未命名对话'}
+              >
+                <span className="agent-conv-title">{c.title || '未命名对话'}</span>
+                <small>{c.updatedAt ? new Date(c.updatedAt).toLocaleDateString('zh-CN') : ''}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <section className="agent-thread" aria-label="设计助理消息">
-        <header><div><strong>{activeJobs.length ? `${activeJobs.length} 个任务运行中` : messages.length ? `${messages.length} 条消息` : '新会话'}</strong></div>{messages.length > 0 && <button type="button" title="清空本地会话" aria-label="清空本地会话" disabled={activeJobs.length > 0} onClick={() => clearSession(project.id)}><Trash2 size={14} /></button>}</header>
+        <header>
+          <div><strong>{activeJobs.length ? `${activeJobs.length} 个任务运行中` : messages.length ? `${messages.length} 条消息` : ''}</strong></div>
+          {messages.length > 0 && <button type="button" title="清空本地会话" aria-label="清空本地会话" disabled={activeJobs.length > 0} onClick={() => clearSession(project.id)}><Trash2 size={14} /></button>}
+        </header>
         <div className="agent-thread-content">
           {messages.length === 0 ? null : messages.map((message) => {
             const failedJob = message.role === 'error' ? failedJobFor(message.jobId) : undefined;

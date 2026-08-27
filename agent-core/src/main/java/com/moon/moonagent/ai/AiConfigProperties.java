@@ -89,6 +89,11 @@ public class AiConfigProperties {
     @Getter
     private String videoUrlPrefix = "/api/files/videos/";
 
+    /** 主后端内部地址（资产/图片 `/api/files/**` 拉取用；对应 storyboard.internal-url，参考素材本地缺失时经本地址取） */
+    @Setter
+    @Getter
+    private String storyboardInternalUrl = "http://localhost:8082";
+
     // ═══════════════════════════════════════════════════════════
     //  超时 / 重试配置（可外部化到 application.yml 覆盖默认值）
     // ═══════════════════════════════════════════════════════════

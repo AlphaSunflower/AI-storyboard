@@ -1,11 +1,18 @@
 server:
   port: 9090
+  servlet:
+    context-path: /api/canvas
 
 spring:
   application:
     name: xiaoyue-canvas
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        enabled: true
   datasource:
     driver-class-name: org.postgresql.Driver
     # 注意：不用 ${DB_URL:...} 占位符（本机存在其他项目遗留的 DB_URL/DB_USERNAME/DB_PASSWORD 全局环境变量指向 MySQL，会被污染）
@@ -47,12 +54,7 @@ ai:
   gateway-model-timeout: 10
   gateway-cooldown-ms: 300000
 
-# ── JWT 鉴权（与 ai分镜/MoonAgent 同算法 HS256；secret 需与 ai分镜 access-secret 一致——见 application-local.yml，不进 git）──
-auth:
-  jwt-secret: ${JWT_ACCESS_SECRET:}
-  jwt-expire-minutes: 720
-
-# 跨域：Morrow 画布 dev 3000
+# 跨域：dev 靠 vite proxy，生产走网关统一 CORS
 app:
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000}

@@ -1,7 +1,7 @@
 import { getJobToken } from './jobAuth';
 
-// Morrow 项目/画布实体走后端画布服务（9090）。节点与资产内容仍在浏览器 IndexedDB。
-const baseUrl = (import.meta.env.VITE_JOB_API_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:9090';
+// Morrow 项目/画布实体走后端画布服务。dev 靠 vite proxy，生产靠网关同域。
+const baseUrl = '/api/canvas';
 
 /** 带 JWT 的后端 API 调用（非 SSE）。 */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {

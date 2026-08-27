@@ -33,7 +33,8 @@ export const REMOTE_CAPABILITIES: CapabilityDescriptor[] = [
 
 export const CAPABILITIES = [...LOCAL_CAPABILITIES, ...REMOTE_CAPABILITIES];
 
-const endpoint = import.meta.env.VITE_JOB_API_URL?.trim().replace(/\/$/, '');
+// dev 靠 vite proxy 转发 /api/canvas → localhost:9090；生产靠网关同域
+const endpoint = '/api/canvas';
 const requestTimeoutMs = 15_000;
 
 const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -79,8 +80,10 @@ export class UnconfiguredJobAdapter implements JobAdapter {
     return CAPABILITIES;
   }
 
+  async listConversations(_projectId: string) { return []; }
+
   async submit(_request: JobRequest): Promise<{ jobId: string }> {
-    throw new Error('未配置执行服务，请设置 VITE_JOB_API_URL');
+    throw new Error('未配置执行服务');
   }
 
   subscribe(_jobId: string, _listener: (event: JobEvent) => void) {
@@ -196,6 +199,14 @@ export class HttpJobAdapter implements JobAdapter {
       method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(result),
     });
     if (!response.ok) throw new Error(await errorMessage(response));
+  }
+
+  async listConversations(projectId: string) {
+    const response = await withTimeout(`${this.baseUrl}/conversations?projectId=${encodeURIComponent(projectId)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    return await response.json() as Array<{ id: string; title: string; status: string; updatedAt: string }>;
   }
 
   async getConversation(projectId: string) {

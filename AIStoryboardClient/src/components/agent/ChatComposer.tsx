@@ -5,8 +5,14 @@ import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { sttStream } from '../../api/agent';
 import { Paperclip } from 'lucide-react';
-import { Image as ImageIcon, PlusCircle, FileText } from 'lucide-react';
+import { Image as ImageIcon, PlusCircle, FileText, Package } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
+import { assetApi, type Asset, type AssetType } from '../../api/assets';
+import { useProjectStore } from '../../stores/projectStore';
+import { assetUrl } from '../../config';
+
+// 资产类型中文标签（与 AssetLibraryPanel 一致）
+const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
 
 /** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局） */
 export const DS = {
@@ -92,6 +98,12 @@ export function ChatComposer() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  // ├─「上传资产」从已有资产库选择参考图状态（assetApi.list 拉取，选中资产图片作为参考图）
+  const [assetOpen, setAssetOpen] = useState(false);
+  const [assetList, setAssetList] = useState<Asset[]>([]);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetSelectedId, setAssetSelectedId] = useState<string | null>(null);
+  const [assetError, setAssetError] = useState('');
 
   // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
   useEffect(() => { setText(''); }, [activeConversationId]);
@@ -149,6 +161,28 @@ export function ChatComposer() {
     }).join('\n');
     sendMessage(`请分析以下分镜并给出优化和生成建议：\n${summary}`);
     setSceneModalOpen(false);
+  };
+
+  // ──「上传资产」：从已有资产库选择参考图（assetApi.list 拉取 → 选中资产的图片作为参考图） ──
+  const loadAssetList = async () => {
+    setAssetLoading(true); setAssetError('');
+    try {
+      const projectId = useProjectStore.getState().currentProject?.id;
+      const res = await assetApi.list(projectId);
+      setAssetList(res.data.data ?? []);
+    } catch (err) {
+      setAssetError(err instanceof Error ? err.message : '获取资产列表失败');
+    } finally {
+      setAssetLoading(false);
+    }
+  };
+  const handleAssetOpen = () => { setAssetOpen(true); setAssetSelectedId(null); void loadAssetList(); };
+  const handleAssetConfirm = () => {
+    const picked = assetList.find((a) => a.id === assetSelectedId);
+    const url = picked?.images?.[0]?.url;
+    if (!url) { setAssetError('该资产暂无图片'); return; }
+    setRefImageUrl(url);
+    setAssetOpen(false); setAssetSelectedId(null);
   };
 
   return (
@@ -241,6 +275,19 @@ export function ChatComposer() {
                 <ImageIcon size={16} strokeWidth={2} />
                 上传图片
               </button>
+              <button
+                onClick={() => { setMenuOpen(false); handleAssetOpen(); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
+                  background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
+                  color: DS.ink, borderRadius: 8,
+                }}
+                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
+                onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+              >
+                <Package size={16} strokeWidth={2} />
+                上传资产
+              </button>
             </div>,
             document.body,
           )}
@@ -274,6 +321,50 @@ export function ChatComposer() {
         onClose={() => setSceneModalOpen(false)}
         onConfirm={handleSceneConfirm}
       />
+
+      {/* 「上传资产」从资产库选择参考图：assetApi.list → 选中资产图片设 refImageUrl */}
+      {assetOpen && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+          onClick={() => setAssetOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 420, maxWidth: '90vw', background: 'white', borderRadius: 16, padding: 18,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>选择已有资产作为参考图</div>
+            {assetLoading ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>加载中…</div>
+              : assetList.length === 0 ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>当前项目资产库为空，可先在「资源库」创建资产</div>
+              : <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {assetList.map((a) => (
+                    <button key={a.id} onClick={() => setAssetSelectedId(a.id)} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 8, borderRadius: 12,
+                      border: `1px solid ${assetSelectedId === a.id ? DS.brand : DS.border}`,
+                      background: assetSelectedId === a.id ? DS.hover : 'white', cursor: 'pointer', textAlign: 'left',
+                    }}>
+                      {a.images?.[0]
+                        ? <img src={assetUrl(a.images[0].url)} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                        : <div style={{ width: 44, height: 44, borderRadius: 8, background: DS.hover, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: DS.textCaption, flexShrink: 0 }}>无图</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                        <div style={{ fontSize: 11, color: DS.textCaption }}>{ASSET_TYPE_LABEL[a.type]}{a.projectId ? '' : '·全局'} · {a.images?.length ?? 0} 图</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>}
+            {assetError && <div style={{ color: 'rgb(217,45,32)', fontSize: 13 }}>{assetError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setAssetOpen(false)} style={{
+                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
+                color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
+              }}>取消</button>
+              <button onClick={handleAssetConfirm} disabled={!assetSelectedId} style={{
+                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
+                fontSize: 14, cursor: assetSelectedId ? 'pointer' : 'not-allowed', opacity: assetSelectedId ? 1 : 0.45,
+              }}>设为参考图</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

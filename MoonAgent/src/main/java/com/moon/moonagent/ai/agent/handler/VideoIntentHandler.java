@@ -64,8 +64,10 @@ public class VideoIntentHandler implements IntentHandler {
      */
     private String handleFromVideoClarifyGate(OrchestrationRequest request, String content,
                                                List<String> assetIds, String source) {
-        // 有参考图时跳过澄清（参考图本身就是明确信息）
-        if (source != null && !source.isBlank()) {
+        // 已有参考图（本轮 picUrl）或已勾选资产（上传的参考图/设定卡本身即明确信息）→ 跳过澄清，直接设计方案。
+        // 2026-08-27 用户反馈：有清晰场景 + 已上传资产/图片时不该再问「需要更多细节/请描述场景内容」——
+        // 仅凭 picUrl 判定漏掉了资产勾选链路（资产来自项目资产库，不是本条消息的 picUrl）。
+        if ((source != null && !source.isBlank()) || (assetIds != null && !assetIds.isEmpty())) {
             return handleVideoPlan(request, content, assetIds, source);
         }
         String ctx = support.historyContext(request.getConversation().getId(), 15);
@@ -103,6 +105,12 @@ public class VideoIntentHandler implements IntentHandler {
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), ids);
             String gate = support.runAssetGate(request, content, chosen, "video", picUrl);
             if (gate != null) return request.getLastMessage();
+            // 用户「使用所选资产」→ 所选资产/参考图已定义场景，跳过需求澄清直接设计方案；
+            // 「不使用资产」→ 无资产锚点，保留澄清（文本模糊才追问，明确则 type=1 直接过）。
+            // 2026-08-27 用户反馈：选了资产还让「选择示例」——澄清 gate 只看文本看不到图，会误判「根据这个界面」为模糊。
+            if (!"asset-skip".equals(request.getAction())) {
+                return handleVideoPlan(request, content, ids, picUrl);
+            }
             return handleFromVideoClarifyGate(request, content, ids, picUrl);
         }
         // 资产门禁澄清卡片（asset-gate）：重新描述/不使用/仍然使用 → 重判或放行后设计方案
@@ -112,7 +120,8 @@ public class VideoIntentHandler implements IntentHandler {
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), prevIds);
             AgentOrchestratorSupport.AssetGateResume r = support.resumeAssetGate(request, checkpoint, chosen);
             if (!r.proceed()) return request.getLastMessage();
-            return handleFromVideoClarifyGate(request, r.prompt(), r.assetIds(),
+            // 资产门禁已确认（用户重描述相关/仍然使用）→ 直接设计方案，不再问需求澄清
+            return handleVideoPlan(request, r.prompt(), r.assetIds(),
                     support.planField(checkpoint.getPlan(), PlanField.PIC_URL));
         }
         // 视频需求澄清卡片续流：用户选择/自定义输入 → 拼入需求 → 视频来源人工介入
@@ -190,6 +199,15 @@ public class VideoIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), assetIds);
             String sheet = support.assetSheetText(chosen);
+            // 无参考图但勾选了含图的资产：用首张资产图作为视觉方案输入——2026-08-27 用户反馈「读取图片生成」，
+            // 资产图直接决定人物外貌/场景，让视觉模型看图设计，plan 正文才能准确反映产出（而非仅靠文字设定集拼）。
+            if ((source == null || source.isBlank()) && chosen != null) {
+                source = chosen.stream()
+                        .filter(a -> a.images() != null && !a.images().isEmpty())
+                        .map(a -> a.images().getFirst().url())
+                        .filter(u -> u != null && !u.isBlank())
+                        .findFirst().orElse("");
+            }
             String ctx = support.historyContext(request.getConversation().getId(), 15);
             String enriched = content
                     + (ctx.isBlank() ? "" : ctx)

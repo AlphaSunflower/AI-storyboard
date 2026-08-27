@@ -281,20 +281,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined);
     const url = res.data.data.url;
     set({ refImageUrl: url });
-    // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）；
-    // 未选会话时后端不落库，前端也不 push（messages 为空）
+    // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）。
+    // 首会话（未选会话，cid 为空）也 push——后端 upload 未归属，但此时可见；首条消息发出去后
+    // 后端 streamMessage 会把该 url 的未归属资产认领到新会话（见 AgentChatServiceImpl）。
     const cid = get().activeConversationId;
-    if (cid) {
-      const refMsg: AgentMessage = {
-        id: `tmp-ref-${Date.now()}`,
-        conversationId: cid,
-        role: 'user',
-        content: url,
-        
-        createdAt: new Date().toISOString(),
-      };
-      set((s) => ({ messages: [...s.messages, refMsg] }));
-    }
+    const refMsg: AgentMessage = {
+      id: `tmp-ref-${Date.now()}`,
+      conversationId: cid ?? '',
+      role: 'user',
+      content: url,
+      
+      createdAt: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, refMsg] }));
   },
 
   agentGeneratedScenes: false,
@@ -323,6 +322,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   sendMessage: async (content, opts?: { picUrl?: string }) => {
     if (get().streaming || !content.trim()) return;
+    // 快照参考图——createConversation → selectConversation 会把 refImageUrl/messages 清空，
+    // 不先存会导致首条消息 picUrl 丢失（首会话上传图「说话后被吞」）
+    const refBefore = get().refImageUrl;
     let id = get().activeConversationId;
     // 未选对话但已选项目：自动新建对话并选中，避免用户消息被吞
     if (!id) {
@@ -332,6 +334,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id = get().activeConversationId;
     }
     if (!id) return;
+    // 首会话：selectConversation 已重置 messages，把参考图消息插回（保持对话窗可见）
+    if (refBefore && get().messages.length === 0) {
+      set({ messages: [{ id: `tmp-ref-${Date.now()}`, conversationId: id, role: 'user' as const, content: refBefore, createdAt: new Date().toISOString() }] });
+    }
     // 继续完善参考图：点"继续完善"后暂存的 PicUrl，随本条用户消息发送并消费（只带一次，
     // 避免后续普通消息也误带图片导致误判 pic-refine 意图）
     const pendingPic = get().pendingPicUrl;
@@ -396,7 +402,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
 
     try {
-      await streamChat(id, content, opts?.picUrl ?? pendingPic ?? get().refImageUrl ?? undefined, (e: SseEvent) => {
+      await streamChat(id, content, opts?.picUrl ?? pendingPic ?? refBefore ?? undefined, (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息

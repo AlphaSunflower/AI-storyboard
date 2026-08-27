@@ -47,6 +47,8 @@ export function ChatPage() {
   const [convWidth, setConvWidth] = useState(240);
   const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
+  const [embed, setEmbed] = useState(false);             // iframe 紧凑模式（画布执行服务小窗）
+  const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
@@ -63,12 +65,28 @@ export function ChatPage() {
     const params = new URLSearchParams({ token });
     if (userId) params.set('userId', userId);
     if (name) params.set('name', name);
-    window.open(`${base}?${params.toString()}`, '_blank');
+    // 携带当前项目 id → 画布落到位（画布 App 读 #project= hash 自动打开该项目，供用户选画布）
+    const projectId = currentProject?.id;
+    const hash = projectId ? `#project=${encodeURIComponent(projectId)}` : '';
+    window.open(`${base}?${params.toString()}${hash}`, '_blank');
   };
 
-  // 登录守卫
+  // 登录守卫 + iframe 自登录（/chat?embed=1&token=&userId=&name=）：跨端口 iframe 靠 URL 注入 token
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (params.get('embed') === '1') setEmbed(true);
+    if (token) {
+      const refresh = params.get('refresh');
+      const userId = params.get('userId');
+      const name = params.get('name');
+      localStorage.setItem('accessToken', token);
+      if (refresh) localStorage.setItem('refreshToken', refresh);
+      if (userId && name) localStorage.setItem('user', JSON.stringify({ userId, displayName: name }));
+      window.history.replaceState({}, '', '/chat');
+    }
     useAuthStore.getState().checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 无项目上下文时自动选第一个项目（会话绑定项目是后端契约）
@@ -106,6 +124,8 @@ export function ChatPage() {
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
+  // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
+  const showMobile = isMobile && !embed;
 
   // 手机端：选择会话后自动关闭侧栏
   const handleMobileSelectConversation = (id: string) => {
@@ -177,7 +197,7 @@ export function ChatPage() {
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDrop={handleDropImage}
-      style={{ height: '100vh', display: isMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
+      style={{ height: '100vh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
     >
       {/* 拖拽图片时的提示浮层 */}
       {dropActive && <DropHint />}
@@ -326,10 +346,11 @@ export function ChatPage() {
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDrop={handleDropImage}
-      style={{ height: '100vh', display: isMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden' }}
+      style={{ height: '100vh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
     >
       {dropActive && <DropHint />}
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
+      {!embed && (<>
       {collapsed ? (
         /* ── 收起态：图标 rail ── */
         <div style={{
@@ -486,15 +507,55 @@ export function ChatPage() {
         <div style={{ width: 2, height: 20, borderRadius: 1, background: 'rgba(0,0,0,0.12)' }} />
       </div>
       {collapsed && <div style={{ width: 4, flexShrink: 0 }} />}
+      </>)}
+
+      {/* ── embed 紧凑模式（画布小窗 iframe）：会话切换按钮 + 会话列表 overlay ── */}
+      {embed && embedConvOpen && (
+            <div
+              onClick={() => setEmbedConvOpen(false)}
+              style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.25)' }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute', top: 0, left: 0, bottom: 0,
+                  width: Math.min(convWidth, 280), background: DS.sidebarBg,
+                  boxShadow: '6px 0 24px rgba(0,0,0,0.12)', display: 'flex',
+                }}
+              >
+                <AgentConversationList
+                  width={Math.min(convWidth, 280)}
+                  hideHeader
+                  toolbar={
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 12px 0' }}>
+                      <button
+                        onClick={() => setEmbedConvOpen(false)}
+                        title="收起"
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: 'var(--color-muted)', padding: '4px 8px', borderRadius: 8 }}
+                      ><PanelLeftClose size={14} strokeWidth={2} /> 收起</button>
+                    </div>
+                  }
+                  onSelectOverride={(id) => { useAgentStore.getState().selectConversation(id); setEmbedConvOpen(false); }}
+                />
+              </div>
+            </div>
+      )}
 
       {/* ── 主对话区 ── */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {isEmpty ? (
           /* 首次对话 hero：名称居中 + 输入卡居中（DeepSeek harness 空态） */
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
           }}>
+            {embed && (
+              <button
+                onClick={() => setEmbedConvOpen(true)}
+                title="会话"
+                style={{ position: 'absolute', top: 8, left: 8, border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3 }}
+              ><Moon size={12} strokeWidth={1.8} /> 会话</button>
+            )}
             <LiveOrb
               variant="webgl"
               colors={["#1D4E89", "#81C3D7", "#D9E8F5"]}
@@ -526,25 +587,36 @@ export function ChatPage() {
           </div>
         ) : (
           <>
-            {/* 头部：会话名称 + 操作 */}
+            {/* 头部：会话名称 + 操作（embed 小窗内收紧字号与留白） */}
             <div style={{
-              padding: '14px 28px', borderBottom: `1px solid ${DS.border}`,
+              padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
             }}>
-              <span style={{ fontSize: 18, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {currentTitle}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                {embed && (
+                  <button
+                    onClick={() => setEmbedConvOpen(true)}
+                    title="会话"
+                    style={{ border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}
+                  ><Moon size={12} strokeWidth={1.8} /> 会话</button>
+                )}
+                <span style={{ fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentTitle}
+                </span>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <button
                   onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
                   disabled={!activeConversationId}
-                  style={headerBtn(activeConversationId ? 1 : 0.4)}
+                  style={headerBtn(activeConversationId ? 1 : 0.4, embed ? 12 : 14)}
                 ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
-                <button
-                  onClick={openCanvas}
-                  title="进入画布"
-                  style={headerBtn(1)}
-                ><Frame size={16} strokeWidth={1.8} /> 进入画布</button>
+                {!embed && (
+                  <button
+                    onClick={openCanvas}
+                    title="进入画布"
+                    style={headerBtn(1)}
+                  ><Frame size={16} strokeWidth={1.8} /> 进入画布</button>
+                )}
               </div>
             </div>
 
@@ -624,9 +696,9 @@ export function ChatPage() {
   );
 }
 
-function headerBtn(opacity: number): React.CSSProperties {
+function headerBtn(opacity: number, fontSize = 14): React.CSSProperties {
   return {
-    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 14,
+    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize,
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
     display: 'flex', alignItems: 'center', gap: 4,
   };

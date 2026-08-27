@@ -7,13 +7,17 @@ import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.service.FileStorageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MimeType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
@@ -38,6 +42,7 @@ public class OtherSpecialist implements SpecialistAgent {
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final AgentMessageMapper messageMapper;
+    private final FileStorageService fileStorageService;
 
     private volatile ChatClient chatClient;
 
@@ -64,7 +69,7 @@ public class OtherSpecialist implements SpecialistAgent {
 
             String answer = getClient().prompt()
                     .system("你是 Moon 智能体，一个专业的分镜创作助手。用中文回答，简洁友好。")
-                    .user(history + "\n用户: " + context.userMessage())
+                    .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrl()))
                     .call()
                     .content();
 
@@ -79,6 +84,22 @@ public class OtherSpecialist implements SpecialistAgent {
             log.error("OtherSpecialist 执行失败: {}", e.getMessage(), e);
             return SpecialistResult.done("抱歉，处理出了点问题，请稍后重试。");
         }
+    }
+
+    /** 构造用户消息：picUrl 非空时读本地图转 data URI 作为多模态图片加入；读图失败降级纯文本 */
+    private UserMessage buildUserMessage(String text, String picUrl) {
+        if (picUrl != null && !picUrl.isBlank()) {
+            try {
+                String dataUri = fileStorageService.toImageDataUri(picUrl);
+                int sep = dataUri.indexOf(';');
+                String mime = dataUri.startsWith("data:") && sep > 5 ? dataUri.substring(5, sep) : "image/png";
+                Media media = Media.builder().mimeType(MimeType.valueOf(mime)).data(dataUri).build();
+                return UserMessage.builder().text(text).media(media).build();
+            } catch (Exception e) {
+                log.warn("参考图加入主回答失败，降级纯文本: {}", e.getMessage());
+            }
+        }
+        return UserMessage.builder().text(text).build();
     }
 
     private ChatClient getClient() {

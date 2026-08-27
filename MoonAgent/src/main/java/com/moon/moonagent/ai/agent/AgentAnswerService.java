@@ -19,9 +19,10 @@ public interface AgentAnswerService {
      *
      * @param conversation 会话（已校验归属）
      * @param content      用户消息
+     * @param picUrl       参考图 URL（可空；非空时作为多模态图片喂给 LLM）
      * @return 回答文本（LLM 失败返回降级文案）
      */
-    String generate(AgentConversation conversation, String content);
+    String generate(AgentConversation conversation, String content, String picUrl);
 
     /**
      * 流式生成回答：逐 token 推 SSE message 增量事件（前端打字机逐段拼接），
@@ -29,18 +30,20 @@ public interface AgentAnswerService {
      *
      * @param conversation 会话（已校验归属）
      * @param content      用户消息
+     * @param picUrl       参考图 URL（可空；非空时作为多模态图片喂给 LLM）
      * @param emitter      SSE 输出
      * @return 完整回答文本（LLM 失败返回降级文案并补发一条 message）
      */
-    String streamAnswer(AgentConversation conversation, String content, SseEmitter emitter);
+    String streamAnswer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
 
     /**
      * 生成回答并推 SSE message 事件（blocking 路径兼容入口）。
      *
      * @param conversation 会话（已校验归属）
      * @param content      用户消息
+     * @param picUrl       参考图 URL（可空；非空时作为多模态图片喂给 LLM）
      * @param emitter      SSE 输出
      * @return 回答文本（调用方可落库）
      */
-    String answer(AgentConversation conversation, String content, SseEmitter emitter);
+    String answer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
 }

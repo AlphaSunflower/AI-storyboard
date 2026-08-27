@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { createId } from '../utils/id';
 
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  status: string;
+  updatedAt: string;
+}
+
 export type AgentMessageRole = 'user' | 'agent' | 'error' | 'status';
 
 export interface AgentToolCallState {
@@ -43,6 +50,10 @@ interface AgentSession {
 }
 
 interface AgentStoreState {
+  conversationLists: Record<string, ConversationSummary[]>;
+  loadConversations: (projectId: string, adapter: { listConversations?: (projectId: string) => Promise<ConversationSummary[]> }) => Promise<void>;
+  selectConversation: (projectId: string, conversationId: string, messages: AgentMessage[]) => void;
+
   sessions: Record<string, AgentSession>;
   ensureSession: (projectId: string) => AgentSession;
   setConversation: (projectId: string, conversationId: string, messages: AgentMessage[]) => void;
@@ -59,6 +70,18 @@ interface AgentStoreState {
 const newSession = (): AgentSession => ({ conversationId: createId(), draft: '', messages: [], jobs: {} });
 
 export const useAgentStore = create<AgentStoreState>((set, get) => ({
+  conversationLists: {},
+  loadConversations: async (projectId, adapter) => {
+    if (!adapter.listConversations) return;
+    try {
+      const list = await adapter.listConversations(projectId);
+      set((state) => ({ conversationLists: { ...state.conversationLists, [projectId]: list } }));
+    } catch { /* 静默 */ }
+  },
+  selectConversation: (projectId, conversationId, messages) => set((state) => {
+    const session = state.sessions[projectId] ?? newSession();
+    return { sessions: { ...state.sessions, [projectId]: { ...session, conversationId, messages, jobs: {} } } };
+  }),
   sessions: {},
   ensureSession: (projectId) => {
     const current = get().sessions[projectId];

@@ -9,7 +9,6 @@ import com.moon.xiaoyuecanvas.dto.response.JobSubmitResponse;
 import com.moon.xiaoyuecanvas.service.DesignJobService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,13 +17,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.storyboard.common.BusinessException;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -46,28 +40,6 @@ public class DesignAgentJobController {
 
     private final DesignJobService designJobService;
     private final FileStorageService fileStorageService;
-
-    // ai分镜 后端（登录代理目标）：Morrow 前端只连本画布(9090)，登录由本服务转调 ai分镜
-    @Value("${ai.storyboard-base-url:http://localhost:8082}")
-    private String storyboardBaseUrl;
-
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
-
-    @PostMapping("/api/auth/login")
-    public ResponseEntity<String> login(@RequestBody String bodyJson) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(storyboardBaseUrl + "/api/auth/login"))
-                .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(30))
-                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .build();
-        HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return ResponseEntity.status(resp.statusCode())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(resp.body());
-    }
 
     @GetMapping("/health")
     public Map<String, Object> health() {
@@ -96,6 +68,18 @@ public class DesignAgentJobController {
                                       @PathVariable String jobId) {
         designJobService.cancel(userId, jobId);
         return Map.of("jobId", jobId);
+    }
+
+    @GetMapping("/conversations")
+    public List<Map<String, Object>> listConversations(@RequestAttribute("userId") String userId,
+                                                        @RequestParam String projectId) {
+        return designJobService.listConversations(userId, projectId).stream()
+                .map(c -> Map.<String, Object>of(
+                        "id", c.getId(),
+                        "title", c.getTitle() == null ? "" : c.getTitle(),
+                        "status", c.getStatus() == null ? "active" : c.getStatus(),
+                        "updatedAt", c.getUpdatedAt() == null ? "" : c.getUpdatedAt().toString()))
+                .toList();
     }
 
     @PostMapping("/conversations")

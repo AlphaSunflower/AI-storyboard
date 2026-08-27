@@ -53,7 +53,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 提取 Bearer token
         String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
+        String token = null;
+        if (header != null && header.startsWith("Bearer ")) {
+            token = header.substring(7);
+        }
+        // EventSource 无法带 Authorization 头——SSE 用查询参数 access_token 兜底
+        if (token == null) {
+            token = request.getParameter("access_token");
+        }
+        if (token == null) {
             writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "未授权：缺少 token");
             return;
         }
@@ -61,7 +69,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 验签（仅验签失败返回 401；后续路由/转发异常须冒泡，不能吞）
         Claims claims;
         try {
-            claims = jwtVerifier.verify(header.substring(7));
+            claims = jwtVerifier.verify(token);
         } catch (Exception e) {
             log.warn("JWT 验签失败: {}", e.getMessage());
             writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "未授权：token 无效或已过期");
