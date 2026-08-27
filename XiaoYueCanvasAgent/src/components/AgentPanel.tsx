@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, CircleStop, Cloud, CloudOff, Database,
-  Image, LoaderCircle, Paperclip, RefreshCw, RotateCw, Send, Trash2,
+  AlertTriangle, CircleStop,
+  LoaderCircle, Paperclip, RefreshCw, Send, Trash2,
 } from 'lucide-react';
-import { CAPABILITIES, jobAdapter } from '../services/capabilities';
+import { jobAdapter } from '../services/capabilities';
 import { saveAsset } from '../services/projectStorage';
 import { useAgentStore, type AgentJobState } from '../store/agentStore';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
-import type { CapabilityDescriptor, JobAdapter, JobAdapterStatus, JobEvent, PersistedAsset, ProjectDocumentV2 } from '../types';
+import type { JobAdapter, JobEvent, PersistedAsset, ProjectDocumentV2 } from '../types';
 import { createId } from '../utils/id';
 import { createImageAsset, createVideoAsset, getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 import { executeToolCall, getTool, shouldDryRun } from '../canvas/toolRegistry';
@@ -37,8 +37,6 @@ const outputPosition = () => {
 };
 
 export function AgentPanel({ project, adapter = jobAdapter }: { project: ProjectDocumentV2; adapter?: JobAdapter }) {
-  const nodeCount = useCanvasStore((state) => state.nodes.length);
-  const edgeCount = useCanvasStore((state) => state.edges.length);
   const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
   const selectedLabel = useCanvasStore((state) => state.nodes.find((node) => node.id === state.selectedNodeId)?.data.label);
   const session = useAgentStore((state) => state.sessions[project.id]);
@@ -52,9 +50,6 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
   const clearSession = useAgentStore((state) => state.clearSession);
   const updateToolCall = useAgentStore((state) => state.updateToolCall);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
-  const [runtime, setRuntime] = useState<JobAdapterStatus>({ connected: false, label: '正在检查执行服务' });
-  const [capabilities, setCapabilities] = useState<CapabilityDescriptor[]>(CAPABILITIES);
-  const [isChecking, setIsChecking] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const subscriptionsRef = useRef(new Map<string, () => void>());
@@ -90,24 +85,6 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
       threadEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [session?.messages.length]);
-
-  const refreshConnection = useCallback(async () => {
-    setIsChecking(true);
-    const status = await adapter.getStatus();
-    setRuntime(status);
-    if (status.connected) {
-      try {
-        setCapabilities(await adapter.getCapabilities());
-      } catch (error) {
-        setRuntime({ connected: false, label: error instanceof Error ? error.message : '能力发现失败', endpoint: status.endpoint });
-      }
-    } else {
-      setCapabilities(await adapter.getCapabilities().catch(() => CAPABILITIES));
-    }
-    setIsChecking(false);
-  }, [adapter]);
-
-  useEffect(() => { void refreshConnection(); }, [refreshConnection]);
 
   const finishSubscription = useCallback((jobId: string) => {
     subscriptionsRef.current.get(jobId)?.();
@@ -283,30 +260,12 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
   const messages = session?.messages ?? [];
   const jobs = session ? Object.values(session.jobs) : [];
   const activeJobs = jobs.filter((job) => !terminalStatuses.has(job.status));
-  const local = capabilities.filter((item) => item.category === 'local' && item.available);
-  const remoteReady = capabilities.filter((item) => item.category === 'remote' && item.available);
-  const contextLabel = selectedLabel ?? '整个画布';
-  const statusClass = isChecking ? 'is-checking' : runtime.connected ? 'is-online' : 'is-offline';
   const failedJobFor = (jobId?: string) => jobId ? session?.jobs[jobId] : undefined;
 
   return (
     <div className="connection-panel agent-panel-ready">
-      <section className={`agent-runtime-bar ${statusClass}`} aria-live="polite">
-        <span className="agent-runtime-icon">{isChecking ? <LoaderCircle className="is-spinning" size={17} /> : runtime.connected ? <Cloud size={17} /> : <CloudOff size={17} />}</span>
-        <div><strong>{runtime.label}</strong><small>{runtime.connected ? `${remoteReady.length} 项远程能力可用` : '请求失败时不会创建假回复或结果'}</small></div>
-        <button type="button" onClick={() => void refreshConnection()} disabled={isChecking} title="重新检查连接" aria-label="重新检查连接"><RotateCw size={15} /></button>
-      </section>
-
-      <details className="agent-context-drawer">
-        <summary><Database size={14} /><span>当前上下文</span><b>{nodeCount} 节点 · {contextLabel}</b><ChevronDown size={14} /></summary>
-        <div className="agent-context-body">
-          <dl><div><dt>项目</dt><dd>{project.title}</dd></div><div><dt>节点 / 连线</dt><dd>{nodeCount} / {edgeCount}</dd></div><div><dt>附带范围</dt><dd>{contextLabel}</dd></div></dl>
-          <div className="agent-capability-line"><span><Check size={13} /> 本地 {local.length}</span><span className={remoteReady.length ? 'is-ready' : ''}><Cloud size={13} /> 远程 {remoteReady.length}</span></div>
-        </div>
-      </details>
-
       <section className="agent-thread" aria-label="设计助理消息">
-        <header><div><strong>设计助理</strong><span>{activeJobs.length ? `${activeJobs.length} 个任务运行中` : messages.length ? `${messages.length} 条消息` : '新会话'}</span></div>{messages.length > 0 && <button type="button" title="清空本地会话" aria-label="清空本地会话" disabled={activeJobs.length > 0} onClick={() => clearSession(project.id)}><Trash2 size={14} /></button>}</header>
+        <header><div><strong>{activeJobs.length ? `${activeJobs.length} 个任务运行中` : messages.length ? `${messages.length} 条消息` : '新会话'}</strong></div>{messages.length > 0 && <button type="button" title="清空本地会话" aria-label="清空本地会话" disabled={activeJobs.length > 0} onClick={() => clearSession(project.id)}><Trash2 size={14} /></button>}</header>
         <div className="agent-thread-content">
           {messages.length === 0 ? null : messages.map((message) => {
             const failedJob = message.role === 'error' ? failedJobFor(message.jobId) : undefined;

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ArrowRight, FileArchive, FolderOpen, Image, Plus, Trash2, WifiOff } from 'lucide-react';
+import { ArrowRight, FileArchive, FolderOpen, Image, Plus, Trash2 } from 'lucide-react';
 import type { ProjectSummary } from '../types';
 
 interface HomePageProps {
@@ -31,7 +31,6 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
         <div className="local-home-actions"><button className="local-primary" onClick={onCreate}><Plus size={17} /> 新建项目</button><button onClick={() => fileInput.current?.click()}><FileArchive size={17} /> 导入 .morrow</button></div>
       </header>
 
-      <section className="local-service-strip"><span><WifiOff size={15} /> AI 执行服务未配置</span><p>裁剪、切分、像素调整、标注和导出可离线运行；模型工具会明确保持禁用。</p></section>
 
       <section className="local-projects">
         <header><div><small>LOCAL PROJECTS</small><h2>最近项目</h2></div><span>{projects.length} 个项目</span></header>
