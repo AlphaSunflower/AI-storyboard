@@ -7,7 +7,7 @@ import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { ToastContainer } from '../components/common/Toast';
 import { AgentFab } from '../components/agent/AgentFab';
-import { AgentDrawer } from '../components/agent/AgentDrawer';
+import { MoonAgentWindow } from '../components/agent/MoonAgentWindow';
 import { TaskFab } from '../components/common/TaskFab';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
 import { MobileSceneList } from '../components/editor/MobileSceneList';
@@ -219,7 +219,7 @@ export function EditorPage() {
 
       {/* 智能体窗口 */}
       <AgentFab />
-      <AgentDrawer />
+      <MoonAgentWindow />
       {/* 任务中心悬浮球（右下角 ☾ 上方，聚合进行中的生成任务） */}
       <TaskFab />
     </div>
