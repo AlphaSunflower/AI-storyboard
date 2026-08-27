@@ -1,0 +1,22 @@
+import type { NodePreset } from '../types';
+
+export const NODE_PRESETS: NodePreset[] = [
+  { kind: 'text', title: '文字', description: '记录脚本、说明和设计判断', accent: '#f4c95d' },
+  { kind: 'image', title: '图片', description: '上传真实图片后进行非破坏编辑', accent: '#ff775f' },
+  { kind: 'video', title: '视频', description: '导入真实视频，编排参考素材与分镜参数', accent: '#8f9cff' },
+];
+
+export const CANVAS_TEMPLATES = [
+  {
+    id: 'image-review',
+    title: '图片评审流程',
+    description: '原图、修改版本与设计说明的空结构',
+    colors: ['#ff775f', '#f4c95d'],
+  },
+  {
+    id: 'variant-study',
+    title: '视觉版本探索',
+    description: '一张源图连接三个空白版本节点',
+    colors: ['#ff775f', '#d7ff54', '#ff775f'],
+  },
+];

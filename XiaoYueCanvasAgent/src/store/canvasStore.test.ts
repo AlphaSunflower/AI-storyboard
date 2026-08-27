@@ -1,0 +1,96 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { useCanvasStore } from './canvasStore';
+
+describe('canvas transactions', () => {
+  beforeEach(() => useCanvasStore.setState({ nodes: [], edges: [], past: [], future: [], selectedNodeId: null, dragStartSnapshot: null, revision: 0 }));
+
+  it('creates derived assets, nodes, and edges as one undoable action', () => {
+    const sourceId = useCanvasStore.getState().addNode('image', { x: 0, y: 0 });
+    useCanvasStore.getState().createDerivedNodes(sourceId, [{ data: { assetId: 'asset-1', label: 'derived' }, size: { width: 200, height: 100 } }]);
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    expect(useCanvasStore.getState().edges).toHaveLength(1);
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+    useCanvasStore.getState().redo();
+    expect(useCanvasStore.getState().nodes[1].data.assetId).toBe('asset-1');
+  });
+
+  it('imports a batch as one undoable action', () => {
+    useCanvasStore.getState().addImportedImages([
+      { assetId: 'a', label: 'a', position: { x: 0, y: 0 }, size: { width: 200, height: 200 } },
+      { assetId: 'b', label: 'b', position: { x: 250, y: 0 }, size: { width: 200, height: 200 } },
+    ]);
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
+  });
+
+  it('preserves unchanged node references when selecting inside a large graph', () => {
+    const project = {
+      schemaVersion: 1 as const,
+      id: 'large', title: 'large', edges: [], viewport: { x: 0, y: 0, zoom: 1 }, createdAt: 1, updatedAt: 1,
+      nodes: Array.from({ length: 500 }, (_, index) => ({
+        id: `node-${index}`, type: 'media' as const, position: { x: index * 10, y: 0 }, width: 200, height: 200,
+        data: { kind: 'image' as const, label: `${index}`, prompt: '', status: 'idle' as const, accent: '#fff' },
+      })),
+    };
+    useCanvasStore.getState().loadProjectGraph(project);
+    const before = useCanvasStore.getState().nodes;
+    useCanvasStore.getState().selectNode('node-250');
+    const selected = useCanvasStore.getState().nodes;
+    expect(selected.filter((node, index) => node !== before[index])).toHaveLength(1);
+
+    useCanvasStore.getState().selectNode('node-251');
+    const next = useCanvasStore.getState().nodes;
+    expect(next.filter((node, index) => node !== selected[index])).toHaveLength(2);
+  });
+
+  it('copies selected nodes and internal edges without cloning assets', () => {
+    const state = useCanvasStore.getState();
+    const first = state.addNode('image', { x: 10, y: 20 }, { assetId: 'shared-asset' });
+    const second = useCanvasStore.getState().addNode('text', { x: 310, y: 20 });
+    useCanvasStore.setState((current) => ({
+      nodes: current.nodes.map((node) => ({ ...node, selected: node.id === first || node.id === second })),
+      selectedNodeId: second,
+      edges: [{ id: 'original-edge', source: first, target: second, type: 'canvas' }],
+    }));
+
+    expect(useCanvasStore.getState().copySelected()).toBe(2);
+    const created = useCanvasStore.getState().pasteClipboard({ x: 1000, y: 800 });
+    expect(created).toHaveLength(2);
+    const pasted = useCanvasStore.getState();
+    expect(pasted.nodes).toHaveLength(4);
+    expect(pasted.edges).toHaveLength(2);
+    expect(pasted.nodes.find((node) => node.id === created[0])?.data.assetId).toBe('shared-asset');
+    expect(pasted.edges[1].source).toBe(created[0]);
+    expect(pasted.edges[1].target).toBe(created[1]);
+    expect(Math.min(...pasted.nodes.filter((node) => created.includes(node.id)).map((node) => node.position.x))).toBe(1000);
+  });
+
+  it('pastes and duplicates a multi-node selection as one undoable transaction', () => {
+    useCanvasStore.getState().addNode('text', { x: 0, y: 0 });
+    useCanvasStore.getState().copySelected();
+    useCanvasStore.getState().pasteClipboard();
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    useCanvasStore.getState().redo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    useCanvasStore.getState().duplicateSelected();
+    expect(useCanvasStore.getState().nodes).toHaveLength(3);
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  });
+
+  it('deletes a selected edge without removing its nodes', () => {
+    const first = useCanvasStore.getState().addNode('text', { x: 0, y: 0 });
+    const second = useCanvasStore.getState().addNode('text', { x: 400, y: 0 });
+    useCanvasStore.setState({ edges: [{ id: 'edge-only', source: first, target: second, type: 'canvas' }] });
+    useCanvasStore.getState().deleteEdge('edge-only');
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().edges).toHaveLength(1);
+  });
+});

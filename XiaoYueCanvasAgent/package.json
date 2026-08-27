@@ -1,0 +1,45 @@
+{
+  "name": "morrow-creative-canvas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "morrow": "./cli/morrow.ts"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "typecheck:node": "tsc -p tsconfig.node-scripts.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "verify": "npm run typecheck && npm run typecheck:node && npm run test && npm run build",
+    "bridge": "node bridge/server.ts",
+    "canvas": "node cli/morrow.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.8.6",
+    "fflate": "^0.8.3",
+    "idb": "^8.0.3",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/node": "^26.3.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^4.1.10"
+  }
+}
