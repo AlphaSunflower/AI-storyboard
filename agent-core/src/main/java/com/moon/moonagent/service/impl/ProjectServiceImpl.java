@@ -53,9 +53,9 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public List<Project> listMine(String userId) {
+        // 项目跨系统共享（ai分镜/Morrow 同一 projects 表，按 id 锚点）：列出该用户全部项目，不区分 movie/morrow 类型
         return projectMapper.selectList(new LambdaQueryWrapper<Project>()
                 .eq(Project::getUserId, userId)
-                .eq(Project::getCreationType, "morrow")
                 .orderByDesc(Project::getUpdatedAt));
     }
 
