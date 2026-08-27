@@ -73,6 +73,7 @@ ai:
   image-url-prefix: /api/files/images/
   video-url-prefix: /api/files/videos/
   audio-url-prefix: /api/files/audios/
+  storyboard-base-url: ${STORYBOARD_BASE_URL:http://localhost:8082}   # 本服务地址：参考素材(/api/files/**) 本地缺失时经此拉取
 
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
   image-request-timeout: 300
@@ -98,3 +99,13 @@ internal:
 # 提示词文件目录（文件系统路径，支持热刷新）
 prompts:
   dir: src/main/resources/prompts
+
+# MinIO 对象存储（图片/视频/音频统一存对象存储，替代本地 uploads/）
+# 默认指向本机 MinIO（本地开发）；生产在 application-prod.yml 覆盖 endpoint/access-key/secret-key/bucket。
+storyboard:
+  storage:
+    endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:minioadmin123}
+    bucket: storyboard
+    region: us-east-1

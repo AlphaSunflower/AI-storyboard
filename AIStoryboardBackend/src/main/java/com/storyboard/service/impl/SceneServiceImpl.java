@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storyboard.dto.request.SceneRequest;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
+import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneReferenceImage;
 import com.storyboard.common.BusinessException;
+import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.FileStorageService;
@@ -36,6 +38,7 @@ public class SceneServiceImpl implements SceneService {
     private final SceneMapper sceneMapper;
     private final SceneReferenceImageMapper refImageMapper;
     private final FileStorageService fileStorageService;
+    private final ProjectMapper projectMapper;
 
     /** 参考素材上限兜底（对齐 MiniMax 输入约束；网关 params 精确值由前端展示，后端硬上限防滥用） */
     private static final Map<String, int[]> REF_LIMITS = Map.of(
@@ -52,7 +55,8 @@ public class SceneServiceImpl implements SceneService {
 
     @Override
     @Transactional
-    public SceneResponse addScene(String projectId, SceneRequest request) {
+    public SceneResponse addScene(String userId, String projectId, SceneRequest request) {
+        checkProjectOwnership(userId, projectId);
         int nextNum = sceneMapper.maxSceneNumber(projectId) + 1;
         Scene scene = new Scene();
         scene.setProjectId(projectId);
@@ -68,9 +72,10 @@ public class SceneServiceImpl implements SceneService {
 
     @Override
     @Transactional
-    public SceneResponse updateScene(String sceneId, SceneRequest request) {
+    public SceneResponse updateScene(String userId, String sceneId, SceneRequest request) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        checkProjectOwnership(userId, scene.getProjectId());
 
         // 仅更新非 null 字段（null = 不修改）
         if (request.scriptContent() != null) scene.setScriptContent(request.scriptContent());
@@ -97,15 +102,17 @@ public class SceneServiceImpl implements SceneService {
 
     @Override
     @Transactional
-    public void deleteScene(String sceneId) {
+    public void deleteScene(String userId, String sceneId) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        checkProjectOwnership(userId, scene.getProjectId());
         sceneMapper.deleteById(sceneId);
     }
 
     @Override
     @Transactional
-    public void reorderScenes(String projectId, List<String> sceneIds) {
+    public void reorderScenes(String userId, String projectId, List<String> sceneIds) {
+        checkProjectOwnership(userId, projectId);
         // 校验：sceneIds 不能为空
         if (sceneIds == null || sceneIds.isEmpty()) {
             throw new BusinessException(40001, "排序列表不能为空");
@@ -128,9 +135,10 @@ public class SceneServiceImpl implements SceneService {
     }
 
     @Override
-    public List<SceneReferenceResponse> listReferences(String sceneId) {
+    public List<SceneReferenceResponse> listReferences(String userId, String sceneId) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        checkProjectOwnership(userId, scene.getProjectId());
         return refImageMapper.findBySceneId(sceneId).stream()
             .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
                     r.getFileName(), r.getFileSize()))
@@ -139,9 +147,10 @@ public class SceneServiceImpl implements SceneService {
 
     @Override
     @Transactional
-    public SceneReferenceResponse uploadReference(String sceneId, String type, String purpose, MultipartFile file) {
+    public SceneReferenceResponse uploadReference(String userId, String sceneId, String type, String purpose, MultipartFile file) {
         Scene scene = sceneMapper.selectById(sceneId);
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
+        checkProjectOwnership(userId, scene.getProjectId());
         String t = type == null ? "image" : type;
         String p = purpose == null ? "image" : purpose;
         if (!REF_LIMITS.containsKey(t)) throw new BusinessException(40001, "不支持的素材类型: " + t);
@@ -178,25 +187,36 @@ public class SceneServiceImpl implements SceneService {
     }
 
     @Override
-    public void deleteReference(String referenceId) {
+    public void deleteReference(String userId, String referenceId) {
         SceneReferenceImage ref = refImageMapper.selectById(referenceId);
         if (ref == null) throw new BusinessException(40401, "素材不存在");
-        // 删除本地文件（失败仅警告，不阻断——素材表已删，残留文件由磁盘清理兜底）
+        // 归属校验：通过 ref → scene → project → userId
+        Scene scene = sceneMapper.selectById(ref.getSceneId());
+        if (scene == null) throw new BusinessException(40401, "素材所属分镜不存在");
+        checkProjectOwnership(userId, scene.getProjectId());
+        // 删除对象（失败仅警告，不阻断——素材表已删，残留对象由生命周期兜底）
         try {
             String url = ref.getImageUrl();
             if (url != null && url.contains("/")) {
                 String filename = url.substring(url.lastIndexOf('/') + 1);
-                Path p = switch (ref.getType() == null ? "image" : ref.getType()) {
-                    case "video" -> fileStorageService.resolveVideo(filename);
-                    case "audio" -> fileStorageService.resolveAudio(filename);
-                    default -> fileStorageService.resolveImage(filename);
-                };
-                Files.deleteIfExists(p);
+                switch (ref.getType() == null ? "image" : ref.getType()) {
+                    case "video" -> fileStorageService.deleteVideo(filename);
+                    case "audio" -> fileStorageService.deleteAudio(filename);
+                    default -> fileStorageService.deleteImage(filename);
+                }
             }
-        } catch (IOException e) {
-            log.warn("删除参考素材本地文件失败: {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("删除参考素材对象失败: {}", e.getMessage());
         }
         refImageMapper.deleteById(referenceId);
+    }
+
+    /** 归属校验：校验 userId 是否拥有 projectId 对应的项目 */
+    private void checkProjectOwnership(String userId, String projectId) {
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || !project.getUserId().equals(userId)) {
+            throw new BusinessException(40401, "项目不存在");
+        }
     }
 
     private SceneResponse toResponse(Scene s) {

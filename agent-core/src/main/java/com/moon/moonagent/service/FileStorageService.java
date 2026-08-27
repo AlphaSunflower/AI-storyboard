@@ -1,50 +1,69 @@
 package com.moon.moonagent.service;
 
-import java.nio.file.Path;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 文件存储服务接口：图片/视频下载保存、上传图片保存、本地路径解析、Content-Type 推断。
+ * 文件存储服务接口：图片/视频下载保存、上传图片保存、对象读取/删除、Content-Type 推断、图片转 data URI。
+ * <p>
+ * 存储后端已切换 MinIO（对象存储），保存方法仍返回对外访问的相对路径（如 {@code /api/files/images/xxx.png}），
+ * 读取方法返回对象字节（不存在返回 null）。
  */
 public interface FileStorageService {
 
     /**
-     * Download image from URL and save locally.
-     * @return local relative path like /api/files/images/xxx.png
+     * Download image from URL and save to MinIO.
+     * @return relative path like /api/files/images/xxx.png
      */
     String saveImage(String sourceUrl);
 
     /**
      * Save image from base64 data (Gemini inlineData).
-     * @return local relative path like /api/files/images/xxx.png
+     * @return relative path like /api/files/images/xxx.png
      */
     String saveImageFromBase64(String base64Data);
 
     /**
      * 保存用户上传的图片文件（Agent 对话参考图）。
-     * @return local relative path like /api/files/images/xxx.png
+     * @return relative path like /api/files/images/xxx.png
      */
-    String saveUploadedImage(org.springframework.web.multipart.MultipartFile file);
+    String saveUploadedImage(MultipartFile file);
 
     /**
-     * 保存分镜参考素材（image→images 目录，video→videos，audio→audios）。
-     * @return local relative path like /api/files/images|videos|audios/xxx
+     * 保存分镜参考素材（image→images，video→videos，audio→audios）。
+     * @return relative path like /api/files/images|videos|audios/xxx
      */
-    String saveUploadedReference(String type, org.springframework.web.multipart.MultipartFile file);
+    String saveUploadedReference(String type, MultipartFile file);
 
     /**
-     * Download video from URL and save locally.
-     * @return local relative path like /api/files/videos/xxx.mp4
+     * Download video from URL and save to MinIO.
+     * @return relative path like /api/files/videos/xxx.mp4
      */
     String saveVideo(String sourceUrl);
 
-    /** Resolve local file path from the URL prefix path. */
-    Path resolveImage(String filename);
+    /** 读取图片字节；MinIO 对象不存在返回 null。 */
+    byte[] readImage(String filename);
 
-    /** 解析视频本地文件路径。 */
-    Path resolveVideo(String filename);
+    /** 读取视频字节；MinIO 对象不存在返回 null。 */
+    byte[] readVideo(String filename);
 
-    /** 解析音频本地文件路径（参考音频素材）。 */
-    Path resolveAudio(String filename);
+    /** 读取音频字节；MinIO 对象不存在返回 null。 */
+    byte[] readAudio(String filename);
+
+    /** 删除图片对象（best-effort：不存在/失败不抛）。 */
+    void deleteImage(String filename);
+
+    /** 删除视频对象（best-effort：不存在/失败不抛）。 */
+    void deleteVideo(String filename);
+
+    /** 删除音频对象（best-effort：不存在/失败不抛）。 */
+    void deleteAudio(String filename);
+
+    /**
+     * 读取对象图并转 base64 data URI（多模态调用用）。
+     * @param urlOrPath 相对路径或 /api/files/images/xxx.png（兼容完整 URL / query / fragment）
+     * @return "data:image/xxx;base64,...."
+     */
+    String toImageDataUri(String urlOrPath);
 
     /** Infer Content-Type from filename extension. */
     static String contentType(String filename) {

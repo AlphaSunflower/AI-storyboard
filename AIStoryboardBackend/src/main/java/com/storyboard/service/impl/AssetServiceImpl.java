@@ -295,14 +295,14 @@ public class AssetServiceImpl implements AssetService {
                 a.getProjectId(), images, a.getCreatedAt(), a.getUpdatedAt());
     }
 
-    /** 删除本地图片文件（失败仅警告，不阻断——DB 行已删，残留文件由磁盘清理兜底）。 */
+    /** 删除图片对象（失败仅警告，不阻断——DB 行已删，残留对象由生命周期兜底）。 */
     private void deleteLocalFile(String url) {
         if (url == null || !url.contains("/")) return;
         try {
             String filename = url.substring(url.lastIndexOf('/') + 1);
-            Files.deleteIfExists(fileStorageService.resolveImage(filename));
-        } catch (IOException e) {
-            log.warn("删除资产图片本地文件失败: {}", e.getMessage());
+            fileStorageService.deleteImage(filename);
+        } catch (Exception e) {
+            log.warn("删除资产图片对象失败: {}", e.getMessage());
         }
     }
 }

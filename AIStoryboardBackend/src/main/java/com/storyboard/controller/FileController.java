@@ -3,16 +3,13 @@ package com.storyboard.controller;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 
 @RestController
@@ -32,47 +29,29 @@ public class FileController {
      }
 
     @GetMapping("/images/{filename}")
-    public ResponseEntity<Resource> getImage(@PathVariable String filename) throws IOException {
-        Path filePath = fileStorageService.resolveImage(filename);
-        if (!Files.exists(filePath)) {
-            return ResponseEntity.notFound().build();
-        }
-
-        var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-        
-        return ResponseEntity.ok()
-                .contentType(contentType)
-                .contentLength(Files.size(filePath))
-                .body(new InputStreamResource(Files.newInputStream(filePath)));
+    public ResponseEntity<Resource> getImage(@PathVariable String filename) {
+        return serve(fileStorageService.readImage(filename), filename);
     }
 
     @GetMapping("/videos/{filename}")
-    public ResponseEntity<Resource> getVideo(@PathVariable String filename) throws IOException {
-        Path filePath = fileStorageService.resolveVideo(filename);
-        if (!Files.exists(filePath)) {
-            return ResponseEntity.notFound().build();
-        }
-
-        var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-
-        return ResponseEntity.ok()
-                .contentType(contentType)
-                .contentLength(Files.size(filePath))
-                .body(new InputStreamResource(Files.newInputStream(filePath)));
+    public ResponseEntity<Resource> getVideo(@PathVariable String filename) {
+        return serve(fileStorageService.readVideo(filename), filename);
     }
 
     @GetMapping("/audios/{filename}")
-    public ResponseEntity<Resource> getAudio(@PathVariable String filename) throws IOException {
-        Path filePath = fileStorageService.resolveAudio(filename);
-        if (!Files.exists(filePath)) {
+    public ResponseEntity<Resource> getAudio(@PathVariable String filename) {
+        return serve(fileStorageService.readAudio(filename), filename);
+    }
+
+    /** 对象不存在返回 404；存在则以推断的 Content-Type 返回对象字节。 */
+    private ResponseEntity<Resource> serve(byte[] bytes, String filename) {
+        if (bytes == null) {
             return ResponseEntity.notFound().build();
         }
-
-        var contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-
+        MediaType contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
         return ResponseEntity.ok()
                 .contentType(contentType)
-                .contentLength(Files.size(filePath))
-                .body(new InputStreamResource(Files.newInputStream(filePath)));
+                .contentLength(bytes.length)
+                .body(new ByteArrayResource(bytes));
     }
 }

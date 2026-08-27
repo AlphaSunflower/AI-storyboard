@@ -147,7 +147,9 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 body.put("seed", seed);
             }
 
-            // 参考素材转换：任一存在 → 多模态参考模式（r2va），不再传首帧 imageUrl
+            // 参考素材转换：一律多模态参考生视频（r2va）——用户 2026-08-27 明确「图生视频(首帧 source) 与
+            // 资产生视频(资产参考图) 都当参考图 reference_image 用」，不做严格首帧 first_frame 冻结
+            // （首帧冻结会锁死起始画面、丢失运镜/动态；参考图更能按设定灵活演绎）。
             // 本地文件（/api/files/... 相对路径）→ 小文件(≤10MB) data URI 内联 / 大文件经网关上传代理换 mm_file://
             List<String> refImages = new ArrayList<>();
             List<String> refVideos = new ArrayList<>();
@@ -160,6 +162,11 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
             if (referenceImages != null) {
                 for (String i : referenceImages) { String u = resolveReferenceUrl(i, "image"); if (u != null) refImages.add(u); }
+            }
+            // 图生视频首帧 source 也并作参考图（外链/data URI/mm_file 透传；本地路径转 data URI/mm_file）
+            if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+                String u = resolveReferenceUrl(generatedImageUrl, "image");
+                if (u != null) refImages.add(u);
             }
             // 资产参考图优先于手动参考素材：本地路径转 data URI 后合并，总数 ≤ 9
             if (!assetRefImages.isEmpty()) {
@@ -177,24 +184,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 body.put("referenceImages", refImages);
                 body.put("referenceVideos", refVideos);
                 body.put("referenceAudios", refAudios);
-            } else {
-                // 首帧图生视频 imageUrl：优先已生成图片（本地文件 → data URI 内联——
-                // 图片在业务 uploads 目录，网关无权限访问，设计 §6.2 明确业务侧保留此转换），
-                // 其次参考图第一张（base64 已有，直接用）
-                if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
-                    String filename = extractFilename(generatedImageUrl);
-                    Path localFile = fileStorageService.resolveImage(filename);
-                    if (Files.exists(localFile)) {
-                        byte[] bytes = Files.readAllBytes(localFile);
-                        String mime = FileStorageService.contentType(filename);
-                        body.put("imageUrl", "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes));
-                    } else {
-                        log.warn("Reference image not found: {}", localFile);
-                    }
-                } else if (referenceImages != null && !referenceImages.isEmpty()) {
-                    body.put("imageUrl", normalizeImageUrl(referenceImages.getFirst()));
-                }
             }
+            // 无任何参考素材 → 纯文生视频（t2va）；不写 imageUrl 首帧（首帧与参考图两条路径已统一为 reference）
 
             String jsonBody = objectMapper.writeValueAsString(body);
 
@@ -392,49 +383,82 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
     }
 
-    /**
-     * 参考素材 data URI 归一化：已是 data URI 原样返回；裸 base64 补齐前缀
-     * （协议转换已下沉网关，业务侧只需保证 imageUrl 是合法 data URI）。
-     */
-    private String normalizeImageUrl(String base64) {
-        if (base64 == null || base64.isBlank()) return null;
-        if (base64.startsWith("data:")) return base64;
-        if (base64.contains(",") && base64.contains("base64")) {
-            return base64.substring(base64.indexOf("data:"));
-        }
-        return "data:image/png;base64," + base64;
-    }
-
-    /** 参考素材转换：已内联/绝对 URL 原样返回；本地文件 ≤10MB 转 data URI，大文件经网关上传代理换 mm_file:// */
+    /** 参考素材转换：已内联/绝对 URL 原样返回；`/api/files/**` 相对路径经本服务绝对 URL 拉取 → 网关上传换 mm_file://；
+     *  其余本地文件 ≤10MB 转 data URI，>10MB 经网关上传代理换 mm_file:// */
     private String resolveReferenceUrl(String urlPath, String type) {
         if (urlPath == null || urlPath.isBlank()) return null;
         if (urlPath.startsWith("data:") || urlPath.startsWith("http") || urlPath.startsWith("mm_file://")) {
             return urlPath;
         }
         String filename = extractFilename(urlPath);
-        Path localFile = switch (type) {
-            case "video" -> fileStorageService.resolveVideo(filename);
-            case "audio" -> fileStorageService.resolveAudio(filename);
-            default -> fileStorageService.resolveImage(filename);
+        // 相对路径（/api/files/...）：取本服务绝对 URL → 下载字节 → 网关 /v1/files/upload 换 mm_file://。
+        // 参考素材 URL 是相对路径，统一经网关文件上传换 mm_file://，免除对本地文件路径的强依赖（2026-08-27 方案 2）。
+        if (urlPath.startsWith("/api/files/")) {
+            String abs = getRefBaseUrl() + urlPath;
+            byte[] bytes = downloadBytes(abs);
+            if (bytes == null) {
+                log.warn("[参考图] /api/files/** 下载失败 -> 丢图(该素材将不进请求体): {}", abs);
+                return null;
+            }
+            log.info("[参考图] /api/files/** 下载成功: {} ({} 字节)", abs, bytes.length);
+            // v2 契约 image_url.url 支持 data URI：≤10MB 直接内联（免上传、不撞 purpose 报错，2026-08-27）
+            if (bytes.length <= 10 * 1024 * 1024) {
+                String dataUri = "data:" + FileStorageService.contentType(filename) + ";base64,"
+                        + Base64.getEncoder().encodeToString(bytes);
+                log.info("[参考图] 小文件≤10MB 转 data URI 内联: {} ({} 字节)", filename, bytes.length);
+                return dataUri;
+            }
+            // 大文件>10MB：经网关 /v1/files/upload 换 mm_file://（避免 base64 膨胀爆 64MB 请求体）
+            String mm = uploadReferenceToGateway(filename, bytes);
+            log.info("[参考图] 大文件>10MB 经网关上传换 mm_file://: {} -> {}", filename, mm);
+            return mm;
+        }
+        // 其余相对对象路径：≤10MB 转 data URI，>10MB 经网关上传换 mm_file://
+        byte[] fileBytes = switch (type) {
+            case "video" -> fileStorageService.readVideo(filename);
+            case "audio" -> fileStorageService.readAudio(filename);
+            default -> fileStorageService.readImage(filename);
         };
-        if (!Files.exists(localFile)) {
-            log.warn("参考素材文件不存在: {}", localFile);
+        if (fileBytes == null) {
+            log.warn("参考素材对象不存在: {}", filename);
             return null;
         }
+        if (fileBytes.length <= 10 * 1024 * 1024) {
+            String mime = FileStorageService.contentType(filename);
+            return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(fileBytes);
+        }
+        return uploadReferenceToGateway(filename, fileBytes);
+    }
+
+    /** 参考素材拉取基准地址（主后端 = 本服务 storyboard.base-url） */
+    private String getRefBaseUrl() {
+        return config.getStoryboardBaseUrl();
+    }
+
+    /** 下载远端字节（参考素材经本服务 `/api/files/**` 拉取）；失败返回 null */
+    private byte[] downloadBytes(String url) {
         try {
-            byte[] bytes = Files.readAllBytes(localFile);
-            if (bytes.length <= 10 * 1024 * 1024) {
-                String mime = FileStorageService.contentType(filename);
-                return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes);
-            }
-            // 大文件：multipart 字节流 → 网关 /v1/files/upload → mm_file://{file_id}
-            // （base64 膨胀 ~33% 会爆上游 64MB 请求体限制，必须走平台 file_id 引用）
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(60)).GET().build();
+            HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            if (resp.statusCode() == 200 && resp.body().length > 0) return resp.body();
+            log.warn("下载参考素材失败 {}: {}", url, resp.statusCode());
+            return null;
+        } catch (Exception e) {
+            log.warn("下载参考素材异常 {}: {}", url, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 参考素材经网关 `/v1/files/upload` 换 mm_file://（octet-stream 发 multipart 字节流，网关重建 boundary） */
+    private String uploadReferenceToGateway(String filename, byte[] bytes) {
+        try {
             MultipartBuilder mp = new MultipartBuilder()
-                    .file("file", filename, mimeOf(filename), bytes);
+                    .file("file", filename, FileStorageService.contentType(filename), bytes);
             byte[] bodyBytes = mp.build();
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/files/upload"))
-                    .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary())
+                    .header("Content-Type", "application/octet-stream")
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
                     .timeout(Duration.ofSeconds(config.getRefUploadTimeout()))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
@@ -443,8 +467,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             if (resp.statusCode() != 200) {
                 throw new BusinessException(50201, "参考素材上传失败: " + resp.statusCode() + " " + resp.body());
             }
-            JsonNode root = objectMapper.readTree(resp.body());
-            String fileId = root.path("file_id").asText("");
+            // 网关响应 {file_id: "mm_file://..."} 已带前缀，原样返回（勿再拼 mm_file://）
+            String fileId = objectMapper.readTree(resp.body()).path("file_id").asText("");
             if (fileId.isBlank()) {
                 throw new BusinessException(50201, "参考素材上传响应缺少 file_id: " + resp.body());
             }
@@ -452,19 +476,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new BusinessException(50201, "参考素材转换失败: " + e.getMessage(), e);
+            throw new BusinessException(50201, "参考素材上传失败: " + e.getMessage(), e);
         }
-    }
-
-    /** 参考素材 MIME 推断（multipart 上传用） */
-    private String mimeOf(String filename) {
-        String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        return switch (ext) {
-            case "mp4" -> "video/mp4";
-            case "mov" -> "video/quicktime";
-            case "wav" -> "audio/wav";
-            case "m4a" -> "audio/mp4";
-            default -> "audio/mpeg";
-        };
     }
 }

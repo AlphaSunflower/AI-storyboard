@@ -66,6 +66,13 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
 
+        <!-- MinIO 对象存储（S3 兼容端点；可迁阿里云 OSS / AWS S3 仅改配置） -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.31.0</version>
+        </dependency>
+
         <!-- Spring / 日志 -->
         <dependency>
             <groupId>org.springframework</groupId>

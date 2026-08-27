@@ -253,26 +253,26 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         String imageFilename;
 
         if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
-            // 完善图片：从本地存储读取当前生成图
+            // 完善图片：从对象存储读取当前生成图
             String filename = extractFilename(generatedImageUrl);
-            Path localFile = fileStorageService.resolveImage(filename);
-            if (!Files.exists(localFile)) {
-                throw new BusinessException(40401, "资源不存在: " + localFile);
+            byte[] fileBytes = fileStorageService.readImage(filename);
+            if (fileBytes == null) {
+                throw new BusinessException(40401, "资源不存在: " + filename);
             }
-            imageBytes = Files.readAllBytes(localFile);
+            imageBytes = fileBytes;
             imageFilename = filename;
         } else if (referenceImages != null && !referenceImages.isEmpty()) {
             // 参考图生图：使用第一张参考图（后端文件路径 /api/files/... 或 base64 data URI 旧格式）
             String ref = referenceImages.getFirst();
             if (isImagePath(ref)) {
-                // 分镜参考素材上传后存的是本地文件路径（文件名含 UUID 连字符，直接当 base64
-                // 解码会报 Illegal base64 character 2d）→ 与 generatedImageUrl 一致，从本地存储读文件
+                // 分镜参考素材上传后存的是对象路径（文件名含 UUID 连字符，直接当 base64
+                // 解码会报 Illegal base64 character 2d）→ 与 generatedImageUrl 一致，从对象存储读文件
                 String filename = extractFilename(ref);
-                Path localFile = fileStorageService.resolveImage(filename);
-                if (!Files.exists(localFile)) {
-                    throw new BusinessException(40401, "资源不存在: " + localFile);
+                byte[] fileBytes = fileStorageService.readImage(filename);
+                if (fileBytes == null) {
+                    throw new BusinessException(40401, "资源不存在: " + filename);
                 }
-                imageBytes = Files.readAllBytes(localFile);
+                imageBytes = fileBytes;
                 imageFilename = filename;
             } else {
                 // 旧流程兼容：前端直传 base64 data URI

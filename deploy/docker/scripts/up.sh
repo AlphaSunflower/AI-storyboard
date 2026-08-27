@@ -55,12 +55,27 @@ up_redis() {
   done
 }
 
+up_minio() {
+  (cd minio && docker compose up -d)
+  echo "[等待] minio 健康检查…"
+  for i in $(seq 1 15); do
+    # 健康端点非 200 即已就绪（minio/health/live），只认连接成功
+    if curl -s -o /dev/null --max-time 2 "http://localhost:${MINIO_PORT:-9000}/minio/health/live"; then
+      echo "[OK] minio 已就绪"
+      break
+    fi
+    [ "$i" = 15 ] && echo "[警告] minio 15s 内未就绪，可稍候重试 status.sh"
+    sleep 1
+  done
+}
+
 case "$SVC" in
   nacos) up_nacos ;;
   vosk)  up_vosk ;;
   redis) up_redis ;;
-  all|"") up_nacos; up_vosk; up_redis ;;
-  *) echo "用法: $0 [nacos|vosk|redis|all]"; exit 1 ;;
+  minio) up_minio ;;
+  all|"") up_nacos; up_vosk; up_redis; up_minio ;;
+  *) echo "用法: $0 [nacos|vosk|redis|minio|all]"; exit 1 ;;
 esac
 
 ./scripts/status.sh "$SVC"

@@ -1,0 +1,26 @@
+# deploy/docker/minio/docker-compose.yml
+# MinIO 独立部署（对象存储：图片/视频资产）。与 nacos/vosk 完全分离，可单独启停、可连同 data 拷到其他机器。
+# 用法：cd minio && docker compose up -d（或从上层 ./scripts/up.sh minio）
+services:
+  minio:
+    image: quay.io/minio/minio   # 社区版(AGPL)，无 license 门槛；aistor 为付费企业版，无 license 拒绝服务
+    container_name: minio-object
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}          # 本地默认；服务器部署务必显式改强密码
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}  # MinIO 要求 ≥8 位；默认值仅本地
+      # 镜像内置 *FILE 指针（指向容器内不存在的 access_key/secret_key）会让 MinIO 优先读文件导致凭据为空、
+      # Access Denied。显式清空（含遗留的 ACCESS_KEY/SECRET_KEY 别名），让上面的 MINIO_ROOT_* 生效。
+      MINIO_ROOT_USER_FILE: ""
+      MINIO_ROOT_PASSWORD_FILE: ""
+      MINIO_ACCESS_KEY_FILE: ""
+      MINIO_SECRET_KEY_FILE: ""
+      MINIO_CONFIG_ENV_FILE: ""
+      MINIO_KMS_SECRET_KEY_FILE: ""
+    ports:
+      # 绑定 ${MINIO_BIND_IP:-127.0.0.1}：默认仅本机可连；服务器部署设 MINIO_BIND_IP 为内网 IP 配合防火墙
+      - "${MINIO_BIND_IP:-127.0.0.1}:${MINIO_PORT:-9000}:9000"        # S3 API
+      - "${MINIO_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"  # 管理控制台
+    volumes:
+      - ./data:/data            # 持久化对象数据（含 bucket 结构；改动 MINIO_ROOT_* 不丢数据）
+    restart: unless-stopped

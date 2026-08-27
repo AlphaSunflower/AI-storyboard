@@ -1,8 +1,10 @@
 package com.storyboard.service.impl;
 
 import com.storyboard.ai.AiConfigProperties;
+import com.storyboard.storage.MinioStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.file.Files;
@@ -19,7 +21,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class FileStorageServiceImplTest {
 
-    private final FileStorageServiceImpl service = new FileStorageServiceImpl(new AiConfigProperties(new AiConfigProperties.Gateway()));
+    private final FileStorageServiceImpl service = new FileStorageServiceImpl(
+            new AiConfigProperties(new AiConfigProperties.Gateway()),
+            Mockito.mock(MinioStorage.class));
     private final List<String> createdUrls = new ArrayList<>();
 
     @AfterEach

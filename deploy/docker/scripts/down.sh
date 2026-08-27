@@ -9,6 +9,7 @@ case "$SVC" in
   nacos) (cd nacos && docker compose down) ;;
   vosk)  (cd vosk && docker compose down) ;;
   redis) (cd redis && docker compose down) ;;
-  all|"") (cd nacos && docker compose down); (cd vosk && docker compose down); (cd redis && docker compose down) ;;
-  *) echo "用法: $0 [nacos|vosk|redis|all]"; exit 1 ;;
+  minio) (cd minio && docker compose down) ;;
+  all|"") (cd nacos && docker compose down); (cd vosk && docker compose down); (cd redis && docker compose down); (cd minio && docker compose down) ;;
+  *) echo "用法: $0 [nacos|vosk|redis|minio|all]"; exit 1 ;;
 esac

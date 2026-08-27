@@ -55,11 +55,10 @@ public class VideoPlanServiceImpl implements VideoPlanService {
         try {
             // 1. 读本地源图 → base64 data URI
             String filename = extractFilename(imagePath);
-            Path localFile = fileStorageService.resolveImage(filename);
-            if (!Files.exists(localFile)) {
-                throw new BusinessException(40401, "资源不存在: " + localFile);
+            byte[] imageBytes = fileStorageService.readImage(filename);
+            if (imageBytes == null) {
+                throw new BusinessException(40401, "资源不存在: " + filename);
             }
-            byte[] imageBytes = Files.readAllBytes(localFile);
             String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
                     + Base64.getEncoder().encodeToString(imageBytes);
 

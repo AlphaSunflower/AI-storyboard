@@ -99,13 +99,12 @@ public class MinimaxVideoServiceImpl implements MinimaxVideoService {
             // 图片在业务 uploads 目录，网关无权限访问，设计 §6.2），其次参考图第一张
             if (generatedImageUrl != null && !generatedImageUrl.isEmpty()) {
                 String filename = extractFilename(generatedImageUrl);
-                Path localFile = fileStorageService.resolveImage(filename);
-                if (Files.exists(localFile)) {
-                    byte[] bytes = Files.readAllBytes(localFile);
+                byte[] bytes = fileStorageService.readImage(filename);
+                if (bytes != null) {
                     String mime = FileStorageService.contentType(filename);
                     body.put("imageUrl", "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes));
                 } else {
-                    log.warn("Reference image not found: {}", localFile);
+                    log.warn("Reference image not found: {}", filename);
                 }
             } else if (referenceImages != null && !referenceImages.isEmpty()) {
                 body.put("imageUrl", normalizeImageUrl(referenceImages.get(0)));

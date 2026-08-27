@@ -49,10 +49,19 @@ management:
 storyboard:
   internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
   internal-secret: ${INTERNAL_SECRET:moon-internal-secret-2024}
+  # MinIO 对象存储（图片/视频/音频统一存对象存储，替代本地 uploads/）
+  # 默认指向本机 MinIO（本地开发）；生产在 application-prod.yml 覆盖。
+  storage:
+    endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:minioadmin123}
+    bucket: storyboard
+    region: us-east-1
 
 # 上传根目录：monorepo 本地指向主后端 uploads（文件共享，前端统一经主后端 /api/files/** 读取）；生产配共享存储
 ai:
   upload-root: ${UPLOAD_ROOT:../AIStoryboardBackend/uploads}
+  storyboard-internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}   # 主后端地址：参考素材(/api/files/**) 本地缺失时经此拉取
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
