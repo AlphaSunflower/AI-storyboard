@@ -260,7 +260,7 @@ export function AgentChatPanel() {
         {refImageUrls.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <img src={refImageUrls[0]} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
-            <span style={{ fontSize: 14, color: 'var(--color-muted)' }}>参考图已附{refImageUrls.length > 1 ? `（还有 ${refImageUrls.length - 1} 张）` : ''}</span>
+            <span style={{ fontSize: 14, color: 'var(--color-muted)' }}>参考图已附{refImageUrls.length > 1 ? `（共 ${refImageUrls.length} 张）` : ''}</span>
             <button onClick={() => setRefImageUrls([])} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 14 }}>移除</button>
           </div>
         )}
