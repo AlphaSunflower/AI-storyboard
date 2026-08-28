@@ -9,7 +9,7 @@ import com.moon.xiaoyuecanvas.dto.response.JobSubmitResponse;
 import com.moon.xiaoyuecanvas.service.DesignJobService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,8 +17,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.storyboard.common.BusinessException;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -103,19 +101,19 @@ public class DesignAgentJobController {
     }
 
     @GetMapping("/assets/{assetId}")
-    public ResponseEntity<FileSystemResource> asset(@RequestAttribute("userId") String userId,
-                                                    @PathVariable String assetId) throws IOException {
+    public ResponseEntity<ByteArrayResource> asset(@RequestAttribute("userId") String userId,
+                                                    @PathVariable String assetId) {
         AgentAsset asset = designJobService.getOwnedAsset(userId, assetId);
         String url = asset.getUrl();
         if (url == null) throw new BusinessException(40401, "素材无文件");
         String filename = url.substring(url.lastIndexOf('/') + 1);
-        Path file = "video".equals(asset.getType())
-                ? fileStorageService.resolveVideo(filename)
-                : fileStorageService.resolveImage(filename);
-        if (!Files.exists(file)) throw new BusinessException(40401, "素材文件不存在");
+        byte[] data = "video".equals(asset.getType())
+                ? fileStorageService.readVideo(filename)
+                : fileStorageService.readImage(filename);
+        if (data == null) throw new BusinessException(40401, "素材文件不存在");
         String mime = "video".equals(asset.getType()) ? "video/mp4" : MediaType.IMAGE_PNG_VALUE;
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(mime))
-                .body(new FileSystemResource(file));
+                .body(new ByteArrayResource(data));
     }
 }

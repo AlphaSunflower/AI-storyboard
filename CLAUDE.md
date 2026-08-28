@@ -105,9 +105,11 @@ private OffsetDateTime createdAt;
 ### 3.5 视频生成（统一走 LLM 网关，2026-08-12 重构）
 
 - **链路**：`VideoGenerationService` / `MinimaxVideoService` 创建/轮询/下载全部直连 **LLM 网关**（不再直连 MiniMax/Laozhang，上游密钥与协议转换下沉网关）：
-  - 创建：`POST {gateway}/v1/videos`，Bearer `LLM_GATEWAY_API_KEY`，OpenAI 风格 JSON body `{model, prompt, size, resolution, aspectRatio, duration, negativePrompt?, seed?, imageUrl?}` → 响应解析 `task_id` / `id` / `taskId` 任一
+  - 创建：`POST {gateway}/v1/videos`，Bearer `LLM_GATEWAY_API_KEY`，OpenAI 风格 JSON body `{model, prompt, size, resolution, aspectRatio, duration, negativePrompt?, seed?, imageUrl?}` → 响应统一返回 `{vendor, taskId}`（网关已归一，**业务侧只读 taskId，不再猜 task_id/id/taskId**）
   - 轮询：`GET {gateway}/v1/videos/{taskId}`（queued/running→processing；succeeded→下载；failed→error）
   - 下载：`GET {gateway}/v1/videos/{taskId}/content` → 转存 uploads/videos（限时链接须立即转存）
+  - **厂商协议适配器（2026-08-27 重构）**：网关 `com.llmgateway.vendor.video`（spi/dto/impl 三层）按 channel.type（minimax / openai_compatible）分发 `VideoVendorAdapter`：每协议一个适配器，自含请求载荷构建（MiniMax JSON content 数组 / Laozhang multipart）+ 创建/轮询响应解析 + 重试策略（次数/可重试判定/退避）。**新增协议 = 新实现类声明新 channelType + DB 配渠道，编排器零改动；同协议复用同一适配器**（openai_compatible → LaozhangVideoAdapter）
+  - **同类模式已推广**：聊天/生图路由 = `com.llmgateway.vendor.route`（`ChatImageVendorAdapter` + 按 channel.type 分发，Gemini 转换 / OpenAI 兼容透传；结果复用 RouteResult，无 sealed）；agent-core 视频 poll 去重 = `VideoPollExecutor`（VideoGenerationServiceImpl / MinimaxVideoServiceImpl 委派，只去 agent-core 内、不抽 CommonCore，见 skill `vendor-chat-image-route-adapter.md` / `video-poll-executor.md`）
   - **图生视频**：业务侧保留转换——本地图读文件转 `data:image/png;base64,...` 内联（网关无 uploads 目录权限，设计 §6.2）
 - **模型别名**：业务侧保留 `video-model-aliases` 映射（veo 简称 → 网关实际模型名）；默认模型 `minimax-video-model`（MiniMax-H3）
 - **配置**：仅 `ai.laozhang.minimax-video-model`（默认模型名）+ `video-model-aliases`（别名映射）；分辨率/时长/尺寸默认值在 `default-video-*`（Agent 卡片人工选值经 `/form/submit` 透传，优先级：用户提交 > LLM 推荐 > plan 原值 > config 默认）

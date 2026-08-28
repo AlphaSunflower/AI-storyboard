@@ -48,12 +48,6 @@ jwt:
 #   application-local.yml（本地） / application-prod.yml（生产）
 # ═══════════════════════════════════════════════════
 ai:
-  # Agent 编排行为参数（意图阈值 / 澄清上限；代码默认值见 AgentAiConfigProperties，yml 覆盖）
-  agent:
-    intent-threshold: 0.6
-    max-clarify-rounds: 2
-    max-regenerate-rounds: 3
-
   # ── LLM 网关兜底策略 ──
   # 当网关不可达或未标记 is_default 时，以下值作为文本模型的兜底默认值。
   # fallback-text-api-key 为兜底模型的独立 API Key（网关正常时由网关统一管理密钥，

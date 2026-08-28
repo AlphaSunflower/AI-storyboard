@@ -65,7 +65,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
     /**
      * 创建视频生成任务（统一走网关 POST /v1/videos，JSON 体，OpenAI 风格格式）。
-     * 响应解析 task_id / id / taskId 任一 → 返回 taskId 落库（scene.videoTaskId 逻辑不变）。
+     * 响应解析：网关已归一为 {vendor, taskId}，本层只认 taskId 落库（scene.videoTaskId 逻辑不变）。
      */
     @Override
     public String createVideoTask(String sceneId, String prompt, String alias,
@@ -201,10 +201,9 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
             }
-            // 网关透传上游响应：task_id（minimax）/ id / taskId（laozhang）三选一
+            // 网关已按 vendor 归一响应（{vendor, taskId, status?}），业务层只认 taskId，不再猜字段名
             JsonNode root = objectMapper.readTree(resp.body());
-            String taskId = root.path("task_id").asText(
-                    root.path("id").asText(root.path("taskId").asText("")));
+            String taskId = root.path("taskId").asText("");
             if (taskId.isBlank()) {
                 throw new BusinessException(50201, "视频创建响应缺少 taskId: " + resp.body());
             }

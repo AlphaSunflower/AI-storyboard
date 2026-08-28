@@ -14,7 +14,7 @@ public interface VideoGenerationService {
 
     /**
      * 创建视频生成任务（统一走网关 POST /v1/videos，JSON 体，OpenAI 风格格式）。
-     * 响应解析 task_id / id / taskId 任一 → 返回 taskId 落库（scene.videoTaskId 逻辑不变）。
+     * 响应解析：网关已归一为 {vendor, taskId}，本层只认 taskId 落库（scene.videoTaskId 逻辑不变）。
      */
     String createVideoTask(String sceneId, String prompt, String alias,
                            String resolution, String size, String aspectRatio,
