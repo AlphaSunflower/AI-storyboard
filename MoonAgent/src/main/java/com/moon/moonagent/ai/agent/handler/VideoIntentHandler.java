@@ -41,28 +41,38 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
-        // 2026-08-28 用户反馈（第四次）：区分「上传了资产」与「上传了参考图」。
-        // - 用户从资产库选中资产(assetIds 非空，前端 handleAssetConfirm 带上) → 直接用该资产，不弹「是否投资产」卡；
-        // - 用户只上传了参考图(picUrls 非空，无 assetIds) → 弹卡问「要不要投入资产库资产」（可选可不选）；
-        // - 两者都无 → 走需求澄清 gate。
-        // 注意：getProjectAssets(projectId) 返回项目库存量资产，不能作为「用户本次上传资产」的判据（会误投不想要的资产）。
+        // 2026-08-28 用户反馈（第5次）：用户消息明确「根据资产设计视频」时，应直接用项目资产，不再弹「是否投资产」。
+        // 判定优先级：
+        //  1) assetIds 非空（用户从资产库勾选）→ 直接用该资产；
+        //  2) 消息含资产意图词（根据资产/按资产/用资产/结合资产等）且项目有资产 → 直接用项目资产；
+        //  3) 只传了参考图、未提及资产 → 弹卡问「要不要投入资产库资产」；
+        //  4) 两者都无 → 走需求澄清 gate。
+        // 注意：getProjectAssets(projectId) 返回项目库存量资产，不能无条件自动投（否则重蹈「未上传却包含资产」覆辙），
+        //       仅当用户明确「按资产」或用 assetIds 勾选时才投。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
         List<String> assetIds = request.getAssetIds() == null ? List.of() : request.getAssetIds();
-        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 本次带资产ids={}, 项目库存量资产数={}, 本次参考图数={}",
+        boolean wantsAsset = wantsAssetByContent(request.getContent());
+        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 本次带资产ids={}, 项目库存量资产数={}, 本次参考图数={}, 消息含资产意图={}",
                 request.getConversation().getId(), request.getConversation().getProjectId(),
-                assetIds, projectAssets == null ? 0 : projectAssets.size(), picUrls.size());
+                assetIds, projectAssets == null ? 0 : projectAssets.size(), picUrls.size(), wantsAsset);
         if (!assetIds.isEmpty()) {
             // 用户已选中资产 → 直接用该资产设计方案（资产图当参考图），不弹「是否投资产」卡
             log.info("[视频编排] 用户本次选中了资产({}个)，直接进视频方案（不再弹「是否投资产」）", assetIds.size());
             return handleFromVideoClarifyGate(request, request.getContent(), assetIds, picUrls);
+        }
+        if (wantsAsset && projectAssets != null && !projectAssets.isEmpty()) {
+            // 用户明确「根据资产」且项目有资产 → 直接用全部项目资产进方案，不弹「是否投资产」
+            log.info("[视频编排] 用户消息含资产意图，直接用项目资产({}个)进方案（不再弹「是否投资产」）", projectAssets.size());
+            return handleFromVideoClarifyGate(request, request.getContent(),
+                    projectAssets.stream().map(AssetVO::id).toList(), picUrls);
         }
         if (picUrls.isEmpty()) {
             // 无资产无参考图 → 走需求澄清 gate
             log.info("[视频编排] 本次无资产且无参考图，走需求澄清 gate");
             return handleFromVideoClarifyGate(request, request.getContent(), List.of(), picUrls);
         }
-        // 只上传了参考图、未选中资产 → 弹卡问「要不要投入资产库资产」；资产库资产作可选项，用户勾选才投、跳过则不投
+        // 只上传了参考图、未选中资产且未提及资产 → 弹卡问「要不要投入资产库资产」；资产库资产作可选项，用户勾选才投、跳过则不投
         log.info("[视频编排] 仅上传参考图({}张)，弹 asset-selection 询问是否投入资产（库存资产={}个，可选不选，不自动投）",
                 picUrls.size(), projectAssets == null ? 0 : projectAssets.size());
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
@@ -75,6 +85,18 @@ public class VideoIntentHandler implements IntentHandler {
                         Map.of("id", "asset-skip", "title", "不使用资产，只用参考图")),
                 List.of(), Map.of(), Map.of(), List.of(), List.of(),
                 support.buildAssetOptions(projectAssets)));
+    }
+
+    /** 判断用户消息是否明确表达「使用/根据资产库资产」意图（命中则直接用项目资产，不再弹「是否投资产」）。
+     *  仅精确匹配资产意图短语，避免「资产」单独出现（如"没有资产/不要资产"）误判。 */
+    private boolean wantsAssetByContent(String content) {
+        if (content == null || content.isBlank()) return false;
+        String c = content.trim();
+        String[] keywords = {"根据资产", "按资产", "用资产", "结合资产", "参照资产", "使用资产", "按设定", "根据设定", "用设定"};
+        for (String kw : keywords) {
+            if (c.contains(kw)) return true;
+        }
+        return false;
     }
 
     /**
