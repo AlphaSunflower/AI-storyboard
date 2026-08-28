@@ -416,7 +416,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 收到 human_input_required → 转发 human_input 事件 → 结束流（编排侧 pause 自动关闭）。
      * message_end → 落库 assistant 消息 + 回填 conversation_id + 附带 sceneCount。
      */
-    public void streamMessage(String userId, String conversationId, String content, String picUrl, SseEmitter emitter) {
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, SseEmitter emitter) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
@@ -431,16 +431,19 @@ public class AgentChatServiceImpl implements AgentChatService {
             return;
         }
 
-        // 图改图参考图兜底：按会话记录最近一次 PicUrl（本条带图则更新，不带图则清空，
+        // 图改图参考图兜底：按会话记录最近一次 picUrls（本条带图则更新，不带图则清空，
         // 严格限定在"带图的当轮"内生效，防跨轮误用）
-        if (picUrl != null && !picUrl.isBlank()) {
-            lastPicUrlByConversation.put(conversationId, picUrl);
-            // 首会话上传时无 convId → agent_assets.conversation_id=null；本条消息带上该 url 即认领归属（仅改未归属资产，防误抢其他会话）
-            assetMapper.update(null,
-                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentAsset>()
-                            .eq(AgentAsset::getUrl, picUrl)
-                            .isNull(AgentAsset::getConversationId)
-                            .set(AgentAsset::getConversationId, conversationId));
+        if (picUrls != null && !picUrls.isEmpty()) {
+            lastPicUrlByConversation.put(conversationId, picUrls);
+            // 首会话上传时无 convId → agent_assets.conversation_id=null；本条消息带上这些 url 即逐张认领归属（仅改未归属资产，防误抢其他会话）
+            for (String url : picUrls) {
+                if (url == null || url.isBlank()) continue;
+                assetMapper.update(null,
+                        new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentAsset>()
+                                .eq(AgentAsset::getUrl, url)
+                                .isNull(AgentAsset::getConversationId)
+                                .set(AgentAsset::getConversationId, conversationId));
+            }
         } else {
             lastPicUrlByConversation.remove(conversationId);
         }
@@ -466,7 +469,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                String answer = orchestrator.run(conversation, content, picUrl, emitter);
+                String answer = orchestrator.run(conversation, content, picUrls, emitter);
                 // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);
@@ -556,7 +559,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /** conversationId → 最近一次消息携带的 PicUrl（图改图兜底：node_finished 不带 code 节点 outputs，
      *  plan 无 picture；本字段在 streamMessage 按轮更新/清空，仅当轮生效） */
-    private final Map<String, String> lastPicUrlByConversation = new ConcurrentHashMap<>();
+    private final Map<String, java.util.List<String>> lastPicUrlByConversation = new ConcurrentHashMap<>();
 
 
 
