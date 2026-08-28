@@ -161,7 +161,7 @@ public class AgentConversationController {
             throw new BusinessException(40001, "消息内容不能为空");
         }
         SseEmitter emitter = new SseEmitter(600_000L);
-        chatService.streamMessage(auth.getName(), id, request.content(), request.picUrl(), emitter);
+        chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request), emitter);
         return emitter;
     }
 
@@ -221,5 +221,12 @@ public class AgentConversationController {
     private static AgentMessageVO toVO(AgentMessage m) {
         return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(), m.getContent(),
                 m.getCreatedAt());
+    }
+
+    /** picUrls 兼容包装：picUrls 优先；为空回退 [picUrl]（旧客户端只传 picUrl） */
+    private static List<String> picUrls(AgentSendMessageRequest r) {
+        if (r.picUrls() != null && !r.picUrls().isEmpty()) return r.picUrls();
+        if (r.picUrl() != null && !r.picUrl().isBlank()) return List.of(r.picUrl());
+        return List.of();
     }
 }
