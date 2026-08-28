@@ -3,41 +3,43 @@ package com.llmgateway.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.config.GatewayConfig;
 import com.llmgateway.entity.CallLog;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
-import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.mapper.CallLogMapper;
+import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
+import com.llmgateway.vendor.video.dto.VendorCreateInput;
+import com.llmgateway.vendor.video.dto.VideoVendorResult;
+import com.llmgateway.vendor.video.spi.VideoVendorAdapter;
+import com.llmgateway.vendor.video.spi.VideoVendorRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.Map;
 
 /**
- * 视频网关实现：统一 /v1/videos 创建/轮询/下载，按 model 路由到 Laozhang（multipart）
- * 或 MiniMax（JSON content 数组）渠道。下载由网关流式代理（业务只认 /v1/videos/{taskId}/content）。
+ * 视频网关编排器 —— 统一 /v1/videos 创建/轮询/下载的「编排」，不含任何厂商协议细节。
+ * <p>
+ * 协议（载荷构建 / 创建+轮询响应解析 / 重试策略）全部下沉到 {@link VideoVendorAdapter}，
+ * 按 channel.type 经 {@link VideoVendorRegistry} 分发；新增协议 = 新增适配器 + 注册渠道类型，此处零改动。
  */
 @Service
 @RequiredArgsConstructor
@@ -51,6 +53,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     private final CallLogService callLogService;
     private final CallLogMapper callLogMapper;
     private final GatewayConfig config;
+    private final VideoVendorRegistry registry;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** HttpClient 懒加载（connectTimeout 依赖 config，构造期不构建） */
@@ -86,9 +89,8 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     }
 
     /**
-     * 创建视频任务。请求体（OpenAI 风格统一格式）：
-     * {model, prompt, size?, resolution?, aspectRatio?, duration?, negativePrompt?, seed?, imageUrl?}
-     * imageUrl：图生视频首帧（data URI 或 http URL，业务侧已把本地图转 data URI）
+     * 创建视频任务。OpenAI 风格统一请求体 → 按 model 反查渠道 → 经适配器构建/发送/解析。
+     * 响应为带 vendor 的归一契约 {vendor, taskId, status, ...}（数据不挤成一坨，厂商可识别）。
      */
     @Override
     public VideoResult create(String requestBody) {
@@ -99,32 +101,35 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
             if (model.isBlank()) throw new BusinessException(40001, "model 不能为空");
             Channel channel = resolveChannel(model);
             String apiKey = keyService.decrypt(channel.getApiKey());
+            VideoVendorAdapter adapter = registry.resolve(channel.getType());
+            VendorCreateInput in = toCreateInput(body);
 
-            HttpResponse<String> resp;
-            if ("minimax".equals(channel.getType())) {
-                resp = createMinimax(channel, apiKey, body);
-            } else {
-                // Laozhang 创建按池路由、成功率低（实测约 1/8）：按 isRetryableVideoCreate 语义
-                // 换池重试最多 10 次（退避 500ms*attempt），对齐旧 Backend 逻辑（设计 §7）；
-                // minimax 分支保持单发（其错误不可重试换池）
-                resp = createLaozhangWithRetry(channel, apiKey, body);
+            // 泛型重试循环：重试次数 / 可重试判定 / 退避均来自适配器（该协议自身策略）
+            HttpResponse<String> resp = null;
+            for (int attempt = 1; attempt <= adapter.maxCreateAttempts(); attempt++) {
+                HttpRequest req = adapter.buildCreateRequest(in, channel, apiKey);
+                resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
+                if (!adapter.isRetryableCreate(resp.statusCode(), resp.body())
+                        || attempt == adapter.maxCreateAttempts()) {
+                    break;
+                }
+                log.warn("视频创建返回 {}（可重试），第 {}/{} 次重试, body={}",
+                        resp.statusCode(), attempt, adapter.maxCreateAttempts(),
+                        resp.body().length() > 150 ? resp.body().substring(0, 150) : resp.body());
+                Thread.sleep(adapter.createBackoffMs(attempt));
             }
 
             int status = resp.statusCode();
             String bodyStr = resp.body();
             if (status == 200) {
-                // 从上游响应提取 task_id（minimax: task_id；laozhang: id/taskId）
-                JsonNode respJson = objectMapper.readTree(bodyStr);
-                String taskId = respJson.path("task_id").asText(
-                        respJson.path("id").asText(respJson.path("taskId").asText("")));
-                callLogService.log(model, channel.getId(), "created", System.currentTimeMillis() - start, null, null, taskId);
-                if (taskId.isBlank()) {
-                    log.warn("视频创建响应无 task_id: {}", bodyStr.length() > 200 ? bodyStr.substring(0, 200) : bodyStr);
-                }
-                return new VideoResult(200, bodyStr);
+                VideoVendorResult result = adapter.parseCreate(bodyStr);
+                callLogService.log(model, channel.getId(), "created",
+                        System.currentTimeMillis() - start, null, null, result.taskId());
+                return new VideoResult(200, toJson(result));
             }
             String error = bodyStr.length() > 300 ? bodyStr.substring(0, 300) : bodyStr;
-            callLogService.log(model, channel.getId(), "error", System.currentTimeMillis() - start, error, null, null);
+            callLogService.log(model, channel.getId(), "error",
+                    System.currentTimeMillis() - start, error, null, null);
             return new VideoResult(status, bodyStr);
         } catch (BusinessException be) {
             throw be;
@@ -133,201 +138,19 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
-    /** MiniMax ratio 可用值白名单（t2v 纯文本场景；i2v 恒 adaptive） */
-    private static final Set<String> RATIOS = Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9");
-
-    /** MiniMax 创建：POST {base}/v2/video_generation，content 数组 JSON */
-    private HttpResponse<String> createMinimax(Channel channel, String apiKey, JsonNode body) throws Exception {
-        ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("model", body.path("model").asText());
-
-        ArrayNode content = payload.putArray("content");
-        ObjectNode textPart = content.addObject();
-        textPart.put("type", "text");
-        textPart.put("text", body.path("prompt").asText(""));
-
-        // 多模态参考素材（r2va）：referenceImages / referenceVideos / referenceAudios
-        // （data URI 或 mm_file://）；与图生视频首帧（imageUrl）互斥——MiniMax 契约明确二者不可混用
-        List<String> refImages = new ArrayList<>();
-        for (JsonNode n : body.path("referenceImages")) refImages.add(n.asText(""));
-        List<String> refVideos = new ArrayList<>();
-        for (JsonNode n : body.path("referenceVideos")) refVideos.add(n.asText(""));
-        List<String> refAudios = new ArrayList<>();
-        for (JsonNode n : body.path("referenceAudios")) refAudios.add(n.asText(""));
-        boolean hasRefs = !refImages.isEmpty() || !refVideos.isEmpty() || !refAudios.isEmpty();
-        String imageUrl = body.path("imageUrl").asText("");
-        if (hasRefs && !imageUrl.isBlank()) {
-            throw new BusinessException(40001, "多模态参考素材与首帧图生视频互斥，不能同时提交");
-        }
-        for (String ref : refImages) {
-            ObjectNode imgPart = content.addObject();
-            imgPart.put("type", "image_url");
-            imgPart.put("image_url", objectMapper.createObjectNode().put("url", ref));
-            imgPart.put("role", "reference_image");
-        }
-        for (String ref : refVideos) {
-            ObjectNode vidPart = content.addObject();
-            vidPart.put("type", "video_url");
-            vidPart.put("video_url", objectMapper.createObjectNode().put("url", ref));
-            vidPart.put("role", "reference_video");
-        }
-        for (String ref : refAudios) {
-            ObjectNode audPart = content.addObject();
-            audPart.put("type", "audio_url");
-            audPart.put("audio_url", objectMapper.createObjectNode().put("url", ref));
-            audPart.put("role", "reference_audio");
-        }
-
-        if (!imageUrl.isBlank()) {
-            ObjectNode imgPart = content.addObject();
-            imgPart.put("type", "image_url");
-            imgPart.put("image_url", objectMapper.createObjectNode().put("url", imageUrl));
-            imgPart.put("role", "first_frame");
-        }
-        // ── 定位日志：网关收到的参考素材是否真的进了 MiniMax content（grep [参考图]）──
-        log.info("[参考图] 网关拼装 MiniMax content: referenceImages={} | referenceVideos={} | referenceAudios={} | imageUrl(first_frame)={}",
-                refImages, refVideos, refAudios, imageUrl);
-
-        // 分辨率：调用方显式传值则透传（人工选择生效，如卡片选 2K），未传回落默认档（省钱，默认 768P）
-        String resolution = body.path("resolution").asText("");
-        payload.put("resolution", resolution.isBlank()
-                ? (config.getVideoDefaultResolution() == null ? "768P" : config.getVideoDefaultResolution())
-                : resolution);
-        int duration = body.path("duration").asInt(8);
-        payload.put("duration", Math.max(4, Math.min(15, duration)));   // clamp 4~15
-        String ratio = body.path("aspectRatio").asText("");
-        // MiniMax ratio 语义（实测 2026-08-08 联调踩坑）：
-        //   图生视频（i2v）→ 必须显式 "adaptive"；
-        //   纯文本（t2v）→ 必须显式指定可用值（16:9/4:3/1:1/3:4/9:16/21:9），
-        //     缺省/非法值一律回落 16:9（不能不带 ratio——上游 400 invalid params 2013）
-        boolean isImageToVideo = !imageUrl.isBlank();
-        if (isImageToVideo) {
-            payload.put("ratio", "adaptive");
-        } else {
-            String effRatio = RATIOS.contains(ratio) ? ratio : "16:9";
-            payload.put("ratio", effRatio);
-        }
-
-        // 轻量重试（设计 §7）：429 限流/5xx 服务端错误最多重试 2 次（共 3 次请求），退避 500ms*attempt；
-        // 其余状态码（400 参数错/401 密钥错等）直接返回，避免重复创建任务/白扣费
-        HttpResponse<String> resp = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
-                    .build();
-            resp = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
-            int code = resp.statusCode();
-            if ((code != 429 && code < 500) || attempt == 3) {
-                break;
-            }
-            log.warn("MiniMax 创建返回 {}（限流/服务端错误），第 {}/3 次重试, body={}",
-                    code, attempt, resp.body().length() > 150 ? resp.body().substring(0, 150) : resp.body());
-            Thread.sleep(500L * attempt);
-        }
-        return resp;
-    }
-
-    /** Laozhang 创建：POST {base}/videos，multipart 表单（与业务现状一致） */
-    private HttpResponse<String> createLaozhang(Channel channel, String apiKey, JsonNode body) throws Exception {
-        String boundary = "----llmgw" + UUID.randomUUID().toString().replace("-", "");
-        StringBuilder sb = new StringBuilder();
-        // multipart 字段
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n").append(body.path("model").asText()).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n").append(body.path("prompt").asText("")).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"duration\"\r\n\r\n").append(body.path("duration").asInt(8)).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"size\"\r\n\r\n").append(body.path("size").asText("1280x720")).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"resolution\"\r\n\r\n").append(body.path("resolution").asText("720p")).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"aspectRatio\"\r\n\r\n").append(body.path("aspectRatio").asText("16:9")).append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"metadata\"\r\n\r\n")
-          .append("{\"durationSeconds\":").append(body.path("duration").asInt(8))
-          .append(",\"resolution\":\"").append(body.path("resolution").asText("720p"))
-          .append("\",\"aspectRatio\":\"").append(body.path("aspectRatio").asText("16:9")).append("\"}\r\n");
-        if (body.hasNonNull("negativePrompt")) {
-            sb.append("--").append(boundary).append("\r\n");
-            sb.append("Content-Disposition: form-data; name=\"negativePrompt\"\r\n\r\n").append(body.path("negativePrompt").asText()).append("\r\n");
-        }
-        if (body.hasNonNull("seed")) {
-            sb.append("--").append(boundary).append("\r\n");
-            sb.append("Content-Disposition: form-data; name=\"seed\"\r\n\r\n").append(body.path("seed").asLong()).append("\r\n");
-        }
-        sb.append("--").append(boundary).append("--\r\n");
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/videos"))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                .POST(HttpRequest.BodyPublishers.ofString(sb.toString()))
-                .build();
-        return httpClient().send(request, HttpResponse.BodyHandlers.ofString());
-    }
-
-    /** Laozhang 创建 + 换池重试（设计 §7）：老张网关按池路由到多个上游 Google 项目，
-     *  未开通 veo 模型的池返回 404 fail_to_fetch_task（实测 2026-08-04 成功率仅约 1/8），
-     *  失效服务账号返回 500（body 含 do_request_failed/invalid_grant，发生在请求发往 Google
-     *  之前，任务必然未创建）——此类错误可安全重试换池，最多 10 次，退避 500ms*attempt。 */
-    private HttpResponse<String> createLaozhangWithRetry(Channel channel, String apiKey, JsonNode body) throws Exception {
-        int maxAttempts = 10;
-        HttpResponse<String> resp = null;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            resp = createLaozhang(channel, apiKey, body);
-            int code = resp.statusCode();
-            String respBody = resp.body();
-            if (!isRetryableVideoCreate(code, respBody) || attempt == maxAttempts) {
-                break;
-            }
-            log.warn("视频任务创建返回 {}(上游项目池故障), 第 {}/{} 次重试换池, body={}",
-                    code, attempt, maxAttempts,
-                    respBody.length() > 150 ? respBody.substring(0, 150) : respBody);
-            Thread.sleep(500L * attempt);
-        }
-        return resp;
-    }
-
-    /** 视频任务创建响应是否可安全重试（对齐旧 Backend isRetryableVideoCreate 语义）：
-     *  404 = 上游池无模型权限（fail_to_fetch_task）；5xx 且 body 含
-     *  fail_to_fetch_task / do_request_failed / invalid_grant（凭据故障，任务未创建）→ 重试换池。
-     *  其余（400 参数错、401 密钥错等）不重试，避免重复创建任务/白扣费。 */
-    private static boolean isRetryableVideoCreate(int code, String body) {
-        if (code == 404) return true;
-        if (code < 500 || body == null) return false;
-        return body.contains("fail_to_fetch_task") || body.contains("do_request_failed")
-                || body.contains("invalid_grant");
-    }
-
-    private String stripTrailingSlash(String url) {
-        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
-    }
-
     /**
-     * 轮询视频状态。taskId 反查渠道：优先用 call_log 的「created」记录定位实际创建渠道（taskId→channelId），
-     * 只查该渠道——避免遍历时被其他渠道类型误中：MiniMax 任务被 priority 更高的 laozhang 渠道返回 200 抢占，
-     * 拿到非终态 status（日志 status=polled）→ 前端以为仍在生成、无限轮询（2026-08-27 修复）。
-     * 无 created 记录（历史任务）才回退遍历 enabled 渠道逐个尝试。
+     * 轮询视频状态。taskId 反查渠道：优先用 call_log 的「created」记录定位实际创建渠道，只查该渠道，
+     * 避免被其他渠道类型误中（Priority 更高的 laozhang 渠道抢先返回 200 抢占信号）；无 created 记录才回退遍历。
      */
     @Override
     public VideoResult poll(String taskId) {
         long start = System.currentTimeMillis();
         try {
-            // 1. 用 call_log「created」记录定位实际创建渠道，只查该渠道
             Channel taskChannel = resolveChannelByTaskId(taskId);
             if (taskChannel != null) {
                 VideoResult r = pollChannel(taskChannel, taskId, start);
                 if (r != null) return r;
-                // 该渠道返回非 200（404 等）→ 回退遍历
             }
-            // 2. 兜底：遍历所有 enabled 渠道逐个尝试（老任务无 created 记录时走原逻辑）
             List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                     .eq(Channel::getEnabled, true)
                     .orderByAsc(Channel::getPriority));
@@ -347,7 +170,54 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
-    /** 按 taskId 反查创建渠道：call_log「created」记录优先，无则取最近一条；返回 null 表示无法定位。 */
+    /** 单渠道轮询：命中 200 返回归一结果，否则返回 null（该渠道无此任务） */
+    private VideoResult pollChannel(Channel channel, String taskId, long start) throws Exception {
+        String apiKey = keyService.decrypt(channel.getApiKey());
+        String url;
+        if ("minimax".equals(channel.getType())) {
+            url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/query/video_generation/" + taskId;
+        } else {
+            url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId;
+        }
+        HttpResponse<String> resp = httpClient().send(HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        // ponytail: laozhang 历史端点兜底（其他 openai_compatible 渠道沿用；新协议若无需此兜底可后续下沉适配器）
+        if (!"minimax".equals(channel.getType())
+                && (resp.statusCode() == 404 || resp.body().isBlank())) {
+            String fbUrl = stripTrailingSlash(channel.getBaseUrl()) + "/video/generations/" + taskId;
+            HttpResponse<String> fbResp = httpClient().send(HttpRequest.newBuilder()
+                    .uri(URI.create(fbUrl))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (fbResp.statusCode() == 200) {
+                resp = fbResp;
+            }
+        }
+
+        if (resp.statusCode() != 200) return null;
+
+        VideoVendorAdapter adapter = registry.resolve(channel.getType());
+        VideoVendorResult result = adapter.parsePoll(resp.body(), taskId, channel, apiKey);
+        // 统一按归一状态记 call_log；succeeded 时带媒体直链（minimax 供下载端点复用）
+        if ("succeeded".equals(result.status())) {
+            callLogService.log(result.vendor(), channel.getId(), "succeeded",
+                    System.currentTimeMillis() - start, null, result.url(), taskId);
+        } else if ("failed".equals(result.status())) {
+            callLogService.log(result.vendor(), channel.getId(), "failed",
+                    System.currentTimeMillis() - start, result.error(), null, taskId);
+        } else {
+            callLogService.log(result.vendor(), channel.getId(), "polled",
+                    System.currentTimeMillis() - start, null, null, taskId);
+        }
+        return new VideoResult(200, toJson(result));
+    }
+
+    /** 按 taskId 反查创建渠道：call_log「created」记录优先，无则取最近一条；返回 null 表示无法定位 */
     private Channel resolveChannelByTaskId(String taskId) {
         try {
             CallLog created = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
@@ -372,85 +242,17 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
-    /** 单渠道轮询：命中 200 返回 VideoResult（含归一化状态），否则返回 null（该渠道无此任务）。 */
-    private VideoResult pollChannel(Channel channel, String taskId, long start) throws Exception {
-        String apiKey = keyService.decrypt(channel.getApiKey());
-        String url;
-        if ("minimax".equals(channel.getType())) {
-            url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/query/video_generation/" + taskId;
-        } else {
-            url = stripTrailingSlash(channel.getBaseUrl()) + "/videos/" + taskId;
-        }
-        HttpResponse<String> resp = httpClient().send(HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                .GET().build(), HttpResponse.BodyHandlers.ofString());
-        if (!"minimax".equals(channel.getType())
-                && (resp.statusCode() == 404 || resp.body().isBlank())) {
-            // Laozhang fallback 端点（设计 §6.2）：主端点 404/空响应时再试 /video/generations/{taskId}
-            String fbUrl = stripTrailingSlash(channel.getBaseUrl()) + "/video/generations/" + taskId;
-            HttpResponse<String> fbResp = httpClient().send(HttpRequest.newBuilder()
-                    .uri(URI.create(fbUrl))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                    .GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (fbResp.statusCode() == 200) {
-                resp = fbResp;
-            }
-        }
-
-        if (resp.statusCode() != 200) return null;   // 404/非 200 → 该渠道无此任务
-        JsonNode json = objectMapper.readTree(resp.body());
-        // MiniMax 响应为 {"task":{...}} 包裹结构（实测 2026-08-08 联调踩坑），
-        // 取 task 子节点作为实际状态载体；Laozhang 无包裹层，直接取顶层
-        JsonNode task = "minimax".equals(channel.getType())
-                ? (json.has("task") ? json.path("task") : json) : json;
-        // MiniMax succeeded → 暂存 video_url 供下载端点使用（从原始 JsonNode 提取）
-        if ("minimax".equals(channel.getType())) {
-            String status = task.path("status").asText("");
-            String contentUrl = task.path("content").path("url").asText("");
-            if (isSucceeded(status)) {
-                if (contentUrl.isBlank()) {
-                    String fileId = task.path("file_id").asText("");
-                    if (!fileId.isBlank()) {
-                        contentUrl = fetchMiniMaxDownloadUrl(channel, apiKey, fileId);
-                    }
-                }
-                if (!contentUrl.isBlank()) {
-                    callLogService.log(task.path("model").asText("video"), channel.getId(), "succeeded",
-                            System.currentTimeMillis() - start, null, contentUrl, taskId);
-                }
-            } else if (isFailed(status)) {
-                String err = task.path("error").path("message").asText("");
-                if (err.isBlank()) err = task.path("base_resp").path("status_msg").asText("video generation failed");
-                callLogService.log(task.path("model").asText("video"), channel.getId(), "failed",
-                        System.currentTimeMillis() - start, err, null, taskId);
-            }
-        } else {
-            callLogService.log("video", channel.getId(), "polled",
-                    System.currentTimeMillis() - start, null, null, taskId);
-        }
-        // 归一化为统一响应 {taskId, status, progress?, error?}（对齐设计 §5.1）
-        return new VideoResult(200, normalizePoll(task));
-    }
-
     /** 视频下载：流式代理（业务只认本端点，永不接触上游 URL/Key） */
     @Override
     public org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             download(String taskId) {
         try {
-            // 1. 按 taskId 反查创建渠道，只从该渠道取内容——避免遍历时被其他 openai_compatible 渠道误中：
-            //    minimax-pic(type=openai_compatible, base=api.minimaxi.com/v1)走 else 分支打
-            //    /videos/{taskId}/content → MiniMax 返回 HTTP 200 + {base_resp:2013 invalid params}，
-            //    被当成 200 视频流透传 → 前端拿到 79 字节假视频(2026-08-27 修复)
             Channel taskChannel = resolveChannelByTaskId(taskId);
             if (taskChannel != null) {
                 org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> r =
                         downloadChannel(taskChannel, taskId);
                 if (r != null) return r;
             }
-            // 2. 兜底：遍历所有 enabled 渠道逐个尝试（老任务无 call_log 创建记录时走原逻辑）
             List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                     .eq(Channel::getEnabled, true)
                     .orderByAsc(Channel::getPriority));
@@ -471,13 +273,11 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         }
     }
 
-    /** 单渠道下载：命中 200 返回流式响应，否则返回 null（该渠道无此内容）。 */
+    /** 单渠道下载：命中 200 返回流式响应，否则返回 null（该渠道无此内容） */
     private org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             downloadChannel(Channel channel, String taskId) throws Exception {
         String apiKey = keyService.decrypt(channel.getApiKey());
         if ("minimax".equals(channel.getType())) {
-            // 从 call_log 取该渠道该 taskId 最近一条限时直链
-            // （taskId+channelId 双条件过滤，同渠道并发任务不串号）
             CallLog latest = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
                     .eq(CallLog::getChannelId, channel.getId())
                     .eq(CallLog::getTaskId, taskId)
@@ -507,74 +307,50 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         return null;
     }
 
-    /** MiniMax 状态成功判定：兼容新版 H3 的 Success/success 与旧版 succeeded/completed/done */
-    private static boolean isSucceeded(String status) {
-        switch (status == null ? "" : status.toLowerCase()) {
-            case "succeeded", "success", "completed", "done": return true;
-            default: return false;
-        }
-    }
-
-    /** MiniMax 状态失败判定：failed/fail */
-    private static boolean isFailed(String status) {
-        switch (status == null ? "" : status.toLowerCase()) {
-            case "failed", "fail": return true;
-            default: return false;
-        }
-    }
-
     /**
-     * 新版 H3 契约：任务查询只回 file_id，需再调 /v1/files/retrieve?file_id= 取限时 download_url 存下
-     * （2026-08-27 用户反馈：仅拿 task_id/file_id 取不到视频；下载直链过期须立即转存）。
-     * 失败返回空串（调用方按 old content.url 缺失处理，下轮轮询重试）。
+     * 把 OpenAI 风格请求体转成统一入参。参考素材/首帧互斥与参数默认全部下沉到适配器，
+     * 这里只做字段搬运，不做任何协议判断。
      */
-    private String fetchMiniMaxDownloadUrl(Channel channel, String apiKey, String fileId) {
-        try {
-            String url = stripTrailingSlash(channel.getBaseUrl()) + "/v1/files/retrieve?file_id="
-                    + URLEncoder.encode(fileId, StandardCharsets.UTF_8);
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                    .GET().build();
-            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return objectMapper.readTree(resp.body()).path("file").path("download_url").asText("");
-            }
-            log.warn("MiniMax file retrieve returned {}: {}", resp.statusCode(),
-                    resp.body().length() > 200 ? resp.body().substring(0, 200) : resp.body());
-        } catch (Exception e) {
-            log.warn("MiniMax file retrieve failed: fileId={}, error={}", fileId, e.getMessage());
-        }
-        return "";
+    private VendorCreateInput toCreateInput(JsonNode body) {
+        List<String> refImages = new ArrayList<>();
+        for (JsonNode n : body.path("referenceImages")) refImages.add(n.asText(""));
+        List<String> refVideos = new ArrayList<>();
+        for (JsonNode n : body.path("referenceVideos")) refVideos.add(n.asText(""));
+        List<String> refAudios = new ArrayList<>();
+        for (JsonNode n : body.path("referenceAudios")) refAudios.add(n.asText(""));
+        return new VendorCreateInput(
+                body.path("model").asText(""),
+                body.path("prompt").asText(""),
+                textOrNull(body, "size"),
+                textOrNull(body, "resolution"),
+                textOrNull(body, "aspectRatio"),
+                body.has("duration") ? body.path("duration").asInt() : null,
+                textOrNull(body, "negativePrompt"),
+                body.has("seed") ? body.path("seed").asLong() : null,
+                textOrNull(body, "imageUrl"),
+                refImages, refVideos, refAudios);
     }
 
-    /** 归一化轮询响应：统一输出 {taskId, status, progress?, error?}（设计 §5.1，兼容 minimax/laozhang 双协议） */
-    private String normalizePoll(JsonNode json) {
+    /** 归一结果 → 带 vendor 标识的 JSON（数据不挤成一坨：各厂商专用字段由适配器决定是否透出） */
+    private String toJson(VideoVendorResult r) {
         ObjectNode out = objectMapper.createObjectNode();
-        // taskId 三选一：task_id / id / taskId
-        String taskId = json.path("task_id").asText(json.path("id").asText(json.path("taskId").asText("")));
-        if (!taskId.isBlank()) out.put("taskId", taskId);
-        // status 归一化映射：succeeded/completed→succeeded，failed→failed，queued/running/未知→processing
-        String raw = json.path("status").asText("");
-        String status;
-        switch (raw.toLowerCase()) {
-            case "succeeded", "success", "completed", "done": status = "succeeded"; break;
-            case "failed", "fail": status = "failed"; break;
-            default: status = "processing"; break;
-        }
-        out.put("status", status);
-        // progress 透传上游（无则省略）
-        JsonNode progress = json.path("progress");
-        if (progress.isNumber() || progress.isTextual()) out.put("progress", progress.asInt());
-        // failed 时带 error：minimax 取 error.message；laozhang 取 error/message
-        if ("failed".equals(status)) {
-            String err = json.path("error").path("message").asText("");
-            if (err.isBlank()) err = json.path("error").asText("");
-            if (err.isBlank()) err = json.path("message").asText("");
-            if (err.isBlank()) err = "video generation failed";
-            out.put("error", err);
-        }
+        out.put("vendor", r.vendor());
+        out.put("taskId", r.taskId() == null ? "" : r.taskId());
+        if (r.status() != null && !r.status().isBlank()) out.put("status", r.status());
+        if (r.progress() != null && !r.progress().isBlank()) out.put("progress", r.progress());
+        if (r.url() != null && !r.url().isBlank()) out.put("url", r.url());
+        if (r.error() != null && !r.error().isBlank()) out.put("error", r.error());
         return out.toString();
+    }
+
+    private static String textOrNull(JsonNode body, String field) {
+        JsonNode n = body.path(field);
+        return (n.isMissingNode() || n.isNull()) ? null
+                : (n.isTextual() && n.asText().isBlank() ? null : n.asText());
+    }
+
+    private static String stripTrailingSlash(String url) {
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     private org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
