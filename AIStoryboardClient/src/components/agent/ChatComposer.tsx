@@ -35,11 +35,13 @@ export const DS = {
 export function ChatComposer() {
   const {
     streaming, waitingHumanInput, waitingVideoPlan,
-    refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage,
+    refImageUrls, addRefImageUrls, uploadRefImages, sendMessage,
     pendingPicUrls, cancelRefine,
+    removeRefImageUrl,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
+  const [removeModalOpen, setRemoveModalOpen] = useState(false);
   // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
   const textRef = useRef('');
   textRef.current = text;
@@ -197,7 +199,7 @@ export function ChatComposer() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <img src={refImageUrls[0]} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10 }} />
           <span style={{ fontSize: 14, color: DS.textSecondary }}>参考图已附{refImageUrls.length > 1 ? `（共 ${refImageUrls.length} 张）` : ''}</span>
-          <button onClick={() => setRefImageUrls([])} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>移除</button>
+          <button onClick={() => setRemoveModalOpen(true)} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>移除</button>
         </div>
       )}
       {pendingPicUrls.length > 0 && (
@@ -321,6 +323,39 @@ export function ChatComposer() {
         onClose={() => setSceneModalOpen(false)}
         onConfirm={handleSceneConfirm}
       />
+
+      {/* 参考图列表弹窗：指定移除单张（2026-08-28 用户反馈：不再一键清空，改为逐张指定移除） */}
+      {removeModalOpen && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}
+          onClick={() => setRemoveModalOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 480, maxWidth: '92vw', background: 'white', borderRadius: 16, padding: 18,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>指定移除参考图（共 {refImageUrls.length} 张）</div>
+            <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {refImageUrls.map((u, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', borderRadius: 12, background: DS.hover }}>
+                  <img src={u} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: DS.textCaption, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>图 {i + 1}</span>
+                  <button
+                    onClick={() => removeRefImageUrl(i)}
+                    style={{ border: 'none', background: 'none', color: '#d9534f', cursor: 'pointer', fontSize: 19, lineHeight: 1 }}
+                    aria-label={`移除第 ${i + 1} 张`}
+                  >×</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setRemoveModalOpen(false)}
+                style={{ border: 'none', background: DS.hover, color: DS.ink, cursor: 'pointer', fontSize: 14, padding: '7px 18px', borderRadius: 10 }}
+              >完成</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* 「上传资产」从资产库选择参考图：assetApi.list → 选中资产图片设 refImageUrl */}
       {assetOpen && createPortal(
