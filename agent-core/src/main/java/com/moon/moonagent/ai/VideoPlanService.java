@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -44,12 +45,12 @@ public interface VideoPlanService {
     }
 
     /**
-     * 生成图生视频方案：视觉模型看图 + 用户诉求 → 视频 prompt + 时长（+ 推荐生成参数）。
+     * 生成图生视频方案：视觉模型看多张源图 + 用户诉求 → 视频 prompt + 时长（+ 推荐生成参数）。
      *
-     * @param imagePath        源图路径（/api/files/images/xxx.png 或完整 URL），从本地 uploads 读取
+     * @param imagePaths        源图路径列表（/api/files/images/xxx.png 或完整 URL），从本地 uploads 读取；空列表=纯文本（无图）
      * @param userRequest      用户视频创作诉求（如"让画面动起来，镜头缓缓推近"）
      * @param modelOptionsText 可选的模型与参数枚举文本（空=不要求 LLM 选参）
      * @return 视频方案；视觉理解失败或输出非法时抛 RuntimeException（调用方转业务错误）
      */
-    VideoPlan buildVideoPlan(String imagePath, String userRequest, String modelOptionsText);
+    VideoPlan buildVideoPlan(List<String> imagePaths, String userRequest, String modelOptionsText);
 }

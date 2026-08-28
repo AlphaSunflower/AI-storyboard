@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import com.storyboard.common.BusinessException;
 
@@ -44,37 +45,40 @@ public class VideoPlanServiceImpl implements VideoPlanService {
     private volatile ChatClient chatClient;
 
     /**
-     * 生成图生视频方案：视觉模型看图 + 用户诉求 → 视频 prompt + 时长。
+     * 生成图生视频方案：视觉模型看多张源图 + 用户诉求 → 视频 prompt + 时长。
      *
-     * @param imagePath   源图路径（/api/files/images/xxx.png 或完整 URL），从本地 uploads 读取
-     * @param userRequest 用户视频创作诉求（如"让画面动起来，镜头缓缓推近"）
+     * @param imagePaths    源图路径列表（/api/files/images/xxx.png 或完整 URL），从本地 uploads 读取；空列表=纯文本（无图）
+     * @param userRequest   用户视频创作诉求（如"让画面动起来，镜头缓缓推近"）
      * @return 视频方案；视觉理解失败或输出非法时抛 RuntimeException（调用方转业务错误）
      */
     @Override
-    public VideoPlan buildVideoPlan(String imagePath, String userRequest, String modelOptionsText) {
+    public VideoPlan buildVideoPlan(List<String> imagePaths, String userRequest, String modelOptionsText) {
         try {
-            // 1. 读本地源图 → base64 data URI
-            String filename = extractFilename(imagePath);
-            byte[] imageBytes = fileStorageService.readImage(filename);
-            if (imageBytes == null) {
-                throw new BusinessException(40401, "资源不存在: " + filename);
-            }
-            String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
-                    + Base64.getEncoder().encodeToString(imageBytes);
-
-            // 2. 组装多模态 UserMessage：文本诉求 + 图片（data 传完整 data URI 字符串，直接透传为 image_url）
-            Media media = Media.builder()
-                    .mimeType(MimeType.valueOf("image/" + guessImageType(filename)))
-                    .data(dataUri)
-                    .build();
-            UserMessage userMessage = UserMessage.builder()
+            // 1. 组装多模态 UserMessage：文本诉求 + 多张源图（逐张读本地 uploads → base64 data URI 内联）
+            var mb = UserMessage.builder()
                     .text("用户的视频创作诉求："
                             + (userRequest == null || userRequest.isBlank()
-                                    ? "（未提供，请结合图片内容自行设计合理的动态方案）" : userRequest))
-                    .media(media)
-                    .build();
+                                    ? "（未提供，请结合图片内容自行设计合理的动态方案）" : userRequest));
+            List<Media> medias = new java.util.ArrayList<>();
+            if (imagePaths != null) {
+                for (String imagePath : imagePaths) {
+                    if (imagePath == null || imagePath.isBlank()) continue;
+                    String filename = extractFilename(imagePath);
+                    byte[] imageBytes = fileStorageService.readImage(filename);
+                    if (imageBytes == null) {
+                        log.warn("源图不存在，跳过: {}", filename);
+                        continue;
+                    }
+                    String dataUri = "data:image/" + guessImageType(filename) + ";base64,"
+                            + Base64.getEncoder().encodeToString(imageBytes);
+                    medias.add(Media.builder()
+                            .mimeType(MimeType.valueOf("image/" + guessImageType(filename)))
+                            .data(dataUri).build());
+                }
+            }
+            UserMessage userMessage = mb.media(medias).build();
 
-            // 3. 调用视觉模型（ChatClient 统一走 LLM 网关；有选项文本时追加选参指令）
+            // 2. 调用视觉模型（ChatClient 统一走 LLM 网关；有选项文本时追加选参指令）
             String content = chatClient()
                     .prompt()
                     .system(buildSystemPrompt(modelOptionsText))

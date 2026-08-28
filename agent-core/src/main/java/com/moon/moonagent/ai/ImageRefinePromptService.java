@@ -1,5 +1,7 @@
 package com.moon.moonagent.ai;
 
+import java.util.List;
+
 /**
  * 图片完善提示词增强服务 —— 图生图前先用视觉模型"看图"。
  *
@@ -25,11 +27,8 @@ package com.moon.moonagent.ai;
 public interface ImageRefinePromptService {
 
     /**
-     * 生成图生图改图提示词：视觉模型看图 + 用户诉求 → refined_prompt。
-     *
-     * @param imagePath  源图路径（/api/files/images/xxx.png 或完整 URL），从本地 uploads 读取
-     * @param userRequest 用户完善诉求（如"太暗了，改亮一点"）
-     * @return refined_prompt 改图提示词文本
+     * 改图提示词增强：视觉模型看多张源图 + 诉求 → refined_prompt。
+     * imagePaths 空列表=纯文本（无图）。
      */
-    String buildRefinedPrompt(String imagePath, String userRequest);
+    String buildRefinedPrompt(List<String> imagePaths, String userRequest);
 }
