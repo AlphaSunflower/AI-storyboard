@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.AgentAsset;
+import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.Scene;
@@ -1079,7 +1080,9 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /** 按 taskId 更新 agent_assets 行（幂等；行不存在忽略——scene 视频无资产行） */
+    /** 按 taskId 更新 agent_assets 行（幂等；行不存在忽略——scene 视频无资产行）。
+     *  completed 时把视频 URL 追加为 assistant 消息（![视频](url)），让视频持久到消息历史——
+     *  否则 URL 只存 agent_assets，MessageBubble 从消息文本抠不到，刷新/切会话后不显示。 */
     private void updateVideoAsset(String taskId, String status, String url, String error) {
         try {
             AgentAsset asset = assetMapper.selectOne(
@@ -1090,8 +1093,30 @@ public class AgentOrchestratorSupport {
             if (url != null && !url.isBlank()) asset.setUrl(url);
             if (error != null && !error.isBlank()) asset.setError(error);
             assetMapper.updateById(asset);
+            if ("completed".equals(status) && url != null && !url.isBlank()) {
+                persistVideoMessage(asset, url);
+            }
         } catch (Exception e) {
             log.warn("视频资产状态更新失败: taskId={}, error={}", taskId, e.getMessage());
+        }
+    }
+
+    /** 视频生成完成：往 agent_messages 追加一条 assistant 消息（content=磁盘视频 URL），
+     *  让视频持久到消息历史（刷新/切会话后 MessageBubble 仍能渲染）。
+     *  用裸 .mp4 URL 而非 ![视频](url)：MessageBubble 的 imgMatch 先于 videoMatch，![视频](url.mp4) 会被
+     *  imgMatch 截走渲染成 <img>（mp4 裂图）；裸 URL 只匹配 videoMatch → 正确渲染 <video>。
+     *  幂等：按 taskId 防重复——同一资产行不会连续 completed（轮询终态只回一次）。 */
+    private void persistVideoMessage(AgentAsset asset, String url) {
+        try {
+            if (asset.getConversationId() == null || asset.getConversationId().isBlank()) return;
+            AgentMessage msg = new AgentMessage();
+            msg.setConversationId(asset.getConversationId());
+            msg.setRole("assistant");
+            msg.setContent(url);
+            messageMapper.insert(msg);
+            log.info("视频生成完成，已追加消息历史: conversationId={}, url={}", asset.getConversationId(), url);
+        } catch (Exception e) {
+            log.warn("视频消息追加失败: conversationId={}, error={}", asset.getConversationId(), e.getMessage());
         }
     }
 
