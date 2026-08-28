@@ -36,7 +36,7 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
             OrchestrationRequest request = new OrchestrationRequest(
                     context.conversation(),
                     context.userMessage(),
-                    context.picUrl(),
+                    context.picUrls(),
                     context.emitter()
             );
             request.setIntentType(handler.intentType());

@@ -148,7 +148,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(projectId), ids);
             // 关联性门禁：弱关联弹澄清卡片；相关/判定失败/无资产放行
-            String gate = support.runAssetGate(request, request.getContent(), chosen, "review-video", "");
+            String gate = support.runAssetGate(request, request.getContent(), chosen, "review-video", java.util.List.of());
             if (gate != null) return request.getLastMessage();
             return handleGenVideo(request, targetScenes, ids);
         }

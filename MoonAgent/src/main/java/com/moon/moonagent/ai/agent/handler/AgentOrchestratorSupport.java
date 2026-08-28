@@ -857,25 +857,34 @@ public class AgentOrchestratorSupport {
         return StoryboardClient.buildSheetText(assets);
     }
 
-    /** 勾选资产（逗号分隔 ID）的第一张图片 URL（作为视频首帧参照——人物形象直接由资产照片决定；
-     *  纯文字描述生成的视频人物与资产完全不像，2026-08-17 用户反馈）；无资产/无图返回空串 */
-    public String firstAssetImageUrl(String projectId, String assetIdsCsv) {
-        if (projectId == null || assetIdsCsv == null || assetIdsCsv.isBlank()) return "";
+    /** 勾选资产（逗号分隔 ID）的全部图片 URL（去重；人物多角度参考——2026-08-17 用户反馈
+     *  纯文字描述生成的视频人物与资产完全不像，资产照片直接决定人物长相；无资产/无图返回空列表） */
+    public List<String> assetImageUrls(String projectId, String assetIdsCsv) {
+        if (projectId == null || assetIdsCsv == null || assetIdsCsv.isBlank()) return List.of();
         try {
             List<String> ids = java.util.Arrays.stream(assetIdsCsv.split(","))
                     .map(String::trim).filter(x -> !x.isBlank()).toList();
-            if (ids.isEmpty()) return "";
+            if (ids.isEmpty()) return List.of();
+            List<String> urls = new java.util.ArrayList<>();
             for (com.moon.moonagent.dto.response.AssetVO vo : storyboardClient.getProjectAssets(projectId)) {
                 if (!ids.contains(vo.id())) continue;
-                if (vo.images() != null && !vo.images().isEmpty() && vo.images().getFirst().url() != null) {
-                    return vo.images().getFirst().url();
+                if (vo.images() != null) {
+                    for (var img : vo.images()) {
+                        if (img.url() != null && !img.url().isBlank()) urls.add(img.url());
+                    }
                 }
             }
-            return "";
+            return urls;
         } catch (Exception e) {
-            log.warn("获取资产首图失败: {}", e.getMessage());
-            return "";
+            log.warn("获取资产图片失败: {}", e.getMessage());
+            return List.of();
         }
+    }
+
+    /** 勾选资产的第一张图片 URL（单图兼容；取 assetImageUrls 首图）。无资产/无图返回空串 */
+    public String firstAssetImageUrl(String projectId, String assetIdsCsv) {
+        List<String> urls = assetImageUrls(projectId, assetIdsCsv);
+        return urls.isEmpty() ? "" : urls.getFirst();
     }
 
     /**
@@ -910,10 +919,10 @@ public class AgentOrchestratorSupport {
      * 关联性门禁：提示词 × 勾选资产 判定。
      *
      * @param source 来源链标识（aisplit / video，存入 checkpoint plan 供 resume 分派）
-     * @param picUrl video 链参考图（存 plan 供澄清后继续设计方案用；aisplit 传空串）
+     * @param picUrls video 链参考图列表（存 plan 供澄清后继续设计方案用；aisplit 传空列表）
      * @return null=放行（相关/判定失败/无资产）；非 null=本轮已结束（弱关联澄清卡片已发），调用方直接 return
      */
-    public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source, String picUrl) {
+    public String runAssetGate(OrchestrationRequest req, String prompt, List<AssetVO> chosenAssets, String source, java.util.List<String> picUrls) {
         if (chosenAssets == null || chosenAssets.isEmpty()) return null;
         // 判定输入拼最近会话上下文：用户可能只说「重新生成」，真实需求在历史消息里（不读上下文会把资产误判为不相关）
         String promptWithCtx = prompt + historyContext(req.getConversation().getId(), 15);
@@ -929,7 +938,7 @@ public class AgentOrchestratorSupport {
         return runHITLStage(req, null, new StagePlan(
                 planText, "asset-gate",
                 List.of(Map.of("source", source, "content", prompt, "assetIds", String.join(",", ids),
-                        "picUrl", picUrl == null ? "" : picUrl)),
+                        "picUrls", picUrls == null ? List.of() : picUrls)),
                 "human_input",
                 List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
                         Map.of("id", "asset-skip", "title", "不使用资产，直接生成"),
@@ -964,6 +973,7 @@ public class AgentOrchestratorSupport {
                         planText, "asset-gate",
                         List.of(Map.of("source", planField(cp.getPlan(), PlanField.SOURCE),
                                 "content", newPrompt, "assetIds", String.join(",", ids),
+                                "picUrls", planPicUrls(cp.getPlan()),
                                 "picUrl", planField(cp.getPlan(), PlanField.PIC_URL))),
                         "human_input",
                         List.of(Map.of("id", "custom", "title", "✍ 重新描述需求（讲清楚资产用途）"),
@@ -1009,20 +1019,22 @@ public class AgentOrchestratorSupport {
      * @return taskId（创建失败返回 null，已发 error 事件）
      */
     public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
-                                            String aspectRatio, String source) {
-        return startVideoGenerationAsync(req, prompt, duration, aspectRatio, source, Map.of());
+                                            String aspectRatio, java.util.List<String> referenceImages) {
+        return startVideoGenerationAsync(req, prompt, duration, aspectRatio, referenceImages, Map.of());
     }
 
-    /** 带用户参数选择的异步视频生成（params 显式优先，未提供键回退原值/默认） */
+    /** 带用户参数选择的异步视频生成（params 显式优先，未提供键回退原值/默认）；
+     *  多参考图走 referenceImages（图生视频/资产多图投喂），generatedImageUrl 传 null（统一按参考图处理） */
     public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
-                                            String aspectRatio, String source, Map<String, String> params) {
+                                            String aspectRatio, java.util.List<String> referenceImages, Map<String, String> params) {
         String model = params.getOrDefault("model", null);
         String resolution = params.getOrDefault("resolution", null);
         String effDuration = params.getOrDefault("duration", duration);
         String effAspectRatio = params.getOrDefault("aspectRatio", aspectRatio);
         String taskId = generationService.createVideoTask(
                 req.getConversation(), null, prompt, model, resolution, null,
-                effAspectRatio, effDuration, null, null, source);
+                effAspectRatio, effDuration, null,
+                referenceImages == null ? List.of() : referenceImages, null);
         if (taskId == null || taskId.isBlank()) {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
@@ -1115,6 +1127,38 @@ public class AgentOrchestratorSupport {
             }
         } catch (Exception ignored) {}
         return List.of();
+    }
+
+    /** checkpoint plan 取参考图 URL 列表（多图）：优先 `picUrls` 数组；缺失回退单图 `picUrl` / `source`
+     *  （兼容历史 checkpoint：只存了单图字段）；均无返回空列表 */
+    public List<String> planPicUrls(String planJson) {
+        if (planJson == null || planJson.isBlank()) return List.of();
+        try {
+            var root = objectMapper.readTree(planJson);
+            var items = root.path("items");
+            var node = (items.isArray() && !items.isEmpty()) ? items.get(0) : root;
+            // 1. picUrls 数组（新格式）
+            if (node.has("picUrls") && node.get("picUrls").isArray()) {
+                List<String> urls = new java.util.ArrayList<>();
+                for (var u : node.get("picUrls")) {
+                    if (u.isNumber() || u.isTextual()) {
+                        String s = u.asText("");
+                        if (!s.isBlank()) urls.add(s);
+                    } else if (u.isObject() && u.has("url")) {
+                        String s = u.get("url").asText("");
+                        if (!s.isBlank()) urls.add(s);
+                    }
+                }
+                if (!urls.isEmpty()) return urls;
+            }
+            // 2. 回退单图：picUrl（新字段名）或 source（旧字段名）
+            String single = node.path("picUrl").asText("");
+            if (single.isBlank()) single = node.path("source").asText("");
+            if (single.isBlank()) single = node.path("imageUrl").asText("");
+            return single.isBlank() ? List.of() : List.of(single);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /** checkpoint plan JSON → AgentSceneItem 列表（宽松解析） */

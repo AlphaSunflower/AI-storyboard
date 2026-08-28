@@ -48,14 +48,14 @@ public class VideoIntentHandler implements IntentHandler {
                     "检测到资产库，本次生成视频要投入哪些资产？（可多选）",
                     "asset-selection",
                     List.of(Map.of("content", request.getContent(), "source", "video",
-                            "picUrl", request.getPicUrl() == null ? "" : request.getPicUrl())),
+                            "picUrls", request.getPicUrls() == null ? List.of() : request.getPicUrls())),
                     "human_input",
                     List.of(Map.of("id", "asset-confirm", "title", "使用所选资产"),
                             Map.of("id", "asset-skip", "title", "不使用资产，直接生成")),
                     List.of(), Map.of(), Map.of(), List.of(), List.of(),
                     support.buildAssetOptions(projectAssets)));
         }
-        return handleFromVideoClarifyGate(request, request.getContent(), List.of(), request.getPicUrl());
+        return handleFromVideoClarifyGate(request, request.getContent(), List.of(), request.getPicUrls());
     }
 
     /**
@@ -63,12 +63,12 @@ public class VideoIntentHandler implements IntentHandler {
      * type=1（需求已明确）→ 直接跳过进 handleVideoPlan；type=0 → 发 HITL 选项卡片暂停。
      */
     private String handleFromVideoClarifyGate(OrchestrationRequest request, String content,
-                                               List<String> assetIds, String source) {
-        // 已有参考图（本轮 picUrl）或已勾选资产（上传的参考图/设定卡本身即明确信息）→ 跳过澄清，直接设计方案。
+                                               List<String> assetIds, List<String> sources) {
+        // 已有参考图（本轮 picUrls）或已勾选资产（上传的参考图/设定卡本身即明确信息）→ 跳过澄清，直接设计方案。
         // 2026-08-27 用户反馈：有清晰场景 + 已上传资产/图片时不该再问「需要更多细节/请描述场景内容」——
         // 仅凭 picUrl 判定漏掉了资产勾选链路（资产来自项目资产库，不是本条消息的 picUrl）。
-        if ((source != null && !source.isBlank()) || (assetIds != null && !assetIds.isEmpty())) {
-            return handleVideoPlan(request, content, assetIds, source);
+        if ((sources != null && !sources.isEmpty()) || (assetIds != null && !assetIds.isEmpty())) {
+            return handleVideoPlan(request, content, assetIds, sources);
         }
         String ctx = support.historyContext(request.getConversation().getId(), 15);
         String enriched = content + (ctx.isBlank() ? "" : ctx);
@@ -80,12 +80,12 @@ public class VideoIntentHandler implements IntentHandler {
             support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     clarify.message(), "video-clarify",
                     List.of(Map.of("content", content, "assetIds", String.join(",", assetIds),
-                            "source", source == null ? "" : source, "options", options)),
+                            "picUrls", sources == null ? List.of() : sources, "options", options)),
                     "human_input", options), true);
             return request.getLastMessage();
         }
         // 需求明确/达上限 → 直接用用户内容设计视频方案
-        return handleVideoPlan(request, content, assetIds, source);
+        return handleVideoPlan(request, content, assetIds, sources);
     }
 
 
@@ -98,20 +98,20 @@ public class VideoIntentHandler implements IntentHandler {
         // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 需求澄清 → 设计方案
         if ("asset-selection".equals(cpAction)) {
             String content = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
-            String picUrl = support.planField(checkpoint.getPlan(), PlanField.PIC_URL);
+            List<String> picUrls = support.planPicUrls(checkpoint.getPlan());
             List<String> ids = "asset-skip".equals(request.getAction())
                     ? List.of() : request.getAssetIds() == null ? List.of() : request.getAssetIds();
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), ids);
-            String gate = support.runAssetGate(request, content, chosen, "video", picUrl);
+            String gate = support.runAssetGate(request, content, chosen, "video", picUrls);
             if (gate != null) return request.getLastMessage();
             // 用户「使用所选资产」→ 所选资产/参考图已定义场景，跳过需求澄清直接设计方案；
             // 「不使用资产」→ 无资产锚点，保留澄清（文本模糊才追问，明确则 type=1 直接过）。
             // 2026-08-27 用户反馈：选了资产还让「选择示例」——澄清 gate 只看文本看不到图，会误判「根据这个界面」为模糊。
             if (!"asset-skip".equals(request.getAction())) {
-                return handleVideoPlan(request, content, ids, picUrl);
+                return handleVideoPlan(request, content, ids, picUrls);
             }
-            return handleFromVideoClarifyGate(request, content, ids, picUrl);
+            return handleFromVideoClarifyGate(request, content, ids, picUrls);
         }
         // 资产门禁澄清卡片（asset-gate）：重新描述/不使用/仍然使用 → 重判或放行后设计方案
         if ("asset-gate".equals(cpAction)) {
@@ -122,12 +122,12 @@ public class VideoIntentHandler implements IntentHandler {
             if (!r.proceed()) return request.getLastMessage();
             // 资产门禁已确认（用户重描述相关/仍然使用）→ 直接设计方案，不再问需求澄清
             return handleVideoPlan(request, r.prompt(), r.assetIds(),
-                    support.planField(checkpoint.getPlan(), PlanField.PIC_URL));
+                    support.planPicUrls(checkpoint.getPlan()));
         }
         // 视频需求澄清卡片续流：用户选择/自定义输入 → 拼入需求 → 视频来源人工介入
         if ("video-clarify".equals(cpAction)) {
             String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
-            String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
+            List<String> sources = support.planPicUrls(checkpoint.getPlan());
             List<String> assetIds = parseAssetIds(support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS));
             String chosenId = request.getAction();
             String title = "custom".equals(chosenId)
@@ -137,13 +137,13 @@ public class VideoIntentHandler implements IntentHandler {
                             .map(o -> String.valueOf(o.getOrDefault("title", "")))
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
-            return handleVideoPlan(request, supplemented, assetIds, source);
+            return handleVideoPlan(request, supplemented, assetIds, sources);
         }
         // 视频来源卡片续流（video-source）：has-prompt → 用户填写描述 → 视频方案；no-prompt → LLM 自由生成
         if ("video-source".equals(cpAction)) {
             String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             List<String> assetIds = parseAssetIds(support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS));
-            String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
+            List<String> sources = support.planPicUrls(checkpoint.getPlan());
             String supplemented;
             if ("has-prompt".equals(request.getAction())) {
                 String custom = request.getCustomText();
@@ -155,7 +155,7 @@ public class VideoIntentHandler implements IntentHandler {
                         ? "用户想生成视频但没有具体描述，请自由发挥设计一个有创意的视频方案。用户原始需求：" + original
                         : original;
             }
-            return handleVideoPlan(request, supplemented, assetIds, source);
+            return handleVideoPlan(request, supplemented, assetIds, sources);
         }
         // 调整意见卡片提交（video-opinion）：合并自定义意见重新设计方案 → 新 video_plan 卡片
         if ("video-opinion".equals(cpAction)) {
@@ -173,14 +173,14 @@ public class VideoIntentHandler implements IntentHandler {
         // 无同步 message 输出，返回空串（结果由后台轮询更新资产行，前端轮询渲染）
         String message = support.planField(checkpoint.getPlan(), PlanField.MESSAGE);
         String duration = support.planField(checkpoint.getPlan(), PlanField.DURATION);
-        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
-        // 勾选资产的第一张图片优先作视频首帧（人物形象参照：资产照片直接决定人物长相；
-        // 纯文字描述生成的视频人物与资产完全不像——2026-08-17 用户反馈；无资产图才回退用户参考图 PicUrl）
+        List<String> sources = support.planPicUrls(checkpoint.getPlan());
+        // 勾选资产的全部图片优先作视频参考（人物形象参照：资产照片直接决定人物长相；
+        // 纯文字描述生成的视频人物与资产完全不像——2026-08-17 用户反馈；无资产图才回退用户参考图 PicUrls）
         String assetIdsCsv = support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS);
-        String assetImage = support.firstAssetImageUrl(request.getConversation().getProjectId(), assetIdsCsv);
-        if (!assetImage.isBlank()) source = assetImage;
+        List<String> assetImages = support.assetImageUrls(request.getConversation().getProjectId(), assetIdsCsv);
+        if (!assetImages.isEmpty()) sources = assetImages;
         // 生成参数：用户提交 params 优先，未提交回退 checkpoint 推荐/原值（startVideoGenerationAsync 内做键级兜底）
-        support.startVideoGenerationAsync(request, message, duration, null, source, request.getParams());
+        support.startVideoGenerationAsync(request, message, duration, null, sources, request.getParams());
         return "";
     }
 
@@ -188,7 +188,7 @@ public class VideoIntentHandler implements IntentHandler {
      * 视频方案设计（asset-selection/asset-gate resume 与 handle 无资产分支共用）：
      * 勾选资产设定集拼入方案输入 → 视觉模型（有图）/ LLM（无图）→ video_plan 卡片（plan 存 assetIds 供后续完善接力）。
      */
-    private String handleVideoPlan(OrchestrationRequest request, String content, List<String> assetIds, String source) {
+    private String handleVideoPlan(OrchestrationRequest request, String content, List<String> assetIds, List<String> sources) {
         try {
             // 网关模型列表（卡片参数选择器用）+ LLM 选参选项文本（网关不可用时为空）
             List<Map<String, Object>> models = support.buildModels("video");
@@ -199,14 +199,16 @@ public class VideoIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()), assetIds);
             String sheet = support.assetSheetText(chosen);
-            // 无参考图但勾选了含图的资产：用首张资产图作为视觉方案输入——2026-08-27 用户反馈「读取图片生成」，
+            // 无参考图但勾选了含图的资产：用全部资产图作为视觉方案输入——2026-08-27 用户反馈「读取图片生成」，
             // 资产图直接决定人物外貌/场景，让视觉模型看图设计，plan 正文才能准确反映产出（而非仅靠文字设定集拼）。
-            if ((source == null || source.isBlank()) && chosen != null) {
-                source = chosen.stream()
+            if ((sources == null || sources.isEmpty()) && chosen != null) {
+                List<String> assetUrls = chosen.stream()
                         .filter(a -> a.images() != null && !a.images().isEmpty())
-                        .map(a -> a.images().getFirst().url())
+                        .flatMap(a -> a.images().stream())
+                        .map(img -> img.url())
                         .filter(u -> u != null && !u.isBlank())
-                        .findFirst().orElse("");
+                        .distinct().toList();
+                if (!assetUrls.isEmpty()) sources = assetUrls;
             }
             String ctx = support.historyContext(request.getConversation().getId(), 15);
             String enriched = content
@@ -216,9 +218,9 @@ public class VideoIntentHandler implements IntentHandler {
             int duration;
             Map<String, String> recommended = Map.of();
             Map<String, String> reasons = Map.of();
-            if (source != null && !source.isBlank()) {
-                // 视觉模型看图 + 诉求 → 视频方案（首帧语义）
-                VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(source, enriched, modelOptionsText);
+            if (sources != null && !sources.isEmpty()) {
+                // 视觉模型看全部图 + 诉求 → 视频方案
+                VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(sources, enriched, modelOptionsText);
                 message = plan.message();
                 duration = plan.duration();
                 recommended = plan.params() == null ? Map.of() : plan.params();
@@ -240,7 +242,7 @@ public class VideoIntentHandler implements IntentHandler {
             return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                     planText, "generate_video",
                     List.of(Map.of("message", message, "duration", duration,
-                            "source", source == null ? "" : source,
+                            "picUrls", sources == null ? List.of() : sources,
                             "assetIds", String.join(",", assetIds))),
                     "video_plan",
                     support.buildHITLCard(request, planText, List.of(
@@ -259,13 +261,13 @@ public class VideoIntentHandler implements IntentHandler {
     private String showVideoOpinionCard(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         String message = support.planField(checkpoint.getPlan(), PlanField.MESSAGE);
         String duration = support.planField(checkpoint.getPlan(), PlanField.DURATION);
-        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
+        List<String> sources = support.planPicUrls(checkpoint.getPlan());
         String assetIds = support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS);
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 "📹 想怎么调整视频方案？\n\n请直接描述修改意见（如节奏、运镜、内容、时长、画幅），我会重新设计方案。",
                 "video-opinion",
                 List.of(Map.of("message", message, "duration", duration,
-                        "source", source == null ? "" : source,
+                        "picUrls", sources == null ? List.of() : sources,
                         "assetIds", assetIds == null ? "" : assetIds)),
                 "human_input",
                 List.of(Map.of("id", "custom", "title", "✍ 自定义输入"))));
@@ -275,9 +277,9 @@ public class VideoIntentHandler implements IntentHandler {
     private String resumeVideoWithOpinion(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         String opinion = request.getCustomText();
         if (opinion == null || opinion.isBlank()) opinion = request.getContent();
-        String source = support.planField(checkpoint.getPlan(), PlanField.SOURCE);
+        List<String> sources = support.planPicUrls(checkpoint.getPlan());
         List<String> assetIds = parseAssetIds(support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS));
-        return handleVideoPlan(request, opinion, assetIds, source);
+        return handleVideoPlan(request, opinion, assetIds, sources);
     }
 
     /** 逗号分隔资产 ID 字符串 → List（宽松解析） */

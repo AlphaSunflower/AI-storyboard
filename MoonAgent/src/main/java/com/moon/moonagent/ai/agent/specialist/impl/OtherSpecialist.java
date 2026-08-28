@@ -69,7 +69,7 @@ public class OtherSpecialist implements SpecialistAgent {
 
             String answer = getClient().prompt()
                     .system("你是 Moon 智能体，一个专业的分镜创作助手。用中文回答，简洁友好。")
-                    .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrl()))
+                    .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrls()))
                     .call()
                     .content();
 
@@ -86,15 +86,20 @@ public class OtherSpecialist implements SpecialistAgent {
         }
     }
 
-    /** 构造用户消息：picUrl 非空时读本地图转 data URI 作为多模态图片加入；读图失败降级纯文本 */
-    private UserMessage buildUserMessage(String text, String picUrl) {
-        if (picUrl != null && !picUrl.isBlank()) {
+    /** 构造用户消息：picUrls 非空时循环读本地图转 data URI 作为多模态图片加入（多张）；全失败降级纯文本 */
+    private UserMessage buildUserMessage(String text, java.util.List<String> picUrls) {
+        if (picUrls != null && !picUrls.isEmpty()) {
             try {
-                String dataUri = fileStorageService.toImageDataUri(picUrl);
-                int sep = dataUri.indexOf(';');
-                String mime = dataUri.startsWith("data:") && sep > 5 ? dataUri.substring(5, sep) : "image/png";
-                Media media = Media.builder().mimeType(MimeType.valueOf(mime)).data(dataUri).build();
-                return UserMessage.builder().text(text).media(media).build();
+                var mb = UserMessage.builder().text(text);
+                java.util.List<Media> medias = new java.util.ArrayList<>();
+                for (String picUrl : picUrls) {
+                    if (picUrl == null || picUrl.isBlank()) continue;
+                    String dataUri = fileStorageService.toImageDataUri(picUrl);
+                    int sep = dataUri.indexOf(';');
+                    String mime = dataUri.startsWith("data:") && sep > 5 ? dataUri.substring(5, sep) : "image/png";
+                    medias.add(Media.builder().mimeType(MimeType.valueOf(mime)).data(dataUri).build());
+                }
+                if (!medias.isEmpty()) return mb.media(medias).build();
             } catch (Exception e) {
                 log.warn("参考图加入主回答失败，降级纯文本: {}", e.getMessage());
             }

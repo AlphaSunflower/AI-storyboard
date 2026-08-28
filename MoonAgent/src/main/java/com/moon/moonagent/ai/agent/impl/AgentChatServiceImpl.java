@@ -608,12 +608,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                     sendEvent(emitter, "error", Map.of("code", "40001", "message", "视频方案已被使用，请重新发起"));
                     return;
                 }
-                // 解析 plan JSON：{message, duration, source}（兼容 items 数组包裹：{items:[{...}]}）
+                // 解析 plan JSON：{message, duration, picUrls|source}（兼容 items 数组包裹：{items:[{...}]}）
                 String message = "";
                 String duration = null;
-                String source = null;
+                java.util.List<String> picUrls = java.util.List.of();
                 if (cp.getPlan() != null && !cp.getPlan().isBlank()) {
                     try {
+                        picUrls = orchestratorSupport.planPicUrls(cp.getPlan());
                         JsonNode plan = objectMapper.readTree(cp.getPlan());
                         JsonNode node = plan;
                         JsonNode items = plan.path("items");
@@ -622,7 +623,6 @@ public class AgentChatServiceImpl implements AgentChatService {
                         }
                         message = node.path("message").asText("");
                         duration = node.hasNonNull("duration") ? node.path("duration").asText() : null;
-                        source = node.hasNonNull("source") ? node.path("source").asText(null) : null;
                     } catch (Exception e) {
                         log.warn("图生视频 checkpoint plan 解析失败: {}", e.getMessage());
                     }
@@ -636,8 +636,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 // 异步视频生成：创建任务 → task_accepted → 本轮 SSE 结束，前端轮询状态端点取结果
                 orchestratorSupport.startVideoGenerationAsync(
                         new com.moon.moonagent.ai.agent.handler.OrchestrationRequest(
-                                conversation, "", null, emitter),
-                        message, duration, null, source);
+                                conversation, "", picUrls, emitter),
+                        message, duration, null, picUrls);
                 log.info("图生视频任务已受理: conversationId={}, duration={}", conversationId, duration);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
