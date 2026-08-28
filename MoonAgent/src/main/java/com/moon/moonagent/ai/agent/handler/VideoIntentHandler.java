@@ -41,34 +41,31 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
-        // 2026-08-28 用户反馈重构：有资产直接进视频方案（资产图当参考图），不再弹「检测到有资产」确认卡。
-        // 只有既无资产、又上传了普通图片时，才问「是否需要上传资产」。
+        // 2026-08-28 用户反馈（第三次）：项目库有资产 ≠ 用户本次上传了资产。
+        // getProjectAssets 返回的是项目库存量资产（可能之前建的/全局的），不能自动投进本次视频。
+        // 正确语义：用户带了参考图(picUrls) → 弹卡问「要不要投入资产库资产」（可勾选/跳过，选了才投）；
+        //         用户不带图 → 走需求澄清 gate。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
-        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 资产数={}, 参考图数={}, 参考图={}",
+        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 项目库存量资产数={}, 本次参考图数={}, 参考图={}",
                 request.getConversation().getId(), request.getConversation().getProjectId(),
                 projectAssets == null ? 0 : projectAssets.size(), picUrls.size(), picUrls);
-        if (projectAssets != null && !projectAssets.isEmpty()) {
-            // 有资产 → 直接设计方案（全部项目资产投入；handleFromVideoClarifyGate 见 assetIds 非空即跳澄清）
-            log.info("[视频编排] 检测到资产({}个)，直接进视频方案，不再弹「检测到有资产」", projectAssets.size());
-            return handleFromVideoClarifyGate(request, request.getContent(),
-                    projectAssets.stream().map(AssetVO::id).toList(), picUrls);
-        }
         if (picUrls.isEmpty()) {
-            // 无资产无图 → 走需求澄清 gate（原来逻辑）
-            log.info("[视频编排] 无资产且无参考图，走需求澄清 gate");
+            // 无参考图 → 走需求澄清 gate（既不自动投资产，也不弹资产卡）
+            log.info("[视频编排] 本次无参考图，走需求澄清 gate");
             return handleFromVideoClarifyGate(request, request.getContent(), List.of(), picUrls);
         }
-        // 只上传了普通图片、无资产 → 问「是否需要上传资产」（保留 asset-selection 弹窗供用资产/跳过）
-        log.info("[视频编排] 仅上传参考图({}张)无资产，问「是否要投入资产库资产」", picUrls.size());
+        // 本次带了参考图 → 弹卡问「要不要投入资产库资产」；资产库资产作为可选项展示，用户勾选才投、跳过则不投
+        log.info("[视频编排] 本次带参考图({}张)，弹 asset-selection 询问是否投入资产（库存资产={}个，可选不选，不自动投）",
+                picUrls.size(), projectAssets == null ? 0 : projectAssets.size());
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                "检测到已上传图片，本次生成视频是否还要投入资产库的资产设定？（可多选）",
+                "本次生成视频，是否还要投入资产库的资产设定？（可多选；不选则只用你上传的参考图）",
                 "asset-selection",
                 List.of(Map.of("content", request.getContent(), "source", "video",
                         "picUrls", picUrls)),
                 "human_input",
                 List.of(Map.of("id", "asset-confirm", "title", "使用所选资产"),
-                        Map.of("id", "asset-skip", "title", "不使用资产，直接生成")),
+                        Map.of("id", "asset-skip", "title", "不使用资产，只用参考图")),
                 List.of(), Map.of(), Map.of(), List.of(), List.of(),
                 support.buildAssetOptions(projectAssets)));
     }
