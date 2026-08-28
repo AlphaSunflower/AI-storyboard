@@ -41,21 +41,30 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
-        // 资产询问：项目有可用资产 → 弹资产选择卡片（勾选/跳过后才设计方案；source=video 由 Orchestrator 分派）
+        // 2026-08-28 用户反馈重构：有资产直接进视频方案（资产图当参考图），不再弹「检测到有资产」确认卡。
+        // 只有既无资产、又上传了普通图片时，才问「是否需要上传资产」。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
+        List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
         if (projectAssets != null && !projectAssets.isEmpty()) {
-            return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                    "检测到资产库，本次生成视频要投入哪些资产？（可多选）",
-                    "asset-selection",
-                    List.of(Map.of("content", request.getContent(), "source", "video",
-                            "picUrls", request.getPicUrls() == null ? List.of() : request.getPicUrls())),
-                    "human_input",
-                    List.of(Map.of("id", "asset-confirm", "title", "使用所选资产"),
-                            Map.of("id", "asset-skip", "title", "不使用资产，直接生成")),
-                    List.of(), Map.of(), Map.of(), List.of(), List.of(),
-                    support.buildAssetOptions(projectAssets)));
+            // 有资产 → 直接设计方案（全部项目资产投入；handleFromVideoClarifyGate 见 assetIds 非空即跳澄清）
+            return handleFromVideoClarifyGate(request, request.getContent(),
+                    projectAssets.stream().map(AssetVO::id).toList(), picUrls);
         }
-        return handleFromVideoClarifyGate(request, request.getContent(), List.of(), request.getPicUrls());
+        if (picUrls.isEmpty()) {
+            // 无资产无图 → 走需求澄清 gate（原来逻辑）
+            return handleFromVideoClarifyGate(request, request.getContent(), List.of(), picUrls);
+        }
+        // 只上传了普通图片、无资产 → 问「是否需要上传资产」（保留 asset-selection 弹窗供用资产/跳过）
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                "检测到已上传图片，本次生成视频是否还要投入资产库的资产设定？（可多选）",
+                "asset-selection",
+                List.of(Map.of("content", request.getContent(), "source", "video",
+                        "picUrls", picUrls)),
+                "human_input",
+                List.of(Map.of("id", "asset-confirm", "title", "使用所选资产"),
+                        Map.of("id", "asset-skip", "title", "不使用资产，直接生成")),
+                List.of(), Map.of(), Map.of(), List.of(), List.of(),
+                support.buildAssetOptions(projectAssets)));
     }
 
     /**

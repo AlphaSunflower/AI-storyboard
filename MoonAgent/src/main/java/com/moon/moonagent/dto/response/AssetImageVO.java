@@ -7,5 +7,6 @@ public record AssetImageVO(
     String id,
     String url,
     Integer sortOrder,
-    String fileName
+    String fileName,
+    String text
 ) {}

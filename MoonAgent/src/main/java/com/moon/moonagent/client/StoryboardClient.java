@@ -145,6 +145,19 @@ public class StoryboardClient {
                 sb.append("\n描述：").append(a.description());
             }
             sb.append("\n");
+            // 图片级文字约束：每张资产图携带的 text（人物外貌/道具/场景细分约束），逐图注入
+            if (a.images() != null) {
+                int idx = 0;
+                for (var img : a.images().stream()
+                        .sorted(java.util.Comparator.comparingInt(i -> i.sortOrder() != null ? i.sortOrder() : Integer.MAX_VALUE))
+                        .toList()) {
+                    idx++;
+                    if (img.text() != null && !img.text().isBlank()) {
+                        sb.append("  · ").append(a.name()).append(" 图").append(idx)
+                          .append("约束：").append(img.text().trim()).append("\n");
+                    }
+                }
+            }
         }
         return sb.toString();
     }
