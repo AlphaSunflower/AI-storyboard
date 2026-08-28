@@ -164,13 +164,18 @@ public class StoryboardClient {
 
     // ===== 单场景操作 =====
 
-    /** 按 videoTaskId 查场景 */
+    /** 按 videoTaskId 查场景。主后端对不存在的 scene 返回 404（code=40401）——按"无该场景"返回 null，
+     *  调用方（如 VideoPollExecutor.updateTaskOwner）据此降级走 agent_assets 通道；否则 404 抛异常会中断 asset 回退 */
     public Scene getSceneByVideoTaskId(String videoTaskId) {
         String url = baseUrl + "/api/internal/scenes/by-video-task/" + videoTaskId;
-        var resp = restTemplate.exchange(url, HttpMethod.GET,
-                new HttpEntity<>(headers()),
-                new ParameterizedTypeReference<ApiResponse<Scene>>() {});
-        return resp.getBody() != null ? resp.getBody().data() : null;
+        try {
+            var resp = restTemplate.exchange(url, HttpMethod.GET,
+                    new HttpEntity<>(headers()),
+                    new ParameterizedTypeReference<ApiResponse<Scene>>() {});
+            return resp.getBody() != null ? resp.getBody().data() : null;
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            return null;
+        }
     }
 
     /** 查单个场景 */
