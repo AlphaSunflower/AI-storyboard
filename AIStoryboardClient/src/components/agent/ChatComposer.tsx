@@ -42,6 +42,7 @@ export function ChatComposer() {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  const [pickedAssetIds, setPickedAssetIds] = useState<string[]>([]);
   // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
   const textRef = useRef('');
   textRef.current = text;
@@ -131,7 +132,8 @@ export function ChatComposer() {
     const content = text.trim();
     if (!content || busy) return;
     setText('');
-    sendMessage(content);
+    sendMessage(content, { assetIds: pickedAssetIds });
+    setPickedAssetIds([]);
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,6 +186,8 @@ export function ChatComposer() {
     const urls = (picked?.images ?? []).map((img) => img.url).filter(Boolean);
     if (urls.length === 0) { setAssetError('该资产暂无图片'); return; }
     addRefImageUrls(urls);
+    // 记录选中资产 id：发消息时随 assetIds 传给后端，编排识别「用户已投资产」→ 直接用资产，不再弹「是否投资产」
+    setPickedAssetIds((prev) => Array.from(new Set([...prev, ...(assetSelectedId ? [assetSelectedId] : [])])));
     setAssetOpen(false); setAssetSelectedId(null);
   };
 

@@ -104,7 +104,7 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string, opts?: { picUrls?: string[] }) => Promise<void>;
+  sendMessage: (content: string, opts?: { picUrls?: string[]; assetIds?: string[] }) => Promise<void>;
   submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
@@ -330,7 +330,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, opts?: { picUrls?: string[] }) => {
+  sendMessage: async (content, opts?: { picUrls?: string[]; assetIds?: string[] }) => {
     if (get().streaming || !content.trim()) return;
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
     // 不先存会导致首条消息 picUrls 丢失（首会话上传图「说话后被吞」）
@@ -510,7 +510,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      });
+      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : []));
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误
       if (get().activeConversationId === snapshotId) {

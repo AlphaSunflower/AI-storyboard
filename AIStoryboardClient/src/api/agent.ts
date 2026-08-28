@@ -219,12 +219,13 @@ export async function streamChat(
   content: string,
   picUrls: string[],
   onEvent: (e: SseEvent) => void,
+  assetIds?: string[],
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ content, picUrls: picUrls ?? [] }),
+    body: JSON.stringify({ content, picUrls: picUrls ?? [], assetIds: assetIds ?? [] }),
   });
   await consumeSse(res, onEvent);
 }
