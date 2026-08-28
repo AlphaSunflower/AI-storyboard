@@ -45,16 +45,22 @@ public class VideoIntentHandler implements IntentHandler {
         // 只有既无资产、又上传了普通图片时，才问「是否需要上传资产」。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
+        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 资产数={}, 参考图数={}, 参考图={}",
+                request.getConversation().getId(), request.getConversation().getProjectId(),
+                projectAssets == null ? 0 : projectAssets.size(), picUrls.size(), picUrls);
         if (projectAssets != null && !projectAssets.isEmpty()) {
             // 有资产 → 直接设计方案（全部项目资产投入；handleFromVideoClarifyGate 见 assetIds 非空即跳澄清）
+            log.info("[视频编排] 检测到资产({}个)，直接进视频方案，不再弹「检测到有资产」", projectAssets.size());
             return handleFromVideoClarifyGate(request, request.getContent(),
                     projectAssets.stream().map(AssetVO::id).toList(), picUrls);
         }
         if (picUrls.isEmpty()) {
             // 无资产无图 → 走需求澄清 gate（原来逻辑）
+            log.info("[视频编排] 无资产且无参考图，走需求澄清 gate");
             return handleFromVideoClarifyGate(request, request.getContent(), List.of(), picUrls);
         }
         // 只上传了普通图片、无资产 → 问「是否需要上传资产」（保留 asset-selection 弹窗供用资产/跳过）
+        log.info("[视频编排] 仅上传参考图({}张)无资产，问「是否要投入资产库资产」", picUrls.size());
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 "检测到已上传图片，本次生成视频是否还要投入资产库的资产设定？（可多选）",
                 "asset-selection",
@@ -199,6 +205,23 @@ public class VideoIntentHandler implements IntentHandler {
      */
     private String handleVideoPlan(OrchestrationRequest request, String content, List<String> assetIds, List<String> sources) {
         try {
+            // 日志：确认资产/图片/图片text是否有带入（用户实测定位「图带没带进生成」）
+            log.info("[视频编排] handleVideoPlan 入口: 资产ids={}, 参考图数={}, 参考图={}",
+                    assetIds, sources == null ? 0 : sources.size(), sources);
+            List<AssetVO> chosenTmp = support.pickAssets(
+                    storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
+                    assetIds == null ? List.of() : assetIds);
+            if (chosenTmp != null && !chosenTmp.isEmpty()) {
+                int imgCnt = 0; int txtCnt = 0;
+                for (var a : chosenTmp) {
+                    if (a.images() != null) {
+                        imgCnt += a.images().size();
+                        txtCnt += (int) a.images().stream().filter(im -> im.text() != null && !im.text().isBlank()).count();
+                    }
+                }
+                log.info("[视频编排] 勾选资产={}个, 名称={}, 图片总数={}, 带图片text约束数={}",
+                        chosenTmp.size(), chosenTmp.stream().map(AssetVO::name).toList(), imgCnt, txtCnt);
+            }
             // 网关模型列表（卡片参数选择器用）+ LLM 选参选项文本（网关不可用时为空）
             List<Map<String, Object>> models = support.buildModels("video");
             String modelOptionsText = support.buildModelOptionsText("video");
