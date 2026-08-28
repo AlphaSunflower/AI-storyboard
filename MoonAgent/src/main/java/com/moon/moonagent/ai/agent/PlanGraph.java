@@ -73,7 +73,7 @@ public class PlanGraph {
     /** state 键（Replace 策略——每轮新消息覆盖旧值） */
     private static final String K_CONVERSATION = "conversation";
     private static final String K_CONTENT = "content";
-    private static final String K_PIC_URL = "picUrl";
+    private static final String K_PIC_URLS = "picUrls";
     private static final String K_INTENT = "intent";
     private static final String K_CONFIDENCE = "confidence";
     private static final String K_LOW_CONFIDENCE = "lowConfidence";
@@ -153,7 +153,7 @@ public class PlanGraph {
             Map<String, KeyStrategy> m = new HashMap<>();
             m.put(K_CONVERSATION, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_CONTENT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
-            m.put(K_PIC_URL, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
+            m.put(K_PIC_URLS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_INTENT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_CONFIDENCE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_LOW_CONFIDENCE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
@@ -372,7 +372,7 @@ public class PlanGraph {
                 SpecialistContext ctx = new SpecialistContext(
                         state.<AgentConversation>value(K_CONVERSATION).orElseThrow(),
                         state.<String>value(K_CONTENT).orElse(""),
-                        state.<String>value(K_PIC_URL).orElse(""),
+                        state.<java.util.List<String>>value(K_PIC_URLS).orElse(java.util.List.of()),
                         emittersByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()),
                         null,  // previousResult（单步，无链式）
                         skill,
@@ -422,14 +422,14 @@ public class PlanGraph {
      *
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息）
      */
-    public String run(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
+    public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
             Optional<OverAllState> result = compiledGraph.invoke(Map.of(
                     K_CONVERSATION, conversation,
                     K_CONTENT, content,
-                    K_PIC_URL, picUrl == null ? "" : picUrl,
+                    K_PIC_URLS, picUrls == null ? java.util.List.of() : picUrls,
                     K_RESUME, false,
                     K_LAST_MESSAGE, ""), config);
             return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
@@ -485,13 +485,12 @@ public class PlanGraph {
     private OrchestrationRequest stateRequest(OverAllState state) {
         AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
         String content = state.<String>value(K_CONTENT).orElse("");
-        String picUrl = state.<String>value(K_PIC_URL).orElse("");
+        java.util.List<String> picUrls = state.<java.util.List<String>>value(K_PIC_URLS).orElse(java.util.List.of());
         SseEmitter emitter = emittersByThread.get(conversation.getId());
         if (emitter == null) {
             throw new IllegalStateException("PlanGraph: emitter 未注册 conversationId=" + conversation.getId());
         }
-        return new OrchestrationRequest(conversation, content,
-                picUrl == null || picUrl.isBlank() ? null : picUrl, emitter);
+        return new OrchestrationRequest(conversation, content, picUrls == null || picUrls.isEmpty() ? java.util.List.of() : picUrls, emitter);
     }
 
     /** 条件边输出 → 节点映射（run 路由：intent_clarify + 各 handler 节点） */

@@ -14,7 +14,7 @@ import java.util.Map;
 public record SpecialistContext(
         AgentConversation conversation,
         String userMessage,
-        String picUrl,
+        java.util.List<String> picUrls,
         SseEmitter emitter,
         /** 上一个专家的移交结果（如有） */
         SpecialistResult previousResult,
@@ -35,7 +35,7 @@ public record SpecialistContext(
         return new SpecialistContext(
                 request.getConversation(),
                 request.getContent(),
-                request.getPicUrl(),
+                request.getPicUrls(),
                 request.getEmitter(),
                 null,
                 skill,

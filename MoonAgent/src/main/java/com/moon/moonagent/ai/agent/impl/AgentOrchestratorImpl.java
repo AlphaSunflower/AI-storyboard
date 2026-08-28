@@ -38,13 +38,13 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private final AgentOrchestratorSupport support;
 
     @Override
-    public String run(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
-        OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrl, emitter);
+    public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, SseEmitter emitter) {
+        OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
         try {
             // P2（2026-08-21）：run 路径迁入 PlanGraph（StateGraph 主图）——
             // 意图识别（intent_recognize 节点）→ 条件边路由（低置信度 → intent_clarify 卡片 / 否则 → handler 适配器节点）
             // 图内节点调用与原先完全相同的 handler/support，SSE 事件协议零变化
-            String answer = planGraph.run(conversation, content, picUrl, emitter);
+            String answer = planGraph.run(conversation, content, picUrls, emitter);
             log.info("AgentOrchestrator(PlanGraph): conversationId={} 编排完成", conversation.getId());
             return answer;
         } catch (Exception e) {
@@ -58,7 +58,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Override
     public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
-        OrchestrationRequest request = new OrchestrationRequest(conversation, "", null, emitter);
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
         request.setParams(params == null ? Map.of() : params);
         request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
         try {

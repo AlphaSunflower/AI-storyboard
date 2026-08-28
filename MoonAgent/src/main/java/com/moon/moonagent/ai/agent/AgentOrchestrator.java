@@ -25,11 +25,11 @@ public interface AgentOrchestrator {
      *
      * @param conversation 会话（已校验归属）
      * @param content      用户消息内容
-     * @param picUrl       本轮参考图 URL（可空）
+     * @param picUrls      本轮参考图 URL 列表（可空/空列表）
      * @param emitter      SSE 输出
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息；无消息返回空串）
      */
-    String run(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
+    String run(AgentConversation conversation, String content, java.util.List<String> picUrls, SseEmitter emitter);
 
     /**
      * HITL 表单提交后续流：按 checkpoint 恢复对应 step 执行。

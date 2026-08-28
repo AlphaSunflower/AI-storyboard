@@ -22,8 +22,13 @@ public class OrchestrationRequest {
 
     private final AgentConversation conversation;
     private final String content;
-    private final String picUrl;
+    private final java.util.List<String> picUrls;
     private final SseEmitter emitter;
+
+    /** 兼容：返回首张参考图（无图返回 null）。新逻辑一律用 getPicUrls()。 */
+    public String getPicUrl() {
+        return (picUrls == null || picUrls.isEmpty()) ? null : picUrls.getFirst();
+    }
 
     /** 本轮最后一条 message 事件内容（流式增量时逐段更新；空串=尚未发出） */
     private String lastMessage = "";
