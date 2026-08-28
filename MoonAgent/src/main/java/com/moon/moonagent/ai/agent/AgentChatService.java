@@ -94,7 +94,7 @@ public interface AgentChatService {
      * HITL 暂停 → 转发 human_input 事件 → 结束流（等表单提交 resume）。
      * message_end → 落库 assistant 消息 + 附带 sceneCount。
      */
-    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, SseEmitter emitter);
+    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter);
 
     /**
      * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。

@@ -29,7 +29,7 @@ public interface AgentOrchestrator {
      * @param emitter      SSE 输出
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息；无消息返回空串）
      */
-    String run(AgentConversation conversation, String content, java.util.List<String> picUrls, SseEmitter emitter);
+    String run(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter);
 
     /**
      * HITL 表单提交后续流：按 checkpoint 恢复对应 step 执行。

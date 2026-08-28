@@ -422,7 +422,7 @@ public class PlanGraph {
      *
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息）
      */
-    public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, SseEmitter emitter) {
+    public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
@@ -430,6 +430,7 @@ public class PlanGraph {
                     K_CONVERSATION, conversation,
                     K_CONTENT, content,
                     K_PIC_URLS, picUrls == null ? java.util.List.of() : picUrls,
+                    K_ASSET_IDS, assetIds == null ? java.util.List.of() : assetIds,
                     K_RESUME, false,
                     K_LAST_MESSAGE, ""), config);
             return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");

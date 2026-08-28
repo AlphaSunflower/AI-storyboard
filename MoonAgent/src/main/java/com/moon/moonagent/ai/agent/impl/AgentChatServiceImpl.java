@@ -416,7 +416,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 收到 human_input_required → 转发 human_input 事件 → 结束流（编排侧 pause 自动关闭）。
      * message_end → 落库 assistant 消息 + 回填 conversation_id + 附带 sceneCount。
      */
-    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, SseEmitter emitter) {
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
@@ -469,7 +469,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                String answer = orchestrator.run(conversation, content, picUrls, emitter);
+                String answer = orchestrator.run(conversation, content, picUrls, assetIds, emitter);
                 // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);

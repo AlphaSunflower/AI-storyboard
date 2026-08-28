@@ -161,7 +161,8 @@ public class AgentConversationController {
             throw new BusinessException(40001, "消息内容不能为空");
         }
         SseEmitter emitter = new SseEmitter(600_000L);
-        chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request), emitter);
+        chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request),
+                request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter);
         return emitter;
     }
 

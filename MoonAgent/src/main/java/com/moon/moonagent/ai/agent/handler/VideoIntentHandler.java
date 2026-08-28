@@ -41,22 +41,29 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
-        // 2026-08-28 用户反馈（第三次）：项目库有资产 ≠ 用户本次上传了资产。
-        // getProjectAssets 返回的是项目库存量资产（可能之前建的/全局的），不能自动投进本次视频。
-        // 正确语义：用户带了参考图(picUrls) → 弹卡问「要不要投入资产库资产」（可勾选/跳过，选了才投）；
-        //         用户不带图 → 走需求澄清 gate。
+        // 2026-08-28 用户反馈（第四次）：区分「上传了资产」与「上传了参考图」。
+        // - 用户从资产库选中资产(assetIds 非空，前端 handleAssetConfirm 带上) → 直接用该资产，不弹「是否投资产」卡；
+        // - 用户只上传了参考图(picUrls 非空，无 assetIds) → 弹卡问「要不要投入资产库资产」（可选可不选）；
+        // - 两者都无 → 走需求澄清 gate。
+        // 注意：getProjectAssets(projectId) 返回项目库存量资产，不能作为「用户本次上传资产」的判据（会误投不想要的资产）。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
-        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 项目库存量资产数={}, 本次参考图数={}, 参考图={}",
+        List<String> assetIds = request.getAssetIds() == null ? List.of() : request.getAssetIds();
+        log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 本次带资产ids={}, 项目库存量资产数={}, 本次参考图数={}",
                 request.getConversation().getId(), request.getConversation().getProjectId(),
-                projectAssets == null ? 0 : projectAssets.size(), picUrls.size(), picUrls);
+                assetIds, projectAssets == null ? 0 : projectAssets.size(), picUrls.size());
+        if (!assetIds.isEmpty()) {
+            // 用户已选中资产 → 直接用该资产设计方案（资产图当参考图），不弹「是否投资产」卡
+            log.info("[视频编排] 用户本次选中了资产({}个)，直接进视频方案（不再弹「是否投资产」）", assetIds.size());
+            return handleFromVideoClarifyGate(request, request.getContent(), assetIds, picUrls);
+        }
         if (picUrls.isEmpty()) {
-            // 无参考图 → 走需求澄清 gate（既不自动投资产，也不弹资产卡）
-            log.info("[视频编排] 本次无参考图，走需求澄清 gate");
+            // 无资产无参考图 → 走需求澄清 gate
+            log.info("[视频编排] 本次无资产且无参考图，走需求澄清 gate");
             return handleFromVideoClarifyGate(request, request.getContent(), List.of(), picUrls);
         }
-        // 本次带了参考图 → 弹卡问「要不要投入资产库资产」；资产库资产作为可选项展示，用户勾选才投、跳过则不投
-        log.info("[视频编排] 本次带参考图({}张)，弹 asset-selection 询问是否投入资产（库存资产={}个，可选不选，不自动投）",
+        // 只上传了参考图、未选中资产 → 弹卡问「要不要投入资产库资产」；资产库资产作可选项，用户勾选才投、跳过则不投
+        log.info("[视频编排] 仅上传参考图({}张)，弹 asset-selection 询问是否投入资产（库存资产={}个，可选不选，不自动投）",
                 picUrls.size(), projectAssets == null ? 0 : projectAssets.size());
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 "本次生成视频，是否还要投入资产库的资产设定？（可多选；不选则只用你上传的参考图）",
