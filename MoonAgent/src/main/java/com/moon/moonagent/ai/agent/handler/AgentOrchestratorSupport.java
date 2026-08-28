@@ -1129,8 +1129,10 @@ public class AgentOrchestratorSupport {
         return List.of();
     }
 
-    /** checkpoint plan 取参考图 URL 列表（多图）：优先 `picUrls` 数组；缺失回退单图 `picUrl` / `source`
-     *  （兼容历史 checkpoint：只存了单图字段）；均无返回空列表 */
+    /** checkpoint plan JSON 取参考图 URL 列表（宽松解析，缺失/失败返回空 list）。
+     *  优先 picUrls 数组（新格式）；回退 picUrl / imageUrl 单图（旧格式）。
+     *  注意：绝不回退 source 字段——source 在本链路是来源链标识(video/aisplit)，不是图片 URL，
+     *  回退会把 "video" 当成参考图 URL 传给生视频，导致参考图丢失（2026-08-28 实机借图失败根因）。 */
     public List<String> planPicUrls(String planJson) {
         if (planJson == null || planJson.isBlank()) return List.of();
         try {
@@ -1151,9 +1153,8 @@ public class AgentOrchestratorSupport {
                 }
                 if (!urls.isEmpty()) return urls;
             }
-            // 2. 回退单图：picUrl（新字段名）或 source（旧字段名）
+            // 2. 回退单图：picUrl / imageUrl（旧格式，仅这两种是真图片 URL）
             String single = node.path("picUrl").asText("");
-            if (single.isBlank()) single = node.path("source").asText("");
             if (single.isBlank()) single = node.path("imageUrl").asText("");
             return single.isBlank() ? List.of() : List.of(single);
         } catch (Exception e) {
