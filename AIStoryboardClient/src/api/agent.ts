@@ -217,14 +217,14 @@ export function sttStream(onPartial: (text: string) => void, onFinal: (text: str
 export async function streamChat(
   conversationId: string,
   content: string,
-  picUrl: string | undefined,
+  picUrls: string[],
   onEvent: (e: SseEvent) => void,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ content, picUrl: picUrl ?? '' }),
+    body: JSON.stringify({ content, picUrls: picUrls ?? [] }),
   });
   await consumeSse(res, onEvent);
 }

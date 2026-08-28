@@ -87,9 +87,12 @@ interface AgentState {
   pendingAssistantId: string | null;
 
   // 输入
-  refImageUrl: string | null;
-  setRefImageUrl: (v: string | null) => void;
+  refImageUrls: string[];
+  setRefImageUrls: (v: string[]) => void;
+  addRefImageUrls: (urls: string[]) => void;
+  removeRefImageUrl: (index: number) => void;
   uploadRefImage: (file: File) => Promise<void>;
+  uploadRefImages: (files: File[]) => Promise<void>;
 
   // 互斥标志（会话级，刷新即恢复）
   agentGeneratedScenes: boolean;
@@ -101,7 +104,7 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string, opts?: { picUrl?: string }) => Promise<void>;
+  sendMessage: (content: string, opts?: { picUrls?: string[] }) => Promise<void>;
   submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
@@ -113,8 +116,8 @@ interface AgentState {
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
   refineAsset: () => void;
   dismissConfirm: () => void;
-  // 继续完善参考图：点"继续完善"后不自动发送，暂存 PicUrl 等待用户输入完善需求（随下一条消息发送并消费）
-  pendingPicUrl: string | null;
+  // 继续完善参考图：点"继续完善"后不自动发送，暂存 PicUrls 等待用户输入完善需求（随下一条消息发送并消费）
+  pendingPicUrls: string[];
   cancelRefine: () => void;
   resetChatState: () => void;
 
@@ -159,8 +162,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       streamError: null,
       pendingAssistantId: null,
       confirmResult: null,
-      pendingPicUrl: null,
-      refImageUrl: null,
+      pendingPicUrls: [],
+      refImageUrls: [],
       workflowHint: '',
       generating: {},
     });
@@ -237,7 +240,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingHumanInput: null,
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
-        pendingAssistantId: null, confirmResult: null, pendingPicUrl: null, refImageUrl: null,
+        pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], refImageUrls: [],
       };
     });
     const res = await agentApi.listMessages(id);
@@ -272,15 +275,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setWorkflowHint: (v) => set({ workflowHint: v }),
   agentVideoTask: null,
   confirmResult: null,
-  pendingPicUrl: null,
+  pendingPicUrls: [],
   pendingAssistantId: null,
 
-  refImageUrl: null,
-  setRefImageUrl: (v) => set({ refImageUrl: v }),
+  refImageUrls: [],
+  setRefImageUrls: (v) => set({ refImageUrls: v }),
+  addRefImageUrls: (urls) => set((s) => ({ refImageUrls: [...new Set([...s.refImageUrls, ...urls])] })),
+  removeRefImageUrl: (index) => set((s) => ({ refImageUrls: s.refImageUrls.filter((_, i) => i !== index) })),
   uploadRefImage: async (file) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined);
     const url = res.data.data.url;
-    set({ refImageUrl: url });
+    set((s) => ({ refImageUrls: [...s.refImageUrls, url] }));
     // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）。
     // 首会话（未选会话，cid 为空）也 push——后端 upload 未归属，但此时可见；首条消息发出去后
     // 后端 streamMessage 会把该 url 的未归属资产认领到新会话（见 AgentChatServiceImpl）。
@@ -294,6 +299,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((s) => ({ messages: [...s.messages, refMsg] }));
+  },
+  uploadRefImages: async (files) => {
+    for (const f of files) {
+      try { await get().uploadRefImage(f); } catch { /* 单张失败跳过，不阻断其他张 */ }
+    }
   },
 
   agentGeneratedScenes: false,
@@ -320,11 +330,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, opts?: { picUrl?: string }) => {
+  sendMessage: async (content, opts?: { picUrls?: string[] }) => {
     if (get().streaming || !content.trim()) return;
-    // 快照参考图——createConversation → selectConversation 会把 refImageUrl/messages 清空，
-    // 不先存会导致首条消息 picUrl 丢失（首会话上传图「说话后被吞」）
-    const refBefore = get().refImageUrl;
+    // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
+    // 不先存会导致首条消息 picUrls 丢失（首会话上传图「说话后被吞」）
+    const refBefore = get().refImageUrls.map((u) => u);
     let id = get().activeConversationId;
     // 未选对话但已选项目：自动新建对话并选中，避免用户消息被吞
     if (!id) {
@@ -335,13 +345,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     if (!id) return;
     // 首会话：selectConversation 已重置 messages，把参考图消息插回（保持对话窗可见）
-    if (refBefore && get().messages.length === 0) {
-      set({ messages: [{ id: `tmp-ref-${Date.now()}`, conversationId: id, role: 'user' as const, content: refBefore, createdAt: new Date().toISOString() }] });
+    if (refBefore.length > 0 && get().messages.length === 0) {
+      set({ messages: refBefore.map((u, i) => ({ id: `tmp-ref-${Date.now()}-${i}`, conversationId: id, role: 'user' as const, content: u, createdAt: new Date().toISOString() })) });
     }
-    // 继续完善参考图：点"继续完善"后暂存的 PicUrl，随本条用户消息发送并消费（只带一次，
+    // 继续完善参考图：点"继续完善"后暂存的 PicUrls，随本条用户消息发送并消费（只带一次，
     // 避免后续普通消息也误带图片导致误判 pic-refine 意图）
-    const pendingPic = get().pendingPicUrl;
-    if (pendingPic) set({ pendingPicUrl: null });
+    const pendingPic = get().pendingPicUrls;
+    if (pendingPic.length > 0) set({ pendingPicUrls: [] });
 
     // 追加 user 消息（乐观 UI）
     const optimisticUser: AgentMessage = {
@@ -349,7 +359,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'user',
       content,
-      
+
       createdAt: new Date().toISOString(),
     };
     set((s) => ({
@@ -402,7 +412,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
 
     try {
-      await streamChat(id, content, opts?.picUrl ?? pendingPic ?? refBefore ?? undefined, (e: SseEvent) => {
+      await streamChat(id, content, opts?.picUrls ?? pendingPic ?? refBefore ?? [], (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
@@ -531,7 +541,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       });
     }
     // 清空参考图（M4：仅当仍在原会话时清空，避免切换会话后误清新会话的参考图）
-    if (get().activeConversationId === snapshotId) set({ refImageUrl: null });
+    if (get().activeConversationId === snapshotId) set({ refImageUrls: [] });
   },
 
   submitHumanInput: async (actionId, customText = '', params, assetIds) => {
@@ -1061,10 +1071,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），容器内无法访问；
     // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给后端
     const picUrl = assetUrl(confirmResult.url);
-    set({ confirmResult: null, pendingPicUrl: picUrl });
+    set({ confirmResult: null, pendingPicUrls: [picUrl] });
   },
   /** 取消继续完善：清空暂存参考图（输入框提示条上的 ✕ 触发） */
-  cancelRefine: () => set({ pendingPicUrl: null }),
+  cancelRefine: () => set({ pendingPicUrls: [] }),
   /**
    * 看图确认卡片：满意完成 → 通知后端清空图片上下文变量（下次图片需求走全新设计）。
    * 成功收起卡片 + 刷新资产；失败保留卡片并提示（可重试）。纯前端收起（旧行为）会
@@ -1086,7 +1096,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null, waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrl: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }),
+    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null, waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [] }),
 
   activeModal: null,
   setActiveModal: (modal) => set({ activeModal: modal }),
