@@ -412,7 +412,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
 
     try {
-      await streamChat(id, content, opts?.picUrls ?? pendingPic ?? refBefore ?? [], (e: SseEvent) => {
+      await streamChat(id, content,
+        (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
+          : (pendingPic && pendingPic.length > 0) ? pendingPic
+          : refBefore, (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
