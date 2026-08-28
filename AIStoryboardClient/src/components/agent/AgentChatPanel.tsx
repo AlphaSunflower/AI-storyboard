@@ -15,7 +15,7 @@ import { Folder, Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrl, setRefImageUrl, uploadRefImage, sendMessage, confirmResult, pendingPicUrl, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -50,10 +50,10 @@ export function AgentChatPanel() {
 
   // 点击"继续完善"后：聚焦输入框，引导用户输入完善需求（不自动发送）
   useEffect(() => {
-    if (pendingPicUrl) {
+    if (pendingPicUrls.length > 0) {
       inputRef.current?.focus();
     }
-  }, [pendingPicUrl]);
+  }, [pendingPicUrls]);
 
   // 点击外部关闭"+"菜单
   useEffect(() => {
@@ -96,10 +96,10 @@ export function AgentChatPanel() {
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     try {
-      await uploadRefImage(file);
+      await uploadRefImages(files);
     } catch {
       setStreamErrorLocal('图片上传失败');
     }
@@ -257,15 +257,15 @@ export function AgentChatPanel() {
 
       {/* 输入区 */}
       <div style={{ padding: 16, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
-        {refImageUrl && (
+        {refImageUrls.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <img src={refImageUrl} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
-            <span style={{ fontSize: 14, color: 'var(--color-muted)' }}>参考图已附</span>
-            <button onClick={() => setRefImageUrl(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 14 }}>移除</button>
+            <img src={refImageUrls[0]} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
+            <span style={{ fontSize: 14, color: 'var(--color-muted)' }}>参考图已附{refImageUrls.length > 1 ? `（还有 ${refImageUrls.length - 1} 张）` : ''}</span>
+            <button onClick={() => setRefImageUrls([])} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: 14 }}>移除</button>
           </div>
         )}
         {/* 继续完善提示条：点击"继续完善"后暂存参考图，等待用户输入完善需求 */}
-        {pendingPicUrl && (
+        {pendingPicUrls.length > 0 && (
           <div
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -293,7 +293,7 @@ export function AgentChatPanel() {
               title="上传"
               style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
-            <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />
             {/* 下拉菜单：portal 到 body */}
             {menuOpen && menuPos && createPortal(
               <div ref={menuRef} style={{
@@ -341,7 +341,7 @@ export function AgentChatPanel() {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+            placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
             disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan}
             rows={2}
             style={{
@@ -350,8 +350,14 @@ export function AgentChatPanel() {
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
             }}
           />
-          {/* 右侧：麦克风 + 发送，紧贴排列 */}
-          <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+          {/* 右侧：图片携带徽标 + 麦克风 + 发送 */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            {(() => { const n = refImageUrls.length + pendingPicUrls.length; return n > 0 ? (
+              <span style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 500, whiteSpace: 'nowrap', paddingBottom: 2 }}>
+                已携带{n}张图片
+              </span>
+            ) : null; })()}
+            <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
             <MicButton
               onToggle={handleMicToggle}
               onPcm={handlePcm}
@@ -373,6 +379,7 @@ export function AgentChatPanel() {
             >
               发送
             </SpecularButton>
+          </div>
           </div>
         </div>
       </div>

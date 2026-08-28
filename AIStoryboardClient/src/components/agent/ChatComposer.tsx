@@ -35,8 +35,8 @@ export const DS = {
 export function ChatComposer() {
   const {
     streaming, waitingHumanInput, waitingVideoPlan,
-    refImageUrl, setRefImageUrl, uploadRefImage, sendMessage,
-    pendingPicUrl, cancelRefine,
+    refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage,
+    pendingPicUrls, cancelRefine,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
@@ -110,8 +110,8 @@ export function ChatComposer() {
 
   // 点击"继续完善"后聚焦输入框
   useEffect(() => {
-    if (pendingPicUrl) inputRef.current?.focus();
-  }, [pendingPicUrl]);
+    if (pendingPicUrls.length > 0) inputRef.current?.focus();
+  }, [pendingPicUrls]);
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -133,10 +133,10 @@ export function ChatComposer() {
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     try {
-      await uploadRefImage(file);
+      await uploadRefImages(files);
     } catch {
       alert('图片上传失败');
     }
@@ -179,9 +179,9 @@ export function ChatComposer() {
   const handleAssetOpen = () => { setAssetOpen(true); setAssetSelectedId(null); void loadAssetList(); };
   const handleAssetConfirm = () => {
     const picked = assetList.find((a) => a.id === assetSelectedId);
-    const url = picked?.images?.[0]?.url;
-    if (!url) { setAssetError('该资产暂无图片'); return; }
-    setRefImageUrl(url);
+    const urls = (picked?.images ?? []).map((img) => img.url).filter(Boolean);
+    if (urls.length === 0) { setAssetError('该资产暂无图片'); return; }
+    addRefImageUrls(urls);
     setAssetOpen(false); setAssetSelectedId(null);
   };
 
@@ -193,14 +193,14 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {refImageUrl && (
+      {refImageUrls.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src={refImageUrl} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10 }} />
-          <span style={{ fontSize: 14, color: DS.textSecondary }}>参考图已附</span>
-          <button onClick={() => setRefImageUrl(null)} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>移除</button>
+          <img src={refImageUrls[0]} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10 }} />
+          <span style={{ fontSize: 14, color: DS.textSecondary }}>参考图已附{refImageUrls.length > 1 ? `（还有 ${refImageUrls.length - 1} 张）` : ''}</span>
+          <button onClick={() => setRefImageUrls([])} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>移除</button>
         </div>
       )}
-      {pendingPicUrl && (
+      {pendingPicUrls.length > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '8px 12px', borderRadius: 12, background: DS.hover, fontSize: 14, color: DS.textSecondary,
@@ -220,7 +220,7 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrl ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={busy}
         rows={2}
         style={{
@@ -240,7 +240,7 @@ export function ChatComposer() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
           {menuOpen && menuPos && createPortal(
             <div ref={menuRef} style={{
