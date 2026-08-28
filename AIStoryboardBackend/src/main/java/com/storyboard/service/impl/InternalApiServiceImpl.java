@@ -123,7 +123,7 @@ public class InternalApiServiceImpl implements InternalApiService {
                 .orderByDesc(Asset::getCreatedAt));
         return assets.stream().map(a -> {
             List<AssetImageVO> images = assetImageMapper.findByAssetId(a.getId()).stream()
-                    .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName()))
+                    .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName(), i.getText()))
                     .toList();
             return new AssetVO(a.getId(), a.getType(), a.getName(), a.getDescription(),
                     a.getProjectId(), images, a.getCreatedAt(), a.getUpdatedAt());

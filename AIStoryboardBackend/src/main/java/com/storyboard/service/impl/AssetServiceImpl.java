@@ -122,7 +122,7 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
-    public AssetImageVO uploadImage(String userId, String assetId, MultipartFile file) {
+    public AssetImageVO uploadImage(String userId, String assetId, MultipartFile file, String text) {
         getOwnedAsset(userId, assetId);
         if (file == null || file.isEmpty()) throw new BusinessException(40001, "上传文件为空");
         String contentType = file.getContentType();
@@ -136,9 +136,10 @@ public class AssetServiceImpl implements AssetService {
         img.setAssetId(assetId);
         img.setUrl(url);
         img.setFileName(file.getOriginalFilename());
+        img.setText(text == null || text.isBlank() ? null : text.trim());
         img.setSortOrder((int) count);
         assetImageMapper.insert(img);
-        return new AssetImageVO(img.getId(), url, img.getSortOrder(), img.getFileName());
+        return new AssetImageVO(img.getId(), url, img.getSortOrder(), img.getFileName(), img.getText());
     }
 
     @Override
@@ -205,6 +206,19 @@ public class AssetServiceImpl implements AssetService {
                 sb.append("：").append(a.description().trim());
             }
             sb.append("\n");
+            // 图片级文字约束：每张资产图携带的 text（人物外貌/道具/场景细分约束），逐图注入
+            if (a.images() != null) {
+                int idx = 0;
+                for (AssetImageVO img : a.images().stream()
+                        .sorted(Comparator.comparingInt(i -> i.sortOrder() != null ? i.sortOrder() : Integer.MAX_VALUE))
+                        .toList()) {
+                    idx++;
+                    if (img.text() != null && !img.text().isBlank()) {
+                        sb.append("  · ").append(a.name()).append(" 图").append(idx)
+                          .append("约束：").append(img.text().trim()).append("\n");
+                    }
+                }
+            }
         }
         return sb.toString();
     }
@@ -286,7 +300,7 @@ public class AssetServiceImpl implements AssetService {
 
     private List<AssetImageVO> loadImages(String assetId) {
         return assetImageMapper.findByAssetId(assetId).stream()
-                .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName()))
+                .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName(), i.getText()))
                 .toList();
     }
 

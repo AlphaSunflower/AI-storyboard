@@ -26,8 +26,9 @@ public interface AssetService {
     /** 删除资产（DB 级联删图 + scene_assets 关联）。 */
     void delete(String userId, String assetId);
 
-    /** 上传资产图片（存 uploads/images，落 asset_images；主图 = 首张，即 sort_order 最小）。 */
-    AssetImageVO uploadImage(String userId, String assetId, MultipartFile file);
+    /** 上传资产图片（存 uploads/images，落 asset_images；主图 = 首张，即 sort_order 最小）。
+     *  @param text 图片级文字约束（人物外貌/道具/场景约束，生成时注入；可为空=纯图） */
+    AssetImageVO uploadImage(String userId, String assetId, MultipartFile file, String text);
 
     /** 删除资产图片。 */
     void deleteImage(String userId, String assetId, String imageId);

@@ -52,8 +52,9 @@ public class AssetController {
 
     @PostMapping("/assets/{id}/images")
     public ApiResponse<AssetImageVO> uploadImage(Authentication auth, @PathVariable String id,
-            @RequestParam MultipartFile file) {
-        return ApiResponse.ok(assetService.uploadImage(auth.getName(), id, file));
+            @RequestParam MultipartFile file,
+            @RequestParam(required = false) String text) {
+        return ApiResponse.ok(assetService.uploadImage(auth.getName(), id, file, text));
     }
 
     @DeleteMapping("/assets/{id}/images/{imageId}")
