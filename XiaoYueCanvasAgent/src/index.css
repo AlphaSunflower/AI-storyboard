@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 深墨绿 / acid 荧光绿 主题（tailwind/shadcn 用）。palette 值复用 styles.css 的 --canvas/--card/--acid/--ink 等，
+   这里只补语义别名与圆角，不重定义 --card 等会与 styles.css 冲突的名字。 */
+:root {
+  --radius: 0.625rem;
+}
