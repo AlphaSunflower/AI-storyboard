@@ -9,6 +9,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 import { NODE_PRESETS } from '../data/presets';
+import { NODE_DEFS } from '../domain/nodeRegistry';
 import type { CanvasDocumentV1, CanvasEdge, CanvasNode, GraphSnapshot, MediaKind } from '../types';
 import { createId } from '../utils/id';
 
@@ -100,6 +101,10 @@ interface CanvasState {
   moveNodes: (positions: Array<{ nodeId: string; position: XYPosition }>) => number;
   resizeNodes: (sizes: Array<{ nodeId: string; size: { width: number; height: number } }>) => number;
   createEdge: (connection: Connection) => string | null;
+  // 创建节点并自动连线（新节点连到 sourceId 的右边）
+  createConnectedNode: (sourceId: string, kind: MediaKind, position: XYPosition) => string | null;
+  // 创建节点并自动连线（新节点排在 targetId 的左边，作为其前置）
+  createNodeBefore: (targetId: string, kind: MediaKind, position: XYPosition) => string | null;
   deleteEdge: (edgeId: string) => void;
   selectNode: (nodeId: string | null, preserveSelection?: boolean) => void;
   undo: () => void;
@@ -389,9 +394,36 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       if (!connection.source || !connection.target || connection.source === connection.target) return null;
       if (!state.nodes.some((node) => node.id === connection.source) || !state.nodes.some((node) => node.id === connection.target)) return null;
       if (state.edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.sourceHandle === connection.sourceHandle && edge.targetHandle === connection.targetHandle)) return null;
+      // acceptTypes 校验：仅当源节点声明了可接类型时校验，声明了但目标不匹配则拒绝连线
+      const sourceNode = state.nodes.find((node) => node.id === connection.source);
+      const targetNode = state.nodes.find((node) => node.id === connection.target);
+      const sourceDef = sourceNode ? NODE_DEFS[sourceNode.data.kind] : undefined;
+      if (sourceDef?.connectivity?.acceptTypes?.length) {
+        if (!targetNode || !sourceDef.connectivity.acceptTypes.includes(targetNode.data.kind)) return null;
+      }
       const edge = { ...connection, id: `edge-${createId()}`, type: 'canvas' } as CanvasEdge;
       commit((current) => ({ nodes: current.nodes, edges: [...current.edges, edge] }));
       return edge.id;
+    },
+    // 创建节点并自动连线（新节点连到 sourceId 的右边）
+    createConnectedNode: (sourceId, kind, position) => {
+      const source = get().nodes.find((n) => n.id === sourceId);
+      if (!source) return null;
+      const node = { ...makeNode(kind, position), selected: true };
+      const edge = { id: `edge-${createId()}`, source: sourceId, sourceHandle: 'right', target: node.id, targetHandle: 'left', type: 'canvas' };
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));
+      set({ selectedNodeId: node.id });
+      return node.id;
+    },
+    // 创建节点并自动连线（新节点排在 targetId 的左边，作为其前置）
+    createNodeBefore: (targetId, kind, position) => {
+      const target = get().nodes.find((n) => n.id === targetId);
+      if (!target) return null;
+      const node = { ...makeNode(kind, position), selected: true };
+      const edge = { id: `edge-${createId()}`, source: node.id, sourceHandle: 'right', target: targetId, targetHandle: 'left', type: 'canvas' };
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));
+      set({ selectedNodeId: node.id });
+      return node.id;
     },
     deleteEdge: (edgeId) => {
       if (!get().edges.some((edge) => edge.id === edgeId)) return;

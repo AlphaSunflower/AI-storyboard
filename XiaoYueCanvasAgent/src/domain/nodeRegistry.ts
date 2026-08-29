@@ -42,8 +42,14 @@ export const NODE_DEFS: Record<string, NodeDef> = {
   script: {
     type: 'script', key: 'script', menuLabel: '剧本', menuIcon: 'script', category: '基础',
     capabilities: { hasImage: false, hasPrompt: true, hasExport: false, hasTools: false },
-    connectivity: { maxInputs: 0, maxOutputs: 0, acceptTypes: [] },
+    connectivity: { maxInputs: 0, maxOutputs: 1, acceptTypes: ['storyboard'] },
     createDefaultData: () => ({ kind: 'script', label: '剧本', scriptText: '', prompt: '', status: 'idle', accent: '#a9c9f5' }),
+  },
+  storyboard: {
+    type: 'storyboard', key: 'storyboard', menuLabel: '分镜', menuIcon: 'storyboard', category: '基础',
+    capabilities: { hasImage: true, hasPrompt: false, hasExport: false, hasTools: false },
+    connectivity: { maxInputs: 1, maxOutputs: 0, acceptTypes: ['script'] },
+    createDefaultData: () => ({ kind: 'storyboard', label: '分镜', frames: [], prompt: '', status: 'idle', accent: '#ffb3a1' }),
   },
   note: {
     type: 'note', key: 'note', menuLabel: '批注', menuIcon: 'note', category: '文本',

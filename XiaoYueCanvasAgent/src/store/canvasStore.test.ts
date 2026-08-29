@@ -93,4 +93,18 @@ describe('canvas transactions', () => {
     useCanvasStore.getState().undo();
     expect(useCanvasStore.getState().edges).toHaveLength(1);
   });
+
+  // 验证 acceptTypes 边校验：源节点声明了可接类型，目标不匹配时应拒绝连线
+  it('rejects connections that violate acceptTypes', () => {
+    useCanvasStore.getState().addNode('script', { x: 0, y: 0 });
+    useCanvasStore.getState().addNode('note', { x: 300, y: 0 });
+    const scriptId = useCanvasStore.getState().nodes[0].id;
+    const noteId = useCanvasStore.getState().nodes[1].id;
+    const edgeId = useCanvasStore.getState().createEdge({ source: scriptId, target: noteId, sourceHandle: 'right', targetHandle: 'left' });
+    expect(edgeId).toBeNull();
+    // 反向：通过 createConnectedNode 应能正常创建（script 连 storyboard，目标匹配 acceptTypes）
+    const storyNodeId = useCanvasStore.getState().createConnectedNode(scriptId, 'storyboard', { x: 600, y: 0 });
+    expect(storyNodeId).not.toBeNull();
+    expect(useCanvasStore.getState().edges).toHaveLength(1);
+  });
 });

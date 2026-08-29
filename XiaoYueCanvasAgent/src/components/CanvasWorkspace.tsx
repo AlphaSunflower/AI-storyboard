@@ -1,26 +1,29 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background, BackgroundVariant, ConnectionLineType, Panel, ReactFlow, ReactFlowProvider,
-  useReactFlow, useStore, useStoreApi, type Viewport,
+  useReactFlow, useStore, useStoreApi, type Connection, type Viewport,
 } from '@xyflow/react';
 import { Check, ChevronDown, CircleHelp, Download, FileArchive, FolderOpen, Grid2X2, Layers, LayoutList, Map, MessageCircle, MousePointer2, Plus, Scissors, Search, Trash2 } from 'lucide-react';
 import { getAsset, saveAsset, saveAssets, saveAssetToLibrary } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
-import type { CanvasNode, CanvasSummary, MediaAsset, PersistedAsset, ProjectSummary, SaveStatus } from '../types';
+import type { CanvasNode, CanvasSummary, MediaAsset, MediaKind, PersistedAsset, ProjectSummary, SaveStatus } from '../types';
 import { createImageAsset, createVideoAsset, disposeRuntimeAsset, getMediaNodeSize, getVideoNodeSize, processWithConcurrency } from '../utils/mediaPipeline';
 import { createId } from '../utils/id';
 import { mediaQualityForZoom } from '../utils/canvasPerformance';
 import { refreshMediaBudget, setMediaBudgetQuality } from '../utils/mediaBudget';
 import { CanvasEdge } from './CanvasEdge';
 import { CanvasContextMenu, type CanvasContextTarget } from './CanvasContextMenu';
+import { ConnectionNodeMenu } from './ConnectionNodeMenu';
 import { AssetDrawer, ASSET_DRAG_MIME } from './AssetDrawer';
 import { MediaNode } from './MediaNode';
 import { VideoNode } from './VideoNode';
+import { ScriptNode } from './nodes/ScriptNode';
+import { StoryboardNode } from './nodes/StoryboardNode';
 import { NodeLibrary } from './NodeLibrary';
 import { TemplatePanel } from './TemplatePanel';
 
-const nodeTypes = { media: MediaNode, video: VideoNode };
+const nodeTypes = { media: MediaNode, video: VideoNode, script: ScriptNode, storyboard: StoryboardNode };
 const edgeTypes = { canvas: CanvasEdge };
 
 type StableMiniMapProps = { nodes: CanvasNode[]; initialViewport: Viewport; isMoving: boolean };
@@ -301,6 +304,27 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const canUndo = useCanvasStore((state) => state.past.length > 0);
   const canRedo = useCanvasStore((state) => state.future.length > 0);
   const { fitView, screenToFlowPosition, zoomTo } = useReactFlow();
+  // 「连接即创建」：跟踪连接生命周期，拖线松手未落到节点时（didConnect 为 false）
+  // dispatch 'connection-end'，由 ConnectionNodeMenu 弹出「选择节点类型」菜单。
+  const connectRef = useRef<{ nodeId: string; nodeType: string | undefined; handleType: 'source' | 'target' | null; didConnect: boolean } | null>(null);
+  const handleConnectStart = useCallback((_event: any, params: any) => {
+    if (!params?.nodeId) return;
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === params.nodeId);
+    connectRef.current = { nodeId: params.nodeId, nodeType: node?.data.kind, handleType: params.handleType ?? null, didConnect: false };
+  }, []);
+  const handleConnect = useCallback((connection: Connection) => {
+    if (connectRef.current) connectRef.current.didConnect = true;
+    connect(connection);
+  }, [connect]);
+  const handleConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
+    const ref = connectRef.current;
+    if (!ref || ref.didConnect) { connectRef.current = null; return; }
+    const clientX = 'clientX' in event ? event.clientX : 0;
+    const clientY = 'clientY' in event ? event.clientY : 0;
+    const flow = screenToFlowPosition({ x: clientX, y: clientY });
+    window.dispatchEvent(new CustomEvent('connection-end', { detail: { clientX, clientY, flowX: flow.x, flowY: flow.y, sourceNodeId: ref.nodeId, sourceNodeType: ref.nodeType, handleType: ref.handleType ?? 'source' } }));
+    connectRef.current = null;
+  }, [screenToFlowPosition]);
   const flowStore = useStoreApi();
   const upsertAssets = useMediaStore((state) => state.upsertAssets);
   const setMediaQuality = useMediaStore((state) => state.setQuality);
@@ -514,7 +538,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       onDragLeave={() => { dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setIsFileDragActive(false); }}
       onDrop={(event) => { event.preventDefault(); dragDepthRef.current = 0; setIsFileDragActive(false); const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME); if (assetId) { void addAssetAt(assetId, screenToFlowPosition({ x: event.clientX, y: event.clientY })); return; } if (event.dataTransfer.files.length) void importMedia(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
       <input ref={fileInputRef} className="canvas-file-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={(event) => { if (event.target.files) void importMedia(event.target.files); event.target.value = ''; }} />
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect}
+      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={handleConnect} onConnectStart={handleConnectStart} onConnectEnd={handleConnectEnd}
         onNodeDragStart={beginNodeDrag} onNodeDragStop={endNodeDrag}
         onNodeClick={(event, node) => { closeContextMenu(); selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey); }} onPaneClick={(event) => { closeContextMenu(); selectNode(null); if (event.detail === 2) { const point = screenToFlowPosition({ x: event.clientX, y: event.clientY }); addNode('text', { x: point.x - 190, y: point.y - 140 }); } }}
         onPaneContextMenu={(event) => { event.preventDefault(); setContextTarget({ type: 'pane', clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
@@ -591,6 +615,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onOpenAssets={() => setPanel('nodes')}
         onAddText={() => addNode('text', contextTarget.flowPosition)}
         onAddImage={() => addNode('image', contextTarget.flowPosition)}
+        onAddNode={(kind) => addNode(kind as MediaKind, contextTarget.flowPosition)}
         onUndo={undo}
         onRedo={redo}
         onCopy={() => { const count = copySelected(); if (count) notify(`已复制 ${count} 个节点`); }}
@@ -602,6 +627,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onDownload={downloadContextAsset}
         onCopyImage={copyContextImage}
       />}
+      <ConnectionNodeMenu />
     </main>
   );
 }

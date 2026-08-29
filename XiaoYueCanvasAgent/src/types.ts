@@ -1,6 +1,6 @@
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
-export type NodeKind = 'text' | 'image' | 'video' | 'script' | 'note' | 'prompt' | 'sequence';
+export type NodeKind = 'text' | 'image' | 'video' | 'script' | 'note' | 'prompt' | 'sequence' | 'storyboard';
 export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';

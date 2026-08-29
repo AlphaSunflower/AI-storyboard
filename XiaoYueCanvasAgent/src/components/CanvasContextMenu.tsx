@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { CanvasNode } from '../types';
+import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
 
 export type CanvasContextTarget =
   | { type: 'pane'; clientX: number; clientY: number; flowPosition: { x: number; y: number } }
@@ -38,6 +39,7 @@ interface CanvasContextMenuProps {
   onOpenAssets: () => void;
   onAddText: () => void;
   onAddImage: () => void;
+  onAddNode?: (kind: string) => void;
   onUndo: () => void;
   onRedo: () => void;
   onCopy: () => void;
@@ -85,10 +87,7 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
   }, [onClose]);
 
   const run = (action: () => void) => () => { action(); onClose(); };
-  const addNodeSubmenu = <>
-    <MenuItem onSelect={run(props.onAddImage)}>图片节点</MenuItem>
-    <MenuItem onSelect={run(props.onAddText)}>文字节点</MenuItem>
-  </>;
+  const addNodeSubmenu = <GroupedNodeMenu onAdd={(kind: string) => { if (kind === 'image') run(props.onAddImage)(); else if (kind === 'text') run(props.onAddText)(); else props.onAddNode?.(kind); }} />;
 
   return <div ref={menuRef} className={`canvas-context-menu ${flyoutLeft ? 'is-flyout-left' : ''}`} role="menu" aria-label="画布右键菜单" style={position} onContextMenu={(event) => event.preventDefault()}>
     {target.type === 'pane' && <>
