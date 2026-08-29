@@ -26,6 +26,8 @@ const buildLineage = (nodes: CanvasNode[], startId: string): LineageStep[] => {
 
 const formatTime = (at?: number) => (at ? new Date(at).toLocaleString('zh-CN', { hour12: false }) : undefined);
 
+const fieldInput = 'w-full rounded-lg border border-[var(--border-dark)] bg-[rgba(19,34,30,0.55)] px-3 text-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(215,255,84,0.18)]';
+
 export function InspectorPanel() {
   const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
   const nodes = useCanvasStore((state) => state.nodes);
@@ -37,38 +39,57 @@ export function InspectorPanel() {
 
   const lineage = useMemo(() => (selectedNodeId ? buildLineage(nodes, selectedNodeId) : []), [nodes, selectedNodeId]);
 
-  if (!selectedNodeId || !nodeData) return <div className="inspector-empty"><span className="empty-target"><i /></span><h3>尚未选择节点</h3><p>选择图片或文字节点后，可以编辑名称和说明。</p></div>;
+  if (!selectedNodeId || !nodeData) {
+    return (
+      <div className="grid h-full place-items-center gap-2 p-6 text-center">
+        <span className="h-8 w-8 rounded-full border border-[var(--border-dark)] bg-[rgba(215,255,84,0.06)]" />
+        <h3 className="text-[15px] font-semibold text-foreground">尚未选择节点</h3>
+        <p className="max-w-[240px] text-[13px] leading-relaxed text-muted-foreground">选择图片或文字节点后，可以编辑名称和说明。</p>
+      </div>
+    );
+  }
 
   const params = nodeData.operation && Object.keys(nodeData.operation.params).length > 0
     ? nodeData.operation.params
     : null;
 
   return (
-    <div className="inspector" key={selectedNodeId}>
-      <div className="inspector-identity"><span style={{ background: nodeData.accent }} /><div><small>{nodeData.kind.toUpperCase()} NODE</small><strong>{selectedNodeId.slice(0, 22)}…</strong></div></div>
-      <label className="field-label">节点名称<input defaultValue={nodeData.label} onBlur={(event) => updateNode(selectedNodeId, { label: event.target.value })} /></label>
-      <label className="field-label">说明<textarea defaultValue={nodeData.prompt} rows={7} onBlur={(event) => updateNode(selectedNodeId, { prompt: event.target.value })} /></label>
+    <div className="flex flex-col gap-3 p-4" key={selectedNodeId}>
+      <div className="flex items-center gap-3 rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.05)] p-3">
+        <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: nodeData.accent }} />
+        <div className="min-w-0">
+          <small className="block font-mono text-[10px] tracking-[0.12em] text-muted-foreground">{nodeData.kind.toUpperCase()} NODE</small>
+          <strong className="block truncate text-sm text-foreground">{selectedNodeId.slice(0, 22)}…</strong>
+        </div>
+      </div>
+
+      <label className="flex flex-col gap-1.5 text-[13px] text-muted-foreground">节点名称
+        <input defaultValue={nodeData.label} onBlur={(event) => updateNode(selectedNodeId, { label: event.target.value })} className={`h-9 ${fieldInput}`} />
+      </label>
+      <label className="flex flex-col gap-1.5 text-[13px] text-muted-foreground">说明
+        <textarea defaultValue={nodeData.prompt} rows={7} onBlur={(event) => updateNode(selectedNodeId, { prompt: event.target.value })} className={`${fieldInput} p-3`} />
+      </label>
 
       {nodeData.operation && (
-        <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <small style={{ opacity: 0.6 }}>操作记录</small>
-          <div style={{ marginTop: 4, fontWeight: 600 }}>{operationLabel(nodeData.operation.type)}</div>
-          {nodeData.operation.at && <div style={{ fontSize: 11, opacity: 0.5 }}>{formatTime(nodeData.operation.at)}</div>}
-          {params && <code style={{ display: 'block', marginTop: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(params)}</code>}
+        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+          <small className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">操作记录</small>
+          <div className="mt-1 font-medium text-foreground">{operationLabel(nodeData.operation.type)}</div>
+          {nodeData.operation.at && <div className="mt-0.5 text-[11px] text-muted-foreground">{formatTime(nodeData.operation.at)}</div>}
+          {params && <code className="mt-2 block whitespace-pre-wrap break-all text-[11px] leading-relaxed text-muted-foreground">{JSON.stringify(params)}</code>}
         </div>
       )}
 
       {lineage.length > 1 && (
-        <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <small style={{ opacity: 0.6 }}>血缘链</small>
-          <ol style={{ listStyle: 'none', margin: '6px 0 0', padding: 0 }}>
-            <li style={{ fontWeight: 600, marginBottom: 4 }}>{lineage[0].label}</li>
+        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+          <small className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">血缘链</small>
+          <ol className="mt-2 list-none space-y-1.5 p-0">
+            <li className="font-medium text-foreground">{lineage[0].label}</li>
             {lineage.slice(1).map((step, index) => {
               const op = operationLabel(lineage[index].operationType);
               return (
-                <li key={step.id} style={{ marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, opacity: 0.5, minWidth: 18, textAlign: 'right' }}>{op ?? '←'}</span>
-                  <button type="button" onClick={() => selectNode(step.id)} style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{step.label}</button>
+                <li key={step.id} className="flex items-center gap-2">
+                  <span className="min-w-[18px] text-right font-mono text-[11px] text-muted-foreground">{op ?? '←'}</span>
+                  <button type="button" onClick={() => selectNode(step.id)} className="cursor-pointer border-0 border-b border-dotted border-[var(--border-dark)] bg-transparent p-0 text-[13px] text-acid">{step.label}</button>
                 </li>
               );
             })}
@@ -76,8 +97,11 @@ export function InspectorPanel() {
         </div>
       )}
 
-      {nodeData.assetId && <div className="inspector-tip">该节点引用真实本地资产。编辑操作会创建派生版本，不会覆盖原图。</div>}
-      <div className="inspector-actions"><button onClick={duplicate}><Copy size={15} /> 复制节点</button><button className="danger-action" onClick={remove}><Trash2 size={15} /> 删除</button></div>
+      {nodeData.assetId && <p className="text-xs leading-relaxed text-muted-foreground">该节点引用真实本地资产。编辑操作会创建派生版本，不会覆盖原图。</p>}
+      <div className="flex gap-2">
+        <button onClick={duplicate} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-acid font-medium text-ink transition hover:brightness-105"><Copy size={15} /> 复制节点</button>
+        <button onClick={remove} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[rgba(255,107,94,0.4)] bg-[rgba(255,107,94,0.1)] font-medium text-destructive transition hover:bg-[rgba(255,107,94,0.18)]"><Trash2 size={15} /> 删除</button>
+      </div>
     </div>
   );
 }
