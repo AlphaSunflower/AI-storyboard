@@ -7,3 +7,16 @@
 :root {
   --radius: 0.625rem;
 }
+
+/* 关闭了 Tailwind preflight，手动补最小 button 重置——否则 <button> 保留 UA 默认白底/灰边，
+   配浅色文字会白底白字看不清（"导入 .morrow"、项目卡片打开按钮都踩中）。 */
+@layer base {
+  button,
+  [type='submit'],
+  [type='button'],
+  [type='reset'] {
+    background-color: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+}
