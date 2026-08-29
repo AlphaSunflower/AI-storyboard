@@ -1499,7 +1499,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .storyboard-gen-field span { font-family: 'Cascadia Mono',Consolas,monospace; font-size: 10px; }
 .storyboard-gen-field input,.storyboard-gen-field select { width: 64px; height: 28px; padding: 0 6px; border: 1px solid var(--border-dark); border-radius: 6px; background: rgba(19,34,30,.5); color: #eef0df; font: inherit; font-size: 12px; }
 .storyboard-gen-field select { width: auto; }
-.storyboard-gen-view .node-upload--generate { position: static; margin: 0 8px; align-self: stretch; justify-content: center; }
+.storyboard-gen-view .node-upload--generate { position: static; margin: 0 8px; align-self: stretch; justify-content: center; transform: none; }
+/* .node-upload 基类带 left:50%+translateX(-50%)，转静态后必须重置 transform，否则整块左移半宽不居中 */
 .storyboard-grid--gen { grid-template-columns: repeat(var(--gen-cols,3),1fr); grid-auto-rows: minmax(0,1fr); }
 .storyboard-grid--gen .storyboard-frame { aspect-ratio: 3/4; }
 
