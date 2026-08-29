@@ -1544,4 +1544,13 @@ textarea.text-node-editor::placeholder,
 .node-selected-bar button:hover { background: rgba(215,255,84,.14); color: var(--acid); }
 .node-selected-bar button.is-danger:hover { background: rgba(255,118,95,.14); color: #ff765f; }
 
+/* v8：右键菜单配色统一深墨绿/acid（基类底色偏灰 #1f1f1f，非主题） */
+.canvas-context-menu { background: #14241f !important; border-color: rgba(215,255,84,.16) !important; color: #eef0df !important; }
+.canvas-menu-item { color: #eef0df !important; background: transparent !important; }
+.canvas-menu-item:hover, .canvas-menu-item-wrap.is-open .canvas-menu-item { background: rgba(215,255,84,.12) !important; color: var(--acid) !important; }
+.canvas-menu-item[disabled] { opacity: .45 !important; }
+.canvas-menu-item kbd { color: rgba(238,240,223,.5) !important; }
+.canvas-menu-separator { background: rgba(215,255,84,.12) !important; }
+.canvas-context-submenu { background: #14241f !important; border-color: rgba(215,255,84,.16) !important; }
+
 
