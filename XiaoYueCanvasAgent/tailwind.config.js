@@ -22,7 +22,7 @@ export default {
         ring: 'var(--acid)',
         input: 'var(--border-light)',
         primary: { DEFAULT: 'var(--acid)', foreground: 'var(--ink)' },
-        muted: { DEFAULT: 'rgba(238,240,223,0.08)', foreground: 'rgba(238,240,223,0.6)' },
+        muted: { DEFAULT: 'rgba(238,240,223,0.08)', foreground: 'rgba(238,240,223,0.82)' },
         accent: { DEFAULT: 'rgba(215,255,84,0.12)', foreground: 'var(--acid)' },
         destructive: { DEFAULT: '#ff6b5e', foreground: '#fff' },
         popover: { DEFAULT: '#1c2a25', foreground: '#eef0df' },
