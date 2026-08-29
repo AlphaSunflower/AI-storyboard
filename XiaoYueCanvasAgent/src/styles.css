@@ -1515,4 +1515,13 @@ textarea.text-node-editor,
 textarea.text-node-editor::placeholder,
 .script-node-view .text-node-editor::placeholder { color: rgba(238,240,223,.45) !important; }
 
+/* 节点旁「+」的节点类型选择弹层（对齐参考工程：选类型才创建连线，而非盲目复制同类型） */
+.node-add-backdrop { position: fixed; inset: 0; z-index: 150; background: rgba(8,18,15,.45); backdrop-filter: blur(1px); }
+.node-add-popover { position: absolute; z-index: 160; }
+.grouped-node-menu { min-width: 168px; max-height: 320px; overflow: auto; padding: 6px; border: 1px solid rgba(215,255,84,.16); border-radius: 12px; background: #14241f; color: #eef0df; box-shadow: 0 18px 46px rgba(0,0,0,.5); }
+.grouped-node-menu section + section { margin-top: 4px; border-top: 1px solid rgba(215,255,84,.08); padding-top: 4px; }
+.grouped-node-menu .group-cat { width: 100%; text-align: left; padding: 6px 8px; font: 10px/1 'Cascadia Mono',Consolas,monospace; letter-spacing: .08em; color: rgba(215,255,84,.72); background: transparent; border: 0; }
+.grouped-node-menu .group-item { width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; color: #eef0df; background: transparent; font-size: 13px; }
+.grouped-node-menu .group-item:hover { background: rgba(215,255,84,.12); color: var(--acid); }
+
 

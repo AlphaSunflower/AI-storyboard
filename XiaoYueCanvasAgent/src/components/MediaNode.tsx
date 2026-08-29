@@ -12,6 +12,7 @@ import { createImageAsset, disposeRuntimeAsset, getMediaNodeSize } from '../util
 import { ImageNodeTools } from './ImageNodeTools';
 import { GeneratePanel } from './GeneratePanel';
 import { StoryboardGenView } from './nodes/StoryboardGenView';
+import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
 
 function SelectedNodeChrome({ node }: { node: CanvasNode }) {
   const zoom = useStore((state) => state.transform[2]);
@@ -24,7 +25,8 @@ function SelectedNodeChrome({ node }: { node: CanvasNode }) {
 
 function MediaNodeComponent({ id, data, selected, width, height, positionAbsoluteX, positionAbsoluteY }: NodeProps<CanvasNode>) {
   const updateNode = useCanvasStore((state) => state.updateNode);
-  const extendNode = useCanvasStore((state) => state.extendNode);
+  const createConnectedNode = useCanvasStore((state) => state.createConnectedNode);
+  const createNodeBefore = useCanvasStore((state) => state.createNodeBefore);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
@@ -42,6 +44,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const [generating, setGenerating] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [draftFeedback, setDraftFeedback] = useState<string | null>(null);
+  const [addDir, setAddDir] = useState<null | 'left' | 'right'>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
   const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : ImageIcon;
@@ -101,7 +104,18 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
       {selected && data.kind === 'image' && asset && <SelectedNodeChrome node={node} />}
       <Handle className="node-handle" id="left" type="target" position={Position.Left} />
       <Handle className="node-handle" id="right" type="source" position={Position.Right} />
-      {selected && <><button className="node-side-plus node-side-plus--left nodrag" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); extendNode(id, data.kind, 'left'); }} aria-label="向左添加节点"><Plus size={18} /></button><button className="node-side-plus node-side-plus--right nodrag" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); extendNode(id, data.kind, 'right'); }} aria-label="向右添加节点"><Plus size={18} /></button></>}
+      {selected && <><button className="node-side-plus node-side-plus--left nodrag" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setAddDir('left'); }} aria-label="向左添加节点"><Plus size={18} /></button><button className="node-side-plus node-side-plus--right nodrag" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setAddDir('right'); }} aria-label="向右添加节点"><Plus size={18} /></button></>}
+      {addDir && <>
+        <div className="node-add-backdrop nodrag" onClick={(e) => { e.stopPropagation(); setAddDir(null); }} />
+        <div className="node-add-popover nodrag nowheel" style={addDir === 'right' ? { left: 'calc(100% + 10px)', top: '50%', transform: 'translateY(-50%)' } : { right: 'calc(100% + 10px)', top: '50%', transform: 'translateY(-50%)' }} onClick={(e) => e.stopPropagation()}>
+          <GroupedNodeMenu onAdd={(kind) => {
+            const target = { x: node.position.x + (addDir === 'right' ? (width ?? 250) + 90 : -270), y: node.position.y + (height ?? 250) / 2 };
+            if (addDir === 'right') createConnectedNode(id, kind as any, target);
+            else createNodeBefore(id, kind as any, target);
+            setAddDir(null);
+          }} />
+        </div>
+      </>}
     </article>
   );
 }
