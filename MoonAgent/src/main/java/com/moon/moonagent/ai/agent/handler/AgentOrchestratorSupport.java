@@ -5,6 +5,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.mapper.AgentAssetMapper;
@@ -98,6 +99,31 @@ public class AgentOrchestratorSupport {
     /** 会话删除时清理全部内存态——委托 AgentSessionState */
     public void cleanupOnDelete(String conversationId) {
         sessionState.cleanupOnDelete(conversationId);
+    }
+
+    /** 置位会话打断标志（「停止生成」/ SSE 断开触发）——委托 AgentSessionState */
+    public void interrupt(String conversationId) {
+        sessionState.interrupt(conversationId);
+    }
+
+    /** 清除会话打断标志（新一轮编排启动/收尾调用，恢复正常流）——委托 AgentSessionState */
+    public void clearInterrupt(String conversationId) {
+        sessionState.clearInterrupt(conversationId);
+    }
+
+    /** 是否收到打断信号——委托 AgentSessionState */
+    public boolean isInterrupted(String conversationId) {
+        return sessionState.isInterrupted(conversationId);
+    }
+
+    /**
+     * 打断检查（流式 LLM doOnNext / 阶段边界调用）：置位后抛 {@link AgentInterruptException}，
+     * 触发编排协作式取消——中断打字机、跳过被截断回答的落库、提前释放会话锁。
+     */
+    public void checkInterrupted(OrchestrationRequest req) {
+        if (req != null && sessionState.isInterrupted(req.getConversation().getId())) {
+            throw new AgentInterruptException();
+        }
     }
 
     /** 不满意调整 +1，返回新值——委托 AgentSessionState */
@@ -267,6 +293,8 @@ public class AgentOrchestratorSupport {
         try {
             String raw = streamPlanWithMessage(prompt(req, stepId, fallbackKey, null), content, req);
             return convertStructured(raw, type);
+        } catch (AgentInterruptException e) {
+            throw e; // 用户打断：终止修复重试，交给编排壳层收尾
         } catch (Exception e) {
             log.warn("{} LLM 输出非 JSON，修复重试一次: {}", fallbackKey, e.getMessage());
             try {
@@ -360,6 +388,8 @@ public class AgentOrchestratorSupport {
                 .content()
                 .doOnNext(chunk -> {
                     if (chunk == null || chunk.isBlank()) return;
+                    // 打断：用户点击「停止生成」→ 中断流式打字机，异常上抛到编排壳层收尾
+                    checkInterrupted(req);
                     full.append(chunk);
                     String msg = extractMessageField(full.toString());
                     if (msg != null && msg.length() > emitted.get().length()) {
@@ -369,6 +399,8 @@ public class AgentOrchestratorSupport {
                     }
                 })
                 .blockLast();
+        } catch (AgentInterruptException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("流式 LLM 调用失败: {}", e.getMessage());
         }
@@ -800,6 +832,7 @@ public class AgentOrchestratorSupport {
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan, boolean skipMessage) {
+        checkInterrupted(req); // 打断：不再弹出确认卡片/落库 checkpoint
         if (workflowTitle != null) {
             sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
         }
@@ -999,6 +1032,7 @@ public class AgentOrchestratorSupport {
      * @param result 含 {content, confirm(Map), sceneCount(long)} 三键
      */
     public void resumeStage(OrchestrationRequest req, String workflowTitle, Map<String, Object> result) {
+        checkInterrupted(req); // 打断：不再发送生成结果/confirm_result，跳过被截断内容的落库
         if (workflowTitle != null) {
             sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
         }
@@ -1028,6 +1062,7 @@ public class AgentOrchestratorSupport {
      *  多参考图走 referenceImages（图生视频/资产多图投喂），generatedImageUrl 传 null（统一按参考图处理） */
     public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
                                             String aspectRatio, java.util.List<String> referenceImages, Map<String, String> params) {
+        checkInterrupted(req); // 打断：不再创建视频任务
         String model = params.getOrDefault("model", null);
         String resolution = params.getOrDefault("resolution", null);
         String effDuration = params.getOrDefault("duration", duration);
@@ -1323,5 +1358,44 @@ public class AgentOrchestratorSupport {
     /** 便捷转发：方案文本 → message 事件（流式增量时逐段更新 lastMessage） */
     public void sendMessage(OrchestrationRequest req, String content) {
         sendEvent(req, "message", Map.of("content", content));
+    }
+
+    // ===== 取消意图判定（分镜澄清死循环出口，2026-08-28） =====
+
+    /** 取消意图规则词：命中即判定为「用户想终止当前分镜生成」。 */
+    private static final java.util.regex.Pattern CANCEL_RULE = java.util.regex.Pattern.compile(
+            "取消|不生成|算了|终止|停止|跳过|换个话题|换话题|不弄了|不做了|不分镜|不要了|不用了|算了不|撤消|撤销");
+
+    /**
+     * 判定一段用户文本是否为「取消/终止当前分镜生成」意图。
+     * 两级：① 规则关键词命中 → true（快、准、零成本）；② 未命中 → 调一次 LLM 兜底判定
+     * （覆盖规则没枚举到的表达），LLM 输出 JSON {@code {cancel:true|false}}。
+     * LLM 调用失败/解析失败 → 返回 false（不误杀，宁可多问一轮）。规则优先，LLM 兜底。
+     */
+    public boolean isCancelIntent(String text) {
+        if (text == null || text.isBlank()) return false;
+        String t = text.trim();
+        // ① 规则
+        if (CANCEL_RULE.matcher(t).find()) {
+            log.info("取消意图规则命中: text={}", t);
+            return true;
+        }
+        // ② LLM 兜底
+        try {
+            String raw = retryTransient(() -> planClient().prompt()
+                    .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                    .system("你是意图判定助手。判断用户这句话是不是想【取消/终止当前的分镜生成操作】。"
+                            + "只输出一个 JSON 对象 {\"cancel\": true 或 false}，不要任何其他文字。")
+                    .user(t)
+                    .call()
+                    .content());
+            if (raw == null || raw.isBlank()) return false;
+            int a = raw.indexOf('{'), b = raw.lastIndexOf('}');
+            String json = (a >= 0 && b > a) ? raw.substring(a, b + 1) : raw;
+            return objectMapper.readTree(json).path("cancel").asBoolean(false);
+        } catch (Exception e) {
+            log.warn("取消意图 LLM 判定失败（按不取消处理）: {}", e.getMessage());
+            return false;
+        }
     }
 }

@@ -113,6 +113,8 @@ interface AgentState {
   submitVideoPlan: (actionId: string, params?: Record<string, string>, customText?: string) => Promise<void>;
   // 跳过当前 HITL 卡片（用户想切换话题时使用，checkpoint 30 分钟后自动过期）
   skipCurrentHITL: () => void;
+  // 停止当前会话生成（「停止生成」按钮）：中断 SSE 流 + 后端协作式取消 + 复位视图
+  stopGeneration: () => void;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
   refineAsset: () => void;
   dismissConfirm: () => void;
@@ -129,6 +131,10 @@ interface AgentState {
 }
 
 let initialSceneCount = 0;
+
+// 当前流式会话的 AbortController + 用户手动停止标志：点「停止生成」时中断 SSE fetch（typewriter 停）并委托后端协作式取消
+let streamAbort: AbortController | null = null;
+let manualStop = false;
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   windowOpen: false,
@@ -332,6 +338,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   sendMessage: async (content, opts?: { picUrls?: string[]; assetIds?: string[] }) => {
     if (get().streaming || !content.trim()) return;
+    // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
+    manualStop = false;
+    streamAbort = new AbortController();
+    const signal = streamAbort.signal;
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
     // 不先存会导致首条消息 picUrls 丢失（首会话上传图「说话后被吞」）
     const refBefore = get().refImageUrls.map((u) => u);
@@ -510,10 +520,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : []));
+      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : []), signal);
     } catch (err) {
-      // M3：跨会话守卫——已切换会话则忽略旧流错误
-      if (get().activeConversationId === snapshotId) {
+      // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
+      if (!manualStop && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       }
     } finally {
@@ -522,8 +532,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
       const isThisStream = get().pendingAssistantId === assistantId;
       const stillSameConversation = get().activeConversationId === snapshotId;
-      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导
-      const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
+      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
+      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
         delete g[snapshotId];
@@ -551,6 +561,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
+    manualStop = false;
+    streamAbort = new AbortController();
+    const signal = streamAbort.signal;
     // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
     set((s) => ({
       streaming: true,
@@ -725,10 +739,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, customText, params, assetIds);
+      }, customText, params, assetIds, signal);
     } catch (err) {
-      // M3：跨会话守卫——已切换会话则忽略旧流错误
-      if (get().activeConversationId === snapshotId) {
+      // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
+      if (!manualStop && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       }
     } finally {
@@ -737,8 +751,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
       const isThisStream = get().pendingAssistantId === assistantId;
       const stillSameConversation = get().activeConversationId === snapshotId;
-      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导
-      const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
+      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
+      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
         delete g[snapshotId];
@@ -772,6 +786,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
+    manualStop = false;
+    streamAbort = new AbortController();
+    const signal = streamAbort.signal;
     // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，后端容器内可访问）
     if (actionId === 'refine') {
       set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { waitingVideoPlan: null, hitlVideoPlan: h, pendingPicUrl: assetUrl(info.picUrl) }; });
@@ -858,14 +876,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               if (get().activeConversationId === snapshotId) set({ streamError: e.message ?? '对话出错，请重试' });
               break;
           }
-        }, customText, params);
+        }, customText, params, undefined, signal);
       } catch (err) {
-        if (get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+        if (!manualStop && get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       } finally {
         // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
         const isThisStream = get().pendingAssistantId === assistantId;
         const stillSame = get().activeConversationId === snapshotId;
-        const failedText = get().streamError ? '（回复失败）' : '（未收到回复）';
+        const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
         set((s) => {
           const g = { ...s.generating };
           delete g[snapshotId];
@@ -1025,10 +1043,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, '', params);
+      }, '', params, undefined, signal);
     } catch (err) {
-      // M3：跨会话守卫——已切换会话则忽略旧流错误
-      if (get().activeConversationId === snapshotId) {
+      // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
+      if (!manualStop && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '生成出错，请重试' });
       }
     } finally {
@@ -1039,7 +1057,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         return;
       }
       // 未受理（异常/失败）：该会话不在生成，删除 generating + 按 active 会话重置视图
-      const failedText = get().streamError ? '（生成失败）' : '（未收到回复）';
+      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（生成失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
         delete g[snapshotId];
@@ -1059,6 +1077,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         };
       });
     }
+  },
+
+  /** 停止当前会话生成（「停止生成」按钮）：中断 SSE 流（打字机停）+ 后端协作式取消 + 复位视图 */
+  stopGeneration: () => {
+    const id = get().activeConversationId;
+    manualStop = true;
+    // 中断当前 SSE fetch（若有）：consumeSse 循环检测 signal.aborted 会立即跳出 → 触发 sendMessage 等的 finally 清理
+    streamAbort?.abort();
+    streamAbort = null;
+    // 后端协作式取消：置位会话级 interrupt 标志（编排流式循环/阶段边界检测后停止生成、释放会话锁）
+    if (id) void agentApi.interrupt(id).catch(() => { /* 静默：后端取消尽力而为 */ });
+    // 视频异步任务轮询期 / 无活跃 SSE 流：直接复位当前会话视图（后端视频任务仍会后台跑完）
+    set((s) => {
+      const g = { ...s.generating };
+      if (id) delete g[id];
+      const gview = id && s.activeConversationId ? g[s.activeConversationId] : undefined;
+      return { generating: g, streaming: !!gview, workflowHint: gview?.hint ?? '' };
+    });
   },
 
   /** 跳过当前 HITL 卡片：清除等待状态，让用户继续输入其他话题（checkpoint 30 分钟后自动过期） */

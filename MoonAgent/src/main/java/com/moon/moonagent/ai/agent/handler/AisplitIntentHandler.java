@@ -222,9 +222,12 @@ public class AisplitIntentHandler implements IntentHandler {
         // 4. HITL 通用模板：方案消息 → checkpoint(agree) → human_input 事件。
         // 已有分镜 → 选项变为写库策略（replace/append/disagree/cancel）+ 覆盖警告；无 → 现状（满意/不满意）
         long existing = existingSceneCount(request.getConversation().getProjectId());
+        // 部分替换判定：方案只覆盖部分现有分镜（用户「只优化分镜N」/分镜选择卡只勾选几镜）时，
+        // 写库走 replaceSpecificScenes 只更新选中分镜，绝不删除其他分镜——警告与按钮文案须随之区分。
+        boolean partial = existing > 0 && isPartialPlan(scenes, request.getConversation().getProjectId());
         List<Map<String, Object>> actions = existing > 0
                 ? List.of(
-                    Map.of("id", "replace", "title", "先删除现有分镜再导入"),
+                    Map.of("id", "replace", "title", partial ? "更新选中分镜，其他保持不变" : "先删除现有分镜再导入"),
                     Map.of("id", "append", "title", "追加到现有分镜后面"),
                     Map.of("id", "disagree", "title", "不满意，重新生成"),
                     Map.of("id", "cancel", "title", "不生成分镜"))
@@ -234,8 +237,11 @@ public class AisplitIntentHandler implements IntentHandler {
             planText += "\n\n🔗 建议资产关联：\n" + buildMatchSummary(matches, chosen);
         }
         if (existing > 0) {
-            // 覆盖导入会删除现有分镜及其产出素材——卡片正文前置警告
-            planText = "⚠ 检测到您当前已有 " + existing + " 个分镜（含已生成的图片/视频素材），覆盖导入将全部删除。\n" + planText;
+            // 覆盖导入会删除现有分镜及其产出素材——卡片正文前置警告；部分替换时说明只更新选中分镜
+            planText = (partial
+                    ? "ℹ 只更新选中的 " + scenes.size() + " 个分镜，其他分镜及其产出素材保持不变。\n"
+                    : "⚠ 检测到您当前已有 " + existing + " 个分镜（含已生成的图片/视频素材），覆盖导入将全部删除。\n")
+                    + planText;
         }
         // 5. 整套统一推荐一套生成参数（图片+视频，LLM 预选 + 用户可改；推荐失败静默回退，卡片照常）
         AgentOrchestratorSupport.SceneParamsRecommendation rec = support.recommendSceneParams(script, request);
@@ -317,6 +323,10 @@ public class AisplitIntentHandler implements IntentHandler {
                             .map(o -> String.valueOf(o.getOrDefault("title", "")))
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
+            // 取消意图出口：动态选项标题（如「取消操作/取消分镜生成/跳过换个话题」）或 custom 文本 → 干净收尾
+            if (support.isCancelIntent(title)) {
+                return endWithoutScenes(request, "好的，已取消这次分镜生成。需要时随时再叫我。");
+            }
             return "plan".equals(kind)
                     ? handleFromPlanGate(request, supplemented, currentAssetIds(request))
                     : handleFromScriptGate(request, supplemented, currentAssetIds(request));
@@ -333,6 +343,17 @@ public class AisplitIntentHandler implements IntentHandler {
                             .map(o -> String.valueOf(o.getOrDefault("title", "")))
                             .findFirst().orElse("");
             String supplemented = title.isBlank() ? original : original + "\n（补充：" + title + "）";
+            // 取消意图出口：选项标题/custom 文本命中「取消/不生成/算了...」→ 干净收尾不再循环（LLM 兜底）
+            if (support.isCancelIntent(title)) {
+                return endWithoutScenes(request, "好的，已取消这次分镜生成。需要时随时再叫我。");
+            }
+            // 「对指定分镜优化」意图：识别到用户想选特定分镜（如「我要对指定的分镜优化/哪些分镜」）
+            // → 弹分镜选择卡（复用 assets 多选），只优化选中的分镜（写库走部分替换，保留其他分镜及其素材）
+            if (isSceneSelectionIntent(title)) {
+                if (existingSceneCount(request.getConversation().getProjectId()) > 0) {
+                    return showSceneSelectCard(request, rawRequirement(original), currentAssetIds(request));
+                }
+            }
             // 澄清后 → 剧本来源人工介入（跳过二次澄清）
             List<String> assetIds = currentAssetIds(request);
             if (assetIds.isEmpty()) {
@@ -372,6 +393,10 @@ public class AisplitIntentHandler implements IntentHandler {
             String supplemented;
             if ("has-script".equals(request.getAction())) {
                 String custom = request.getCustomText();
+                // 取消意图出口：用户填剧本时输入「取消/不弄了」→ 干净收尾
+                if (support.isCancelIntent(custom)) {
+                    return endWithoutScenes(request, "好的，已取消这次分镜生成。需要时随时再叫我。");
+                }
                 supplemented = (custom != null && !custom.isBlank())
                         ? original + "\n（用户提供的剧本：\n" + custom + "）" : original;
             } else {
@@ -383,6 +408,28 @@ public class AisplitIntentHandler implements IntentHandler {
             return handleFromScriptGate(request, supplemented, assetIds);
         }
 
+        // 分镜选择卡片续流（scene-select）：用户勾选/输入了要优化的分镜 → 只优化这些分镜
+        // （保留其他分镜及其素材，写库走部分替换 replaceSpecificScenes；不点名则全量）
+        if ("scene-select".equals(checkpoint.getAction())) {
+            String original = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
+            java.util.Set<Integer> targetNums = resolveTargetScenes(request);
+            if (targetNums == null) {
+                // 勾选/输入都没有识别到有效分镜 → 重新弹选择卡
+                return showSceneSelectCard(request, original, currentAssetIds(request));
+            }
+            if (targetNums.isEmpty()) {
+                // 「优化全部分镜」→ 现有全量逻辑
+                return handleFromScriptGate(request, original, currentAssetIds(request));
+            }
+            // 只优化点名分镜：现有分镜（指定编号）+ 用户需求 + 限定只生成这些分镜（编号不变）
+            String existing = buildExistingSceneText(request.getConversation().getProjectId(), targetNums);
+            String supplemented = "【现有分镜】\n" + existing
+                    + "\n【用户需求】\n" + original
+                    + "\n请只针对用户点名的分镜（" + targetNums + "）优化，输出方案时只包含这些分镜，"
+                    + "保持这些分镜的编号不变，不要修改/生成其他分镜。";
+            return handleFromScriptGate(request, supplemented, currentAssetIds(request));
+        }
+
         // 卡片1：分镜处理方式（scene-mode）——基于现有优化 / 全新创建 / 不生成
         if ("scene-mode".equals(checkpoint.getAction())) {
             String action = request.getAction();
@@ -391,11 +438,32 @@ public class AisplitIntentHandler implements IntentHandler {
                 return endWithoutScenes(request, "好的，本次不生成分镜。需要时可以随时再让我生成。");
             }
             if ("scene-mode-optimize".equals(action)) {
-                // 基于现有分镜优化：现有分镜文本 + 原始需求拼入剧本优化 gate 输入
-                String existing = buildExistingSceneText(request.getConversation().getProjectId());
+                // 基于现有分镜优化：识别用户需求里的「分镜N」——若点名了某个分镜，只拼该分镜优化，
+                // 方案只含该分镜 → 写库走部分替换（保留其他分镜）；否则现有逻辑拼全部。
+                // 也从 plan 里尝试恢复上一轮 scene-regenerate 的目标编号（scene-regenerate 无编号时全量）。
+                java.util.Set<Integer> targetNums = new java.util.HashSet<>();
+                java.util.regex.Matcher m2 = java.util.regex.Pattern.compile("分镜\\s*(\\d+)").matcher(original);
+                while (m2.find()) targetNums.add(Integer.parseInt(m2.group(1)));
+                // 用户想选特定分镜（原文含「指定/哪些分镜」但没点名编号）→ 弹分镜选择卡
+                if (targetNums.isEmpty() && isSceneSelectionIntent(original)) {
+                    if (existingSceneCount(request.getConversation().getProjectId()) > 0) {
+                        return showSceneSelectCard(request, rawRequirement(original), currentAssetIds(request));
+                    }
+                }
+                String existing;
+                if (targetNums.isEmpty()) {
+                    existing = buildExistingSceneText(request.getConversation().getProjectId());
+                } else {
+                    existing = buildExistingSceneText(request.getConversation().getProjectId(), targetNums);
+                }
                 String supplemented = "【现有分镜】\n" + existing
-                        + "\n【用户需求】\n" + original
-                        + "\n请在保留现有分镜合理结构的基础上，按用户需求优化并生成新的分镜方案。";
+                        + "\n【用户需求】\n" + original;
+                if (targetNums.isEmpty()) {
+                    supplemented += "\n请在保留现有分镜合理结构的基础上，按用户需求优化并生成新的分镜方案。";
+                } else {
+                    supplemented += "\n请只针对用户点名的分镜（" + targetNums + "）优化，输出方案时只包含这些分镜，"
+                            + "保持这些分镜的编号不变，不要修改/生成其他分镜。";
+                }
                 return handleFromClarifyGate(request, supplemented, currentAssetIds(request));
             }
             // scene-mode-fresh：全新创建，正常流程
@@ -406,6 +474,10 @@ public class AisplitIntentHandler implements IntentHandler {
         if ("scene-regenerate".equals(checkpoint.getAction())) {
             String prevPlan = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
             String opinion = request.getCustomText();
+            // 取消意图出口：调整意见填「算了/不弄了/取消」→ 干净收尾
+            if (support.isCancelIntent(opinion)) {
+                return endWithoutScenes(request, "好的，已取消这次分镜生成。需要时随时再叫我。");
+            }
             String supplemented = prevPlan + "\n【用户调整意见】\n"
                     + (opinion == null || opinion.isBlank() ? "请重新生成一版更合适的方案" : opinion);
             return handleFromScriptGate(request, supplemented, currentAssetIds(request));
@@ -438,11 +510,20 @@ public class AisplitIntentHandler implements IntentHandler {
                     "human_input",
                     List.of(Map.of("id", "custom", "title", "✍ 自定义输入"))));
         }
-        // 执行写分镜（EXECUTE step）；replace=同事务清空现有再写（覆盖）/ 其余=追加（现状）
+        // 执行写分镜（EXECUTE step）。
+        // 部分替换判断（2026-08-28）：用户「只针对分镜N优化」时，方案 items 的 scene_number 构成现有分镜的
+        // 真子集（< 现有编号集合）——此时绝不能 replaceScenes（会清空全部/覆盖其他分镜），改用部分替换
+        // updateScenesByNumber，只更新指定编号并保留其他分镜及其素材关联。
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
-        Map<String, Object> writeResult = "replace".equals(chosen)
-                ? safeReplaceScenes(request.getConversation().getProjectId(), items)
-                : safeWriteScenes(request.getConversation().getProjectId(), items);
+        boolean partialReplace = isPartialSubset(items, request.getConversation().getProjectId());
+        Map<String, Object> writeResult;
+        if ("replace".equals(chosen) && partialReplace) {
+            writeResult = safeUpdateScenesByNumber(request.getConversation().getProjectId(), items);
+        } else {
+            writeResult = "replace".equals(chosen)
+                    ? safeReplaceScenes(request.getConversation().getProjectId(), items)
+                    : safeWriteScenes(request.getConversation().getProjectId(), items);
+        }
         int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
         // 写库成功：不满意调整计数清零（新一轮生成起点）+ 用户确认的整套推荐参数应用到全部分镜
         support.clearRegenCount(request.getConversation().getId());
@@ -465,20 +546,19 @@ public class AisplitIntentHandler implements IntentHandler {
         String msg = count > 0
                 ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
                 : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
-        // 4.3 自动审查：写库成功且本链开启 auto-review → 不本链 resumeStage 收尾，
-        // 改在 request 上声明 handoff 到 intent-scene-review（HandlerDelegatingSpecialist 读后转
-        // SpecialistResult.handoff），scene-review 接管发「📋 分镜审查结果」卡（暴露缺图缺视频、补图补视频）。
-        // 开关默认关闭 → 走现状 resumeStage，行为零变化。
-        if (count > 0 && agentConfig.getAutoReviewChains().contains("aisplit")) {
-            request.setHandoffTarget("intent-scene-review");
-            request.setHandoffState(Map.<String, Object>of("projectId", request.getConversation().getProjectId()));
-            return msg;
-        }
+        // 4.3 自动审查（2026-08-28 改为「软提示」）：不再写库成功即强制 handoff 到 scene-review——
+        // 那样用户会无条件被抛进「分镜审查结果」卡，之后任何含"分镜"的消息又触发 review，形成死循环。
+        // 改为正常 resumeStage 收尾（发「已生成 N 个分镜」确认消息），并在 message 里提示可手动审查，
+        // 用户想查看缺图缺视频时主动说「审查分镜」即由意图识别正常路由到 scene-review。
+        String msg2 = count > 0
+                ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表。\n\n"
+                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？可以说「审查分镜」。"
+                : msg;
         support.resumeStage(request, "正在写入分镜…", Map.of(
-                "content", msg,
+                "content", msg2,
                 "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
                 "sceneCount", totalScenes));
-        return msg;
+        return msg2;
     }
 
     /** 不写库收尾：message + message_end（sceneCount=-1，前端不触发分镜列表刷新） */
@@ -491,6 +571,102 @@ public class AisplitIntentHandler implements IntentHandler {
     /** 本轮已确认的资产 ID（sessionAssets 快照；无记录返回空列表） */
     private List<String> currentAssetIds(OrchestrationRequest request) {
         return support.getSessionAssets(request.getConversation().getId());
+    }
+
+    /** 是否为「指定/选择/哪些分镜」意图（需要让用户选分镜，而非全量优化）；命中返回 true */
+    private boolean isSceneSelectionIntent(String text) {
+        if (text == null || text.isBlank()) return false;
+        return java.util.regex.Pattern.compile(
+                "指定\\s*分镜|指定的\\s*分镜|选择\\s*分镜|哪些\\s*分镜|部分\\s*分镜|"
+                + "只优化|特定\\s*分镜|优化\\s*特定|哪些\\s*镜头|部分\\s*镜头|指定\\s*镜头|"
+                + "挑\\s*几|选\\s*几|哪几|哪些|某些\\s*分镜|少数\\s*分镜")
+                .matcher(text).find();
+    }
+
+    /**
+     * 从补充需求文本中提取用户原始需求（剥掉「【现有分镜】…【用户需求】」与追加的全量生成指令；
+     * 不命中【用户需求】标记时原样返回）。避免把「生成新的分镜方案」这类全量语气带进指定分镜优化。
+     */
+    private String rawRequirement(String text) {
+        if (text == null || text.isBlank()) return text;
+        String t = text;
+        int idx = t.indexOf("【用户需求】");
+        if (idx >= 0) {
+            t = t.substring(idx + "【用户需求】".length()).trim();
+            int cut = t.indexOf("请在保留现有分镜合理结构的基础上");
+            if (cut > 0) t = t.substring(0, cut).trim();
+        }
+        return t;
+    }
+
+    /**
+     * 弹「选择要优化的分镜」卡片：复用前端 human_input 的 assets 多选（前端零改动），
+     * 选中的分镜编号以 assetIds 回传。卡片正文列出各分镜概要，勾选清单同源。
+     */
+    private String showSceneSelectCard(OrchestrationRequest request, String content, List<String> currentAssetIds) {
+        var list = new java.util.ArrayList<>(storyboardClient.getProjectScenes(request.getConversation().getProjectId()));
+        if (list.isEmpty()) {
+            // 无现有分镜可选 → 直接走全量生成（兜底，不阻塞）
+            return handleFromScriptGate(request, content, currentAssetIds);
+        }
+        list.sort(java.util.Comparator.comparingInt(Scene::getSceneNumber));
+        StringBuilder sb = new StringBuilder("请选择要优化的分镜（可勾选多个，也可点「✍自定义输入」填写编号，如：分镜1、分镜3）：\n");
+        List<Map<String, Object>> scenePayload = new java.util.ArrayList<>();
+        for (Scene s : list) {
+            String num = String.valueOf(s.getSceneNumber());
+            String c = s.getScriptContent();
+            if (c != null && !c.isBlank()) {
+                String t = c.length() > 60 ? c.substring(0, 60) + "…" : c;
+                sb.append("分镜").append(s.getSceneNumber()).append("：").append(t).append("\n");
+            }
+            String name = "分镜 " + num
+                    + (c != null && !c.isBlank() ? " · " + (c.length() > 26 ? c.substring(0, 26) + "…" : c) : "");
+            scenePayload.add(Map.of("id", num, "name", name, "type", "scene"));
+        }
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                sb.toString(), "scene-select",
+                List.of(Map.of("content", content, "assetIds", currentAssetIds == null ? List.of() : currentAssetIds)),
+                "human_input",
+                List.of(Map.of("id", "scene-confirm", "title", "确认所选分镜"),
+                        Map.of("id", "all-scenes", "title", "优化全部分镜"),
+                        Map.of("id", "custom", "title", "✍ 自定义输入")),
+                List.of(), Map.of(), Map.of(), List.of(), List.of(),
+                scenePayload));
+    }
+
+    /**
+     * 解析分镜选择卡的选中/输入编号：
+     * null=未识别到有效分镜（重新弹选择卡）；空集=「优化全部」；非空=用户点名的分镜编号。
+     */
+    private java.util.Set<Integer> resolveTargetScenes(OrchestrationRequest request) {
+        String action = request.getAction();
+        if ("all-scenes".equals(action)) {
+            return new java.util.LinkedHashSet<>(); // 空集 = 全量
+        }
+        java.util.Set<Integer> nums = new java.util.LinkedHashSet<>();
+        // 1) 勾选的分镜（assetIds = 选中分镜编号）
+        if (request.getAssetIds() != null) {
+            for (String id : request.getAssetIds()) {
+                if (id == null || id.isBlank()) continue;
+                try { nums.add(Integer.parseInt(id.trim())); } catch (NumberFormatException ignore) {}
+            }
+        }
+        // 2) action 形如 scene-N（单选项回传）
+        if (nums.isEmpty() && action != null && action.startsWith("scene-")) {
+            try { nums.add(Integer.parseInt(action.substring("scene-".length()))); } catch (NumberFormatException ignore) {}
+        }
+        // 3) 自定义输入文本里的「分镜N」；含「全部/所有」→ 全量
+        if (nums.isEmpty() && "custom".equals(action)) {
+            String ct = request.getCustomText();
+            if (ct != null && !ct.isBlank()) {
+                if (java.util.regex.Pattern.compile("全部|所有|全走|全优化|不分镜").matcher(ct).find()) {
+                    return new java.util.LinkedHashSet<>();
+                }
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("分镜\\s*(\\d+)").matcher(ct);
+                while (m.find()) nums.add(Integer.parseInt(m.group(1)));
+            }
+        }
+        return nums.isEmpty() ? null : nums;
     }
 
     /** 关联摘要文本（方案确认卡片展示）：每镜一行「镜N：资产名、资产名」 */
@@ -553,6 +729,19 @@ public class AisplitIntentHandler implements IntentHandler {
         return sb.toString();
     }
 
+    /** 现有分镜文本（只取指定 scene_number 的分镜；供「只优化分镜N」拼入 LLM，编号保持原值） */
+    private String buildExistingSceneText(String projectId, java.util.Set<Integer> targetNums) {
+        var list = new java.util.ArrayList<>(storyboardClient.getProjectScenes(projectId));
+        list.sort(java.util.Comparator.comparingInt(Scene::getSceneNumber));
+        StringBuilder sb = new StringBuilder();
+        for (Scene s : list) {
+            if (targetNums.contains(s.getSceneNumber()) && s.getScriptContent() != null && !s.getScriptContent().isBlank()) {
+                sb.append("【分镜").append(s.getSceneNumber()).append("】").append(s.getScriptContent()).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
     /** 包装 AgentTools：捕获异常转 error Map（保持 handler 错误处理语义） */
     private Map<String, Object> safeWriteScenes(String projectId, List<AgentSceneItem> scenes) {
         try { return agentTools.writeScenes(projectId, scenes); }
@@ -561,5 +750,53 @@ public class AisplitIntentHandler implements IntentHandler {
     private Map<String, Object> safeReplaceScenes(String projectId, List<AgentSceneItem> scenes) {
         try { return agentTools.replaceScenes(projectId, scenes); }
         catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
+    }
+    /** 包装 AgentTools.replaceSpecificScenes：部分替换（只更新指定编号，保留其他分镜） */
+    private Map<String, Object> safeUpdateScenesByNumber(String projectId, List<AgentSceneItem> scenes) {
+        try { return agentTools.replaceSpecificScenes(projectId, scenes); }
+        catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
+    }
+
+    /**
+     * 部分替换判定：方案 items 的 scene_number 集合是否为项目现有分镜编号集合的<b>真子集</b>。
+     * true → 用户只针对部分分镜（如「只优化分镜9」→ 方案只有 9），写库应部分替换，保留其他分镜；
+     * false → 全新创建/覆盖全部，走原有 replace/write。
+     */
+    private boolean isPartialSubset(List<AgentSceneItem> items, String projectId) {
+        if (items == null || items.isEmpty()) return false;
+        java.util.Set<Integer> itemNums = new java.util.HashSet<>();
+        for (AgentSceneItem s : items) {
+            itemNums.add(s.sceneNumber());
+        }
+        if (itemNums.isEmpty()) return false;
+        java.util.Set<Integer> existingNums = new java.util.HashSet<>();
+        for (Scene s : storyboardClient.getProjectScenes(projectId)) {
+            existingNums.add(s.getSceneNumber());
+        }
+        // 真子集：方案编号非空、且方案编号 ⊆ 现有编号、且现有编号里存在方案没覆盖的（否则是全覆盖/新增）
+        if (existingNums.isEmpty()) return false;
+        boolean allCovered = existingNums.containsAll(itemNums);
+        boolean isSubset = itemNums.size() < existingNums.size();
+        return allCovered && isSubset;
+    }
+
+    /**
+     * 方案 scenes（List&lt;Map&gt;）的 scene_number 集合是否为项目现有分镜编号的<b>真子集</b>。
+     * 与 {@link #isPartialSubset} 判定一致，但接收计划阶段尚未转 AgentSceneItem 的 Map 列表，
+     * 供确认卡覆盖警告/按钮文案区分「部分更新 vs 全量覆盖」。
+     */
+    private boolean isPartialPlan(List<Map<String, Object>> scenes, String projectId) {
+        if (scenes == null || scenes.isEmpty()) return false;
+        java.util.Set<Integer> itemNums = new java.util.HashSet<>();
+        for (Map<String, Object> s : scenes) {
+            if (s.get("sceneNumber") instanceof Number n) itemNums.add(n.intValue());
+        }
+        if (itemNums.isEmpty()) return false;
+        java.util.Set<Integer> existingNums = new java.util.HashSet<>();
+        for (Scene s : storyboardClient.getProjectScenes(projectId)) {
+            existingNums.add(s.getSceneNumber());
+        }
+        if (existingNums.isEmpty()) return false;
+        return existingNums.containsAll(itemNums) && itemNums.size() < existingNums.size();
     }
 }

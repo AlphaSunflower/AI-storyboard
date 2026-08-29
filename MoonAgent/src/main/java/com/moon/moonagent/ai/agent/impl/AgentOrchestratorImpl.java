@@ -4,6 +4,7 @@ import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.ai.agent.AgentOrchestrator;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +48,10 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             String answer = planGraph.run(conversation, content, picUrls, assetIds, emitter);
             log.info("AgentOrchestrator(PlanGraph): conversationId={} 编排完成", conversation.getId());
             return answer;
+        } catch (AgentInterruptException e) {
+            // 用户主动打断：静默收尾（不补发友好错误、不落库），返回空串表示本轮无回答
+            log.info("AgentOrchestrator 编排被用户打断: conversationId={}", conversation.getId());
+            return "";
         } catch (Exception e) {
             log.error("AgentOrchestrator 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             // 上游错误不直接展示：LLM 翻译成友好中文回复（踩线→改措辞 / 网络→稍后重试），正常 message 收尾
@@ -99,6 +104,10 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.info("AgentOrchestrator(PlanGraph).resume: conversationId={} cpAction={} action={} routingHint={} 完成",
                     conversation.getId(), cp.getAction(), action, routingHint);
             return answer;
+        } catch (AgentInterruptException e) {
+            // 用户主动打断：静默收尾（不补发友好错误、不落库），返回空串表示本轮无回答
+            log.info("AgentOrchestrator.resume 被用户打断: conversationId={}", conversation.getId());
+            return "";
         } catch (Exception e) {
             log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             // 上游错误不直接展示：LLM 翻译成友好中文回复，正常 message 收尾（同 run）

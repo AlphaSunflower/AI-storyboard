@@ -23,6 +23,15 @@ public interface AgentGenerationService {
     int replaceScript(String projectId, List<AgentSceneItem> scenes);
 
     /**
+     * 只替换指定 scene_number 的分镜（部分替换）：更新这些编号的现有分镜（保留 id 与素材关联），
+     * 不存在则新插入；不在 {@code scenes} 里出现的其他分镜完全不动。
+     * 用于「只针对分镜N优化」——绝不清空/覆盖未指定的分镜。
+     *
+     * @return 被更新/插入的分镜数
+     */
+    int updateScenesByNumber(String projectId, List<AgentSceneItem> scenes);
+
+    /**
      * 生图并落库（支持 quality/n 多张）。
      * sceneId 非空 → 更新真实分镜（返回 imageUrls）；为空 → 每张图落一条 agent_assets（返回 imageUrls + assetIds）。
      * mode="edit" 走图改图（generatedImageUrl 为源图，恒单张）。

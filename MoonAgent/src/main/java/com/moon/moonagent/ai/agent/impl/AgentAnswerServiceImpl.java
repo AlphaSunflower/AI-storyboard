@@ -5,7 +5,9 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.ai.agent.AgentAnswerService;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
+import com.moon.moonagent.ai.agent.handler.AgentSessionState;
 import com.moon.moonagent.ai.AiConfigProperties;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -42,6 +44,8 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     private final FileStorageService fileStorageService;
+    /** 会话级打断标志（「停止生成」按钮 → 中断主回答流式打字机） */
+    private final AgentSessionState sessionState;
 
     /** 主回答 ChatClient（懒加载，默认视觉模型，超时 60s） */
     private volatile ChatClient chatClient;
@@ -72,6 +76,10 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                 .content()
                 .doOnNext(chunk -> {
                     if (chunk == null || chunk.isBlank()) return;
+                    // 打断：用户点击「停止生成」→ 中断主回答流式打字机，异常上抛到编排壳层收尾
+                    if (sessionState.isInterrupted(conversation.getId())) {
+                        throw new AgentInterruptException();
+                    }
                     sb.append(chunk);
                     try {
                         emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", chunk))));
@@ -80,6 +88,8 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                     }
                 })
                 .blockLast();
+        } catch (AgentInterruptException e) {
+            throw e; // 用户打断：跳过降级文案补发，交给编排壳层收尾
         } catch (Exception e) {
             log.error("AgentAnswerService 流式回答失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
         }

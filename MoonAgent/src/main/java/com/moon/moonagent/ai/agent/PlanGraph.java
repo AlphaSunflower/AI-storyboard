@@ -121,6 +121,7 @@ public class PlanGraph {
             Map.entry("scene-mode", "intent-aisplit"),
             Map.entry("requirement-clarify", "intent-aisplit"),
             Map.entry("scene-regenerate", "intent-aisplit"),
+            Map.entry("scene-select", "intent-aisplit"),
             Map.entry("script-source", "intent-aisplit"),
             Map.entry("video-clarify", "intent-video"),
             Map.entry("video-source", "intent-video"),
@@ -194,6 +195,29 @@ public class PlanGraph {
                             conversation.getId(), intentResult.type(), intentResult.confidence(), intentResult.source());
                     if (!"intent-aisplit".equals(intentResult.type()) && !"intent-pic".equals(intentResult.type())) {
                         support.resetClarify(conversation.getId());
+                    }
+                    // 上下文意图延续（2026-08-28）：LLM 低置信度（结果不明确）且当前 query 是短表达
+                    // （反悔/延续句，如「骗你的/我还是想生成/继续/做吧」）时，回看最近一条用户消息——
+                    // 若它命中某个非 other 意图（如上一轮在分镜链路），就把当前 query 延续到该意图，
+                    // 而不是弹「没太确定你想做什么」的澄清卡。让用户能通过上下文回到分镜链路。
+                    boolean lowConf = intentResult.confidence() < agentConfig.getIntentThreshold();
+                    if (lowConf && content != null && content.trim().length() <= 8) {
+                        String anchorIntent = null;
+                        for (int i = recent.size() - 1; i >= 0; i--) {
+                            AgentMessage m = recent.get(i);
+                            if (m != null && "user".equals(m.getRole())) {
+                                anchorIntent = intentRecognitionService.ruleMatch(m.getContent());
+                                break;
+                            }
+                        }
+                        if (anchorIntent != null && !IntentRecognitionService.FALLBACK_TYPE.equals(anchorIntent)) {
+                            log.info("PlanGraph: 上下文意图延续 {} -> {}（最近用户消息命中规则）", intentResult.type(), anchorIntent);
+                            return Map.of(
+                                    K_INTENT, anchorIntent,
+                                    K_CONFIDENCE, 1.0,
+                                    K_LOW_CONFIDENCE, false,
+                                    K_SWITCH, false);
+                        }
                     }
                     return Map.of(
                             K_INTENT, intentResult.type(),
@@ -426,13 +450,28 @@ public class PlanGraph {
         emittersByThread.put(conversation.getId(), emitter);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
-            Optional<OverAllState> result = compiledGraph.invoke(Map.of(
-                    K_CONVERSATION, conversation,
-                    K_CONTENT, content,
-                    K_PIC_URLS, picUrls == null ? java.util.List.of() : picUrls,
-                    K_ASSET_IDS, assetIds == null ? java.util.List.of() : assetIds,
-                    K_RESUME, false,
-                    K_LAST_MESSAGE, ""), config);
+            // 关键：run() 是全新消息，必须重置 resume 专用状态键——graph-core 的 CompileConfig 默认
+            // 注册 MemorySaver，GraphRunnerContext.initializeFromStart → getInitialState 会按
+            // threadId(=conversationId) 把上一次 resume 留下的完整 OverAllState 取出来再盖上新 inputs。
+            // run() 的 inputs 若不带 submitAction/cpAction 等键，它们会保留上次 resume 的 stale 值
+            // （如 submitAction=cancel、cpAction=agree）→ 新消息被误判成「取消续流」→ 反复回
+            // 「已取消本次分镜导入」（2026-08-28 实测）。此处显式清空全部 resume 键。
+            Map<String, Object> inputs = new HashMap<>();
+            inputs.put(K_CONVERSATION, conversation);
+            inputs.put(K_CONTENT, content);
+            inputs.put(K_PIC_URLS, picUrls == null ? java.util.List.of() : picUrls);
+            inputs.put(K_ASSET_IDS, assetIds == null ? java.util.List.of() : assetIds);
+            inputs.put(K_RESUME, false);
+            inputs.put(K_SUBMIT_ACTION, "");
+            inputs.put(K_CP_ACTION, "");
+            inputs.put(K_CP_PLAN, "");
+            inputs.put(K_CUSTOM_TEXT, "");
+            inputs.put(K_ROUTING_HINT, "");
+            inputs.put(K_PARAMS, Map.of());
+            inputs.put(K_HANDOFF_TARGET, "");
+            inputs.put(K_HANDOFF_STATE, Map.of());
+            inputs.put(K_LAST_MESSAGE, "");
+            Optional<OverAllState> result = compiledGraph.invoke(inputs, config);
             return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
         } finally {
             emittersByThread.remove(conversation.getId());

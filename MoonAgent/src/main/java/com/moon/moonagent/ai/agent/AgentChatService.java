@@ -123,4 +123,12 @@ public interface AgentChatService {
      * @return checkpoint 恢复数据（formToken/formContent/actions/expirationTime + 可选 models/assets）；null=无待处理
      */
     Map<String, Object> getPendingCheckpoint(String conversationId);
+
+    /**
+     * 打断当前会话的生成（「停止生成」按钮）：校验归属 → 置位会话级 interrupt 标志。
+     * 编排的流式循环/阶段边界检测到后协作式取消——中断打字机、跳过被截断回答的落库、提前释放会话锁。
+     *
+     * @return true（命中断开请求；无论是否有活跃编排均安全返回）
+     */
+    boolean interrupt(String userId, String conversationId);
 }

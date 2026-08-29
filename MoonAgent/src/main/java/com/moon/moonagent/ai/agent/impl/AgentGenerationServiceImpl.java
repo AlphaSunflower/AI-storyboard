@@ -74,6 +74,51 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     }
 
     /**
+     * 只替换指定 scene_number 的分镜（部分替换，2026-08-28）：更新这些编号的现有分镜（保留 id 与素材关联），
+     * 不存在则新插入；不在 {@code scenes} 里出现的其他分镜完全不动。
+     * 用于「只针对分镜N优化」——绝不清空/覆盖未指定的分镜（原 replaceScript 会 deleteProjectScenes 清空全部）。
+     */
+    @Override
+    public int updateScenesByNumber(String projectId, List<AgentSceneItem> scenes) {
+        if (scenes == null || scenes.isEmpty()) return 0;
+        Map<Integer, Scene> byNumber = new HashMap<>();
+        for (Scene s : storyboardClient.getProjectScenes(projectId)) {
+            byNumber.put(s.getSceneNumber(), s);
+        }
+        int updated = 0;
+        for (var item : scenes) {
+            Scene newScene = new Scene();
+            newScene.setProjectId(projectId);
+            newScene.setSceneNumber(item.sceneNumber());
+            newScene.setScriptContent(item.scriptContent());
+            newScene.setImagePrompt(item.imagePrompt());
+            newScene.setVideoPrompt(item.videoPrompt());
+            newScene.setNegativePrompt(item.negativePrompt());
+            newScene.setCameraMovement(item.cameraMovement());
+            newScene.setShotType(item.shotType());
+            newScene.setSoundDesign(item.soundDesign());
+            Scene existing = byNumber.get(item.sceneNumber());
+            if (existing != null) {
+                // 同编号已存在 → 更新（带原 id，保留 imageUrl/videoUrl/素材关联等已生成资产不丢）
+                newScene.setId(existing.getId());
+                newScene.setImageUrl(existing.getImageUrl());
+                newScene.setVideoUrl(existing.getVideoUrl());
+                newScene.setImageStatus(existing.getImageStatus());
+                newScene.setVideoStatus(existing.getVideoStatus());
+                newScene.setVideoTaskId(existing.getVideoTaskId());
+                newScene.setImageTaskId(existing.getImageTaskId());
+                storyboardClient.updateScene(newScene);
+            } else {
+                // 不存在 → 新插入
+                storyboardClient.insertScene(newScene);
+            }
+            updated++;
+        }
+        log.info("Agent 生成编排：按编号部分替换 {} 个分镜到项目 {}", updated, projectId);
+        return updated;
+    }
+
+    /**
      * 生图并落库（支持 quality/n 多张）。
      * sceneId 非空 → 更新真实分镜（返回 imageUrls）；为空 → 每张图落一条 agent_assets（返回 imageUrls + assetIds）。
      * mode="edit" 走图改图（generatedImageUrl 为源图，恒单张）。

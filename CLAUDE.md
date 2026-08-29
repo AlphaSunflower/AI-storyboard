@@ -4,7 +4,7 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 
 ## Tech Stack
 
-- **Backend**: Spring Boot 4.0.0, JDK 21, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, JDK HttpClient
+- **Backend**: Spring Boot 4.1.1, JDK 21, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, JDK HttpClient
 - **Frontend**: React 19 + TypeScript 6 + Vite 8, Zustand 5, Tailwind CSS 4, Axios (timeout 120s), React Router 7
 - **AI**: 全部模型调用统一走 **LLM 网关**（AILLMGateway，:8083，`LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`）；chat/文生图/图改图/视频均经网关转发（生图 `gpt-image-2`、视觉 `gemini-3-flash-preview`、视频 `MiniMax-H3`），协议转换与上游密钥下沉网关
 - **Auth**: JWT (jjwt), scrypt password hashing (lambdaworks 1.4.0), cross-system token exchange via `/api/auth/unlogin`
@@ -174,7 +174,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Spring AI 2.0 (LLM 调用层，2026-08-11 迁移)
 
-**依赖**：`pom.xml` 引入 `spring-ai-bom:2.0.0`（dependencyManagement import）+ `spring-ai-starter-model-openai`（SB 4.0.0 兼容；泄漏断言正则必须限定 groupId `org\.springframework\.ai:spring-ai[^:]*:jar:(1\.|0\.)`）。
+**依赖**：`pom.xml` 引入 `spring-ai-bom:2.0.0`（dependencyManagement import）+ `spring-ai-starter-model-openai`（SB 4.1.1 兼容；泄漏断言正则必须限定 groupId `org\.springframework\.ai:spring-ai[^:]*:jar:(1\.|0\.)`）。
 
 **配置**（`application.yml`，指向 LLM 网关，复用 `ai.gateway` 同源 env 变量）：
 ```yaml

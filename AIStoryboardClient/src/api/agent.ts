@@ -142,6 +142,10 @@ export const agentApi = {
   // 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）
   getPendingCheckpoint: (conversationId: string) =>
     client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
+
+  // 打断当前会话的生成（「停止生成」按钮触发）：后端置位会话级 interrupt 标志 → 编排协作式取消
+  interrupt: (conversationId: string) =>
+    client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
 };
 
 /**
@@ -220,14 +224,16 @@ export async function streamChat(
   picUrls: string[],
   onEvent: (e: SseEvent) => void,
   assetIds?: string[],
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ content, picUrls: picUrls ?? [], assetIds: assetIds ?? [] }),
+    signal,
   });
-  await consumeSse(res, onEvent);
+  await consumeSse(res, onEvent, signal);
 }
 
 /** HITL 表单提交并续流 */
@@ -240,18 +246,20 @@ export async function submitForm(
   customText?: string,
   params?: Record<string, string>,
   assetIds?: string[],
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {}, assetIds: assetIds ?? [] }),
+    signal,
   });
-  await consumeSse(res, onEvent);
+  await consumeSse(res, onEvent, signal);
 }
 
 /** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
-async function consumeSse(res: Response, onEvent: (e: SseEvent) => void): Promise<void> {
+async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void> {
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.json()).message ?? ''; } catch { /* ignore */ }
@@ -263,6 +271,7 @@ async function consumeSse(res: Response, onEvent: (e: SseEvent) => void): Promis
   let buffer = '';
   try {
     for (;;) {
+      if (signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });

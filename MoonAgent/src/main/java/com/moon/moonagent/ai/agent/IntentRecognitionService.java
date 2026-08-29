@@ -31,4 +31,10 @@ public interface IntentRecognitionService {
      * @return 意图识别结果；任何失败返回 {@link #FALLBACK_TYPE} + 置信度 0
      */
     IntentResult recognize(String query, List<AgentMessage> recentMessages);
+
+    /**
+     * 仅规则前置匹配（不调 LLM）：返回首个命中的意图类型；未命中返回 null。
+     * 供上下文意图延续用（对历史消息做轻量规则判定，避免递归调 LLM）。
+     */
+    String ruleMatch(String text);
 }

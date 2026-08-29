@@ -149,6 +149,12 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.confirmImageDone(auth.getName(), id));
     }
 
+    /** 打断当前会话的生成（「停止生成」按钮触发）：置位会话级 interrupt 标志 → 编排协作式取消 */
+    @PostMapping("/conversations/{id}/interrupt")
+    public ApiResponse<Boolean> interrupt(Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(chatService.interrupt(auth.getName(), id));
+    }
+
     /** 流式发送消息（SSE） */
     @PostMapping(value = "/conversations/{id}/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamMessage(Authentication auth, @PathVariable String id,

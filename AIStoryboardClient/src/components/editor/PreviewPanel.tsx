@@ -153,6 +153,8 @@ export function PreviewPanel() {
   const clearSceneParams = useProjectStore((s) => s.clearSceneParams);
   const generateImage = useProjectStore((s) => s.generateImage);
   const generateVideo = useProjectStore((s) => s.generateVideo);
+  const pollVideoTask = useProjectStore((s) => s.pollVideoTask);
+  const refreshScenes = useProjectStore((s) => s.refreshScenes);
   const generatingImage = useProjectStore((s) => (selectedSceneId ? !!s.generatingImage[selectedSceneId] : false));
   const generatingVideo = useProjectStore((s) => (selectedSceneId ? !!s.generatingVideo[selectedSceneId] : false));
   const imageModelOptions = useProjectStore((s) => s.imageModelOptions);
@@ -357,7 +359,31 @@ export function PreviewPanel() {
     }
   };
 
-  // tab button style
+  // 手动拉取视频：视频创建成功但轮询失败/放弃时，用已落库的 videoTaskId 重新走完整闭环（查上游→下载→落库 videoUrl/status）。
+  // 仅当 scene.videoTaskId 有值时才可用——创建本身抛错时该字段为空，只能重试生成。
+  const handleManualFetchVideo = async () => {
+    if (!scene || !scene.videoTaskId) return;
+    try {
+      await pollVideoTask(scene.id, scene.videoTaskId);
+      // pollVideoTask 终态时内部 loadProject 刷新 scene（completed/failed 都会更新 UI）
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '手动拉取视频失败');
+      alert(msg);
+    }
+  };
+
+  // 刷新图片状态：图片为同步生成（后端在请求线程内完成并落库），客户端刷新/重登会中断请求但后端仍会完成；
+  // 点此重载 scenes 拾取后端已落库的结果（若确实失败则保持 failed，可走重试）。
+  const handleRefreshImage = async () => {
+    try {
+      await refreshScenes();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (err instanceof Error ? err.message : '刷新图片状态失败');
+      alert(msg);
+    }
+  };
   const tabStyle = (tab: PreviewTab): React.CSSProperties => ({
     padding: '6px 14px',
     fontSize: 12,
@@ -557,7 +583,17 @@ export function PreviewPanel() {
                 }}
               >
                 {scene.imageStatus === 'generating' ? '正在生成图片...'
-                  : scene.imageStatus === 'failed' ? '生成失败，点击下方重试'
+                  : scene.imageStatus === 'failed' ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                      <span>生成失败，点击下方重试</span>
+                      <button
+                        onClick={() => void handleRefreshImage()}
+                        style={{ ...btnGhost, cursor: 'pointer' }}
+                      >
+                        刷新状态
+                      </button>
+                    </div>
+                  )
                   : '未生成图片'}
               </div>
             )}
@@ -725,7 +761,20 @@ export function PreviewPanel() {
                 }}
               >
                 {scene.videoStatus === 'generating' ? '正在生成视频...'
-                  : scene.videoStatus === 'failed' ? '生成失败，点击下方重试'
+                  : scene.videoStatus === 'failed' ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                      <span>生成失败，点击下方重试</span>
+                      {scene.videoTaskId && (
+                        <button
+                          onClick={() => void handleManualFetchVideo()}
+                          style={{ ...btnGhost, cursor: 'pointer' }}
+                          title="用已创建的视频任务重新拉取结果（若上游已完成则直接拿回视频）"
+                        >
+                          手动拉取视频
+                        </button>
+                      )}
+                    </div>
+                  )
                   : '未生成视频'}
               </div>
             )}

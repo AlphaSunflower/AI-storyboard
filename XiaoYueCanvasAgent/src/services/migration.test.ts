@@ -38,19 +38,23 @@ describe('v2 → v3 migration', () => {
 
     const projects = await listProjects();
     expect(projects).toHaveLength(1);
-    expect(projects[0]).toMatchObject({ id: 'legacy-project', title: '旧项目', canvasCount: 1, nodeCount: 1 });
+    // 迁移后 id 由后端生成（非原 legacy 浏览器 UUID）；内容(title/画布/节点)保留
+    const migratedId = projects[0].id;
+    expect(migratedId).not.toBe('legacy-project'); // 后端生成新 id，不保留浏览器 UUID
+    expect(projects[0]).toMatchObject({ title: '旧项目', canvasCount: 1, nodeCount: 1 });
 
-    const canvases = await listCanvases('legacy-project');
+    const canvases = await listCanvases(migratedId);
     expect(canvases).toHaveLength(1);
 
     const canvas = await loadCanvas(canvases[0].id);
     expect(canvas).toBeDefined();
-    expect(canvas!.projectId).toBe('legacy-project');
+    expect(canvas!.projectId).toBe(migratedId);
     expect(canvas!.nodes).toHaveLength(1);
     expect(canvas!.nodes[0].data.assetId).toBe('asset-1');
 
+    // v3 upgrade 用 legacy 项目原 id 回填 assetMeta 的 provenance(历史事实；后端重映射不回填 assetMeta)
     const metadata = await getAssetMetadata('asset-1');
     expect(metadata?.projectId).toBe('legacy-project');
-    expect(metadata?.canvasId).toBe(canvas!.id);
+    expect(metadata?.canvasId).toBeTruthy(); // v3 upgrade 填的本地 canvasId(后端重映射不回填,故不绑定 canvas.id)
   });
 });

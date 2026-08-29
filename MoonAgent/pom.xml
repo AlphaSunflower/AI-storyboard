@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.0</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
     <groupId>com.moon</groupId>
@@ -14,7 +14,7 @@
     <name>Moon Agent</name>
     <description>Moon 智能体微服务 — 编排/对话/生图/视频</description>
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
@@ -192,7 +192,7 @@
                         <path>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-configuration-processor</artifactId>
-                            <version>4.0.0</version>
+                            <version>4.1.1</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>

@@ -59,6 +59,26 @@ public class AgentTools {
         }
     }
 
+    /**
+     * 只替换指定 scene_number 的分镜（部分替换）：更新这些编号的现有分镜（保留 id 与素材关联），
+     * 不存在则新插入；不在 scenes 里出现的其他分镜完全不动。用于「只针对分镜N优化」——
+     * 绝不清空/覆盖未指定的分镜（replaceScenes 会清空全部）。
+     */
+    @Tool(description = "部分替换分镜：只更新/插入指定 scene_number 的分镜，其他分镜不动（保留素材关联）")
+    @McpTool(name = "replaceSpecificScenes", description = "部分替换分镜：只更新指定 scene_number 的分镜，保留其他分镜及其素材关联")
+    public Map<String, Object> replaceSpecificScenes(
+            @ToolParam(description = "项目 ID") @McpToolParam(description = "项目 ID") String projectId,
+            @ToolParam(description = "分镜列表（只包含想更新的分镜）") @McpToolParam(description = "分镜列表") List<AgentSceneItem> scenes) {
+        try {
+            int count = generationService.updateScenesByNumber(projectId, scenes);
+            log.info("AgentTools.replaceSpecificScenes: projectId={} count={}", projectId, count);
+            return Map.of("ok", true, "count", count);
+        } catch (Exception e) {
+            log.error("AgentTools.replaceSpecificScenes 失败: {}", e.getMessage(), e);
+            throw new IllegalArgumentException("分镜部分替换失败：" + e.getMessage());
+        }
+    }
+
     @Tool(description = "生成或完善图片（提供 picUrls 时基于这些图改图，多张参考图均作源图），支持多张（n>1），结果落库到会话产出素材")
     @McpTool(name = "refineImage", description = "生成或完善图片（图生图或文生图）")
     public Map<String, Object> refineImage(

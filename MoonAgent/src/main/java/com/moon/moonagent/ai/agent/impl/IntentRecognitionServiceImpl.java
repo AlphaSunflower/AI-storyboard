@@ -117,6 +117,22 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     }
 
     /**
+     * 仅规则前置匹配（不调 LLM）：返回首个命中的意图类型；未命中返回 null。
+     * 供上下文意图延续用（对历史消息做轻量规则判定，避免递归调 LLM）。
+     */
+    @Override
+    public String ruleMatch(String text) {
+        if (text == null || text.isBlank()) return null;
+        String q = text.trim();
+        for (Map.Entry<String, Pattern> rule : ruleTable) {
+            if (rule.getValue().matcher(q).find()) {
+                return rule.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
      * 识别用户输入意图 → 结构化结果。
      * 解析顺序：JSON {type, confidence} → 兼容裸标识符（无置信度按 0.5）→ 白名单校验 → 兜底。
      */

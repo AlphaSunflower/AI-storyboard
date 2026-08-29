@@ -34,8 +34,8 @@ export const DS = {
  */
 export function ChatComposer() {
   const {
-    streaming, waitingHumanInput, waitingVideoPlan,
-    refImageUrls, addRefImageUrls, uploadRefImages, sendMessage,
+    streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
+    refImageUrls, addRefImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
   } = useAgentStore();
@@ -306,18 +306,33 @@ export function ChatComposer() {
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
             disabled={(busy && !recording)}
           />
-          <button
-            onClick={handleSend}
-            disabled={busy || !text.trim()}
-            style={{
-              height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
-              background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-              cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
-            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-          >发送</button>
+          {streaming && !agentVideoTask ? (
+            <button
+              onClick={stopGeneration}
+              title="停止生成"
+              style={{
+                height: 38, padding: '0 16px', borderRadius: 12, border: 'none',
+                background: 'rgba(217, 45, 32, 0.9)', color: 'white', fontSize: 14, fontWeight: 500,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgb(217, 45, 32)'; }}
+              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'rgba(217, 45, 32, 0.9)'; }}
+            ><span style={{ width: 9, height: 9, borderRadius: 2, background: 'white', display: 'inline-block' }} />停止生成</button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={busy || !text.trim()}
+              style={{
+                height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
+                background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
+                cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
+              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
+            >发送</button>
+          )}
         </div>
       </div>
 

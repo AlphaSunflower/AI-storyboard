@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 会话级内存状态（原 {@link AgentOrchestratorSupport} 迁出）：
@@ -31,6 +32,9 @@ public class AgentSessionState {
 
     /** 本轮勾选资产：conversationId → assetIds（资产选择卡片确认后写入，HITL 链内接力） */
     private final ConcurrentHashMap<String, List<String>> sessionAssets = new ConcurrentHashMap<>();
+
+    /** 对话打断标志：conversationId → 置位即要求当前编排协作式取消（「停止生成」按钮 / SSE 断开） */
+    private final ConcurrentHashMap<String, AtomicBoolean> interrupted = new ConcurrentHashMap<>();
 
     /** 澄清计数 +1，返回新值 */
     public int incrClarifyCount(String conversationId) {
@@ -67,6 +71,22 @@ public class AgentSessionState {
         return sessionAssets.containsKey(conversationId);
     }
 
+    /** 置位会话打断标志：当前编排协作式取消（「停止生成」按钮 / SSE 断开触发） */
+    public void interrupt(String conversationId) {
+        interrupted.computeIfAbsent(conversationId, k -> new AtomicBoolean()).set(true);
+    }
+
+    /** 清除打断标志（新一轮编排启动/收尾时调用，恢复正常流） */
+    public void clearInterrupt(String conversationId) {
+        interrupted.remove(conversationId);
+    }
+
+    /** 是否收到打断信号（编排流式循环在 doOnNext/阶段边界检查） */
+    public boolean isInterrupted(String conversationId) {
+        AtomicBoolean b = interrupted.get(conversationId);
+        return b != null && b.get();
+    }
+
     /** 本轮结束清理 */
     public void clearSessionAssets(String conversationId) {
         sessionAssets.remove(conversationId);
@@ -77,6 +97,7 @@ public class AgentSessionState {
         clarifyCount.remove(conversationId);
         regenCount.remove(conversationId);
         sessionAssets.remove(conversationId);
+        interrupted.remove(conversationId);
     }
 
     /** 计数写入 checkpoint.plan（createCheckpoint 内调用）——重启/刷新后 resume 可恢复 */

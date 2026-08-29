@@ -2,6 +2,7 @@ import type { Connection, XYPosition } from '@xyflow/react';
 import { useCanvasStore } from '../store/canvasStore';
 import { createId } from '../utils/id';
 import type { CanvasNode, MediaKind } from '../types';
+import { getNodeDefByType } from '../domain/nodeRegistry';
 import { failure } from './canvasErrors';
 import { check, result } from './canvasTransaction';
 import { computeGridLayout, type GridDirection, type LayoutPosition } from './layout/gridLayout';
@@ -158,6 +159,25 @@ export const canvasCommandService = {
   createEdge(context: CanvasCommandContext, params: { source: string; target: string; sourceHandle?: string; targetHandle?: string }) {
     const invalid = check(context);
     if (invalid) return invalid as CanvasCommandResult<string | null>;
+    const state = useCanvasStore.getState();
+    const sourceNode = state.nodes.find((n) => n.id === params.source);
+    const targetNode = state.nodes.find((n) => n.id === params.target);
+    if (!sourceNode || !targetNode) return failure('INVALID_ARGUMENTS', '源或目标节点不存在', { source: params.source, target: params.target });
+    if (sourceNode.id === targetNode.id) return failure('INVALID_ARGUMENTS', '不能创建自环连线');
+    // connectivity 校验：类型可接受 + 数量上限
+    const sourceDef = getNodeDefByType(sourceNode.data.kind);
+    const targetDef = getNodeDefByType(targetNode.data.kind);
+    if (sourceDef && sourceDef.connectivity.maxOutputs > 0) {
+      const outCount = state.edges.filter((e) => e.source === params.source).length;
+      if (outCount >= sourceDef.connectivity.maxOutputs) return failure('INVALID_ARGUMENTS', `源节点输出已达上限 ${sourceDef.connectivity.maxOutputs}`);
+    }
+    if (targetDef && targetDef.connectivity.maxInputs > 0) {
+      const inCount = state.edges.filter((e) => e.target === params.target).length;
+      if (inCount >= targetDef.connectivity.maxInputs) return failure('INVALID_ARGUMENTS', `目标节点输入已达上限 ${targetDef.connectivity.maxInputs}`);
+    }
+    if (targetDef && targetDef.connectivity.acceptTypes.length > 0 && !targetDef.connectivity.acceptTypes.includes(sourceNode.data.kind)) {
+      return failure('INVALID_ARGUMENTS', `目标节点不接受源类型 "${sourceNode.data.kind}"`);
+    }
     const connection: Connection = { source: params.source, target: params.target, sourceHandle: params.sourceHandle ?? 'right', targetHandle: params.targetHandle ?? 'left' };
     return result(context, { description: '创建 1 条连线' }, { source: params.source, target: params.target }, () => {
       useCanvasStore.getState().createEdge(connection);

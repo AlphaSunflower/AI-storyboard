@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
 import type { AssetMetadata, CanvasDocumentV1, CanvasEdge, CanvasNode, CanvasSummary, MediaAsset, PersistedAsset, ProjectDocumentV1, ProjectDocumentV2, ProjectSummary } from '../types';
+import type { Viewport } from '@xyflow/react';
 import { createId } from '../utils/id';
 import { apiJson } from './morrowApi';
 
@@ -166,7 +167,11 @@ export async function loadProject(projectId: string): Promise<ProjectDocumentV2 
   try {
     const p = await apiJson<{ id: string; title: string }>(`/projects/${encodeURIComponent(projectId)}`);
     const now = nowMs();
-    return { schemaVersion: 2, id: p.id, title: p.title, canvases: [], createdAt: now, updatedAt: now };
+    // 合并本地 IndexedDB canvases：后端的画布元数据 + 本地缓存的画布 id，供 export/遍历使用
+    const db = await database;
+    const localCanvases = await db.getAll('canvases') as CanvasDocumentV1[];
+    const canvases = [...new Set(localCanvases.filter((c) => c.projectId === p.id).map((c) => c.id))];
+    return { schemaVersion: 2, id: p.id, title: p.title, canvases, createdAt: now, updatedAt: now };
   } catch { return undefined; }
 }
 
@@ -225,23 +230,79 @@ export async function deleteProject(projectId: string) {
   }
 }
 
-// ── 画布：元数据(id/projectId/title)落后端 morrow_canvases，节点内容(nodes/edges/viewport)留 IndexedDB canvases store ──
+// ── 画布：元数据(id/projectId/title)落后端 morrow_canvases，节点图(nodes/edges/viewport)落后端 morrow_canvas_graphs ──
 export async function createCanvas(projectId: string, title = '画布'): Promise<CanvasDocumentV1> {
   const meta = await apiJson<{ id: string; projectId: string; title: string }>(`/projects/${encodeURIComponent(projectId)}/canvases`, { method: 'POST', body: JSON.stringify({ title }) });
   const now = nowMs();
-  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, createdAt: now, updatedAt: now };
-  await (await database).put('canvases', canvas); // 节点内容落本地（按画布 id）
+  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, revision: 0, createdAt: now, updatedAt: now };
+  await (await database).put('canvases', canvas); // 本地缓存（可离线读）
   return canvas;
 }
 
-export async function saveCanvas(canvas: CanvasDocumentV1) {
+interface CanvasGraphPayload {
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  viewport: Viewport;
+}
+
+interface CanvasGraphDto {
+  graph: CanvasGraphPayload;
+  revision: number;
+  updatedAt?: string;
+}
+
+/** 提取图载荷：nodes/edges/viewport（去 schemaVersion/id 等元数据）。 */
+function graphPayloadOf(canvas: CanvasDocumentV1): CanvasGraphPayload {
+  return { nodes: canvas.nodes, edges: canvas.edges, viewport: canvas.viewport };
+}
+
+/** 用后端图载荷回填 CanvasDocumentV1（保留本地元数据，覆写图 + revision）。 */
+function applyGraph(canvas: CanvasDocumentV1, dto: CanvasGraphDto): CanvasDocumentV1 {
+  return {
+    ...canvas,
+    nodes: dto.graph?.nodes ?? [],
+    edges: dto.graph?.edges ?? [],
+    viewport: dto.graph?.viewport ?? canvas.viewport,
+    revision: dto.revision ?? canvas.revision ?? 0,
+    updatedAt: nowMs(),
+  };
+}
+
+export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocumentV1> {
   const now = nowMs();
-  await (await database).put('canvases', { ...canvas, updatedAt: now }); // 节点内容
-  await apiJson(`/canvases/${encodeURIComponent(canvas.id)}`, { method: 'PATCH', body: JSON.stringify({ title: canvas.title }) }).catch(() => undefined); // 标题走后端（失败不阻断本地保存）
+  const baseRevision = canvas.revision ?? 0;
+  // 标题走后端元数据（失败不阻断图入库）
+  await apiJson(`/canvases/${encodeURIComponent(canvas.id)}`, { method: 'PATCH', body: JSON.stringify({ title: canvas.title }) }).catch(() => undefined);
+  // 图入库：乐观锁 CAS（baseRevision 不匹配抛 40901，message 携带当前 revision）
+  const dto = await apiJson<CanvasGraphDto>(`/canvases/${encodeURIComponent(canvas.id)}/graph`, {
+    method: 'PUT',
+    body: JSON.stringify({ graph: graphPayloadOf(canvas), baseRevision }),
+  });
+  const saved = applyGraph(canvas, dto);
+  await (await database).put('canvases', saved); // 本地缓存回写
+  return saved;
 }
 
 export async function loadCanvas(canvasId: string): Promise<CanvasDocumentV1 | undefined> {
-  return (await database).get('canvases', canvasId) as Promise<CanvasDocumentV1 | undefined>;
+  const local = await (await database).get('canvases', canvasId) as CanvasDocumentV1 | undefined;
+  try {
+    // 后端图先读：成功则以库为准覆写本地元数据
+    const dto = await apiJson<CanvasGraphDto>(`/canvases/${encodeURIComponent(canvasId)}/graph`);
+    const backendHasContent = (dto.graph?.nodes?.length ?? 0) > 0 || (dto.graph?.edges?.length ?? 0) > 0;
+    const localHasContent = (local?.nodes?.length ?? 0) > 0 || (local?.edges?.length ?? 0) > 0;
+    // 后端为空但本地有内容（迁移/离线缓存）→ 信任本地，防后端空图覆盖勿丢数据
+    if (!backendHasContent && localHasContent) return local;
+    if (!local && !backendHasContent) return undefined;
+    return applyGraph(local ?? emptyCanvas(canvasId), dto);
+  } catch {
+    // 后端不可达/无鉴权 → 降级本地缓存
+    return local;
+  }
+}
+
+function emptyCanvas(canvasId: string): CanvasDocumentV1 {
+  const now = nowMs();
+  return { schemaVersion: 1, id: canvasId, projectId: '', title: '画布', nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, revision: 0, createdAt: now, updatedAt: now };
 }
 
 export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {

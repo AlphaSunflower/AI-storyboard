@@ -1,6 +1,7 @@
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
-export type MediaKind = 'text' | 'image' | 'video';
+export type NodeKind = 'text' | 'image' | 'video' | 'script' | 'note' | 'prompt' | 'sequence';
+export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export type MediaQuality = 'placeholder' | 'thumbnail' | 'preview';
@@ -114,6 +115,11 @@ export interface MediaNodeData extends Record<string, unknown> {
   playlist?: VideoClip[];
   playlistEnabled?: boolean;
   starred?: boolean;
+  // ── 新节点类型字段（script/note/prompt/sequence）──
+  scriptText?: string;
+  richText?: string;
+  promptText?: string;
+  children?: string[];
 }
 
 export interface PersistedAsset {
@@ -185,6 +191,8 @@ export interface CanvasDocumentV1 {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   viewport: Viewport;
+  /** 后端持久化版本（乐观锁 baseRevision）；加载后回写、保存时携带 */
+  revision?: number;
   createdAt: number;
   updatedAt: number;
 }

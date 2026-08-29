@@ -4,6 +4,8 @@ spring:
   profiles:
     active: local            # 默认本地环境；生产用 --spring.profiles.active=prod 覆盖
   cloud:
+    compatibility-verifier:
+      enabled: false   # Boot 4.1.1 与 Spring Cloud 2025.1 官方未配对（Framework 同为 7.0.x，实机冒烟通过）；SC 发布 4.1 配对车后可删
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}

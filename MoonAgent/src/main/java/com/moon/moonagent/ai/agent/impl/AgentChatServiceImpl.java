@@ -14,6 +14,7 @@ import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
@@ -430,6 +431,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
+        // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流；/interrupt 端点可能在上轮收尾后置位）
+        orchestratorSupport.clearInterrupt(conversationId);
 
         // 图改图参考图兜底：按会话记录最近一次 picUrls（本条带图则更新，不带图则清空，
         // 严格限定在"带图的当轮"内生效，防跨轮误用）
@@ -448,11 +451,12 @@ public class AgentChatServiceImpl implements AgentChatService {
             lastPicUrlByConversation.remove(conversationId);
         }
 
-        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开即置取消标志
+        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开即置取消标志；同时置位会话打断标志供编排协作式取消
         AtomicBoolean cancel = new AtomicBoolean(false);
-        emitter.onCompletion(() -> cancel.set(true));
-        emitter.onTimeout(() -> cancel.set(true));
-        emitter.onError(ignored -> cancel.set(true));
+        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        emitter.onCompletion(interruptTrap);
+        emitter.onTimeout(interruptTrap);
+        emitter.onError(ignored -> interruptTrap.run());
 
         // 1. user 消息独立事务立即提交
         AgentMessage userMessage = new AgentMessage();
@@ -474,6 +478,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);
                 }
+            } catch (AgentInterruptException e) {
+                // 用户主动打断：不补发错误、不落库被截断的回答，静默收尾（锁在 finally 释放）
+                log.info("Agent 编排被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
@@ -578,11 +585,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
+        // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流）
+        orchestratorSupport.clearInterrupt(conversationId);
         // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage / submitFormAndResume）
         AtomicBoolean cancel = new AtomicBoolean(false);
-        emitter.onCompletion(() -> cancel.set(true));
-        emitter.onTimeout(() -> cancel.set(true));
-        emitter.onError(ignored -> cancel.set(true));
+        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        emitter.onCompletion(interruptTrap);
+        emitter.onTimeout(interruptTrap);
+        emitter.onError(ignored -> interruptTrap.run());
         CompletableFuture.runAsync(() -> {
             try {
                 // checkpoint 驱动（替代内存 videoPlanSnapshots）：planToken 即 checkpoint formToken，
@@ -639,6 +649,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                                 conversation, "", picUrls, emitter),
                         message, duration, null, picUrls);
                 log.info("图生视频任务已受理: conversationId={}, duration={}", conversationId, duration);
+            } catch (AgentInterruptException e) {
+                // 用户主动打断：不补发错误，静默收尾（锁在 finally 释放）
+                log.info("图生视频被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) return;
@@ -668,11 +681,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
+        // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流）
+        orchestratorSupport.clearInterrupt(conversationId);
         // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage，语义见上）
         AtomicBoolean cancel = new AtomicBoolean(false);
-        emitter.onCompletion(() -> cancel.set(true));
-        emitter.onTimeout(() -> cancel.set(true));
-        emitter.onError(ignored -> cancel.set(true));
+        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        emitter.onCompletion(interruptTrap);
+        emitter.onTimeout(interruptTrap);
+        emitter.onError(ignored -> interruptTrap.run());
         CompletableFuture.runAsync(() -> {
             try {
                 // 生成后端化：HITL 人工确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
@@ -684,6 +700,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 if (answer != null && !answer.isBlank()) {
                     persistAssistant(conversation, answer);
                 }
+            } catch (AgentInterruptException e) {
+                // 用户主动打断：不补发错误、不落库被截断的回答，静默收尾（锁在 finally 释放）
+                log.info("HITL 提交被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
@@ -797,5 +816,15 @@ public class AgentChatServiceImpl implements AgentChatService {
             log.warn("解析 pending checkpoint 失败: conversationId={}, error={}", conversationId, e.getMessage());
             return null;
         }
+    }
+
+    @Override
+    public boolean interrupt(String userId, String conversationId) {
+        // 归属校验（40401 同文案，防 IDOR 枚举）
+        getOwnedConversation(userId, conversationId);
+        // 置位会话级打断标志：编排的流式循环/阶段边界检测到后协作式取消
+        orchestratorSupport.interrupt(conversationId);
+        log.info("Agent 对话打断请求已登记: conversationId={}, userId={}", conversationId, userId);
+        return true;
     }
 }

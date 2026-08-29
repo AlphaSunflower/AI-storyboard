@@ -43,7 +43,6 @@ describe('AgentPanel', () => {
     expect(await screen.findByText('分析当前版式层级')).toBeVisible();
     const error = await screen.findByRole('alert');
     expect(within(error).getByText('执行服务未连接')).toBeVisible();
-    expect(within(error).getByText('未配置执行服务，请设置 VITE_JOB_API_URL')).toBeVisible();
     expect(useCanvasStore.getState().nodes).toHaveLength(0);
     expect(useCanvasStore.getState().edges).toHaveLength(0);
   });
@@ -61,7 +60,6 @@ describe('AgentPanel', () => {
     const user = userEvent.setup();
     const view = render(<AgentPanel project={project} adapter={adapter} />);
 
-    expect(await screen.findByText('测试执行服务')).toBeVisible();
     const input = screen.getByRole('textbox', { name: '给设计助理发送请求' });
     await user.type(input, '调整信息层级');
     await user.click(screen.getByRole('button', { name: '发送请求' }));

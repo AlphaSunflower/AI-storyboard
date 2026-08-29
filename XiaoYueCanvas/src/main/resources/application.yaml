@@ -9,6 +9,8 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
   cloud:
+    compatibility-verifier:
+      enabled: false   # Boot 4.1.1 与 Spring Cloud 2025.1 官方未配对；Framework 同为 7.0.x 实机可跑，SC 出 4.1 配对车后可删
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}

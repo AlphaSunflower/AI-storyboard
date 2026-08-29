@@ -116,6 +116,9 @@ public class SceneReviewIntentHandler implements IntentHandler {
             actions.add(Map.of("id", "review-gen-video", "title", "生成视频"));
         }
         actions.add(Map.of("id", "review-skip", "title", "跳过"));
+        // 自定义输入：用户可在审查卡上输入自己的解释/新需求，PlanGraph 切链出口对此做意图识别，
+        // 若命中其他意图（如「生成/优化分镜」→ aisplit）则自动切回对应分镜链路（2026-08-28）
+        actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
 
         String planText = summary + "\n请选择要执行的操作：";
 
@@ -320,12 +323,23 @@ public class SceneReviewIntentHandler implements IntentHandler {
         }
     }
 
-    /** 确认优化：更新分镜 → 追问是否生成图/视频 */
+    /** 确认优化：把优化后的内容写回对应分镜（只更新 scriptContent，保留图/视频提示词与素材关联）→ 追问是否生成图/视频 */
     private String handleOptimizeConfirm(OrchestrationRequest request, AgentCheckpoint checkpoint) {
-        support.sendMessage(request, "✅ 分镜方案已更新！");
+        // 读 checkpoint 存的优化文本与目标分镜编号（handleOptimize 落库 {optimized, sceneNums}）
+        String optimized = support.planField(checkpoint.getPlan(), "optimized");
+        List<Integer> sceneNums = extractSceneNums(checkpoint);
+        if (optimized != null && !optimized.isBlank() && !sceneNums.isEmpty()) {
+            int updated = writeOptimizedBack(request, optimized, sceneNums);
+            if (updated > 0) {
+                support.sendMessage(request, "✅ 已更新 " + updated + " 个分镜的优化内容！");
+            } else {
+                support.sendMessage(request, "⚠ 未能解析优化内容，请重新优化。");
+            }
+        } else {
+            support.sendMessage(request, "✅ 分镜方案已更新！");
+        }
 
         // 追问是否生成图/视频
-        List<Integer> sceneNums = extractSceneNums(checkpoint);
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 "是否需要继续生成图片或视频？",
                 "review-gen",
@@ -336,6 +350,45 @@ public class SceneReviewIntentHandler implements IntentHandler {
                         Map.of("id", "review-gen-video", "title", "生成视频"),
                         Map.of("id", "review-skip", "title", "不需要"))),
                 List.of(), Map.of(), Map.of()));
+    }
+
+    /**
+     * 把「优化后的分镜方案」文本（【分镜N】...段落）解析并写回对应分镜的 scriptContent。
+     * 只更新 scriptContent（镜头描述优化），保留 imagePrompt/videoPrompt/素材关联等已生成资产——
+     * 通过按 scene_number 定位现有分镜、updateScene 保留 id 实现。
+     *
+     * @return 成功更新数
+     */
+    private int writeOptimizedBack(OrchestrationRequest request, String optimized, List<Integer> sceneNums) {
+        String projectId = request.getConversation().getProjectId();
+        List<Scene> allScenes;
+        try {
+            allScenes = storyboardClient.getProjectScenes(projectId);
+        } catch (Exception e) {
+            log.warn("获取分镜失败: {}", e.getMessage());
+            return 0;
+        }
+        if (allScenes == null) return 0;
+        // 解析【分镜N】标题段 → sceneNumber → 优化文本
+        java.util.Map<Integer, String> byNum = new java.util.LinkedHashMap<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("【分镜\\s*(\\d+)】([\\s\\S]*?)(?=【分镜\\s*\\d+】|\\z)").matcher(optimized);
+        while (m.find()) {
+            byNum.put(Integer.parseInt(m.group(1)), m.group(2).trim());
+        }
+        int updated = 0;
+        for (Scene s : allScenes) {
+            if (!sceneNums.contains(s.getSceneNumber())) continue;
+            String newText = byNum.get(s.getSceneNumber());
+            if (newText == null || newText.isBlank()) continue;
+            s.setScriptContent(newText);
+            try {
+                storyboardClient.updateScene(s); // 保留原 id → 不丢 imageUrl/videoUrl/素材关联
+                updated++;
+            } catch (Exception e) {
+                log.warn("写回分镜{}优化内容失败: {}", s.getSceneNumber(), e.getMessage());
+            }
+        }
+        return updated;
     }
 
     /** 生成图片：遍历缺图分镜 → 逐个生图 */
