@@ -8,8 +8,8 @@
   --radius: 0.625rem;
 }
 
-/* 关闭了 Tailwind preflight，手动补最小 button 重置——否则 <button> 保留 UA 默认白底/灰边，
-   配浅色文字会白底白字看不清（"导入 .morrow"、项目卡片打开按钮都踩中）。 */
+/* 关闭了 Tailwind preflight，手动补最小 button/input 重置——否则 <button>/<textarea>/<input> 保留 UA 默认
+   浅底白字，配深色主题会刺眼（"导入 .morrow"、节点 textarea、聊天输入框都踩中）。 */
 @layer base {
   button,
   [type='submit'],
@@ -18,5 +18,16 @@
     background-color: transparent;
     border: 0;
     cursor: pointer;
+  }
+  textarea,
+  input,
+  select {
+    background-color: rgba(19, 34, 30, 0.55);
+    color: #eef0df;
+    border-color: rgba(215, 255, 84, 0.14);
+  }
+  textarea::placeholder,
+  input::placeholder {
+    color: rgba(238, 240, 223, 0.5);
   }
 }

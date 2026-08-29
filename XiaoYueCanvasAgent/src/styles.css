@@ -1499,3 +1499,20 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .storyboard-grid--gen { grid-template-columns: repeat(var(--gen-cols,3),1fr); grid-auto-rows: minmax(0,1fr); }
 .storyboard-grid--gen .storyboard-frame { aspect-ratio: 3/4; }
 
+/* v6：编辑器「执行服务」面板（chat-workspace）→ 深墨绿工作台——铲除 --panel 奶油浅色残留。
+   前面层用了 !important 强制奶油底，这里必须同样 !important 才能级联胜出。 */
+.chat-workspace { background: #121f1b !important; color: #eef0df !important; border-left-color: rgba(215,255,84,.14) !important; border-color: rgba(215,255,84,.14) !important; box-shadow: -12px 0 34px rgba(0,0,0,.3) !important; }
+.chat-topbar { border-bottom-color: rgba(215,255,84,.12) !important; }
+.chat-topbar button { color: rgba(238,240,223,.62) !important; }
+.chat-topbar button:hover, .chat-topbar button.is-active { background: rgba(215,255,84,.14) !important; color: var(--acid) !important; }
+.workspace-side-title { color: rgba(238,240,223,.72) !important; }
+.chat-workspace .chat-body, .chat-workspace .chat-view { color: #eef0df !important; }
+/* 聊天内容容器（MoonChatWindow 根）一并深色 */
+.moon-chat-frame { background: transparent !important; color: #eef0df !important; }
+/* 节点内文字编辑器（.text-node-editor）被 --paper 奶油覆盖——类级 !important 压成深色 */
+textarea.text-node-editor,
+.script-node-view .text-node-editor { background: rgba(19,34,30,.55) !important; color: #eef0df !important; border-color: rgba(215,255,84,.14) !important; }
+textarea.text-node-editor::placeholder,
+.script-node-view .text-node-editor::placeholder { color: rgba(238,240,223,.45) !important; }
+
+
