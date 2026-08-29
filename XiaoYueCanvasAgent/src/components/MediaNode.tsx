@@ -27,6 +27,8 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const updateNode = useCanvasStore((state) => state.updateNode);
   const createConnectedNode = useCanvasStore((state) => state.createConnectedNode);
   const createNodeBefore = useCanvasStore((state) => state.createNodeBefore);
+  const addNode = useCanvasStore((state) => state.addNode);
+  const nodes = useCanvasStore((state) => state.nodes);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
@@ -45,6 +47,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const [drafting, setDrafting] = useState(false);
   const [draftFeedback, setDraftFeedback] = useState<string | null>(null);
   const [addDir, setAddDir] = useState<null | 'left' | 'right'>(null);
+  const [childMenu, setChildMenu] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
   const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : ImageIcon;
@@ -93,7 +96,21 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <textarea className="text-node-editor nodrag nowheel" aria-label={data.kind === 'note' ? '批注内容' : data.kind === 'prompt' ? '提示词内容' : '文字内容'} value={data.kind === 'note' ? (data.richText ?? textDraft) : data.kind === 'prompt' ? (data.promptText ?? textDraft) : textDraft} placeholder={data.kind === 'note' ? '在此记录设计说明…' : data.kind === 'prompt' ? '在此输入 AI 提示词…' : '在此输入文字…'} onChange={(event) => { setTextDraft(event.target.value); const patch = data.kind === 'note' ? { richText: event.target.value } : data.kind === 'prompt' ? { promptText: event.target.value } : { prompt: event.target.value }; updateNode(id, patch); }} onBlur={() => { if (data.kind !== 'note' && data.kind !== 'prompt' && textDraft !== data.prompt) updateNode(id, { prompt: textDraft }); }} />
         ) : data.kind === 'sequence' ? (
-          <div className="sequence-node-view"><strong>序列节点</strong><span>{Array.isArray(data.children) && data.children.length ? `${data.children.length} 个子节点` : '暂未挂载子节点'}</span></div>
+          <div className="sequence-node-view">
+            <strong>序列节点</strong>
+            <span>{Array.isArray(data.children) && data.children.length ? `${data.children.length} 个子节点` : '暂未挂载子节点'}</span>
+            {Array.isArray(data.children) && data.children.length > 0 && (
+              <ul className="sequence-children">
+                {data.children.map((childId) => {
+                  const child = nodes.find((n) => n.id === childId);
+                  return (
+                    <li key={childId}><span>{child?.data.label || childId.slice(0, 10)}</span><button className="nodrag" aria-label="移除子节点" onClick={(e) => { e.stopPropagation(); updateNode(id, { children: (data.children ?? []).filter((c) => c !== childId) }); }}>×</button></li>
+                  );
+                })}
+              </ul>
+            )}
+            <button className="node-upload node-upload--generate nodrag" onClick={(e) => { e.stopPropagation(); setChildMenu(true); }}>+ 挂载节点</button>
+          </div>
         ) : metadata ? (
           !mediaUrl ? <div className="media-placeholder"><ImageIcon size={22} /><span>{metadata.name}</span></div> : <div className="media-asset-frame"><img key={mediaUrl} src={mediaUrl} alt={metadata.name} loading="eager" decoding="async" draggable={false} width={metadata.width} height={metadata.height} /><span className="media-quality-badge">{selected ? 'PREVIEW' : quality.toUpperCase()}</span></div>
         ) : (
@@ -113,6 +130,16 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
             if (addDir === 'right') createConnectedNode(id, kind as any, target);
             else createNodeBefore(id, kind as any, target);
             setAddDir(null);
+          }} />
+        </div>
+      </>}
+      {childMenu && <>
+        <div className="node-add-backdrop nodrag" onClick={(e) => { e.stopPropagation(); setChildMenu(false); }} />
+        <div className="node-add-popover nodrag nowheel" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} onClick={(e) => e.stopPropagation()}>
+          <GroupedNodeMenu onAdd={(kind) => {
+            const cid = addNode(kind as any, { x: node.position.x + 40, y: node.position.y + (height ?? 250) + 60 });
+            updateNode(id, { children: [...(data.children ?? []), cid] });
+            setChildMenu(false);
           }} />
         </div>
       </>}
