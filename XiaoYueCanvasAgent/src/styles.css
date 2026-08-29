@@ -1500,6 +1500,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .sequence-children li button { background: transparent; border: 0; color: rgba(255,118,95,.8); cursor: pointer; font-size: 15px; line-height: 1; flex-shrink: 0; }
 .sequence-children li button:hover { color: #ff765f; }
 
+/* AI 图片节点（imageGen）：提示词 + 上游参考图，无生图按钮 */
+.image-gen-view { display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: auto; padding-bottom: 8px; }
+.image-gen-view .text-node-editor { min-height: 70px; }
+.image-gen-reference { margin: 0; border-radius: 8px; overflow: hidden; border: 1px solid rgba(215,255,84,.16); background: var(--card); }
+.image-gen-reference img { width: 100%; height: auto; display: block; }
+.image-gen-reference figcaption { padding: 4px 8px; color: rgba(238,240,223,.55); font-size: 10px; }
+.image-gen-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 8px; color: rgba(238,240,223,.6); text-align: center; }
+.image-gen-empty strong { color: #eef0df; font-size: 13px; }
+.image-gen-empty span { font-size: 11px; }
+
 /* 分镜生成节点（storyboardGen） */
 .storyboard-gen-view { display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: auto; padding-bottom: 8px; }
 .storyboard-gen-view .text-node-editor { min-height: 88px; }

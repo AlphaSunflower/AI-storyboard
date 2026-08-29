@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
-import { Clapperboard, FileText, Image as ImageIcon, Images, LayoutGrid, Layers, Library, MessageSquare, Type, Video, Wand2, X } from 'lucide-react';
+import { Clapperboard, FileText, Image as ImageIcon, Images, LayoutGrid, Layers, Library, MessageSquare, Sparkles, Type, Video, Wand2, X } from 'lucide-react';
 import { NODE_PRESETS } from '../data/presets';
 import { hydrateAsset, listLibraryAssets } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
@@ -8,7 +8,7 @@ import { useMediaStore } from '../store/mediaStore';
 import type { PersistedAsset } from '../types';
 import { getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 
-const icons = { text: Type, image: ImageIcon, video: Video, script: FileText, note: MessageSquare, prompt: Wand2, sequence: Layers, storyboard: Clapperboard, storyboardGen: LayoutGrid };
+const icons = { text: Type, image: ImageIcon, video: Video, script: FileText, note: MessageSquare, prompt: Wand2, sequence: Layers, storyboard: Clapperboard, storyboardGen: LayoutGrid, imageGen: Sparkles };
 
 function LibraryThumbnail({ asset }: { asset: PersistedAsset }) {
   const [url, setUrl] = useState('');

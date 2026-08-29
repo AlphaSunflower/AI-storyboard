@@ -43,6 +43,11 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
     ? (selected || quality === 'preview' ? asset.previewBlob : asset.thumbnailBlob)
     : lazyVariant?.key === `${data.assetId}:${desiredVariant}` ? lazyVariant.blob : undefined;
   const mediaUrl = useObjectUrl(mediaBlob, visibility.visible);
+  const edges = useCanvasStore((state) => state.edges);
+  const upstreamEdge = edges.find((e) => e.target === id);
+  const upstreamAssetId = (upstreamEdge?.source ? nodes.find((n) => n.id === upstreamEdge.source)?.data.assetId : undefined) as string | undefined;
+  const upstreamBlob = useMediaStore((state) => upstreamAssetId ? state.assets[upstreamAssetId]?.previewBlob : undefined);
+  const upstreamUrl = useObjectUrl(upstreamBlob, visibility.visible);
   const [textDraft, setTextDraft] = useState(data.prompt);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -52,7 +57,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const [childMenu, setChildMenu] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
-  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : ImageIcon;
+  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : data.kind === 'imageGen' ? Sparkles : ImageIcon;
 
   useEffect(() => {
     if (!data.assetId || asset || !metadata || !visibility.visible || !selected) return;
@@ -101,6 +106,15 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           </div>
         ) : data.kind === 'storyboardGen' ? (
           <StoryboardGenView node={node} updateNode={updateNode} />
+        ) : data.kind === 'imageGen' ? (
+          <div className="image-gen-view">
+            <textarea className="text-node-editor nodrag nowheel" aria-label="AI 图片提示词" value={data.prompt ?? textDraft} placeholder="描述要生成的画面…" onChange={(event) => { setTextDraft(event.target.value); updateNode(id, { prompt: event.target.value }); }} />
+            {upstreamUrl ? (
+              <figure className="image-gen-reference"><img src={upstreamUrl} alt="" /><figcaption>参考图</figcaption></figure>
+            ) : (
+              <div className="image-gen-empty"><ImageIcon size={26} /><strong>AI 图片节点</strong><span>连接上方输入节点作为参考图</span></div>
+            )}
+          </div>
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <textarea className="text-node-editor nodrag nowheel" aria-label={data.kind === 'note' ? '批注内容' : data.kind === 'prompt' ? '提示词内容' : '文字内容'} value={data.kind === 'note' ? (data.richText ?? textDraft) : data.kind === 'prompt' ? (data.promptText ?? textDraft) : textDraft} placeholder={data.kind === 'note' ? '在此记录设计说明…' : data.kind === 'prompt' ? '在此输入 AI 提示词…' : '在此输入文字…'} onChange={(event) => { setTextDraft(event.target.value); const patch = data.kind === 'note' ? { richText: event.target.value } : data.kind === 'prompt' ? { promptText: event.target.value } : { prompt: event.target.value }; updateNode(id, patch); }} onBlur={() => { if (data.kind !== 'note' && data.kind !== 'prompt' && textDraft !== data.prompt) updateNode(id, { prompt: textDraft }); }} />
         ) : data.kind === 'sequence' ? (

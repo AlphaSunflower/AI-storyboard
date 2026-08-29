@@ -57,6 +57,12 @@ export const NODE_DEFS: Record<string, NodeDef> = {
     connectivity: { maxInputs: 0, maxOutputs: 0, acceptTypes: ['script', 'image', 'video'] },
     createDefaultData: () => ({ kind: 'storyboardGen', label: '分镜生成', rows: 2, cols: 3, styleType: '2d-anime', model: '', frames: [], prompt: '', status: 'idle', isGenerating: false, accent: '#ff8a3d' }),
   },
+  imageGen: {
+    type: 'imageGen', key: 'imageGen', menuLabel: 'AI 图片', menuIcon: 'image', category: '媒体',
+    capabilities: { hasImage: true, hasPrompt: true, hasExport: false, hasTools: false },
+    connectivity: { maxInputs: 1, maxOutputs: 0, acceptTypes: ['image', 'prompt', 'script'] },
+    createDefaultData: () => ({ kind: 'imageGen', label: 'AI 图片', prompt: '', status: 'idle', accent: '#b48cff' }),
+  },
   note: {
     type: 'note', key: 'note', menuLabel: '批注', menuIcon: 'note', category: '文本',
     capabilities: { hasImage: false, hasPrompt: false, hasExport: false, hasTools: false },
