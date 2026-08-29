@@ -115,6 +115,15 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
               <div className="image-gen-empty"><ImageIcon size={26} /><strong>AI 图片节点</strong><span>连接上方输入节点作为参考图</span></div>
             )}
           </div>
+        ) : data.kind === 'videoGen' ? (
+          <div className="image-gen-view video-gen-view">
+            <textarea className="text-node-editor nodrag nowheel" aria-label="生视频提示词" value={data.prompt ?? textDraft} placeholder="描述要生成的视频…" onChange={(event) => { setTextDraft(event.target.value); updateNode(id, { prompt: event.target.value }); }} />
+            {upstreamUrl ? (
+              <figure className="image-gen-reference"><img src={upstreamUrl} alt="" /><figcaption>参考图</figcaption></figure>
+            ) : (
+              <div className="image-gen-empty"><ImageIcon size={26} /><strong>生视频节点</strong><span>连接上方输入节点作为参考图</span></div>
+            )}
+          </div>
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <textarea className="text-node-editor nodrag nowheel" aria-label={data.kind === 'note' ? '批注内容' : data.kind === 'prompt' ? '提示词内容' : '文字内容'} value={data.kind === 'note' ? (data.richText ?? textDraft) : data.kind === 'prompt' ? (data.promptText ?? textDraft) : textDraft} placeholder={data.kind === 'note' ? '在此记录设计说明…' : data.kind === 'prompt' ? '在此输入 AI 提示词…' : '在此输入文字…'} onChange={(event) => { setTextDraft(event.target.value); const patch = data.kind === 'note' ? { richText: event.target.value } : data.kind === 'prompt' ? { promptText: event.target.value } : { prompt: event.target.value }; updateNode(id, patch); }} onBlur={() => { if (data.kind !== 'note' && data.kind !== 'prompt' && textDraft !== data.prompt) updateNode(id, { prompt: textDraft }); }} />
         ) : data.kind === 'sequence' ? (

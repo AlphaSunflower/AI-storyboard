@@ -8,6 +8,7 @@ export const NODE_PRESETS: NodePreset[] = [
   { kind: 'storyboard', title: '分镜', description: '连接剧本节点，展示分镜帧网格', accent: '#ffb3a1' },
   { kind: 'storyboardGen', title: '分镜生成', description: '按剧本生成分镜帧网格（AI）', accent: '#ff8a3d' },
   { kind: 'imageGen', title: 'AI 图片', description: '连接上游参考图，生成 AI 图片', accent: '#b48cff' },
+  { kind: 'videoGen', title: '生视频', description: '连接上游参考图，生成 AI 视频', accent: '#8f9cff' },
   { kind: 'note', title: '批注', description: '设计说明与批注', accent: '#d7ff54' },
   { kind: 'prompt', title: '提示词', description: 'AI 生图/生视频的提示词容器', accent: '#c4b5fd' },
   { kind: 'sequence', title: '序列', description: '编排组合多个子节点', accent: '#f9a8d4' },

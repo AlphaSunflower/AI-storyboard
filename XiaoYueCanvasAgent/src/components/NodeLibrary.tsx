@@ -8,7 +8,7 @@ import { useMediaStore } from '../store/mediaStore';
 import type { PersistedAsset } from '../types';
 import { getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 
-const icons = { text: Type, image: ImageIcon, video: Video, script: FileText, note: MessageSquare, prompt: Wand2, sequence: Layers, storyboard: Clapperboard, storyboardGen: LayoutGrid, imageGen: Sparkles };
+const icons = { text: Type, image: ImageIcon, video: Video, videoGen: Video, script: FileText, note: MessageSquare, prompt: Wand2, sequence: Layers, storyboard: Clapperboard, storyboardGen: LayoutGrid, imageGen: Sparkles };
 
 function LibraryThumbnail({ asset }: { asset: PersistedAsset }) {
   const [url, setUrl] = useState('');

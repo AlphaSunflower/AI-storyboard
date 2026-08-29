@@ -30,8 +30,14 @@ export const NODE_DEFS: Record<string, NodeDef> = {
   image: {
     type: 'image', key: 'image', menuLabel: '图片', menuIcon: 'image', category: '媒体',
     capabilities: { hasImage: true, hasPrompt: true, hasExport: false, hasTools: true },
-    connectivity: { maxInputs: 1, maxOutputs: 0, acceptTypes: ['prompt', 'script'] },
+    connectivity: { maxInputs: 1, maxOutputs: 1, acceptTypes: ['prompt', 'script', 'imageGen', 'videoGen'] },
     createDefaultData: () => ({ kind: 'image', label: '图片', prompt: '', status: 'idle', accent: '#ff775f' }),
+  },
+  videoGen: {
+    type: 'videoGen', key: 'videoGen', menuLabel: '生视频', menuIcon: 'video', category: '媒体',
+    capabilities: { hasImage: true, hasPrompt: true, hasExport: false, hasTools: false },
+    connectivity: { maxInputs: 1, maxOutputs: 0, acceptTypes: ['image', 'prompt', 'script'] },
+    createDefaultData: () => ({ kind: 'videoGen', label: '生视频', prompt: '', status: 'idle', accent: '#8f9cff' }),
   },
   video: {
     type: 'video', key: 'video', menuLabel: '视频', menuIcon: 'video', category: '媒体',
@@ -42,7 +48,7 @@ export const NODE_DEFS: Record<string, NodeDef> = {
   script: {
     type: 'script', key: 'script', menuLabel: '剧本', menuIcon: 'script', category: '基础',
     capabilities: { hasImage: false, hasPrompt: true, hasExport: false, hasTools: false },
-    connectivity: { maxInputs: 0, maxOutputs: 1, acceptTypes: ['storyboard'] },
+    connectivity: { maxInputs: 0, maxOutputs: 1, acceptTypes: ['storyboard', 'storyboardGen', 'videoGen'] },
     createDefaultData: () => ({ kind: 'script', label: '剧本', scriptText: '', prompt: '', status: 'idle', accent: '#a9c9f5' }),
   },
   storyboard: {
