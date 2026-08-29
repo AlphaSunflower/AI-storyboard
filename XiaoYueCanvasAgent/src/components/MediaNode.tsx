@@ -108,12 +108,20 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           <StoryboardGenView node={node} updateNode={updateNode} />
         ) : data.kind === 'imageGen' ? (
           <div className="image-gen-view">
-            <textarea className="text-node-editor nodrag nowheel" aria-label="AI 图片提示词" value={data.prompt ?? textDraft} placeholder="描述要生成的画面…" onChange={(event) => { setTextDraft(event.target.value); updateNode(id, { prompt: event.target.value }); }} />
+            <div className="gen-tabs nodrag" role="group" aria-label="风格">
+              {['2D动漫', '3D国漫', '真人'].map((s) => <button key={s} className={(data.styleType ?? '2D动漫') === s ? 'is-active' : ''} onClick={(e) => { e.stopPropagation(); updateNode(id, { styleType: s as any }); }}>{s}</button>)}
+            </div>
+            <textarea className="text-node-editor nodrag nowheel" aria-label="AI 图片提示词" value={data.prompt ?? textDraft} placeholder="描述你想要生成的画面内容，@引用素材" onChange={(event) => { setTextDraft(event.target.value); updateNode(id, { prompt: event.target.value }); }} />
             {upstreamUrl ? (
               <figure className="image-gen-reference"><img src={upstreamUrl} alt="" /><figcaption>参考图</figcaption></figure>
             ) : (
               <div className="image-gen-empty"><ImageIcon size={26} /><strong>AI 图片节点</strong><span>连接上方输入节点作为参考图</span></div>
             )}
+            <div className="gen-params nodrag">
+              <select value={String(data.aspectRatio ?? '1:1')} onChange={(e) => updateNode(id, { aspectRatio: e.target.value as any })}>{['1:1', '16:9', '9:16', '3:4'].map((r) => <option key={r} value={r}>{r}</option>)}</select>
+              <select value={String(data.size ?? '1K')} onChange={(e) => updateNode(id, { size: e.target.value as any })}>{['1K', '2K'].map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </div>
+            <button className="node-upload node-upload--generate nodrag" disabled={data.isGenerating} onClick={(e) => { e.stopPropagation(); updateNode(id, { isGenerating: true }); window.setTimeout(() => updateNode(id, { isGenerating: false }), 1800); }}>{data.isGenerating ? <LoaderCircle className="is-spinning" size={14} /> : <Sparkles size={14} />} {data.isGenerating ? '生成中…' : '生成图片'}</button>
           </div>
         ) : data.kind === 'videoGen' ? (
           <div className="image-gen-view video-gen-view">

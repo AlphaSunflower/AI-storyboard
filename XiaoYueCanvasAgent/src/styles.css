@@ -1509,6 +1509,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .image-gen-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 8px; color: rgba(238,240,223,.6); text-align: center; }
 .image-gen-empty strong { color: #eef0df; font-size: 13px; }
 .image-gen-empty span { font-size: 11px; }
+.gen-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.gen-tabs button { padding: 4px 10px; border: 1px solid var(--border-dark); border-radius: 999px; background: transparent; color: rgba(238,240,223,.7); font-size: 12px; cursor: pointer; }
+.gen-tabs button.is-active { border-color: rgba(215,255,84,.6); background: rgba(215,255,84,.12); color: var(--acid); }
+.gen-params { display: flex; gap: 6px; }
+.gen-params select { height: 28px; border: 1px solid var(--border-dark); border-radius: 6px; background: rgba(19,34,30,.5); color: #eef0df; font: inherit; font-size: 12px; }
+.image-gen-view .node-upload--generate { position: static; margin: 0; align-self: stretch; justify-content: center; transform: none; }
 
 /* 分镜生成节点（storyboardGen） */
 .storyboard-gen-view { display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: auto; padding-bottom: 8px; }
