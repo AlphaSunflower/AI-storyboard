@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { setJobToken } from '../services/jobAuth';
 
-// 画布登录页（仿 5173 前端：email + password，走 ai分镜 /api/auth/login，复用同一批用户数据）
+// 画布登录页（Email + Password，走网关 /api/auth/login，复用同一批用户数据）
+// 深墨绿 + 荧光绿工作台质感：主强调色统一为 --acid（与画布一致），不再混用珊瑚红 --clay。
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 登录走网关 → ai-storyboard（dev 靠 vite proxy，生产靠网关同域）
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setError(null);
     try {
       const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        credentials: 'omit',
+        method: 'POST', credentials: 'omit',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
@@ -27,68 +26,37 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
       if (!data.data?.accessToken) throw new Error('登录响应缺少 accessToken');
       setJobToken(data.data.accessToken, data.data.userId);
       onLogin();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登录失败');
       setLoading(false);
     }
   };
 
+  const inputClass = 'h-10 w-full rounded-[10px] border border-[var(--border-light)] bg-[rgba(255,255,255,0.05)] px-3.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(215,255,84,0.18)]';
+
   return (
-    <div
-      style={{
-        minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--canvas)', padding: '24px',
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--card)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16,
-          padding: '28px 24px', width: '100%', maxWidth: 380, boxShadow: '0 12px 40px rgba(0,0,0,0.4)',
-        }}
-      >
-        <span style={{ color: 'var(--clay)', fontSize: 13, fontWeight: 500, letterSpacing: '0.12em' }}>
+    <div className="login-shell min-h-dvh flex items-center justify-center px-6"
+      style={{ background: 'radial-gradient(circle at 18% 12%, rgba(215,255,84,0.10), transparent 34%), radial-gradient(circle at 84% 88%, rgba(25,42,36,0.9), transparent 46%), var(--canvas)' }}>
+      <div className="login-card w-full max-w-sm rounded-2xl border border-[var(--border-dark)] bg-card p-7 shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
+        <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.2em] text-acid">
+          <span className="inline-block h-2 w-2 rounded-full bg-acid shadow-[0_0_8px_rgba(215,255,84,0.8)]" />
           MORROW 设计画布
         </span>
-        <h2 style={{ color: 'var(--paper)', fontSize: 22, fontWeight: 600, margin: '6px 0 4px' }}>欢迎回来</h2>
-        <p style={{ color: 'rgba(238,239,223,0.6)', fontSize: 13, marginBottom: 20 }}>
-          登录后继续你的创作（同一账号数据）
-        </p>
-        <form onSubmit={submit}>
-          <label style={{ display: 'block', color: 'rgba(238,239,223,0.7)', fontSize: 13, marginBottom: 4 }}>邮箱</label>
-          <input
-            type="email" value={email} required autoFocus
-            onChange={(e) => setEmail(e.target.value)}
-            style={inputStyle}
-          />
-          <div style={{ height: 14 }} />
-          <label style={{ display: 'block', color: 'rgba(238,239,223,0.7)', fontSize: 13, marginBottom: 4 }}>密码</label>
-          <input
-            type="password" value={password} required minLength={6}
-            onChange={(e) => setPassword(e.target.value)}
-            style={inputStyle}
-          />
-          {error && (
-            <p style={{ color: '#ff8888', fontSize: 13, margin: '12px 0 0' }}>{error}</p>
-          )}
-          <button
-            type="submit" disabled={loading}
-            style={{
-              width: '100%', height: 42, marginTop: 18, borderRadius: 10, border: 'none',
-              background: 'var(--clay)', color: '#141414', fontSize: 14, fontWeight: 600,
-              cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? '请稍候...' : '登录'}
+        <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">欢迎回来</h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">登录后继续你的创作（同一账号数据）</p>
+        <form onSubmit={submit} className="mt-6">
+          <label className="text-[13px] text-muted-foreground">邮箱</label>
+          <input type="email" value={email} required autoFocus onChange={(e) => setEmail(e.target.value)} className={`mt-1.5 ${inputClass}`} placeholder="you@example.com" />
+          <div className="mt-4" />
+          <label className="text-[13px] text-muted-foreground">密码</label>
+          <input type="password" value={password} required minLength={6} onChange={(e) => setPassword(e.target.value)} className={`mt-1.5 ${inputClass}`} placeholder="••••••" />
+          {error && <p className="mt-3 text-[13px] text-destructive">{error}</p>}
+          <button type="submit" disabled={loading}
+            className="mt-6 h-11 w-full rounded-[10px] bg-acid font-semibold text-ink transition hover:brightness-105 disabled:opacity-60">
+            {loading ? '请稍候…' : '登录'}
           </button>
         </form>
       </div>
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 14px', height: 40,
-  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10,
-  background: 'rgba(255,255,255,0.05)', color: 'var(--paper)', fontSize: 14,
-  outline: 'none', boxSizing: 'border-box',
-};
