@@ -4,37 +4,20 @@ import { Clapperboard, Copy, FileText, Image as ImageIcon, LayoutGrid, Layers, L
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import { getAsset, getAssetVariant, saveAsset } from '../services/projectStorage';
-import { submitScriptDrafting, submitImageGeneration, submitVideoGeneration } from '../services/jobRunner';
+import { submitScriptDrafting } from '../services/jobRunner';
 import { useObjectUrl } from '../hooks/useObjectUrl';
 import { useViewportVisibility } from '../hooks/useViewportVisibility';
 import type { CanvasNode } from '../types';
-import { createImageAsset, createVideoAsset, disposeRuntimeAsset, getMediaNodeSize } from '../utils/mediaPipeline';
+import { createImageAsset, disposeRuntimeAsset, getMediaNodeSize } from '../utils/mediaPipeline';
 import { buildReferenceImagePool } from '../canvas/referenceImagePool';
 import { removeReferenceTokenByNumber } from '../canvas/referenceTokenEditing';
 import { ImageNodeTools } from './ImageNodeTools';
 import { GeneratePanel } from './GeneratePanel';
 import { StoryboardGenView } from './nodes/StoryboardGenView';
+import { ImageGenNode } from './nodes/ImageGenNode';
+import { VideoGenNode } from './nodes/VideoGenNode';
 import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
-import { RichPromptInput } from './RichPromptInput';
 import { NodeResizeHandle } from './NodeResizeHandle';
-import { useGatewayModels, parseModelParams } from '../hooks/useGatewayModels';
-
-// AI 图片生成类型（对齐参考 STYLE_PRESETS，默认四视图而非经典生图）
-const IMAGE_GEN_TYPES = [
-  { key: 'portrait', label: '人物四视图', prompt: '纯白背景，全身正面站立形象，双手自然下垂至身体两侧。从左到右依次生成【正脸头肩特写，全身正面视图，全身侧面视图，全身背面视图】，生成在一张图上。四格保持角色外形服装完全一致。' },
-  { key: 'storyboard', label: '故事板', prompt: '故事板提示：创建一个电影制作板/视觉规划表，比例16:9，展示短片或商业广告的完整。包含清晰的镜头编号、镜头大小、运动方式、动作和情绪进展。' },
-  { key: 'multi-grid', label: '多宫格', prompt: '多宫格摄影作品集：建立一致性锚点参考图0，再生成 3x5 摄影预览网格图（15个不同视角分镜），人物特征、服装、环境和光影完全一致。' },
-  { key: 'custom', label: '自定义', prompt: '' },
-] as const;
-
-// 生视频模式（对齐参考 ALL_VIDEO_MODES）
-const VIDEO_MODES = [
-  { id: 'text2video', label: '文生视频' },
-  { id: 'fullReference', label: '全能参考' },
-  { id: 'image2video', label: '图生视频' },
-  { id: 'firstLastFrame', label: '首尾帧' },
-  { id: 'videoReference', label: '视频参考' },
-] as const;
 
 function SelectedNodeChrome({ node }: { node: CanvasNode }) {
   const zoom = useStore((state) => state.transform[2]);
@@ -49,154 +32,6 @@ function SelectedNodeChrome({ node }: { node: CanvasNode }) {
  * 生成节点 footer（对齐参考：通道|模型 + 比例/尺寸 + 生成按钮）。
  * 当前生成走 jobRunner(agent.request)，模型选择仅存 node.data，后端接生图/生视频时透传。
  */
-function GenFooter({
-  nodeId, kind, data, updateNode, useCallbacks, genText,
-}: {
-  nodeId: string;
-  kind: 'imageGen' | 'videoGen';
-  data: Record<string, unknown>;
-  updateNode: (id: string, patch: Record<string, unknown>) => void;
-  useCallbacks: { generating: boolean; onGenerate: () => void };
-  genText: string;
-}) {
-  // 真实模型列表（网关 /models?type=image|video 经后端代理），网关不可达回退本地硬编码
-  const { models, defaultModel, loading } = useGatewayModels(kind === 'videoGen' ? 'video' : 'image');
-  const modelId = typeof data.model === 'string' && data.model ? data.model : defaultModel;
-  const currentModel = models.find((m) => m.value === modelId);
-  const params = parseModelParams(currentModel?.params);
-  const ratios = params.aspectRatios ?? (kind === 'videoGen' ? ['16:9', '9:16', '1:1'] : ['1:1', '16:9', '9:16', '3:4']);
-  // 尺寸能力：生图读 sizes；生视频读 resolutions
-  const sizes = (kind === 'videoGen' ? params.resolutions : params.sizes)
-    ?? (kind === 'videoGen' ? ['720P', '1080P'] : ['1K', '2K']);
-
-  const onModel = (mid: string) => {
-    const def = models.find((m) => m.value === mid);
-    const p = parseModelParams(def?.params);
-    updateNode(nodeId, { model: mid, aspectRatio: p.aspectRatios?.[0], size: p.sizes?.[0] });
-  };
-
-  return (
-    <div className="gen-footer nodrag">
-      <div className="gen-footer__row">
-        <select aria-label="模型" value={modelId} onChange={(e) => onModel(e.target.value)} disabled={loading}>
-          {(models.length ? models : [{ value: defaultModel || '', label: '默认模型' }]).map((m) => <option key={m.value} value={m.value}>{m.label || m.value}</option>)}
-        </select>
-        <div className="gen-footer__selects">
-          <select aria-label="比例" value={String(data.aspectRatio ?? ratios[0] ?? '1:1')} onChange={(e) => updateNode(nodeId, { aspectRatio: e.target.value as any })}>
-            {ratios.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <select aria-label="尺寸" value={String(data.size ?? sizes[0] ?? '1K')} onChange={(e) => updateNode(nodeId, { size: e.target.value as any })}>
-            {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-      </div>
-      <button
-        className="node-upload node-upload--generate node-upload--footer nodrag"
-        disabled={useCallbacks.generating}
-        onClick={(e) => { e.stopPropagation(); useCallbacks.onGenerate(); }}
-      >
-        {useCallbacks.generating ? <LoaderCircle className="is-spinning" size={14} /> : <Sparkles size={14} />}
-        {useCallbacks.generating ? '生成中…' : genText}
-      </button>
-    </div>
-  );
-}
-
-/**
- * 生视频模式面板：模式 tabs（文生/图生/首尾帧/全能参考/视频参考）+ 条件参考区(首帧/尾帧/参考图/视频上传)。
- * 选择存 data.videoMode / firstFrameAssetId / lastFrameAssetId / videoRefAssetId，生成时透传后端。
- */
-function VideoGenBody({ nodeId, data, updateNode, pool, textDraft, setTextDraft, onDeleteRef }: {
-  nodeId: string;
-  data: Record<string, unknown>;
-  updateNode: (id: string, patch: Record<string, unknown>) => void;
-  pool: ReturnType<typeof buildReferenceImagePool>;
-  textDraft: string | undefined;
-  setTextDraft: (v: string) => void;
-  onDeleteRef: (entry: { number: number; sourceNodeId: string }) => void;
-}) {
-  const videoMode = typeof data.videoMode === 'string' ? data.videoMode : 'text2video';
-  const upsertAsset = useMediaStore((state) => state.upsertAsset);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-
-  const attachRef = async (file: File, field: 'firstFrameAssetId' | 'lastFrameAssetId' | 'videoRefAssetId') => {
-    setUploading(true);
-    try {
-      const asset = file.type.startsWith('video/') ? await createVideoAsset(file) : await createImageAsset(file);
-      await saveAsset(asset);
-      upsertAsset(asset);
-      updateNode(nodeId, { [field]: asset.id });
-    } catch (e) {
-      setFeedback(e instanceof Error ? e.message : '参考上传失败');
-      window.setTimeout(() => setFeedback(null), 2200);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handlePick = (field: 'firstFrameAssetId' | 'lastFrameAssetId' | 'videoRefAssetId') => {
-    const accept = field === 'videoRefAssetId' ? 'video/*' : 'image/*';
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = accept;
-    input.onchange = () => { const f = input.files?.[0]; if (f) void attachRef(f, field); };
-    input.click();
-  };
-
-  return (
-    <>
-      <div className="gen-tabs gen-tabs--mode nodrag" role="group" aria-label="生成模式">
-        {VIDEO_MODES.map((m) => <button key={m.id} className={videoMode === m.id ? 'is-active' : ''} onClick={(e) => { e.stopPropagation(); updateNode(nodeId, { videoMode: m.id }); }}>{m.label}</button>)}
-      </div>
-      {(videoMode === 'image2video' || videoMode === 'firstLastFrame') && (
-        <div className="video-mode-refs nodrag">
-          {videoMode === 'image2video' && (
-            <button className="video-ref-slot" onClick={(e) => { e.stopPropagation(); handlePick('firstFrameAssetId'); }} title="拖入或点击上传首帧图">
-              {data.firstFrameAssetId ? <span className="video-ref-done">✓ 首帧已选</span> : <span>+ 首帧图</span>}
-            </button>
-          )}
-          {videoMode === 'firstLastFrame' && (
-            <>
-              <button className="video-ref-slot" onClick={(e) => { e.stopPropagation(); handlePick('firstFrameAssetId'); }} title="首帧图">
-                {data.firstFrameAssetId ? <span className="video-ref-done">✓ 首帧</span> : <span>+ 首帧</span>}
-              </button>
-              <span className="video-ref-arrow">→</span>
-              <button className="video-ref-slot" onClick={(e) => { e.stopPropagation(); handlePick('lastFrameAssetId'); }} title="尾帧图">
-                {data.lastFrameAssetId ? <span className="video-ref-done">✓ 尾帧</span> : <span>+ 尾帧</span>}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {(videoMode === 'fullReference' || videoMode === 'videoReference') && (
-        <div className="video-mode-refs nodrag">
-          {videoMode === 'videoReference' ? (
-            <button className="video-ref-slot video-ref-slot--video" onClick={(e) => { e.stopPropagation(); handlePick('videoRefAssetId'); }} title="点击或拖拽上传视频 MP4/MOV">
-              {data.videoRefAssetId ? <span className="video-ref-done">✓ {uploading ? '上传中…' : '参考视频已选'}</span> : <span>{uploading ? '上传中…' : '+ 参考视频'}</span>}
-            </button>
-          ) : (
-            <div className="video-fullref-hint nodrag">{pool.count > 0 ? '已连接上游素材，可 @引用图片作参考' : '从画布上 @引用 图片作为参考，或连接上游节点导入'}</div>
-          )}
-        </div>
-      )}
-      {feedback && <small className="node-upload-error nodrag">{feedback}</small>}
-      <RichPromptInput
-        className="rt-input--gen"
-        value={String(data.prompt ?? textDraft ?? '')}
-        onChange={(v) => { setTextDraft(v); updateNode(nodeId, { prompt: v }); }}
-        placeholder="描述要生成的视频…"
-        minHeight={80}
-        maxHeight={0}
-        pool={pool}
-        showStrip={Boolean(pool.count > 0)}
-        onDeleteRefEntry={onDeleteRef}
-      />
-      {!pool.count && <div className="image-gen-empty"><ImageIcon size={26} /><strong>生视频节点</strong><span>连接上方输入节点作为参考图</span></div>}
-    </>
-  );
-}
-
 function TitleInput({ nodeId, label, onLabel }: { nodeId: string; label: string; onLabel: (label: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -238,6 +73,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
     : lazyVariant?.key === `${data.assetId}:${desiredVariant}` ? lazyVariant.blob : undefined;
   const mediaUrl = useObjectUrl(mediaBlob, visibility.visible);
   const edges = useCanvasStore((state) => state.edges);
+  const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const [textDraft, setTextDraft] = useState(data.prompt);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -259,11 +95,13 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   // 当前 prompt 文本（删除参考图 token 时用）
   const promptText = (data.prompt ?? textDraft ?? '') as string;
 
-  // 删除参考图：移除 @图N token
+  // 删除参考图：移除 @图N token + 断连该参考源节点 → 当前节点的上游边（对齐参考"删参考同时断上游"）
   const deleteReference = (entry: { number: number; sourceNodeId: string }) => {
     const cleaned = removeReferenceTokenByNumber(promptText, entry.number);
     setTextDraft(cleaned);
     updateNode(id, { prompt: cleaned });
+    const edgesToCut = edges.filter((e) => e.target === id && e.source === entry.sourceNodeId);
+    for (const edge of edgesToCut) deleteEdge(edge.id);
   };
 
   useEffect(() => {
@@ -325,38 +163,9 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
         ) : data.kind === 'storyboardGen' ? (
           <StoryboardGenView node={node} updateNode={updateNode} />
         ) : data.kind === 'imageGen' ? (
-          <div className="image-gen-view">
-            <div className="gen-tabs gen-tabs--type nodrag" role="group" aria-label="生成类型">
-              {IMAGE_GEN_TYPES.map((t) => <button key={t.key} className={(data.genType ?? 'portrait') === t.key ? 'is-active' : ''} title={t.prompt ? `该类型会自动拼入提示词` : ''} onClick={(e) => { e.stopPropagation(); updateNode(id, { genType: t.key }); }}>{t.label}</button>)}
-            </div>
-            <div className="gen-tabs nodrag" role="group" aria-label="风格">
-              {['2D动漫', '3D国漫', '真人'].map((s) => <button key={s} className={(data.styleType ?? '2D动漫') === s ? 'is-active' : ''} onClick={(e) => { e.stopPropagation(); updateNode(id, { styleType: s as any }); }}>{s}</button>)}
-            </div>
-            <div className="gen-body">
-              <RichPromptInput
-                className="rt-input--gen"
-                value={data.prompt ?? textDraft ?? ''}
-                onChange={(v) => { setTextDraft(v); updateNode(id, { prompt: v }); }}
-                placeholder="描述你想要生成的画面内容，@引用素材"
-                minHeight={80}
-                maxHeight={0}
-                pool={referencePool!}
-                showStrip={Boolean(referencePool && referencePool.count > 0)}
-                onDeleteRefEntry={deleteReference}
-              />
-              {!referencePool?.count && <div className="image-gen-empty"><ImageIcon size={26} /><strong>AI 图片节点</strong><span>连接上方输入节点作为参考图</span></div>}
-            </div>
-            <GenFooter nodeId={id} kind="imageGen" data={data} updateNode={updateNode} genText="生成图片" useCallbacks={{ generating: Boolean(data.isGenerating), onGenerate: () => { const text = String(data.prompt ?? textDraft ?? ''); const opts = { sourceAssetIds: referencePool?.assetIds ?? [], params: { model: data.model, size: data.size, aspectRatio: data.aspectRatio, genType: data.genType } }; void submitImageGeneration(text, id, (msg) => setDraftFeedback(msg), opts).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '生图提交失败')); } }} />
-            {draftFeedback && <small className="node-upload-error nodrag">{draftFeedback}</small>}
-          </div>
+          <ImageGenNode id={id} data={data} updateNode={updateNode} textDraft={textDraft} setTextDraft={setTextDraft} referencePool={referencePool!} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
         ) : data.kind === 'videoGen' ? (
-          <div className="image-gen-view video-gen-view">
-            <div className="gen-body">
-              <VideoGenBody nodeId={id} data={data} updateNode={updateNode} pool={referencePool!} textDraft={textDraft} setTextDraft={setTextDraft} onDeleteRef={deleteReference} />
-            </div>
-            <GenFooter nodeId={id} kind="videoGen" data={data} updateNode={updateNode} genText="生成视频" useCallbacks={{ generating: Boolean(data.isGenerating), onGenerate: () => { const text = String(data.prompt ?? textDraft ?? ''); const refIds = [...(referencePool?.assetIds ?? [])]; for (const f of ['firstFrameAssetId', 'lastFrameAssetId', 'videoRefAssetId']) { if (typeof data[f] === 'string' && data[f]) refIds.push(data[f] as string); } const opts = { sourceAssetIds: refIds, params: { videoMode: data.videoMode, model: data.model, aspectRatio: data.aspectRatio, size: data.size } }; void submitVideoGeneration(text, id, (msg) => setDraftFeedback(msg), opts).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '生视频提交失败')); } }} />
-            {draftFeedback && <small className="node-upload-error nodrag">{draftFeedback}</small>}
-          </div>
+          <VideoGenNode id={id} data={data} updateNode={updateNode} textDraft={textDraft} setTextDraft={setTextDraft} referencePool={referencePool!} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <textarea className="text-node-editor nodrag nowheel" aria-label={data.kind === 'note' ? '批注内容' : data.kind === 'prompt' ? '提示词内容' : '文字内容'} value={data.kind === 'note' ? (data.richText ?? textDraft) : data.kind === 'prompt' ? (data.promptText ?? textDraft) : textDraft} placeholder={data.kind === 'note' ? '在此记录设计说明…' : data.kind === 'prompt' ? '在此输入 AI 提示词…' : '在此输入文字…'} onChange={(event) => { setTextDraft(event.target.value); const patch = data.kind === 'note' ? { richText: event.target.value } : data.kind === 'prompt' ? { promptText: event.target.value } : { prompt: event.target.value }; updateNode(id, patch); }} onBlur={() => { if (data.kind !== 'note' && data.kind !== 'prompt' && textDraft !== data.prompt) updateNode(id, { prompt: textDraft }); }} />
         ) : data.kind === 'sequence' ? (

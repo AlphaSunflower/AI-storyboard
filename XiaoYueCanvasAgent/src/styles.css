@@ -1981,3 +1981,17 @@ textarea.text-node-editor::placeholder,
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ── 生成进度百分比胶囊（对齐参考 ImageEditNode 生成中进度） ── */
+.gen-footer__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--acid);
+  background: rgba(215, 255, 84, 0.12);
+  border-radius: 9999px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  vertical-align: middle;
+}

@@ -49,7 +49,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
 
   useAgentStore.getState().putJob(projectId, { id: jobId, prompt: trimmed.slice(0, 24), sourceNodeId: targetNodeId, capabilityId, status: 'queued', progress: 0, createdAt: Date.now() });
   // 立即置生成态（不依赖 job.started 事件顺序），completed/failed/asset.created 时复位
-  useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true });
+  useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true, generationStartedAt: Date.now(), progressPercent: 0 });
 
   const seenAssets = new Set<string>();
   const unsubscribe = jobAdapter.subscribe(jobId, (event) => {
@@ -58,15 +58,17 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       if (seenAssets.has(dedupeKey)) return;
       seenAssets.add(dedupeKey);
       void materializeGeneration(event, targetNodeId)
-        .then(() => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false }); })
-        .catch((error) => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false }); onFeedback(error instanceof Error ? error.message : '生成结果落地失败'); });
+        .then(() => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 }); })
+        .catch((error) => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 }); onFeedback(error instanceof Error ? error.message : '生成结果落地失败'); });
     } else if (event.type === 'job.progress') {
-      useAgentStore.getState().updateJob(projectId, jobId, { status: 'running', progress: Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress)) });
+      const raw = Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress));
+      useAgentStore.getState().updateJob(projectId, jobId, { status: 'running', progress: raw });
+      useCanvasStore.getState().updateNode(targetNodeId, { progressPercent: Math.round(raw * 100) });
     } else if (event.type === 'job.started' || event.type === 'job.queued') {
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true });
     } else if (event.type === 'job.failed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false });
+      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
       onFeedback(event.message);
     } else if (event.type === 'job.completed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
