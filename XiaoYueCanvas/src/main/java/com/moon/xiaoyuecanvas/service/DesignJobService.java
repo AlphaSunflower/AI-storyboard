@@ -235,16 +235,19 @@ public class DesignJobService {
         String model = str(params, "model");
         String size = str(params, "size");
         String quality = str(params, "quality");
+        String aspectRatio = str(params, "aspectRatio");
         Integer n = intVal(params, "n");
         List<String> referenceImages = new ArrayList<>();
+        // 图改图：image.redraw 显式指定，或 image.generate 携带参考图源时自动 edit
         String mode = "image.redraw".equals(job.getCapabilityId()) ? "edit" : null;
         List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
         for (String aid : sourceAssetIds) {
             AgentAsset a = agentAssetMapper.selectById(aid);
             if (a != null && a.getUrl() != null) referenceImages.add(toDataUriOrUrl(a.getUrl()));
         }
+        if (mode == null && !referenceImages.isEmpty()) mode = "edit";
         List<String> paths = imageGenerationService.generateImages(
-                null, prompt, model, size, quality, null, referenceImages, mode, null, n);
+                null, prompt, model, size, quality, aspectRatio, referenceImages, mode, null, n);
         if (paths == null || paths.isEmpty()) {
             throw new BusinessException(50201, "图片生成失败");
         }
@@ -264,9 +267,20 @@ public class DesignJobService {
         String aspectRatio = str(params, "aspectRatio");
         Integer duration = intVal(params, "duration");
         List<String> referenceImages = new ArrayList<>();
+        // 图生视频：sourceAssetIds（首帧图/参考图）→ referenceImages；参考视频 → referenceVideos（多模态签名）
+        List<String> referenceVideos = new ArrayList<>();
+        List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
+        for (String aid : sourceAssetIds) {
+            AgentAsset a = agentAssetMapper.selectById(aid);
+            if (a == null || a.getUrl() == null) continue;
+            String url = toDataUriOrUrl(a.getUrl());
+            if ("video".equals(a.getType())) referenceVideos.add(url);
+            else referenceImages.add(url);
+        }
         int progress = 0;
         String taskId = videoGenerationService.createVideoTask(
-                null, prompt, alias, resolution, size, aspectRatio, duration, null, null, referenceImages, null);
+                null, prompt, alias, resolution, size, aspectRatio, duration, null, null,
+                referenceImages, null, referenceVideos, null);
         saveAsset(job, "video", null, taskId, alias, "generating");
         while (true) {
             Map<String, String> poll = videoGenerationService.pollVideoTask(taskId);

@@ -1,9 +1,12 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Clapperboard, LayoutGrid, LoaderCircle } from 'lucide-react';
 import type { CanvasNode } from '../../types';
 import { submitStoryboardGeneration } from '../../services/jobRunner';
+import { useCanvasStore } from '../../store/canvasStore';
+import { buildReferenceImagePool, type ReferenceImagePoolResult } from '../../canvas/referenceImagePool';
+import { RichPromptInput } from '../RichPromptInput';
 
-type Frames = Array<{ img?: string; label?: string; description?: string }>;
+type Frames = Array<{ img?: string; label?: string; description?: string; imageUrl?: string; duration?: number }>;
 const STYLE_LABELS: Record<string, string> = { '2d-anime': '2D动漫', '3d-cg': '3D国漫', 'live-action': '真人实拍' };
 
 // 分镜生成节点的卡片内容（无 Handle——当前由 MediaNode 按 data.kind 分发渲染）。
@@ -20,6 +23,18 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
   const rows = data.rows ?? 2;
   const cols = data.cols ?? 3;
   const styleType = data.styleType ?? '2d-anime';
+
+  // 参考图池（对齐参考 FrameDescriptionCell：每帧描述可 @引用上游素材）
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
+  const referencePool = useMemo(() => buildReferenceImagePool(id, nodes, edges, 1), [id, nodes, edges]);
+
+  // 更新某帧的分镜描述
+  const updateFrameDescription = (index: number, description: string) => {
+    const next = [...frames];
+    next[index] = { ...next[index], description };
+    updateNode(id, { frames: next });
+  };
 
   const submit = () => {
     const text = draftText.trim();
@@ -55,12 +70,39 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
       {feedback && <small className="node-upload-error nodrag">{feedback}</small>}
       {frames.length > 0 ? (
         <div className="storyboard-grid storyboard-grid--gen" style={{ '--gen-cols': cols, '--gen-rows': rows } as React.CSSProperties}>
-          {frames.map((frame, i) => (
-            <figure key={i} className="storyboard-frame" style={{ '--gen-cols': cols, '--gen-rows': rows } as React.CSSProperties}>
-              {frame.img && <img src={frame.img} alt="" />}
-              <figcaption>{frame.label ?? `镜头${i + 1}`}</figcaption>
-            </figure>
-          ))}
+          {frames.map((frame, i) => {
+            const imgSrc = frame.img || frame.imageUrl;
+            const desc = frame.description ?? '';
+            return (
+              <figure key={i} className="storyboard-frame" style={{ '--gen-cols': cols, '--gen-rows': rows } as React.CSSProperties}>
+                <div className="storyboard-frame__thumb">
+                  {imgSrc ? <img src={imgSrc} alt={`镜头${i + 1}`} /> : (
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(238,240,223,.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                  )}
+                  {desc.trim() && !imgSrc && (
+                    <button className="storyboard-frame__retry nodrag" title="重试生成这一帧" onClick={() => { updateNode(id, { isGenerating: true }); window.setTimeout(() => updateNode(id, { isGenerating: false }), 1500); }}>↻</button>
+                  )}
+                </div>
+                <figcaption className="storyboard-frame__cap">
+                  <span className="storyboard-frame__no">#{String(i + 1).padStart(2, '0')}</span>
+                  <span className="storyboard-frame__style">{STYLE_LABELS[styleType] ?? styleType}</span>
+                </figcaption>
+                <RichPromptInput
+                  className="storyboard-frame__desc"
+                  value={desc}
+                  onChange={(v) => updateFrameDescription(i, v)}
+                  placeholder="分镜描述…"
+                  pool={referencePool}
+                  showStrip={false}
+                  minHeight={36}
+                  maxHeight={0}
+                />
+                <figcaption className="storyboard-frame__label">{frame.label ?? `镜头${i + 1}`}</figcaption>
+              </figure>
+            );
+          })}
         </div>
       ) : (
         <div className="empty-image-node"><LayoutGrid size={26} /><strong>分镜生成节点</strong><span>输入剧本后生成分镜帧网格</span></div>

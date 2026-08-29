@@ -143,11 +143,11 @@ export default function App() {
             while (pendingSave.current) {
               const candidate = pendingSave.current;
               pendingSave.current = null;
-              await saveCanvas(candidate);
-              saved = candidate;
+              const persisted = await saveCanvas(candidate);   // 返回 applyGraph 后的新 revision
+              saved = persisted;
               if (canvasRef.current?.id === candidate.id) {
-                canvasRef.current = candidate;
-                setCanvas(candidate);
+                canvasRef.current = persisted;
+                setCanvas(persisted);
                 setSaveStatus('saved');
               }
             }

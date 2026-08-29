@@ -1570,3 +1570,414 @@ textarea.text-node-editor::placeholder,
 .canvas-context-submenu { background: #14241f !important; border-color: rgba(215,255,84,.16) !important; }
 
 
+
+/* ── 参考图条 ReferenceStrip（深墨绿+acid 主题，对齐参考工程交互） ─────────────────── */
+.reference-strip {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  background: rgba(19, 34, 30, .6);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(215, 255, 84, .1);
+  scrollbar-width: thin;
+}
+.reference-strip__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform .15s, opacity .15s;
+  opacity: .65;
+}
+.reference-strip__item:hover { transform: scale(1.05); opacity: 1; }
+.reference-strip__thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid rgba(215, 255, 84, .12);
+  background: rgba(255, 255, 255, .04);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color .15s, box-shadow .15s;
+}
+.reference-strip__thumb.is-referenced {
+  border-color: var(--acid);
+  box-shadow: 0 0 0 1px var(--acid), 0 0 12px rgba(215, 255, 84, .18);
+}
+.reference-strip__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.reference-strip__thumb-empty { width: 100%; height: 100%; }
+.reference-strip__num {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #eef0df;
+  background: rgba(19, 34, 30, .8);
+}
+.reference-strip__check {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--acid);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reference-strip__del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(239, 68, 68, .9);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
+.reference-strip__label {
+  font-size: 10px;
+  color: rgba(238, 240, 223, .55);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
+  text-align: center;
+  line-height: 12px;
+}
+.reference-strip__label.is-referenced { color: var(--acid); font-weight: 600; }
+
+/* ── 即梦式富提示词输入 RichPromptInput（contenteditable + @图N chip） ───────── */
+.rt-input {
+  background: rgba(19, 34, 30, .55);
+  border: 1px solid rgba(215, 255, 84, .12);
+  border-radius: 10px;
+  padding: 8px;
+}
+.rt-input--gen { margin-bottom: 8px; width: 100%; box-sizing: border-box; }
+.rt-input__editable {
+  color: #eef0df;
+}
+.rt-input__editable:focus { outline: none; }
+.rt-chip {
+  cursor: default;
+  transition: background-color .15s;
+}
+.rt-chip:hover { background: rgba(215, 255, 84, .24) !important; }
+.rt-chip [data-chip-delete]:hover { opacity: 1; background: rgba(215, 255, 84, .25); }
+
+/* @picker 悬浮面板 */
+.reference-picker {
+  position: fixed;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 360px;
+  overflow: auto;
+  background: #1c2a25;
+  border: 1px solid rgba(215, 255, 84, .16);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .5);
+  color: #eef0df;
+}
+.reference-picker--empty { padding: 16px 20px; min-width: 200px; }
+.reference-picker--empty small { color: rgba(238, 240, 223, .5); }
+.reference-picker__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(238, 240, 223, .55);
+  padding: 2px 8px 8px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.reference-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 2px;
+}
+.reference-picker__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: rgba(238, 240, 223, .75);
+  cursor: pointer;
+  transition: all .15s;
+}
+.reference-picker__cell.is-selected {
+  border-color: var(--acid);
+  background: rgba(215, 255, 84, .1);
+  color: var(--acid);
+}
+.reference-picker__num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--acid);
+  background: rgba(215, 255, 84, .12);
+  border-radius: 6px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+.reference-picker__name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+}
+
+/* ── 节点通用外壳（对齐参考：header 内嵌卡片顶，图标+标题+生成态徽章） ───────── */
+.node-card { display: flex; flex-direction: column; }
+.media-node .node-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(215,255,84,.1);
+  flex-shrink: 0;
+  min-width: 0;
+}
+.media-node .node-card__header svg { flex-shrink: 0; color: rgba(226,233,216,.6); }
+.media-node .node-card__header-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(238,240,223,.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.media-node .node-card__header-title input {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  outline: 0;
+  background: rgba(14,27,23,.82);
+  color: #f2f5ea;
+  font: inherit;
+  border-radius: 4px;
+}
+.media-node .node-card__badge-gen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--acid);
+  background: rgba(215,255,84,.12);
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.media-node .node-card__badge-gen::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--acid);
+  animation: media-node-pulse 1.5s ease-in-out infinite;
+}
+@keyframes media-node-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+/* 内容区撑满剩余高度并可滚动 */
+.media-node .node-card__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* 各 kind 内容区占满 body */
+.media-node .script-node-view,
+.media-node .image-gen-view,
+.media-node .storyboard-gen-view,
+.media-node .sequence-node-view {
+  flex: 1;
+  min-height: 0;
+}
+/* 标题不再是浮动标签（改为 header 内嵌），隐藏旧的浮动标题 */
+.media-node .node-floating-title { display: none; }
+
+/* ── 生成节点 footer（通道|模型 + 比例/尺寸 + 生成按钮） ─────────────────── */
+.gen-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(215,255,84,.1);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+.gen-footer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gen-footer__selects { display: flex; gap: 4px; }
+.gen-footer__selects select {
+  height: 26px;
+  border: 1px solid rgba(215,255,84,.14);
+  border-radius: 6px;
+  background: rgba(19,34,30,.5);
+  color: #eef0df;
+  font: inherit;
+  font-size: 11px;
+  padding: 0 4px;
+}
+.gen-footer .node-upload--footer {
+  position: static;
+  transform: none;
+  align-self: stretch;
+  justify-content: center;
+  width: 100%;
+}
+
+/* ── 节点内容区 flex 布局修正（footer 顶底不裁剪） ───────────────────
+   参考实现用 height:100% 在 flex 父容器（node-card__body）里不撑满，
+   导致 GenFooter 超出容器被 overflow:hidden 裁剪。改为 flex:1 + min-height:0。 */
+.media-node .node-card__body { display: flex; flex-direction: column; }
+.media-node .node-card__body > .image-gen-view,
+.media-node .node-card__body > .storyboard-gen-view,
+.media-node .node-card__body > .script-node-view,
+.media-node .node-card__body > .sequence-node-view {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 生成节点正文滚动区（footer 固定底部） ─────────────────── */
+.image-gen-view .gen-body,
+.video-gen-view .gen-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── 分镜生成帧单元格（对齐参考 FrameDescriptionCell：图占位 + #编号 + 描述编辑 + 重试） ── */
+.storyboard-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  border: 1px solid rgba(215,255,84,.1);
+  border-radius: 6px;
+  background: rgba(19,34,30,.4);
+  overflow: hidden;
+  min-width: 0;
+}
+.storyboard-frame__thumb {
+  position: relative;
+  height: 84px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(14,27,23,.6);
+  overflow: hidden;
+}
+.storyboard-frame__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.storyboard-frame__retry {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(215,255,84,.4);
+  border-radius: 4px;
+  background: rgba(0,0,0,.55);
+  color: var(--acid);
+  font-size: 12px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.storyboard-frame__cap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  min-width: 0;
+}
+.storyboard-frame__no { font-size: 10px; font-weight: 500; color: rgba(238,240,223,.5); }
+.storyboard-frame__style {
+  font-size: 9px;
+  color: var(--acid);
+  background: rgba(215,255,84,.1);
+  padding: 0 5px;
+  border-radius: 999px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+.storyboard-frame__desc { flex: 1; min-height: 0; }
+.storyboard-frame__label { padding: 0 6px 4px; font-size: 10px; color: rgba(238,240,223,.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 生视频模式参考区（首尾帧槽 / 视频参考上传） ─────────────────── */
+.gen-tabs--mode .is-active, .gen-tabs--type .is-active { border-color: rgba(215,255,84,.6); background: rgba(215,255,84,.12); color: var(--acid); }
+.video-mode-refs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.video-ref-slot {
+  flex: 1;
+  min-width: 90px;
+  height: 44px;
+  padding: 0 8px;
+  border: 1px dashed rgba(215,255,84,.3);
+  border-radius: 8px;
+  background: rgba(19,34,30,.45);
+  color: rgba(238,240,223,.6);
+  font-size: 11px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: border-color .15s, background .15s;
+}
+.video-ref-slot:hover { border-color: var(--acid); background: rgba(215,255,84,.08); }
+.video-ref-slot--video { height: 52px; }
+.video-ref-done { color: var(--acid); font-weight: 500; }
+.video-ref-arrow { color: rgba(238,240,223,.4); font-size: 16px; flex-shrink: 0; }
+.video-fullref-hint { font-size: 11px; color: rgba(238,240,223,.55); padding: 8px 0; text-align: center; }
+
+/* ── 普通分镜节点帧描述（只读展示） ─────────────────── */
+.storyboard-frame__desc-text {
+  margin: 0;
+  padding: 0 6px 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: rgba(238,240,223,.55);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

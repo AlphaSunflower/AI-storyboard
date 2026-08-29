@@ -32,7 +32,11 @@ const makeNode = (
   size?: { width: number; height: number },
 ): CanvasNode => {
   const preset = NODE_PRESETS.find((item) => item.kind === kind) ?? NODE_PRESETS[0];
-  const defaultSize = kind === 'text' ? { width: 380, height: 280 } : kind === 'video' ? { width: 420, height: 236 } : { width: 250, height: 250 };
+  // 生成类节点参考尺寸（对齐参考 ImageEditNode 520×400），text/video 保持；其余 250×250
+  const defaultSize = kind === 'text' ? { width: 380, height: 280 }
+    : kind === 'video' ? { width: 420, height: 236 }
+    : (kind === 'imageGen' || kind === 'videoGen' || kind === 'storyboardGen') ? { width: 520, height: 420 }
+    : { width: 250, height: 250 };
   return {
     id: `${kind}-${createId()}`,
     type: kind === 'video' ? 'video' : 'media',
@@ -115,6 +119,23 @@ interface CanvasState {
 
 const MAX_HISTORY = 40;
 
+/**
+ * 连通性校验（唯一入口）：判断 sourceKind 作为源能否连到 targetKind。
+ * 语义 = 源节点的 connect.acceptTypes 白名单：
+ *  - 非空：仅当白名单包含目标 kind 才放行；
+ *  - 空数组：该源「不允许连出任何目标」（终端/注释/容器节点）。
+ * 所有连线路径（connect / createEdge / createConnectedNode / createNodeBefore）都走这里，防漏网。
+ * 未知 kind 放行（向后兼容旧画布数据）。
+ */
+const canConnect = (sourceKind: MediaKind, targetKind: MediaKind): boolean => {
+  const def = NODE_DEFS[sourceKind];
+  if (!def) return true;
+  return def.connectivity.acceptTypes.includes(targetKind);
+};
+
+/** 导出给连线菜单（ConnectionNodeMenu）用：判断源能否连到目标，口径与 store 一致。 */
+export const canConnectNodes = canConnect;
+
 const selectedNodes = (state: Pick<CanvasState, 'nodes' | 'selectedNodeId'>) => {
   const selected = state.nodes.filter((node) => node.selected);
   if (selected.length) return selected;
@@ -196,7 +217,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         past: [...state.past, snapshot].slice(-MAX_HISTORY), future: [], revision: state.revision + 1,
       } : { dragStartSnapshot: null });
     },
-    connect: (connection) => commit((state) => ({ nodes: state.nodes, edges: addEdge({ ...connection, type: 'canvas' }, state.edges) })),
+    connect: (connection) => {
+      const state = get();
+      if (!connection.source || !connection.target || connection.source === connection.target) return;
+      if (state.edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.sourceHandle === connection.sourceHandle && edge.targetHandle === connection.targetHandle)) return;
+      const sourceNode = state.nodes.find((node) => node.id === connection.source);
+      const targetNode = state.nodes.find((node) => node.id === connection.target);
+      if (!sourceNode || !targetNode) return;
+      if (!canConnect(sourceNode.data.kind, targetNode.data.kind)) return;
+      commit((state) => ({ nodes: state.nodes, edges: addEdge({ ...connection, type: 'canvas' }, state.edges) }));
+    },
     addNode: (kind, position = { x: 300, y: 200 }, overrides = {}) => {
       const node = { ...makeNode(kind, position, overrides), selected: true };
       commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: state.edges }));
@@ -394,13 +424,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       if (!connection.source || !connection.target || connection.source === connection.target) return null;
       if (!state.nodes.some((node) => node.id === connection.source) || !state.nodes.some((node) => node.id === connection.target)) return null;
       if (state.edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.sourceHandle === connection.sourceHandle && edge.targetHandle === connection.targetHandle)) return null;
-      // acceptTypes 校验：仅当源节点声明了可接类型时校验，声明了但目标不匹配则拒绝连线
+      // 连通性校验（统一走 canConnect：源白名单，空数组=该源不允许连出任何目标）
       const sourceNode = state.nodes.find((node) => node.id === connection.source);
       const targetNode = state.nodes.find((node) => node.id === connection.target);
-      const sourceDef = sourceNode ? NODE_DEFS[sourceNode.data.kind] : undefined;
-      if (sourceDef?.connectivity?.acceptTypes?.length) {
-        if (!targetNode || !sourceDef.connectivity.acceptTypes.includes(targetNode.data.kind)) return null;
-      }
+      if (!sourceNode || !targetNode || !canConnect(sourceNode.data.kind, targetNode.data.kind)) return null;
       const edge = { ...connection, id: `edge-${createId()}`, type: 'canvas' } as CanvasEdge;
       commit((current) => ({ nodes: current.nodes, edges: [...current.edges, edge] }));
       return edge.id;
@@ -409,6 +436,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     createConnectedNode: (sourceId, kind, position) => {
       const source = get().nodes.find((n) => n.id === sourceId);
       if (!source) return null;
+      // 连通性校验：源节点必须允许连到目标 kind
+      if (!canConnect(source.data.kind, kind)) return null;
       const node = { ...makeNode(kind, position), selected: true };
       const edge = { id: `edge-${createId()}`, source: sourceId, sourceHandle: 'right', target: node.id, targetHandle: 'left', type: 'canvas' };
       commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));
@@ -419,6 +448,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     createNodeBefore: (targetId, kind, position) => {
       const target = get().nodes.find((n) => n.id === targetId);
       if (!target) return null;
+      // 连通性校验：新建的源节点 kind 必须允许连到目标节点
+      if (!canConnect(kind, target.data.kind)) return null;
       const node = { ...makeNode(kind, position), selected: true };
       const edge = { id: `edge-${createId()}`, source: node.id, sourceHandle: 'right', target: targetId, targetHandle: 'left', type: 'canvas' };
       commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));

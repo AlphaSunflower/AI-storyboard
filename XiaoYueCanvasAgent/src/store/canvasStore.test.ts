@@ -107,4 +107,32 @@ describe('canvas transactions', () => {
     expect(storyNodeId).not.toBeNull();
     expect(useCanvasStore.getState().edges).toHaveLength(1);
   });
+
+  // 空 acceptTypes 的源（批注/注释）不允许连出任何目标
+  it('rejects outgoing edges from a source with empty acceptTypes (note)', () => {
+    useCanvasStore.getState().addNode('note', { x: 0, y: 0 });
+    useCanvasStore.getState().addNode('imageGen', { x: 300, y: 0 });
+    const noteId = useCanvasStore.getState().nodes[0].id;
+    const imageGenId = useCanvasStore.getState().nodes[1].id;
+    expect(useCanvasStore.getState().createEdge({ source: noteId, target: imageGenId, sourceHandle: 'right', targetHandle: 'left' })).toBeNull();
+    expect(useCanvasStore.getState().createConnectedNode(noteId, 'imageGen', { x: 600, y: 0 })).toBeNull();
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+  });
+
+  // onConnect（connect）也走连通性校验：图片只能连生成图片/生视频
+  it('enforces acceptTypes on the connect(onConnect) path too', () => {
+    useCanvasStore.getState().addNode('image', { x: 0, y: 0 });
+    useCanvasStore.getState().addNode('script', { x: 300, y: 0 });
+    const imageId = useCanvasStore.getState().nodes[0].id;
+    const scriptId = useCanvasStore.getState().nodes[1].id;
+    // image 不能连 script（图片白名单只有 imageGen/videoGen）
+    useCanvasStore.getState().connect({ source: imageId, target: scriptId, sourceHandle: 'right', targetHandle: 'left' });
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+    // 图片 → 生视频 应被放行
+    useCanvasStore.getState().addNode('videoGen', { x: 600, y: 0 });
+    const videoGenId = useCanvasStore.getState().nodes[2].id;
+    useCanvasStore.getState().connect({ source: imageId, target: videoGenId, sourceHandle: 'right', targetHandle: 'left' });
+    expect(useCanvasStore.getState().edges).toHaveLength(1);
+  });
 });

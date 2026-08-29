@@ -24,51 +24,69 @@ const materializeGeneration = async (event: Extract<JobEvent, { type: 'asset.cre
   return asset;
 };
 
-// 提交生图任务：未配置执行服务时如实抛错，不伪造结果。
-export const submitImageGeneration = async (prompt: string, targetNodeId: string, onFeedback: (message: string) => void) => {
-  const text = prompt.trim();
-  if (!text) throw new Error('请输入生图提示词');
+// 生图/生视频/分镜的通用提交（capability 由调用方指定，params 透传生成参数 + 参考图源资产）。
+interface GenSubmitOpts {
+  sourceAssetIds?: string[];
+  params?: Record<string, unknown>;
+}
+const submitGen = async (text: string, targetNodeId: string, onFeedback: (message: string) => void, capabilityId: string, opts: GenSubmitOpts = {}) => {
+  const trimmed = text.trim();
   const canvas = useCanvasStore.getState();
   const projectId = canvas.projectId ?? 'local-project';
   const capabilities = await jobAdapter.getCapabilities();
-  const capability = capabilities.find((item) => item.id === 'image.generate');
-  if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置图像执行服务');
+  const capability = capabilities.find((item) => item.id === capabilityId);
+  if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置对应执行服务');
 
   const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
   const { jobId } = await jobAdapter.submit({
     clientRequestId: createId(),
     conversationId,
-    capabilityId: 'image.generate',
-    sourceAssetIds: [],
+    capabilityId,
+    sourceAssetIds: opts.sourceAssetIds ?? [],
     context: { projectId, nodeIds: canvas.nodes.map((node) => node.id), selectedNodeId: targetNodeId },
-    params: { prompt: text },
+    params: { prompt: trimmed, ...(opts.params ?? {}) },
   });
 
-  useAgentStore.getState().putJob(projectId, { id: jobId, prompt: text, sourceNodeId: targetNodeId, capabilityId: 'image.generate', status: 'queued', progress: 0, createdAt: Date.now() });
+  useAgentStore.getState().putJob(projectId, { id: jobId, prompt: trimmed.slice(0, 24), sourceNodeId: targetNodeId, capabilityId, status: 'queued', progress: 0, createdAt: Date.now() });
+  // 立即置生成态（不依赖 job.started 事件顺序），completed/failed/asset.created 时复位
+  useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true });
 
   const seenAssets = new Set<string>();
-  jobAdapter.subscribe(jobId, (event) => {
+  const unsubscribe = jobAdapter.subscribe(jobId, (event) => {
     if (event.type === 'asset.created') {
       const dedupeKey = `${event.jobId}:${event.asset.id}`;
       if (seenAssets.has(dedupeKey)) return;
       seenAssets.add(dedupeKey);
       void materializeGeneration(event, targetNodeId)
-        .then(() => useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 }))
-        .catch((error) => {
-          useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' });
-          onFeedback(error instanceof Error ? error.message : '生图结果落地失败');
-        });
+        .then(() => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false }); })
+        .catch((error) => { useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' }); useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false }); onFeedback(error instanceof Error ? error.message : '生成结果落地失败'); });
     } else if (event.type === 'job.progress') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'running', progress: Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress)) });
+    } else if (event.type === 'job.started' || event.type === 'job.queued') {
+      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true });
     } else if (event.type === 'job.failed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' });
+      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false });
       onFeedback(event.message);
     } else if (event.type === 'job.completed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
     }
   });
-
+  // 取消时解绑订阅（保存引用供取消用）
+  (jobId as unknown as { __unsub?: () => void }).__unsub = unsubscribe;
   return jobId;
+};
+
+/** 提交生图任务：透传生成参数（model/size/aspectRatio/genType）+ 参考图源资产。 */
+export const submitImageGeneration = async (prompt: string, targetNodeId: string, onFeedback: (message: string) => void, opts: GenSubmitOpts = {}) => {
+  if (!prompt.trim()) throw new Error('请输入生图提示词');
+  return submitGen(prompt, targetNodeId, onFeedback, 'image.generate', opts);
+};
+
+/** 提交生视频任务（video.generate）：透传 videoMode/首尾帧/视频参考 + model/aspectRatio/resolution。 */
+export const submitVideoGeneration = async (prompt: string, targetNodeId: string, onFeedback: (message: string) => void, opts: GenSubmitOpts = {}) => {
+  if (!prompt.trim()) throw new Error('请输入生视频提示词');
+  return submitGen(prompt, targetNodeId, onFeedback, 'video.generate', opts);
 };
 
 // 提交分镜生成任务：把剧本交给设计助理（agent.request），编排器识别分镜意图后生成分镜，
