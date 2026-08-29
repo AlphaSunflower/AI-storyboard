@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Clapperboard, FileText, Image as ImageIcon, LayoutGrid, Layers, LoaderCircle, MessageSquare, Plus, Sparkles, Type, Upload, Wand2 } from 'lucide-react';
+import { Clapperboard, Copy, FileText, Image as ImageIcon, LayoutGrid, Layers, LoaderCircle, MessageSquare, Plus, Sparkles, Trash2, Type, Upload, Wand2 } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import { getAsset, getAssetVariant, saveAsset } from '../services/projectStorage';
@@ -29,6 +29,8 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const createNodeBefore = useCanvasStore((state) => state.createNodeBefore);
   const addNode = useCanvasStore((state) => state.addNode);
   const nodes = useCanvasStore((state) => state.nodes);
+  const duplicateSelected = useCanvasStore((state) => state.duplicateSelected);
+  const deleteSelected = useCanvasStore((state) => state.deleteSelected);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
@@ -78,6 +80,12 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   return (
     <article ref={visibility.ref} data-media-active={mediaUrl ? 'true' : 'false'} className={`media-node media-node--${data.kind} ${selected ? 'is-selected' : ''}`}>
       <div className="node-floating-title"><Icon size={12} />{selected ? <input className="nodrag" aria-label="请输入标题" key={data.label} defaultValue={data.label} onBlur={(event) => updateNode(id, { label: event.target.value })} /> : <span>{data.label}</span>}</div>
+      {selected && (
+        <div className="node-selected-bar nodrag">
+          <button aria-label="复制节点" onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}><Copy size={13} /></button>
+          <button aria-label="删除节点" className="is-danger" onClick={(e) => { e.stopPropagation(); deleteSelected(); }}><Trash2 size={13} /></button>
+        </div>
+      )}
       <div className="node-card">
         {data.kind === 'script' ? (
           <div className="script-node-view">

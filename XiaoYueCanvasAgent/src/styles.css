@@ -1538,4 +1538,10 @@ textarea.text-node-editor::placeholder,
 .grouped-node-menu .group-item { width: 100%; text-align: left; padding: 7px 10px; border-radius: 8px; color: #eef0df; background: transparent; font-size: 13px; }
 .grouped-node-menu .group-item:hover { background: rgba(215,255,84,.12); color: var(--acid); }
 
+/* 选中节点浮动工具栏（复制/删除） */
+.node-selected-bar { position: absolute; top: -30px; left: 24px; display: flex; gap: 4px; z-index: 12; padding: 3px; border: 1px solid rgba(215,255,84,.18); border-radius: 8px; background: #14241f; box-shadow: 0 10px 26px rgba(0,0,0,.45); }
+.node-selected-bar button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: rgba(238,240,223,.75); cursor: pointer; }
+.node-selected-bar button:hover { background: rgba(215,255,84,.14); color: var(--acid); }
+.node-selected-bar button.is-danger:hover { background: rgba(255,118,95,.14); color: #ff765f; }
+
 
