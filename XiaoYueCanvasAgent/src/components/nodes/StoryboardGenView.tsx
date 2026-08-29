@@ -48,10 +48,10 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
             {Object.entries(STYLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
-        <button className="node-upload node-upload--generate nodrag" disabled={generating} onClick={submit}>
-          {generating ? <LoaderCircle className="is-spinning" size={14} /> : <Clapperboard size={14} />} {generating ? '生成中' : '生成分镜'}
-        </button>
       </div>
+      <button className="node-upload node-upload--generate nodrag" disabled={generating} onClick={submit}>
+        {generating ? <LoaderCircle className="is-spinning" size={14} /> : <Clapperboard size={14} />} {generating ? '生成中' : '生成分镜'}
+      </button>
       {feedback && <small className="node-upload-error nodrag">{feedback}</small>}
       {frames.length > 0 ? (
         <div className="storyboard-grid storyboard-grid--gen" style={{ '--gen-cols': cols, '--gen-rows': rows } as React.CSSProperties}>
