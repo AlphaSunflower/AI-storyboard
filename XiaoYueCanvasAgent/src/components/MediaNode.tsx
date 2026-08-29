@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { FileText, Image as ImageIcon, Layers, LoaderCircle, MessageSquare, Plus, Sparkles, Type, Upload, Wand2 } from 'lucide-react';
+import { Clapperboard, FileText, Image as ImageIcon, LayoutGrid, Layers, LoaderCircle, MessageSquare, Plus, Sparkles, Type, Upload, Wand2 } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import { getAsset, getAssetVariant, saveAsset } from '../services/projectStorage';
@@ -11,6 +11,7 @@ import type { CanvasNode } from '../types';
 import { createImageAsset, disposeRuntimeAsset, getMediaNodeSize } from '../utils/mediaPipeline';
 import { ImageNodeTools } from './ImageNodeTools';
 import { GeneratePanel } from './GeneratePanel';
+import { StoryboardGenView } from './nodes/StoryboardGenView';
 
 function SelectedNodeChrome({ node }: { node: CanvasNode }) {
   const zoom = useStore((state) => state.transform[2]);
@@ -43,7 +44,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const [draftFeedback, setDraftFeedback] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
-  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : ImageIcon;
+  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : ImageIcon;
 
   useEffect(() => {
     if (!data.assetId || asset || !metadata || !visibility.visible || !selected) return;
@@ -78,6 +79,14 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
             <button className="node-upload node-upload--generate nodrag" disabled={drafting} onClick={() => { const text = data.scriptText ?? textDraft; if (!text.trim()) { setDraftFeedback('请先输入剧本'); window.setTimeout(() => setDraftFeedback(null), 2200); return; } setDrafting(true); void submitScriptDrafting(text, id, (msg) => setDraftFeedback(msg)).then(() => setDraftFeedback('分镜任务已提交')).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '分镜任务提交失败')).finally(() => setDrafting(false)); }}>{drafting ? <LoaderCircle className="is-spinning" size={14} /> : <FileText size={14} />} {drafting ? '生成中' : '生成分镜'}</button>
             {draftFeedback && <small className="script-node-feedback nodrag">{draftFeedback}</small>}
           </div>
+        ) : data.kind === 'storyboard' ? (
+          <div className="storyboard-grid">
+            {Array.isArray(data.frames) && data.frames.length ? data.frames.map((frame, i) => (
+              <figure key={i} className="storyboard-frame">{frame.img && <img src={frame.img} alt="" />}<figcaption>{frame.label ?? `镜头${i + 1}`}</figcaption></figure>
+            )) : <div className="empty-image-node"><Clapperboard size={26} /><strong>分镜节点</strong><span>连接剧本节点，生成后展示分镜帧</span></div>}
+          </div>
+        ) : data.kind === 'storyboardGen' ? (
+          <StoryboardGenView node={node} updateNode={updateNode} />
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <textarea className="text-node-editor nodrag nowheel" aria-label={data.kind === 'note' ? '批注内容' : data.kind === 'prompt' ? '提示词内容' : '文字内容'} value={data.kind === 'note' ? (data.richText ?? textDraft) : data.kind === 'prompt' ? (data.promptText ?? textDraft) : textDraft} placeholder={data.kind === 'note' ? '在此记录设计说明…' : data.kind === 'prompt' ? '在此输入 AI 提示词…' : '在此输入文字…'} onChange={(event) => { setTextDraft(event.target.value); const patch = data.kind === 'note' ? { richText: event.target.value } : data.kind === 'prompt' ? { promptText: event.target.value } : { prompt: event.target.value }; updateNode(id, patch); }} onBlur={() => { if (data.kind !== 'note' && data.kind !== 'prompt' && textDraft !== data.prompt) updateNode(id, { prompt: textDraft }); }} />
         ) : data.kind === 'sequence' ? (

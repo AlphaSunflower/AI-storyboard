@@ -1,6 +1,6 @@
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
-export type NodeKind = 'text' | 'image' | 'video' | 'script' | 'note' | 'prompt' | 'sequence' | 'storyboard';
+export type NodeKind = 'text' | 'image' | 'video' | 'script' | 'note' | 'prompt' | 'sequence' | 'storyboard' | 'storyboardGen';
 export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -120,6 +120,14 @@ export interface MediaNodeData extends Record<string, unknown> {
   richText?: string;
   promptText?: string;
   children?: string[];
+  // ── 分镜（storyboard）字段──
+  frames?: Array<{ img?: string; label?: string; description?: string }>;
+  // ── 分镜生成（storyboardGen）字段──
+  rows?: number;
+  cols?: number;
+  styleType?: '2d-anime' | '3d-cg' | 'live-action';
+  model?: string;
+  isGenerating?: boolean;
 }
 
 export interface PersistedAsset {

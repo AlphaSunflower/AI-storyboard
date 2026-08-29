@@ -23,7 +23,7 @@ import { StoryboardNode } from './nodes/StoryboardNode';
 import { NodeLibrary } from './NodeLibrary';
 import { TemplatePanel } from './TemplatePanel';
 
-const nodeTypes = { media: MediaNode, video: VideoNode, script: ScriptNode, storyboard: StoryboardNode };
+const nodeTypes = { media: MediaNode, video: VideoNode, script: ScriptNode, storyboard: StoryboardNode, storyboardGen: MediaNode };
 const edgeTypes = { canvas: CanvasEdge };
 
 type StableMiniMapProps = { nodes: CanvasNode[]; initialViewport: Viewport; isMoving: boolean };
