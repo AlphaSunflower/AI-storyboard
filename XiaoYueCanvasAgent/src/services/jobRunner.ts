@@ -110,6 +110,9 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       onFeedback(event.message);
     } else if (event.type === 'job.completed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
+      // 兜底清生成态：正常由 asset.created 清，但 materializeGeneration 慢/挂起时 job.completed 可能先到，
+      // 不处理会让节点永久卡"生成中 95%"。失败已由 job.failed 清。
+      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
     }
   });
   // 取消/解绑：subscribe 返回的 unsubscribe 在提交后不再需要 ref（当前无取消入口）。
