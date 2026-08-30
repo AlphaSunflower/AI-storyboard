@@ -74,8 +74,8 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
     }
   });
-  // 取消时解绑订阅（保存引用供取消用）
-  (jobId as unknown as { __unsub?: () => void }).__unsub = unsubscribe;
+  // 取消/解绑：subscribe 返回的 unsubscribe 在提交后不再需要 ref（当前无取消入口）。
+  // 修复：原在 string jobId 上挂 __unsub 属性（strict 下抛 TypeError），死代码，已删。
   return jobId;
 };
 
