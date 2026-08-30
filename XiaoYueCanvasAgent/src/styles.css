@@ -1846,8 +1846,9 @@ textarea.text-node-editor::placeholder,
   justify-content: space-between;
   gap: 8px;
 }
-.gen-footer__selects { display: flex; gap: 4px; }
-.gen-footer__selects select {
+.gen-footer__selects { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gen-footer__selects select,
+.gen-footer__n input {
   height: 26px;
   border: 1px solid rgba(215,255,84,.14);
   border-radius: 6px;
@@ -1857,6 +1858,8 @@ textarea.text-node-editor::placeholder,
   font-size: 11px;
   padding: 0 4px;
 }
+.gen-footer__n { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #eef0df; }
+.gen-footer__n input { width: 46px; }
 .gen-footer .node-upload--footer {
   position: static;
   transform: none;
@@ -1994,4 +1997,18 @@ textarea.text-node-editor::placeholder,
   padding: 2px 8px;
   margin-left: 6px;
   vertical-align: middle;
+}
+
+/* ── media（image 媒体承载）节点独立 body（MediaAssetNode） ── */
+.media-node .node-card__body > .media-node-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.media-node .media-node-view > .media-asset-frame,
+.media-node .media-node-view > .media-placeholder,
+.media-node .media-node-view > .empty-image-node {
+  flex: 1;
+  min-height: 0;
 }

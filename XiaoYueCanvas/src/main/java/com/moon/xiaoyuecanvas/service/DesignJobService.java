@@ -121,9 +121,12 @@ public class DesignJobService {
         CanvasJob job = getOwnedJob(userId, jobId);
         SseEmitter emitter = new SseEmitter(0L); // 不限时（生成可能 2-5 分钟）
         emitters.put(jobId, emitter);
-        emitter.onCompletion(() -> emitters.remove(jobId));
-        emitter.onTimeout(() -> emitters.remove(jobId));
-        emitter.onError(e -> emitters.remove(jobId));
+        // 旧 emitter 的清理回调必须按「当前注册实例」判值删除（remove(key,value)），
+        // 否则 SSE 重连后新 emitter 已入 map，旧 emitter 的 onError/onTimeout 若按 key 删会误删新 emitter，
+        // 导致前端新连接从此收不到任何事件 → 节点卡 95%。
+        emitter.onCompletion(() -> emitters.remove(jobId, emitter));
+        emitter.onTimeout(() -> emitters.remove(jobId, emitter));
+        emitter.onError(e -> emitters.remove(jobId, emitter));
 
         // 若作业已到终态（重连），直接重放终态事件
         if (isTerminal(job.getStatus())) {
@@ -198,9 +201,9 @@ public class DesignJobService {
 
     private void runJob(String userId, CanvasJob job, SseEmitter emitter) {
         String jobId = job.getId();
-        send(emitter, "job.queued", Map.of("jobId", jobId));
+        sendToJob(jobId, "job.queued", Map.of("jobId", jobId));
         update(job, "running", 0, null);
-        send(emitter, "job.started", Map.of("jobId", jobId));
+        sendToJob(jobId, "job.started", Map.of("jobId", jobId));
         try {
             switch (job.getCapabilityId()) {
                 case "agent.request" -> handleAsk(job, emitter);
@@ -209,14 +212,16 @@ public class DesignJobService {
                 default -> throw new BusinessException(40001, "未知能力: " + job.getCapabilityId());
             }
             update(job, "completed", 100, null);
-            send(emitter, "job.completed", Map.of("jobId", jobId));
-            emitter.complete();
+            // 终态事件一律发给「当前活跃」emitter（SSE 重连后是新实例），不能用 runJob 闭包里的旧 emitter——
+            // 否则断连时 job.completed / asset.created 发到已断开的旧 emitter，前端新连接收不到 → 节点永久卡 95%。
+            sendToJob(jobId, "job.completed", Map.of("jobId", jobId));
+            completeCurrent(jobId);
         } catch (Exception e) {
             log.error("作业执行失败 jobId={}", jobId, e);
             String msg = e instanceof BusinessException be ? be.getMessage() : "生成失败，请稍后重试";
             update(job, "failed", 0, msg);
-            safeSend(emitter, "job.failed", Map.of("jobId", jobId, "error", msg));
-            emitter.complete();
+            sendToJob(jobId, "job.failed", Map.of("jobId", jobId, "error", msg));
+            completeCurrent(jobId);
         }
     }
 
@@ -225,7 +230,7 @@ public class DesignJobService {
         String messageId = UUID.randomUUID().toString();
         // 回答能力下沉 agent-core：内部持久化 user/assistant 消息到共享会话 + 流式增量（仅 delta，防前端重复气泡）
         designAssistantCapability.answer(prompt, job.getConversationId(), t ->
-                safeSend(emitter, "agent.message",
+                sendToJob(job.getId(), "agent.message",
                         Map.of("jobId", job.getId(), "messageId", messageId, "message", t, "delta", true)));
     }
 
@@ -260,7 +265,7 @@ public class DesignJobService {
         }
         for (int i = 0; i < paths.size(); i++) {
             AgentAsset asset = saveAsset(job, "image", paths.get(i), null, model, "completed");
-            send(emitter, "asset.created", Map.of("jobId", job.getId(),
+            sendToJob(job.getId(), "asset.created", Map.of("jobId", job.getId(),
                     "asset", Map.of("id", asset.getId(), "name", "image_" + i + ".png", "mimeType", "image/png")));
         }
     }
@@ -295,17 +300,22 @@ public class DesignJobService {
             }
         }
         int progress = 0;
+        long pollStartMs = System.currentTimeMillis();
+        final long pollTimeoutMs = 15 * 60 * 1000L; // 兜底：上游长期 processing 不结束则超时转失败（防 while(true) 无限循环）
         String taskId = videoGenerationService.createVideoTask(
                 null, prompt, alias, resolution, size, aspectRatio, duration, null, null,
                 referenceImages, null, referenceVideos, null);
         saveAsset(job, "video", null, taskId, alias, "generating");
         while (true) {
+            if (System.currentTimeMillis() - pollStartMs > pollTimeoutMs) {
+                throw new BusinessException(50201, "视频生成超时（超过15分钟未完成），请重试");
+            }
             Map<String, String> poll = videoGenerationService.pollVideoTask(taskId);
             String status = poll.getOrDefault("status", "processing");
             if ("completed".equals(status)) {
                 String url = poll.get("videoUrl");
                 saveAsset(job, "video", url, taskId, alias, "completed");
-                send(emitter, "asset.created", Map.of("jobId", job.getId(),
+                sendToJob(job.getId(), "asset.created", Map.of("jobId", job.getId(),
                         "asset", Map.of("id", lastAssetId(job, taskId), "name", "video.mp4", "mimeType", "video/mp4")));
                 return;
             } else if ("failed".equals(status)) {
@@ -313,7 +323,7 @@ public class DesignJobService {
             }
             progress = Math.min(95, progress + 5);
             update(job, "running", progress, null);
-            safeSend(emitter, "job.progress", Map.of("jobId", job.getId(), "progress", progress / 100.0, "message", "正在生成视频"));
+            sendToJob(job.getId(), "job.progress", Map.of("jobId", job.getId(), "progress", progress / 100.0, "message", "正在生成视频"));
             try { Thread.sleep(5000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
     }
@@ -382,6 +392,32 @@ public class DesignJobService {
             emitter.send(SseEmitter.event().name(event).data(JsonUtil.toJson(data)));
         } catch (Exception e) {
             log.warn("SSE 发送 {} 失败: {}", event, e.getMessage());
+        }
+    }
+
+    /**
+     * 把事件发给 jobId 当前注册的 emitter。SSE 断连 → EventSource 自动重连会重新调用 subscribeAndRun，
+     * 换成新 emitter 实例；此后必须实时从 emitters 取最新实例，而不是用 runJob 闭包里的旧 emitter 引用
+     * （旧引用已断开，safeSend 静默吞掉异常 → 前端新连接收不到任何事件 → 生成节点永久卡 95%）。
+     */
+    private void sendToJob(String jobId, String event, Map<String, Object> data) {
+        SseEmitter current = emitters.get(jobId);
+        if (current == null) {
+            log.warn("SSE 无活跃发射器 jobId={} event={}（可能客户端已断开），跳过", jobId, event);
+            return;
+        }
+        safeSend(current, event, data);
+    }
+
+    /** 完成当前活跃 emitter（非闭包旧引用），使前端 EventSource 正常收尾。 */
+    private void completeCurrent(String jobId) {
+        SseEmitter current = emitters.get(jobId);
+        if (current != null) {
+            try {
+                current.complete();
+            } catch (Exception e) {
+                log.warn("SSE 完成失败 jobId={}: {}", jobId, e.getMessage());
+            }
         }
     }
 

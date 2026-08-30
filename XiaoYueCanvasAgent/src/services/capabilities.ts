@@ -71,38 +71,6 @@ const normalizeEvent = (data: string, jobId: string, fallbackType?: JobEvent['ty
   }
 };
 
-export class UnconfiguredJobAdapter implements JobAdapter {
-  async getStatus(): Promise<JobAdapterStatus> {
-    return { connected: false, label: '未配置执行服务' };
-  }
-
-  async getCapabilities() {
-    return CAPABILITIES;
-  }
-
-  async listConversations(_projectId: string) { return []; }
-
-  async submit(_request: JobRequest): Promise<{ jobId: string }> {
-    throw new Error('未配置执行服务');
-  }
-
-  subscribe(_jobId: string, _listener: (event: JobEvent) => void) {
-    return () => undefined;
-  }
-
-  async cancel(_jobId: string) {
-    throw new Error('未配置执行服务');
-  }
-
-  async fetchAsset(_asset: JobAssetDescriptor): Promise<File> {
-    throw new Error('未配置执行服务');
-  }
-
-  async sendToolResult(_jobId: string, _result: import('../types').AgentToolResult) {
-    throw new Error('未配置执行服务');
-  }
-}
-
 export class HttpJobAdapter implements JobAdapter {
   constructor(private readonly baseUrl: string) {}
 
@@ -226,4 +194,4 @@ export class HttpJobAdapter implements JobAdapter {
   }
 }
 
-export const jobAdapter: JobAdapter = endpoint ? new HttpJobAdapter(endpoint) : new UnconfiguredJobAdapter();
+export const jobAdapter: JobAdapter = new HttpJobAdapter(endpoint);

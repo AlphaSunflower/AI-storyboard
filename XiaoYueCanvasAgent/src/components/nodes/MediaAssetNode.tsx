@@ -1,0 +1,83 @@
+import { memo, useEffect, useRef, useState } from 'react';
+import { useStore } from '@xyflow/react';
+import { Image as ImageIcon, Sparkles, Upload } from 'lucide-react';
+import { useCanvasStore } from '../../store/canvasStore';
+import { useMediaStore } from '../../store/mediaStore';
+import { getAsset, getAssetVariant, saveAsset } from '../../services/projectStorage';
+import { useObjectUrl } from '../../hooks/useObjectUrl';
+import { useViewportVisibility } from '../../hooks/useViewportVisibility';
+import type { CanvasNode } from '../../types';
+import { createImageAsset, disposeRuntimeAsset, getMediaNodeSize } from '../../utils/mediaPipeline';
+import { ImageNodeTools } from '../ImageNodeTools';
+import { GeneratePanel } from '../GeneratePanel';
+
+// media（image 媒体承载）节点 body：懒加载管线(visibility/objectUrl/lazy 变体) + 媒体帧/空态显示 + 上传/生图 + 图片编辑工具。
+// 媒体渲染与编辑工具整体自持（不再依赖 MediaNode 顶层 state），MediaNode 只负责 chrome。
+function MediaAssetNodeComponent({ id, data, selected, node }: {
+  id: string;
+  data: CanvasNode['data'];
+  selected: boolean;
+  node: CanvasNode;
+}) {
+  const zoom = useStore((state) => state.transform[2]);
+  const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
+  const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const quality = useMediaStore((state) => state.quality);
+  const metadata = useMediaStore((state) => data.assetId ? state.metadata[data.assetId] : undefined);
+  const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
+  const visibility = useViewportVisibility<HTMLDivElement>(id, selected);
+  const [lazyVariant, setLazyVariant] = useState<{ key: string; blob: Blob } | null>(null);
+  const desiredVariant = quality === 'preview' ? 'preview' : 'thumbnail';
+  const mediaBlob = asset
+    ? (selected || quality === 'preview' ? asset.previewBlob : asset.thumbnailBlob)
+    : lazyVariant?.key === `${data.assetId}:${desiredVariant}` ? lazyVariant.blob : undefined;
+  const mediaUrl = useObjectUrl(mediaBlob, visibility.visible);
+  const [generating, setGenerating] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!data.assetId || asset || !metadata || !visibility.visible || !selected) return;
+    let cancelled = false;
+    void getAsset(data.assetId).then((loaded) => {
+      if (!cancelled && loaded) upsertAsset(loaded);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [asset, data.assetId, metadata, selected, upsertAsset, visibility.visible]);
+
+  useEffect(() => {
+    if (!data.assetId || asset || !metadata || !visibility.visible || selected || quality === 'placeholder') return;
+    let cancelled = false;
+    const key = `${data.assetId}:${desiredVariant}`;
+    void getAssetVariant(data.assetId, desiredVariant).then((blob) => {
+      if (!cancelled && blob) setLazyVariant({ key, blob });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [asset, data.assetId, desiredVariant, metadata, quality, selected, visibility.visible]);
+
+  useEffect(() => {
+    if (!visibility.visible) setLazyVariant(null);
+  }, [visibility.visible]);
+
+  return (
+    <div ref={visibility.ref} className="media-node-view">
+      {metadata ? (
+        !mediaUrl ? <div className="media-placeholder"><ImageIcon size={22} /><span>{metadata.name}</span></div> : (
+          <div className="media-asset-frame"><img key={mediaUrl} src={mediaUrl} alt={metadata.name} loading="eager" decoding="async" draggable={false} width={metadata.width} height={metadata.height} /><span className="media-quality-badge">{selected ? 'PREVIEW' : quality.toUpperCase()}</span></div>
+        )
+      ) : (
+        <div className="empty-image-node" onClick={() => setGenerating((open) => !open)}><ImageIcon size={28} /><strong>空图片节点</strong><span>点击生图，或上传文件创建图片资产</span></div>
+      )}
+      {selected && !metadata && <>
+        <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); let created: Awaited<ReturnType<typeof createImageAsset>> | null = null; void createImageAsset(file).then(async (nextAsset) => { created = nextAsset; await saveAsset(nextAsset); upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => { if (created) disposeRuntimeAsset(created); setUploadError(error instanceof Error ? error.message : '图片导入失败'); }); }} />
+        <button className="node-upload nodrag" onClick={() => fileInput.current?.click()}><Upload size={16} /> 上传图片</button>
+        <button className="node-upload node-upload--generate nodrag" onClick={() => setGenerating((open) => !open)}><Sparkles size={16} /> 生图</button>
+        {generating && <GeneratePanel node={node} onClose={() => setGenerating(false)} />}
+        {uploadError && <div className="node-upload-error nodrag">{uploadError}</div>}
+      </>}
+      {selected && asset && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} /> : <div className="empty-node-note nodrag nowheel" style={{ '--inverse-zoom': 1 / zoom } as React.CSSProperties}>上传真实图片后可使用本地编辑工具</div>)}
+    </div>
+  );
+}
+
+export const MediaAssetNode = memo(MediaAssetNodeComponent);

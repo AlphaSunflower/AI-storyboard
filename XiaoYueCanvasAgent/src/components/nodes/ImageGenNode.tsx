@@ -31,11 +31,21 @@ export function GenFooter({ nodeId, kind, data, updateNode, useCallbacks, genTex
   const params = parseModelParams(currentModel?.params);
   const ratios = params.aspectRatios ?? (kind === 'videoGen' ? ['16:9', '9:16', '1:1'] : ['1:1', '16:9', '9:16', '3:4']);
   const sizes = (kind === 'videoGen' ? params.resolutions : params.sizes) ?? (kind === 'videoGen' ? ['720P', '1080P'] : ['1K', '2K']);
+  // 时长（生视频）：读网关能力枚举，空则用与上游 clamp(4-15) 一致的兜底档
+  const durations = (params.durations as number[] | undefined) ?? (kind === 'videoGen' ? [4, 5, 6, 8, 10] : []);
+  // 质量：生图读网关 qualities（gpt-image-2 真支持）；生视频上游（MiniMax/Laozhang API 文档）无 quality 字段 → 不渲染
+  const qualities = (params.qualities as string[] | undefined) ?? [];
+  // 生成个数：生图读网关 n{min,max,default}（一次可生成多张）；生视频上游一次只产出 1 条、无 count → 不渲染
+  const nRange = (params.n as { min?: number; max?: number; default?: number } | undefined) ?? {};
+  const nDefault = nRange.default ?? 1;
 
   const onModel = (mid: string) => {
     const def = models.find((m) => m.value === mid);
     const p = parseModelParams(def?.params);
-    updateNode(nodeId, { model: mid, aspectRatio: p.aspectRatios?.[0], size: p.sizes?.[0] });
+    const patch: Record<string, unknown> = { model: mid, aspectRatio: p.aspectRatios?.[0] };
+    // 生视频的分辨率档存 resolution、生图尺寸档存 size——Minimax 网关只读 resolution，存 size 会被忽略导致分辨率失效
+    if (kind === 'videoGen') patch.resolution = p.resolutions?.[0]; else patch.size = p.sizes?.[0];
+    updateNode(nodeId, patch);
   };
 
   return (
@@ -45,12 +55,27 @@ export function GenFooter({ nodeId, kind, data, updateNode, useCallbacks, genTex
           {(models.length ? models : [{ value: defaultModel || '', label: '默认模型' }]).map((m) => <option key={m.value} value={m.value}>{m.label || m.value}</option>)}
         </select>
         <div className="gen-footer__selects">
+          {kind === 'videoGen' && durations.length > 0 && (
+            <select aria-label="时长" value={String(data.duration ?? durations[0] ?? 5)} onChange={(e) => updateNode(nodeId, { duration: Number(e.target.value) as any })}>
+              {durations.map((d) => <option key={d} value={d}>{d}s</option>)}
+            </select>
+          )}
           <select aria-label="比例" value={String(data.aspectRatio ?? ratios[0] ?? '1:1')} onChange={(e) => updateNode(nodeId, { aspectRatio: e.target.value as any })}>
             {ratios.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
-          <select aria-label="尺寸" value={String(data.size ?? sizes[0] ?? '1K')} onChange={(e) => updateNode(nodeId, { size: e.target.value as any })}>
+          <select aria-label="尺寸" value={String((kind === 'videoGen' ? (data.resolution ?? data.size) : data.size) ?? sizes[0] ?? '1K')} onChange={(e) => updateNode(nodeId, kind === 'videoGen' ? { resolution: e.target.value as any } : { size: e.target.value as any })}>
             {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          {kind === 'imageGen' && qualities.length > 0 && (
+            <select aria-label="质量" value={String(data.quality ?? qualities[0] ?? '高清')} onChange={(e) => updateNode(nodeId, { quality: e.target.value as any })}>
+              {qualities.map((q) => <option key={q} value={q}>{q}</option>)}
+            </select>
+          )}
+          {kind === 'imageGen' && (nRange.max === undefined || nRange.max > 1) && (
+            <label className="gen-footer__n nodrag">个数
+              <input aria-label="生成个数" type="number" min={nRange.min ?? 1} max={nRange.max ?? 10} value={String(data.n ?? nDefault)} onChange={(e) => updateNode(nodeId, { n: Number(e.target.value) as any })} />
+            </label>
+          )}
         </div>
       </div>
       <button
@@ -102,7 +127,7 @@ export const ImageGenNode = memo(function ImageGenNode({ id, data, updateNode, t
         />
         {!referencePool.count && <div className="image-gen-empty"><ImageIcon size={26} /><strong>AI 图片节点</strong><span>连接上方输入节点作为参考图</span></div>}
       </div>
-      <GenFooter nodeId={id} kind="imageGen" data={data} updateNode={updateNode} genText="生成图片" useCallbacks={{ generating: Boolean(data.isGenerating), onGenerate: () => { const text = String(data.prompt ?? textDraft ?? ''); const opts = { sourceAssetIds: referencePool.assetIds ?? [], params: { model: data.model, size: data.size, aspectRatio: data.aspectRatio, genType: data.genType } }; void submitImageGeneration(text, id, (msg) => setDraftFeedback(msg), opts).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '生图提交失败')); } }} />
+      <GenFooter nodeId={id} kind="imageGen" data={data} updateNode={updateNode} genText="生成图片" useCallbacks={{ generating: Boolean(data.isGenerating), onGenerate: () => { const text = String(data.prompt ?? textDraft ?? ''); const opts = { sourceAssetIds: referencePool.assetIds ?? [], params: { model: data.model, size: data.size, quality: data.quality, aspectRatio: data.aspectRatio, genType: data.genType, n: data.n } }; void submitImageGeneration(text, id, (msg) => setDraftFeedback(msg), opts).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '生图提交失败')); } }} />
       {draftFeedback && <small className="node-upload-error nodrag">{draftFeedback}</small>}
     </div>
   );
