@@ -7,6 +7,34 @@ import { saveAsset } from './projectStorage';
 import { createImageAsset, createVideoAsset, getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 import type { JobEvent, PersistedAsset } from '../types';
 
+// 参考素材（图/视频）assetId → data URI（前端本地 Blob 资产 → 后端可直接消费的 data: 前缀）。
+// 仅 ≤10MB 转（免得 base64 膨胀爆 64MB 请求体）；>10MB 留 sourceAssetIds 让后端 decide（query 本身需参考素材）。
+const blobToDataURI = (blob: Blob): Promise<string | null> =>
+  new Promise((resolve) => {
+    if (blob.size > 10 * 1024 * 1024) return resolve(null);
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+
+// 把当次提交的源资产 id 读 blob → data URI，按媒体类型分流到 referenceImages / referenceVideos。
+const collectReferenceDataUris = async (sourceAssetIds: string[]) => {
+  const images: string[] = [];
+  const videos: string[] = [];
+  const assets = useMediaStore.getState().assets;
+  for (const aid of sourceAssetIds) {
+    const asset = assets[aid];
+    if (!asset) continue;
+    const blob = asset.previewBlob ?? asset.originalBlob ?? asset.thumbnailBlob;
+    if (!blob) continue;
+    const uri = await blobToDataURI(blob);
+    if (!uri) continue;
+    if (asset.kind === 'video') videos.push(uri); else images.push(uri);
+  }
+  return { images, videos };
+};
+
 // 生图：把执行服务返回的图片落到目标（空图片）节点，带完整溯源。
 const materializeGeneration = async (event: Extract<JobEvent, { type: 'asset.created' }>, targetNodeId: string) => {
   const file = await jobAdapter.fetchAsset(event.asset);
@@ -38,13 +66,23 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置对应执行服务');
 
   const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
+  // 参考素材（前端本地 Blob 资产）→ data URI，合并进 params.referenceImages/referenceVideos 供后端直接消费
+  //（后端 agent_assets 表无前端资产 id，sourceAssetIds selectById 查不到 → 图生图/图生视频参考图会丢失）
+  const sourceAssetIds = opts.sourceAssetIds ?? [];
+  const refUris = sourceAssetIds.length ? await collectReferenceDataUris(sourceAssetIds) : { images: [], videos: [] };
+  const mergedParams: Record<string, unknown> = {
+    prompt: trimmed,
+    ...(opts.params ?? {}),
+    ...(refUris.images.length ? { referenceImages: refUris.images } : {}),
+    ...(refUris.videos.length ? { referenceVideos: refUris.videos } : {}),
+  };
   const { jobId } = await jobAdapter.submit({
     clientRequestId: createId(),
     conversationId,
     capabilityId,
-    sourceAssetIds: opts.sourceAssetIds ?? [],
+    sourceAssetIds,
     context: { projectId, nodeIds: canvas.nodes.map((node) => node.id), selectedNodeId: targetNodeId },
-    params: { prompt: trimmed, ...(opts.params ?? {}) },
+    params: mergedParams,
   });
 
   useAgentStore.getState().putJob(projectId, { id: jobId, prompt: trimmed.slice(0, 24), sourceNodeId: targetNodeId, capabilityId, status: 'queued', progress: 0, createdAt: Date.now() });

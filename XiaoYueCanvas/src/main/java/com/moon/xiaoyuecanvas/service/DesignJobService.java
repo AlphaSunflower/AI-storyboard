@@ -240,10 +240,17 @@ public class DesignJobService {
         List<String> referenceImages = new ArrayList<>();
         // 图改图：image.redraw 显式指定，或 image.generate 携带参考图源时自动 edit
         String mode = "image.redraw".equals(job.getCapabilityId()) ? "edit" : null;
-        List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
-        for (String aid : sourceAssetIds) {
-            AgentAsset a = agentAssetMapper.selectById(aid);
-            if (a != null && a.getUrl() != null) referenceImages.add(toDataUriOrUrl(a.getUrl()));
+        // 优先读前端直接传的参考图（data URI / URL，经 params.referenceImages）；否则 sourceAssetIds 查 agent_assets 兜底
+        Object refParam = params.get("referenceImages");
+        if (refParam instanceof List<?> list) {
+            for (Object item : list) if (item instanceof String s && !s.isBlank()) referenceImages.add(s);
+        }
+        if (referenceImages.isEmpty()) {
+            List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
+            for (String aid : sourceAssetIds) {
+                AgentAsset a = agentAssetMapper.selectById(aid);
+                if (a != null && a.getUrl() != null) referenceImages.add(toDataUriOrUrl(a.getUrl()));
+            }
         }
         if (mode == null && !referenceImages.isEmpty()) mode = "edit";
         List<String> paths = imageGenerationService.generateImages(
@@ -267,15 +274,25 @@ public class DesignJobService {
         String aspectRatio = str(params, "aspectRatio");
         Integer duration = intVal(params, "duration");
         List<String> referenceImages = new ArrayList<>();
-        // 图生视频：sourceAssetIds（首帧图/参考图）→ referenceImages；参考视频 → referenceVideos（多模态签名）
         List<String> referenceVideos = new ArrayList<>();
-        List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
-        for (String aid : sourceAssetIds) {
-            AgentAsset a = agentAssetMapper.selectById(aid);
-            if (a == null || a.getUrl() == null) continue;
-            String url = toDataUriOrUrl(a.getUrl());
-            if ("video".equals(a.getType())) referenceVideos.add(url);
-            else referenceImages.add(url);
+        // 优先读前端直接传的参考素材（data URI / URL，经 params.referenceImages/referenceVideos）；否则 sourceAssetIds 查 agent_assets 分流兜底
+        Object imgParam = params.get("referenceImages");
+        if (imgParam instanceof List<?> list) {
+            for (Object item : list) if (item instanceof String s && !s.isBlank()) referenceImages.add(s);
+        }
+        Object vidParam = params.get("referenceVideos");
+        if (vidParam instanceof List<?> list) {
+            for (Object item : list) if (item instanceof String s && !s.isBlank()) referenceVideos.add(s);
+        }
+        if (referenceImages.isEmpty() && referenceVideos.isEmpty()) {
+            List<String> sourceAssetIds = JsonUtil.parseList(job.getSourceAssetIds());
+            for (String aid : sourceAssetIds) {
+                AgentAsset a = agentAssetMapper.selectById(aid);
+                if (a == null || a.getUrl() == null) continue;
+                String url = toDataUriOrUrl(a.getUrl());
+                if ("video".equals(a.getType())) referenceVideos.add(url);
+                else referenceImages.add(url);
+            }
         }
         int progress = 0;
         String taskId = videoGenerationService.createVideoTask(
