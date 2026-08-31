@@ -163,6 +163,12 @@ public class VideoPollExecutor {
             asset.setUrl(videoUrl);
             asset.setStatus(status);
             asset.setError(error);
+            if ("completed".equals(status) && videoUrl != null && !videoUrl.isBlank()) {
+                asset.setResultUrls("[\"" + videoUrl.replace("\\", "\\\\").replace("\"", "\\\"") + "\"]");
+            }
+            if (("completed".equals(status) || "failed".equals(status)) && asset.getCreatedAt() != null) {
+                asset.setDurationMs(java.time.Duration.between(asset.getCreatedAt(), java.time.OffsetDateTime.now()).toMillis());
+            }
             agentAssetMapper.updateById(asset);
         }
     }

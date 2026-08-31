@@ -31,6 +31,40 @@ export interface AgentAsset {
   taskId: string | null;
   error: string | null;
   createdAt: string;
+  // 生成记录扩展（产出素材面板按 resultUrls 展示多图）
+  genType?: string | null;
+  params?: string | null;
+  referenceUrls?: string | null;
+  resultUrls?: string | null;
+  durationMs?: number | null;
+  sceneId?: string | null;
+}
+
+/** 生成记录（agent_assets 扩展版）：一次生成尝试一行；params/referenceUrls/resultUrls 为 JSON 字符串 */
+export interface GenerationRecord {
+  id: string;
+  conversationId: string | null;
+  type: 'image' | 'video' | 'reference';
+  url: string | null;
+  prompt: string | null;
+  model: string | null;
+  status: string;
+  taskId: string | null;
+  error: string | null;
+  createdAt: string;
+  genType: string | null;
+  params: string | null;
+  referenceUrls: string | null;
+  resultUrls: string | null;
+  durationMs: number | null;
+  sceneId: string | null;
+}
+
+export interface GenerationRecordPage {
+  records: GenerationRecord[];
+  total: number;
+  page: number;
+  size: number;
 }
 
 export interface AgentPage<T> {
@@ -121,6 +155,26 @@ export const agentApi = {
 
   deleteAsset: (assetId: string) =>
     client.delete(`/agent/assets/${assetId}`),
+
+  // ── 生成记录 ──────────────────────────────
+  listGenerationRecords: (params: {
+    genType?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    size?: number;
+  }) =>
+    client.get<{ data: GenerationRecordPage }>('/agent/generation-records', { params }),
+
+  getGenerationRecord: (id: string) =>
+    client.get<{ data: GenerationRecord }>(`/agent/generation-records/${id}`),
+
+  refetchGenerationRecord: (id: string) =>
+    client.post<{ data: GenerationRecord }>(`/agent/generation-records/${id}/refetch`),
+
+  retryGenerationRecord: (id: string) =>
+    client.post<{ data: { id: string; taskId: string } }>(`/agent/generation-records/${id}/retry`),
 
   uploadImage: (file: File, conversationId?: string) => {
     const form = new FormData();

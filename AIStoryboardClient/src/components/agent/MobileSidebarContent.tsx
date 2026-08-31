@@ -10,6 +10,7 @@ interface MobileSidebarContentProps {
   onClose: () => void;
   onOpenSettings: () => void;
   onOpenAssets: () => void;
+  onOpenRecords?: () => void;
   onNavigate: (path: string) => void;
   logout: () => void;
 }
@@ -19,7 +20,7 @@ interface MobileSidebarContentProps {
  * Moon Logo + 关闭 | 资源库 | 项目选择 | 会话列表 | 底部设置
  */
 export function MobileSidebarContent({
-  onSelectConversation, onClose, onOpenSettings, onOpenAssets, onNavigate, logout,
+  onSelectConversation, onClose, onOpenSettings, onOpenAssets, onOpenRecords, onNavigate, logout,
 }: MobileSidebarContentProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const [projectOpen, setProjectOpen] = useState(false);
@@ -60,6 +61,21 @@ export function MobileSidebarContent({
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z" /></svg>
           资源库
         </button>
+
+        {onOpenRecords && (
+          <button
+            onClick={onOpenRecords}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+              border: 'none', borderRadius: 10, background: 'transparent',
+              padding: '0 12px', height: 40, fontSize: 15,
+              color: DS.ink, cursor: 'pointer', textAlign: 'left',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9" /><path d="M3 3h6v6" /></svg>
+            生成记录
+          </button>
+        )}
 
         <div style={{ position: 'relative', width: '100%' }}>
           <button

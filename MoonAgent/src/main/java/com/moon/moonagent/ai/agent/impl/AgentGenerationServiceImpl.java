@@ -9,13 +9,16 @@ import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.ai.ImageGenerationService;
 import com.moon.moonagent.ai.VideoGenerationService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +39,10 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     private final VideoGenerationService videoService;
     private final StoryboardClient storyboardClient;
     private final AgentAssetMapper agentAssetMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 单条参考 URL 上限（base64 过大不落库，详情显示为「参考素材过大」占位） */
+    private static final int MAX_REF_URL_LENGTH = 8192;
 
 
     /** 清洗外部传入参数：未解析的变量引用（含 structured_output.）视为无效值返回 null） */
@@ -127,38 +134,30 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
                                              String prompt, String model, String size, String quality, Integer n,
                                              String mode, List<String> referenceImages, String generatedImageUrl) {
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
-        List<String> urls = imageService.generateImages(
-            effectiveSceneId,
-            sanitize(prompt), sanitize(model),
-            sanitize(size), sanitize(quality), null,
-            referenceImages, mode, sanitize(generatedImageUrl),
-            (n != null && n > 0) ? n : 1);
-        Map<String, Object> out = new HashMap<>();
-        if (effectiveSceneId == null) {
-            List<String> assetIds = new ArrayList<>();
-            for (String url : urls) {
-                AgentAsset asset = new AgentAsset();
-                asset.setConversationId(conversation.getId());
-                asset.setType("image");
-                asset.setUrl(url);
-                asset.setPrompt(sanitize(prompt));
-                asset.setModel(sanitize(model));
-                asset.setStatus("completed");
-                try {
-                    agentAssetMapper.insert(asset);
-                    assetIds.add(asset.getId());
-                } catch (Exception e) {
-                    // 图片已生成（已计费），落库失败不能抛异常导致 URL 丢失、重试重复计费
-                    log.error("Agent 生成编排：图片资产落库失败(不影响已生成的图片), conversationId={}, 原因: {}", conversation.getId(), e.getMessage());
-                }
-            }
+        String cleanPrompt = sanitize(prompt);
+        String cleanModel = sanitize(model);
+        String cleanSize = sanitize(size);
+        String cleanQuality = sanitize(quality);
+        String cleanSource = sanitize(generatedImageUrl);
+        int count = (n != null && n > 0) ? n : 1;
+        String genType = classifyImageGenType(mode, referenceImages, cleanSource);
+        AgentAsset record = newRecord(conversation, "image", genType, cleanPrompt, cleanModel,
+                effectiveSceneId, buildImageParams(cleanSize, cleanQuality, count, mode),
+                buildReferenceUrls(referenceImages, cleanSource), "generating");
+        long startMs = System.currentTimeMillis();
+        try {
+            List<String> urls = imageService.generateImages(
+                effectiveSceneId, cleanPrompt, cleanModel, cleanSize, cleanQuality, null,
+                referenceImages, mode, cleanSource, count);
+            updateRecord(record, "completed", urls.isEmpty() ? null : urls.getFirst(), urls, null, startMs);
+            Map<String, Object> out = new HashMap<>();
             out.put("imageUrls", urls);
-            out.put("assetIds", assetIds);
+            out.put("assetIds", record == null ? List.of() : List.of(record.getId()));
             return out;
+        } catch (Exception e) {
+            updateRecord(record, "failed", null, null, friendlyMessage(e), startMs);
+            throw e;
         }
-        out.put("imageUrls", urls);
-        out.put("assetIds", List.of());
-        return out;
     }
 
     /**
@@ -169,39 +168,171 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
                                   String prompt, String model, String resolution, String size,
                                   String aspectRatio, String duration, String negativePrompt,
                                   List<String> referenceImages, String generatedImageUrl) {
-        Integer durationInt = null;
-        if (duration != null && !duration.isBlank()) {
-            try {
-                durationInt = Integer.parseInt(duration);
-            } catch (NumberFormatException e) {
-                log.warn("Agent 生成编排：视频 duration 值非法({}), 使用 service 默认值", duration);
-            }
-        }
+        Integer durationInt = parseDuration(duration);
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
-        String taskId = videoService.createVideoTask(
-            effectiveSceneId,
-            sanitize(prompt), sanitize(model),
-            sanitize(resolution), sanitize(size),
-            sanitize(aspectRatio),
-            durationInt, sanitize(negativePrompt), null,
-            referenceImages, sanitize(generatedImageUrl));
-        if (effectiveSceneId == null) {
-            AgentAsset asset = new AgentAsset();
-            asset.setConversationId(conversation.getId());
-            asset.setType("video");
-            asset.setPrompt(sanitize(prompt));
-            asset.setModel(sanitize(model));
-            asset.setStatus("queued");
-            asset.setTaskId(taskId);
-            try {
-                agentAssetMapper.insert(asset);
-                log.info("Agent 生成编排：视频资产已落库 assetId={}, taskId={}", asset.getId(), taskId);
-            } catch (Exception e) {
-                // 资产落库失败不影响已创建的 Laozhang 任务（避免白扣费）
-                log.error("Agent 生成编排：视频资产落库失败(不影响任务), taskId={}, 原因: {}", taskId, e.getMessage());
-            }
+        String cleanPrompt = sanitize(prompt);
+        String cleanModel = sanitize(model);
+        String cleanResolution = sanitize(resolution);
+        String cleanSize = sanitize(size);
+        String cleanAspectRatio = sanitize(aspectRatio);
+        String cleanNegative = sanitize(negativePrompt);
+        String cleanSource = sanitize(generatedImageUrl);
+        String genType = classifyVideoGenType(referenceImages, cleanSource);
+        // 仅会话产出（sceneId 为空）落 agent_assets 记录；分镜生视频走 scenes 表，由外部轮询更新，不落记录避免卡 queued。
+        AgentAsset record = effectiveSceneId == null
+                ? newRecord(conversation, "video", genType, cleanPrompt, cleanModel, null,
+                        buildVideoParams(cleanResolution, cleanSize, cleanAspectRatio, duration, cleanNegative),
+                        buildReferenceUrls(referenceImages, cleanSource), "queued")
+                : null;
+        long startMs = System.currentTimeMillis();
+        String taskId;
+        try {
+            taskId = videoService.createVideoTask(
+                effectiveSceneId, cleanPrompt, cleanModel, cleanResolution, cleanSize, cleanAspectRatio,
+                durationInt, cleanNegative, null, referenceImages, cleanSource);
+        } catch (Exception e) {
+            updateRecord(record, "failed", null, null, friendlyMessage(e), startMs);
+            throw e;
+        }
+        if (taskId != null && !taskId.isBlank() && record != null) {
+            record.setTaskId(taskId);
+            agentAssetMapper.updateById(record);
+            log.info("Agent 生成编排：视频资产已落库 assetId={}, taskId={}", record.getId(), taskId);
         }
         return taskId;
+    }
+
+    /** 解析视频 duration 字符串，非法值返回 null（走 service 默认） */
+    private Integer parseDuration(String duration) {
+        if (duration == null || duration.isBlank()) return null;
+        try {
+            return Integer.parseInt(duration);
+        } catch (NumberFormatException e) {
+            log.warn("Agent 生成编排：视频 duration 值非法({}), 使用 service 默认值", duration);
+            return null;
+        }
+    }
+
+    /** 生成类型分类：图片。有源图（generatedImageUrl）或参考图（referenceImages）或显式 edit → 图生图；否则文生图。 */
+    static String classifyImageGenType(String mode, List<String> referenceImages, String generatedImageUrl) {
+        boolean hasRef = (referenceImages != null && !referenceImages.isEmpty()) || (generatedImageUrl != null && !generatedImageUrl.isBlank());
+        boolean edit = "edit".equals(mode);
+        if (hasRef || edit) {
+            // 多图生图（>1 参考图编辑）未来能力：当前链路不会产出多个参考改图，此处仅为统一枚举手
+            return (referenceImages != null && referenceImages.size() > 1) ? "multi_image_to_image" : "image_to_image";
+        }
+        return "text_to_image";
+    }
+
+    /** 生成类型分类：视频。有参考素材或首帧源 → 参考生视频；否则文生视频。首帧/首尾帧未实现，仅预留枚举。 */
+    static String classifyVideoGenType(List<String> referenceImages, String generatedImageUrl) {
+        boolean hasRef = (referenceImages != null && !referenceImages.isEmpty()) || (generatedImageUrl != null && !generatedImageUrl.isBlank());
+        return hasRef ? "ref_to_video" : "text_to_video";
+    }
+
+    /** 新建一条生成记录（每次生成尝试一条；sceneId 非空也落库以便用户级记录列表可见）。落库失败不影响生成，返回 null。 */
+    private AgentAsset newRecord(AgentConversation conversation, String type, String genType,
+                                 String prompt, String model, String sceneId,
+                                 String params, String referenceUrls, String status) {
+        AgentAsset record = new AgentAsset();
+        record.setConversationId(conversation.getId());
+        record.setType(type);
+        record.setPrompt(prompt);
+        record.setModel(model);
+        record.setStatus(status);
+        record.setGenType(genType);
+        record.setParams(params);
+        record.setReferenceUrls(referenceUrls);
+        record.setSceneId(sceneId);
+        record.setCreatedAt(OffsetDateTime.now());
+        try {
+            agentAssetMapper.insert(record);
+            return record;
+        } catch (Exception e) {
+            log.error("Agent 生成编排：生成记录落库失败(不影响生成), conversationId={}, 原因: {}", conversation.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /** 更新生成记录终态/进度；记录为 null（落库失败）时安全跳过。 */
+    private void updateRecord(AgentAsset record, String status, String url, List<String> resultUrls, String error, long startMs) {
+        if (record == null) return;
+        record.setStatus(status);
+        if (url != null && !url.isBlank()) record.setUrl(url);
+        if (resultUrls != null) record.setResultUrls(toJson(resultUrls));
+        if (error != null && !error.isBlank()) record.setError(error);
+        record.setDurationMs(System.currentTimeMillis() - startMs);
+        try {
+            agentAssetMapper.updateById(record);
+        } catch (Exception e) {
+            log.error("Agent 生成编排：生成记录状态更新失败, assetId={}, 原因: {}", record.getId(), e.getMessage());
+        }
+    }
+
+    /** 生成参数 JSON（图片）：size / quality / n / mode。null 值不写入。 */
+    private String buildImageParams(String size, String quality, int n, String mode) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (size != null && !size.isBlank()) params.put("size", size);
+        if (quality != null && !quality.isBlank()) params.put("quality", quality);
+        params.put("n", n);
+        if (mode != null && !mode.isBlank()) params.put("mode", mode);
+        return toJson(params);
+    }
+
+    /** 生成参数 JSON（视频）：resolution / size / aspectRatio / duration / negativePrompt。null 值不写入。 */
+    private String buildVideoParams(String resolution, String size, String aspectRatio, String duration, String negativePrompt) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (resolution != null && !resolution.isBlank()) params.put("resolution", resolution);
+        if (size != null && !size.isBlank()) params.put("size", size);
+        if (aspectRatio != null && !aspectRatio.isBlank()) params.put("aspectRatio", aspectRatio);
+        if (duration != null && !duration.isBlank()) params.put("duration", duration);
+        if (negativePrompt != null && !negativePrompt.isBlank()) params.put("negativePrompt", negativePrompt);
+        return toJson(params);
+    }
+
+    /** 参考素材 JSON（[{type,url,role?}]）：referenceImages → image；generatedImageUrl → image+source。超大 base64 截断为占位。 */
+    private String buildReferenceUrls(List<String> referenceImages, String generatedImageUrl) {
+        List<Map<String, Object>> refs = new ArrayList<>();
+        if (referenceImages != null) {
+            for (String ref : referenceImages) {
+                if (ref == null || ref.isBlank()) continue;
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("type", "image");
+                item.put("url", safeRefUrl(ref));
+                refs.add(item);
+            }
+        }
+        if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("type", "image");
+            item.put("role", "source");
+            item.put("url", safeRefUrl(generatedImageUrl));
+            refs.add(item);
+        }
+        return toJson(refs);
+    }
+
+    /** 参考 URL 安全截断：超过上限存 null 占位，前端显示「参考素材过大」 */
+    private String safeRefUrl(String url) {
+        if (url.length() > MAX_REF_URL_LENGTH) return null;
+        return url;
+    }
+
+    /** Java 对象 → JSON 字符串（失败回退空串） */
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.warn("Agent 生成编排：JSON 序列化失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 错误文案截断，避免超长异常撑爆详情 */
+    private String friendlyMessage(Exception e) {
+        String msg = e == null ? "" : e.getMessage();
+        if (msg == null || msg.isBlank()) msg = "生成失败";
+        return msg.length() > 600 ? msg.substring(0, 600) : msg;
     }
 
     /**

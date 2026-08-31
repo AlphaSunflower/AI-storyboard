@@ -7,6 +7,7 @@ import { HumanInputCard } from '../components/agent/HumanInputCard';
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
+import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
 import { SettingsPopover } from '../components/agent/SettingsPopover';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
@@ -15,7 +16,7 @@ import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { Moon } from 'lucide-react';
-import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info, Frame } from 'lucide-react';
+import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info, Frame, History } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useAuthStore } from '../stores/authStore';
@@ -41,6 +42,7 @@ export function ChatPage() {
   } = useAgentStore();
   const [assetsOpen, setAssetsOpen] = useState(false);       // 资源库（rail 🧩）
   const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
+  const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [projectOpen, setProjectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -234,6 +236,7 @@ export function ChatPage() {
                 onClose={() => setMobileSidebarOpen(false)}
                 onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
                 onOpenAssets={() => { setAssetsOpen(true); setMobileSidebarOpen(false); }}
+                onOpenRecords={() => { setRecordsOpen(true); setMobileSidebarOpen(false); }}
                 onNavigate={(path) => { navigate(path); setMobileSidebarOpen(false); }}
                 logout={logout}
               />
@@ -549,6 +552,16 @@ export function ChatPage() {
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
           }}>
+            {/* 右上角生成记录入口（空态 hero 也可用） */}
+            <button
+              onClick={() => setRecordsOpen(true)}
+              title="生成记录"
+              style={{
+                position: 'absolute', top: 10, right: 16, border: 'none', background: 'transparent',
+                color: DS.textSecondary, fontSize: 13, cursor: 'pointer', padding: '6px 10px',
+                borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            ><History size={15} strokeWidth={1.8} /> 生成记录</button>
             {embed && (
               <button
                 onClick={() => setEmbedConvOpen(true)}
@@ -605,6 +618,11 @@ export function ChatPage() {
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  onClick={() => setRecordsOpen(true)}
+                  title="生成记录"
+                  style={headerBtn(1, embed ? 12 : 14)}
+                ><History size={16} strokeWidth={1.8} /> 生成记录</button>
                 <button
                   onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
                   disabled={!activeConversationId}
@@ -692,6 +710,7 @@ export function ChatPage() {
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
     </div>
+    <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
     </>
   );
 }

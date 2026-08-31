@@ -3,8 +3,10 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
+import { parseResultUrls } from '../../stores/generationRecordsStore';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { Folder } from 'lucide-react';
+import type { AgentAsset } from '../../api/agent';
 
 /**
  * 当前对话的产出素材弹窗（文件夹图标入口，不再常驻底部）：
@@ -57,6 +59,11 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
   const total = assets?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / (assets?.size ?? 20)));
 
+  const urlsFor = (a: AgentAsset): string[] => {
+    const parsed = parseResultUrls(a.resultUrls ?? null);
+    return parsed.length ? parsed : (a.url ? [a.url] : []);
+  };
+
   return (
     <>
       <div
@@ -96,10 +103,10 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
               </p>
             ) : (
               <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 10 }}>
-                {records.map((a) => (
+                {records.map((a) => urlsFor(a).map((url, idx) => (
                   <div
-                    key={a.id}
-                    onClick={() => { setPreviewType(a.type === 'video' ? 'video' : 'image'); setPreviewUrl(a.url); }}
+                    key={`${a.id}-${idx}`}
+                    onClick={() => { setPreviewType(a.type === 'video' ? 'video' : 'image'); setPreviewUrl(url); }}
                     title={a.type === 'video' ? '点击预览视频' : '点击预览大图'}
                     style={{
                       position: 'relative', aspectRatio: '1', borderRadius: 10, overflow: 'hidden',
@@ -108,9 +115,9 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                     }}
                   >
                     {a.type === 'video' ? (
-                      <video src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
+                      <video src={assetUrl(url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
                     ) : (
-                      <img src={assetUrl(a.url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={assetUrl(url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); if (window.confirm('删除该素材？')) void deleteAsset(a.id); }}
@@ -124,7 +131,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                       ×
                     </button>
                   </div>
-                ))}
+                )))}
               </div>
             )}
           </div>

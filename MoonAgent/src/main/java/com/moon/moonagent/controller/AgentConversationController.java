@@ -9,10 +9,12 @@ import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
 import com.storyboard.common.ApiResponse;
+import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +44,7 @@ public class AgentConversationController {
 
     private final AgentChatService chatService;
     private final PromptOptimizeService optimizeService;
+    private final GenerationRecordService generationRecordService;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -203,6 +207,38 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.getVideoTaskStatus(auth.getName(), taskId));
     }
 
+    /** 用户级生成记录列表（跨项目/会话，created_at 倒序，支持类型/日期/状态筛选） */
+    @GetMapping("/generation-records")
+    public ApiResponse<Map<String, Object>> listGenerationRecords(
+            Authentication auth,
+            @RequestParam(required = false) String genType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(generationRecordService.listRecords(
+                auth.getName(), genType, status, parseDate(from), parseDate(to), page, size));
+    }
+
+    /** 生成记录详情 */
+    @GetMapping("/generation-records/{id}")
+    public ApiResponse<AgentAsset> getGenerationRecord(Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(generationRecordService.getRecord(auth.getName(), id));
+    }
+
+    /** 重新拉取（仅视频且 taskId 非空）：重新轮询上游并更新记录 */
+    @PostMapping("/generation-records/{id}/refetch")
+    public ApiResponse<AgentAsset> refetchGenerationRecord(Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(generationRecordService.refetch(auth.getName(), id));
+    }
+
+    /** 重试（仅 failed 记录）：复用原参数重新生成，产出新记录 */
+    @PostMapping("/generation-records/{id}/retry")
+    public ApiResponse<Map<String, String>> retryGenerationRecord(Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(generationRecordService.retry(auth.getName(), id));
+    }
+
     /** 重命名 / 归档会话 */
     @PatchMapping("/conversations/{id}")
     public ApiResponse<AgentConversationVO> updateConversation(Authentication auth, @PathVariable String id,
@@ -235,5 +271,15 @@ public class AgentConversationController {
         if (r.picUrls() != null && !r.picUrls().isEmpty()) return r.picUrls();
         if (r.picUrl() != null && !r.picUrl().isBlank()) return List.of(r.picUrl());
         return List.of();
+    }
+
+    /** yyyy-MM-dd → LocalDate；非法/空返回 null（不筛选） */
+    private static LocalDate parseDate(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return LocalDate.parse(value);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

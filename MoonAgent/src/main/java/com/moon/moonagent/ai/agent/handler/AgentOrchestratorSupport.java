@@ -1127,6 +1127,16 @@ public class AgentOrchestratorSupport {
             asset.setStatus(status);
             if (url != null && !url.isBlank()) asset.setUrl(url);
             if (error != null && !error.isBlank()) asset.setError(error);
+            if ("completed".equals(status) && url != null && !url.isBlank()) {
+                asset.setResultUrls(org.springframework.util.StringUtils.hasText(asset.getResultUrls())
+                        ? asset.getResultUrls()
+                        : "[\"" + url.replace("\\", "\\\\").replace("\"", "\\\"") + "\"]");
+            }
+            if ("completed".equals(status) || "failed".equals(status)) {
+                if (asset.getCreatedAt() != null) {
+                    asset.setDurationMs(java.time.Duration.between(asset.getCreatedAt(), java.time.OffsetDateTime.now()).toMillis());
+                }
+            }
             assetMapper.updateById(asset);
             if ("completed".equals(status) && url != null && !url.isBlank()) {
                 persistVideoMessage(asset, url);
