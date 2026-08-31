@@ -122,12 +122,18 @@ const Particles = ({
     const container = containerRef.current;
     if (!container) return;
 
-    const renderer = new Renderer({
-      dpr: pixelRatio,
-      depth: false,
-      alpha: true
-    });
-    const gl = renderer.gl;
+    let renderer!: Renderer;
+    let gl!: Renderer['gl'];
+    try {
+      renderer = new Renderer({
+        dpr: pixelRatio,
+        depth: false,
+        alpha: true
+      });
+      gl = renderer.gl;
+    } catch {
+      return;
+    }
     container.appendChild(gl.canvas);
     gl.clearColor(0, 0, 0, 0);
 
