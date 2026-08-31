@@ -15,6 +15,7 @@ import { Folder } from 'lucide-react';
 export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { assets, loadAssets, deleteAsset } = useAgentStore();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
   const gridRef = useRef<HTMLDivElement>(null);
 
   // B6: 素材网格入场——打开/翻页时缩略图 stagger 浮现
@@ -98,12 +99,12 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                 {records.map((a) => (
                   <div
                     key={a.id}
-                    onClick={() => { if (a.type !== 'video') setPreviewUrl(a.url); }}
-                    title={a.type === 'video' ? '视频' : '点击预览大图'}
+                    onClick={() => { setPreviewType(a.type === 'video' ? 'video' : 'image'); setPreviewUrl(a.url); }}
+                    title={a.type === 'video' ? '点击预览视频' : '点击预览大图'}
                     style={{
                       position: 'relative', aspectRatio: '1', borderRadius: 10, overflow: 'hidden',
                       background: 'var(--color-surface-soft)',
-                      cursor: a.type === 'video' ? 'default' : 'zoom-in',
+                      cursor: 'zoom-in',
                     }}
                   >
                     {a.type === 'video' ? (
@@ -138,7 +139,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
       </div>
       {/* 缩略图点击预览大图 */}
-      <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      <ImagePreviewModal url={previewUrl} type={previewType} onClose={() => setPreviewUrl(null)} />
     </>
   );
 }

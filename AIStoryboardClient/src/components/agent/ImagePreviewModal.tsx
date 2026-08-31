@@ -2,18 +2,25 @@ import { useEffect } from 'react';
 import { assetUrl } from '../../config';
 
 /**
- * 图片点击放大预览（灯箱）：
+ * 图片/视频点击放大预览（灯箱）：
  * - 遮罩点击 / ESC / 右上角关闭按钮均可关闭
- * - 大图 max 92vw x 88vh 居中显示，点击图片本身不关闭（便于查看细节）
+ * - 大图 max 92vw x 88vh 居中显示，点击媒体本身不关闭
  */
-export function ImagePreviewModal({ url, onClose }: { url: string | null; onClose: () => void }) {
+export function ImagePreviewModal({
+  url,
+  type = 'image',
+  onClose,
+}: {
+  url: string | null;
+  type?: 'image' | 'video';
+  onClose: () => void;
+}) {
   useEffect(() => {
     if (!url) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    // 模态打开时锁定页面滚动，避免背景穿透滚动
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
@@ -45,15 +52,28 @@ export function ImagePreviewModal({ url, onClose }: { url: string | null; onClos
       >
         ✕
       </button>
-      <img
-        src={assetUrl(url)}
-        alt="预览大图"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: '92vw', maxHeight: '88vh', objectFit: 'contain',
-          borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.5)', cursor: 'zoom-out',
-        }}
-      />
+      {type === 'video' ? (
+        <video
+          src={assetUrl(url)}
+          controls
+          autoPlay
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            maxWidth: '92vw', maxHeight: '88vh', objectFit: 'contain',
+            borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+          }}
+        />
+      ) : (
+        <img
+          src={assetUrl(url)}
+          alt="预览大图"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            maxWidth: '92vw', maxHeight: '88vh', objectFit: 'contain',
+            borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.5)', cursor: 'zoom-out',
+          }}
+        />
+      )}
     </div>
   );
 }
