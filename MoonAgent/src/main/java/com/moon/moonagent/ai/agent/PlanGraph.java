@@ -16,7 +16,7 @@ import com.moon.moonagent.ai.agent.specialist.SpecialistAgentRegistry;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
-import com.moon.moonagent.ai.agent.skill.SkillLoader;
+import com.moon.moonagent.ai.agent.skill.SkillManager;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
@@ -97,7 +97,7 @@ public class PlanGraph {
     private final AgentAiConfigProperties agentConfig;
     private final AgentOrchestratorSupport support;
     private final List<IntentHandler> intentHandlers;
-    private final SkillLoader skillLoader;
+    private final SkillManager skillManager;
     private final SpecialistAgentRegistry specialistRegistry;
 
     /**
@@ -230,7 +230,7 @@ public class PlanGraph {
                     OrchestrationRequest request = stateRequest(state);
                     String content = state.<String>value(K_CONTENT).orElse("");
                     java.util.List<Map<String, Object>> actions = new java.util.ArrayList<>();
-                    for (var skill : skillLoader.allMenuOrdered()) {
+                    for (var skill : skillManager.allMenuOrdered()) {
                         actions.add(Map.of("id", skill.intentType(), "title", skill.label()));
                     }
                     actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
@@ -273,8 +273,7 @@ public class PlanGraph {
                                 return "intent_clarify";
                             }
                             String intent = state.<String>value(K_INTENT).orElse(IntentRecognitionService.FALLBACK_TYPE);
-                            return intentToNode.getOrDefault(intent,
-                                    intentToNode.get(IntentRecognitionService.FALLBACK_TYPE));
+                            return routeTarget(intent);
                         }),
                         allNodeTargets())
                 // ---- 条件边：resume 路由（P3 核心：替代 12+ if/else） ----
@@ -291,6 +290,13 @@ public class PlanGraph {
                             if (!routingHint.isBlank()) {
                                 log.info("PlanGraph: resume 显式 routingHint={} currentIntent={} → rerun_selected", routingHint, intent);
                                 return "rerun_selected";
+                            }
+
+                            // ★ 通用技能卡锚定：skill-confirm / skill-step:* 一律回 skill_manager，
+                            // 自定义文本不再触发全局重新识别切链（避免多轮澄清跑偏）
+                            if (cpAction != null && cpAction.startsWith("skill-")) {
+                                log.info("PlanGraph: resume 通用技能卡 cpAction={} → skill_manager（同链锚定）", cpAction);
+                                return "skill_manager";
                             }
 
                             // ★ 切链出口：customText 非空 → 意图识别 → 意图 ≠ 当前链 → 回 intent_recognize
@@ -361,8 +367,7 @@ public class PlanGraph {
                 .addConditionalEdges("rerun_selected",
                         edge_async(state -> {
                             String intent = state.<String>value(K_INTENT).orElse(IntentRecognitionService.FALLBACK_TYPE);
-                            return intentToNode.getOrDefault(intent,
-                                    intentToNode.get(IntentRecognitionService.FALLBACK_TYPE));
+                            return routeTarget(intent);
                         }),
                         allNodeTargets());
 
@@ -392,7 +397,7 @@ public class PlanGraph {
                 }
 
                 // 构建 SpecialistContext
-                AgentSkill skill = skillLoader.byIntent(intent);
+                AgentSkill skill = skillManager.byIntent(intent).orElse(null);
                 SpecialistContext ctx = new SpecialistContext(
                         state.<AgentConversation>value(K_CONVERSATION).orElseThrow(),
                         state.<String>value(K_CONTENT).orElse(""),
@@ -436,6 +441,59 @@ public class PlanGraph {
                     }),
                     allNodeTargetsWithEnd());
         }
+
+        // ---- 通用技能管理节点：处理无 handler 但已注册 skill 的意图（handler-less 能力走通用执行器） ----
+        graph.addNode("skill_manager", node_async(state -> {
+            boolean resume = Boolean.TRUE.equals(state.value(K_RESUME).orElse(false));
+            String intent;
+            String cpAction = state.<String>value(K_CP_ACTION).orElse("");
+            if (resume && cpAction != null && cpAction.startsWith("skill-")) {
+                intent = support.planField(state.<String>value(K_CP_PLAN).orElse(""), "intent");
+            } else {
+                intent = state.<String>value(K_INTENT).orElse(IntentRecognitionService.FALLBACK_TYPE);
+            }
+            AgentSkill skill = skillManager.byIntent(intent).orElse(null);
+            if (skill == null) {
+                log.warn("PlanGraph skill_manager: 意图 {} 无技能，降级友好提示", intent);
+                OrchestrationRequest request = stateRequest(state);
+                request.setIntentType(intent);
+                return Map.of(K_LAST_MESSAGE, support.sendFriendlyError(request,
+                        "未找到对应技能", "这个功能暂时帮不了你，换个说法试试。"));
+            }
+            SpecialistAgent specialist = specialistRegistry.get(intent).orElse(null);
+            if (specialist == null) {
+                log.warn("PlanGraph skill_manager: 意图 {} 无 specialist，降级友好提示", intent);
+                OrchestrationRequest request = stateRequest(state);
+                request.setIntentType(intent);
+                return Map.of(K_LAST_MESSAGE, support.sendFriendlyError(request,
+                        "未找到对应执行器", "这个功能暂时帮不了你，换个说法试试。"));
+            }
+            SpecialistContext ctx = new SpecialistContext(
+                    state.<AgentConversation>value(K_CONVERSATION).orElseThrow(),
+                    state.<String>value(K_CONTENT).orElse(""),
+                    state.<java.util.List<String>>value(K_PIC_URLS).orElse(java.util.List.of()),
+                    emittersByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()),
+                    null,
+                    skill,
+                    state.<String>value(K_SUBMIT_ACTION).orElse(""),
+                    state.<String>value(K_CUSTOM_TEXT).orElse(""),
+                    state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
+                    state.<String>value(K_CP_ACTION).orElse(""),
+                    state.<String>value(K_CP_PLAN).orElse(""));
+            SpecialistResult result;
+            try {
+                result = specialist.execute(ctx);
+            } catch (Exception e) {
+                log.error("PlanGraph skill_manager: {} 执行失败: {}", intent, e.getMessage(), e);
+                OrchestrationRequest request = stateRequest(state);
+                request.setIntentType(intent);
+                return Map.of(K_LAST_MESSAGE, support.sendFriendlyError(request, e.getMessage(),
+                        "处理出了点问题，请稍后重试。"));
+            }
+            log.info("PlanGraph skill_manager: {} 完成", intent);
+            return Map.of(K_LAST_MESSAGE, result.message() != null ? result.message() : "");
+        }));
+        graph.addEdge("skill_manager", END);
 
         compiledGraph = graph.compile();
         log.info("PlanGraph: 编译完成，节点={}", intentToNode.keySet());
@@ -521,6 +579,16 @@ public class PlanGraph {
         };
     }
 
+    /** run 路由目标：有 handler → 原节点；无 handler 但已注册 skill → skill_manager；否则 → intent-other */
+    private String routeTarget(String intent) {
+        String node = intentToNode.get(intent);
+        if (node != null) return node;
+        if (intent != null && skillManager.byIntent(intent).isPresent()) {
+            return "skill_manager";
+        }
+        return intentToNode.get(IntentRecognitionService.FALLBACK_TYPE);
+    }
+
     /** state → OrchestrationRequest（handler 适配器用） */
     private OrchestrationRequest stateRequest(OverAllState state) {
         AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
@@ -537,6 +605,7 @@ public class PlanGraph {
     private Map<String, String> allNodeTargets() {
         Map<String, String> m = new HashMap<>();
         m.put("intent_clarify", "intent_clarify");
+        m.put("skill_manager", "skill_manager");
         for (String node : intentToNode.values()) {
             m.put(node, node);
         }

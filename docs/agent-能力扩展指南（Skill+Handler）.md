@@ -1,14 +1,22 @@
 # Agent 能力扩展指南（Skill + Handler 双文件样板）
 
-> MoonAgent 模块化约定：**加一个能力 = 一个 `SKILL.md` + 一个 `IntentHandler` 类**，核心零改动。
+> MoonAgent 模块化约定：**加一个能力 = 一个 `SKILL.md`（+ 若需新工具再加一个 `@Tool`/`@McpTool`）**，核心零改动。
+> 有复杂流程才写 `IntentHandler`；无 handler 的能力自动走 `skill_manager` 通用执行器（`GenericSkillSpecialist`）。
 > 路由（规则前置表/澄清菜单）、注册表、校验都按约定自动跟上。
 
 ## 流程（四步）
 
 1. 建 `resources/skills/<name>/SKILL.md`（声明式元数据 + body 知识/提示词）。
 2. 建 `ai/agent/handler/<Name>IntentHandler.java`（`@Component implements IntentHandler`）。
-3. 编译。启动时 `SkillConsistencyValidator` 自动校验 handler↔skill 一一对应（缺一个直接报错不启动）。
+3. 编译。启动时 `SkillConsistencyValidator` 自动校验：有 handler 的能力强制 handler↔skill 一致；
+   无 handler 的能力走 `skill_manager`（仅校验 `triggers`/`label`/`model_role`，`hitl` 可选）。
 4. e2e 冒烟：走 `/messages/stream` 点亮该能力。
+
+> **无 handler 技能（声明即扩展）**：只写 `SKILL.md`（声明 `tools`/`model_role`/`triggers`/`hitl`/body），且对应 `@Tool` 已存在，
+> 即可被 `SkillExpander` 索引、`skill_manager` 路由、`GenericSkillSpecialist` 用 Spring AI 2.0 的 `ToolCallingAdvisor` 执行；
+> `hitl` 声明了按钮就弹确认卡，未声明则直接执行。
+> 需要**多轮多次人工介入**时，用 `flow: [stepId1, stepId2, ...]` 声明多步澄清流程，body 用 `### stepId` 写每步提示词，
+> 通用执行器会逐步弹卡、累积信息、同链推进（不切到别的 skill）。
 
 ## SKILL.md 样板
 

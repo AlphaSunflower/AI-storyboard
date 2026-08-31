@@ -10,8 +10,9 @@ import java.util.Map;
  * <ul>
  *   <li><b>YAML frontmatter</b>（本 record 承载）——能力的<b>声明式元数据</b>：路由触发（triggers/priority）、
  *       澄清菜单显示名（label）、模型角色（model_role）、工具清单（tools）、上限（limits）、HITL 卡按钮清单（hitl）。</li>
- *   <li><b>markdown body</b>（{@link #nodePrompts()}）——按 {@code ### 步骤id} 分段的知识/系统提示词。当前阶段
- *       提示词仍走 {@code PromptConfig}（prompts/**），body 只作知识归属与后续合并（步骤 6，暂缓）。</li>
+ *   <li><b>markdown body</b>（{@link #nodePrompts()}）——按 {@code ### 步骤id} 分段的知识/系统提示词。
+ *       由 {@code GenericSkillSpecialist}（无 handler 通用执行器）作为系统提示词数据源消费；
+ *       有 handler 的能力仍走 {@code PromptConfig}（prompts/**）。</li>
  * </ul>
  *
  * <p>Graph 仍是代码（{@code PlanGraph}）管流程/HITL/循环；Skill 只是被节点代码消费的 data，
@@ -26,7 +27,10 @@ import java.util.Map;
  * @param priority  触发优先级（数字越小越先匹配；当前 delete=10/scene-review=20/aisplit=30/video=40/pic=50）
  * @param menuOrder 澄清菜单显示顺序（数字越小越靠前；当前 aisplit=10/pic=20/video=30/scene-review=40/delete=50/other=60）
  * @param hitlManifest HITL 卡按钮清单（[{id, title}]；LLM 声明卡的 id 必须落在该清单内，保留 resume 路由确定性）
- * @param nodePrompts markdown body 按 {@code ### 步骤id} 分段的知识提示词（暂仅供步骤 6 合并；当前不消费）
+ * @param nodePrompts markdown body 按 {@code ### 步骤id} 分段的知识提示词（由 {@link #systemPrompt()} 消费，
+ *                    供无 handler 的 {@code GenericSkillSpecialist} 作为系统提示词；有 handler 的能力仍走 PromptConfig）
+ * @param flow handler-less 技能的可选「多步澄清流程」步骤 id 列表（顺序执行；缺省=单发）。每个 id 对应 body
+ *             {@code ### <id>} 段，由 {@code GenericSkillSpecialist} 的步骤机消费。
  */
 public record AgentSkill(
         String intentType,
@@ -40,7 +44,8 @@ public record AgentSkill(
         int priority,
         int menuOrder,
         List<Map<String, Object>> hitlManifest,
-        Map<String, String> nodePrompts) {
+        Map<String, String> nodePrompts,
+        List<String> flow) {
 
     /** 意图前缀：Skill name 与 intentType 的映射规则（handler.intentType() = "intent-" + name） */
     private static final String INTENT_PREFIX = "intent-";
@@ -67,12 +72,31 @@ public record AgentSkill(
                 intVal(frontmatter.get("priority"), 100),
                 intVal(frontmatter.get("menu_order"), 100),
                 hitl == null ? List.of() : hitl,
-                nodePrompts == null ? Map.of() : nodePrompts);
+                nodePrompts == null ? Map.of() : nodePrompts,
+                toStrList(frontmatter.get("flow")));
     }
 
     /** 澄清菜单最终 id（与 handler.intentType() 对齐，resume/clarify 共用） */
     public String intentId() {
         return intentType;
+    }
+
+    /** 通用执行器系统提示词：描述 + body（{@code ### stepId} 段拼接）；无分段时用 {@code _body}。 */
+    public String systemPrompt() {
+        StringBuilder sb = new StringBuilder();
+        if (description != null && !description.isBlank()) {
+            sb.append(description).append("\n\n");
+        }
+        if (nodePrompts != null && !nodePrompts.isEmpty()) {
+            if (nodePrompts.containsKey("_body")) {
+                sb.append(nodePrompts.get("_body"));
+            } else {
+                nodePrompts.values().forEach(p -> {
+                    if (p != null && !p.isBlank()) sb.append(p).append("\n\n");
+                });
+            }
+        }
+        return sb.toString().trim();
     }
 
     private static String str(Object o) {

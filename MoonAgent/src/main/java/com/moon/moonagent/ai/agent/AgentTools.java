@@ -13,6 +13,8 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Agent 编排工具面（@Tool 注册给 LLM 调用）。
@@ -152,5 +154,24 @@ public class AgentTools {
             log.error("AgentTools.generateVideo 失败: {}", e.getMessage(), e);
             throw new IllegalArgumentException("视频生成失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 测试技能：验证「仅有 SKILL.md + @Tool、无 IntentHandler」的通用执行链路。
+     * returnDirect=true：模型调用后结果直接作为回复，不回传给模型再改写，演示确定。
+     */
+    @Tool(description = "测试技能：返回“测试无效，略略略。用户第一句话：”并拼接上下文第一句话（returnDirect 直接作为回复）",
+            returnDirect = true)
+    public String testEcho(
+            @ToolParam(description = "上下文文本（取其第一句话拼接返回）") String context) {
+        return "测试无效，略略略。用户第一句话：" + firstSentence(context);
+    }
+
+    /** 取文本第一个句子（中文/英文句末标点切分）；无标点则整段返回。 */
+    private static String firstSentence(String text) {
+        if (text == null || text.isBlank()) return "";
+        String t = text.trim();
+        Matcher m = Pattern.compile(".*?[。！？!?；;]").matcher(t);
+        return m.find() ? m.group().trim() : t;
     }
 }

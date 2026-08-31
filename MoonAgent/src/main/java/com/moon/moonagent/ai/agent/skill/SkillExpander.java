@@ -1,0 +1,86 @@
+package com.moon.moonagent.ai.agent.skill;
+
+import com.moon.moonagent.ai.agent.AgentTools;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.method.MethodToolCallbackProvider;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * 工具/技能桥 —— 声明即扩展入口。
+ *
+ * <p>职责：把 {@link AgentTools} 上的 {@code @Tool}/{@code @McpTool} 方法提取为
+ * {@link ToolCallback}，按工具名建立索引；供 {@code GenericSkillSpecialist} 按技能声明的
+ * {@code tools} 名称过滤注入。启动时校验每个技能声明的工具都能解析到真实回调（缺失只警告、不阻断）。
+ *
+ * <p>设计定案：加能力 = 加一个 {@code SKILL.md} + 加/改一个 {@code @Tool}，编排零改动；
+ * 不引入 LLM 自动发明技能（不做运行时合成）。
+ */
+@Component
+@RequiredArgsConstructor
+public class SkillExpander {
+
+    private static final Logger log = LoggerFactory.getLogger(SkillExpander.class);
+
+    private final AgentTools agentTools;
+    private final SkillManager skillManager;
+
+    /** 工具名 → ToolCallback（启动时由 AgentTools 扫描生成） */
+    private volatile Map<String, ToolCallback> toolByName = Map.of();
+
+    @PostConstruct
+    void init() {
+        ToolCallback[] callbacks = MethodToolCallbackProvider.builder()
+                .toolObjects(agentTools)
+                .build()
+                .getToolCallbacks();
+        Map<String, ToolCallback> map = new HashMap<>();
+        for (ToolCallback callback : callbacks) {
+            String name = callback.getToolDefinition().name();
+            map.put(name, callback);
+            log.info("[SkillExpander] 发现工具: {}", name);
+        }
+        toolByName = map;
+
+        // 校验：技能声明的工具必须能解析到真实回调（缺失仅警告，避免运行期空工具集）
+        for (AgentSkill skill : skillManager.all()) {
+            if (skill.tools() == null) continue;
+            for (String tool : skill.tools()) {
+                if (tool == null || tool.isBlank()) continue;
+                if (!toolByName.containsKey(tool)) {
+                    log.warn("[SkillExpander] 技能 {} 声明的工具 '{}' 未找到（@Tool/@McpTool 缺失），将无法注入",
+                            skill.name(), tool);
+                }
+            }
+        }
+        log.info("[SkillExpander] 共索引 {} 个工具: {}", toolByName.size(), toolByName.keySet());
+    }
+
+    /** 全部可用工具名 */
+    public Set<String> allToolNames() {
+        return toolByName.keySet();
+    }
+
+    /**
+     * 按名称过滤出技能声明所需的 {@link ToolCallback}。
+     * 未命中（工具缺失/未声明）返回空数组，调用方据此降级。
+     */
+    public ToolCallback[] toolCallbacks(List<String> names) {
+        if (names == null || names.isEmpty()) return new ToolCallback[0];
+        List<ToolCallback> out = new ArrayList<>();
+        for (String name : names) {
+            ToolCallback callback = name == null ? null : toolByName.get(name);
+            if (callback != null) out.add(callback);
+        }
+        return out.toArray(new ToolCallback[0]);
+    }
+}

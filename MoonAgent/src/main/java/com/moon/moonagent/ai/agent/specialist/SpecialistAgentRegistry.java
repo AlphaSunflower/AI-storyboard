@@ -1,7 +1,9 @@
 package com.moon.moonagent.ai.agent.specialist;
 
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
+import com.moon.moonagent.ai.agent.skill.SkillManager;
 import com.moon.moonagent.ai.agent.specialist.impl.HandlerDelegatingSpecialist;
+import com.moon.moonagent.ai.agent.specialist.impl.GenericSkillSpecialist;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +28,8 @@ public class SpecialistAgentRegistry {
 
     private final List<IntentHandler> intentHandlers;
     private final List<SpecialistAgent> specialists;
+    private final SkillManager skillManager;
+    private final GenericSkillSpecialist genericSkillSpecialist;
 
     private Map<String, SpecialistAgent> registry = Map.of();
 
@@ -51,6 +55,15 @@ public class SpecialistAgentRegistry {
     }
 
     public Optional<SpecialistAgent> get(String intentType) {
-        return Optional.ofNullable(registry.get(intentType));
+        SpecialistAgent specialist = registry.get(intentType);
+        if (specialist != null) {
+            return Optional.of(specialist);
+        }
+        // 无专属 specialist/handler 但已注册技能 → 兜底通用执行器（handler-less 技能）
+        if (intentType != null && !intentType.isBlank() && skillManager.byIntent(intentType).isPresent()) {
+            log.info("SpecialistAgentRegistry: {} 无专属 specialist，回退 GenericSkillSpecialist", intentType);
+            return Optional.of(genericSkillSpecialist);
+        }
+        return Optional.empty();
     }
 }

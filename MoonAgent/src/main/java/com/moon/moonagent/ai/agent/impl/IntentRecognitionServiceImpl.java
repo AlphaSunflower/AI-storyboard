@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
-import com.moon.moonagent.ai.agent.skill.SkillLoader;
+import com.moon.moonagent.ai.agent.skill.SkillManager;
 import jakarta.annotation.PostConstruct;
 
 import java.time.Duration;
@@ -72,14 +72,14 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
-    private final SkillLoader skillLoader;
+    private final SkillManager skillManager;
 
     /** 由 Skill 推导规则前置表 + 合法意图集（priority 升序：delete 先于 aisplit 的「分镜」；menu 顺序用于澄清菜单） */
     @PostConstruct
     void initRules() {
         List<Map.Entry<String, Pattern>> rules = new ArrayList<>();
         Set<String> types = new java.util.LinkedHashSet<>();
-        for (AgentSkill skill : skillLoader.all()) {          // priority 升序
+        for (AgentSkill skill : skillManager.allOrdered()) {  // priority 升序（静态 + 动态）
             if (!skill.triggers().isEmpty()) {
                 for (String t : skill.triggers()) {
                     if (t == null || t.isBlank()) continue;

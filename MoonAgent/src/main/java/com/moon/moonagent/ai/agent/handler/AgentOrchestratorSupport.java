@@ -66,7 +66,7 @@ public class AgentOrchestratorSupport {
     private final com.moon.moonagent.ai.agent.AssetMatchingService assetMatchingService;
     private final com.moon.moonagent.mapper.AgentMessageMapper messageMapper;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
-    private final com.moon.moonagent.ai.agent.skill.SkillLoader skillLoader;
+    private final com.moon.moonagent.ai.agent.skill.SkillManager skillManager;
     private final AgentSessionState sessionState;
     private final ModelOptionsAssembler modelOptionsAssembler;
 
@@ -350,7 +350,7 @@ public class AgentOrchestratorSupport {
      * 供 gate/方案提示词「按需加载」——skill body 未命中时回退 promptConfig。
      */
     public com.moon.moonagent.ai.agent.skill.AgentSkill skill(OrchestrationRequest req) {
-        return req == null ? null : skillLoader.byIntent(req.getIntentType());
+        return req == null ? null : skillManager.byIntent(req.getIntentType()).orElse(null);
     }
 
     /**
