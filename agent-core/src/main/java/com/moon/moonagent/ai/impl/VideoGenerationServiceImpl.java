@@ -9,6 +9,7 @@ import com.moon.moonagent.ai.SceneGenerationBridge;
 import com.moon.moonagent.ai.SceneView;
 import com.storyboard.common.MultipartBuilder;
 import com.moon.moonagent.ai.VideoGenerationService;
+import com.moon.moonagent.ai.video.ReferenceImage;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -322,4 +323,144 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             throw new BusinessException(50201, "参考素材上传失败: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * 创建视频任务（新版：支持带 role 的参考图列表）。
+     * <p>
+     * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
+     * <p>
+     * 将 ReferenceImage 列表转换为网关期望的格式（{url, role} 对象数组），传递给 LLM 网关。
+     */
+    @Override
+    public String createVideoTask(String sceneId, String prompt, String alias,
+                                   String resolution, String size, String aspectRatio,
+                                   Integer duration, String negativePrompt, Long seed,
+                                   List<ReferenceImage> referenceImages, String generatedImageUrl,
+                                   List<String> referenceVideos, List<String> referenceAudios,
+                                   boolean isReferenceImageWithRole) {
+        SceneView scene = sceneId != null ? sceneBridge.getScene(sceneId) : null;
+        if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
+
+        if (prompt == null || prompt.isBlank()) {
+            throw new BusinessException(40001, "视频生成 prompt 不能为空");
+        }
+
+        String actualModel = alias != null
+                ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
+                : (scene != null && scene.videoModel != null && !scene.videoModel.isBlank())
+                        ? scene.videoModel
+                        : gatewayModelService.getDefaultVideoModel();
+
+        // 参数：显式传入 > 分镜覆盖 > 网关兜底默认
+        String effResolution = resolution != null ? resolution
+                : (scene != null && scene.videoResolution != null && !scene.videoResolution.isBlank())
+                        ? scene.videoResolution : null;
+        String effAspectRatio = aspectRatio != null ? aspectRatio
+                : (scene != null && scene.videoAspectRatio != null && !scene.videoAspectRatio.isBlank())
+                        ? scene.videoAspectRatio : null;
+        Integer effDuration = duration != null ? duration
+                : (scene != null && scene.duration != null && scene.duration > 0)
+                        ? scene.duration : null;
+
+        try {
+            // 构建统一请求体
+            Map<String, Object> body = new HashMap<>();
+            body.put("model", actualModel);
+            body.put("prompt", prompt);
+            if (size != null) body.put("size", size);
+            if (effResolution != null) body.put("resolution", effResolution);
+            if (effAspectRatio != null) body.put("aspectRatio", effAspectRatio);
+            if (effDuration != null) body.put("duration", effDuration);
+            if (negativePrompt != null && !negativePrompt.isEmpty()) {
+                body.put("negativePrompt", negativePrompt);
+            }
+            if (seed != null) {
+                body.put("seed", seed);
+            }
+
+            // 将 ReferenceImage 列表转换为带 role 的格式
+            List<Map<String, Object>> refImageList = new ArrayList<>();
+            if (referenceImages != null) {
+                for (ReferenceImage ref : referenceImages) {
+                    if (ref.url() == null || ref.url().isBlank()) continue;
+                    String resolvedUrl = resolveReferenceUrl(ref.url(), "image");
+                    if (resolvedUrl != null) {
+                        Map<String, Object> refMap = new HashMap<>();
+                        refMap.put("url", resolvedUrl);
+                        refMap.put("role", ref.role() != null ? ref.role().name() : "REFERENCE");
+                        refImageList.add(refMap);
+                    }
+                }
+            }
+
+            // 处理 generatedImageUrl 作为首帧
+            if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+                String resolvedUrl = resolveReferenceUrl(generatedImageUrl, "image");
+                if (resolvedUrl != null) {
+                    Map<String, Object> refMap = new HashMap<>();
+                    refMap.put("url", resolvedUrl);
+                    refMap.put("role", "FIRST_FRAME");
+                    refImageList.add(0, refMap); // 首帧放在列表开头
+                }
+            }
+
+            if (!refImageList.isEmpty()) {
+                body.put("referenceImages", refImageList);
+            }
+
+            // 参考视频和音频（保持原有逻辑）
+            List<String> refVideos = new ArrayList<>();
+            List<String> refAudios = new ArrayList<>();
+            if (referenceVideos != null) {
+                for (String v : referenceVideos) { String u = resolveReferenceUrl(v, "video"); if (u != null) refVideos.add(u); }
+            }
+            if (referenceAudios != null) {
+                for (String a : referenceAudios) { String u = resolveReferenceUrl(a, "audio"); if (u != null) refAudios.add(u); }
+            }
+            if (!refVideos.isEmpty()) body.put("referenceVideos", refVideos);
+            if (!refAudios.isEmpty()) body.put("referenceAudios", refAudios);
+
+            log.info("[参考图-Role] 创建视频: model={}, refImageCount={}, hasFirstFrame={}",
+                    actualModel, refImageList.size(),
+                    refImageList.stream().anyMatch(m -> "FIRST_FRAME".equals(m.get("role"))));
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.getGatewayApiKey())
+                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200 && resp.statusCode() != 201) {
+                throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
+            }
+
+            JsonNode root = objectMapper.readTree(resp.body());
+            String taskId = root.path("taskId").asText("");
+            if (taskId.isBlank()) {
+                throw new BusinessException(50201, "视频创建响应缺少 taskId: " + resp.body());
+            }
+
+            if (scene != null) {
+                scene.videoTaskId = taskId;
+                scene.videoStatus = "generating";
+                sceneBridge.updateScene(scene);
+            }
+            log.info("视频任务已创建(带Role): taskId={}, model={}", taskId, actualModel);
+            return taskId;
+        } catch (Exception e) {
+            if (scene != null) {
+                scene.videoStatus = "failed";
+                sceneBridge.updateScene(scene);
+            }
+            throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
+        }
+    }
+
 }
+
+
+

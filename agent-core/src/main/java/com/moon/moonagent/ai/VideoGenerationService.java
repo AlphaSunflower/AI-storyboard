@@ -1,5 +1,9 @@
 package com.moon.moonagent.ai;
 
+import com.moon.moonagent.ai.video.ReferenceImage;
+import com.moon.moonagent.ai.video.ReferenceImageRole;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -32,6 +36,35 @@ public interface VideoGenerationService {
                            List<String> referenceVideos, List<String> referenceAudios);
 
     /**
+     * 创建视频任务（新版：支持带 role 的参考图列表）。
+     * <p>
+     * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
+     * <p>
+     * 向后兼容：如果调用方没有 role 信息，可使用 {@link ReferenceImage#ofReference(String)} 包装。
+     *
+     * @param sceneId           分镜 ID（可为空）
+     * @param prompt            视频生成提示词
+     * @param alias             模型别名（可为空，使用默认）
+     * @param resolution        分辨率（可为空，使用默认）
+     * @param size              尺寸（可为空）
+     * @param aspectRatio       宽高比（可为空）
+     * @param duration          时长（可为空）
+     * @param negativePrompt    负面提示词（可为空）
+     * @param seed              随机种子（可为空）
+     * @param referenceImages   带 role 的参考图列表（可为空）
+     * @param generatedImageUrl 已生成的图片 URL（首帧，可为空）
+     * @param referenceVideos   参考视频列表（可为空）
+     * @param referenceAudios   参考音频列表（可为空）
+     * @return 视频任务 ID
+     */
+    String createVideoTask(String sceneId, String prompt, String alias,
+                           String resolution, String size, String aspectRatio,
+                           Integer duration, String negativePrompt, Long seed,
+                           List<ReferenceImage> referenceImages, String generatedImageUrl,
+                           List<String> referenceVideos, List<String> referenceAudios,
+                           boolean isReferenceImageWithRole);
+
+    /**
      * 轮询视频任务状态，完成后自动下载视频文件（统一走网关）。
      * 网关统一响应 {taskId, status, progress?, error?}（status: processing/succeeded/failed）：
      *   succeeded → GET 网关下载端点拿视频流 → 本地转存 uploads/videos → {status:completed, videoUrl}
@@ -40,3 +73,6 @@ public interface VideoGenerationService {
      */
     Map<String, String> pollVideoTask(String taskId);
 }
+
+
+

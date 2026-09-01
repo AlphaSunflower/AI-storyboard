@@ -28,4 +28,24 @@ public record VendorCreateInput(
                 || (referenceAudios != null && !referenceAudios.isEmpty())
                 || (imageUrl != null && !imageUrl.isBlank());
     }
+
+    /**
+     * 创建一个新的 VendorCreateInput，替换 referenceImages 字段（用于向后兼容的默认适配器实现）。
+     */
+    public VendorCreateInput withReferenceImages(List<String> newReferenceImages) {
+        return new VendorCreateInput(
+                this.model,
+                this.prompt,
+                this.size,
+                this.resolution,
+                this.aspectRatio,
+                this.duration,
+                this.negativePrompt,
+                this.seed,
+                this.imageUrl,
+                newReferenceImages,
+                this.referenceVideos,
+                this.referenceAudios
+        );
+    }
 }

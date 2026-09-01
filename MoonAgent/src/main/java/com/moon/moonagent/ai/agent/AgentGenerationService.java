@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent;
 
+import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.entity.AgentConversation;
 
 import java.util.List;
@@ -50,8 +51,34 @@ public interface AgentGenerationService {
                            List<String> referenceImages, String generatedImageUrl);
 
     /**
+     * 创建视频任务（新版：支持带 role 的参考图列表）。
+     * <p>
+     * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
+     *
+     * @param conversation      会话信息
+     * @param sceneId           分镜 ID（可为空）
+     * @param prompt            视频生成提示词
+     * @param model             模型别名（可为空）
+     * @param resolution        分辨率（可为空）
+     * @param size              尺寸（可为空）
+     * @param aspectRatio       宽高比（可为空）
+     * @param duration          时长（可为空）
+     * @param negativePrompt    负面提示词（可为空）
+     * @param referenceImages   带 role 的参考图列表（可为空）
+     * @param generatedImageUrl 已生成的图片 URL（首帧，可为空）
+     * @return 视频任务 ID
+     */
+    String createVideoTaskWithRole(AgentConversation conversation, String sceneId,
+                           String prompt, String model, String resolution, String size,
+                           String aspectRatio, String duration, String negativePrompt,
+                           List<ReferenceImage> referenceImages, String generatedImageUrl);
+
+    /**
      * 轮询视频任务。
      * 资产更新由上游 VideoGenerationService 在终态时完成，此处只转发轮询结果。
      */
     Map<String, String> pollVideoTask(String taskId);
 }
+
+
+

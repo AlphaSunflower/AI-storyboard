@@ -3,8 +3,11 @@ package com.llmgateway.vendor.video.spi;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
 import com.llmgateway.vendor.video.dto.VideoVendorResult;
+import com.llmgateway.vendor.video.model.ReferenceImage;
 
 import java.net.http.HttpRequest;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 视频厂商适配器 SPI —— 统一规则接口（规则统一，数据不统一）。
@@ -37,6 +40,34 @@ public interface VideoVendorAdapter {
     /** 用统一入参构建该协议的创建请求（含 HTTP 方法/URL/头/体/超时），交由编排器发送 */
     HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey);
 
+    /**
+     * 构建创建请求（新版：支持带 role 的参考图列表）。
+     * <p>
+     * 默认实现：将 {@link ReferenceImage} 列表转为 {@link VendorCreateInput} 的 referenceImages 字段，
+     * 然后委托给旧版 {@link #buildCreateRequest(VendorCreateInput, Channel, String)}（向后兼容）。
+     * <p>
+     * 各模型适配器可覆盖此方法以实现 role 语义的精确映射（如 MiniMax 的 first_frame / last_frame / reference_image）。
+     *
+     * @param in              统一入参
+     * @param channel         渠道配置
+     * @param apiKey          API 密钥
+     * @param referenceImages 带 role 的参考图列表（可能为空）
+     * @return HTTP 请求
+     */
+    default HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey,
+                                           List<ReferenceImage> referenceImages) {
+        // 默认实现：提取所有图片 URL，忽略 role（向后兼容旧模型）
+        List<String> urls = new ArrayList<>();
+        if (referenceImages != null) {
+            for (ReferenceImage ref : referenceImages) {
+                if (ref.url() != null && !ref.url().isBlank()) {
+                    urls.add(ref.url());
+                }
+            }
+        }
+        return buildCreateRequest(in.withReferenceImages(urls), channel, apiKey);
+    }
+
     // ── 响应解析（该协议原始响应 → 归一结果）──
 
     /** 解析创建响应 —— 从 task_id / id / taskId 稳取 taskId（不再让调用方猜字段名） */
@@ -45,3 +76,5 @@ public interface VideoVendorAdapter {
     /** 解析轮询响应 —— 完成状态映射归一（succeeded/failed/processing）与错误/进度/直链提取 */
     VideoVendorResult parsePoll(String rawBody, String taskId, Channel channel, String apiKey);
 }
+
+

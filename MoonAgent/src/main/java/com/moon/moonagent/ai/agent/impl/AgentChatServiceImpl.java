@@ -15,6 +15,8 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
@@ -643,6 +645,50 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
                 // 确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
                 persistUserConfirmation(conversation, "开始生成视频", null);
+
+                // ── 参考图 role 人工介入 ──
+                // 如果有1-2张参考图，触发 HITL 卡片让用户选择用途（首帧/尾帧/参考图）
+                if (picUrls.size() > 0 && picUrls.size() < 3) {
+                    log.info("参考图 role 选择: picUrls.size()={}, 触发 HITL 卡片", picUrls.size());
+                    OrchestrationRequest req = new OrchestrationRequest(conversation, "", picUrls, emitter);
+
+                    // 构建 HITL 卡片选项
+                    List<Map<String, Object>> actions = new ArrayList<>();
+                    if (picUrls.size() == 1) {
+                        actions.add(Map.of("id", "first_frame", "title", "作为首帧", "description", "锁定视频起始画面"));
+                        actions.add(Map.of("id", "last_frame", "title", "作为尾帧", "description", "锁定视频结束画面"));
+                        actions.add(Map.of("id", "reference", "title", "作为参考图", "description", "模型自由演绎"));
+                    } else {
+                        actions.add(Map.of("id", "first_last_frame", "title", "作为首尾帧", "description", "图1为首帧，图2为尾帧"));
+                        actions.add(Map.of("id", "reference", "title", "作为参考图", "description", "两张都作为参考图"));
+                    }
+                    actions.add(Map.of("id", "cancel", "title", "取消"));
+
+                    // 构建 plan 文本
+                    StringBuilder planText = new StringBuilder();
+                    planText.append("🎬 请选择参考图片的用途：\n\n");
+                    for (int i = 0; i < picUrls.size(); i++) {
+                        planText.append("- 图").append(i + 1).append("\n");
+                    }
+
+                    // 构建 plan payload（保存必要信息供 resume 使用）
+                    List<Map<String, Object>> planPayload = List.of(Map.of(
+                        "message", message,
+                        "duration", duration != null ? duration : "",
+                        "picUrls", picUrls
+                    ));
+
+                    // 发送 HITL 卡片并结束本轮 SSE
+                    orchestratorSupport.runHITLStage(req, null,
+                        new AgentOrchestratorSupport.StagePlan(
+                            planText.toString(), "video-role-select",
+                            planPayload, "human_input", actions));
+
+                    log.info("参考图 role 选择 HITL 卡片已发送: conversationId={}", conversationId);
+                    return; // 结束本轮，等待用户选择后 resume
+                }
+
+                // ≥3张图或无图：默认多模态参考，直接生成
                 // 异步视频生成：创建任务 → task_accepted → 本轮 SSE 结束，前端轮询状态端点取结果
                 orchestratorSupport.startVideoGenerationAsync(
                         new com.moon.moonagent.ai.agent.handler.OrchestrationRequest(
@@ -828,3 +874,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         return true;
     }
 }
+
+
+

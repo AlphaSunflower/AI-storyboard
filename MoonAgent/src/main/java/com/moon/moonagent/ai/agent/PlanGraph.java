@@ -125,6 +125,7 @@ public class PlanGraph {
             Map.entry("script-source", "intent-aisplit"),
             Map.entry("video-clarify", "intent-video"),
             Map.entry("video-source", "intent-video"),
+            Map.entry("video-role-select", "intent-video"),
             Map.entry("pic-option", "intent-pic"),
             Map.entry("pic-clarify", "intent-pic"),
             Map.entry("prompt-source", "intent-pic"),
@@ -621,3 +622,4 @@ public class PlanGraph {
         return m;
     }
 }
+

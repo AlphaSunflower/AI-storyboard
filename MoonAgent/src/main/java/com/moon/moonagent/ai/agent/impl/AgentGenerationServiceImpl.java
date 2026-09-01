@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.impl;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.Scene;
@@ -201,6 +202,58 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         }
         return taskId;
     }
+    /**
+     * 创建视频任务（新版：支持带 role 的参考图列表）。
+     * <p>
+     * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
+     * <p>
+     * 向后兼容：如果调用方没有 role 信息，可使用 {@link ReferenceImage#ofReference(String)} 包装。
+     */
+    @Override
+    public String createVideoTaskWithRole(AgentConversation conversation, String sceneId,
+                                  String prompt, String model, String resolution, String size,
+                                  String aspectRatio, String duration, String negativePrompt,
+                                  List<ReferenceImage> referenceImages, String generatedImageUrl) {
+        Integer durationInt = parseDuration(duration);
+        String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
+        String cleanPrompt = sanitize(prompt);
+        String cleanModel = sanitize(model);
+        String cleanResolution = sanitize(resolution);
+        String cleanSize = sanitize(size);
+        String cleanAspectRatio = sanitize(aspectRatio);
+        String cleanNegative = sanitize(negativePrompt);
+        String cleanSource = sanitize(generatedImageUrl);
+
+        // 从 ReferenceImage 列表提取 URL 用于记录（role 信息在 videoService 中处理）
+        List<String> refUrls = referenceImages != null
+                ? referenceImages.stream().map(ReferenceImage::url).toList()
+                : List.of();
+        String genType = classifyVideoGenType(refUrls, cleanSource);
+
+        // 仅会话产出（sceneId 为空）落 agent_assets 记录；分镜生视频走 scenes 表，由外部轮询更新，不落记录避免卡 queued。
+        AgentAsset record = effectiveSceneId == null
+                ? newRecord(conversation, "video", genType, cleanPrompt, cleanModel, null,
+                        buildVideoParams(cleanResolution, cleanSize, cleanAspectRatio, duration, cleanNegative),
+                        buildReferenceUrls(refUrls, cleanSource), "queued")
+                : null;
+        long startMs = System.currentTimeMillis();
+        String taskId;
+        try {
+            taskId = videoService.createVideoTask(
+                effectiveSceneId, cleanPrompt, cleanModel, cleanResolution, cleanSize, cleanAspectRatio,
+                durationInt, cleanNegative, null, referenceImages, cleanSource, null, null, true);
+        } catch (Exception e) {
+            updateRecord(record, "failed", null, null, friendlyMessage(e), startMs);
+            throw e;
+        }
+        if (taskId != null && !taskId.isBlank() && record != null) {
+            record.setTaskId(taskId);
+            agentAssetMapper.updateById(record);
+            log.info("Agent 生成编排：视频资产已落库 assetId={}, taskId={}", record.getId(), taskId);
+        }
+        return taskId;
+    }
+
 
     /** 解析视频 duration 字符串，非法值返回 null（走 service 默认） */
     private Integer parseDuration(String duration) {
@@ -343,3 +396,8 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         return videoService.pollVideoTask(taskId);
     }
 }
+
+
+
+
+

@@ -1,4 +1,5 @@
 import { memo, useState } from 'react';
+import { ReferenceRoleSelector, type ReferenceRoleSelection } from '../video/ReferenceRoleSelector';
 import { ImageIcon } from 'lucide-react';
 import { RichPromptInput } from '../RichPromptInput';
 import type { CanvasNode } from '../../types';
@@ -30,7 +31,10 @@ function VideoGenBody({ nodeId, data, updateNode, pool, textDraft, setTextDraft,
 }) {
   const videoMode = typeof data.videoMode === 'string' ? data.videoMode : 'text2video';
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
-  const [feedback, setFeedback] = useState<string | null>(null);
+    const [feedback, setFeedback] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [showRoleSelector, setShowRoleSelector] = useState(false);
+  const [pendingReferenceUrls, setPendingReferenceUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
 
   const attachRef = async (file: File, field: 'firstFrameAssetId' | 'lastFrameAssetId' | 'videoRefAssetId') => {
@@ -54,6 +58,23 @@ function VideoGenBody({ nodeId, data, updateNode, pool, textDraft, setTextDraft,
     input.type = 'file';
     input.accept = accept;
     input.onchange = () => { const f = input.files?.[0]; if (f) void attachRef(f, field); };
+
+  // 处理参考图 role 选择
+  const handleRoleSelect = (selection: ReferenceRoleSelection) => {
+    setShowRoleSelector(false);
+    // 将选择结果存储到节点数据中
+    updateNode(nodeId, {
+      referenceRole: selection.role || (selection.firstLastFrame ? 'FIRST_LAST_FRAME' : 'REFERENCE'),
+      referenceRoleSelection: selection,
+    });
+    setFeedback(null);
+  };
+
+  const handleRoleCancel = () => {
+    setShowRoleSelector(false);
+    setPendingReferenceUrls([]);
+  };
+
     input.click();
   };
 
@@ -132,3 +153,6 @@ export const VideoGenNode = memo(function VideoGenNode({ id, data, updateNode, t
     </div>
   );
 });
+
+
+

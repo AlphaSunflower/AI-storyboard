@@ -1115,6 +1115,26 @@ public class AgentOrchestratorSupport {
         }
     }
 
+    /**
+     * 带 ReferenceImage role 的异步视频生成。
+     * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
+     */
+    public String startVideoGenerationAsyncWithRole(OrchestrationRequest req, String prompt, String duration,
+                                                    String aspectRatio, java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages) {
+        checkInterrupted(req);
+        String taskId = generationService.createVideoTaskWithRole(
+                req.getConversation(), null, prompt, null, null, null,
+                aspectRatio, duration, null,
+                referenceImages == null ? List.of() : referenceImages, null);
+        if (taskId == null || taskId.isBlank()) {
+            sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
+            return null;
+        }
+        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
+        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        return taskId;
+    }
+
     /** 按 taskId 更新 agent_assets 行（幂等；行不存在忽略——scene 视频无资产行）。
      *  completed 时把视频 URL 追加为 assistant 消息（![视频](url)），让视频持久到消息历史——
      *  否则 URL 只存 agent_assets，MessageBubble 从消息文本抠不到，刷新/切会话后不显示。 */

@@ -11,7 +11,11 @@ import com.llmgateway.vendor.video.dto.MinimaxVideoResult;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
 import com.llmgateway.vendor.video.dto.VideoVendorResult;
 import com.llmgateway.vendor.video.spi.VideoVendorAdapter;
+import com.llmgateway.vendor.video.model.ReferenceImage;
+import com.llmgateway.vendor.video.model.ReferenceImageRole;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -34,6 +38,8 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class MinimaxVideoAdapter implements VideoVendorAdapter {
+
+    private static final Logger log = LoggerFactory.getLogger(MinimaxVideoAdapter.class);
 
     /** MiniMax ratio 可用值白名单（t2v 纯文本场景；i2v 恒 adaptive） */
     private static final Set<String> RATIOS = Set.of("16:9", "4:3", "1:1", "3:4", "9:16", "21:9");
@@ -68,6 +74,29 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
 
     @Override
     public HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey) {
+        // 旧版接口：将 referenceImages 转为 ReferenceImage 列表（默认 REFERENCE role），委托新版
+        List<ReferenceImage> refImages = new ArrayList<>();
+        if (in.referenceImages() != null) {
+            for (String url : in.referenceImages()) {
+                refImages.add(ReferenceImage.ofReference(url));
+            }
+        }
+        return buildCreateRequest(in, channel, apiKey, refImages);
+    }
+
+    /**
+     * 构建创建请求（新版：支持带 role 的参考图列表）。
+     * <p>
+     * MiniMax role 映射：
+     * <ul>
+     *   <li>FIRST_FRAME → "first_frame"（首帧，锁定起始画面）</li>
+     *   <li>LAST_FRAME → "last_frame"（尾帧，锁定结束画面）</li>
+     *   <li>REFERENCE → "reference_image"（参考图，模型自由演绎）</li>
+     * </ul>
+     */
+    @Override
+    public HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey,
+                                          List<ReferenceImage> referenceImages) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("model", in.model());
 
@@ -77,32 +106,44 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
         textPart.put("text", in.prompt());
 
         // 多模态参考素材（r2va）：referenceImages / referenceVideos / referenceAudios；与首帧 imageUrl 互斥
-        List<String> refImages = nvl(in.referenceImages());
         List<String> refVideos = nvl(in.referenceVideos());
         List<String> refAudios = nvl(in.referenceAudios());
-        boolean hasRefs = !refImages.isEmpty() || !refVideos.isEmpty() || !refAudios.isEmpty();
+        boolean hasRefs = (referenceImages != null && !referenceImages.isEmpty())
+                || !refVideos.isEmpty() || !refAudios.isEmpty();
         String imageUrl = in.imageUrl() == null ? "" : in.imageUrl();
         if (hasRefs && !imageUrl.isBlank()) {
             throw new BusinessException(40001, "多模态参考素材与首帧图生视频互斥，不能同时提交");
         }
-        for (String ref : refImages) {
-            ObjectNode img = content.addObject();
-            img.put("type", "image_url");
-            img.put("image_url", objectMapper.createObjectNode().put("url", ref));
-            img.put("role", "reference_image");
+
+        // 参考图（带 role 映射）
+        if (referenceImages != null) {
+            for (ReferenceImage ref : referenceImages) {
+                if (ref.url() == null || ref.url().isBlank()) continue;
+                ObjectNode img = content.addObject();
+                img.put("type", "image_url");
+                img.put("image_url", objectMapper.createObjectNode().put("url", ref.url()));
+                // 根据 role 映射到 MiniMax 特定的 role 值
+                String minimaxRole = mapRoleToMinimax(ref.role());
+                img.put("role", minimaxRole);
+                log.debug("[MiniMax] 参考图 role 映射: {} -> {}", ref.role(), minimaxRole);
+            }
         }
+
+        // 参考视频
         for (String ref : refVideos) {
             ObjectNode vid = content.addObject();
             vid.put("type", "video_url");
             vid.put("video_url", objectMapper.createObjectNode().put("url", ref));
             vid.put("role", "reference_video");
         }
+        // 参考音频
         for (String ref : refAudios) {
             ObjectNode aud = content.addObject();
             aud.put("type", "audio_url");
             aud.put("audio_url", objectMapper.createObjectNode().put("url", ref));
             aud.put("role", "reference_audio");
         }
+        // 首帧（旧版 imageUrl 兼容）
         if (!imageUrl.isBlank()) {
             ObjectNode img = content.addObject();
             img.put("type", "image_url");
@@ -133,6 +174,8 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
         } catch (Exception e) {
             throw new BusinessException(50201, "MiniMax 请求体序列化失败: " + e.getMessage());
         }
+        log.info("[MiniMax] 构建视频创建请求: model={}, refImageCount={}, hasFirstFrame={}",
+                in.model(), referenceImages != null ? referenceImages.size() : 0, !imageUrl.isBlank());
         return HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation"))
                 .header("Content-Type", "application/json")
@@ -140,6 +183,18 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
                 .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
+    }
+
+    /**
+     * 将通用 ReferenceImageRole 映射为 MiniMax 特定的 role 字符串。
+     */
+    private String mapRoleToMinimax(ReferenceImageRole role) {
+        if (role == null) return "reference_image";
+        return switch (role) {
+            case FIRST_FRAME -> "first_frame";
+            case LAST_FRAME -> "last_frame";
+            case REFERENCE -> "reference_image";
+        };
     }
 
     @Override
@@ -213,3 +268,5 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 }
+
+

@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 
@@ -36,7 +37,7 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public Set<String> resumeActions() {
-        return Set.of("generate_video", "refine");
+        return Set.of("generate_video", "refine", "video-role-select");
     }
 
     @Override
@@ -119,6 +120,47 @@ public class VideoIntentHandler implements IntentHandler {
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         String cpAction = checkpoint.getAction();
+
+        // ── 参考图 role 选择卡片续流（video-role-select）──
+
+        // ── 参考图 role 选择卡片续流（video-role-select）──
+        // 用户选择 role 后，继续执行视频方案生成
+        if ("video-role-select".equals(cpAction)) {
+            String action = request.getAction();
+            if ("cancel".equals(action)) {
+                support.sendMessage(request, "已取消视频生成。");
+                return "";
+            }
+
+            // 从 checkpoint plan 恢复信息
+            String content = support.planField(checkpoint.getPlan(), "content");
+            String assetIdsStr = support.planField(checkpoint.getPlan(), "assetIds");
+            List<String> assetIds = assetIdsStr == null || assetIdsStr.isBlank()
+                    ? List.of() : java.util.Arrays.stream(assetIdsStr.split(",")).toList();
+            List<String> sources = support.planPicUrls(checkpoint.getPlan());
+
+            // 根据用户选择设置 role 属性（保存到会话状态，供后续 buildVideoPlan 使用）
+            // 这里我们直接调用 handleVideoPlan，role 信息会通过 request params 传递
+            Map<String, String> roleParams = new java.util.HashMap<>(request.getParams() == null ? Map.of() : request.getParams());
+            if ("first_last_frame".equals(action) && sources.size() >= 2) {
+                roleParams.put("referenceRole", "FIRST_LAST_FRAME");
+                log.info("[视频编排] 参考图 role 选择: 使用首尾帧模式");
+            } else {
+                String role = switch (action) {
+                    case "first_frame" -> "FIRST_FRAME";
+                    case "last_frame" -> "LAST_FRAME";
+                    default -> "REFERENCE";
+                };
+                roleParams.put("referenceRole", role);
+                log.info("[视频编排] 参考图 role 选择: 使用 {} 模式", role);
+            }
+            request.setParams(roleParams);
+
+            // 继续执行视频方案生成
+            return handleVideoPlan(request, content, assetIds, sources);
+        }
+
+
         // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 需求澄清 → 设计方案
         if ("asset-selection".equals(cpAction)) {
             String content = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
@@ -259,6 +301,45 @@ public class VideoIntentHandler implements IntentHandler {
             int duration;
             Map<String, String> recommended = Map.of();
             Map<String, String> reasons = Map.of();
+
+            // ── 参考图 role 人工介入（生成视频方案之前）──
+            // 如果有1-2张参考图，触发 HITL 卡片让用户选择用途（首帧/尾帧/参考图）
+            if (sources != null && sources.size() > 0 && sources.size() < 3) {
+                log.info("[视频编排] 参考图 role 选择: sources.size()={}, 触发 HITL 卡片", sources.size());
+
+                // 构建 HITL 卡片选项
+                List<Map<String, Object>> roleActions = new ArrayList<>();
+                if (sources.size() == 1) {
+                    roleActions.add(Map.of("id", "first_frame", "title", "作为首帧", "description", "锁定视频起始画面"));
+                    roleActions.add(Map.of("id", "last_frame", "title", "作为尾帧", "description", "锁定视频结束画面"));
+                    roleActions.add(Map.of("id", "reference", "title", "作为参考图", "description", "模型自由演绎"));
+                } else {
+                    roleActions.add(Map.of("id", "first_last_frame", "title", "作为首尾帧", "description", "图1为首帧，图2为尾帧"));
+                    roleActions.add(Map.of("id", "reference", "title", "作为参考图", "description", "两张都作为参考图"));
+                }
+                roleActions.add(Map.of("id", "cancel", "title", "取消"));
+
+                // 构建 plan 文本
+                StringBuilder rolePlanText = new StringBuilder();
+                rolePlanText.append("🎬 请选择参考图片的用途：\n\n");
+                for (int i = 0; i < sources.size(); i++) {
+                    rolePlanText.append("- 图").append(i + 1).append("\n");
+                }
+
+                // 保存当前状态供 resume 使用
+                List<Map<String, Object>> rolePlanPayload = List.of(Map.of(
+                    "content", content,
+                    "assetIds", String.join(",", assetIds),
+                    "sources", sources
+                ));
+
+                // 发送 HITL 卡片并结束本轮
+                return support.runHITLStage(request, null,
+                    new AgentOrchestratorSupport.StagePlan(
+                        rolePlanText.toString(), "video-role-select",
+                        rolePlanPayload, "human_input", roleActions));
+            }
+
             if (sources != null && !sources.isEmpty()) {
                 // 视觉模型看全部图 + 诉求 → 视频方案
                 VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(sources, enriched, modelOptionsText);
@@ -329,3 +410,6 @@ public class VideoIntentHandler implements IntentHandler {
         return java.util.Arrays.stream(s.split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
     }
 }
+
+
+

@@ -5,6 +5,8 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.Scene;
+import com.moon.moonagent.ai.video.ReferenceImage;
+import com.moon.moonagent.ai.video.ReferenceImageRole;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
@@ -51,7 +53,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
     @Override
     public Set<String> resumeActions() {
         return Set.of("review-optimize", "review-gen-image", "review-gen-video", "review-skip",
-                "review-confirm", "review-disagree");
+                "review-confirm", "review-disagree", "reference-role-select");
     }
 
     @Override
@@ -166,6 +168,12 @@ public class SceneReviewIntentHandler implements IntentHandler {
             if (!r.proceed()) return request.getLastMessage();
             return handleGenVideo(request, targetScenes, r.assetIds());
         }
+
+        // 参考图 role 选择卡片续流（reference-role-select）：用户选择了参考图用途 → 执行视频生成
+        if ("reference-role-select".equals(cpAction)) {
+            return handleReferenceRoleSelect(request, checkpoint);
+        }
+
 
         // 优先用前端传来的 assetIds（用户勾选的分镜 ID），回退到 checkpoint 的 sceneNums
         List<String> selectedIds = request.getAssetIds();
@@ -511,8 +519,9 @@ public class SceneReviewIntentHandler implements IntentHandler {
                     }
                 }
                 // 传 sceneId → 创建任务后自动关联到 scenes 表
-                String taskId = generationService.createVideoTask(
-                        conv, s.getId(), prompt, null, null, null, null, null, null, refImages, sourceImage);
+                List<ReferenceImage> refImageList = refImages.stream().map(ReferenceImage::ofReference).toList();
+                String taskId = generationService.createVideoTaskWithRole(
+                        conv, s.getId(), prompt, null, null, null, null, null, null, refImageList, sourceImage);
                 if (taskId != null && !taskId.isBlank()) {
                     success++;
                     support.sendEvent(request, "message", Map.of("content", String.format("分镜%d视频任务已提交（%s）。\n", s.getSceneNumber(), taskId)));
@@ -530,6 +539,165 @@ public class SceneReviewIntentHandler implements IntentHandler {
         support.sendEvent(request, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", resultMsg));
         return resultMsg;
     }
+
+    /**
+     * 弹出参考图 role 选择卡片（人工介入）。
+     * 当分镜有 1-2 张参考图时，询问用户用途（首帧/尾帧/参考图）。
+     */
+    private String showReferenceRoleCard(OrchestrationRequest request, Scene scene, List<String> refUrls) {
+        int count = refUrls.size();
+
+        List<Map<String, Object>> actions = new ArrayList<>();
+        if (count == 1) {
+            actions.add(Map.of("id", "first_frame", "title", "作为首帧", "description", "锁定视频起始画面"));
+            actions.add(Map.of("id", "last_frame", "title", "作为尾帧", "description", "锁定视频结束画面"));
+            actions.add(Map.of("id", "reference", "title", "作为参考图", "description", "模型自由演绎"));
+        } else {
+            actions.add(Map.of("id", "first_last_frame", "title", "作为首尾帧", "description", "图1为首帧，图2为尾帧"));
+            actions.add(Map.of("id", "reference", "title", "作为参考图", "description", "两张都作为参考图"));
+        }
+        actions.add(Map.of("id", "cancel", "title", "取消", "description", "取消本次视频生成"));
+
+        StringBuilder planText = new StringBuilder();
+        planText.append(String.format("🎬 分镜%d有%d张参考图片，请选择用途：\n\n", scene.getSceneNumber(), count));
+        for (int i = 0; i < refUrls.size(); i++) {
+            planText.append(String.format("- 图%d: %s\n", i + 1, refUrls.get(i)));
+        }
+
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText.toString(), "reference-role-select",
+                List.of(Map.of("sceneId", scene.getId(), "sceneNumber", scene.getSceneNumber(),
+                        "refUrls", refUrls, "prompt", scene.getVideoPrompt() != null ? scene.getVideoPrompt() : scene.getScriptContent())),
+                "human_input",
+                actions,
+                List.of(), Map.of(), Map.of(), List.of(), List.of(), List.of()));
+    }
+
+    /**
+     * 处理参考图 role 选择结果（resume 方法中调用）。
+     */
+    private String handleReferenceRoleSelect(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String action = request.getAction();
+        if ("cancel".equals(action)) {
+            support.sendMessage(request, "已取消视频生成。");
+            return "";
+        }
+
+        // 解析 checkpoint 中的分镜信息
+        String sceneId = extractStringFromPlan(checkpoint, "sceneId");
+        int sceneNumber = extractIntFromPlan(checkpoint, "sceneNumber");
+        List<String> refUrls = extractListFromPlan(checkpoint, "refUrls");
+        String prompt = extractStringFromPlan(checkpoint, "prompt");
+
+        if (sceneId == null || refUrls == null || refUrls.isEmpty()) {
+            support.sendMessage(request, "参考图信息丢失，请重试。");
+            return "";
+        }
+
+        // 根据用户选择构建 ReferenceImage 列表
+        List<ReferenceImage> refImages;
+        if ("first_last_frame".equals(action) && refUrls.size() >= 2) {
+            refImages = List.of(
+                    ReferenceImage.ofFirstFrame(refUrls.get(0)),
+                    ReferenceImage.ofLastFrame(refUrls.get(1))
+            );
+            log.info("参考图 role 选择: 分镜{} 使用首尾帧模式", sceneNumber);
+        } else {
+            ReferenceImageRole role = switch (action) {
+                case "first_frame" -> ReferenceImageRole.FIRST_FRAME;
+                case "last_frame" -> ReferenceImageRole.LAST_FRAME;
+                default -> ReferenceImageRole.REFERENCE;
+            };
+            refImages = refUrls.stream()
+                    .map(url -> new ReferenceImage(url, role))
+                    .toList();
+            log.info("参考图 role 选择: 分镜{} 使用 {} 模式, 图片数={}", sceneNumber, role, refImages.size());
+        }
+
+        // 执行视频生成
+        try {
+            support.sendEvent(request, "workflow", Map.of("title", "正在生成视频…", "status", "node_started"));
+            AgentConversation conv = request.getConversation();
+            String taskId = generationService.createVideoTaskWithRole(
+                    conv, sceneId, prompt, null, null, null, null, null, null, refImages, null);
+
+            if (taskId != null && !taskId.isBlank()) {
+                String resultMsg = String.format("✅ 分镜%d视频任务已提交（%s），后台生成中。", sceneNumber, taskId);
+                support.sendMessage(request, resultMsg);
+                support.sendEvent(request, "message", Map.of("content", resultMsg));
+            } else {
+                support.sendMessage(request, String.format("❌ 分镜%d视频任务创建失败。", sceneNumber));
+            }
+            support.sendEvent(request, "workflow", Map.of("title", "视频任务已提交", "status", "node_finished"));
+        } catch (Exception e) {
+            log.warn("分镜{}生视频失败: {}", sceneNumber, e.getMessage());
+            support.sendMessage(request, String.format("❌ 分镜%d视频生成失败：%s", sceneNumber, e.getMessage()));
+        }
+        return "";
+    }
+
+    /** 从 checkpoint plan 中提取字符串字段 */
+    private String extractStringFromPlan(AgentCheckpoint cp, String field) {
+        try {
+            Object parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(cp.getPlan(), Object.class);
+            Map<String, Object> plan;
+            if (parsed instanceof List<?> list && !list.isEmpty()) {
+                plan = (Map<String, Object>) list.get(0);
+            } else if (parsed instanceof Map) {
+                plan = (Map<String, Object>) parsed;
+            } else {
+                return null;
+            }
+            Object value = plan.get(field);
+            return value != null ? value.toString() : null;
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    /** 从 checkpoint plan 中提取整数字段 */
+    private int extractIntFromPlan(AgentCheckpoint cp, String field) {
+        try {
+            Object parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(cp.getPlan(), Object.class);
+            Map<String, Object> plan;
+            if (parsed instanceof List<?> list && !list.isEmpty()) {
+                plan = (Map<String, Object>) list.get(0);
+            } else if (parsed instanceof Map) {
+                plan = (Map<String, Object>) parsed;
+            } else {
+                return 0;
+            }
+            Object value = plan.get(field);
+            if (value instanceof Number num) return num.intValue();
+            return Integer.parseInt(value.toString());
+        } catch (Exception ignore) {
+            return 0;
+        }
+    }
+
+    /** 从 checkpoint plan 中提取列表字段 */
+    @SuppressWarnings("unchecked")
+    private List<String> extractListFromPlan(AgentCheckpoint cp, String field) {
+        try {
+            Object parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(cp.getPlan(), Object.class);
+            Map<String, Object> plan;
+            if (parsed instanceof List<?> list && !list.isEmpty()) {
+                plan = (Map<String, Object>) list.get(0);
+            } else if (parsed instanceof Map) {
+                plan = (Map<String, Object>) parsed;
+            } else {
+                return List.of();
+            }
+            Object value = plan.get(field);
+            if (value instanceof List<?> list) {
+                return list.stream().map(Object::toString).toList();
+            }
+            return List.of();
+        } catch (Exception ignore) {
+            return List.of();
+        }
+    }
+
 
     // ===== 工具方法 =====
 
@@ -588,3 +756,11 @@ public class SceneReviewIntentHandler implements IntentHandler {
         return java.util.Arrays.stream(s.split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
     }
 }
+
+
+
+
+
+
+
+
