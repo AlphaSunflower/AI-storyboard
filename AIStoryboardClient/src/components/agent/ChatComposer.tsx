@@ -38,11 +38,12 @@ export function ChatComposer() {
     refImageUrls, addRefImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
+    pickedAssetIds, addPickedAssetId, removePickedAssetId, clearPickedAssetIds,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
-  const [pickedAssetIds, setPickedAssetIds] = useState<string[]>([]);
+  // pickedAssetIds 现在从 store 获取，持久化不丢失
   // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
   const textRef = useRef('');
   textRef.current = text;
@@ -133,7 +134,7 @@ export function ChatComposer() {
     if (!content || busy) return;
     setText('');
     sendMessage(content, { assetIds: pickedAssetIds });
-    setPickedAssetIds([]);
+    clearPickedAssetIds();
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -187,7 +188,7 @@ export function ChatComposer() {
     if (urls.length === 0) { setAssetError('该资产暂无图片'); return; }
     addRefImageUrls(urls);
     // 记录选中资产 id：发消息时随 assetIds 传给后端，编排识别「用户已投资产」→ 直接用资产，不再弹「是否投资产」
-    setPickedAssetIds((prev) => Array.from(new Set([...prev, ...(assetSelectedId ? [assetSelectedId] : [])])));
+    if (assetSelectedId) addPickedAssetId(assetSelectedId);
     setAssetOpen(false); setAssetSelectedId(null);
   };
 
@@ -199,11 +200,50 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {refImageUrls.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src={refImageUrls[0]} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10 }} />
-          <span style={{ fontSize: 14, color: DS.textSecondary }}>参考图已附{refImageUrls.length > 1 ? `（共 ${refImageUrls.length} 张）` : ''}</span>
-          <button onClick={() => setRemoveModalOpen(true)} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>移除</button>
+      {(refImageUrls.length > 0 || pickedAssetIds.length > 0) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          padding: '8px 12px', borderRadius: 12, background: DS.hover,
+          border: `1px solid ${DS.border}`,
+        }}>
+          {refImageUrls.length > 0 && (
+            <button onClick={() => setRemoveModalOpen(true)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
+              background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
+              padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+            }}>
+              <ImageIcon size={14} strokeWidth={2} style={{ color: DS.brand }} />
+              参考图 {refImageUrls.length} 张
+            </button>
+          )}
+          {pickedAssetIds.length > 0 && (
+            <button onClick={handleAssetOpen} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
+              background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
+              padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+            }}>
+              <Package size={14} strokeWidth={2} style={{ color: DS.brand }} />
+              资产 {pickedAssetIds.length} 个
+            </button>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+            <button
+              onClick={() => fileRef.current?.click()}
+              style={{
+                padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
+                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            ><ImageIcon size={12} strokeWidth={2} /> 加图</button>
+            <button
+              onClick={handleAssetOpen}
+              style={{
+                padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
+                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+            ><Package size={12} strokeWidth={2} /> 加资产</button>
+          </div>
         </div>
       )}
       {pendingPicUrls.length > 0 && (

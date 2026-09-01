@@ -1252,6 +1252,30 @@ public class AgentOrchestratorSupport {
         }
     }
 
+    /** checkpoint plan JSON 取 sources 列表（video-role-select 专用）。
+     *  与 planPicUrls 类似，但读取 "sources" key（video-role-select checkpoint 使用）。 */
+    public List<String> planSources(String planJson) {
+        if (planJson == null || planJson.isBlank()) return List.of();
+        try {
+            var root = objectMapper.readTree(planJson);
+            var items = root.path("items");
+            var node = (items.isArray() && !items.isEmpty()) ? items.get(0) : root;
+            if (node.has("sources") && node.get("sources").isArray()) {
+                List<String> urls = new java.util.ArrayList<>();
+                for (var u : node.get("sources")) {
+                    if (u.isTextual()) {
+                        String s = u.asText("");
+                        if (!s.isBlank()) urls.add(s);
+                    }
+                }
+                return urls;
+            }
+            return List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     /** checkpoint plan JSON → AgentSceneItem 列表（宽松解析） */
     public List<AgentSceneItem> parsePlanScenes(String planJson) {
         if (planJson == null || planJson.isBlank()) return List.of();

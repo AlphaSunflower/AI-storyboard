@@ -466,11 +466,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...m,
         params: m.params ? safeParseParams(m.params) : null,
       }));
-      set((s) => ({
-        imageModelOptions: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
-        videoModelOptions: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
-        understandingModelOptions: parsedUnderstandingModels.length ? parsedUnderstandingModels : s.understandingModelOptions,
-      }));
+      set((s) => {
+        // 自动同步网关默认模型（is_default=true 的模型）
+        const defaultImageModel = parsedImageModels.find((m) => m.default)?.value;
+        const defaultVideoModel = parsedVideoModels.find((m) => m.default)?.value;
+        const defaultUnderstandingModel = parsedUnderstandingModels.find((m) => m.default)?.value;
+        
+        return {
+          imageModelOptions: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
+          videoModelOptions: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
+          understandingModelOptions: parsedUnderstandingModels.length ? parsedUnderstandingModels : s.understandingModelOptions,
+          // 如果网关返回了默认模型，自动更新当前选中的模型
+          ...(defaultImageModel && { imageModel: defaultImageModel }),
+          ...(defaultVideoModel && { videoModel: defaultVideoModel }),
+          ...(defaultUnderstandingModel && { understandingModel: defaultUnderstandingModel }),
+        };
+      });
     } catch {
       // 网关不可达：保持静态默认，模型选择不中断
     }
@@ -564,3 +575,5 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
 }));
+
+

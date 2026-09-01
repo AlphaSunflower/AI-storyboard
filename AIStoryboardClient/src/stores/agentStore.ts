@@ -94,6 +94,12 @@ interface AgentState {
   uploadRefImage: (file: File) => Promise<void>;
   uploadRefImages: (files: File[]) => Promise<void>;
 
+  // 本次携带的资产ID（持久化到发送时消费，不随渲染丢失）
+  pickedAssetIds: string[];
+  addPickedAssetId: (id: string) => void;
+  removePickedAssetId: (id: string) => void;
+  clearPickedAssetIds: () => void;
+
   // 互斥标志（会话级，刷新即恢复）
   agentGeneratedScenes: boolean;
   setAgentGeneratedScenes: (v: boolean) => void;
@@ -246,7 +252,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingHumanInput: null,
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
-        pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], refImageUrls: [],
+        pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], refImageUrls: [], pickedAssetIds: [],
       };
     });
     const res = await agentApi.listMessages(id);
@@ -288,6 +294,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setRefImageUrls: (v) => set({ refImageUrls: v }),
   addRefImageUrls: (urls) => set((s) => ({ refImageUrls: [...new Set([...s.refImageUrls, ...urls])] })),
   removeRefImageUrl: (index) => set((s) => ({ refImageUrls: s.refImageUrls.filter((_, i) => i !== index) })),
+
+  pickedAssetIds: [],
+  addPickedAssetId: (id) => set((s) => ({ pickedAssetIds: [...new Set([...s.pickedAssetIds, id])] })),
+  removePickedAssetId: (id) => set((s) => ({ pickedAssetIds: s.pickedAssetIds.filter((a) => a !== id) })),
+  clearPickedAssetIds: () => set({ pickedAssetIds: [] }),
+
   uploadRefImage: async (file) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined);
     const url = res.data.data.url;
@@ -520,7 +532,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : []), signal);
+      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -553,8 +565,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         };
       });
     }
-    // 清空参考图（M4：仅当仍在原会话时清空，避免切换会话后误清新会话的参考图）
-    if (get().activeConversationId === snapshotId) set({ refImageUrls: [] });
+    // 不再自动清空参考图和资产ID——用户要求持久化到意图节点消费
+    // if (get().activeConversationId === snapshotId) set({ refImageUrls: [] });
   },
 
   submitHumanInput: async (actionId, customText = '', params, assetIds) => {

@@ -29,6 +29,9 @@ public class ModelRouteServiceImpl implements ModelRouteService {
 
     /** Redis key 前缀：gateway:default_model:{type} → model_name */
     private static final String REDIS_KEY_PREFIX = "gateway:default_model:";
+    
+    /** 模型列表缓存 key 前缀（与 GatewayRoutingServiceImpl 一致） */
+    private static final String MODELS_CACHE_PREFIX = "gateway:models:";
 
     /** 合法模型类型 */
     private static final Set<String> ROUTE_TYPES = Set.of("text", "image", "video", "vision");
@@ -71,6 +74,8 @@ public class ModelRouteServiceImpl implements ModelRouteService {
 
         // 同步 Redis
         syncDefaultToRedis(type, route.getIsDefault(), route.getModelName());
+        // 清除模型列表缓存，确保前端立即获取最新列表
+        invalidateModelsCache(type);
         return route;
     }
 
@@ -107,6 +112,8 @@ public class ModelRouteServiceImpl implements ModelRouteService {
 
         // 同步 Redis
         syncDefaultToRedis(route.getType(), route.getIsDefault(), route.getModelName());
+        // 清除模型列表缓存，确保前端立即获取最新列表
+        invalidateModelsCache(route.getType());
         return route;
     }
 
@@ -121,6 +128,8 @@ public class ModelRouteServiceImpl implements ModelRouteService {
                 log.warn("Redis 清理默认模型失败: type={}", route.getType());
             }
         }
+        // 清除模型列表缓存
+        invalidateModelsCache(route.getType());
     }
 
     @Override
@@ -162,6 +171,20 @@ public class ModelRouteServiceImpl implements ModelRouteService {
             }
         } catch (Exception e) {
             log.warn("Redis 同步默认模型失败: type={}, model={}, error={}", type, modelName, e.getMessage());
+        }
+    }
+
+    /** 清除模型列表缓存（gateway:models:{type} 和 gateway:models:all） */
+    private void invalidateModelsCache(String type) {
+        try {
+            if (type != null) {
+                redisTemplate.delete(MODELS_CACHE_PREFIX + type);
+            }
+            // always clear the "all" cache too
+            redisTemplate.delete(MODELS_CACHE_PREFIX + "all");
+            log.info("模型列表缓存已清除: type={}", type);
+        } catch (Exception e) {
+            log.warn("清除模型列表缓存失败（不影响业务）: {}", e.getMessage());
         }
     }
 

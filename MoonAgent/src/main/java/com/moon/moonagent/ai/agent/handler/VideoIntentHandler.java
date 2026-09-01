@@ -137,7 +137,7 @@ public class VideoIntentHandler implements IntentHandler {
             String assetIdsStr = support.planField(checkpoint.getPlan(), "assetIds");
             List<String> assetIds = assetIdsStr == null || assetIdsStr.isBlank()
                     ? List.of() : java.util.Arrays.stream(assetIdsStr.split(",")).toList();
-            List<String> sources = support.planPicUrls(checkpoint.getPlan());
+            List<String> sources = support.planSources(checkpoint.getPlan());
 
             // 根据用户选择设置 role 属性（保存到会话状态，供后续 buildVideoPlan 使用）
             // 这里我们直接调用 handleVideoPlan，role 信息会通过 request params 传递
@@ -297,14 +297,26 @@ public class VideoIntentHandler implements IntentHandler {
             String enriched = content
                     + (ctx.isBlank() ? "" : ctx)
                     + (sheet.isBlank() ? "" : "\n\n【本次投入的资产设定，视频方案必须体现且不得改变】\n" + sheet);
+            // 用户已在 video-role-select 选中参考图角色 → 把角色诉求拼入方案输入，让视觉/LLM 按要求产出
+            String referenceRole = request.getParams() == null ? null : request.getParams().get("referenceRole");
+            if (referenceRole != null && !referenceRole.isBlank()) {
+                String roleHint = switch (referenceRole) {
+                    case "FIRST_FRAME" -> "参考图用于首帧：视频的第一帧必须以上传图片为准。";
+                    case "LAST_FRAME" -> "参考图用于尾帧：视频的最后一帧必须以上传图片为准。";
+                    case "FIRST_LAST_FRAME" -> "参考图用于首尾帧：图1作为首帧，图2作为尾帧。";
+                    default -> "参考图仅作风格参考，模型可自由演绎。";
+                };
+                enriched = enriched + "\n\n【参考图角色】" + roleHint;
+            }
             String message;
             int duration;
             Map<String, String> recommended = Map.of();
             Map<String, String> reasons = Map.of();
 
             // ── 参考图 role 人工介入（生成视频方案之前）──
-            // 如果有1-2张参考图，触发 HITL 卡片让用户选择用途（首帧/尾帧/参考图）
-            if (sources != null && sources.size() > 0 && sources.size() < 3) {
+            // 如果有1-2张参考图且尚未选择角色（未从 video-role-select resume），触发 HITL 卡片让用户选择用途
+            boolean roleAlreadyChosen = referenceRole != null && !referenceRole.isBlank();
+            if (!roleAlreadyChosen && sources != null && sources.size() > 0 && sources.size() < 3) {
                 log.info("[视频编排] 参考图 role 选择: sources.size()={}, 触发 HITL 卡片", sources.size());
 
                 // 构建 HITL 卡片选项
