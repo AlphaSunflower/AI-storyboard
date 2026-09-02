@@ -32,10 +32,11 @@ public interface VideoPlanService {
 
     /** 图生视频方案：message=视频 prompt（直接投喂生成），duration=时长（秒），params/reasons=LLM 推荐的生成参数与理由（可空） */
     record VideoPlan(String message, Integer duration,
-                     Map<String, String> params, Map<String, String> reasons) {
+                     Map<String, String> params, Map<String, String> reasons,
+                     String referenceRole) {
         /** 兼容构造器：无推荐参数 */
         public VideoPlan(String message, Integer duration) {
-            this(message, duration, Map.of(), Map.of());
+            this(message, duration, Map.of(), Map.of(), null);
         }
         /** 校验合法性：message 非空、duration 在 4~15 区间；非法返回 null 由调用方降级 */
         public boolean isValid() {

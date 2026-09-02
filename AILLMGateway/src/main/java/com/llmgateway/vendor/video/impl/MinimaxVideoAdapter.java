@@ -74,14 +74,8 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
 
     @Override
     public HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey) {
-        // 旧版接口：将 referenceImages 转为 ReferenceImage 列表（默认 REFERENCE role），委托新版
-        List<ReferenceImage> refImages = new ArrayList<>();
-        if (in.referenceImages() != null) {
-            for (String url : in.referenceImages()) {
-                refImages.add(ReferenceImage.ofReference(url));
-            }
-        }
-        return buildCreateRequest(in, channel, apiKey, refImages);
+        // 参考图已在网关解析阶段带上 role，直接委托四参重载
+        return buildCreateRequest(in, channel, apiKey, in.referenceImages());
     }
 
     /**
@@ -159,8 +153,12 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
         int duration = in.duration() == null ? 8 : in.duration();
         payload.put("duration", Math.max(4, Math.min(15, duration)));
 
-        // ratio 语义：i2v 恒 "adaptive"；t2v 必须显式指定可用值，缺省/非法回落 16:9
-        boolean isImageToVideo = !imageUrl.isBlank();
+        // ratio 语义：i2v 恒 "adaptive"；t2v 必须显式指定可用值，缺省/非法回落 16:9。
+        // 首帧/尾帧经 referenceImages[{role}] 传入（imageUrl 为空）时，同样判定为 i2v，需切 adaptive。
+        boolean hasFrameRole = referenceImages != null && referenceImages.stream()
+                .anyMatch(r -> r.role() == ReferenceImageRole.FIRST_FRAME
+                        || r.role() == ReferenceImageRole.LAST_FRAME);
+        boolean isImageToVideo = !imageUrl.isBlank() || hasFrameRole;
         if (isImageToVideo) {
             payload.put("ratio", "adaptive");
         } else {

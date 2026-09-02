@@ -5,6 +5,8 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.ai.VideoPlanService;
 import com.moon.moonagent.ai.agent.PlanField;
+import com.moon.moonagent.ai.video.ReferenceImage;
+import com.moon.moonagent.ai.video.ReferenceImageRole;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +39,7 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public Set<String> resumeActions() {
-        return Set.of("generate_video", "refine", "video-role-select");
+        return Set.of("generate_video", "refine");
     }
 
     @Override
@@ -121,42 +123,15 @@ public class VideoIntentHandler implements IntentHandler {
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         String cpAction = checkpoint.getAction();
 
-        // ── 参考图 role 选择卡片续流（video-role-select）──
-
-        // ── 参考图 role 选择卡片续流（video-role-select）──
-        // 用户选择 role 后，继续执行视频方案生成
+        // 旧「参考图 role 选择」卡片已改为视觉模型自动推荐。若会话仍停留在 video-role-select，
+        // 忽略用户所选动作，用停点信息重新走 handleVideoPlan（由视觉模型自动推荐角色）。
         if ("video-role-select".equals(cpAction)) {
-            String action = request.getAction();
-            if ("cancel".equals(action)) {
-                support.sendMessage(request, "已取消视频生成。");
-                return "";
-            }
-
-            // 从 checkpoint plan 恢复信息
             String content = support.planField(checkpoint.getPlan(), "content");
             String assetIdsStr = support.planField(checkpoint.getPlan(), "assetIds");
             List<String> assetIds = assetIdsStr == null || assetIdsStr.isBlank()
                     ? List.of() : java.util.Arrays.stream(assetIdsStr.split(",")).toList();
             List<String> sources = support.planSources(checkpoint.getPlan());
-
-            // 根据用户选择设置 role 属性（保存到会话状态，供后续 buildVideoPlan 使用）
-            // 这里我们直接调用 handleVideoPlan，role 信息会通过 request params 传递
-            Map<String, String> roleParams = new java.util.HashMap<>(request.getParams() == null ? Map.of() : request.getParams());
-            if ("first_last_frame".equals(action) && sources.size() >= 2) {
-                roleParams.put("referenceRole", "FIRST_LAST_FRAME");
-                log.info("[视频编排] 参考图 role 选择: 使用首尾帧模式");
-            } else {
-                String role = switch (action) {
-                    case "first_frame" -> "FIRST_FRAME";
-                    case "last_frame" -> "LAST_FRAME";
-                    default -> "REFERENCE";
-                };
-                roleParams.put("referenceRole", role);
-                log.info("[视频编排] 参考图 role 选择: 使用 {} 模式", role);
-            }
-            request.setParams(roleParams);
-
-            // 继续执行视频方案生成
+            log.info("[视频编排] 命中旧 video-role-select 停点，忽略所选动作并自动推荐角色");
             return handleVideoPlan(request, content, assetIds, sources);
         }
 
@@ -245,8 +220,17 @@ public class VideoIntentHandler implements IntentHandler {
         String assetIdsCsv = support.planField(checkpoint.getPlan(), PlanField.ASSET_IDS);
         List<String> assetImages = support.assetImageUrls(request.getConversation().getProjectId(), assetIdsCsv);
         if (!assetImages.isEmpty()) sources = assetImages;
-        // 生成参数：用户提交 params 优先，未提交回退 checkpoint 推荐/原值（startVideoGenerationAsync 内做键级兜底）
-        support.startVideoGenerationAsync(request, message, duration, null, sources, request.getParams());
+        // 从 checkpoint 恢复参考图角色（自动选择阶段存入 plan），并拆解为逐图 role 透传给模型
+        String refRole = support.planField(checkpoint.getPlan(), "referenceRole");
+        if (refRole != null && !refRole.isBlank() && sources != null && !sources.isEmpty()) {
+            List<ReferenceImage> refImages = buildReferenceImages(refRole, sources);
+            log.info("[视频编排] 使用带角色的视频生成: semanticRole={}, 图片数={}, 拆解前3图={}",
+                    refRole, refImages.size(),
+                    refImages.stream().limit(3).map(r -> r.role() + ":" + r.url()).toList());
+            support.startVideoGenerationAsyncWithRole(request, message, duration, null, refImages, request.getParams());
+        } else {
+            support.startVideoGenerationAsync(request, message, duration, null, sources, request.getParams());
+        }
         return "";
     }
 
@@ -313,52 +297,33 @@ public class VideoIntentHandler implements IntentHandler {
             Map<String, String> recommended = Map.of();
             Map<String, String> reasons = Map.of();
 
-            // ── 参考图 role 人工介入（生成视频方案之前）──
-            // 如果有1-2张参考图且尚未选择角色（未从 video-role-select resume），触发 HITL 卡片让用户选择用途
-            boolean roleAlreadyChosen = referenceRole != null && !referenceRole.isBlank();
-            if (!roleAlreadyChosen && sources != null && sources.size() > 0 && sources.size() < 3) {
-                log.info("[视频编排] 参考图 role 选择: sources.size()={}, 触发 HITL 卡片", sources.size());
 
-                // 构建 HITL 卡片选项
-                List<Map<String, Object>> roleActions = new ArrayList<>();
-                if (sources.size() == 1) {
-                    roleActions.add(Map.of("id", "first_frame", "title", "作为首帧", "description", "锁定视频起始画面"));
-                    roleActions.add(Map.of("id", "last_frame", "title", "作为尾帧", "description", "锁定视频结束画面"));
-                    roleActions.add(Map.of("id", "reference", "title", "作为参考图", "description", "模型自由演绎"));
-                } else {
-                    roleActions.add(Map.of("id", "first_last_frame", "title", "作为首尾帧", "description", "图1为首帧，图2为尾帧"));
-                    roleActions.add(Map.of("id", "reference", "title", "作为参考图", "description", "两张都作为参考图"));
-                }
-                roleActions.add(Map.of("id", "cancel", "title", "取消"));
-
-                // 构建 plan 文本
-                StringBuilder rolePlanText = new StringBuilder();
-                rolePlanText.append("🎬 请选择参考图片的用途：\n\n");
-                for (int i = 0; i < sources.size(); i++) {
-                    rolePlanText.append("- 图").append(i + 1).append("\n");
-                }
-
-                // 保存当前状态供 resume 使用
-                List<Map<String, Object>> rolePlanPayload = List.of(Map.of(
-                    "content", content,
-                    "assetIds", String.join(",", assetIds),
-                    "sources", sources
-                ));
-
-                // 发送 HITL 卡片并结束本轮
-                return support.runHITLStage(request, null,
-                    new AgentOrchestratorSupport.StagePlan(
-                        rolePlanText.toString(), "video-role-select",
-                        rolePlanPayload, "human_input", roleActions));
-            }
 
             if (sources != null && !sources.isEmpty()) {
-                // 视觉模型看全部图 + 诉求 → 视频方案
+                // 视觉模型看全部图 + 诉求 → 视频方案（同时输出推荐的参考图角色）
                 VideoPlanService.VideoPlan plan = videoPlanService.buildVideoPlan(sources, enriched, modelOptionsText);
                 message = plan.message();
                 duration = plan.duration();
                 recommended = plan.params() == null ? Map.of() : plan.params();
                 reasons = plan.reasons() == null ? Map.of() : plan.reasons();
+                
+                // 从 VideoPlan 获取推荐的参考图角色（只认 4 个合法值；非法/缺失按图数回退默认）
+                String planRole = normalizeRole(plan.referenceRole());
+                if (planRole != null) {
+                    referenceRole = planRole;
+                    log.info("[视频编排] 从 VideoPlan 获取参考图角色: {}", referenceRole);
+                } else if (normalizeRole(referenceRole) == null) {
+                    // 既无合法推荐、也无合法已选角色 → 按图数回退默认
+                    referenceRole = defaultRole(sources.size());
+                    log.info("[视频编排] VideoPlan 未输出合法角色，使用默认: {}", referenceRole);
+                } else {
+                    // 已选角色（来自 request.params）合法 → 归一大小写
+                    referenceRole = normalizeRole(referenceRole);
+                }
+                // 将角色写回 request.params，供后续 startVideoGenerationAsync 使用
+                Map<String, String> updatedParams = new java.util.HashMap<>(request.getParams() == null ? Map.of() : request.getParams());
+                updatedParams.put("referenceRole", referenceRole);
+                request.setParams(updatedParams);
             } else {
                 // 无图：LLM 生成视频方案（prompt + 时长 + 推荐参数）
                 AgentOrchestratorSupport.VideoPlanResult plan = support.callVideoPlan(enriched, modelOptionsText, request);
@@ -377,7 +342,8 @@ public class VideoIntentHandler implements IntentHandler {
                     planText, "generate_video",
                     List.of(Map.of("message", message, "duration", duration,
                             "picUrls", sources == null ? List.of() : sources,
-                            "assetIds", String.join(",", assetIds))),
+                            "assetIds", String.join(",", assetIds),
+                            "referenceRole", referenceRole == null ? "" : referenceRole)),
                     "video_plan",
                     support.buildHITLCard(request, planText, List.of(
                             Map.of("id", "generate_video", "title", "开始生成视频"),
@@ -420,6 +386,65 @@ public class VideoIntentHandler implements IntentHandler {
     private List<String> parseAssetIds(String s) {
         if (s == null || s.isBlank()) return List.of();
         return java.util.Arrays.stream(s.split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
+    }
+
+    /** 语义参考图角色：只认 4 个合法值，大小写归一；非法/缺失返回 null */
+    private static String normalizeRole(String role) {
+        if (role == null || role.isBlank()) return null;
+        String r = role.trim().toUpperCase();
+        return switch (r) {
+            case "FIRST_FRAME", "LAST_FRAME", "FIRST_LAST_FRAME", "REFERENCE" -> r;
+            default -> null;
+        };
+    }
+
+    /** 按图片数量回退默认语义角色 */
+    private static String defaultRole(int imageCount) {
+        return switch (imageCount) {
+            case 1 -> "FIRST_FRAME";
+            case 2 -> "FIRST_LAST_FRAME";
+            default -> "REFERENCE";
+        };
+    }
+
+    /**
+     * 语义角色 → 逐图 ReferenceImage（MiniMax 按图带 role）。
+     * FIRST_LAST_FRAME 拆成「图1=首帧、图末=尾帧、中间=参考」；仅 1 张时按 FIRST_FRAME 处理。
+     */
+    static List<ReferenceImage> buildReferenceImages(String semanticRole, List<String> urls) {
+        if (urls == null || urls.isEmpty()) return List.of();
+        String role = normalizeRole(semanticRole);
+        if (role == null) role = "REFERENCE";
+        List<ReferenceImage> out = new ArrayList<>();
+        switch (role) {
+            case "FIRST_FRAME" -> {
+                for (int i = 0; i < urls.size(); i++) {
+                    out.add(new ReferenceImage(urls.get(i),
+                            i == 0 ? ReferenceImageRole.FIRST_FRAME : ReferenceImageRole.REFERENCE));
+                }
+            }
+            case "LAST_FRAME" -> {
+                int last = urls.size() - 1;
+                for (int i = 0; i < urls.size(); i++) {
+                    out.add(new ReferenceImage(urls.get(i),
+                            i == last ? ReferenceImageRole.LAST_FRAME : ReferenceImageRole.REFERENCE));
+                }
+            }
+            case "FIRST_LAST_FRAME" -> {
+                int last = urls.size() - 1;
+                for (int i = 0; i < urls.size(); i++) {
+                    ReferenceImageRole r;
+                    if (i == 0) r = ReferenceImageRole.FIRST_FRAME;
+                    else if (i == last && last > 0) r = ReferenceImageRole.LAST_FRAME;
+                    else r = ReferenceImageRole.REFERENCE;
+                    out.add(new ReferenceImage(urls.get(i), r));
+                }
+            }
+            default -> {
+                for (String u : urls) out.add(new ReferenceImage(u, ReferenceImageRole.REFERENCE));
+            }
+        }
+        return out;
     }
 }
 

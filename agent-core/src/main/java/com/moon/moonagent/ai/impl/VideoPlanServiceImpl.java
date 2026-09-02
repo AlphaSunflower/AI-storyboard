@@ -137,15 +137,16 @@ public class VideoPlanServiceImpl implements VideoPlanService {
 
     /** 组装 system prompt：基础方案指令 + 可选的模型参数选择指令（有选项文本时要求 LLM 预选参数并给理由） */
     private String buildSystemPrompt(String modelOptionsText) {
+        String base = promptConfig.get("services/video-plan-with-image");
         if (modelOptionsText == null || modelOptionsText.isBlank()) {
-            return promptConfig.get("services/video-plan-with-image");
+            return base + "\n只输出一个 JSON 对象，不要输出其他内容。";
         }
-        return promptConfig.get("services/video-plan-with-image")
-                + "\n3. params（对象，必填）：从以下可用模型与参数选项中选择合适的值：\n"
+        return base
+                + "\n4. params（对象，必填）：从以下可用模型与参数选项中选择合适的值：\n"
                 + modelOptionsText
                 + "（形如 {\"model\":\"...\",\"resolution\":\"...\",\"aspectRatio\":\"...\"}，值必须是选项中出现的）\n"
-                + "4. reasons（对象，必填）：每个参数一句简短推荐理由（≤15 字），键与 params 一致。\n"
-                + "只输出 JSON，不要输出其他内容。";
+                + "5. reasons（对象，必填）：每个参数一句简短推荐理由（≤15 字），键与 params 一致。\n"
+                + "只输出一个 JSON 对象，不要输出其他内容。";
     }
 
     /** 从模型输出提取视频方案：JSON 结构优先（message/duration），非法返回 null */
@@ -169,7 +170,8 @@ public class VideoPlanServiceImpl implements VideoPlanService {
                     return null;
                 }
                 return new VideoPlan(message.trim(), duration,
-                        parseStringMap(node, "params"), parseStringMap(node, "reasons"));
+                        parseStringMap(node, "params"), parseStringMap(node, "reasons"),
+                        node.path("referenceRole").asText(null));
             }
         } catch (Exception ignored) {
             // 非 JSON 输出，降级 null（调用方转业务错误）

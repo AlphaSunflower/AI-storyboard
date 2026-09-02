@@ -1,7 +1,6 @@
 package com.moon.moonagent.config;
 
 import jakarta.annotation.PostConstruct;
-import org.apache.commons.text.StringSubstitutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +25,7 @@ import java.util.stream.Stream;
  * 提示词管理器——YAML 文件版。
  * 启动时扫描 classpath*:prompts/ 下所有 YAML 文件，以 name 字段作为唯一索引。
  * 本地开发时额外从文件系统 prompts.dir 加载并做 mtime 热刷新（60s 扫描，改文件即生效）。
- * 占位符由 StringSubstitutor 处理。
+ * 占位符由 {@link PromptResolver} 处理（skill body 与 YAML 共用同一替换语义）。
  */
 @Component
 public class PromptConfig {
@@ -161,13 +160,12 @@ public class PromptConfig {
      */
     public String get(String name, Map<String, String> vars) {
         String raw = get(name);
-        if (raw.isEmpty() || vars == null || vars.isEmpty()) {
-            return raw;
-        }
-        StringSubstitutor sub = new StringSubstitutor(vars);
-        sub.setVariablePrefix("{{");
-        sub.setVariableSuffix("}}");
-        return sub.replace(raw);
+        return PromptResolver.resolve(raw, vars);
+    }
+
+    /** 判断某个提示词 key 是否已加载（供技能绑定校验判断 fallback 是否存在）。 */
+    public boolean contains(String name) {
+        return prompts.containsKey(name);
     }
 
     /** 列出所有已加载的提示词名称（调试用） */

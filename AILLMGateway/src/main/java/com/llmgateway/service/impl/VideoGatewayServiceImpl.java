@@ -17,6 +17,8 @@ import com.llmgateway.service.KeyService;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
+import com.llmgateway.vendor.video.model.ReferenceImage;
+import com.llmgateway.vendor.video.model.ReferenceImageRole;
 import com.llmgateway.vendor.video.dto.VideoVendorResult;
 import com.llmgateway.vendor.video.spi.VideoVendorAdapter;
 import com.llmgateway.vendor.video.spi.VideoVendorRegistry;
@@ -107,7 +109,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
             // 泛型重试循环：重试次数 / 可重试判定 / 退避均来自适配器（该协议自身策略）
             HttpResponse<String> resp = null;
             for (int attempt = 1; attempt <= adapter.maxCreateAttempts(); attempt++) {
-                HttpRequest req = adapter.buildCreateRequest(in, channel, apiKey);
+                HttpRequest req = adapter.buildCreateRequest(in, channel, apiKey, in.referenceImages());
                 resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
                 if (!adapter.isRetryableCreate(resp.statusCode(), resp.body())
                         || attempt == adapter.maxCreateAttempts()) {
@@ -311,9 +313,12 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
      * 把 OpenAI 风格请求体转成统一入参。参考素材/首帧互斥与参数默认全部下沉到适配器，
      * 这里只做字段搬运，不做任何协议判断。
      */
-    private VendorCreateInput toCreateInput(JsonNode body) {
-        List<String> refImages = new ArrayList<>();
-        for (JsonNode n : body.path("referenceImages")) refImages.add(n.asText(""));
+    static VendorCreateInput toCreateInput(JsonNode body) {
+        List<ReferenceImage> refImages = new ArrayList<>();
+        for (JsonNode n : body.path("referenceImages")) {
+            ReferenceImage ref = parseReferenceImage(n);
+            if (ref != null) refImages.add(ref);
+        }
         List<String> refVideos = new ArrayList<>();
         for (JsonNode n : body.path("referenceVideos")) refVideos.add(n.asText(""));
         List<String> refAudios = new ArrayList<>();
@@ -329,6 +334,32 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
                 body.has("seed") ? body.path("seed").asLong() : null,
                 textOrNull(body, "imageUrl"),
                 refImages, refVideos, refAudios);
+    }
+
+    /** 兼容两种入参形状：字符串数组 → 默认 REFERENCE；{url, role} 对象数组 → 逐项解析 role（缺失/非法默认 REFERENCE） */
+    static ReferenceImage parseReferenceImage(JsonNode n) {
+        if (n == null || n.isMissingNode() || n.isNull()) return null;
+        if (n.isTextual()) {
+            String url = n.asText("");
+            return url.isBlank() ? null : ReferenceImage.ofReference(url);
+        }
+        if (n.isObject()) {
+            String url = n.path("url").asText("");
+            if (url.isBlank()) return null;
+            ReferenceImageRole r = parseReferenceImageRole(n.path("role").asText(""));
+            return r == null ? ReferenceImage.ofReference(url) : new ReferenceImage(url, r);
+        }
+        return null;
+    }
+
+    /** 解析参考图 role；未知/缺失返回 null（调用方回退 REFERENCE） */
+    static ReferenceImageRole parseReferenceImageRole(String role) {
+        if (role == null || role.isBlank()) return null;
+        try {
+            return ReferenceImageRole.valueOf(role.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** 归一结果 → 带 vendor 标识的 JSON（数据不挤成一坨：各厂商专用字段由适配器决定是否透出） */

@@ -6,7 +6,6 @@ import com.llmgateway.vendor.video.dto.VideoVendorResult;
 import com.llmgateway.vendor.video.model.ReferenceImage;
 
 import java.net.http.HttpRequest;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -56,16 +55,8 @@ public interface VideoVendorAdapter {
      */
     default HttpRequest buildCreateRequest(VendorCreateInput in, Channel channel, String apiKey,
                                            List<ReferenceImage> referenceImages) {
-        // 默认实现：提取所有图片 URL，忽略 role（向后兼容旧模型）
-        List<String> urls = new ArrayList<>();
-        if (referenceImages != null) {
-            for (ReferenceImage ref : referenceImages) {
-                if (ref.url() != null && !ref.url().isBlank()) {
-                    urls.add(ref.url());
-                }
-            }
-        }
-        return buildCreateRequest(in.withReferenceImages(urls), channel, apiKey);
+        // 默认实现：忽略 role（旧模型无 role 语义），将入参原样交给三参重载
+        return buildCreateRequest(in, channel, apiKey);
     }
 
     // ── 响应解析（该协议原始响应 → 归一结果）──

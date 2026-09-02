@@ -16,6 +16,7 @@ import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.AssetRelevanceResult;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.config.PromptResolver;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -353,6 +354,31 @@ public class AgentOrchestratorSupport {
         return req == null ? null : skillManager.byIntent(req.getIntentType()).orElse(null);
     }
 
+    /** 用户面技能 gate 提示词绑定：stepId ↔ fallbackKey ↔ 所属 intentType（供启动期绑定校验防漂移）。 */
+    public record GatePrompt(String intentType, String stepId, String fallbackKey) {}
+
+    /**
+     * 用户面技能编排 gate 提示词清单（单一来源，供 {@code SkillPromptBindingValidator} 启动校验）。
+     *
+     * <p>规则：fallbackKey 在 prompts/** 不存在时，stepId 必须在对应 SKILL.md body 有 {@code ### stepId} 段；
+     * fallbackKey 存在（迁移期安全网）则允许缺段。当前所有演进到 skill-first 的 gate，fallback 已在 YAML 中删除。
+     */
+    public static List<GatePrompt> gatePrompts() {
+        return List.of(
+                new GatePrompt("intent-aisplit", "script-optimize", "orchestrator/script-optimize"),
+                new GatePrompt("intent-aisplit", "requirement-clarify", "orchestrator/requirement-clarify"),
+                new GatePrompt("intent-aisplit", "storyboard-plan", "orchestrator/storyboard-plan"),
+                new GatePrompt("intent-aisplit", "scene-params-recommend", "orchestrator/scene-params-recommend"),
+                new GatePrompt("intent-pic", "image-clarify", "orchestrator/image-clarify"),
+                new GatePrompt("intent-pic", "image-prompt", "orchestrator/image-prompt"),
+                new GatePrompt("intent-pic", "image-prompt-with-params", "orchestrator/image-prompt-with-params"),
+                new GatePrompt("intent-pic", "pic-refine-options", "orchestrator/pic-refine-options"),
+                new GatePrompt("intent-pic", "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note"),
+                new GatePrompt("intent-video", "video-clarify", "orchestrator/video-clarify"),
+                new GatePrompt("intent-video", "video-plan", "orchestrator/video-plan"),
+                new GatePrompt("intent-scene-review", "scene-review", "services/scene-review"));
+    }
+
     /**
      * Skill 提示词按需加载：优先当前能力 SKILL.md body 的 {@code ### stepId} 段（单一来源——改提示词不用碰 Java），
      * 未命中回退 promptConfig {@code fallbackKey}（迁移期安全网）；两者都替换 {@code {{var}}}。
@@ -363,11 +389,7 @@ public class AgentOrchestratorSupport {
         if (text == null || text.isBlank()) {
             return promptConfig.get(fallbackKey, vars == null ? Map.of() : vars);
         }
-        Map<String, String> v = vars == null ? Map.of() : vars;
-        for (Map.Entry<String, String> e : v.entrySet()) {
-            text = text.replace("{{" + e.getKey() + "}}", e.getValue() == null ? "" : e.getValue());
-        }
-        return text;
+        return PromptResolver.resolve(text, vars);
     }
 
     /**
@@ -1120,11 +1142,17 @@ public class AgentOrchestratorSupport {
      * 每个参考图可指定用途（首帧/尾帧/参考图），由适配器负责转换为各模型特定格式。
      */
     public String startVideoGenerationAsyncWithRole(OrchestrationRequest req, String prompt, String duration,
-                                                    String aspectRatio, java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages) {
+                                                    String aspectRatio, java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
+                                                    Map<String, String> params) {
         checkInterrupted(req);
+        Map<String, String> p = params == null ? Map.of() : params;
+        String model = p.getOrDefault("model", null);
+        String resolution = p.getOrDefault("resolution", null);
+        String effDuration = p.getOrDefault("duration", duration);
+        String effAspectRatio = p.getOrDefault("aspectRatio", aspectRatio);
         String taskId = generationService.createVideoTaskWithRole(
-                req.getConversation(), null, prompt, null, null, null,
-                aspectRatio, duration, null,
+                req.getConversation(), null, prompt, model, resolution, null,
+                effAspectRatio, effDuration, null,
                 referenceImages == null ? List.of() : referenceImages, null);
         if (taskId == null || taskId.isBlank()) {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");

@@ -405,6 +405,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
 
             if (!refImageList.isEmpty()) {
+                // 参考图上限：与文生/首帧路径对齐，避免超过 MiniMax 参考图硬上限；保留首帧/尾帧角色，其余截断
+                refImageList = capReferenceImages(refImageList);
                 body.put("referenceImages", refImageList);
             }
 
@@ -458,6 +460,24 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
             throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
+    }
+
+    /** 截断参考图列表：保留首帧/尾帧角色（各至多一），其余按序填充至 MAX_REFERENCE_IMAGES 总量。 */
+    private static List<Map<String, Object>> capReferenceImages(List<Map<String, Object>> refs) {
+        if (refs == null || refs.size() <= MAX_REFERENCE_IMAGES) return refs;
+        List<Map<String, Object>> out = new ArrayList<>();
+        java.util.Set<Integer> frameIdx = new java.util.HashSet<>();
+        for (int i = 0; i < refs.size(); i++) {
+            String role = String.valueOf(refs.get(i).getOrDefault("role", ""));
+            if ("FIRST_FRAME".equals(role) || "LAST_FRAME".equals(role)) {
+                out.add(refs.get(i));
+                frameIdx.add(i);
+            }
+        }
+        for (int i = 0; i < refs.size() && out.size() < MAX_REFERENCE_IMAGES; i++) {
+            if (!frameIdx.contains(i)) out.add(refs.get(i));
+        }
+        return out;
     }
 
 }
