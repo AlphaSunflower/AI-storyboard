@@ -18,6 +18,13 @@ export interface AgentMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  /** HITL 人工介入卡片信息（选择后保存到对话记录） */
+  hitlCard?: {
+    formContent: string;
+    actions: { id: string; title: string }[];
+    selectedActionId: string;
+    selectedActionTitle: string;
+  };
 }
 
 export interface AgentAsset {

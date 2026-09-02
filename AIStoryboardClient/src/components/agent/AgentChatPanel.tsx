@@ -31,6 +31,8 @@ export function AgentChatPanel() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  // HumanInputCard 折叠状态
+  const [hitlCollapsed, setHitlCollapsed] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -245,7 +247,7 @@ export function AgentChatPanel() {
             `}</style>
           </div>
         )}
-        {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+        
         {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
         {confirmResult && <ConfirmResultCard />}
         {streamError && (
@@ -254,6 +256,17 @@ export function AgentChatPanel() {
           </div>
         )}
       </div>
+
+      {/* HumanInputCard: 人工介入卡片 - 在输入区上方显示 */}
+      {waitingHumanInput && (
+        <div style={{ padding: '0 16px', background: 'white' }}>
+          <HumanInputCard
+            info={waitingHumanInput}
+            collapsed={hitlCollapsed}
+            onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
+          />
+        </div>
+      )}
 
       {/* 输入区 */}
       <div style={{ padding: 16, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>

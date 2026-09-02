@@ -170,6 +170,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       messages: [],
       streaming: false,
       waitingHumanInput: null,
+      
       waitingVideoPlan: null,
       streamError: null,
       pendingAssistantId: null,
@@ -223,7 +224,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         streaming: !!gview,
         workflowHint: gview?.hint ?? '',
         messages: isActive ? [] : s.messages,
-        waitingHumanInput: isActive ? null : s.waitingHumanInput,
+        waitingHumanInput: isActive ? null : s.waitingHumanInput, 
         waitingVideoPlan: isActive ? null : s.waitingVideoPlan,
         hitlVideoPlan: h,
         confirmResult: isActive ? null : s.confirmResult,
@@ -237,7 +238,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 守卫：无会话 / 流式生成中 / HITL 等待期 / 图生视频方案确认期禁止清空（防止删除进行中的上下文导致流事件污染）
     if (!id || get().streaming || get().waitingHumanInput || get().waitingVideoPlan) return;
     await agentApi.clearMessages(id);
-    set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { messages: [], waitingHumanInput: null, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }; });
+    set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { messages: [], waitingHumanInput: null,
+       waitingVideoPlan: null, hitlVideoPlan: h, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }; });
   },
 
   selectConversation: async (id) => {
@@ -250,6 +252,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         streaming: !!g,
         workflowHint: g?.hint ?? '',
         waitingHumanInput: null,
+      
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
         pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], refImageUrls: [], pickedAssetIds: [],
@@ -280,6 +283,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   streaming: false,
   generating: {},
   waitingHumanInput: null,
+      
   waitingVideoPlan: null,
   hitlVideoPlan: {},
   streamError: null,
@@ -390,6 +394,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       generating: { ...s.generating, [id]: { hint: '' } },
       streamError: null,
       waitingHumanInput: null,
+      
     }));
     initialSceneCount = useProjectStore.getState().scenes.length;
 
@@ -462,7 +467,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedHumanInput = true;
             set({
               workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-              waitingHumanInput: {
+               waitingHumanInput: {
                 formToken: e.formToken ?? '',
                 taskId: e.taskId ?? '',
                 formContent: e.formContent ?? '',
@@ -578,29 +583,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
     // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
+    // 保存已提交的人工介入信息（用于选择后仍显示卡片）
+    const hitlMessage = {
+      id: `hitl-${Date.now()}`,
+      conversationId: id,
+      role: 'assistant' as const,
+      content: '',
+      createdAt: new Date().toISOString(),
+      hitlCard: {
+        formContent: info.formContent || '',
+        actions: info.actions || [],
+        selectedActionId: actionId,
+        selectedActionTitle: info.actions.find(a => a.id === actionId)?.title || actionId,
+      },
+    };
     set((s) => ({
       streaming: true,
       generating: { ...s.generating, [id]: { hint: '' } },
       waitingHumanInput: null,
+      messages: [...s.messages, hitlMessage],
       streamError: null,
     }));
-    // 刷新基准：提交时刻的项目分镜数（sendMessage 时的旧值可能已过期，
-    // 例如 HITL 期间分镜被其他操作修改；确认写库后 sceneCount(总数) > 此值才触发列表刷新）
-    initialSceneCount = useProjectStore.getState().scenes.length;
-
-    // I2（2026-08-19 修正）：HITL 续流总是新建 assistant 气泡——与后端 persistAssistant
-    // 每次 insert 对齐，避免确认后内容续写在旧方案气泡里（用户期望 HITL 后从新气泡开始）。
-    // 方案文本（formContent）保留在 HITL 前的旧气泡：若旧气泡为空（方案未流式输出）则填入，
-    // 避免残留空"…"占位；若已有流式方案内容则不动。
-    const lastAssistant = [...get().messages].reverse().find((m) => m.role === 'assistant');
+    // 找到最后一条非 HITL 的 assistant 消息
+    const lastAssistant = [...get().messages].reverse().find((m) => m.role === 'assistant' && !m.hitlCard);
     if (info.formContent && lastAssistant && !lastAssistant.content) {
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === lastAssistant.id ? { ...m, content: info.formContent as string } : m),
       }));
     }
-    const assistantId = `tmp-assistant-${Date.now()}`;
 
+    const assistantId = `tmp-assistant-${Date.now()}`;
     const updateAssistant = (delta: string) => {
       set((s) => ({
         messages: s.messages.map((m) =>
@@ -681,7 +694,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedHumanInput = true;
             set({
               workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-              waitingHumanInput: {
+               waitingHumanInput: {
                 formToken: e.formToken ?? '',
                 taskId: e.taskId ?? '',
                 formContent: e.formContent ?? '',
@@ -851,7 +864,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               receivedHumanInput = true;
               set({
                 workflowHint: '',
-                waitingHumanInput: {
+                 waitingHumanInput: {
                   formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
                   actions: e.actions ?? [], expirationTime: e.expirationTime ?? 0,
                   models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
@@ -1112,7 +1125,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   /** 跳过当前 HITL 卡片：清除等待状态，让用户继续输入其他话题（checkpoint 30 分钟后自动过期） */
   skipCurrentHITL: () => {
     const id = get().activeConversationId;
-    set((s) => { const h = { ...s.hitlVideoPlan }; if (id) delete h[id]; return { waitingHumanInput: null, waitingVideoPlan: null, hitlVideoPlan: h }; });
+    set((s) => { const h = { ...s.hitlVideoPlan }; if (id) delete h[id]; return { waitingHumanInput: null,
+       waitingVideoPlan: null, hitlVideoPlan: h }; });
   },
 
   /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */
@@ -1147,7 +1161,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   resetChatState: () =>
-    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null, waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [] }),
+    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
+       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [] }),
 
   activeModal: null,
   setActiveModal: (modal) => set({ activeModal: modal }),

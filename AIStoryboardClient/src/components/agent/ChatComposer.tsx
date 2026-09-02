@@ -10,6 +10,7 @@ import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { HumanInputCard } from './HumanInputCard';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -43,6 +44,8 @@ export function ChatComposer() {
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  // HumanInputCard 折叠状态
+  const [hitlCollapsed, setHitlCollapsed] = useState(false);
   // pickedAssetIds 现在从 store 获取，持久化不丢失
   // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
   const textRef = useRef('');
@@ -200,6 +203,17 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
+      {/* HumanInputCard: 人工介入卡片 - 在输入框上方显示 */}
+      {waitingHumanInput && (
+        <div style={{ marginBottom: 4 }}>
+          <HumanInputCard
+            info={waitingHumanInput}
+            collapsed={hitlCollapsed}
+            onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
+          />
+        </div>
+      )}
+
       {(refImageUrls.length > 0 || pickedAssetIds.length > 0) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',

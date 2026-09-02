@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
-import { HumanInputCard } from '../components/agent/HumanInputCard';
+
+
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
@@ -312,7 +313,7 @@ export function ChatPage() {
                     <style>{`@keyframes dsDot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }`}</style>
                   </div>
                 )}
-                {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+                
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
@@ -676,7 +677,7 @@ export function ChatPage() {
                     <style>{`@keyframes dsDot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }`}</style>
                   </div>
                 )}
-                {waitingHumanInput && <HumanInputCard info={waitingHumanInput} />}
+                
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
