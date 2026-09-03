@@ -56,6 +56,8 @@ public class ModelParams {
     private Integer maxAudioSizeMb;
     private Integer maxRequestBodyMb;
     private Integer maxPromptChars;
+    /** Ollama 兼容渠道扩展参数（JSON：local/think/think_level/num_ctx/seed/stop/keep_alive/format），可空 */
+    private String ollamaParams;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

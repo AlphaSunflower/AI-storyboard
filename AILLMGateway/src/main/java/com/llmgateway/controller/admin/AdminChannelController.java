@@ -2,9 +2,11 @@ package com.llmgateway.controller.admin;
 
 import com.llmgateway.dto.ApiResponse;
 import com.llmgateway.dto.admin.ChannelRequest;
+import com.llmgateway.dto.vo.OllamaSyncResult;
 import com.llmgateway.dto.vo.ChannelVO;
 import com.llmgateway.entity.Channel;
 import com.llmgateway.service.ChannelService;
+import com.llmgateway.service.OllamaModelSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +19,7 @@ import java.util.List;
 public class AdminChannelController {
 
     private final ChannelService channelService;
+    private final OllamaModelSyncService ollamaModelSyncService;
 
     @PostMapping
     public ApiResponse<ChannelVO> create(@RequestBody ChannelRequest request) {
@@ -37,6 +40,12 @@ public class AdminChannelController {
     public ApiResponse<Void> delete(@PathVariable String id) {
         channelService.delete(id);
         return ApiResponse.ok(null);
+    }
+
+    /** 同步 Ollama 渠道模型：GET /api/tags → 建 model_route + 更新 channel.models + 清模型缓存 */
+    @PostMapping("/{id}/sync-models")
+    public ApiResponse<OllamaSyncResult> syncModels(@PathVariable String id) {
+        return ApiResponse.ok(ollamaModelSyncService.sync(id));
     }
 
     private ChannelVO toVO(Channel e) {

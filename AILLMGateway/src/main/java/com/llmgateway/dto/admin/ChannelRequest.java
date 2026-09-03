@@ -6,7 +6,7 @@ import lombok.Data;
 @Data
 public class ChannelRequest {
     private String name;
-    /** openai_compatible | gemini | minimax，为空默认 openai_compatible */
+    /** openai_compatible | gemini | minimax | ollama，为空默认 openai_compatible */
     private String type;
     private String baseUrl;
     /** 明文 Key，服务端 AES 加密后落库 */

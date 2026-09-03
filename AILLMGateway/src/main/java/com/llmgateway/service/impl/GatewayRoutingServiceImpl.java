@@ -207,11 +207,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             modelTypeMap.putIfAbsent(r.getModelName(), t);
             if (Boolean.TRUE.equals(r.getIsDefault())) modelDefaultMap.put(r.getModelName(), true);
         }
+        // 按 (model_name|type) 建索引：同一模型可 text/vision 各一套参数
         Map<String, ModelParams> paramsMap = modelParamsMapper.selectList(null).stream()
-                .collect(Collectors.toMap(ModelParams::getModelName, p -> p, (a, b) -> a));
+                .collect(Collectors.toMap(p -> p.getModelName() + "|" + p.getType(), p -> p, (a, b) -> a));
         List<Map<String, Object>> data = new ArrayList<>();
         modelTypeMap.forEach((name, t) -> {
-            ModelParams mp = paramsMap.get(name);
+            ModelParams mp = paramsMap.get(name + "|" + t);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", name);
             m.put("object", "model");
@@ -280,6 +281,15 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         putInt(params, "maxAudioSizeMB", mp.getMaxAudioSizeMb());
         putInt(params, "maxRequestBodyMB", mp.getMaxRequestBodyMb());
         putInt(params, "maxPromptChars", mp.getMaxPromptChars());
+        // Ollama 兼容渠道扩展参数（思考/等级/num_ctx 等），解析失败忽略，不阻塞 /v1/models
+        if (mp.getOllamaParams() != null && !mp.getOllamaParams().isBlank()) {
+            try {
+                JsonNode o = objectMapper.readTree(mp.getOllamaParams());
+                if (o.isObject() && !o.isEmpty()) params.put("ollama", o);
+            } catch (Exception e) {
+                log.warn("解析 ollama_params 失败，忽略: model={}, error={}", mp.getModelName(), e.getMessage());
+            }
+        }
         return params.isEmpty() ? null : params;
     }
 

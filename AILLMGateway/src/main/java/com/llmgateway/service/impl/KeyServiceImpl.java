@@ -75,6 +75,8 @@ public class KeyServiceImpl implements KeyService {
     /** AES-256-GCM 解密（encrypt 的逆过程） */
     @Override
     public String decrypt(String cipherB64) {
+        // Ollama 本地渠道允许空 Key：空值直接返回空串，交由调用方按无鉴权处理
+        if (cipherB64 == null || cipherB64.isBlank()) return "";
         try {
             byte[] combined = Base64.getDecoder().decode(cipherB64);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");

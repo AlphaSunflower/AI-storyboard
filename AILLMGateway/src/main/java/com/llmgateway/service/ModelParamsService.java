@@ -9,6 +9,6 @@ public interface ModelParamsService {
     /** 按 model_name upsert：type 默认 text 并校验枚举；nMin/nMax 均提供时须 nMin<=nMax；非 null 字段更新语义 */
     ModelParams upsert(ModelParamsRequest request);
 
-    /** 按 model_name 查询（不存在返回 null，不抛错——表单编辑回显语义） */
-    ModelParams getByModelName(String modelName);
+    /** 按 (model_name, type) 查询（不存在返回 null，不抛错——表单编辑回显语义；同一模型可 text/vision 各一套参数） */
+    ModelParams getByModelNameAndType(String modelName, String type);
 }

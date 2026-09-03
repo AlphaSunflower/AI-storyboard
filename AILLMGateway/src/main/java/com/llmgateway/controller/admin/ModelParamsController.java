@@ -22,10 +22,14 @@ public class ModelParamsController {
         return ApiResponse.ok(toVO(modelParamsService.upsert(req)));
     }
 
-    /** GET /admin/model-params/{modelName}：表单编辑回显（不存在返回 data=null 不报错） */
-    @GetMapping("/model-params/{modelName}")
-    public ApiResponse<ModelParamsVO> get(@PathVariable String modelName) {
-        ModelParams entity = modelParamsService.getByModelName(modelName);
+    /**
+     * GET /admin/model-params?modelName=X&type=Y：表单编辑回显（不存在返回 data=null 不报错）。
+     * 用查询参数而非路径变量：Ollama 模型名含 /（如 org/model:tag），路径变量会撞 Tomcat 编码斜杠 400；
+     * 同时按 (model_name, type) 返回，支持同一模型 text/vision 各一套参数。
+     */
+    @GetMapping("/model-params")
+    public ApiResponse<ModelParamsVO> get(@RequestParam String modelName, @RequestParam String type) {
+        ModelParams entity = modelParamsService.getByModelNameAndType(modelName, type);
         return ApiResponse.ok(entity == null ? null : toVO(entity));
     }
 
@@ -43,6 +47,7 @@ public class ModelParamsController {
                 e.getMaxTotalDuration(), e.getMaxTotalFiles(),
                 e.getMaxVideoSizeMb(), e.getMaxImageSizeMb(), e.getMaxAudioSizeMb(),
                 e.getMaxRequestBodyMb(), e.getMaxPromptChars(),
+                e.getOllamaParams(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 }

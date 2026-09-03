@@ -77,9 +77,31 @@ public class AdminTestController {
         }
         routeService.listByChannelId(id)
                 .forEach(r -> { if (r.getModelName() != null && !r.getModelName().isBlank()) merged.add(r.getModelName()); });
-        // 上游拉取（仅 openai_compatible 有标准 GET /models；gemini/minimax 接口格式不同，不尝试）
+        // 上游拉取：ollama 走 GET /api/tags 解析 models[].name；openai_compatible 走 GET /models 解析 data[].id；
+        // gemini/minimax 接口格式不同，不尝试
         String source = "local";
-        if (!"gemini".equals(channel.getType()) && !"minimax".equals(channel.getType())) {
+        if ("ollama".equals(channel.getType())) {
+            try {
+                String apiKey = keyService.decrypt(channel.getApiKey());
+                HttpResponse<String> resp = upstreamClient.get(
+                        stripTrailingSlash(channel.getBaseUrl()) + "/tags", apiKey);
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    JsonNode models = objectMapper.readTree(resp.body()).path("models");
+                    if (models.isArray()) {
+                        List<String> upstream = new ArrayList<>();
+                        models.forEach(n -> { String name = n.path("name").asText(""); if (!name.isEmpty()) upstream.add(name); });
+                        if (!upstream.isEmpty()) {
+                            source = "upstream";
+                            merged.addAll(upstream);   // 上游优先展示（插入序在前）
+                        }
+                    }
+                } else {
+                    log.warn("【模型列表】上游 GET /tags 非 2xx: channel={} http={}", channel.getName(), resp.statusCode());
+                }
+            } catch (Exception e) {
+                log.warn("【模型列表】上游拉取失败: channel={} error={}", channel.getName(), e.getMessage());
+            }
+        } else if (!"gemini".equals(channel.getType()) && !"minimax".equals(channel.getType())) {
             try {
                 String apiKey = keyService.decrypt(channel.getApiKey());
                 HttpResponse<String> resp = upstreamClient.get(
@@ -122,7 +144,8 @@ public class AdminTestController {
             }
         }
         // 渠道类型默认模型：minimax 用其官方模型名，其余 openai_compatible 用通用小模型
-        String typeDefault = "minimax".equals(channel.getType()) ? "MiniMax-Text-01" : "gpt-4o-mini";
+        String typeDefault = "minimax".equals(channel.getType()) ? "MiniMax-Text-01"
+                : "ollama".equals(channel.getType()) ? "llama3.2" : "gpt-4o-mini";
         String effectiveModel = (modelName == null || modelName.isBlank()) ? typeDefault : modelName;
         log.info("【通道测试】发起: channel={} type={} model={} baseUrl={}", channel.getName(),
                 channel.getType(), effectiveModel, channel.getBaseUrl());
@@ -132,6 +155,9 @@ public class AdminTestController {
             // 按渠道类型构造最小请求体（max_tokens=1，仅验证连通不追求正确回复）；gemini 无模型字段
             String bodyJson = switch (channel.getType() == null ? "" : channel.getType()) {
                 case "gemini" -> "{\"contents\":[{\"parts\":[{\"text\":\"ping\"}]}]}";
+                case "ollama" -> String.format(
+                        "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"stream\":false}",
+                        effectiveModel);
                 default -> String.format(
                         "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}",
                         effectiveModel);
@@ -223,15 +249,19 @@ public class AdminTestController {
     /** 直发最小请求：gemini Key 走 query 参数（与 UpstreamClient.postGemini 一致），其余 Bearer */
     private HttpResponse<String> sendTestRequest(Channel channel, String apiKey, String bodyJson) throws Exception {
         String base = stripTrailingSlash(channel.getBaseUrl());
+        String type = channel.getType() == null ? "" : channel.getType();
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(20))   // 单请求超时 20s：思考类模型响应可达 10s+，10s 会误报超时
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
         String url;
-        if ("gemini".equals(channel.getType())) {
+        if ("gemini".equals(type)) {
             url = base + "?key=" + apiKey;
+        } else if ("ollama".equals(type)) {
+            url = base + "/chat";
+            if (apiKey != null && !apiKey.isBlank()) builder.header("Authorization", "Bearer " + apiKey);
         } else {
-            String path = "minimax".equals(channel.getType()) ? "/v1/text/chatcompletion_v2" : "/chat/completions";
+            String path = "minimax".equals(type) ? "/v1/text/chatcompletion_v2" : "/chat/completions";
             url = base + path;
             builder.header("Authorization", "Bearer " + apiKey);
         }

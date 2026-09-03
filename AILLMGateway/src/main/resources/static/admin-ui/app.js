@@ -441,6 +441,7 @@ async function loadChannels() {
             + '<td>' + esc(c.priority === null || c.priority === undefined ? 0 : c.priority) + '</td>'
             + '<td class="td-muted">' + fmtTime(c.createdAt) + '</td>'
             + '<td class="td-actions">'
+            + (c.type === 'ollama' ? '<button type="button" class="btn btn-sm btn-table" data-action="sync-channel" data-id="' + esc(c.id) + '">同步模型</button>' : '')
             + '<button type="button" class="btn btn-sm btn-table" data-action="test-channel" data-id="' + esc(c.id) + '">测试</button>'
             + '<button type="button" class="btn btn-sm btn-table" data-action="edit-channel" data-id="' + esc(c.id) + '">编辑</button>'
             + '<button type="button" class="btn btn-sm btn-table btn-table-danger" data-action="del-channel" data-id="' + esc(c.id) + '">删除</button>'
@@ -461,7 +462,7 @@ function openChannelModal(channel) {
     field('名称', '<input class="input" id="f-name" value="' + esc(channel ? channel.name : '') + '" placeholder="如：OpenAI 主渠道">')
     + field('类型',
       '<select class="input" id="f-type">'
-      + ['openai_compatible', 'gemini', 'minimax']
+      + ['openai_compatible', 'gemini', 'minimax', 'ollama']
         .map((t) => '<option value="' + t + '"' + (channel && channel.type === t ? ' selected' : '') + '>' + t + '</option>').join('')
       + '</select>')
     + field('BaseURL', '<input class="input" id="f-baseurl" value="' + esc(channel ? channel.baseUrl : '') + '" placeholder="https://api.openai.com">')
@@ -486,7 +487,7 @@ async function submitChannel(id) {
   const enabled = $('#f-enabled').checked;
 
   if (!name || !baseUrl) { toast('名称和 BaseURL 不能为空', 'error'); return; }
-  if (!id && !apiKey) { toast('新建渠道必须填写 API Key', 'error'); return; }
+  if (!id && !apiKey && type !== 'ollama') { toast('新建渠道必须填写 API Key（Ollama 本地可留空）', 'error'); return; }
 
   const body = { name, type, baseUrl, models: $('#f-models').value.trim(), enabled, priority: isNaN(priority) ? 0 : priority };
   if (apiKey) body.apiKey = apiKey;   // 编辑留空 = 不更换 Key
@@ -616,6 +617,25 @@ function onChannelsClick(e) {
     deleteChannel(id);
   } else if (action === 'test-channel') {
     testChannel(id, btn);
+  } else if (action === 'sync-channel') {
+    syncChannelModels(id, btn);
+  }
+}
+
+/** Ollama 渠道同步模型：POST /admin/channels/{id}/sync-models，拉全量模型建路由后刷新渠道与路由 */
+async function syncChannelModels(id, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '同步中…';
+  try {
+    const data = await api('/admin/channels/' + id + '/sync-models', { method: 'POST' });
+    toast('已同步 ' + data.total + ' 个模型（仅刷新测试候选，未建路由）', 'success');
+    loadChannels();
+  } catch (e) {
+    handleErr(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
   }
 }
 
@@ -703,6 +723,33 @@ const sliderField = (id, label, min, max, step, def) =>
   '<label>' + label
   + ' <input type="range" class="p-range" id="' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + def + '">'
   + ' <span class="p-val" id="' + id + '-val">' + def + '</span></label>';
+
+/** 本地模型（Ollama）扩展参数：思考开关/等级 + num_ctx/seed/stop/keep_alive，仅 ollama 渠道或已开本地模型时显示 */
+const ollamaBlockHtml = () =>
+  '<div class="params-grid">'
+  + '<label><input type="checkbox" id="p-local"> 本地模型（Ollama）</label>'
+  + '<label><input type="checkbox" id="p-think"> 开启思考</label>'
+  + '<label>思考等级 <select class="input" id="p-thinklevel">'
+  + ['high', 'medium', 'low', 'max']
+    .map((v) => '<option value="' + v + '">' + v + '</option>').join('')
+  + '</select></label>'
+  + '<label>num_ctx <input class="input" id="p-numctx" type="number" placeholder="8192"></label>'
+  + '<label>seed <input class="input" id="p-seed" type="number" placeholder="-1"></label>'
+  + '<label>stop（逗号分隔） <input class="input" id="p-stop" placeholder="\\n\\n"></label>'
+  + '<label>keep_alive <input class="input" id="p-keepalive" placeholder="5m"></label>'
+  + '</div>';
+
+/** 刷新「本地模型（Ollama）」区块显隐：text/vision 且（渠道为 ollama 或已开启本地模型）时显示 */
+function refreshOllamaBlock() {
+  const section = $('#ollama-section');
+  if (!section) return;
+  const type = ($('#r-type') || {}).value || 'text';
+  const channelId = ($('#r-channel') || {}).value || '';
+  const chType = (channelMap[channelId] || {}).type;
+  const local = $('#p-local') ? $('#p-local').checked : false;
+  const show = (type === 'text' || type === 'vision') && (chType === 'ollama' || local);
+  section.style.display = show ? '' : 'none';
+}
 
 /** 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/temperature/max_tokens/top_p/时长），字符串枚举保持输入框 */
 const paramsGroups = {
@@ -813,6 +860,7 @@ function openRouteModal(route) {
       + '<label class="switch"><input type="checkbox" id="r-isdefault"><span class="slider"></span></label>'
       + '<span class="field-label">该类型兜底默认模型（单一权威源）</span></div>'
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
+    + field('本地模型（Ollama）', '<div id="ollama-section" style="display:none">' + ollamaBlockHtml() + '</div>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
       + esc(route ? route.defaultParams || '' : '') + '</textarea>');
 
@@ -823,15 +871,23 @@ function openRouteModal(route) {
   $('#r-channel').onchange = () => {
     $('#r-model').value = '';
     loadModelsFor($('#r-channel').value, 'r-model');
+    const lb = $('#p-local');
+    if (lb) lb.checked = (channelMap[$('#r-channel').value] || {}).type === 'ollama';
+    refreshOllamaBlock();
   };
   // 模型类型切换 → 重建参数配置组（按新类型显示对应字段组；切换后已填值不保留，先选类型再填）
   $('#r-type').onchange = () => {
     const t = $('#r-type').value;
     $('#params-group').innerHTML = paramsGroups[t] || paramsGroups.text;
     bindParamSliders();
+    refreshOllamaBlock();
   };
   // 初始渲染后绑定滑块（input 实时值 + min<=max 联动）
   bindParamSliders();
+  // 本地模型勾选：新建默认按渠道类型（ollama 勾选）；编辑由已保存 ollama_params.local 回显（见 loadModelParamsForEdit）
+  const localCb = $('#p-local');
+  if (localCb) localCb.checked = (channelMap[selCh] || {}).type === 'ollama';
+  refreshOllamaBlock();
   // 编辑回显：默认模型 toggle 从路由数据加载（is_default 在 model_route 表）
   if (isEdit) {
     const cb = $('#r-isdefault');
@@ -845,13 +901,14 @@ function openRouteModal(route) {
 }
 
 /**
- * 编辑回显：GET /admin/model-params/{modelName}，type 与路由一致时填当前类型组输入框
+ * 编辑回显：GET /admin/model-params?modelName=X（查询参数，兼容含 / 的 Ollama 模型名），type 与路由一致时填当前类型组输入框
  * 未配置 / 类型不一致 → 不填（提示先选类型）；回显失败不阻塞编辑
  */
 async function loadModelParamsForEdit(modelName, type) {
   try {
-    const mp = await api('/admin/model-params/' + encodeURIComponent(modelName));
-    if (!mp || (mp.type && mp.type !== type)) return;
+    const mp = await api('/admin/model-params?modelName=' + encodeURIComponent(modelName) + '&type=' + encodeURIComponent(type));
+    if (!mp) return;
+    // 按 (model_name, type) 返回，同一模型 text/vision 各一套参数，此处已按当前路由类型取到对应行
     // isDefault 由路由数据回显（见 openRouteModal 编辑分支），此处不覆盖
     // 设置控件值：滑块同时更新右侧值显示；字符串输入直接赋值
     const set = (id, v) => {
@@ -905,6 +962,25 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-maxaudiosize', mp.maxAudioSizeMb);
     set('p-maxbody', mp.maxRequestBodyMb);
     set('p-maxprompt', mp.maxPromptChars);
+    // 本地/Ollama 参数回显：解析 ollama_params JSON 填充本地模型区块
+    if (mp.ollamaParams) {
+      try {
+        const o = typeof mp.ollamaParams === 'string' ? JSON.parse(mp.ollamaParams) : mp.ollamaParams;
+        if (o && typeof o === 'object') {
+          const localEl = $('#p-local'); if (localEl) localEl.checked = !!o.local;
+          const thinkEl = $('#p-think'); if (thinkEl) thinkEl.checked = !!o.think;
+          set('p-thinklevel', o.think_level || 'high');
+          set('p-numctx', o.num_ctx);
+          set('p-seed', o.seed);
+          set('p-stop', Array.isArray(o.stop) ? o.stop.join(',') : (o.stop || ''));
+          set('p-keepalive', o.keep_alive);
+        }
+      } catch (pe) {
+        console.warn('ollama_params 解析失败：', pe && pe.message ? pe.message : pe);
+      }
+    }
+    // 回显后按渠道/本地状态刷新本地模型区块显隐
+    refreshOllamaBlock();
     // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
   } catch (e) {
     console.warn('模型参数回显失败（不阻塞编辑）：', e && e.message ? e.message : e);
@@ -959,15 +1035,39 @@ async function submitRoute(id) {
  * 从当前类型组输入框取值（空输入 → null），type 非法/模型名为空时静默跳过
  */
 async function saveModelParams(modelName, type) {
-  if (!modelName || !paramsGroups[type]) return;
+  if (!modelName) return;
   const val = (id) => { const el = $('#' + id); const s = el ? el.value.trim() : ''; return s === '' ? null : s; };
   const num = (id) => { const s = val(id); return s === null ? null : Number(s); };
   const req = { modelName, type };
   // isDefault 已随路由保存（PUT /admin/routes），此处不再重复
-  if (type === 'text') {
+  if (type === 'text' || type === 'vision') {
     req.temperature = val('p-temperature');
     req.maxTokens = num('p-maxtokens');
     req.topP = val('p-topp');
+    // 本地/Ollama 扩展参数：仅「本地模型」开关勾选时落库；未勾选置空串清除历史值
+    const localEl = $('#p-local');
+    if (localEl && localEl.checked) {
+      const thinkEl = $('#p-think');
+      const lvlEl = $('#p-thinklevel');
+      const stopVal = val('p-stop');
+      const o = {
+        local: true,
+        think: thinkEl ? thinkEl.checked : false,
+        think_level: lvlEl ? lvlEl.value : 'high',
+        num_ctx: num('p-numctx'),
+        seed: num('p-seed'),
+        stop: stopVal ? stopVal.split(',').map((s) => s.trim()).filter(Boolean) : null,
+        keep_alive: val('p-keepalive'),
+      };
+      // 空值不落库，避免 "keep_alive":null 被后端解析成字符串 "null" 传给 Ollama
+      Object.keys(o).forEach((k) => {
+        const v = o[k];
+        if (v === null || v === undefined || (Array.isArray(v) && v.length === 0)) delete o[k];
+      });
+      req.ollamaParams = JSON.stringify(o);
+    } else {
+      req.ollamaParams = '';
+    }
   } else if (type === 'image') {
     req.nMin = num('p-nmin');
     req.nMax = num('p-nmax');

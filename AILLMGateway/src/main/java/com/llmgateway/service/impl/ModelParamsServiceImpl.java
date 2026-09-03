@@ -48,7 +48,8 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         }
 
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
-                .eq(ModelParams::getModelName, req.modelName().trim()));
+                .eq(ModelParams::getModelName, req.modelName().trim())
+                .eq(ModelParams::getType, type));
         if (existing != null) {
             applyNonNull(existing, req);
             existing.setUpdatedAt(OffsetDateTime.now());
@@ -69,9 +70,10 @@ public class ModelParamsServiceImpl implements ModelParamsService {
     }
 
     @Override
-    public ModelParams getByModelName(String modelName) {
+    public ModelParams getByModelNameAndType(String modelName, String type) {
         return modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
-                .eq(ModelParams::getModelName, modelName.trim()));
+                .eq(ModelParams::getModelName, modelName.trim())
+                .eq(ModelParams::getType, type));
     }
 
     private String normalizeType(String type) {
@@ -119,6 +121,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.maxAudioSizeMb() != null) entity.setMaxAudioSizeMb(req.maxAudioSizeMb());
         if (req.maxRequestBodyMb() != null) entity.setMaxRequestBodyMb(req.maxRequestBodyMb());
         if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
+        if (req.ollamaParams() != null) entity.setOllamaParams(req.ollamaParams());
     }
 
     private void validateRange(Integer min, Integer max, String label) {

@@ -14,7 +14,7 @@ public class Channel {
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
     private String name;
-    /** openai_compatible | gemini | minimax */
+    /** openai_compatible | gemini | minimax | ollama */
     private String type;
     private String baseUrl;
     /** AES 加密密文 */

@@ -34,6 +34,7 @@ public record ModelParamsVO(
         Integer maxTotalDuration, Integer maxTotalFiles,
         Integer maxVideoSizeMb, Integer maxImageSizeMb, Integer maxAudioSizeMb,
         Integer maxRequestBodyMb, Integer maxPromptChars,
+        String ollamaParams,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {}

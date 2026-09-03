@@ -20,6 +20,9 @@ public class UpstreamClient {
 
     private static final Logger log = LoggerFactory.getLogger(UpstreamClient.class);
 
+    /** 远程图片下载后允许的最大字节数（20MB，防止超大 base64 撑爆请求体） */
+    private static final long IMAGE_MAX_BYTES = 20L * 1024 * 1024;
+
     private final HttpClient httpClient;
     private final GatewayConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -33,13 +36,13 @@ public class UpstreamClient {
 
     /** POST JSON 到 openai_compatible 渠道（base_url + path，Bearer 渠道 Key） */
     public HttpResponse<String> postJson(String baseUrl, String path, String apiKey, String bodyJson) {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
                 .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
+        addAuthorization(builder, apiKey);
+        HttpRequest request = builder.build();
         return sendWithRetry(request);
     }
 
@@ -49,13 +52,13 @@ public class UpstreamClient {
      * 不重试——SSE 流一旦建立无法安全重放，重试语义交给调用方（渠道轮换）。
      */
     public HttpResponse<java.io.InputStream> postJsonStream(String baseUrl, String path, String apiKey, String bodyJson) {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
                 .timeout(Duration.ofMillis(Math.max(config.getUpstream().getRequestTimeoutMs(), 300_000L)))
-                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
+        addAuthorization(builder, apiKey);
+        HttpRequest request = builder.build();
         try {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
         } catch (Exception e) {
@@ -66,12 +69,13 @@ public class UpstreamClient {
 
     /** POST Gemini 原生格式（Key 走 query 参数） */
     public HttpResponse<String> postGemini(String baseUrl, String apiKey, String bodyJson) {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + "?key=" + apiKey))
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
-                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
+        // Gemini 走 query 参数，不附加 Bearer（Key 由 ?key= 传递）
+        HttpRequest request = builder.build();
         return sendWithRetry(request);
     }
 
@@ -85,24 +89,54 @@ public class UpstreamClient {
     /** POST multipart（上传大文件用长超时，如 MiniMax 文件上传最大 50 MB） */
     public HttpResponse<String> postMultipart(String baseUrl, String path, String apiKey,
                                               String contentType, byte[] bodyBytes, long timeoutMs) {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", contentType)          // 透传上游 Content-Type（含 boundary）
-                .header("Authorization", "Bearer " + apiKey)
                 .timeout(Duration.ofMillis(timeoutMs))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes));
+        addAuthorization(builder, apiKey);
+        HttpRequest request = builder.build();
         return sendWithRetry(request);
     }
 
     /** GET 上游（轮询视频状态等） */
     public HttpResponse<String> get(String url, String apiKey) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .GET();
+        addAuthorization(builder, apiKey);
+        HttpRequest request = builder.build();
+        return sendWithRetry(request);
+    }
+
+    /** 按 http(s) URL 下载字节（Ollama 视觉图：远程 image_url 拉取后 base64）。带超时 + 解码后大小上限。 */
+    public byte[] getBytes(String url) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Authorization", "Bearer " + apiKey)
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .timeout(Duration.ofMillis(Math.min(config.getUpstream().getRequestTimeoutMs(), 30_000L)))
                 .GET().build();
-        return sendWithRetry(request);
+        try {
+            HttpResponse<byte[]> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                throw new RuntimeException("上游 " + resp.statusCode() + ": " + url);
+            }
+            byte[] body = resp.body();
+            if (body.length > IMAGE_MAX_BYTES) {
+                throw new RuntimeException("图片过大: " + body.length + " bytes（上限 " + IMAGE_MAX_BYTES + "）");
+            }
+            return body;
+        } catch (Exception e) {
+            log.warn("图片下载失败: url={}, error={}", url, e.getMessage());
+            throw new RuntimeException("图片下载失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 渠道 Key 非空才附加 Bearer（Ollama 本地无鉴权；非空渠道行为不变） */
+    private void addAuthorization(HttpRequest.Builder builder, String apiKey) {
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
     }
 
     /** 带重试的 send：429/5xx 重试 retryCount 次（指数退避） */

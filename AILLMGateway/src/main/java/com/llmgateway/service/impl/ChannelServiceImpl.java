@@ -24,15 +24,21 @@ public class ChannelServiceImpl implements ChannelService {
     @Override
     public Channel create(ChannelRequest request) {
         if (request.getName() == null || request.getName().isBlank()
-                || request.getBaseUrl() == null || request.getBaseUrl().isBlank()
-                || request.getApiKey() == null || request.getApiKey().isBlank()) {
+                || request.getBaseUrl() == null || request.getBaseUrl().isBlank()) {
+            throw new BusinessException(40001, "name/baseUrl/apiKey 不能为空");
+        }
+        String type = request.getType() == null ? "openai_compatible" : request.getType();
+        // Ollama 本地渠道无鉴权，apiKey 可选；其余渠道必填
+        if (!"ollama".equals(type)
+                && (request.getApiKey() == null || request.getApiKey().isBlank())) {
             throw new BusinessException(40001, "name/baseUrl/apiKey 不能为空");
         }
         Channel channel = new Channel();
         channel.setName(request.getName());
-        channel.setType(request.getType() == null ? "openai_compatible" : request.getType());
+        channel.setType(type);
         channel.setBaseUrl(request.getBaseUrl());
-        channel.setApiKey(keyService.encrypt(request.getApiKey()));   // AES 加密存储
+        channel.setApiKey(request.getApiKey() == null || request.getApiKey().isBlank()
+                ? "" : keyService.encrypt(request.getApiKey()));   // Ollama 无 Key 存空串；其余 AES 加密
         channel.setModels(request.getModels());
         channel.setEnabled(request.getEnabled() == null ? true : request.getEnabled());
         channel.setPriority(request.getPriority() == null ? 0 : request.getPriority());
