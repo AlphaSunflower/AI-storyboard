@@ -3,6 +3,8 @@ import {
   agentApi, streamChat, submitForm,
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
+  type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
+  type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
@@ -119,6 +121,16 @@ interface AgentState {
   submitVideoPlan: (actionId: string, params?: Record<string, string>, customText?: string) => Promise<void>;
   // 跳过当前 HITL 卡片（用户想切换话题时使用，checkpoint 30 分钟后自动过期）
   skipCurrentHITL: () => void;
+  // ── 分镜视频批量生成队列（右上角任务队列） ──
+  storyboardVideoQueue: StoryboardVideoQueueItem[];
+  enqueueStoryboardVideoQueue: (items: StoryboardVideoEnqueueItem[], projectId?: string) => Promise<string[]>;
+  refetchStoryboardVideoQueue: (projectId?: string) => Promise<void>;
+  cancelStoryboardVideoQueue: (queueId: string) => Promise<void>;
+  // ── 分镜「完善图片」队列 ──
+  storyboardImageQueue: StoryboardImageQueueItem[];
+  enqueueStoryboardImageRefine: (items: StoryboardImageEnqueueItem[], projectId?: string) => Promise<string[]>;
+  refetchStoryboardImageQueue: (projectId?: string) => Promise<void>;
+  cancelStoryboardImageQueue: (queueId: string) => Promise<void>;
   // 停止当前会话生成（「停止生成」按钮）：中断 SSE 流 + 后端协作式取消 + 复位视图
   stopGeneration: () => void;
   // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
@@ -290,6 +302,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   workflowHint: '',
   setWorkflowHint: (v) => set({ workflowHint: v }),
   agentVideoTask: null,
+  storyboardVideoQueue: [],
+  storyboardImageQueue: [],
   confirmResult: null,
   pendingPicUrls: [],
   pendingAssistantId: null,
@@ -1129,6 +1143,71 @@ export const useAgentStore = create<AgentState>((set, get) => ({
        waitingVideoPlan: null, hitlVideoPlan: h }; });
   },
 
+  /** 分镜视频批量入队（全自动生成视频门禁确认后调用）。 */
+  enqueueStoryboardVideoQueue: async (items, projectId) => {
+    const pid = projectId ?? useProjectStore.getState().currentProject?.id;
+    const res = await agentApi.enqueueStoryboardVideos({
+      conversationId: get().activeConversationId ?? undefined,
+      projectId: pid,
+      items,
+    });
+    const created = res.data.data ?? [];
+    // 入队后刷新整队（后端已启动串行处理）
+    if (pid) void get().refetchStoryboardVideoQueue(pid);
+    return created.map((row) => row.id);
+  },
+
+  /** 刷新任务队列（右上角面板轮询 + 分镜行状态）。 */
+  refetchStoryboardVideoQueue: async (projectId) => {
+    const pid = projectId ?? useProjectStore.getState().currentProject?.id;
+    if (!pid) return;
+    try {
+      const res = await agentApi.listStoryboardVideoQueue(pid);
+      set({ storyboardVideoQueue: res.data.data ?? [] });
+    } catch {
+      /* 静默：网络抖动不打断聊天 */
+    }
+  },
+
+  /** 取消单个队列任务。 */
+  cancelStoryboardVideoQueue: async (queueId) => {
+    await agentApi.cancelStoryboardVideoQueue(queueId);
+    const pid = useProjectStore.getState().currentProject?.id;
+    if (pid) void get().refetchStoryboardVideoQueue(pid);
+  },
+
+  /** 分镜「完善图片」批量入队（图改图模式）。 */
+  enqueueStoryboardImageRefine: async (items, projectId) => {
+    const pid = projectId ?? useProjectStore.getState().currentProject?.id;
+    const res = await agentApi.enqueueStoryboardImageRefine({
+      conversationId: get().activeConversationId ?? undefined,
+      projectId: pid,
+      items,
+    });
+    const created = res.data.data ?? [];
+    if (pid) void get().refetchStoryboardImageQueue(pid);
+    return created.map((row) => row.id);
+  },
+
+  /** 刷新「完善图片」队列（右上角面板轮询 + 分镜行状态）。 */
+  refetchStoryboardImageQueue: async (projectId) => {
+    const pid = projectId ?? useProjectStore.getState().currentProject?.id;
+    if (!pid) return;
+    try {
+      const res = await agentApi.listStoryboardImageQueue(pid);
+      set({ storyboardImageQueue: res.data.data ?? [] });
+    } catch {
+      /* 静默 */
+    }
+  },
+
+  /** 取消单个「完善图片」队列任务。 */
+  cancelStoryboardImageQueue: async (queueId) => {
+    await agentApi.cancelStoryboardImageQueue(queueId);
+    const pid = useProjectStore.getState().currentProject?.id;
+    if (pid) void get().refetchStoryboardImageQueue(pid);
+  },
+
   /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */
   refineAsset: () => {
     const { confirmResult } = get();
@@ -1162,7 +1241,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   resetChatState: () =>
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
-       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [] }),
+       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [] }),
 
   activeModal: null,
   setActiveModal: (modal) => set({ activeModal: modal }),

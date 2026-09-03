@@ -48,6 +48,7 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
                 request.setAction(context.action());
                 request.setCustomText(context.customText() != null ? context.customText() : "");
                 request.setParams(context.params() != null ? context.params() : java.util.Map.of());
+                request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
                 AgentCheckpoint cp = new AgentCheckpoint();
                 cp.setAction(context.cpAction());
                 cp.setPlan(context.cpPlan());

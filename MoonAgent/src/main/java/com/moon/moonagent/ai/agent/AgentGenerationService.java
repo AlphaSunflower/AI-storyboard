@@ -78,6 +78,36 @@ public interface AgentGenerationService {
      * 资产更新由上游 VideoGenerationService 在终态时完成，此处只转发轮询结果。
      */
     Map<String, String> pollVideoTask(String taskId);
+
+    /**
+     * 取消/删除视频任务（按厂商能力适配；MiniMax v2: DELETE /v2/video_generation/{taskId}）。
+     * 返回归一化 map：{status(cancelled/deleted), taskId}；上游不支持或无此任务时抛异常。
+     */
+    Map<String, String> cancelVideoTask(String taskId);
+
+    /**
+     * 记录一条分镜队列生成结果到 {@code agent_assets}，供「生成记录」展示。
+     *
+     * <p>best-effort：落库失败仅记日志，不影响队列执行。
+     *
+     * @param conversation 会话（需非空，用于归属校验与 conversationId）
+     * @param sceneId      分镜 ID
+     * @param type         素材类型 image | video
+     * @param genType      区分来源，如 storyboard_video / storyboard_image
+     * @param prompt       生成提示词
+     * @param model        模型别名（可为空）
+     * @param taskId       视频异步任务 ID（可为空，图片完善无 taskId）
+     * @param url          主结果 URL（可为空）
+     * @param resultUrls   结果 URL 列表
+     * @param status       终态 completed | failed
+     * @param error        失败原因（可为空）
+     * @param durationMs   尝试耗时（可为空）
+     * @param params       生成参数（序列化为 JSON，可为空）
+     */
+    void recordStoryboardGeneration(AgentConversation conversation, String sceneId, String type, String genType,
+                                    String prompt, String model, String taskId, String url,
+                                    List<String> resultUrls, String status, String error,
+                                    Long durationMs, Map<String, Object> params);
 }
 
 

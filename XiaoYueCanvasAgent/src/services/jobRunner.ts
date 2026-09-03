@@ -9,7 +9,7 @@ import type { JobEvent, PersistedAsset } from '../types';
 
 // 参考素材（图/视频）assetId → data URI（前端本地 Blob 资产 → 后端可直接消费的 data: 前缀）。
 // 仅 ≤10MB 转（免得 base64 膨胀爆 64MB 请求体）；>10MB 留 sourceAssetIds 让后端 decide（query 本身需参考素材）。
-const blobToDataURI = (blob: Blob): Promise<string | null> =>
+export const blobToDataURI = (blob: Blob): Promise<string | null> =>
   new Promise((resolve) => {
     if (blob.size > 10 * 1024 * 1024) return resolve(null);
     const reader = new FileReader();
@@ -19,7 +19,7 @@ const blobToDataURI = (blob: Blob): Promise<string | null> =>
   });
 
 // 把当次提交的源资产 id 读 blob → data URI，按媒体类型分流到 referenceImages / referenceVideos。
-const collectReferenceDataUris = async (sourceAssetIds: string[]) => {
+export const collectReferenceDataUris = async (sourceAssetIds: string[]) => {
   const images: string[] = [];
   const videos: string[] = [];
   const assets = useMediaStore.getState().assets;

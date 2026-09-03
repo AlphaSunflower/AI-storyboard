@@ -2,6 +2,7 @@ package com.llmgateway.vendor.video.spi;
 
 import com.llmgateway.entity.Channel;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
+import com.llmgateway.vendor.video.dto.MinimaxVideoResult;
 import com.llmgateway.vendor.video.dto.VideoVendorResult;
 import com.llmgateway.vendor.video.model.ReferenceImage;
 
@@ -66,6 +67,35 @@ public interface VideoVendorAdapter {
 
     /** 解析轮询响应 —— 完成状态映射归一（succeeded/failed/processing）与错误/进度/直链提取 */
     VideoVendorResult parsePoll(String rawBody, String taskId, Channel channel, String apiKey);
+
+    // ======== cancel / delete task (optional vendor capability) ========
+
+    /**
+     * Build an upstream cancel/delete request (DELETE). Return null to signal that
+     * this vendor has no cancel capability (gateway will throw a friendly error).
+     *
+     * @param taskId  upstream task id
+     * @param channel channel
+     * @param apiKey  decrypted api key
+     * @return cancel request; null when unsupported
+     */
+    default HttpRequest buildCancelRequest(String taskId, Channel channel, String apiKey) {
+        return null;
+    }
+
+    /**
+     * Parse a cancel/delete response and normalize it into a vendor result.
+     * Upstream action/status values map to: cancelled -> cancelled, deleted -> deleted, otherwise lowercased passthrough.
+     *
+     * @param rawBody upstream response body
+     * @param taskId  task id
+     * @param channel channel
+     * @param apiKey  decrypted api key
+     * @return normalized result
+     */
+    default VideoVendorResult parseCancel(String rawBody, String taskId, Channel channel, String apiKey) {
+        return new MinimaxVideoResult("unknown", taskId, "unknown", null, null, null, null, null);
+    }
 }
 
 

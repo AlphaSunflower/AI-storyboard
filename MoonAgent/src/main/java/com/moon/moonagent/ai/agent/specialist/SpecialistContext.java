@@ -26,6 +26,8 @@ public record SpecialistContext(
         String customText,
         /** resume 时的参数 */
         Map<String, String> params,
+        /** resume 时前端携带的勾选 assetIds（分镜/资产 id 列表） */
+        java.util.List<String> assetIds,
         /** checkpoint 真实 action（区别于提交 action，如 user 点的选项 id） */
         String cpAction,
         /** checkpoint plan JSON（方案载荷；缺失时 resume 读字段得空串） */
@@ -42,6 +44,7 @@ public record SpecialistContext(
                 request.getAction(),
                 request.getCustomText(),
                 request.getParams(),
+                request.getAssetIds(),
                 "",
                 ""
         );

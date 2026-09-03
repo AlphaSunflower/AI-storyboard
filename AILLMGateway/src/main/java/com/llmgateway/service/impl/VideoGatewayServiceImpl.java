@@ -220,6 +220,59 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     }
 
     /** 按 taskId 反查创建渠道：call_log「created」记录优先，无则取最近一条；返回 null 表示无法定位 */
+    @Override
+    public VideoResult cancel(String taskId) {
+        long start = System.currentTimeMillis();
+        try {
+            Channel taskChannel = resolveChannelByTaskId(taskId);
+            if (taskChannel != null) {
+                VideoResult r = cancelChannel(taskChannel, taskId, start);
+                if (r != null) return r;
+            }
+            // 经 call_log 反查不到渠道：遍历全部 enabled 候选渠道（优先级），任一支持取消即可
+            List<Channel> allChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
+                    .eq(Channel::getEnabled, true)
+                    .orderByAsc(Channel::getPriority));
+            for (Channel channel : allChannels) {
+                try {
+                    VideoResult r = cancelChannel(channel, taskId, start);
+                    if (r != null) return r;
+                } catch (Exception e) {
+                    log.warn("cancel via channel {} failed: {}", channel.getName(), e.getMessage());
+                }
+            }
+            throw new BusinessException(40401, "video task not found: " + taskId);
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
+        }
+    }
+
+    /** 尝试在指定渠道上取消任务；上游不支持（buildCancelRequest 返回 null）时返回 null 交给调用方继续。 */
+    private VideoResult cancelChannel(Channel channel, String taskId, long start) throws Exception {
+        String apiKey = keyService.decrypt(channel.getApiKey());
+        VideoVendorAdapter adapter = registry.resolve(channel.getType());
+        HttpRequest req = adapter.buildCancelRequest(taskId, channel, apiKey);
+        if (req == null) {
+            log.info("vendor {} has no cancel capability, skip channel {}", channel.getType(), channel.getName());
+            return null;
+        }
+        HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
+        int status = resp.statusCode();
+        String body = resp.body();
+        if (status != 200) {
+            String err = body.length() > 300 ? body.substring(0, 300) : body;
+            callLogService.log(channel.getType(), channel.getId(), "cancel-error",
+                    System.currentTimeMillis() - start, err, null, taskId);
+            throw new BusinessException(status >= 500 ? 50201 : 40001, "cancel failed: " + err);
+        }
+        VideoVendorResult result = adapter.parseCancel(body, taskId, channel, apiKey);
+        callLogService.log(result.vendor(), channel.getId(), "cancelled",
+                System.currentTimeMillis() - start, null, null, taskId);
+        return new VideoResult(200, toJson(result));
+    }
+
     private Channel resolveChannelByTaskId(String taskId) {
         try {
             CallLog created = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()

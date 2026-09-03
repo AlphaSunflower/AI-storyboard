@@ -135,7 +135,7 @@ class GenericSkillSpecialistStepTests {
         AgentConversation conv = new AgentConversation();
         conv.setId("c1");
         return new SpecialistContext(conv, user, List.of(), null, null, skill,
-                action, custom, Map.of(), cpAction, cpPlan);
+                action, custom, Map.of(), List.of(), cpAction, cpPlan);
     }
 
     private String buildPlan(String step, List<Map<String, Object>> collected,

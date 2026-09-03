@@ -87,6 +87,22 @@ export interface AssetOption {
   name: string;
   type: string; // character / prop / scene
   image?: string; // 主图路径（/api/files/...）
+  // ── 分镜审查卡片（SceneReviewCard）扩展：结构化分镜项 ──
+  sceneNumber?: number;
+  scriptContent?: string;
+  hasImage?: boolean;
+  hasVideo?: boolean;
+  videoStatus?: string;
+  videoPrompt?: string;
+  imagePrompt?: string;
+  imageModel?: string;
+  imageSize?: string;
+  imageQuality?: string;
+  videoModel?: string;
+  videoAspectRatio?: string;
+  videoResolution?: string;
+  duration?: number;
+  negativePrompt?: string;
 }
 
 export interface SseEvent {
@@ -133,6 +149,76 @@ export interface VideoTaskStatus {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
   url: string;
   error: string;
+}
+
+/** 分镜视频批量生成队列条目（GET /api/agent/storyboards/video/queue） */
+export interface StoryboardVideoQueueItem {
+  id: string;
+  sceneId: string;
+  projectId: string | null;
+  conversationId: string | null;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  prompt: string | null;
+  model: string | null;
+  resolution: string | null;
+  size: string | null;
+  aspectRatio: string | null;
+  duration: number | null;
+  taskId: string | null;
+  progress: number | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** 单个分镜入队载荷 */
+export interface StoryboardVideoEnqueueItem {
+  sceneId: string;
+  prompt?: string;
+  model?: string;
+  resolution?: string;
+  size?: string;
+  aspectRatio?: string;
+  duration?: number;
+  negativePrompt?: string;
+  sourceImageUrl?: string;
+  refImageUrls?: string[];
+  refAssetIds?: string[];
+}
+
+/** 分镜「完善图片」队列条目（GET /api/agent/storyboards/image/queue） */
+export interface StoryboardImageQueueItem {
+  id: string;
+  sceneId: string;
+  projectId: string | null;
+  conversationId: string | null;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  prompt: string | null;
+  model: string | null;
+  size: string | null;
+  quality: string | null;
+  n: number | null;
+  mode: string | null;
+  sourceImageUrl: string | null;
+  taskId: string | null;
+  progress: number | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** 单个分镜「完善图片」入队载荷 */
+export interface StoryboardImageEnqueueItem {
+  sceneId: string;
+  prompt?: string;
+  model?: string;
+  size?: string;
+  quality?: string;
+  n?: number;
+  sourceImageUrl?: string;
+  refImageUrls?: string[];
 }
 
 // ── 会话 ──────────────────────────────────────────────
@@ -199,6 +285,24 @@ export const agentApi = {
   // 视频异步任务状态（task_accepted 后前端 5s 轮询，取 status/url/error）
   getVideoTaskStatus: (taskId: string) =>
     client.get<{ data: VideoTaskStatus }>(`/agent/tasks/${taskId}`),
+
+  // 分镜视频批量生成队列
+  enqueueStoryboardVideos: (data: { conversationId?: string; projectId?: string; items: StoryboardVideoEnqueueItem[] }) =>
+    client.post<{ data: StoryboardVideoQueueItem[] }>('/agent/storyboards/video/queue', data),
+
+  listStoryboardVideoQueue: (projectId: string, status?: string) =>
+    client.get<{ data: StoryboardVideoQueueItem[] }>('/agent/storyboards/video/queue', { params: { projectId, status } }),
+
+  cancelStoryboardVideoQueue: (queueId: string) =>
+    client.delete(`/agent/storyboards/video/queue/${queueId}`),
+
+  // 分镜「完善图片」队列
+  enqueueStoryboardImageRefine: (data: { conversationId?: string; projectId?: string; items: StoryboardImageEnqueueItem[] }) =>
+    client.post<{ data: StoryboardImageQueueItem[] }>('/agent/storyboards/image/queue', data),
+  listStoryboardImageQueue: (projectId: string, status?: string) =>
+    client.get<{ data: StoryboardImageQueueItem[] }>('/agent/storyboards/image/queue', { params: { projectId, status } }),
+  cancelStoryboardImageQueue: (queueId: string) =>
+    client.delete(`/agent/storyboards/image/queue/${queueId}`),
 
   // 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）
   getPendingCheckpoint: (conversationId: string) =>

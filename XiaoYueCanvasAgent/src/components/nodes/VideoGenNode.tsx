@@ -31,11 +31,10 @@ function VideoGenBody({ nodeId, data, updateNode, pool, textDraft, setTextDraft,
 }) {
   const videoMode = typeof data.videoMode === 'string' ? data.videoMode : 'text2video';
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
-    const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [pendingReferenceUrls, setPendingReferenceUrls] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
 
   const attachRef = async (file: File, field: 'firstFrameAssetId' | 'lastFrameAssetId' | 'videoRefAssetId') => {
     setUploading(true);

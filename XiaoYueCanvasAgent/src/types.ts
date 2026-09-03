@@ -6,6 +6,43 @@ export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | '
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export type MediaQuality = 'placeholder' | 'thumbnail' | 'preview';
 
+export type StoryboardVideoStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'cancelling';
+
+/** 单个分镜帧的视频生成参数配置（用户在行内可改）。 */
+export interface StoryboardVideoConfig {
+  model?: string;
+  aspectRatio?: string;
+  resolution?: string;
+  size?: string;
+  quality?: string;
+  duration?: number;
+}
+
+/** 分镜节点中的一帧，支持行内上传参考图片/资产、修改提示词与参数、标记视频生成状态。 */
+export interface StoryboardFrame {
+  img?: string;
+  label?: string;
+  description?: string;
+  imageUrl?: string;
+  duration?: number;
+  prompt?: string;
+  config?: StoryboardVideoConfig;
+  /** 上传到此帧的参考资产 id（图片/视频），生成视频时作为参考素材使用。 */
+  assetIds?: string[];
+  /** 上传到此帧的参考图片资产 id。 */
+  imageAssetId?: string;
+  /** 该帧生成的视频资产 id。 */
+  videoAssetId?: string;
+  /** 该帧生成的视频可展示 URL（object URL/data URL）。 */
+  videoUrl?: string;
+  videoStatus?: StoryboardVideoStatus;
+  videoJobId?: string;
+  /** 是否勾选（用于批量视频生成）。 */
+  checked?: boolean;
+  /** 该帧使用的视频生成模式（text2video/fullReference/image2video/…）。 */
+  videoMode?: string;
+}
+
 export interface ImageOperation {
   type: 'import' | 'crop' | 'split' | 'pixels' | 'annotation' | 'flatten' | 'remote';
   params: Record<string, string | number | boolean>;
@@ -121,7 +158,7 @@ export interface MediaNodeData extends Record<string, unknown> {
   promptText?: string;
   children?: string[];
   // ── 分镜（storyboard）字段──
-  frames?: Array<{ img?: string; label?: string; description?: string }>;
+  frames?: StoryboardFrame[];
   // ── 分镜生成（storyboardGen）字段──
   rows?: number;
   cols?: number;

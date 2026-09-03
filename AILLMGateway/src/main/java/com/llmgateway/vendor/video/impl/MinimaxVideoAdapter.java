@@ -232,6 +232,40 @@ public class MinimaxVideoAdapter implements VideoVendorAdapter {
     }
 
     /** MiniMax 状态归一：Success/success + succeeded/completed/done → succeeded；failed/fail → failed；其余 → processing */
+    /**
+     * Build a cancel/delete request for MiniMax v2: {@code DELETE /v2/video_generation/{task_id}}.
+     * Supported states: queued -> cancelled, succeeded/failed -> deleted; running/cancelled are not actionable.
+     */
+    @Override
+    public HttpRequest buildCancelRequest(String taskId, Channel channel, String apiKey) {
+        if (taskId == null || taskId.isBlank()) return null;
+        String url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/video_generation/" + taskId;
+        return HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(Duration.ofSeconds(config.getUpstream().getRequestTimeoutMs()))
+                .DELETE()
+                .build();
+    }
+
+    /** Parse MiniMax cancel/delete response: {task_id, action, status}. Map cancelled/deleted into a normalized result. */
+    @Override
+    public VideoVendorResult parseCancel(String rawBody, String taskId, Channel channel, String apiKey) {
+        try {
+            JsonNode root = objectMapper.readTree(rawBody);
+            String action = root.path("action").asText("");
+            String status = root.path("status").asText("");
+            String norm = switch (action.isBlank() ? status : action) {
+                case "cancelled" -> "cancelled";
+                case "deleted" -> "deleted";
+                default -> action.isBlank() ? status.toLowerCase() : action.toLowerCase();
+            };
+            return new MinimaxVideoResult("minimax", taskId, norm, null, null, null, null, null);
+        } catch (Exception e) {
+            throw new BusinessException(50201, "MiniMax cancel response parse failed: " + e.getMessage());
+        }
+    }
+
     private String normalizeStatus(String status) {
         switch (status == null ? "" : status.toLowerCase()) {
             case "succeeded", "success", "completed", "done": return "succeeded";

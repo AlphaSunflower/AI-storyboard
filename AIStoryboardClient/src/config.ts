@@ -78,6 +78,8 @@ export interface UnderstandingModelParams {
 export interface ModelOption {
   value: string;
   label: string;
+  /** 网关下发的是否为默认模型（is_default → "true"；布尔兼容）。 */
+  default?: string | boolean;
   params?: ImageModelParams | VideoModelParams | TextModelParams | UnderstandingModelParams | null;
 }
 

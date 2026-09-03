@@ -11,6 +11,7 @@ import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { HumanInputCard } from './HumanInputCard';
+import { SceneReviewCard } from './SceneReviewCard';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -39,7 +40,7 @@ export function ChatComposer() {
     refImageUrls, addRefImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
-    pickedAssetIds, addPickedAssetId, removePickedAssetId, clearPickedAssetIds,
+    pickedAssetIds, addPickedAssetId, clearPickedAssetIds,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
@@ -203,14 +204,18 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {/* HumanInputCard: 人工介入卡片 - 在输入框上方显示 */}
+      {/* 人工介入卡片 - 在输入框上方显示（分镜审查走 SceneReviewCard，其余走 HumanInputCard） */}
       {waitingHumanInput && (
         <div style={{ marginBottom: 4 }}>
-          <HumanInputCard
-            info={waitingHumanInput}
-            collapsed={hitlCollapsed}
-            onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
-          />
+          {waitingHumanInput.assets?.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined)) ? (
+            <SceneReviewCard info={waitingHumanInput} />
+          ) : (
+            <HumanInputCard
+              info={waitingHumanInput}
+              collapsed={hitlCollapsed}
+              onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
+            />
+          )}
         </div>
       )}
 

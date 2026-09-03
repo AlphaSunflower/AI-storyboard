@@ -36,6 +36,7 @@ const makeNode = (
   const defaultSize = kind === 'text' ? { width: 380, height: 280 }
     : kind === 'video' ? { width: 420, height: 236 }
     : (kind === 'imageGen' || kind === 'videoGen' || kind === 'storyboardGen') ? { width: 520, height: 420 }
+    : kind === 'storyboard' ? { width: 520, height: 380 }
     : { width: 250, height: 250 };
   return {
     id: `${kind}-${createId()}`,

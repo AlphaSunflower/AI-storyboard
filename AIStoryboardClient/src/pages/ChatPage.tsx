@@ -7,6 +7,7 @@ import { MessageBubble } from '../components/agent/MessageBubble';
 
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
+import { TaskQueuePanel } from '../components/agent/TaskQueuePanel';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
@@ -117,6 +118,8 @@ export function ChatPage() {
     if (!projectId) return;
     useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, streaming: false, workflowHint: '' });
     useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
+    useAgentStore.getState().refetchStoryboardVideoQueue(projectId).catch(() => { /* 静默 */ });
+    useAgentStore.getState().refetchStoryboardImageQueue(projectId).catch(() => { /* 静默 */ });
   }, [projectId]);
 
   // 新消息自动滚底（近底才跟随）
@@ -636,6 +639,9 @@ export function ChatPage() {
                     style={headerBtn(1)}
                   ><Frame size={16} strokeWidth={1.8} /> 进入画布</button>
                 )}
+                <div style={{ position: 'relative', display: 'inline-flex' }}>
+                  <TaskQueuePanel />
+                </div>
               </div>
             </div>
 

@@ -409,6 +409,7 @@ public class PlanGraph {
                         state.<String>value(K_SUBMIT_ACTION).orElse(""),
                         state.<String>value(K_CUSTOM_TEXT).orElse(""),
                         state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
+                        state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                         state.<String>value(K_CP_ACTION).orElse(""),
                         state.<String>value(K_CP_PLAN).orElse("")
                 );
@@ -479,6 +480,7 @@ public class PlanGraph {
                     state.<String>value(K_SUBMIT_ACTION).orElse(""),
                     state.<String>value(K_CUSTOM_TEXT).orElse(""),
                     state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
+                    state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                     state.<String>value(K_CP_ACTION).orElse(""),
                     state.<String>value(K_CP_PLAN).orElse(""));
             SpecialistResult result;

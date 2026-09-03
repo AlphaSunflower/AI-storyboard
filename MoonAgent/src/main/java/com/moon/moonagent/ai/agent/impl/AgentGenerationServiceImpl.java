@@ -395,6 +395,39 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     public Map<String, String> pollVideoTask(String taskId) {
         return videoService.pollVideoTask(taskId);
     }
+
+    @Override
+    public Map<String, String> cancelVideoTask(String taskId) {
+        return videoService.cancelVideoTask(taskId);
+    }
+
+    @Override
+    public void recordStoryboardGeneration(AgentConversation conversation, String sceneId, String type, String genType,
+                                           String prompt, String model, String taskId, String url,
+                                           List<String> resultUrls, String status, String error,
+                                           Long durationMs, Map<String, Object> params) {
+        try {
+            if (conversation == null) return;
+            AgentAsset record = new AgentAsset();
+            record.setConversationId(conversation.getId());
+            record.setType(type);
+            record.setGenType(genType);
+            record.setStatus(status);
+            record.setSceneId(sceneId);
+            record.setTaskId(taskId);
+            record.setPrompt(prompt);
+            record.setModel(model);
+            record.setUrl(url);
+            if (resultUrls != null && !resultUrls.isEmpty()) record.setResultUrls(toJson(resultUrls));
+            if (params != null && !params.isEmpty()) record.setParams(toJson(params));
+            record.setError(error);
+            record.setDurationMs(durationMs);
+            record.setCreatedAt(OffsetDateTime.now());
+            agentAssetMapper.insert(record);
+        } catch (Exception e) {
+            log.error("生成记录落库失败(不影响队列), sceneId={}, genType={}, 原因: {}", sceneId, genType, e.getMessage());
+        }
+    }
 }
 
 

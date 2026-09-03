@@ -22,6 +22,7 @@ import { ScriptNode } from './nodes/ScriptNode';
 import { StoryboardNode } from './nodes/StoryboardNode';
 import { NodeLibrary } from './NodeLibrary';
 import { TemplatePanel } from './TemplatePanel';
+import { TaskQueuePanel } from './TaskQueuePanel';
 
 const nodeTypes = { media: MediaNode, video: VideoNode, script: ScriptNode, storyboard: StoryboardNode, storyboardGen: MediaNode };
 const edgeTypes = { canvas: CanvasEdge };
@@ -586,6 +587,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           </div>}
         </Panel>
         <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button><button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button></div></Panel>
+        <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel /></Panel>
         <Panel className="canvas-view-bar" position="bottom-left"><button className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap(!showMinimap)} aria-label="小地图"><Map size={18} /></button><button className={showGrid ? 'is-active' : ''} onClick={() => setShowGrid(!showGrid)} aria-label="网格"><Grid2X2 size={18} /></button><button onClick={() => fitView({ padding: .22, duration: 300 })} aria-label="适应视图"><MousePointer2 size={18} /></button><input aria-label="画布缩放" type="range" min="18" max="240" value={zoom} onChange={(event) => void zoomTo(Number(event.target.value) / 100)} /><span>{zoom}%</span><i /><button onClick={() => notify('双击空白处创建文字节点；拖入图片可直接导入')} aria-label="帮助"><CircleHelp size={19} /></button></Panel>
         {notice && <Panel className="canvas-status-toast" position="bottom-center">{notice}</Panel>}
         {!nodes.length && <Panel className="canvas-empty-hint" position="top-left"><div><strong>空画布</strong><span>从真实素材或文字开始</span></div><section><button onClick={() => fileInputRef.current?.click()}>导入图片 / 视频</button><button onClick={() => addNode('text')}>创建文字</button><button onClick={() => addNode('image')}>创建图片占位</button><button onClick={() => addNode('video')}>创建视频占位</button></section></Panel>}

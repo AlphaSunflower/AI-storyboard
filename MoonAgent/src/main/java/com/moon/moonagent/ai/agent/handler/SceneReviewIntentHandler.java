@@ -12,6 +12,9 @@ import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
+import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
+import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
+import com.moon.moonagent.service.StoryboardVideoQueueService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +44,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
     private final AgentGenerationService generationService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     private final AssetMatchingService assetMatchingService;
+    private final StoryboardVideoQueueService storyboardVideoQueueService;
 
     /** 从消息中提取分镜编号 */
     private static final Pattern SCENE_NUM = Pattern.compile("分镜(\\d+)");
@@ -53,7 +57,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
     @Override
     public Set<String> resumeActions() {
         return Set.of("review-optimize", "review-gen-image", "review-gen-video", "review-skip",
-                "review-confirm", "review-disagree", "reference-role-select");
+                "review-confirm", "review-disagree", "reference-role-select", "review-video-auto");
     }
 
     @Override
@@ -100,14 +104,6 @@ public class SceneReviewIntentHandler implements IntentHandler {
         boolean hasMissingImage = targetScenes.stream().anyMatch(s -> s.getImageUrl() == null || s.getImageUrl().isBlank());
         boolean hasMissingVideo = targetScenes.stream().anyMatch(s -> s.getVideoUrl() == null || s.getVideoUrl().isBlank());
 
-        // 5. 组装状态摘要
-        StringBuilder summary = new StringBuilder("📋 分镜审查结果：\n");
-        for (Scene s : targetScenes) {
-            String img = (s.getImageUrl() != null && !s.getImageUrl().isBlank()) ? "✅有图" : "❌缺图";
-            String vid = (s.getVideoUrl() != null && !s.getVideoUrl().isBlank()) ? "✅有视频" : "❌缺视频";
-            summary.append(String.format("- 分镜%d：%s | %s\n", s.getSceneNumber(), img, vid));
-        }
-
         // 6. 动态组装 HITL 选项
         List<Map<String, Object>> actions = new ArrayList<>();
         actions.add(Map.of("id", "review-optimize", "title", "优化方案"));
@@ -122,15 +118,38 @@ public class SceneReviewIntentHandler implements IntentHandler {
         // 若命中其他意图（如「生成/优化分镜」→ aisplit）则自动切回对应分镜链路（2026-08-28）
         actions.add(Map.of("id", "custom", "title", "✍ 自定义输入"));
 
-        String planText = summary + "\n请选择要执行的操作：";
+        // 卡片正文只保留操作引导（分镜详情由前端 SceneReviewCard 逐镜渲染，避免超长文本占屏）
+        String planText = "请选择要执行的操作：";
+
+        // 全自动生成视频：勾选分镜后直接进入生视频队列，AI 不介入（新门禁：生成视频计划之前人工介入）
+        actions.add(Map.of("id", "review-video-auto", "title", "全自动生成视频（直接进入生视频队列）"));
 
         // 7. HITL 卡片（checkpoint 存储目标分镜编号供 resume 使用）
+        List<Map<String, Object>> imageModels = safeModels("image");
+        List<Map<String, Object>> videoModels = safeModels("video");
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 planText, "review-action",
                 List.of(Map.of("sceneNums", sceneNums, "projectId", projectId)),
                 "human_input",
                 actions,
-                List.of(), Map.of(), Map.of(), List.of(), List.of(), buildSceneOptions(targetScenes)));
+                List.of(), Map.of(), Map.of(), imageModels, videoModels, buildSceneOptions(targetScenes)));
+    }
+
+    /** 网关模型列表容错：网关不可用/未配置时返回空列表，不让卡片因取参失败而崩溃。 */
+    private List<Map<String, Object>> safeModels(String type) {
+        try {
+            List<Map<String, Object>> models = support.buildModels(type);
+            if (models == null) {
+                log.warn("SceneReviewIntentHandler: 获取{}模型列表为 null，降级为空: type={}", type);
+                return List.of();
+            }
+            log.info("SceneReviewIntentHandler: {}模型列表数量={}, ids={}",
+                    type, models.size(), models.stream().map(m -> m.get("value")).toList());
+            return models;
+        } catch (Exception e) {
+            log.warn("SceneReviewIntentHandler: 获取{}模型列表失败，降级为空: {}", type, e.getMessage());
+            return List.of();
+        }
     }
 
     @Override
@@ -196,7 +215,12 @@ public class SceneReviewIntentHandler implements IntentHandler {
                     .filter(s -> sceneNums.contains(s.getSceneNumber()))
                     .toList();
         } else {
-            targetScenes = allScenes;
+            // 没有任何选中的分镜（前端勾选 id 与 checkpoint 的 sceneNums 均缺失）：
+            // 不再回退全量静默入队，明确提示用户先勾选分镜。
+            String noSelectionMsg = "没有选择分镜，请先勾选要生成的分镜。";
+            support.sendMessage(request, noSelectionMsg);
+            support.sendEvent(request, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", noSelectionMsg));
+            return "";
         }
 
         switch (action) {
@@ -207,6 +231,8 @@ public class SceneReviewIntentHandler implements IntentHandler {
             case "review-gen-video":
                 // 资产询问：项目有可用资产 → 弹资产选择卡片（勾选/跳过后才生成视频）
                 return handleGenVideoWithAssetCheck(request, targetScenes, checkpoint);
+            case "review-video-auto":
+                return handleGenVideoAuto(request, targetScenes);
             case "review-confirm":
                 return handleOptimizeConfirm(request, checkpoint);
             case "review-disagree":
@@ -218,6 +244,43 @@ public class SceneReviewIntentHandler implements IntentHandler {
                 log.warn("SceneReviewIntentHandler: 未知 action={}", action);
                 return support.sendFriendlyError(request, "未知操作", "不支持的操作类型。");
         }
+    }
+
+    /**
+     * 全自动生成视频（门禁「选项一」）：勾选分镜直接入队，AI 不介入。
+     * 每镜 prompt/配置从对应分镜取（行内已写回 Scene），参考素材聚合交给队列入队服务。
+     */
+    private String handleGenVideoAuto(OrchestrationRequest request, List<Scene> scenes) {
+        String projectId = request.getConversation().getProjectId();
+        if (scenes == null || scenes.isEmpty()) {
+            support.sendMessage(request, "没有可生成视频的分镜。");
+            return "";
+        }
+        // 与 review-gen-video 保持一致：仅入队缺视频的分镜，已有视频不重生成。
+        List<Scene> missingVideo = scenes.stream()
+                .filter(s -> s.getVideoUrl() == null || s.getVideoUrl().isBlank())
+                .toList();
+        if (missingVideo.isEmpty()) {
+            support.sendMessage(request, "所选分镜已有视频，无需生成。");
+            return "";
+        }
+        List<StoryboardVideoEnqueueItem> items = new ArrayList<>();
+        for (Scene s : missingVideo) {
+            String prompt = (s.getVideoPrompt() != null && !s.getVideoPrompt().isBlank())
+                    ? s.getVideoPrompt() : s.getScriptContent();
+            items.add(new StoryboardVideoEnqueueItem(
+                    s.getId(), prompt, s.getVideoModel(), s.getVideoResolution(), null,
+                    s.getVideoAspectRatio(), s.getDuration(), s.getNegativePrompt(),
+                    s.getImageUrl(), null, null));
+        }
+        int count = items.size();
+        support.sendEvent(request, "workflow", Map.of("title", "正在提交视频生成队列…", "status", "node_started"));
+        storyboardVideoQueueService.enqueue(new StoryboardVideoEnqueueRequest(
+                request.getConversation().getId(), projectId, items));
+        String resultMsg = String.format("已将 %d 个分镜加入视频生成队列，按顺序依次生成，可随时取消。", count);
+        support.sendMessage(request, resultMsg);
+        support.sendEvent(request, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", resultMsg));
+        return resultMsg;
     }
 
     /**
@@ -730,7 +793,11 @@ public class SceneReviewIntentHandler implements IntentHandler {
         return List.of();
     }
 
-    /** 分镜 → AssetOption 格式（前端 HumanInputCard 勾选列表渲染） */
+    /**
+     * 分镜 → 结构化场景项（前端 SceneReviewCard 逐镜渲染）。
+     * 保留 id/name/type/image 兼容旧 HumanInputCard 复选行为，并扩展
+     * sceneNumber/scriptContent/videoStatus/videoPrompt/config 供行内编辑与批量生成。
+     */
     private List<Map<String, Object>> buildSceneOptions(List<Scene> scenes) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Scene s : scenes) {
@@ -741,6 +808,21 @@ public class SceneReviewIntentHandler implements IntentHandler {
             m.put("name", "分镜" + s.getSceneNumber() + ": " + (desc != null ? desc : ""));
             m.put("type", "scene");
             if (s.getImageUrl() != null && !s.getImageUrl().isBlank()) m.put("image", s.getImageUrl());
+            m.put("sceneNumber", s.getSceneNumber());
+            m.put("scriptContent", s.getScriptContent());
+            m.put("hasImage", s.getImageUrl() != null && !s.getImageUrl().isBlank());
+            m.put("hasVideo", s.getVideoUrl() != null && !s.getVideoUrl().isBlank());
+            m.put("videoStatus", s.getVideoStatus());
+            m.put("videoPrompt", s.getVideoPrompt());
+            m.put("imagePrompt", s.getImagePrompt());
+            m.put("imageModel", s.getImageModel());
+            m.put("imageSize", s.getImageSize());
+            m.put("imageQuality", s.getImageQuality());
+            m.put("videoModel", s.getVideoModel());
+            m.put("videoAspectRatio", s.getVideoAspectRatio());
+            m.put("videoResolution", s.getVideoResolution());
+            m.put("duration", s.getDuration());
+            m.put("negativePrompt", s.getNegativePrompt());
             out.add(m);
         }
         return out;

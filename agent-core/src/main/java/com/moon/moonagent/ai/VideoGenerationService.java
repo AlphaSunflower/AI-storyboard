@@ -72,6 +72,12 @@ public interface VideoGenerationService {
      *   processing → 返回 processing（透传 progress）
      */
     Map<String, String> pollVideoTask(String taskId);
+
+    /**
+     * 取消/删除视频任务（按厂商能力适配；MiniMax v2: DELETE /v2/video_generation/{taskId}）。
+     * 返回归一化 map：{status(cancelled/deleted), taskId}；上游不支持或无此任务时抛异常。
+     */
+    Map<String, String> cancelVideoTask(String taskId);
 }
 
 

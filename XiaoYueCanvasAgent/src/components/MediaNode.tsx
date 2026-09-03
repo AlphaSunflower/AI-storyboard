@@ -7,6 +7,7 @@ import type { CanvasNode } from '../types';
 import { buildReferenceImagePool } from '../canvas/referenceImagePool';
 import { removeReferenceTokenByNumber } from '../canvas/referenceTokenEditing';
 import { StoryboardGenView } from './nodes/StoryboardGenView';
+import { StoryboardEditorView } from './nodes/StoryboardEditorView';
 import { ImageGenNode } from './nodes/ImageGenNode';
 import { VideoGenNode } from './nodes/VideoGenNode';
 import { TextNotePromptNode } from './nodes/TextNotePromptNode';
@@ -95,15 +96,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
             {draftFeedback && <small className="script-node-feedback nodrag">{draftFeedback}</small>}
           </div>
         ) : data.kind === 'storyboard' ? (
-          <div className="storyboard-grid">
-            {Array.isArray(data.frames) && data.frames.length ? data.frames.map((frame, i) => (
-              <figure key={i} className="storyboard-frame">
-                <div className="storyboard-frame__thumb">{frame.img ? <img src={frame.img} alt="" /> : <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(238,240,223,.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>}</div>
-                <figcaption className="storyboard-frame__cap"><span className="storyboard-frame__no">#{String(i + 1).padStart(2, '0')}</span></figcaption>
-                {frame.description && <p className="storyboard-frame__desc-text">{frame.description}</p>}
-              </figure>
-            )) : <div className="empty-image-node"><Clapperboard size={26} /><strong>分镜节点</strong><span>连接剧本节点，生成后展示分镜帧</span></div>}
-          </div>
+          <StoryboardEditorView node={node} updateNode={updateNode} />
         ) : data.kind === 'storyboardGen' ? (
           <StoryboardGenView node={node} updateNode={updateNode} />
         ) : data.kind === 'imageGen' ? (
@@ -145,7 +138,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           }} />
         </div>
       </>}
-      {(data.kind === 'imageGen' || data.kind === 'videoGen' || data.kind === 'storyboardGen') && (
+      {(data.kind === 'imageGen' || data.kind === 'videoGen' || data.kind === 'storyboardGen' || data.kind === 'storyboard') && (
         <NodeResizeHandle
           width={width ?? 250}
           height={height ?? 250}

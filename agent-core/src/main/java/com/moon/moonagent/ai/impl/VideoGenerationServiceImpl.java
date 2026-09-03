@@ -228,6 +228,41 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
     /** 参考素材转换：已内联/绝对 URL 原样返回；`/api/files/**` 相对路径经主后端绝对 URL 拉取 → 网关上传换 mm_file://；
      *  其余本地文件 ≤10MB 转 data URI，>10MB 经网关上传代理换 mm_file:// */
+    @Override
+    public Map<String, String> cancelVideoTask(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            throw new BusinessException(40001, "taskId 不能为空");
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos/" + taskId))
+                    .header("Authorization", "Bearer " + config.getGatewayApiKey())
+                    .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                    .DELETE()
+                    .build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 404) {
+                throw new BusinessException(40401, "video task not found: " + taskId);
+            }
+            if (resp.statusCode() != 200) {
+                String err = resp.body().length() > 300 ? resp.body().substring(0, 300) : resp.body();
+                throw new BusinessException(50201, "video cancel failed: " + err);
+            }
+            if (resp.body() == null || resp.body().isBlank()) {
+                return Map.of("taskId", taskId, "status", "cancelled");
+            }
+            JsonNode root = objectMapper.readTree(resp.body());
+            String status = root.path("status").asText("");
+            if (status.isBlank()) status = root.path("action").asText("");
+            return Map.of("taskId", taskId, "status", status.isBlank() ? "cancelled" : status);
+        } catch (BusinessException be) {
+            throw be;
+        } catch (Exception e) {
+            log.warn("video cancel request failed: taskId={}, error={}", taskId, e.getMessage());
+            throw new BusinessException(50201, "video cancel failed: " + e.getMessage());
+        }
+    }
+
     private String resolveReferenceUrl(String urlPath, String type) {
         if (urlPath == null || urlPath.isBlank()) return null;
         if (urlPath.startsWith("data:") || urlPath.startsWith("http") || urlPath.startsWith("mm_file://")) {

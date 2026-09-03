@@ -7,6 +7,7 @@ import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -94,6 +95,16 @@ public class OpenAiCompatController {
         return ResponseEntity.status(result.status()).body(result.body());
     }
 
+    /**
+     * 取消/删除视频任务：按厂商能力适配（MiniMax v2: DELETE /v2/video_generation/{taskId}）。
+     * queued -> cancelled；succeeded/failed -> deleted；running/cancelled -> 错误。
+     */
+    @DeleteMapping(value = "/videos/{taskId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> cancelVideo(@PathVariable String taskId) {
+        VideoResult result = videoGatewayService.cancel(taskId);
+        return new ResponseEntity<>(result.body(), HttpStatus.valueOf(result.status()));
+    }
+
     /** 视频下载：网关流式代理（Laozhang 转发原生端点；MiniMax 用 call_log 暂存的限时直链） */
     @GetMapping(value = "/videos/{taskId}/content", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
@@ -104,7 +115,7 @@ public class OpenAiCompatController {
     /** 文件上传代理：原始 multipart 字节流 + Content-Type（含 boundary）→ MiniMax，返回 {"file_id":"mm_file://..."} */
     @PostMapping(value = "/files/upload", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> fileUpload(@RequestBody byte[] body,
-                                             @RequestHeader("Content-Type") String contentType) {
+                                            @RequestHeader("Content-Type") String contentType) {
         String fileId = fileUploadService.upload(contentType, body);
         return ResponseEntity.ok("{\"file_id\":\"" + fileId + "\"}");
     }

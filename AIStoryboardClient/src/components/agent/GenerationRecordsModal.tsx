@@ -24,6 +24,8 @@ const GEN_TYPE_LABEL: Record<string, string> = {
   multi_image_to_image: '多图生图',
   first_frame_to_video: '首帧生视频',
   first_last_frame_to_video: '首尾帧生视频',
+  storyboard_video: '分镜视频',
+  storyboard_image: '分镜图片',
 };
 
 const GEN_TYPE_OPTIONS = [
@@ -77,6 +79,11 @@ function refUrls(record: GenerationRecord) {
 
 function isRefBased(record: GenerationRecord): boolean {
   return ['image_to_image', 'ref_to_video', 'multi_image_to_image', 'first_frame_to_video', 'first_last_frame_to_video'].includes(record.genType ?? '');
+}
+
+/** 分镜队列来源的生成记录：来自 storyboard_video_queue / storyboard_image_task，重试会二次入队，隐藏「重试」。 */
+function isStoryboardQueueRecord(record: GenerationRecord): boolean {
+  return record.genType === 'storyboard_video' || record.genType === 'storyboard_image';
 }
 
 function MediaThumb({ url, type, onClick }: { url: string; type: 'image' | 'video'; onClick?: () => void }) {
@@ -456,7 +463,7 @@ function RecordDetail({
                 <RefreshCw size={13} strokeWidth={2} /> 重新拉取
               </button>
             )}
-            {(record.type !== 'video' || !record.taskId || refetchTried) && (
+            {!isStoryboardQueueRecord(record) && (record.type !== 'video' || !record.taskId || refetchTried) && (
               <button onClick={onRetry} style={actionBtn('#d92d20')}>
                 <RotateCcw size={13} strokeWidth={2} /> 重试
               </button>

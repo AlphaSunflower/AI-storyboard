@@ -25,4 +25,10 @@ public interface VideoGatewayService {
 
     /** 视频下载：流式代理（业务只认本端点，永不接触上游 URL/Key） */
     ResponseEntity<StreamingResponseBody> download(String taskId);
+
+    /**
+     * Cancel or delete a video task based on vendor capability.
+     * MiniMax v2 supports DELETE /v2/video_generation/{taskId}: queued -> cancelled, succeeded/failed -> deleted, running/cancelled -> error.
+     */
+    VideoResult cancel(String taskId);
 }
