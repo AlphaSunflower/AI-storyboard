@@ -56,7 +56,7 @@ export function LoginPage() {
       await login({ email, password });
     }
     if (useAuthStore.getState().isAuthenticated) {
-      navigate('/editor');
+      navigate('/chat');
     }
   };
 

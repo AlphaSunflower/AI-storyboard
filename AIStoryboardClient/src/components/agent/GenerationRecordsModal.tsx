@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { DS } from './ChatComposer';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -12,7 +14,7 @@ import {
 import type { GenerationRecord } from '../../api/agent';
 import {
   X, History, Download, ArrowRight, Copy, RefreshCw, RotateCcw, ChevronLeft,
-  Calendar, Clock, AlertTriangle, Image as ImageIcon, Film, Eye,
+  Calendar, Clock, AlertTriangle, Image as ImageIcon, Film,
 } from 'lucide-react';
 
 /** 生成类型标签映射 */
@@ -56,8 +58,18 @@ function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  const now = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate();
+  if (sameDay) return `今天 ${hm}`;
+  if (isYesterday) return `昨天 ${hm}`;
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`;
+  return `${d.getFullYear()}-${md} ${hm}`;
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -86,7 +98,7 @@ function isStoryboardQueueRecord(record: GenerationRecord): boolean {
   return record.genType === 'storyboard_video' || record.genType === 'storyboard_image';
 }
 
-function MediaThumb({ url, type, onClick }: { url: string; type: 'image' | 'video'; onClick?: () => void }) {
+function MediaThumb({ url, type, onClick }: { url: string; type: 'image' | 'video'; onClick?: (e: React.MouseEvent) => void }) {
   const src = assetUrl(url);
   const common: React.CSSProperties = {
     width: '100%', height: '100%', objectFit: 'cover', display: 'block',
@@ -126,6 +138,43 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
   } = useGenerationRecordsStore();
   const [preview, setPreview] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
   const [refetchTried, setRefetchTried] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const showDetail = Boolean(activeId && detail);
+
+  // 弹窗入场：对话框淡入 + 上浮（打开时执行一次）
+  useGSAP(() => {
+    if (!open || !dialogRef.current) return;
+    gsap.fromTo(
+      dialogRef.current,
+      { opacity: 0, y: 14, scale: 0.985 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.28, ease: 'power2.out', clearProps: 'transform' }
+    );
+  }, { dependencies: [open], scope: rootRef, revertOnUpdate: true });
+
+  // 记录卡片列表：stagger 浮入（打开 / 重新加载时执行）
+  useGSAP(() => {
+    if (!open || !listRef.current) return;
+    const cards = Array.from(listRef.current.children);
+    if (cards.length === 0) return;
+    gsap.fromTo(
+      cards,
+      { opacity: 0, y: 8 },
+      { opacity: 1, y: 0, duration: 0.3, stagger: 0.04, ease: 'power2.out', clearProps: 'transform' }
+    );
+  }, { dependencies: [open, records, page], scope: rootRef, revertOnUpdate: true });
+
+  // 详情面板：打开时滑入
+  useGSAP(() => {
+    if (!open || !showDetail || !detailRef.current) return;
+    gsap.fromTo(
+      detailRef.current,
+      { opacity: 0, x: 16 },
+      { opacity: 1, x: 0, duration: 0.28, ease: 'power2.out', clearProps: 'transform' }
+    );
+  }, { dependencies: [open, showDetail], scope: rootRef, revertOnUpdate: true });
 
   useEffect(() => {
     if (open) void loadRecords();
@@ -158,11 +207,10 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
 
   if (!open) return null;
 
-  const showDetail = Boolean(activeId && detail);
-
   return (
     <>
       <div
+        ref={rootRef}
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0, zIndex: 400,
@@ -171,6 +219,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
         }}
       >
         <div
+          ref={dialogRef}
           onClick={(e) => e.stopPropagation()}
           style={{
             width: 'min(1080px, 96vw)', maxWidth: '96vw', height: 'min(84vh, 780px)',
@@ -256,7 +305,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
                 <Empty hasError={Boolean(error)} message={error} onRetry={loadRecords} />
               )}
               {records.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {records.map((r) => (
                     <RecordCard
                       key={r.id}
@@ -272,7 +321,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
 
             {/* 详情 */}
             {showDetail && detail && (
-              <div style={{ flex: 0.62, minWidth: 0, overflowY: 'auto', padding: 16 }}>
+              <div ref={detailRef} style={{ flex: 0.62, minWidth: 0, overflowY: 'auto', padding: 16 }}>
                 <RecordDetail
                   record={detail}
                   detailLoading={detailLoading}
@@ -319,33 +368,44 @@ function RecordCard({
   const mediaType = record.type === 'video' ? 'video' : 'image';
   const primary = results[0];
   const firstRef = refs[0]?.url;
+  const preview = (url: string, type: 'image' | 'video') => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onPreviewMedia(url, type);
+  };
 
   return (
     <div style={{
       border: `1px solid ${active ? DS.brand : 'var(--color-hairline)'}`,
       borderRadius: 12, padding: 10, background: active ? 'rgba(29,78,216,0.04)' : 'white',
-      display: 'flex', gap: 10, cursor: 'pointer', transition: 'border-color 0.15s',
-    }}>
+      display: 'flex', gap: 10, cursor: 'pointer', transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
+      }}
+      onClick={onOpenDetail}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenDetail(); } }}
+      onMouseEnter={(e) => { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.07)'; }}
+      onMouseLeave={(e) => { const el = e.currentTarget; el.style.transform = ''; el.style.boxShadow = ''; }}
+    >
       {/* 缩略图区 */}
       <div style={{ flexShrink: 0, width: 96, height: 72, display: 'flex', alignItems: 'center', gap: 4 }}>
         {refBased && firstRef ? (
           <>
             <div style={{ width: 48, height: 72 }}>
-              <MediaThumb url={firstRef} type={refs[0]?.type === 'video' ? 'video' : 'image'} onClick={() => onPreviewMedia(firstRef, refs[0]?.type === 'video' ? 'video' : 'image')} />
+              <MediaThumb url={firstRef} type={refs[0]?.type === 'video' ? 'video' : 'image'} onClick={preview(firstRef, refs[0]?.type === 'video' ? 'video' : 'image')} />
             </div>
             <div style={{ width: 18, height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <ArrowRight size={12} strokeWidth={2} color={DS.brand} />
             </div>
             <div style={{ width: 48, height: 72 }}>
               {primary ? (
-                <MediaThumb url={primary} type={mediaType} onClick={() => onPreviewMedia(primary, mediaType)} />
+                <MediaThumb url={primary} type={mediaType} onClick={preview(primary, mediaType)} />
               ) : <div style={thumbPlaceholder} />}
             </div>
           </>
         ) : (
           <div style={{ width: 96, height: 72 }}>
             {primary ? (
-              <MediaThumb url={primary} type={mediaType} onClick={() => onPreviewMedia(primary, mediaType)} />
+              <MediaThumb url={primary} type={mediaType} onClick={preview(primary, mediaType)} />
             ) : <div style={thumbPlaceholder}>{record.status === 'failed' ? '失败' : '生成中'}</div>}
           </div>
         )}
@@ -374,9 +434,6 @@ function RecordCard({
           {record.prompt?.trim() || '—'}
         </p>
         <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-          <button onClick={(e) => { e.stopPropagation(); onOpenDetail(); }} style={actionBtn(DS.brand)}>
-            <Eye size={12} strokeWidth={2} /> 详情
-          </button>
           {primary && (
             <a
               href={assetUrl(primary)} download target="_blank" rel="noreferrer"

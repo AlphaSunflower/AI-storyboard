@@ -304,6 +304,8 @@ export function AgentChatPanel() {
               ref={menuBtnRef}
               onClick={openMenu}
               title="上传"
+              onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(38,49,72,0.06)'; el.style.borderColor = 'var(--color-primary)'; }}
+              onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'var(--color-canvas)'; el.style.borderColor = 'var(--color-hairline)'; }}
               style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />

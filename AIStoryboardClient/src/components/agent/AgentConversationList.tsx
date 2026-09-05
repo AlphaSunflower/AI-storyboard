@@ -4,8 +4,9 @@ import { useAgentStore } from '../../stores/agentStore';
 import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
-import { Archive } from 'lucide-react';
+import { Archive, Pencil, Trash2 } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
+import { ContextMenu } from '../common/ContextMenu';
 import MoonLogo from './MoonLogo';
 
 /** DeepSeek 风格时间分组：今天 / 昨天 / 7天内 / yyyy-MM（updatedAt 倒序前提下连续归组） */
@@ -47,7 +48,7 @@ function CheckIcon({ checked }: { checked: boolean }) {
   );
 }
 
-export function AgentConversationList({ width, toolbar, onSelectOverride, hideHeader }: { width?: number; toolbar?: React.ReactNode; onSelectOverride?: (id: string) => void; hideHeader?: boolean }) {
+export function AgentConversationList({ width, toolbar, onSelectOverride, hideHeader, headerRight }: { width?: number; toolbar?: React.ReactNode; onSelectOverride?: (id: string) => void; hideHeader?: boolean; headerRight?: React.ReactNode }) {
   const {
     conversations, activeConversationId, selectConversation,
     newConversation, renameConversation, setConversationStatus, deleteConversation,
@@ -58,6 +59,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [multiSelect, setMultiSelect] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const renamingIdRef = useRef<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -130,8 +132,20 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
     >
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
       {!hideHeader && (
-        <div style={{ padding: '18px 16px 12px', borderBottom: `1px solid ${DS.border}` }}>
-          <MoonLogo size={22} showText />
+        <div style={{ padding: '16px 16px 12px', borderBottom: `1px solid ${DS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <button
+            onClick={() => newConversation()}
+            title="新建对话"
+            style={{
+              display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent',
+              padding: '4px 8px', marginLeft: -8, borderRadius: 10, cursor: 'pointer', transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <MoonLogo size={26} showText />
+          </button>
+          {headerRight}
         </div>
       )}
       {/* toolbar 插槽 */}
@@ -158,7 +172,9 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 14px 8px' }}>
         <button
           onClick={() => setShowArchived(!showArchived)}
-          style={{ padding: '6px 0', border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textCaption; }}
         >
           {showArchived ? '◀ 返回进行中' : <><Archive size={13} strokeWidth={1.8} /> 已归档</>}
         </button>
@@ -166,11 +182,13 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           <button
             onClick={() => { setMultiSelect(!multiSelect); setSelectedIds(new Set()); }}
             style={{
-              padding: '4px 0', border: 'none', background: 'none',
+              padding: '6px 8px', marginRight: -8, border: 'none', background: 'none',
               color: multiSelect ? '#cc785c' : DS.textCaption,
-              fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s',
             }}
             title={multiSelect ? '取消多选' : '多选删除'}
+            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             {/* 多选图标：两个叠加方块 */}
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -185,74 +203,93 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* 按时间分组的会话列表 */}
       {groups.map((g) => (
         <div key={g.label}>
-          <div style={{ padding: '10px 14px 4px', fontSize: 12, fontWeight: 600, color: DS.textCaption, letterSpacing: '0.02em', textAlign: 'left' }}>
+          <div style={{ padding: '10px 22px 4px', fontSize: 12, fontWeight: 600, color: DS.textCaption, letterSpacing: '0.02em', textAlign: 'left' }}>
             {g.label}
           </div>
           {g.items.map((c) => {
             const isSelected = selectedIds.has(c.id);
             return (
-              <div
+              <ContextMenu
                 key={c.id}
-                onClick={() => {
-                  if (multiSelect) { toggleSelect(c.id); return; }
-                  if (onSelectOverride) { onSelectOverride(c.id); return; }
-                  selectConversation(c.id);
-                }}
-                title={undefined}
-                style={{
-                  padding: '12px 14px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  background: c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
-                  borderBottom: `1px solid ${DS.border}`,
-                  opacity: 1,
-                }}
+                items={[
+                  { label: '重命名', icon: <Pencil size={14} strokeWidth={1.8} />, onClick: () => startRename(c.id, c.title) },
+                  { label: c.status === 'archived' ? '恢复' : '归档', icon: <Archive size={14} strokeWidth={1.8} />, onClick: () => setConversationStatus(c.id, c.status === 'archived' ? 'active' : 'archived') },
+                  { label: '删除', icon: <Trash2 size={14} strokeWidth={1.8} />, danger: true, onClick: () => setConfirmDeleteId(c.id) },
+                ]}
               >
-                {/* 勾选框（仅多选模式显示，scale 弹入动画） */}
-                {multiSelect && (
-                  <CheckIcon checked={isSelected} />
-                )}
+                <div
+                  onClick={() => {
+                    if (multiSelect) { toggleSelect(c.id); return; }
+                    if (onSelectOverride) { onSelectOverride(c.id); return; }
+                    selectConversation(c.id);
+                  }}
+                  onMouseEnter={(e) => { setHoverId(c.id); if (c.id !== activeConversationId && !isSelected) e.currentTarget.style.background = 'rgba(0,0,0,0.035)'; }}
+                  onMouseLeave={(e) => { setHoverId(null); e.currentTarget.style.background = c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent'; }}
+                  title={undefined}
+                  style={{
+                    margin: '2px 10px',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
+                    boxShadow: c.id === activeConversationId ? 'inset 3px 0 0 ' + DS.brand : undefined,
+                    opacity: 1,
+                  }}
+                >
+                  {/* 勾选框（仅多选模式显示，scale 弹入动画） */}
+                  {multiSelect && (
+                    <CheckIcon checked={isSelected} />
+                  )}
 
-                {renamingId === c.id ? (
-                  <input
-                    autoFocus
-                    value={renameText}
-                    onChange={(e) => setRenameText(e.target.value)}
-                    onBlur={() => handleRename(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleRename(c.id);
-                      if (e.key === 'Escape') {
-                        e.stopPropagation();
-                        cancelRename();
-                      }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ flex: 1, fontSize: 14, padding: '4px 6px', border: '1px solid var(--color-primary)', borderRadius: 6 }}
-                  />
-                ) : (
-                  <>
-                    <div style={{
-                      flex: 1, minWidth: 0, fontSize: 15,
-                      fontWeight: c.id === activeConversationId ? 600 : 400,
-                      color: 'var(--color-ink)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {c.title}
-                    </div>
-                    {!multiSelect && (
-                      <MoreMenu
-                        items={[
-                          { label: '重命名', onClick: () => startRename(c.id, c.title) },
-                          { label: c.status === 'archived' ? '恢复' : '归档', onClick: () => setConversationStatus(c.id, c.status === 'archived' ? 'active' : 'archived') },
-                          { label: '删除', danger: true, onClick: () => setConfirmDeleteId(c.id) },
-                        ]}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
+                  {renamingId === c.id ? (
+                    <input
+                      autoFocus
+                      value={renameText}
+                      onChange={(e) => setRenameText(e.target.value)}
+                      onBlur={() => handleRename(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRename(c.id);
+                        if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          cancelRename();
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ flex: 1, fontSize: 14, padding: '4px 6px', border: '1px solid var(--color-primary)', borderRadius: 6 }}
+                    />
+                  ) : (
+                    <>
+                      <div style={{
+                        flex: 1, minWidth: 0, fontSize: 15,
+                        fontWeight: c.id === activeConversationId ? 600 : 400,
+                        color: c.id === activeConversationId ? DS.brand : 'var(--color-ink)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {c.title}
+                      </div>
+                      {!multiSelect && (
+                        <span style={{
+                          display: 'inline-flex', flexShrink: 0,
+                          opacity: hoverId === c.id || c.id === activeConversationId ? 1 : 0,
+                          pointerEvents: hoverId === c.id || c.id === activeConversationId ? 'auto' : 'none',
+                          transition: 'opacity 0.15s',
+                        }}>
+                          <MoreMenu
+                            items={[
+                              { label: '重命名', onClick: () => startRename(c.id, c.title) },
+                              { label: c.status === 'archived' ? '恢复' : '归档', onClick: () => setConversationStatus(c.id, c.status === 'archived' ? 'active' : 'archived') },
+                              { label: '删除', danger: true, onClick: () => setConfirmDeleteId(c.id) },
+                            ]}
+                          />
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </ContextMenu>
             );
           })}
         </div>

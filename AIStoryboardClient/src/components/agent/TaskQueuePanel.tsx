@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { Check, CircleStop, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDragSnap } from '../../hooks/useDragSnap';
 
 const STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
@@ -16,6 +19,9 @@ const ACTIVE = new Set(['queued', 'running']);
 /** /chat 右上角任务队列：展示分镜视频生成排队/进度，可取消 queued 任务。 */
 export function TaskQueuePanel() {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
   const queue = useAgentStore((s) => s.storyboardVideoQueue);
   const refetch = useAgentStore((s) => s.refetchStoryboardVideoQueue);
   const cancel = useAgentStore((s) => s.cancelStoryboardVideoQueue);
@@ -24,11 +30,55 @@ export function TaskQueuePanel() {
   const cancelImage = useAgentStore((s) => s.cancelStoryboardImageQueue);
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const scenes = useProjectStore((s) => s.scenes);
+  const drag = useDragSnap(() => {
+    if (projectId) { void refetch(projectId); void refetchImage(projectId); }
+    setOpen((v) => !v);
+  });
 
   // 有进行中任务时轮询刷进度（5s）
   const activeVideo = queue.filter((t) => ACTIVE.has(t.status));
   const activeImage = imageQueue.filter((t) => ACTIVE.has(t.status));
   const activeCount = activeVideo.length + activeImage.length;
+
+  // 点击弹窗外（含任务列表按钮本身）关闭；按钮 onMouseDown stopPropagation 由 onClick 自行切换
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // 下拉面板入场：淡入 + 上浮
+  useGSAP(() => {
+    if (!open || !panelRef.current) return;
+    gsap.fromTo(
+      panelRef.current,
+      { opacity: 0, y: -6, scale: 0.98 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.22, ease: 'power2.out', transformOrigin: 'top right', clearProps: 'transform' }
+    );
+  }, { dependencies: [open], scope: panelRef, revertOnUpdate: true });
+
+  // 任务行 stagger 浮入（打开 / 数量变化时）
+  useGSAP(() => {
+    if (!open || !rowsRef.current) return;
+    const rows = Array.from(rowsRef.current.children);
+    if (rows.length === 0) return;
+    gsap.fromTo(
+      rows,
+      { opacity: 0, y: 6 },
+      { opacity: 1, y: 0, duration: 0.24, stagger: 0.04, ease: 'power2.out', clearProps: 'transform' }
+    );
+  }, { dependencies: [open, activeCount], scope: rowsRef, revertOnUpdate: true });
+
   useEffect(() => {
     if (!projectId || activeCount === 0) return;
     const timer = setInterval(() => { void refetch(projectId); void refetchImage(projectId); }, 5000);
@@ -39,59 +89,74 @@ export function TaskQueuePanel() {
   return (
     <>
       <style>{'@keyframes queue-rotate { to { transform: rotate(360deg); } }'}</style>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="任务队列"
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none',
-          background: 'transparent', color: open ? 'rgb(65, 118, 230)' : 'rgb(96, 100, 108)',
-          fontSize: 13, cursor: 'pointer', padding: '6px 10px', borderRadius: 8,
-          position: 'relative',
-        }}
-      >
-        <ListTodo size={15} /> 任务队列
-        {activeCount > 0 && (
-          <span style={{
-            position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 8,
-            background: '#e2544b', color: 'white', fontSize: 10, lineHeight: '16px', textAlign: 'center', padding: '0 4px',
-          }}>{activeCount}</span>
-        )}
-      </button>
-      {open && (
-        <div
+      {/* 右下角悬浮「任务列表」入口 + 弹出队列面板（面板从按钮上方展开） */}
+      <div ref={containerRef} style={{ position: 'fixed', bottom: 104, right: 20, zIndex: 110, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={drag.onClick}
+          onMouseDown={(e) => { e.stopPropagation(); drag.onMouseDown(e); }}
+          title="任务列表"
+          onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; el.style.boxShadow = '0 8px 26px rgba(0,0,0,0.16)'; }}
+          onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = open ? 'var(--color-primary)' : 'var(--color-hairline)'; el.style.color = open ? 'var(--color-primary)' : 'var(--color-ink)'; el.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)'; }}
           style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 4, width: 320, maxHeight: 420,
-            overflowY: 'auto', background: 'white', border: '1px solid rgba(0, 0, 0, 0.08)',
-            borderRadius: 12, boxShadow: '0 12px 32px rgba(15, 17, 21, 0.16)', padding: 8, zIndex: 110,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+            width: 76, height: 76, boxSizing: 'border-box',
+            border: `1px solid ${open ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
+            background: 'white', color: open ? 'var(--color-primary)' : 'var(--color-ink)',
+            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            borderRadius: 16, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', position: 'relative',
+            transform: drag.transform,
+            transition: drag.dragging ? 'none' : 'border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.3s ease',
+            touchAction: 'none',
           }}
-          role="dialog"
-          aria-label="任务队列"
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px' }}>
-            <strong style={{ fontSize: 13, color: 'rgb(15, 17, 21)' }}>任务队列</strong>
-            <small style={{ fontSize: 12, color: 'rgb(152, 158, 168)' }}>
-              {activeCount ? `${activeCount} 个进行中` : '空闲'}
-            </small>
-          </div>
-          {activeVideo.length === 0 && activeImage.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'rgb(152, 158, 168)', padding: '18px 10px', textAlign: 'center' }}>
-              暂无任务
-            </div>
-          ) : (
-            <>
-              {activeVideo.length > 0 && (
-                <div style={{ padding: '4px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>视频生成</div>
-              )}
-              {activeVideo.map((t) => renderRow(t, '视频', scenes, cancel))}
-              {activeImage.length > 0 && (
-                <div style={{ padding: '8px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>完善图片</div>
-              )}
-              {activeImage.map((t) => renderRow(t, '图片', scenes, cancelImage))}
-            </>
+          <ListTodo size={20} strokeWidth={1.8} />
+          <span style={{ lineHeight: 1 }}>任务列表</span>
+          {activeCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 8,
+              background: '#e2544b', color: 'white', fontSize: 10, lineHeight: '16px', textAlign: 'center', padding: '0 4px',
+            }}>{activeCount}</span>
           )}
-        </div>
-      )}
+        </button>
+        {open && (
+          <div
+            ref={panelRef}
+            style={{
+              position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, width: 320, maxHeight: 420,
+              overflowY: 'auto', background: 'white', border: '1px solid rgba(0, 0, 0, 0.08)',
+              borderRadius: 12, boxShadow: '0 12px 32px rgba(15, 17, 21, 0.16)', padding: 8, zIndex: 110,
+            }}
+            role="dialog"
+            aria-label="任务列表"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px' }}>
+              <strong style={{ fontSize: 13, color: 'rgb(15, 17, 21)' }}>任务列表</strong>
+              <small style={{ fontSize: 12, color: 'rgb(152, 158, 168)' }}>
+                {activeCount ? `${activeCount} 个进行中` : '空闲'}
+              </small>
+            </div>
+            <div ref={rowsRef} style={{ display: 'flex', flexDirection: 'column' }}>
+              {activeVideo.length === 0 && activeImage.length === 0 ? (
+                <div style={{ fontSize: 13, color: 'rgb(152, 158, 168)', padding: '18px 10px', textAlign: 'center' }}>
+                  暂无任务
+                </div>
+              ) : (
+                <>
+                  {activeVideo.length > 0 && (
+                    <div style={{ padding: '4px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>视频生成</div>
+                  )}
+                  {activeVideo.map((t) => renderRow(t, '视频', scenes, cancel))}
+                  {activeImage.length > 0 && (
+                    <div style={{ padding: '8px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>完善图片</div>
+                  )}
+                  {activeImage.map((t) => renderRow(t, '图片', scenes, cancelImage))}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </>
   );
 }

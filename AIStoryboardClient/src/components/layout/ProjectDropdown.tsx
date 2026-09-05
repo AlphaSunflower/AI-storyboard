@@ -48,13 +48,15 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
   // 点击外部关闭下拉
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      const t = e.target as Node;
+      const inMenu = dropdownRef.current?.contains(t);
+      const inAnchor = anchor?.current?.contains(t);
+      // 触发按钮上的 mousedown 交由按钮 onClick 自行切换，避免「mousedown 关闭 + click 又打开」导致无法收起
+      if (!inMenu && !inAnchor) onClose();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  }, [onClose, anchor]);
 
   if (!open) return null;
 

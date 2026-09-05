@@ -43,6 +43,7 @@ export function ChatComposer() {
     pickedAssetIds, addPickedAssetId, clearPickedAssetIds,
   } = useAgentStore();
   const [text, setText] = useState('');
+  const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
   // HumanInputCard 折叠状态
@@ -197,10 +198,12 @@ export function ChatComposer() {
   };
 
   return (
+    <>
     <div style={{
       width: '100%', maxWidth: DS.maxContent, margin: '0 auto',
-      border: `1px solid ${DS.border}`, borderRadius: 22,
-      background: 'white', boxShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
+      border: `1px solid ${focused ? 'rgba(65,118,230,0.45)' : DS.border}`, borderRadius: 22,
+      background: 'white', boxShadow: focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
+      transition: 'border-color 0.2s, box-shadow 0.2s',
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
@@ -280,6 +283,8 @@ export function ChatComposer() {
         ref={inputRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
           // I5：中文输入法组合期（选词中）按下 Enter 不发送
           if (e.nativeEvent.isComposing) return;
@@ -299,6 +304,8 @@ export function ChatComposer() {
             ref={menuBtnRef}
             onClick={openMenu}
             title="上传"
+            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
             style={{
               width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
               fontSize: 17, cursor: 'pointer', color: DS.textSecondary, flexShrink: 0,
@@ -479,5 +486,10 @@ export function ChatComposer() {
         document.body
       )}
     </div>
+    {/* 底部免责声明（位于输入框卡片下方） */}
+    <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.4, marginTop: 8 }}>
+      内容由 AI 生成，请仔细甄别
+    </div>
+    </>
   );
 }

@@ -143,8 +143,6 @@ export function EditorPage() {
                 onSelectConversation={() => {}} // /editor 无会话操作
                 onClose={() => setSidebarOpen(false)}
                 onOpenSettings={() => setSidebarOpen(false)}
-                onOpenAssets={() => { setAssetsOpen(true); setSidebarOpen(false); }}
-                onNavigate={(path) => { window.location.href = path; setSidebarOpen(false); }}
                 logout={logout}
               />
             </div>

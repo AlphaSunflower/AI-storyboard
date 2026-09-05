@@ -11,16 +11,17 @@ import { TaskQueuePanel } from '../components/agent/TaskQueuePanel';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
-import { SettingsPopover } from '../components/agent/SettingsPopover';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
+import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
 import { Moon } from 'lucide-react';
-import { X, Folder, FolderKanban, Settings2, PanelLeftClose, ChevronDown, Info, Frame, History } from 'lucide-react';
+import { X, Folder, FolderKanban, PanelLeftClose, ChevronDown, ChevronRight, Info, Frame, History, PenLine, LayoutGrid, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useDragSnap } from '../hooks/useDragSnap';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
@@ -36,18 +37,25 @@ export function ChatPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const logout = useAuthStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
+  const userName = user?.displayName || '未登录';
   const currentProject = useProjectStore((s) => s.currentProject);
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     confirmResult, assets, loadAssets, conversations, activeConversationId,
+    renameConversation,
   } = useAgentStore();
   const [assetsOpen, setAssetsOpen] = useState(false);       // 资源库（rail 🧩）
   const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
+  const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleSavingRef = useRef(false);
   const [convWidth, setConvWidth] = useState(240);
   const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
@@ -57,7 +65,12 @@ export function ChatPage() {
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
   const projectBtnRef = useRef<HTMLButtonElement>(null);
-  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+
+  // 回到最新消息（对话上翻较多时，消息中间出现向下按钮）
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   // 进入画布：携带 ai分镜 access token（与画布同 JWT secret）+ userId/name 跳转 Morrow（无需再登录）
   const openCanvas = () => {
@@ -130,6 +143,24 @@ export function ChatPage() {
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
+
+  const startTitleEdit = () => {
+    if (!activeConversationId) return;
+    setTitleDraft(currentTitle);
+    setEditingTitle(true);
+  };
+  const saveTitle = async () => {
+    if (titleSavingRef.current) return;
+    titleSavingRef.current = true;
+    const t = titleDraft.trim();
+    setEditingTitle(false);
+    if (activeConversationId && t && t !== currentTitle) {
+      await renameConversation(activeConversationId, t);
+    }
+    setTimeout(() => { titleSavingRef.current = false; }, 0);
+  };
+  const cancelTitleEdit = () => setEditingTitle(false);
+
   // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
   const showMobile = isMobile && !embed;
 
@@ -239,9 +270,7 @@ export function ChatPage() {
                 onSelectConversation={handleMobileSelectConversation}
                 onClose={() => setMobileSidebarOpen(false)}
                 onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
-                onOpenAssets={() => { setAssetsOpen(true); setMobileSidebarOpen(false); }}
                 onOpenRecords={() => { setRecordsOpen(true); setMobileSidebarOpen(false); }}
-                onNavigate={(path) => { navigate(path); setMobileSidebarOpen(false); }}
                 logout={logout}
               />
             </div>
@@ -287,6 +316,7 @@ export function ChatPage() {
               onScroll={(e) => {
                 const el = e.target as HTMLElement;
                 nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                setShowScrollDown(!nearBottomRef.current && messages.length > 0);
               }}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
@@ -371,38 +401,33 @@ export function ChatPage() {
               onClick={() => setCollapsed(false)}
               title="展开侧边栏"
               style={railIconBtn}
+              {...railHover}
             ><Moon size={18} strokeWidth={1.8} /></button>
-            <button
-              onClick={() => setAssetsOpen(true)}
-              title="资源库"
-              style={railIconBtn}
-            >{/** 资源库 */}<Folder size={18} strokeWidth={1.8} /></button>
             <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
               <button
                 ref={projectBtnRef}
-                onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+                onClick={() => setProjectOpen(!projectOpen)}
+                onMouseDown={(e) => e.stopPropagation()}
                 title={currentProject?.name ?? '选择项目'}
                 style={railIconBtn}
+                {...railHover}
               >{/** 项目 */}<FolderKanban size={18} strokeWidth={1.8} /></button>
               <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
             </div>
           </div>
-          <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
             <button
-              ref={settingsBtnRef}
-              onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
-              title="设置"
+              onClick={() => setProfileOpen(true)}
+              title="个人信息"
               style={railIconBtn}
-            >{/** 设置 */}<Settings2 size={18} strokeWidth={1.8} /></button>
-            {settingsOpen && (
-              <SettingsPopover
-                anchorRef={settingsBtnRef}
-                onProfile={() => { setProfileOpen(true); setSettingsOpen(false); }}
-                onDocs={() => { navigate('/docs'); setSettingsOpen(false); }}
-                onEditor={() => { navigate('/editor'); setSettingsOpen(false); }}
-                onLogout={() => { logout(); setSettingsOpen(false); }}
-              />
-            )}
+              {...railHover}
+            >{/** 个人信息 */}<User size={18} strokeWidth={1.8} /></button>
+            <button
+              onClick={logout}
+              title="退出登录"
+              style={railIconBtn}
+              {...railHover}
+            >{/** 退出登录 */}<LogOut size={18} strokeWidth={1.8} /></button>
           </div>
         </div>
       ) : (
@@ -414,38 +439,41 @@ export function ChatPage() {
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <AgentConversationList
             width={convWidth}
+            headerRight={
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  title="搜索对话（全文+标题）"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
+                    color: 'var(--color-muted)', borderRadius: 8, transition: 'background 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                ><Search size={15} strokeWidth={1.8} /></button>
+                <button
+                  onClick={() => setCollapsed(true)}
+                  title="收起侧边栏"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
+                    color: 'var(--color-muted)', borderRadius: 8, transition: 'background 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                ><PanelLeftClose size={15} strokeWidth={1.8} /></button>
+              </div>
+            }
             toolbar={
               <>
-                {/* 收起侧栏按钮（标题下方） */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 12px 0' }}>
-                  <button
-                    onClick={() => setCollapsed(true)}
-                    title="收起侧边栏"
-                    style={{
-                      border: 'none', background: 'transparent', cursor: 'pointer',
-                      fontSize: 13, color: 'var(--color-muted)', padding: '4px 8px', borderRadius: 8,
-                    }}
-                  ><PanelLeftClose size={14} strokeWidth={2} /> 收起</button>
-                </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
-                {/* 资源库（独立一行，DeepSeek ghost 风格，与新建按钮同高 40/字体 15） */}
-                <button
-                  onClick={() => setAssetsOpen(true)}
-                  title="资源库"
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                    border: 'none', borderRadius: 10, background: 'transparent',
-                    padding: '0 12px', height: 40, fontSize: 15,
-                    color: DS.ink, cursor: 'pointer', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >{/** 资源库 */}<Folder size={18} strokeWidth={1.8} /> 资源库</button>
-                {/* 项目选择（独立一行，资源库下方，ghost 风格；弹层 portal 右对齐不被裁剪） */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
+                {/* 项目选择（ghost 风格；弹层 portal 右对齐不被裁剪） */}
                 <div style={{ position: 'relative', width: '100%' }}>
                   <button
                     ref={projectBtnRef}
-                    onClick={() => { setProjectOpen(!projectOpen); setSettingsOpen(false); }}
+                    onClick={() => setProjectOpen(!projectOpen)}
+                    onMouseDown={(e) => e.stopPropagation()}
                     title="项目选择"
                     style={{
                       width: '100%', display: 'flex', alignItems: 'center', gap: 6,
@@ -470,32 +498,37 @@ export function ChatPage() {
           />
         </div>
 
-        {/* 底部：设置（左下角） */}
+        {/* 底部：用户资料 + 退出登录（替代原设置菜单） */}
         <div style={{
-          display: 'flex', flexDirection: 'column',
+          display: 'flex', alignItems: 'center', gap: 4,
           padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
         }}>
-          <div style={{ position: 'relative' }}>
-            <button
-              ref={settingsBtnRef}
-              onClick={() => { setSettingsOpen(!settingsOpen); setProjectOpen(false); }}
-              title="设置"
-              style={{
-                border: 'none', background: 'transparent', borderRadius: 10,
-                padding: '0 12px', height: 42, fontSize: 15, color: DS.textSecondary, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >{/** 设置 */}<Settings2 size={18} strokeWidth={1.8} /> 设置</button>
-            {settingsOpen && (
-              <SettingsPopover
-                anchorRef={settingsBtnRef}
-                onProfile={() => { setProfileOpen(true); setSettingsOpen(false); }}
-                onDocs={() => { navigate('/docs'); setSettingsOpen(false); }}
-                onEditor={() => { navigate('/editor'); setSettingsOpen(false); }}
-                onLogout={() => { logout(); setSettingsOpen(false); }}
-              />
-            )}
-          </div>
+          <button
+            onClick={() => setProfileOpen(true)}
+            title="个人信息"
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+              border: 'none', background: 'transparent', borderRadius: 10,
+              padding: '6px 10px', fontSize: 15, color: DS.ink, cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <User size={18} strokeWidth={1.8} />
+            <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
+          </button>
+          <button
+            onClick={logout}
+            title="退出登录"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(217, 45, 32, 0.08)'; e.currentTarget.style.color = '#d92d20'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+          >
+            <LogOut size={18} strokeWidth={1.8} />
+          </button>
         </div>
       </div>
       )}
@@ -609,7 +642,7 @@ export function ChatPage() {
               padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                 {embed && (
                   <button
                     onClick={() => setEmbedConvOpen(true)}
@@ -617,31 +650,63 @@ export function ChatPage() {
                     style={{ border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}
                   ><Moon size={12} strokeWidth={1.8} /> 会话</button>
                 )}
-                <span style={{ fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentTitle}
-                </span>
+                {editingTitle ? (
+                  <input
+                    autoFocus
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={saveTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); saveTitle(); }
+                      else if (e.key === 'Escape') cancelTitleEdit();
+                    }}
+                    style={{
+                      fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, minWidth: 0,
+                      border: `1px solid ${DS.brand}`, borderRadius: 8, padding: '2px 8px',
+                      outline: 'none', background: 'white', boxSizing: 'border-box', fontFamily: 'inherit',
+                    }}
+                  />
+                ) : (
+                  <button
+                    onClick={startTitleEdit}
+                    title="点击重命名"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
+                      maxWidth: '100%', border: 'none', background: 'transparent',
+                      padding: embed ? '2px 6px' : '4px 8px', borderRadius: 8, cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {currentTitle}
+                    </span>
+                  </button>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  onClick={() => setAssetsOpen(true)}
+                  title="资源库"
+                  style={headerBtn(1, embed ? 12 : 14)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+                ><Library size={16} strokeWidth={1.8} /> 资源库</button>
                 <button
                   onClick={() => setRecordsOpen(true)}
                   title="生成记录"
                   style={headerBtn(1, embed ? 12 : 14)}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
                 ><History size={16} strokeWidth={1.8} /> 生成记录</button>
                 <button
                   onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
                   disabled={!activeConversationId}
                   style={headerBtn(activeConversationId ? 1 : 0.4, embed ? 12 : 14)}
+                  onMouseEnter={(e) => { if (activeConversationId) { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; } }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
                 ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
-                {!embed && (
-                  <button
-                    onClick={openCanvas}
-                    title="进入画布"
-                    style={headerBtn(1)}
-                  ><Frame size={16} strokeWidth={1.8} /> 进入画布</button>
-                )}
-                <div style={{ position: 'relative', display: 'inline-flex' }}>
-                  <TaskQueuePanel />
-                </div>
               </div>
             </div>
 
@@ -651,6 +716,7 @@ export function ChatPage() {
               onScroll={(e) => {
                 const el = e.target as HTMLElement;
                 nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                setShowScrollDown(!nearBottomRef.current && messages.length > 0);
               }}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
@@ -711,13 +777,37 @@ export function ChatPage() {
             </div>
           </>
         )}
+        {showScrollDown && !isEmpty && (
+          <button
+            onClick={scrollToBottom}
+            title="回到最新"
+            aria-label="回到最新"
+            style={{
+              position: 'absolute', bottom: 176, left: '50%', transform: 'translateX(-50%)', zIndex: 60,
+              width: 34, height: 34, borderRadius: '50%',
+              border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)',
+              cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+          ><ArrowDown size={16} strokeWidth={2} /></button>
+        )}
       </div>
 
       {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
+      {!embed && <AppLauncher onCanvas={openCanvas} onEditor={() => navigate('/editor')} onDocs={() => navigate('/docs')} />}
+      {!embed && <TaskQueuePanel />}
     </div>
     <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
+    <ConversationSearchModal
+      open={searchOpen}
+      onClose={() => setSearchOpen(false)}
+      onSelectConversation={(id) => { void useAgentStore.getState().selectConversation(id); }}
+    />
     </>
   );
 }
@@ -728,6 +818,83 @@ function headerBtn(opacity: number, fontSize = 14): React.CSSProperties {
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
     display: 'flex', alignItems: 'center', gap: 4,
   };
+}
+
+/** /chat 右上角悬浮「应用」窗口：画布 + 分镜编辑器 + 使用文档（替代原头部按钮与设置菜单入口） */
+function AppLauncher({ onCanvas, onEditor, onDocs }: { onCanvas: () => void; onEditor: () => void; onDocs: () => void }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const drag = useDragSnap(() => setCollapsed(false));
+  const btnBase: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+    padding: '9px 12px', border: '1px solid var(--color-hairline)', borderRadius: 10,
+    background: 'var(--color-canvas)', color: 'var(--color-ink)', fontSize: 13, fontWeight: 500,
+    cursor: 'pointer', textAlign: 'left', transition: 'border-color 0.15s, background 0.15s, color 0.15s',
+  };
+  // 收起态：应用 方形按钮（与任务列表一致）
+  if (collapsed) {
+    return (
+      <button
+        onClick={drag.onClick}
+        onMouseDown={(e) => { e.stopPropagation(); drag.onMouseDown(e); }}
+        title="应用"
+        style={{
+          position: 'fixed', top: 68, right: 16, zIndex: 120,
+          width: 76, height: 76, boxSizing: 'border-box',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+          border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)',
+          fontSize: 12, fontWeight: 500, cursor: 'pointer', borderRadius: 16, boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+          transform: drag.transform,
+          transition: drag.dragging ? 'none' : 'border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.3s ease',
+          touchAction: 'none',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 8px 26px rgba(0,0,0,0.16)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-ink)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)'; }}
+      >
+        <LayoutGrid size={20} strokeWidth={1.8} />
+        <span style={{ lineHeight: 1 }}>应用</span>
+      </button>
+    );
+  }
+  return (
+    <div style={{
+      position: 'fixed', top: 68, right: 16, zIndex: 120,
+      width: 176, background: 'white', border: '1px solid var(--color-hairline)',
+      borderRadius: 14, boxShadow: '0 12px 36px rgba(0,0,0,0.14)', padding: 12,
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 2 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><LayoutGrid size={14} strokeWidth={1.8} /> 应用</span>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="收起应用"
+          style={{ border: 'none', background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: 6, display: 'inline-flex', alignItems: 'center' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.background = DS.hover; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.background = 'transparent'; }}
+        ><ChevronRight size={16} strokeWidth={2} /></button>
+      </div>
+      <button
+        onClick={onCanvas}
+        title="进入画布"
+        style={btnBase}
+        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
+        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
+      ><Frame size={15} strokeWidth={1.8} /> 画布</button>
+      <button
+        onClick={onEditor}
+        title="打开分镜编辑器"
+        style={btnBase}
+        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
+        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
+      ><PenLine size={15} strokeWidth={1.8} /> 分镜编辑器</button>
+      <button
+        onClick={onDocs}
+        title="使用文档"
+        style={btnBase}
+        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
+        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
+      ><FileText size={15} strokeWidth={1.8} /> 使用文档</button>
+    </div>
+  );
 }
 
 /** 拖拽图片到智能体窗口时的全屏提示浮层（pointer-events none，不拦截 drop） */
@@ -754,4 +921,10 @@ const railIconBtn: React.CSSProperties = {
   width: 36, height: 36, borderRadius: 10, border: 'none',
   background: 'transparent', fontSize: 18, cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
+
+/** 收起态 rail 图标按钮悬停高亮 */
+const railHover = {
+  onMouseEnter: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = DS.hover; el.style.color = DS.brand; },
+  onMouseLeave: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = ''; },
 };

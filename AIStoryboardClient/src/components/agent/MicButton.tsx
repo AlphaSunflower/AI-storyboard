@@ -128,6 +128,8 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
         disabled={disabled}
         title={isActive ? '停止录音' : '开始录音'}
         aria-label={isActive ? '停止录音' : '开始录音'}
+        onMouseEnter={(e) => { if (!disabled && !isActive) e.currentTarget.style.background = 'rgba(65,118,230,0.08)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? DS_BLUE : 'transparent'; }}
         style={{
           position: 'relative',
           zIndex: 1,

@@ -129,6 +129,7 @@ export function AppHeader() {
             >
               <button
                 onClick={() => setDropdownOpen(!dropdownOpen)}
+                onMouseDown={(e) => e.stopPropagation()}
                 style={{
                   display: 'flex',
                   alignItems: 'center',

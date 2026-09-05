@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 
@@ -94,6 +96,59 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
   });
 }
 
+/** Markdown 渲染（Moon 助手消息）：保留 `[链接](url)`、视频裸 URL、图片 markdown / 裸图片 URL 的原有处理。 */
+function MarkdownContent({ content, onImgClick }: { content: string; onImgClick: (url: string) => void }) {
+  const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const nodes: React.ReactNode[] = [];
+  let buf: string[] = [];
+  const flush = (key: number) => {
+    if (buf.length === 0) return;
+    const md = buf.map((line) => {
+      // 整行纯图片 URL → markdown 图片语法，交给 react-markdown 渲染
+      const rawImg = line.trim().match(/^(https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|data:image\/[a-z+]+;base64,\S+)$/i);
+      return rawImg ? `![图片](${rawImg[0]})` : line;
+    }).join('\n');
+    nodes.push(
+      <div key={key} style={{ whiteSpace: 'normal' }}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            img: ({ src, alt }) => (
+              <ImgWithFallback
+                src={assetUrl(src ?? '')}
+                alt={alt ?? ''}
+                onClick={() => onImgClick(src ?? '')}
+                style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+              />
+            ),
+            a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+          }}
+        >{md}</ReactMarkdown>
+      </div>
+    );
+    buf = [];
+  };
+  lines.forEach((line, i) => {
+    const videoMatch = line.trim().match(/^(?:https?:\/\/|\/api\/files\/videos\/)\S+\.(mp4|webm)(\?\S*)?$/i);
+    if (videoMatch) {
+      flush(i);
+      nodes.push(
+        <video
+          key={i}
+          src={assetUrl(videoMatch[0])}
+          controls
+          style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
+        />
+      );
+    } else {
+      buf.push(line);
+    }
+  });
+  flush(lines.length);
+  return <>{nodes}</>;
+}
+
 /** 消息时间格式化：今天 → HH:MM；跨天 → MM-DD HH:MM */
 function formatTime(iso?: string): string {
   if (!iso) return '';
@@ -174,7 +229,7 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               textAlign: 'left',
             }}
       >
-        {content ? renderContent(content, setPreviewUrl) : <span style={{ opacity: 0.6 }}>…</span>}
+        {content ? (role === 'assistant' ? <MarkdownContent content={content} onImgClick={setPreviewUrl} /> : renderContent(content, setPreviewUrl)) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
         {streaming && content && (
           <span
@@ -204,6 +259,8 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
           <button
             onClick={handleCopy}
             title="复制内容"
+            onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(0,0,0,0.05)'; el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'; }}
+            onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'transparent'; el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)'; }}
             style={{
               border: 'none', background: 'transparent', cursor: 'pointer',
               fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
