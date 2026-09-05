@@ -28,4 +28,7 @@ public interface CallLogService {
 
     /** 近 7 天每日调用量：[{date, count}]（含今天，按日期升序） */
     List<Map<String, Object>> trend7d();
+
+    /** 冷热归档：把 call_log 早于 retentionDays 的行分批迁到 call_log_archive；返回本次迁移行数 */
+    int archiveOlderThan(int retentionDays, int batchSize);
 }

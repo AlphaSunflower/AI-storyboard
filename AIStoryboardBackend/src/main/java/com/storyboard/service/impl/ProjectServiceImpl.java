@@ -6,15 +6,18 @@ import com.storyboard.dto.response.ProjectResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
+import com.storyboard.entity.ScenePrompt;
 import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.ProjectService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 项目服务实现。
@@ -25,6 +28,7 @@ public class ProjectServiceImpl implements ProjectService {
 
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
+    private final ScenePromptMapper scenePromptMapper;
 
     @Override
     public List<ProjectResponse> listByUser(String userId) {
@@ -100,17 +104,35 @@ public class ProjectServiceImpl implements ProjectService {
         // 批量重置卡在 generating 超过 5 分钟的场景（单条 SQL 替代逐行 updateById）
         sceneMapper.resetStaleGenerating(project.getId());
         List<Scene> scenes = sceneMapper.findByProjectIdOrdered(project.getId());
-        List<SceneResponse> sceneResponses = scenes.stream().map(s -> new SceneResponse(
+        Map<String, ScenePrompt> prompts = scenes.isEmpty() ? Map.of()
+            : scenePromptMapper.selectBatchIds(scenes.stream().map(Scene::getId).toList()).stream()
+                .collect(java.util.stream.Collectors.toMap(ScenePrompt::getSceneId, p -> p));
+        List<SceneResponse> sceneResponses = scenes.stream().map(s -> {
+            ScenePrompt p = prompts.get(s.getId());
+            return new SceneResponse(
             s.getId(), s.getProjectId(), s.getSceneNumber(),
-            s.getScriptContent(), s.getImagePrompt(), s.getVideoPrompt(),
-            s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
-            s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
-            s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
+            p != null ? p.getScriptContent() : null,
+            p != null ? p.getImagePrompt() : null,
+            p != null ? p.getVideoPrompt() : null,
+            p != null ? p.getNegativePrompt() : null,
+            p != null ? p.getCameraMovement() : null,
+            p != null ? p.getShotType() : null,
+            p != null ? p.getSoundDesign() : null,
+            p != null ? p.getAiModel() : null,
+            p != null ? p.getVideoResolution() : null,
+            p != null ? p.getDuration() : null,
+            s.getImageUrl(), s.getVideoUrl(),
             s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
-            s.getImageUrls(), s.getImageModel(), s.getImageSize(),
-            s.getImageQuality(), s.getImageN(), s.getVideoModel(),
-            s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()
-        )).toList();
+            s.getImageUrls(),
+            p != null ? p.getImageModel() : null,
+            p != null ? p.getImageSize() : null,
+            p != null ? p.getImageQuality() : null,
+            p != null ? p.getImageN() : null,
+            p != null ? p.getVideoModel() : null,
+            p != null ? p.getVideoAspectRatio() : null,
+            s.getCreatedAt(), s.getUpdatedAt()
+        );
+        }).toList();
         return new ProjectResponse(
             project.getId(), project.getUserId(), project.getName(),
             project.getDescription(), project.getCreationType(), project.getCustomTypeDesc(),

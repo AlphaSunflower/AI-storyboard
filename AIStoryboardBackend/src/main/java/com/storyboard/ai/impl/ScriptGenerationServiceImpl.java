@@ -3,9 +3,11 @@ package com.storyboard.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
+import com.storyboard.entity.ScenePrompt;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ScriptGenerationService;
@@ -47,6 +49,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     private final AiConfigProperties config;
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
+    private final ScenePromptMapper scenePromptMapper;
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
@@ -130,14 +133,17 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             Scene scene = new Scene();
             scene.setProjectId(projectId);
             scene.setSceneNumber((Integer) s.get("sceneNumber"));
-            scene.setScriptContent((String) s.get("scriptContent"));
-            scene.setImagePrompt((String) s.get("imagePrompt"));
-            scene.setVideoPrompt((String) s.get("videoPrompt"));
-            scene.setNegativePrompt((String) s.get("negativePrompt"));
-            scene.setCameraMovement((String) s.get("cameraMovement"));
-            scene.setShotType((String) s.get("shotType"));
-            scene.setSoundDesign((String) s.get("soundDesign"));
             sceneMapper.insert(scene);
+            ScenePrompt prompt = new ScenePrompt();
+            prompt.setSceneId(scene.getId());
+            prompt.setScriptContent((String) s.get("scriptContent"));
+            prompt.setImagePrompt((String) s.get("imagePrompt"));
+            prompt.setVideoPrompt((String) s.get("videoPrompt"));
+            prompt.setNegativePrompt((String) s.get("negativePrompt"));
+            prompt.setCameraMovement((String) s.get("cameraMovement"));
+            prompt.setShotType((String) s.get("shotType"));
+            prompt.setSoundDesign((String) s.get("soundDesign"));
+            scenePromptMapper.insert(prompt);
         }
         return Map.of("projectId", projectId, "sceneCount", scenes.size());
     }

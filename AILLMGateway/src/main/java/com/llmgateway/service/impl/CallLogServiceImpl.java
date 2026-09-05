@@ -100,6 +100,13 @@ public class CallLogServiceImpl implements CallLogService {
         return trend7d;
     }
 
+    /** 冷热归档：委托 mapper 分批迁移（单条 CTE 原子搬 batchSize 行）。 */
+    @Override
+    public int archiveOlderThan(int retentionDays, int batchSize) {
+        if (retentionDays <= 0 || batchSize <= 0) return 0;
+        return callLogMapper.archiveOlderThan(retentionDays, batchSize);
+    }
+
     /** 把 status 分布行（status + cnt）聚合成 {total, success, failed, successRate} */
     private Map<String, Object> aggregateCalls(List<Map<String, Object>> rows) {
         long total = 0, success = 0, failed = 0;

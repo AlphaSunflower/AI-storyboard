@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.entity.Scene;
+import com.storyboard.entity.ScenePrompt;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.ai.AiConfigProperties;
@@ -45,6 +47,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
+    private final ScenePromptMapper scenePromptMapper;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -101,6 +104,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
+        ScenePrompt scenePrompt = scene != null ? scenePromptMapper.selectById(sceneId) : null;
 
         if (prompt == null || prompt.isBlank()) {
             throw new BusinessException(40001, "图片生成 prompt 不能为空");
@@ -129,18 +133,18 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             List<String> localPaths = new ArrayList<>();
             boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
             // 模型选择：显式传入 > 分镜覆盖 > 网关默认（文生图/图改图共用同一默认模型）
-            String sceneModel = scene != null && scene.getImageModel() != null && !scene.getImageModel().isBlank()
-                    ? scene.getImageModel() : null;
+            String sceneModel = scenePrompt != null && scenePrompt.getImageModel() != null && !scenePrompt.getImageModel().isBlank()
+                    ? scenePrompt.getImageModel() : null;
             String effectiveModel = model != null ? model
                     : sceneModel != null ? sceneModel
                     : gatewayModelService.getDefaultImageModel();
             // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
             String effSize = size != null ? size
-                    : (scene != null && scene.getImageSize() != null && !scene.getImageSize().isBlank()) ? scene.getImageSize() : null;
+                    : (scenePrompt != null && scenePrompt.getImageSize() != null && !scenePrompt.getImageSize().isBlank()) ? scenePrompt.getImageSize() : null;
             String effQuality = quality != null ? quality
-                    : (scene != null && scene.getImageQuality() != null && !scene.getImageQuality().isBlank()) ? scene.getImageQuality() : null;
+                    : (scenePrompt != null && scenePrompt.getImageQuality() != null && !scenePrompt.getImageQuality().isBlank()) ? scenePrompt.getImageQuality() : null;
             Integer effN = (n != null && n > 0) ? n
-                    : (scene != null && scene.getImageN() != null && scene.getImageN() > 0) ? scene.getImageN() : null;
+                    : (scenePrompt != null && scenePrompt.getImageN() != null && scenePrompt.getImageN() > 0) ? scenePrompt.getImageN() : null;
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
             if (hasReferenceImages || "edit".equals(mode)) {

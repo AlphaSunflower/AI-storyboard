@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Scene;
+import com.storyboard.entity.ScenePrompt;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.ai.AiConfigProperties;
@@ -48,6 +50,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
+    private final ScenePromptMapper scenePromptMapper;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
@@ -88,6 +91,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                                    List<String> referenceVideos, List<String> referenceAudios) {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
+        ScenePrompt scenePrompt = scene != null ? scenePromptMapper.selectById(sceneId) : null;
 
         if (prompt == null || prompt.isBlank()) {
             throw new BusinessException(40001, "视频生成 prompt 不能为空");
@@ -95,23 +99,23 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
         String actualModel = alias != null
                 ? config.getVideoModelAliasMap().getOrDefault(alias, alias)
-                : (scene != null && scene.getVideoModel() != null && !scene.getVideoModel().isBlank())
-                        ? scene.getVideoModel()
+                : (scenePrompt != null && scenePrompt.getVideoModel() != null && !scenePrompt.getVideoModel().isBlank())
+                        ? scenePrompt.getVideoModel()
                         : gatewayModelService.getDefaultVideoModel();  // 默认模型：网关 model_params.is_default（MiniMax 直连自家，非 laozhang）
 
         // 参数：显式传入 > 分镜覆盖 > 网关兜底默认（未传值则不下发，网关 model_params 兜底 768P/8s/16:9/1280x720）
         String effSize = size;
         String effResolution = resolution != null ? resolution
-                : (scene != null && scene.getVideoResolution() != null && !scene.getVideoResolution().isBlank())
-                        ? scene.getVideoResolution()
+                : (scenePrompt != null && scenePrompt.getVideoResolution() != null && !scenePrompt.getVideoResolution().isBlank())
+                        ? scenePrompt.getVideoResolution()
                         : null;
         String effAspectRatio = aspectRatio != null ? aspectRatio
-                : (scene != null && scene.getVideoAspectRatio() != null && !scene.getVideoAspectRatio().isBlank())
-                        ? scene.getVideoAspectRatio()
+                : (scenePrompt != null && scenePrompt.getVideoAspectRatio() != null && !scenePrompt.getVideoAspectRatio().isBlank())
+                        ? scenePrompt.getVideoAspectRatio()
                         : null;
         Integer effDuration = duration != null ? duration
-                : (scene != null && scene.getDuration() != null && scene.getDuration() > 0)
-                        ? scene.getDuration()
+                : (scenePrompt != null && scenePrompt.getDuration() != null && scenePrompt.getDuration() > 0)
+                        ? scenePrompt.getDuration()
                         : null;
 
         // 资产库注入：场景关联资产的文字卡 + 参考图（≤9 优先级截断）；无资产则零影响

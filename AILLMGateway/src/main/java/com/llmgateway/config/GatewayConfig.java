@@ -9,6 +9,8 @@ public class GatewayConfig {
     private Aes aes = new Aes();
     private Upstream upstream = new Upstream();
     private Video video = new Video();
+    /** call_log 热表保留天数（冷热归档用） */
+    private int callLogRetentionDays = 90;
     /** 首启管理员自举密码（gateway.admin-init-password；仅 admin_user 表为空时生效） */
     private String adminInitPassword;
 
@@ -20,6 +22,8 @@ public class GatewayConfig {
     public void setUpstream(Upstream upstream) { this.upstream = upstream; }
     public Video getVideo() { return video; }
     public void setVideo(Video video) { this.video = video; }
+    public int getCallLogRetentionDays() { return callLogRetentionDays; }
+    public void setCallLogRetentionDays(int callLogRetentionDays) { this.callLogRetentionDays = callLogRetentionDays; }
 
     /** 视频默认档便捷访问（对应 gateway.video.default-resolution） */
     public String getVideoDefaultResolution() { return video.getDefaultResolution(); }

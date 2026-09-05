@@ -6,10 +6,12 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
+import com.storyboard.entity.ScenePrompt;
 import com.storyboard.entity.SceneReferenceImage;
 import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
+import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.SceneService;
@@ -37,6 +39,7 @@ public class SceneServiceImpl implements SceneService {
 
     private final SceneMapper sceneMapper;
     private final SceneReferenceImageMapper refImageMapper;
+    private final ScenePromptMapper scenePromptMapper;
     private final FileStorageService fileStorageService;
     private final ProjectMapper projectMapper;
 
@@ -48,8 +51,10 @@ public class SceneServiceImpl implements SceneService {
 
     @Override
     public List<SceneResponse> listByProject(String projectId) {
-        return sceneMapper.findByProjectIdOrdered(projectId).stream()
-            .map(this::toResponse)
+        List<Scene> scenes = sceneMapper.findByProjectIdOrdered(projectId);
+        Map<String, ScenePrompt> prompts = loadPrompts(scenes);
+        return scenes.stream()
+            .map(s -> toResponse(s, prompts.get(s.getId())))
             .toList();
     }
 
@@ -61,13 +66,16 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = new Scene();
         scene.setProjectId(projectId);
         scene.setSceneNumber(nextNum);
-        scene.setScriptContent(request.scriptContent() == null ? "" : request.scriptContent());
-        scene.setImagePrompt(request.imagePrompt() == null ? "" : request.imagePrompt());
-        scene.setVideoPrompt(request.videoPrompt() == null ? "" : request.videoPrompt());
-        scene.setCameraMovement(request.cameraMovement() == null ? "" : request.cameraMovement());
-        scene.setShotType(request.shotType() == null ? "" : request.shotType());
         sceneMapper.insert(scene);
-        return toResponse(scene);
+        ScenePrompt prompt = new ScenePrompt();
+        prompt.setSceneId(scene.getId());
+        prompt.setScriptContent(request.scriptContent() == null ? "" : request.scriptContent());
+        prompt.setImagePrompt(request.imagePrompt() == null ? "" : request.imagePrompt());
+        prompt.setVideoPrompt(request.videoPrompt() == null ? "" : request.videoPrompt());
+        prompt.setCameraMovement(request.cameraMovement() == null ? "" : request.cameraMovement());
+        prompt.setShotType(request.shotType() == null ? "" : request.shotType());
+        scenePromptMapper.insert(prompt);
+        return toResponse(scene, prompt);
     }
 
     @Override
@@ -78,26 +86,38 @@ public class SceneServiceImpl implements SceneService {
         checkProjectOwnership(userId, scene.getProjectId());
 
         // 仅更新非 null 字段（null = 不修改）
-        if (request.scriptContent() != null) scene.setScriptContent(request.scriptContent());
-        if (request.imagePrompt() != null) scene.setImagePrompt(request.imagePrompt());
-        if (request.videoPrompt() != null) scene.setVideoPrompt(request.videoPrompt());
-        if (request.negativePrompt() != null) scene.setNegativePrompt(request.negativePrompt());
-        if (request.cameraMovement() != null) scene.setCameraMovement(request.cameraMovement());
-        if (request.shotType() != null) scene.setShotType(request.shotType());
-        if (request.soundDesign() != null) scene.setSoundDesign(request.soundDesign());
-        if (request.aiModel() != null) scene.setAiModel(request.aiModel());
-        if (request.videoResolution() != null) scene.setVideoResolution(request.videoResolution());
-        if (request.duration() != null) scene.setDuration(request.duration());
-        // 分镜生成参数覆盖（null = 不修改）
-        if (request.imageModel() != null) scene.setImageModel(request.imageModel());
-        if (request.imageSize() != null) scene.setImageSize(request.imageSize());
-        if (request.imageQuality() != null) scene.setImageQuality(request.imageQuality());
-        if (request.imageN() != null) scene.setImageN(request.imageN());
-        if (request.videoModel() != null) scene.setVideoModel(request.videoModel());
-        if (request.videoAspectRatio() != null) scene.setVideoAspectRatio(request.videoAspectRatio());
-
         sceneMapper.updateById(scene);
-        return toResponse(scene);
+        ScenePrompt prompt = scenePromptMapper.selectById(sceneId);
+        boolean hadPrompt = prompt != null;
+        if (prompt == null) {
+            prompt = new ScenePrompt();
+            prompt.setSceneId(sceneId);
+        }
+        boolean touched = false;
+        if (request.scriptContent() != null) { prompt.setScriptContent(request.scriptContent()); touched = true; }
+        if (request.imagePrompt() != null) { prompt.setImagePrompt(request.imagePrompt()); touched = true; }
+        if (request.videoPrompt() != null) { prompt.setVideoPrompt(request.videoPrompt()); touched = true; }
+        if (request.negativePrompt() != null) { prompt.setNegativePrompt(request.negativePrompt()); touched = true; }
+        if (request.cameraMovement() != null) { prompt.setCameraMovement(request.cameraMovement()); touched = true; }
+        if (request.shotType() != null) { prompt.setShotType(request.shotType()); touched = true; }
+        if (request.soundDesign() != null) { prompt.setSoundDesign(request.soundDesign()); touched = true; }
+        if (request.aiModel() != null) { prompt.setAiModel(request.aiModel()); touched = true; }
+        if (request.videoResolution() != null) { prompt.setVideoResolution(request.videoResolution()); touched = true; }
+        if (request.duration() != null) { prompt.setDuration(request.duration()); touched = true; }
+        if (request.imageModel() != null) { prompt.setImageModel(request.imageModel()); touched = true; }
+        if (request.imageSize() != null) { prompt.setImageSize(request.imageSize()); touched = true; }
+        if (request.imageQuality() != null) { prompt.setImageQuality(request.imageQuality()); touched = true; }
+        if (request.imageN() != null) { prompt.setImageN(request.imageN()); touched = true; }
+        if (request.videoModel() != null) { prompt.setVideoModel(request.videoModel()); touched = true; }
+        if (request.videoAspectRatio() != null) { prompt.setVideoAspectRatio(request.videoAspectRatio()); touched = true; }
+        if (touched) {
+            if (hadPrompt) {
+                scenePromptMapper.updateById(prompt);
+            } else {
+                scenePromptMapper.insert(prompt);
+            }
+        }
+        return toResponse(scene, prompt);
     }
 
     @Override
@@ -219,17 +239,37 @@ public class SceneServiceImpl implements SceneService {
         }
     }
 
-    private SceneResponse toResponse(Scene s) {
+    private SceneResponse toResponse(Scene s, ScenePrompt p) {
         return new SceneResponse(
             s.getId(), s.getProjectId(), s.getSceneNumber(),
-            s.getScriptContent(), s.getImagePrompt(), s.getVideoPrompt(),
-            s.getNegativePrompt(), s.getCameraMovement(), s.getShotType(),
-            s.getSoundDesign(), s.getAiModel(), s.getVideoResolution(),
-            s.getDuration(), s.getImageUrl(), s.getVideoUrl(),
+            p != null ? p.getScriptContent() : null,
+            p != null ? p.getImagePrompt() : null,
+            p != null ? p.getVideoPrompt() : null,
+            p != null ? p.getNegativePrompt() : null,
+            p != null ? p.getCameraMovement() : null,
+            p != null ? p.getShotType() : null,
+            p != null ? p.getSoundDesign() : null,
+            p != null ? p.getAiModel() : null,
+            p != null ? p.getVideoResolution() : null,
+            p != null ? p.getDuration() : null,
+            s.getImageUrl(), s.getVideoUrl(),
             s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
-            s.getImageUrls(), s.getImageModel(), s.getImageSize(),
-            s.getImageQuality(), s.getImageN(), s.getVideoModel(),
-            s.getVideoAspectRatio(), s.getCreatedAt(), s.getUpdatedAt()
+            s.getImageUrls(),
+            p != null ? p.getImageModel() : null,
+            p != null ? p.getImageSize() : null,
+            p != null ? p.getImageQuality() : null,
+            p != null ? p.getImageN() : null,
+            p != null ? p.getVideoModel() : null,
+            p != null ? p.getVideoAspectRatio() : null,
+            s.getCreatedAt(), s.getUpdatedAt()
         );
+    }
+
+    /** 批量取分镜 prompt 明细（sceneIds → ScenePrompt）。 */
+    private Map<String, ScenePrompt> loadPrompts(List<Scene> scenes) {
+        if (scenes.isEmpty()) return Map.of();
+        List<String> ids = scenes.stream().map(Scene::getId).toList();
+        return scenePromptMapper.selectBatchIds(ids).stream()
+            .collect(java.util.stream.Collectors.toMap(ScenePrompt::getSceneId, p -> p));
     }
 }

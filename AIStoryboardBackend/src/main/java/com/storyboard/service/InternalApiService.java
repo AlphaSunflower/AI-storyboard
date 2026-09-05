@@ -1,8 +1,8 @@
 package com.storyboard.service;
 
 import com.storyboard.dto.response.AssetVO;
+import com.storyboard.dto.response.SceneFull;
 import com.storyboard.entity.Project;
-import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
 
 import java.util.List;
@@ -18,10 +18,10 @@ public interface InternalApiService {
     Project getProject(String id);
 
     /** 查项目分镜列表（按 sceneNumber 升序） */
-    List<Scene> getProjectScenes(String projectId);
+    List<SceneFull> getProjectScenes(String projectId);
 
     /** 批量写入分镜 */
-    void batchInsertScenes(List<Scene> scenes);
+    void batchInsertScenes(List<SceneFull> scenes);
 
     /** 清空项目分镜 */
     void deleteProjectScenes(String projectId);
@@ -33,10 +33,10 @@ public interface InternalApiService {
     void linkSceneAssets(String sceneId, List<String> assetIds);
 
     /** 查单个场景，不存在抛 40401 */
-    Scene getScene(String sceneId);
+    SceneFull getScene(String sceneId);
 
     /** 更新场景 */
-    void updateScene(String sceneId, Scene scene);
+    void updateScene(String sceneId, SceneFull scene);
 
     /**
      * 批量更新项目全部分镜的生成参数。
@@ -48,5 +48,5 @@ public interface InternalApiService {
     List<AssetVO> getProjectAssets(String projectId);
 
     /** 按 videoTaskId 查场景（视频异步轮询终态更新用），不存在抛 40401 */
-    Scene getSceneByVideoTaskId(String videoTaskId);
+    SceneFull getSceneByVideoTaskId(String videoTaskId);
 }

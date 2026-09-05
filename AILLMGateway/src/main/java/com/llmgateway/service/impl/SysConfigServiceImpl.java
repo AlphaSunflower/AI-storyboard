@@ -46,7 +46,14 @@ public class SysConfigServiceImpl implements SysConfigService {
                 if (i < 0 || i > 10) throw new IllegalArgumentException("取值须在 [0,10]");
                 return i;
             },
-            (c, v) -> c.getUpstream().setRetryCount((Integer) v))
+            (c, v) -> c.getUpstream().setRetryCount((Integer) v)),
+        "gateway.call-log-retention-days", new KeySpec("调用日志热表保留天数（超出归档到 call_log_archive）",
+            v -> {
+                int i = Integer.parseInt(v);
+                if (i < 1 || i > 3650) throw new IllegalArgumentException("取值须在 [1,3650]");
+                return i;
+            },
+            (c, v) -> c.setCallLogRetentionDays((Integer) v))
     );
 
     private final SysConfigMapper sysConfigMapper;
