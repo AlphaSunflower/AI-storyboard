@@ -16,7 +16,12 @@ public class JwtVerifier {
     private final String issuer;
 
     public JwtVerifier(JwtConfig config) {
-        this.accessKey = new SecretKeySpec(config.getAccessSecret().getBytes(), "HmacSHA256");
+        String accessSecret = config.getAccessSecret();
+        if (accessSecret == null || accessSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT 密钥未配置：请设置环境变量 JWT_ACCESS_SECRET（与主后端保持一致）");
+        }
+        this.accessKey = new SecretKeySpec(accessSecret.getBytes(), "HmacSHA256");
         this.issuer = config.getIssuer();
     }
 

@@ -154,6 +154,14 @@ let initialSceneCount = 0;
 let streamAbort: AbortController | null = null;
 let manualStop = false;
 
+/** 刷新当前项目的视频/图片任务队列：分镜审查触发的生成（全自动视频/完善图片）入队后即时可见，无需刷新页面。 */
+function refreshStoryboardQueues() {
+  const projectId = useProjectStore.getState().currentProject?.id;
+  if (!projectId) return;
+  void useAgentStore.getState().refetchStoryboardVideoQueue(projectId);
+  void useAgentStore.getState().refetchStoryboardImageQueue(projectId);
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   windowOpen: false,
   setWindowOpen: (v) => set({ windowOpen: v }),
@@ -521,6 +529,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 void useProjectStore.getState().loadProject(currentProject.id);
               }
             }
+            // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
+            refreshStoryboardQueues();
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -748,6 +758,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 void useProjectStore.getState().loadProject(currentProject.id);
               }
             }
+            // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
+            refreshStoryboardQueues();
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -910,6 +922,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 const proj = useProjectStore.getState().currentProject;
                 if (proj) void useProjectStore.getState().loadProject(proj.id);
               }
+              refreshStoryboardQueues();
               break;
             case 'error':
               if (get().activeConversationId === snapshotId) set({ streamError: e.message ?? '对话出错，请重试' });

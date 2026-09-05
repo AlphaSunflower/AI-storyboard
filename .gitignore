@@ -29,3 +29,7 @@ ICAN/
 
 # E2E 测试临时凭据（含 token，禁止入库）
 scripts/e2e/.creds.json
+
+# 运行时日志与本地缓存（模块级 gateway 日志、Web 探测缓存）
+*.log
+.firecrawl/

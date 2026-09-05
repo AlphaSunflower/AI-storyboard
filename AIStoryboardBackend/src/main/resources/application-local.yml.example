@@ -17,3 +17,8 @@ ai:
   gateway:
     base-url: http://localhost:8083
     api-key: <your-gateway-api-key>
+
+# 内部服务共享密钥（必填，无默认值；缺失会导致启动失败）
+# 可由环境变量 INTERNAL_SECRET 注入，或在此填入与 MoonAgent/ApiGateway 一致的值
+internal:
+  secret: <shared-secret>

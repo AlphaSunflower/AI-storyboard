@@ -6,6 +6,7 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.Scene;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -36,8 +37,17 @@ public class StoryboardClient {
     @Value("${storyboard.internal-url:http://localhost:8082}")
     private String baseUrl;
 
-    @Value("${storyboard.internal-secret:moon-internal-secret-2024}")
+    @Value("${storyboard.internal-secret:}")
     private String internalSecret;
+
+    /** 密钥未配置时启动即失败，避免静默发送空 token 或回退仓库默认值。 */
+    @PostConstruct
+    void validateInternalSecret() {
+        if (internalSecret == null || internalSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "storyboard.internal-secret 未配置：请设置环境变量 INTERNAL_SECRET");
+        }
+    }
 
     /** 分镜列表缓存（projectId → scenes，30s 过期） */
     private final Cache<String, List<Scene>> sceneCache = Caffeine.newBuilder()

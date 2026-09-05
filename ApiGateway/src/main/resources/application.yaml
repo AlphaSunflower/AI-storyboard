@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: api-gateway
+  profiles:
+    active: local
   cloud:
     compatibility-verifier:
       enabled: false   # Boot 4.1.1 与 Spring Cloud 2025.1 官方未配对；Framework 同为 7.0.x 实机可跑，SC 出 4.1 配对车后可删
@@ -41,9 +43,9 @@ spring:
 
 # JWT 配置（与主后端共享 secret）
 jwt:
-  access-secret: ${JWT_ACCESS_SECRET:d02f1779750841f8b4de65e47a913e89}
+  access-secret: ${JWT_ACCESS_SECRET:}
   issuer: ${JWT_ISSUER:newworkflow-backend}
 
 # 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
 internal:
-  secret: ${INTERNAL_SECRET:moon-internal-secret-2024}
+  secret: ${INTERNAL_SECRET:}

@@ -30,6 +30,11 @@ public class JwtTokenProvider {
     /** 构造器注入后派生密钥/参数（final 字段需构造器赋值，派生逻辑放 PostConstruct） */
     @PostConstruct
     void init() {
+        if (config.getAccessSecret() == null || config.getAccessSecret().isBlank()
+                || config.getRefreshSecret() == null || config.getRefreshSecret().isBlank()) {
+            throw new IllegalStateException(
+                    "JWT 密钥未配置：请设置 JWT_ACCESS_SECRET / JWT_REFRESH_SECRET（见 application-local.yml）");
+        }
         this.accessKey = new SecretKeySpec(config.getAccessSecret().getBytes(), "HmacSHA256");
         this.refreshKey = new SecretKeySpec(config.getRefreshSecret().getBytes(), "HmacSHA256");
         this.issuer = config.getIssuer();

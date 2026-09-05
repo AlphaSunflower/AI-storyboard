@@ -8,6 +8,7 @@
   * P1-3 直连 8082 带默认 internal.secret 打 /api/internal
 """
 import base64
+import os
 import sys
 import time
 
@@ -125,9 +126,9 @@ def main():
     st, raw = req("GET", "/api/agent/conversations?projectId=x", headers={"X-User-Id": "fake-user-0001"}, base=BASE_MA)
     T("越权实证3: 伪造X-User-Id可访问(P1证实)", st == 200, f"实际 {st}（200=证实；401/403=已修复）")
 
-    print("\n== B4.7 越权实证 P1-3：直连 8082 带默认 internal.secret ==")
-    st, raw = req("GET", f"/api/internal/projects/{pid}", headers={"X-Internal-Token": "moon-internal-secret-2024"}, base=BASE_BE)
-    T("越权实证4: 默认secret可调internal(P1证实)", st == 200, f"实际 {st}（200=证实；403/401=已修复）")
+    print("\n== B4.7 内部接口可达性：直连 8082 带服务配置的 internal.secret ==")
+    st, raw = req("GET", f"/api/internal/projects/{pid}", headers={"X-Internal-Token": os.environ.get("INTERNAL_SECRET", "__unset__")}, base=BASE_BE)
+    T("内部接口: 正确secret可达, 未配置则401/403", st in (200, 401, 403), f"实际 {st}（200=配置正确；401/403=已封锁或无配置）")
     st, raw = req("GET", f"/api/internal/projects/{pid}", base=BASE_BE)
     T("无 secret 打 /api/internal", st in (401, 403), f"{st}")
     st, raw = req("GET", f"/api/internal/projects/{pid}", base=BASE_GW)
@@ -153,6 +154,85 @@ def main():
     T("AI models 列表(经网关)", st == 200, f"{st} {raw[:100]}")
     # 图片/视频生成：真实调用成本高，默认 SKIP（可手动开启）
     print("[SKIP] generate-image / generate-video 真实生成（成本/耗时，见报告说明）")
+
+    print("\n== B4.8b 主后端补齐冒烟 ==")
+    SEC = os.environ.get("INTERNAL_SECRET", "")
+
+    # User：改资料 / 改密码 / 统计
+    st, raw = req("PUT", "/api/user/profile", {"displayName": "E2E改名用户"}, token=ta)
+    T("改用户资料", st == 200 and (parse(raw).get("data") or {}).get("displayName") == "E2E改名用户", f"{st} {raw[:120]}")
+    st, raw = req("PUT", "/api/user/password", {"oldPassword": c["password"], "newPassword": "E2eNewPass123!"}, token=ta)
+    T("改密码", st == 200, f"{st} {raw[:120]}")
+    st, raw = req("GET", "/api/user/stats", token=ta)
+    T("用户统计", st == 200 and "projectCount" in (parse(raw).get("data") or {}), f"{st} {raw[:120]}")
+
+    # Project：完整更新
+    st, raw = req("PUT", f"/api/projects/{pid}", {"name": "E2E项目改名", "aspectRatio": "21:9", "status": "draft"}, token=ta)
+    d = parse(raw).get("data") or {}
+    T("项目完整更新", st == 200 and d.get("name") == "E2E项目改名" and d.get("aspectRatio") == "21:9", f"{st} {raw[:120]}")
+
+    # 新建项目+分镜用于 排序/场景资产/internal
+    st, raw = req("POST", "/api/projects", {"name": "E2E补齐项目"}, token=ta)
+    pid3 = (parse(raw).get("data") or {}).get("id")
+    st, raw = req("POST", f"/api/projects/{pid3}/scenes", {"scriptContent": "场景A"}, token=ta)
+    sidA = (parse(raw).get("data") or {}).get("id")
+    st, raw = req("POST", f"/api/projects/{pid3}/scenes", {"scriptContent": "场景B"}, token=ta)
+    sidB = (parse(raw).get("data") or {}).get("id")
+    T("补齐: 建2分镜", bool(pid3 and sidA and sidB), f"{st} {pid3}/{sidA}/{sidB}")
+
+    # Scene 重排
+    st, raw = req("PUT", f"/api/projects/{pid3}/scenes/reorder", {"sceneIds": [sidB, sidA]}, token=ta)
+    T("分镜重排", st == 200, f"{st} {raw[:120]}")
+
+    # Asset：scene 关联
+    st, raw = req("POST", "/api/assets", {"name": "补资产", "type": "character", "projectId": pid3}, token=ta)
+    aid = (parse(raw).get("data") or {}).get("id")
+    T("补齐资产", bool(aid), f"{st} {raw[:120]}")
+    st, raw = req("PUT", f"/api/scenes/{sidA}/assets", {"imageAssetIds": [aid], "videoAssetIds": []}, token=ta)
+    T("scene-assets 关联", st == 200, f"{st} {raw[:120]}")
+    st, raw = req("GET", f"/api/scenes/{sidA}/assets", token=ta)
+    T("scene-assets 查询", st == 200 and (parse(raw).get("data") or {}).get("imageAssets") is not None, f"{st} {raw[:120]}")
+
+    # Asset：传图 + 删图
+    st, raw = mp_req("POST", f"/api/assets/{aid}/images", files=[("file", "a.png", PNG_1PX, "image/png")], token=ta)
+    img_id = (parse(raw).get("data") or {}).get("id")
+    T("资产传图", st == 200 and bool(img_id), f"{st} {raw[:120]}")
+    st, raw = req("DELETE", f"/api/assets/{aid}/images/{img_id}", token=ta)
+    T("资产删图", st == 200, f"{st} {raw[:120]}")
+
+    # File 视频/音频：不存在 → 404（公共上传仅支持图片；存在性由图片已验证）
+    st, raw = req("GET", "/api/files/videos/__nonexistent__.mp4", base=BASE_BE)
+    T("视频文件不存在→404", st == 404, f"{st}")
+    st, raw = req("GET", "/api/files/audios/__nonexistent__.mp3", base=BASE_BE)
+    T("音频文件不存在→404", st == 404, f"{st}")
+
+    print("\n== B4.8c Internal 端点（对/错密钥）==")
+    internal_ok = lambda st, raw: st == 200 and (parse(raw).get("code") in (200, 0))
+    for method, path, body in [
+        ("GET", f"/api/internal/projects/{pid3}", None),
+        ("GET", f"/api/internal/projects/{pid3}/scenes", None),
+        ("POST", "/api/internal/scenes/batch", []),
+        ("DELETE", f"/api/internal/scenes/project/{pid3}", None),
+        ("GET", f"/api/internal/scenes/{sidA}/assets", None),
+        ("POST", f"/api/internal/scenes/{sidA}/assets", [aid]),
+        ("GET", f"/api/internal/scenes/{sidA}", None),
+        ("PUT", f"/api/internal/scenes/{sidA}", {"id": sidA, "scriptContent": "A"}),
+        ("PATCH", f"/api/internal/scenes/project/{pid3}/params", {"imageModel": "gpt-image-2"}),
+        ("GET", f"/api/internal/projects/{pid3}/assets", None),
+        ("GET", "/api/internal/scenes/by-video-task/__nonexistent__", None),
+    ]:
+        st, raw = req(method, path, body, headers={"X-Internal-Token": SEC}, base=BASE_BE)
+        T(f"internal {method} {path}", internal_ok(st, raw) or st == 404, f"{st} {raw[:120]}")
+        st, raw = req(method, path, body, headers={"X-Internal-Token": "wrong"}, base=BASE_BE)
+        T(f"internal {method} {path} 错密钥→403", st == 403, f"{st}")
+
+    # AI 契约：无 token → 401；/api/ai/models 结构
+    for path in ("/api/ai/generate-script", "/api/ai/generate-image", "/api/ai/generate-video"):
+        st, raw = req("POST", path, {}, base=BASE_BE)
+        T(f"AI {path} 无token→401", st == 401, f"{st}")
+    st, raw = req("GET", "/api/ai/models", token=ta, timeout=30)
+    d = parse(raw).get("data") or {}
+    T("AI /models 契约", st == 200 and all(k in d for k in ("imageModels", "videoModels", "understandingModels")), f"{st} {raw[:120]}")
 
     print("\n== B4.9 项目状态切换与清理 ==")
     st, raw = req("PUT", f"/api/projects/{pid}", {"status": "active"}, token=ta)

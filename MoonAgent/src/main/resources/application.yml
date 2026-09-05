@@ -50,7 +50,7 @@ management:
 # 主后端内部 API 地址（服务间调用）
 storyboard:
   internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
-  internal-secret: ${INTERNAL_SECRET:moon-internal-secret-2024}
+  internal-secret: ${INTERNAL_SECRET:}
   # MinIO 对象存储（图片/视频/音频统一存对象存储，替代本地 uploads/）
   # 默认指向本机 MinIO（本地开发）；生产在 application-prod.yml 覆盖。
   storage:
