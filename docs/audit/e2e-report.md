@@ -49,3 +49,9 @@
 - 测试数据已清理：e2e 用户（10 个）/ 项目（6）/ 分镜（19）/ 资产（13）/ 会话全部删除；llm_gateway 的 e2eadmin 与 e2e-test key 已删
 - MoonAgent 8084 为本测试编译启动（原环境 8084 未运行），停止后恢复原状
 - 上传的随机文件名图片残留于 uploads/（无害，未清）
+
+## 冒烟覆盖补充（2026-09）
+
+- 新增各后端模块内 `@WebMvcTest` 冒烟：`AIStoryboardBackend` 8 个 controller、`MoonAgent` 3 个 controller、`AILLMGateway` `/v1`+admin 鉴权、`ApiGateway` JWT 验签与过滤器。Mock 服务层、不连 DB/不调真实 LLM。
+- `scripts/e2e/` 补齐：unlogin / user 改资料·改密码·统计 / 项目完整更新 / 分镜重排 / 场景资产联动 / 资产删图 / 视频·音频文件 404 / internal 全部 11 端点（对·错密钥）/ MoonAgent pending-checkpoint·confirm-done·interrupt·tasks·generation-records·双队列·SSE 续流鉴权门 / 网关 `/v1` 视频 CRUD 契约与 `/api/canvas` 规则。
+- AI 生成接口默认仅校验契约与鉴权，不真实生成；需真实调用时设 `SMOKE_REAL_AI=1`。

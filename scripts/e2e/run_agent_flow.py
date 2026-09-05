@@ -121,6 +121,35 @@ def main():
     except Exception as e:
         T("SSE 流式(真实编排)", False, f"异常: {e}")
 
+    print("\n== B5.4b MoonAgent 补齐冒烟 ==")
+    st, raw = req("GET", f"/api/agent/conversations/{cid}/pending-checkpoint", token=ta)
+    T("pending-checkpoint", st in (200, 404), f"{st} {raw[:100]}")
+    st, raw = req("DELETE", f"/api/agent/conversations/{cid}/messages", token=ta)
+    T("清空消息", st == 200, f"{st} {raw[:100]}")
+    st, raw = req("POST", f"/api/agent/conversations/{cid}/confirm-done", token=ta)
+    T("confirm-done", st in (200, 400), f"{st} {raw[:100]}")
+    st, raw = req("POST", f"/api/agent/conversations/{cid}/interrupt", token=ta)
+    T("interrupt", st in (200, 400), f"{st} {raw[:100]}")
+    st, raw = req("GET", "/api/agent/tasks/__nonexistent__", token=ta)
+    T("tasks 状态", st in (200, 404), f"{st} {raw[:100]}")
+    st, raw = req("GET", "/api/agent/generation-records?page=1&size=20", token=ta)
+    T("generation-records 列表", st == 200, f"{st} {raw[:100]}")
+
+    # 队列：空 items → 400（不触发 LLM）；列表 → 200
+    st, raw = req("POST", "/api/agent/storyboards/image/queue", {"projectId": pid, "items": []}, token=ta)
+    T("image queue 空items→400", st == 400, f"{st} {raw[:100]}")
+    st, raw = req("POST", "/api/agent/storyboards/video/queue", {"projectId": pid, "items": []}, token=ta)
+    T("video queue 空items→400", st == 400, f"{st} {raw[:100]}")
+    st, raw = req("GET", f"/api/agent/storyboards/image/queue?projectId={pid}", token=ta)
+    T("image queue 列表", st == 200, f"{st} {raw[:100]}")
+    st, raw = req("GET", f"/api/agent/storyboards/video/queue?projectId={pid}", token=ta)
+    T("video queue 列表", st == 200, f"{st} {raw[:100]}")
+
+    # SSE 续流端点：只验鉴权门（不跑真实演算）
+    for p in (f"/api/agent/conversations/{cid}/form/submit", f"/api/agent/conversations/{cid}/video/plan/generate"):
+        st, raw = req("POST", p, {}, base=BASE_MA)
+        T(f"SSE {p} 无token→401/403", st in (401, 403), f"实际 {st}")
+
     print("\n== B5.5 清理 ==")
     st, raw = req("DELETE", f"/api/agent/conversations/{cid}", token=ta)
     T("删会话(级联)", st == 200, f"{st}")

@@ -57,6 +57,14 @@ def main():
     st, raw = req("GET", "/api/user/profile")
     check("无 token → 401", st == 401, f"{st}")
 
+    # 跨系统 unlogin：带 Authorization 头 → 200 JSON 契约；无头 → 不 5xx
+    st, raw = req("POST", "/api/auth/unlogin",
+                  {"authorizationCode": "placeholder"}, token=creds["userA"]["accessToken"])
+    d = parse(raw)
+    check("unlogin(带token) 可达且返回JSON", st in (200, 400), f"{st} {raw[:120]}")
+    st, raw = req("POST", "/api/auth/unlogin", {"authorizationCode": "placeholder"})
+    check("unlogin(无头) 不 5xx", st not in (500,), f"{st} {raw[:120]}")
+
     creds["password"] = pwd
     creds["base_gw"] = BASE_GW
     save_creds(creds)

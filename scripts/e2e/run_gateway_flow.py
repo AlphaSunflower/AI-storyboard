@@ -80,6 +80,33 @@ def main():
     st, raw = req("GET", "/api/agent/prompt/optimize", base=BASE_GW)
     T("经网关 /api/agent 白名单外 401", st == 401, f"{st}")
 
+    print("\n== B6.5 /v1 视频与新增端点契约 ==")
+    st, raw = req("POST", "/v1/videos",
+                  {"model": "gpt-image-2", "prompt": "a cat", "size": "512x512", "n": 1},
+                  headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM, timeout=60)
+    T("/v1/videos 创建(4xx/200不5xx)", st in (200, 400, 422), f"{st} {raw[:150]}")
+    st, raw = req("GET", "/v1/videos/__nonexistent__",
+                  headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM)
+    T("/v1/videos 轮询(非5xx)", st in (200, 400, 404), f"{st} {raw[:150]}")
+    st, raw = req("DELETE", "/v1/videos/__nonexistent__",
+                  headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM)
+    T("/v1/videos 取消(非5xx)", st in (200, 400, 404), f"{st} {raw[:150]}")
+    st, raw = req("GET", "/v1/videos/__nonexistent__/content",
+                  headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM)
+    T("/v1/videos content(非5xx)", st in (200, 404), f"{st}")
+
+    # 缺 key → 401（images/edits、files/upload 为 multipart，仅验鉴权门）
+    st, raw = req("POST", "/v1/images/edits", {}, base=BASE_LLM)
+    T("/v1/images/edits 缺key→401", st == 401, f"{st}")
+    st, raw = req("POST", "/v1/files/upload", {}, base=BASE_LLM)
+    T("/v1/files/upload 缺key→401", st == 401, f"{st}")
+
+    print("\n== B6.6 网关路由规则 ==")
+    st, raw = req("GET", "/api/canvas/x", base=BASE_GW)
+    T("经网关 /api/canvas 无token→401", st == 401, f"{st}")
+    st, raw = req("GET", "/admin/model-params", token=adm, base=BASE_LLM)
+    T("admin GET /model-params", st == 200, f"{st} {raw[:120]}")
+
     print(f"\n=== B6 完成：{'全部通过' if fails == 0 else f'{fails} 项失败'} ===")
     return 0 if fails == 0 else 1
 
