@@ -2,6 +2,8 @@ package com.storyboard.service;
 
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.SceneFull;
+import com.storyboard.dto.response.SceneReferenceResponse;
+import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.SceneAsset;
 
@@ -31,6 +33,12 @@ public interface InternalApiService {
 
     /** 关联资产到场景 */
     void linkSceneAssets(String sceneId, List<String> assetIds);
+
+    /** 挂载参考素材 URL 到场景（Agent 生成分镜后自动关联；按 URL 去重） */
+    void linkSceneReferences(String sceneId, List<SceneReferenceLinkRequest> links);
+
+    /** 查场景参考素材（含 role，供视频生成按首帧/尾帧/参考映射） */
+    List<SceneReferenceResponse> getSceneReferences(String sceneId);
 
     /** 查单个场景，不存在抛 40401 */
     SceneFull getScene(String sceneId);

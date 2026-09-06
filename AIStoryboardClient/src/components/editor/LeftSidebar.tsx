@@ -1,11 +1,14 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
-import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { REFERENCE_LIMITS, type UnderstandingModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
 import { AssetScriptPicker } from './AssetScriptPicker';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
+import { assetApi, type Asset } from '../../api/assets';
+import { assetUrl } from '../../config';
+import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
+import { Puzzle, Plus } from 'lucide-react';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -64,6 +67,19 @@ export function LeftSidebar() {
   // 资产生成（可选）：勾选的资产 id；先生成分镜已存在分镜时弹覆盖确认
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
+  // 侧栏内置「资产库」区块（独立于剧本输入，紧凑列表 + 打开完整面板）
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!currentProject) return;
+    setAssetsLoading(true);
+    assetApi.list(currentProject.id)
+      .then((res) => setAssets(res.data.data || []))
+      .catch(() => { /* 静默 */ })
+      .finally(() => setAssetsLoading(false));
+  }, [currentProject]);
 
   // 上传约束：优先当前理解模型 params（网关 model_params refImages/maxImageSizeMB），未配置回退静态兜底
   const uParams = understandingModelOptions.find((m) => m.value === understandingModel)?.params as UnderstandingModelParams | undefined;
@@ -172,10 +188,10 @@ export function LeftSidebar() {
         height: '100%',
         borderRight: '1px solid var(--color-hairline)',
         background: 'var(--color-canvas)',
-        padding: 'var(--space-md)',
+        padding: '24px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
+        gap: 18,
         overflowY: 'auto',
       }}
     >
@@ -190,10 +206,10 @@ export function LeftSidebar() {
         >
           剧本输入
         </h2>
-        <button
-          onClick={() => setCollapsed(true)}
-          title="折叠面板"
-          style={{
+          <button
+            onClick={() => setCollapsed(true)}
+            title="折叠面板"
+            style={{
             background: 'none',
             border: 'none',
             cursor: 'pointer',
@@ -203,6 +219,8 @@ export function LeftSidebar() {
             borderRadius: 'var(--rounded-sm)',
             lineHeight: 1,
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-soft)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
@@ -241,11 +259,13 @@ export function LeftSidebar() {
         <textarea
           value={scriptText}
           onChange={(e) => setScriptText(e.target.value)}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(204,120,92,0.12)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
           disabled={agentGeneratedScenes}
           placeholder={agentGeneratedScenes ? '分镜已由智能体生成，如需手动生成请刷新页面' : '输入剧本或创作描述，AI 将自动拆解为分镜...'}
           style={{
             ...sharedInputStyle,
-            minHeight: 100,
+            minHeight: 170,
             resize: 'vertical',
             lineHeight: 1.55,
             background: agentGeneratedScenes ? 'var(--color-primary-disabled)' : 'white',
@@ -334,9 +354,45 @@ export function LeftSidebar() {
           fontWeight: 500,
           cursor: isLoading || !scriptText.trim() || agentGeneratedScenes ? 'not-allowed' : 'pointer',
         }}
+        onMouseEnter={(e) => { if (!isLoading && scriptText.trim() && !agentGeneratedScenes) e.currentTarget.style.background = 'var(--color-primary-active)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = isLoading || !scriptText.trim() || agentGeneratedScenes ? 'var(--color-primary-disabled)' : 'var(--color-primary)'; }}
       >
         {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
+
+      {/* 资产库（独立于剧本输入，侧栏内嵌） */}
+      <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+            <Puzzle size={13} strokeWidth={1.8} /> 资产库
+          </span>
+          <button
+            onClick={() => setAssetsOpen(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', fontSize: 12, padding: '4px 10px', borderRadius: 'var(--rounded-sm)', cursor: 'pointer' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; e.currentTarget.style.color = 'white'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-primary)'; }}
+          ><Plus size={13} strokeWidth={1.8} /> 管理</button>
+        </div>
+        {assetsLoading ? (
+          <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>加载中…</div>
+        ) : assets.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--color-muted-soft)' }}>暂无资产，点击「管理」新建</div>
+        ) : (
+          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {assets.map((a) => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 'var(--rounded-sm)', background: 'white', border: '1px solid var(--color-hairline)' }}>
+                {a.images?.[0]
+                  ? <img src={assetUrl(a.images[0].url)} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 'var(--rounded-sm)', flexShrink: 0 }} />
+                  : <div style={{ width: 34, height: 34, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>无图</div>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{a.type === 'character' ? '人物' : a.type === 'prop' ? '道具' : '场景'}{a.projectId ? '' : ' · 全局'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {confirmOverwrite && (
         <div
@@ -356,28 +412,15 @@ export function LeftSidebar() {
             <h3 style={{ margin: '0 0 8px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>项目已有 {scenes.length} 个分镜</h3>
             <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>选择如何处理本次生成：</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: 'none', background: 'var(--color-primary)', color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)', fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
-              <button onClick={() => setConfirmOverwrite(null)} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary-active)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: 'none', background: 'var(--color-primary)', color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)', fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
+              <button onClick={() => setConfirmOverwrite(null)} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Divider + project history — independently scrollable */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'scroll', minHeight: 120 }}>
-        <div style={{ borderTop: '1px solid var(--color-hairline)', marginBottom: 8 }} />
-        <div style={{
-          font: 'var(--text-caption-upper)',
-          fontSize: 11,
-          color: 'var(--color-muted)',
-          marginBottom: 6,
-          flexShrink: 0,
-        }}>
-          历史项目
-        </div>
-        <ProjectHistoryPanel />
-      </div>
+      {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
     </div>
   );
 }

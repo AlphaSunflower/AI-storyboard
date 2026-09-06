@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.ScenePrompt;
+import com.storyboard.entity.SceneReferenceImage;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
+import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.AssetService;
+import com.storyboard.service.FileStorageService;
 import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ScriptGenerationService;
 import com.storyboard.ai.AiConfigProperties;
@@ -50,7 +53,9 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ScenePromptMapper scenePromptMapper;
+    private final SceneReferenceImageMapper sceneReferenceImageMapper;
     private final AssetService assetService;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
     private final com.storyboard.config.PromptConfig promptConfig;
@@ -129,6 +134,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                     .eq(Scene::getProjectId, projectId));
         }
         // 批量写库（原 AIController.generateScript 的循环落库逻辑下沉至此）
+        List<Scene> inserted = new ArrayList<>();
         for (Map<String, Object> s : scenes) {
             Scene scene = new Scene();
             scene.setProjectId(projectId);
@@ -144,8 +150,45 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             prompt.setShotType((String) s.get("shotType"));
             prompt.setSoundDesign((String) s.get("soundDesign"));
             scenePromptMapper.insert(prompt);
+            inserted.add(scene);
         }
+        linkGeneratedMaterials(inserted, referenceImages, assetIds);
         return Map.of("projectId", projectId, "sceneCount", scenes.size());
+    }
+
+    /** 手动生成分镜后：把本次上传参考图/选中资产挂载到每个新分镜（用户可在分镜审查卡逐镜调整）。 */
+    private void linkGeneratedMaterials(List<Scene> scenes, List<String> referenceImages, List<String> assetIds) {
+        if (scenes == null || scenes.isEmpty()) return;
+        try {
+            if (assetIds != null && !assetIds.isEmpty()) {
+                for (Scene s : scenes) {
+                    assetService.linkSceneAssets(s.getId(), assetIds);
+                }
+            }
+            if (referenceImages != null && !referenceImages.isEmpty()) {
+                List<String> savedUrls = new ArrayList<>();
+                for (String ref : referenceImages) {
+                    if (ref == null || ref.isBlank()) continue;
+                    try { savedUrls.add(fileStorageService.saveImageFromBase64(ref)); }
+                    catch (Exception e) { log.warn("参考图保存失败，跳过挂载: {}", e.getMessage()); }
+                }
+                for (Scene s : scenes) {
+                    int idx = 0;
+                    for (String url : savedUrls) {
+                        SceneReferenceImage ref = new SceneReferenceImage();
+                        ref.setSceneId(s.getId());
+                        ref.setImageUrl(url);
+                        ref.setType("image");
+                        ref.setPurpose("video");
+                        ref.setRole("REFERENCE");
+                        ref.setSortOrder(idx++);
+                        sceneReferenceImageMapper.insert(ref);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("手动分镜素材挂载失败（分镜不受影响）: {}", e.getMessage());
+        }
     }
 
     /**

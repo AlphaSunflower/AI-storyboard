@@ -73,9 +73,12 @@ public interface AgentChatService {
      * 上传参考图：校验会话归属（可选）→ 保存图片 → 落库 agent_assets(type=reference) →
      * 参考图作为 user 消息落库（conversationId 非空时，前端对话窗口可见）。
      *
+     * @param purpose 用户填写的用途/说明（如「人物参考（锁脸）」，可空）
+     * @param kind    素材类型：reference（默认）/ asset（带文字约束，无需整理）
      * @return 图片 URL（/api/files/images/xxx）
      */
-    String uploadReferenceImage(String userId, String conversationId, MultipartFile file);
+    String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
+                                String purpose, String kind);
 
     /**
      * 发送消息：落库 user 消息（独立事务）→ 编排回答 → 落库 assistant 消息。
@@ -123,6 +126,12 @@ public interface AgentChatService {
      * @return checkpoint 恢复数据（formToken/formContent/actions/expirationTime + 可选 models/assets）；null=无待处理
      */
     Map<String, Object> getPendingCheckpoint(String conversationId);
+
+    /**
+     * 跳过当前会话所有待处理 HITL checkpoint（Mark expired），防止刷新/切换会话后旧卡片恢复。
+     * 归属校验与 {@link #getPendingCheckpoint} 一致。
+     */
+    void skipPendingCheckpoints(String userId, String conversationId);
 
     /**
      * 打断当前会话的生成（「停止生成」按钮）：校验归属 → 置位会话级 interrupt 标志。

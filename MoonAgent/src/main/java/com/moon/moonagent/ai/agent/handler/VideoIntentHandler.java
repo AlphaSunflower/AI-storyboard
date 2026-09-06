@@ -44,14 +44,20 @@ public class VideoIntentHandler implements IntentHandler {
 
     @Override
     public String handle(OrchestrationRequest request) {
-        // 2026-08-28 用户反馈（第6次拍板）：项目有资产时一律弹「资产选择卡」让用户勾选，杜绝自动全投（否则无关资产
-        // 如「咕咕嘎嘎」也被投进）。判定优先级：
-        //  1) assetIds 非空（用户已勾选）→ 直接用勾选资产；
-        //  2) 项目有资产 → 弹 asset-selection 卡（用户勾选才投；默认不勾，绝不自动全投）；
-        //  3) 项目无资产 + 有参考图 → 直接用参考图；
-        //  4) 项目无资产 + 无图 → 走需求澄清 gate。
+        // 2026-09-05 用户反馈（再一次拍板）：不再弹「本次生成视频，要投入哪些资产库资产？（可多选）」门禁——
+        // 该交互无意义，改为直接用「用户本次自然携带的资产/参考图」。判定优先级：
+        //  1) assetIds 非空（用户已携带）→ 直接用这些资产；
+        //  2) 有参考图（picUrls）→ 直接用参考图；
+        //  3) 无资产无图 → 走需求澄清 gate。
         List<AssetVO> projectAssets = storyboardClient.getProjectAssets(request.getConversation().getProjectId());
         List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
+        if (picUrls.isEmpty()) {
+            List<String> restored = support.referenceMaterialUrls(request.getConversation().getId());
+            if (!restored.isEmpty()) {
+                request.setPicUrls(restored);
+                picUrls = restored;
+            }
+        }
         List<String> assetIds = request.getAssetIds() == null ? List.of() : request.getAssetIds();
         log.info("[视频编排] handle 入口: conversationId={}, projectId={}, 本次带资产ids={}, 项目库存量资产数={}, 本次参考图数={}",
                 request.getConversation().getId(), request.getConversation().getProjectId(),
@@ -60,20 +66,6 @@ public class VideoIntentHandler implements IntentHandler {
             // 用户已选中资产 → 直接用该资产设计方案（资产图当参考图），不弹「是否投资产」卡
             log.info("[视频编排] 用户本次选中了资产({}个)，直接进视频方案（不再弹「是否投资产」）", assetIds.size());
             return handleFromVideoClarifyGate(request, request.getContent(), assetIds, picUrls);
-        }
-        if (projectAssets != null && !projectAssets.isEmpty()) {
-            // 项目有资产但用户未勾选 → 弹卡让用户勾选（默认不勾，绝不自动全投，防空投无关资产）
-            log.info("[视频编排] 项目有资产({}个)且用户未勾选，弹 asset-selection 卡让用户选择（不自动投）", projectAssets.size());
-            return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
-                    "本次生成视频，要投入哪些资产库资产？（可多选；不选则只用你上传的参考图）",
-                    "asset-selection",
-                    List.of(Map.of("content", request.getContent(), "source", "video",
-                            "picUrls", picUrls)),
-                    "human_input",
-                    List.of(Map.of("id", "asset-confirm", "title", "使用所选资产"),
-                            Map.of("id", "asset-skip", "title", "不使用资产，只用参考图")),
-                    List.of(), Map.of(), Map.of(), List.of(), List.of(),
-                    support.buildAssetOptions(projectAssets)));
         }
         if (picUrls.isEmpty()) {
             // 无资产无参考图 → 走需求澄清 gate
@@ -281,6 +273,24 @@ public class VideoIntentHandler implements IntentHandler {
             String enriched = content
                     + (ctx.isBlank() ? "" : ctx)
                     + (sheet.isBlank() ? "" : "\n\n【本次投入的资产设定，视频方案必须体现且不得改变】\n" + sheet);
+            // 用户上传素材时填写的用途（agent_assets.purpose）→ 通知视频方案按 @图片N 锚定（H3 参考素材说明）
+            java.util.Map<String, String> uploadPurposes = support.referenceMaterialPurposes(
+                    request.getConversation().getId());
+            if (!uploadPurposes.isEmpty() && sources != null && !sources.isEmpty()) {
+                StringBuilder purposeText = new StringBuilder("\n\n【本次上传素材用途（H3 参考素材说明，不得改变）】\n");
+                int purposeIdx = 1;
+                boolean hasPurpose = false;
+                for (String s : sources) {
+                    if (s == null || s.isBlank()) continue;
+                    String p = uploadPurposes.getOrDefault(s, "");
+                    if (!p.isBlank()) {
+                        purposeText.append("@图片").append(purposeIdx).append(" 是").append(p.trim()).append("\n");
+                        hasPurpose = true;
+                    }
+                    purposeIdx++;
+                }
+                if (hasPurpose) enriched = enriched + purposeText;
+            }
             // 用户已在 video-role-select 选中参考图角色 → 把角色诉求拼入方案输入，让视觉/LLM 按要求产出
             String referenceRole = request.getParams() == null ? null : request.getParams().get("referenceRole");
             if (referenceRole != null && !referenceRole.isBlank()) {

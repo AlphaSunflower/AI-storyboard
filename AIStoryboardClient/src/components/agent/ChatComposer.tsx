@@ -37,15 +37,20 @@ export const DS = {
 export function ChatComposer() {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
-    refImageUrls, addRefImageUrls, uploadRefImages, sendMessage, stopGeneration,
+    refImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
-    pickedAssetIds, addPickedAssetId, clearPickedAssetIds,
+    pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  const [uploadDrafts, setUploadDrafts] = useState<Array<{
+    file: File;
+    preview: string;
+    purpose: string;
+  }>>([]);
   // HumanInputCard 折叠状态
   const [hitlCollapsed, setHitlCollapsed] = useState(false);
   // pickedAssetIds 现在从 store 获取，持久化不丢失
@@ -111,7 +116,7 @@ export function ChatComposer() {
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetList, setAssetList] = useState<Asset[]>([]);
   const [assetLoading, setAssetLoading] = useState(false);
-  const [assetSelectedId, setAssetSelectedId] = useState<string | null>(null);
+  const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
   const [assetError, setAssetError] = useState('');
 
   // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
@@ -142,15 +147,34 @@ export function ChatComposer() {
     clearPickedAssetIds();
   };
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
+    setUploadDrafts(files.map((file) => ({
+      file,
+      preview: URL.createObjectURL(file),
+      purpose: '',
+    })));
+    e.target.value = '';
+  };
+
+  const closeUploadDrafts = () => {
+    uploadDrafts.forEach((d) => URL.revokeObjectURL(d.preview));
+    setUploadDrafts([]);
+  };
+
+  const handleUploadConfirm = async () => {
+    const drafts = uploadDrafts;
+    if (drafts.length === 0) return;
     try {
-      await uploadRefImages(files);
+      await uploadRefImages(
+        drafts.map((d) => d.file),
+        drafts.map((d) => d.purpose.trim()),
+      );
     } catch {
       alert('图片上传失败');
     }
-    e.target.value = '';
+    closeUploadDrafts();
   };
 
   const openMenu = () => {
@@ -186,15 +210,32 @@ export function ChatComposer() {
       setAssetLoading(false);
     }
   };
-  const handleAssetOpen = () => { setAssetOpen(true); setAssetSelectedId(null); void loadAssetList(); };
-  const handleAssetConfirm = () => {
-    const picked = assetList.find((a) => a.id === assetSelectedId);
-    const urls = (picked?.images ?? []).map((img) => img.url).filter(Boolean);
-    if (urls.length === 0) { setAssetError('该资产暂无图片'); return; }
-    addRefImageUrls(urls);
-    // 记录选中资产 id：发消息时随 assetIds 传给后端，编排识别「用户已投资产」→ 直接用资产，不再弹「是否投资产」
-    if (assetSelectedId) addPickedAssetId(assetSelectedId);
-    setAssetOpen(false); setAssetSelectedId(null);
+  const handleAssetOpen = () => {
+    setAssetOpen(true);
+    setAssetSelected(new Set(pickedAssetIds));
+    void loadAssetList();
+  };
+  const handleAssetConfirm = async () => {
+    if (assetSelected.size === 0) { setAssetError('请至少选择一个资产'); return; }
+    if (!useAgentStore.getState().activeConversationId) {
+      await useAgentStore.getState().createConversation();
+    }
+    // 只选中资产 id；资产图片由后端在生成阶段按资产 id 读取，不混入参考图列表
+    const picked = assetList.filter((a) => assetSelected.has(a.id));
+    setPickedAssetIds(Array.from(assetSelected));
+    if (picked.length) {
+      addLocalUserMessage(`已选择资产：${picked.map((a) => a.name).join('、')}（${picked.length} 个）`);
+    }
+    setAssetOpen(false);
+    setAssetSelected(new Set());
+  };
+  const toggleAsset = (id: string) => {
+    setAssetSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   return (
@@ -442,7 +483,52 @@ export function ChatComposer() {
         document.body
       )}
 
-      {/* 「上传资产」从资产库选择参考图：assetApi.list → 选中资产图片设 refImageUrl */}
+      {/* 上传素材前填写用途/类型 */}
+      {uploadDrafts.length > 0 && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}
+          onClick={closeUploadDrafts}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 520, maxWidth: '92vw', background: 'white', borderRadius: 16, padding: 18,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>上传参考图 · 写清每张是干什么的</div>
+            <div style={{ fontSize: 12, color: DS.textCaption, lineHeight: 1.5 }}>
+              这里是参考图；资产请在「上传资产」里选择。用途会作为 H3 参考素材说明绑定到生成（例如：人物参考（锁脸）/ 场景参考 / 风格参考）。
+            </div>
+            <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {uploadDrafts.map((d, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', borderRadius: 12, background: DS.hover, border: `1px solid ${DS.border}` }}>
+                  <img src={d.preview} alt={`素材${i + 1}`} style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <input
+                      value={d.purpose}
+                      onChange={(e) => setUploadDrafts((prev) => prev.map((x, idx) => idx === i ? { ...x, purpose: e.target.value } : x))}
+                      placeholder="这张图是干什么的？（可留空，智能体会看图识别）"
+                      style={{
+                        width: '100%', border: `1px solid ${DS.border}`, borderRadius: 8, padding: '7px 10px',
+                        fontSize: 13, color: DS.ink, outline: 'none', background: 'white', boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={closeUploadDrafts} style={{
+                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
+                color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
+              }}>取消</button>
+              <button onClick={handleUploadConfirm} style={{
+                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
+                fontSize: 14, cursor: 'pointer',
+              }}>上传 {uploadDrafts.length} 张</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 「上传资产」从资产库选择资产：只记录资产 id，不把资产图片混入参考图列表 */}
       {assetOpen && createPortal(
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
           onClick={() => setAssetOpen(false)}>
@@ -450,15 +536,16 @@ export function ChatComposer() {
             width: 420, maxWidth: '90vw', background: 'white', borderRadius: 16, padding: 18,
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>选择已有资产作为参考图</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>选择资产（可多选，再次点击取消）</div>
+            <div style={{ fontSize: 12, color: DS.textCaption }}>资产图会在生成阶段按资产读取，不会加入“参考图”列表。</div>
             {assetLoading ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>加载中…</div>
               : assetList.length === 0 ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>当前项目资产库为空，可先在「资源库」创建资产</div>
               : <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {assetList.map((a) => (
-                    <button key={a.id} onClick={() => setAssetSelectedId(a.id)} style={{
+                    <button key={a.id} onClick={() => toggleAsset(a.id)} style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 8, borderRadius: 12,
-                      border: `1px solid ${assetSelectedId === a.id ? DS.brand : DS.border}`,
-                      background: assetSelectedId === a.id ? DS.hover : 'white', cursor: 'pointer', textAlign: 'left',
+                      border: `1px solid ${assetSelected.has(a.id) ? DS.brand : DS.border}`,
+                      background: assetSelected.has(a.id) ? DS.hover : 'white', cursor: 'pointer', textAlign: 'left',
                     }}>
                       {a.images?.[0]
                         ? <img src={assetUrl(a.images[0].url)} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
@@ -467,6 +554,7 @@ export function ChatComposer() {
                         <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
                         <div style={{ fontSize: 11, color: DS.textCaption }}>{ASSET_TYPE_LABEL[a.type]}{a.projectId ? '' : '·全局'} · {a.images?.length ?? 0} 图</div>
                       </div>
+                      <span style={{ fontSize: 16, color: assetSelected.has(a.id) ? DS.brand : 'transparent' }}>✓</span>
                     </button>
                   ))}
                 </div>}
@@ -476,10 +564,10 @@ export function ChatComposer() {
                 padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
                 color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
               }}>取消</button>
-              <button onClick={handleAssetConfirm} disabled={!assetSelectedId} style={{
+              <button onClick={handleAssetConfirm} disabled={assetSelected.size === 0} style={{
                 padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
-                fontSize: 14, cursor: assetSelectedId ? 'pointer' : 'not-allowed', opacity: assetSelectedId ? 1 : 0.45,
-              }}>设为参考图</button>
+                fontSize: 14, cursor: assetSelected.size === 0 ? 'not-allowed' : 'pointer', opacity: assetSelected.size === 0 ? 0.45 : 1,
+              }}>确认选择{assetSelected.size ? `（${assetSelected.size}）` : ''}</button>
             </div>
           </div>
         </div>,

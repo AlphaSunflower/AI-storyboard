@@ -93,14 +93,16 @@ interface AgentState {
   setRefImageUrls: (v: string[]) => void;
   addRefImageUrls: (urls: string[]) => void;
   removeRefImageUrl: (index: number) => void;
-  uploadRefImage: (file: File) => Promise<void>;
-  uploadRefImages: (files: File[]) => Promise<void>;
+  uploadRefImage: (file: File, purpose?: string, kind?: 'reference' | 'asset') => Promise<void>;
+  uploadRefImages: (files: File[], purposes?: string[], kinds?: Array<'reference' | 'asset'>) => Promise<void>;
+  addLocalUserMessage: (content: string) => void;
 
   // 本次携带的资产ID（持久化到发送时消费，不随渲染丢失）
   pickedAssetIds: string[];
   addPickedAssetId: (id: string) => void;
   removePickedAssetId: (id: string) => void;
   clearPickedAssetIds: () => void;
+  setPickedAssetIds: (ids: string[]) => void;
 
   // 互斥标志（会话级，刷新即恢复）
   agentGeneratedScenes: boolean;
@@ -325,9 +327,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   addPickedAssetId: (id) => set((s) => ({ pickedAssetIds: [...new Set([...s.pickedAssetIds, id])] })),
   removePickedAssetId: (id) => set((s) => ({ pickedAssetIds: s.pickedAssetIds.filter((a) => a !== id) })),
   clearPickedAssetIds: () => set({ pickedAssetIds: [] }),
+  setPickedAssetIds: (ids) => set(() => ({ pickedAssetIds: [...new Set(ids)] })),
 
-  uploadRefImage: async (file) => {
-    const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined);
+  uploadRefImage: async (file, purpose?, kind?) => {
+    const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined, purpose, kind);
     const url = res.data.data.url;
     set((s) => ({ refImageUrls: [...s.refImageUrls, url] }));
     // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）。
@@ -344,11 +347,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     };
     set((s) => ({ messages: [...s.messages, refMsg] }));
   },
-  uploadRefImages: async (files) => {
-    for (const f of files) {
-      try { await get().uploadRefImage(f); } catch { /* 单张失败跳过，不阻断其他张 */ }
+  uploadRefImages: async (files, purposes, kinds) => {
+    for (let i = 0; i < files.length; i++) {
+      try { await get().uploadRefImage(files[i], purposes?.[i], kinds?.[i]); } catch { /* 单张失败跳过，不阻断其他张 */ }
     }
   },
+  addLocalUserMessage: (content) => set((s) => ({
+    messages: [...s.messages, {
+      id: `tmp-asset-${Date.now()}`,
+      conversationId: s.activeConversationId ?? '',
+      role: 'user',
+      content,
+      createdAt: new Date().toISOString(),
+    }],
+  })),
 
   agentGeneratedScenes: false,
   setAgentGeneratedScenes: (v) => set({ agentGeneratedScenes: v }),
@@ -383,6 +395,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
     // 不先存会导致首条消息 picUrls 丢失（首会话上传图「说话后被吞」）
     const refBefore = get().refImageUrls.map((u) => u);
+    // 同样的坑：createConversation → selectConversation 会清空 pickedAssetIds，必须先快照
+    const assetIdsBefore = get().pickedAssetIds.map((id) => id);
     let id = get().activeConversationId;
     // 未选对话但已选项目：自动新建对话并选中，避免用户消息被吞
     if (!id) {
@@ -519,7 +533,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
             // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
-            if (typeof e.sceneCount === 'number' && e.sceneCount !== initialSceneCount) {
+            if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
               if (e.sceneCount > initialSceneCount) {
                 get().setAgentGeneratedScenes(true);
               }
@@ -561,7 +575,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal);
+      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
+        : assetIdsBefore.length > 0 ? assetIdsBefore
+        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -748,7 +764,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
             // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
-            if (typeof e.sceneCount === 'number' && e.sceneCount !== initialSceneCount) {
+            if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
               if (e.sceneCount > initialSceneCount) {
                 get().setAgentGeneratedScenes(true);
               }
@@ -1152,6 +1168,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   /** 跳过当前 HITL 卡片：清除等待状态，让用户继续输入其他话题（checkpoint 30 分钟后自动过期） */
   skipCurrentHITL: () => {
     const id = get().activeConversationId;
+    // 后端作废 pending checkpoint，防止刷新/切换会话后旧卡片恢复
+    if (id) void agentApi.skipPendingCheckpoint(id).catch(() => {});
     set((s) => { const h = { ...s.hitlVideoPlan }; if (id) delete h[id]; return { waitingHumanInput: null,
        waitingVideoPlan: null, hitlVideoPlan: h }; });
   },

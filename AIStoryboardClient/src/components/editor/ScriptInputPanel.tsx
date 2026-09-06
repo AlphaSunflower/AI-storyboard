@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { VideoPresetSelector, resolveVideoPreset } from '../common/VideoPresetSelector';
-import { ProjectHistoryPanel } from './ProjectHistoryPanel';
 import { IMAGE_SIZES, IMAGE_QUALITIES, type ImageModelParams } from '../../config';
 import SpecularButton from '../SpecularButton';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
@@ -230,6 +229,8 @@ export function ScriptInputPanel() {
         <textarea
           value={scriptText}
           onChange={(e) => setScriptText(e.target.value)}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(204,120,92,0.12)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
           placeholder="输入剧本或创作描述，AI 将自动拆解为分镜..."
           style={{
             ...sharedInputStyle,
@@ -346,7 +347,6 @@ export function ScriptInputPanel() {
       </SpecularButton>
 
       {/* Project history — vertical compact list, only when expanded */}
-      {!collapsed && <ProjectHistoryPanel />}
     </div>
   );
 }

@@ -37,7 +37,7 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
 
     /** 分镜关联结构化输出（sceneNumber 与输入分镜列表的分镜号对齐） */
     public record MatchOutput(List<SceneItem> scenes) {
-        public record SceneItem(int sceneNumber, List<String> assetIds) {}
+        public record SceneItem(String sceneNumber, List<String> assetIds) {}
     }
 
     private final ChatClient.Builder chatClientBuilder;
@@ -90,7 +90,9 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
             List<SceneAssetMatch> result = new ArrayList<>();
             for (MatchOutput.SceneItem item : out.scenes()) {
                 if (item == null || item.assetIds() == null) continue;
-                result.add(new SceneAssetMatch(item.sceneNumber(),
+                int sceneNumber = parseSceneNumber(item.sceneNumber());
+                if (sceneNumber <= 0) continue;
+                result.add(new SceneAssetMatch(sceneNumber,
                         item.assetIds().stream().filter(java.util.Objects::nonNull).toList()));
             }
             log.info("分镜自动关联判定完成: scenes={}, matches={}", scenes.size(), result.size());
@@ -99,6 +101,15 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
             log.warn("分镜自动关联判定 LLM 调用失败，跳过关联: {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /** 兼容 LLM 输出 "37" / "[分镜37]" / "分镜37" → 37；非法返回 0。 */
+    static int parseSceneNumber(String raw) {
+        if (raw == null) return 0;
+        String digits = raw.replaceAll("[^0-9]", "");
+        if (digits.isBlank()) return 0;
+        try { return Integer.parseInt(digits); }
+        catch (NumberFormatException e) { return 0; }
     }
 
     /** 资产清单文本（name/type/description/id，供 LLM 判定） */

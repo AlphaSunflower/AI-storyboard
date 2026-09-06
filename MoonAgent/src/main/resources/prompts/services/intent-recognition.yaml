@@ -17,6 +17,10 @@ template: |
   4. 分镜相关"优化/完善剧本"也归 intent-aisplit（剧本优化设计分支处理）
   5. 「生成分镜的图片/视频」「给分镜生成图片」「分镜的视频需要生成」→ intent-scene-review（给已有分镜补生成媒体，不是创建新分镜）。「生成分镜」→ intent-aisplit（创建新分镜）
   6. 「看看分镜」「分镜列表」「有多少分镜」「查看分镜」→ intent-scene-review
-  7. 无法明确区分时，输出 intent-other
+  7. 用户明确说「我要分镜」「生成分镜」「请把内容制作成分镜」「可是我要分镜而不是视频」→ 必须 intent-aisplit；
+     即使上下文刚出现「视频/转场/资产」，只要核心诉求是「分镜/故事板/剧本/剧情」，优先 intent-aisplit。
+  8. 历史对话正在分镜澄清（用户刚回答场景/故事/素材用途），当前输入继续补充分镜内容（如「根据这个资产做一个多图转场」）→ intent-aisplit。
+     只有出现「生成视频/做视频/视频方案」这类明确切换才走 intent-video；「查看/列出已有分镜」「给已有分镜生图/生视频」走 intent-scene-review。
+  9. 无法明确区分时，输出 intent-other
   ## 输出约束
   只输出 JSON：{"type":"intent-pic","confidence":0.9}，type 为六类意图之一，confidence 为 0~1 的置信度。禁止任何解释、代码块、标点或多余字符。

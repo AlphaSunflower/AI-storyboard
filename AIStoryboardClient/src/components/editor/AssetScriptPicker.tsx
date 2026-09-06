@@ -41,6 +41,8 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
         <button
           type="button"
           onClick={() => setOpen(true)}
+          onMouseEnter={(e) => { if (!value.length) e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.background = 'var(--color-surface-soft)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = value.length ? 'var(--color-primary)' : 'var(--color-hairline)'; e.currentTarget.style.background = value.length ? 'var(--color-surface-card)' : 'white'; }}
           style={{
             flex: 1,
             padding: '8px 10px',
@@ -56,7 +58,7 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
           {value.length ? `已选 ${value.length} 个资产` : '选择资产约束分镜…'}
         </button>
         {value.length > 0 && (
-          <button type="button" onClick={() => onChange([])} style={{ padding: '4px 8px', fontSize: 12, border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer' }}>清空</button>
+          <button type="button" onClick={() => onChange([])} onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-error)'; }} onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; }} style={{ padding: '4px 8px', fontSize: 12, border: 'none', background: 'none', color: 'var(--color-muted)', cursor: 'pointer', borderRadius: 6 }}>清空</button>
         )}
       </div>
 
@@ -80,6 +82,8 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
               <span style={{ flex: 1, font: 'var(--text-title-md)', color: 'var(--color-ink)' }}>选择要约束分镜的资产</span>
               <button
                 onClick={() => setOpen(false)}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--color-primary-active)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--color-primary)'; }}
                 style={{ padding: '6px 16px', border: 'none', borderRadius: 'var(--rounded-md)', background: 'var(--color-primary)', color: 'white', fontSize: 13, cursor: 'pointer' }}
               >
                 确定
@@ -99,6 +103,8 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
                   <div
                     key={a.id}
                     onClick={() => toggle(a.id)}
+                    onMouseEnter={(e) => { if (!checked) e.currentTarget.style.background = 'var(--color-surface-soft)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = checked ? 'var(--color-surface-card)' : 'white'; }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
                       background: checked ? 'var(--color-surface-card)' : 'white',

@@ -110,7 +110,7 @@ function MarkdownContent({ content, onImgClick }: { content: string; onImgClick:
       return rawImg ? `![图片](${rawImg[0]})` : line;
     }).join('\n');
     nodes.push(
-      <div key={key} style={{ whiteSpace: 'normal' }}>
+      <div key={key} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{

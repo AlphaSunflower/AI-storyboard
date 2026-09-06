@@ -55,6 +55,7 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
                 lastMessage = handler.resume(request, cp);
             } else {
                 log.info("Agent[{}] 处理(handle): 会话={}", handler.intentType(), context.conversation().getId());
+                request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
                 lastMessage = handler.handle(request);
             }
 

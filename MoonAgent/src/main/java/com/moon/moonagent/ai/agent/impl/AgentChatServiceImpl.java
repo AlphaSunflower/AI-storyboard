@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.entity.AgentAsset;
+import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
@@ -323,7 +324,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @Override
-    public String uploadReferenceImage(String userId, String conversationId, MultipartFile file) {
+    public String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
+                                       String purpose, String kind) {
         // 校验会话归属（传了 conversationId 时）
         if (conversationId != null && !conversationId.isBlank()) {
             getOwnedConversation(userId, conversationId);
@@ -335,6 +337,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         asset.setConversationId(conversationId != null && !conversationId.isBlank() ? conversationId : null);
         asset.setType("reference");
         asset.setUrl(url);
+        asset.setPurpose(purpose == null || purpose.isBlank() ? null : purpose.trim());
+        asset.setKind((kind == null || kind.isBlank()) ? "reference" : kind.trim());
         asset.setStatus("completed");
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
@@ -426,6 +430,10 @@ public class AgentChatServiceImpl implements AgentChatService {
             return;
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        log.info("[Agent 消息接收] conversationId={}, picUrls={}, assetIds={}",
+                conversationId,
+                picUrls == null ? List.of() : picUrls,
+                assetIds == null ? List.of() : assetIds);
 
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取，防双实例并发启动）
         if (!conversationLock.tryAcquire(conversationId)) {
@@ -862,6 +870,17 @@ public class AgentChatServiceImpl implements AgentChatService {
             log.warn("解析 pending checkpoint 失败: conversationId={}, error={}", conversationId, e.getMessage());
             return null;
         }
+    }
+
+    @Override
+    public void skipPendingCheckpoints(String userId, String conversationId) {
+        getOwnedConversation(userId, conversationId);
+        int updated = checkpointMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentCheckpoint>()
+                        .eq("conversation_id", conversationId)
+                        .eq("status", "pending")
+                        .set("status", "expired"));
+        log.info("Agent 跳过待处理确认: conversationId={}, expiredCount={}", conversationId, updated);
     }
 
     @Override

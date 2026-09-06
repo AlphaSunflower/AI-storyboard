@@ -7,17 +7,21 @@ import com.storyboard.common.BusinessException;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.SceneFull;
+import com.storyboard.dto.response.SceneReferenceResponse;
+import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Asset;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
 import com.storyboard.entity.ScenePrompt;
+import com.storyboard.entity.SceneReferenceImage;
 import com.storyboard.mapper.AssetImageMapper;
 import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
+import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.InternalApiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +40,7 @@ public class InternalApiServiceImpl implements InternalApiService {
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ScenePromptMapper scenePromptMapper;
+    private final SceneReferenceImageMapper sceneReferenceImageMapper;
     private final SceneAssetMapper sceneAssetMapper;
     private final AssetMapper assetMapper;
     private final AssetImageMapper assetImageMapper;
@@ -108,11 +113,52 @@ public class InternalApiServiceImpl implements InternalApiService {
     @Override
     public void linkSceneAssets(String sceneId, List<String> assetIds) {
         for (String assetId : assetIds) {
-            SceneAsset link = new SceneAsset();
-            link.setSceneId(sceneId);
-            link.setAssetId(assetId);
-            sceneAssetMapper.insert(link);
+            if (assetId == null || assetId.isBlank()) continue;
+            for (String purpose : List.of("image", "video")) {
+                long exists = sceneAssetMapper.selectCount(new LambdaQueryWrapper<SceneAsset>()
+                        .eq(SceneAsset::getSceneId, sceneId)
+                        .eq(SceneAsset::getAssetId, assetId)
+                        .eq(SceneAsset::getPurpose, purpose));
+                if (exists > 0) continue;
+                SceneAsset link = new SceneAsset();
+                link.setSceneId(sceneId);
+                link.setAssetId(assetId);
+                link.setPurpose(purpose);
+                sceneAssetMapper.insert(link);
+            }
         }
+    }
+
+    @Override
+    public void linkSceneReferences(String sceneId, List<SceneReferenceLinkRequest> links) {
+        if (links == null || links.isEmpty()) return;
+        int sort = (int) (long) sceneReferenceImageMapper.selectCount(
+                new LambdaQueryWrapper<SceneReferenceImage>().eq(SceneReferenceImage::getSceneId, sceneId));
+        for (SceneReferenceLinkRequest link : links) {
+            if (link == null || link.url() == null || link.url().isBlank()) continue;
+            long exists = sceneReferenceImageMapper.selectCount(new LambdaQueryWrapper<SceneReferenceImage>()
+                    .eq(SceneReferenceImage::getSceneId, sceneId)
+                    .eq(SceneReferenceImage::getImageUrl, link.url()));
+            if (exists > 0) continue;
+            SceneReferenceImage ref = new SceneReferenceImage();
+            ref.setSceneId(sceneId);
+            ref.setImageUrl(link.url());
+            ref.setType(link.type() == null || link.type().isBlank() ? "image" : link.type());
+            ref.setPurpose(link.purpose() == null || link.purpose().isBlank() ? "video" : link.purpose());
+            ref.setRole(link.role() == null || link.role().isBlank() ? "REFERENCE" : link.role());
+            ref.setFileName(link.fileName());
+            ref.setFileSize(link.fileSize());
+            ref.setSortOrder(sort++);
+            sceneReferenceImageMapper.insert(ref);
+        }
+    }
+
+    @Override
+    public List<SceneReferenceResponse> getSceneReferences(String sceneId) {
+        return sceneReferenceImageMapper.findBySceneId(sceneId).stream()
+                .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
+                        r.getRole(), r.getFileName(), r.getFileSize()))
+                .toList();
     }
 
     @Override

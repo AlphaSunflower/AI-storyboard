@@ -80,6 +80,12 @@ const btnGhost: React.CSSProperties = {
   fontWeight: 600,
 };
 
+/** 透明主色描边按钮的悬停态：填充主色 */
+const ghostHover = {
+  onMouseEnter: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--color-primary)'; el.style.color = 'white'; el.style.borderColor = 'var(--color-primary)'; },
+  onMouseLeave: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--color-primary)'; el.style.borderColor = 'var(--color-primary)'; },
+};
+
 /** 参数能力对象（网关 params 或静态兜底） */
 interface ParamLists {
   sizes?: string[];
@@ -483,10 +489,10 @@ export function PreviewPanel() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-        <button onClick={() => setActiveTab('image')} style={tabStyle('image')}>
+        <button onClick={() => setActiveTab('image')} onMouseEnter={(e) => { if (activeTab !== 'image') { e.currentTarget.style.background = 'var(--color-surface-card)'; e.currentTarget.style.color = 'var(--color-primary)'; } }} onMouseLeave={(e) => { if (activeTab !== 'image') { e.currentTarget.style.background = 'var(--color-canvas)'; e.currentTarget.style.color = 'var(--color-muted)'; } }} style={tabStyle('image')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片
         </button>
-        <button onClick={() => setActiveTab('video')} style={tabStyle('video')}>
+        <button onClick={() => setActiveTab('video')} onMouseEnter={(e) => { if (activeTab !== 'video') { e.currentTarget.style.background = 'var(--color-surface-card)'; e.currentTarget.style.color = 'var(--color-primary)'; } }} onMouseLeave={(e) => { if (activeTab !== 'video') { e.currentTarget.style.background = 'var(--color-canvas)'; e.currentTarget.style.color = 'var(--color-muted)'; } }} style={tabStyle('video')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频
         </button>
       </div>
@@ -568,7 +574,7 @@ export function PreviewPanel() {
                     </button>
                   )}
                   {selectedDownloads.size > 0 && (
-                    <button onClick={downloadSelected} style={btnDownload}>
+                    <button onClick={downloadSelected} {...ghostHover} style={btnDownload}>
                       <Download size={12} strokeWidth={2} /> 下载选中 ({selectedDownloads.size})
                     </button>
                   )}
@@ -588,6 +594,7 @@ export function PreviewPanel() {
                       <span>生成失败，点击下方重试</span>
                       <button
                         onClick={() => void handleRefreshImage()}
+                        {...ghostHover}
                         style={{ ...btnGhost, cursor: 'pointer' }}
                       >
                         刷新状态
@@ -618,6 +625,8 @@ export function PreviewPanel() {
                 <button
                   onClick={() => commitParams(imageDraft, () => setImageDraft({}))}
                   disabled={Object.keys(imageDraft).length === 0 || savingParams}
+                  onMouseEnter={(e) => { if (Object.keys(imageDraft).length > 0) (e.currentTarget as HTMLElement).style.background = 'var(--color-primary-active)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = Object.keys(imageDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)'; }}
                   style={{
                     padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
                     background: Object.keys(imageDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
@@ -717,6 +726,7 @@ export function PreviewPanel() {
               {scene.imageUrl && (
                 <button
                   onClick={() => setRefineTarget(scene.imageUrl)}
+                  {...ghostHover}
                   style={{ ...btnGhost, cursor: 'pointer' }}
                 >
                   完善图片
@@ -747,7 +757,7 @@ export function PreviewPanel() {
                     border: '1px solid var(--color-hairline)', background: '#000', marginBottom: 8,
                   }}
                 />
-                <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} style={btnDownload}>
+                <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} {...ghostHover} style={btnDownload}>
                   <Download size={12} strokeWidth={2} /> 下载视频
                 </button>
                 </div>
@@ -767,6 +777,7 @@ export function PreviewPanel() {
                       {scene.videoTaskId && (
                         <button
                           onClick={() => void handleManualFetchVideo()}
+                          {...ghostHover}
                           style={{ ...btnGhost, cursor: 'pointer' }}
                           title="用已创建的视频任务重新拉取结果（若上游已完成则直接拿回视频）"
                         >
@@ -799,6 +810,8 @@ export function PreviewPanel() {
                 <button
                   onClick={() => commitParams(videoDraft, () => setVideoDraft({}))}
                   disabled={Object.keys(videoDraft).length === 0 || savingParams}
+                  onMouseEnter={(e) => { if (Object.keys(videoDraft).length > 0) (e.currentTarget as HTMLElement).style.background = 'var(--color-primary-active)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = Object.keys(videoDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)'; }}
                   style={{
                     padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
                     background: Object.keys(videoDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
@@ -968,7 +981,7 @@ export function PreviewPanel() {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-              <button onClick={() => setAssetPickerPurpose('image')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
+              <button onClick={() => setAssetPickerPurpose('image')} {...ghostHover} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
             </div>
           </div>
         )}
@@ -994,7 +1007,7 @@ export function PreviewPanel() {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-              <button onClick={() => setAssetPickerPurpose('video')} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
+              <button onClick={() => setAssetPickerPurpose('video')} {...ghostHover} style={{ padding: '6px 18px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}>＋ 添加资产</button>
             </div>
           </div>
         )}

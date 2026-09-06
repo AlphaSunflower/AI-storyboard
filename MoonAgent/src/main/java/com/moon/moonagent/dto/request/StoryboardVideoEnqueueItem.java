@@ -17,5 +17,8 @@ public record StoryboardVideoEnqueueItem(
         /** 用户行内上传的参考图 URL（主后端相对路径 /api/files/... 或绝对 URL），可为空。 */
         List<String> refImageUrls,
         /** 资产库关联的资产 ID，可为空；优先读该分镜已关联的「视频用途」资产图。 */
-        List<String> refAssetIds
+        List<String> refAssetIds,
+        /** 可选：带角色的参考图 [{url, role}]（role=FIRST_FRAME/LAST_FRAME/REFERENCE/FULL_REFERENCE）；
+         *  为空回退 refImageUrls 全部按 REFERENCE 处理。 */
+        List<java.util.Map<String, String>> refImageRoles
 ) {}

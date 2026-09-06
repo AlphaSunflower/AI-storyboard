@@ -960,7 +960,7 @@ export function DocsPage() {
             cursorCharacter="|"
           />
           <p className="docs-hero__sub">
-            输入剧本，AI 自动拆解分镜；逐镜生成图片与视频，或召唤 Moon 智能体对话式创作。本指南覆盖全部核心功能，三分钟上手。
+            输入剧本，AI 自动拆解分镜；逐镜生成图片与视频，或切换到 /chat 与 Moon 智能体对话式创作。本指南覆盖全部核心功能，三分钟上手。
           </p>
           <div className="docs-hero__cta">
             <Magnet padding={70} magnetStrength={25}>
@@ -977,6 +977,21 @@ export function DocsPage() {
                 onClick={() => navigate('/editor')}
               >
                 进入编辑器
+              </SpecularButton>
+            </Magnet>
+            <Magnet padding={70} magnetStrength={25}>
+              <SpecularButton
+                size="lg"
+                radius={12}
+                tintOpacity={0}
+                textColor="#cc785c"
+                lineColor="#cc785c"
+                baseColor="#cc785c"
+                intensity={0.9}
+                thickness={1.2}
+                onClick={() => navigate('/chat')}
+              >
+                Moon 对话
               </SpecularButton>
             </Magnet>
           </div>
@@ -1585,6 +1600,8 @@ export function DocsPage() {
             <p className="docs-section__lead">
               Moon 采用「计划模式」：先理解你的需求 → 给出方案并预选参数 → 弹确认卡片由你拍板 → 确认后才执行，不确认不执行。
               分镜、图片、视频都能生成，图生图 / 文生图 / 图生视频 / 文生视频、清空分镜、人工介入、继续完善，全在这里。
+              在 /editor 右下角可随时召唤 Moon；也可进入 /chat 独立对话页：支持全文+标题搜索（侧栏放大镜）、Markdown 渲染、
+              输入框聚焦光晕、以及右上角「应用」悬浮窗（画布 / 分镜编辑器 / 使用文档）。
             </p>
           </div>
 

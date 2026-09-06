@@ -217,8 +217,30 @@ public class PlanGraph {
                                     K_INTENT, anchorIntent,
                                     K_CONFIDENCE, 1.0,
                                     K_LOW_CONFIDENCE, false,
-                                    K_SWITCH, false);
+                            K_SWITCH, false);
                         }
+                    }
+                    // 分镜链续流（2026-09-05）：会话正在分镜澄清（pending checkpoint 或最近用户消息命中分镜），
+                    // 且当前输入仍含「分镜/故事/剧情」、没有明确切视频/图片/查看/删除 → 锚定 intent-aisplit。
+                    // 避免用户在「根据这个资产做一个多图转场」这类分镜澄清回复中被误拉去生成视频。
+                    boolean recentAisplit = false;
+                    for (AgentMessage m : recent) {
+                        if (m == null || !"user".equals(m.getRole())) continue;
+                        if ("intent-aisplit".equals(intentRecognitionService.ruleMatch(m.getContent()))) {
+                            recentAisplit = true;
+                            break;
+                        }
+                    }
+                    String pendingAction = support.pendingCheckpointAction(conversation.getId());
+                    if (!"intent-aisplit".equals(intentResult.type())
+                            && AgentIntentContinuity.shouldContinueAisplit(content, pendingAction, recentAisplit)) {
+                        log.info("PlanGraph: 分镜链上下文续流 -> intent-aisplit（pendingAction={}, recentAisplit={}）",
+                                pendingAction, recentAisplit);
+                        return Map.of(
+                                K_INTENT, "intent-aisplit",
+                                K_CONFIDENCE, 1.0,
+                                K_LOW_CONFIDENCE, false,
+                                K_SWITCH, false);
                     }
                     return Map.of(
                             K_INTENT, intentResult.type(),
@@ -293,6 +315,12 @@ public class PlanGraph {
                                 return "rerun_selected";
                             }
 
+                            // scene-review 操作菜单的「自定义输入」保留切链能力（用户可在审查卡直接说「生成分镜/视频」）；
+                            // 其余分镜/视频/图片澄清卡不自动切链，避免被内容词误判。
+                            if ("review-action".equals(cpAction) && "custom".equals(submitAction)) {
+                                return "switch_to_run";
+                            }
+
                             // ★ 通用技能卡锚定：skill-confirm / skill-step:* 一律回 skill_manager，
                             // 自定义文本不再触发全局重新识别切链（避免多轮澄清跑偏）
                             if (cpAction != null && cpAction.startsWith("skill-")) {
@@ -300,26 +328,9 @@ public class PlanGraph {
                                 return "skill_manager";
                             }
 
-                            // ★ 切链出口：customText 非空 → 意图识别 → 意图 ≠ 当前链 → 回 intent_recognize
-                            if (!customText.isBlank()) {
-                                List<AgentMessage> recent = messageMapper.selectList(
-                                        new LambdaQueryWrapper<AgentMessage>()
-                                                .eq(AgentMessage::getConversationId,
-                                                        state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId())
-                                                .orderByDesc(AgentMessage::getCreatedAt)
-                                                .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
-                                IntentResult ir = intentRecognitionService.recognize(customText, recent);
-                                String target = intentToNode.getOrDefault(ir.type(),
-                                        intentToNode.get(IntentRecognitionService.FALLBACK_TYPE));
-                                log.info("PlanGraph: resume 切链检测 customText intent={} confidence={} currentIntent={} → {}",
-                                        ir.type(), ir.confidence(), intent, target);
-                                // 意图明确（规则命中或高置信度）且不是当前链 → 切链
-                                if ((ir.source().equals("rule") || ir.confidence() >= agentConfig.getIntentThreshold())
-                                        && !ir.type().equals(intent)) {
-                                    return "switch_to_run";
-                                }
-                                // 否则按当前链的 custom 语义处理（调整意见/自定义方向），落到下方常规路由
-                            }
+                            // ★ 切链出口（2026-09-05 收紧）：链内澄清卡的自定义输入一律留在当前链。
+                            // 只有「intent-clarify」全局意图菜单和前端显式 routingHint 才允许切链，
+                            // 否则用户在分镜澄清里输入「根据这个资产做一个多图转场」会被误识别为视频。
 
                             // intent-clarify：用户点选目标意图 → 重新 handle（rerun_selected 清 resume 标记 + 锁定意图）；custom → 重新 run（意图识别）
                             if ("intent-clarify".equals(cpAction)) {
@@ -560,7 +571,11 @@ public class PlanGraph {
             inputs.put(K_SUBMIT_ACTION, action == null ? "" : action);
             inputs.put(K_CUSTOM_TEXT, customText == null ? "" : customText);
             inputs.put(K_PARAMS, params == null ? Map.of() : params);
-            inputs.put(K_ASSET_IDS, assetIds == null ? List.of() : assetIds);
+            // 恢复卡片上下文：参考图与资产从 checkpoint/会话快照带回来，避免「已上传资产+提示词」丢失
+            inputs.put(K_PIC_URLS, support.planPicUrls(checkpoint.getPlan() == null ? "" : checkpoint.getPlan()));
+            List<String> resumeAssetIds = assetIds == null || assetIds.isEmpty()
+                    ? support.getSessionAssets(conversation.getId()) : assetIds;
+            inputs.put(K_ASSET_IDS, resumeAssetIds);
             inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
             inputs.put(K_LAST_MESSAGE, "");
             Optional<OverAllState> result = compiledGraph.invoke(inputs, config);

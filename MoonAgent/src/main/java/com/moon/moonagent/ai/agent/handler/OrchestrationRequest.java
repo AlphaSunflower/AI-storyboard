@@ -25,9 +25,22 @@ public class OrchestrationRequest {
     private final java.util.List<String> picUrls;
     private final SseEmitter emitter;
 
-    /** 兼容：返回首张参考图（无图返回 null）。新逻辑一律用 getPicUrls()。 */
+    /** resume 时从 checkpoint 恢复的参考图；非空时覆盖构造入参 picUrls */
+    private java.util.List<String> picUrlsOverride;
+
+    /** 当前有效参考图（resume 恢复优先）；新逻辑一律用 getPicUrls()。 */
+    public java.util.List<String> getPicUrls() {
+        return picUrlsOverride != null ? picUrlsOverride : picUrls;
+    }
+
+    public void setPicUrls(java.util.List<String> urls) {
+        this.picUrlsOverride = urls;
+    }
+
+    /** 兼容：返回首张参考图（无图返回 null）。 */
     public String getPicUrl() {
-        return (picUrls == null || picUrls.isEmpty()) ? null : picUrls.getFirst();
+        var urls = getPicUrls();
+        return (urls == null || urls.isEmpty()) ? null : urls.getFirst();
     }
 
     /** 本轮最后一条 message 事件内容（流式增量时逐段更新；空串=尚未发出） */

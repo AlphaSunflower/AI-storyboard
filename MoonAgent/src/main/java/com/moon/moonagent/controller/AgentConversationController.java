@@ -80,6 +80,14 @@ public class AgentConversationController {
         return ApiResponse.ok(cp);
     }
 
+    /** 跳过当前会话的待处理 HITL checkpoint（「换个话题」按钮用；刷新后不再恢复旧卡片） */
+    @PostMapping("/conversations/{id}/checkpoint/skip")
+    public ApiResponse<Void> skipPendingCheckpoint(
+            Authentication auth, @PathVariable String id) {
+        chatService.skipPendingCheckpoints(auth.getName(), id);
+        return ApiResponse.ok("已跳过当前确认", null);
+    }
+
     /** 删除会话（级联删消息/资产） */
     @DeleteMapping("/conversations/{id}")
     public ApiResponse<Void> deleteConversation(Authentication auth, @PathVariable String id) {
@@ -123,15 +131,17 @@ public class AgentConversationController {
     /** 上传图片（参考图）：存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) */
     @PostMapping("/upload")
     public ApiResponse<Map<String, String>> uploadImage(
-            Authentication auth,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(required = false) String conversationId) {
+              Authentication auth,
+              @RequestParam("file") MultipartFile file,
+              @RequestParam(required = false) String conversationId,
+              @RequestParam(required = false) String purpose,
+              @RequestParam(required = false) String kind) {
         // 参数校验（文件类型）：Controller 职责
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
             throw new BusinessException(40001, "仅支持上传图片文件");
         }
-        String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file);
+        String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file, purpose, kind);
         return ApiResponse.ok(Map.of("url", url));
     }
 
