@@ -5,6 +5,7 @@ import {
   type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
+  type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
@@ -16,6 +17,8 @@ export interface HumanInputInfo {
   formContent: string;
   actions: { id: string; title: string }[];
   expirationTime: number;
+  /** HITL 卡片对应的后端消息 id（human_input 事件 messageId；提交后写入 metadata.hitl） */
+  messageId?: string;
   // 卡片模型/参数选项 + LLM 推荐（后端 human_input 事件下发；无配置时为空数组/空对象）
   models?: GatewayModelOption[];
   imageModels?: GatewayModelOption[];
@@ -45,6 +48,8 @@ export interface VideoPlanInfo {
   duration: number;
   picUrl: string;
   actions: { id: string; title: string }[];
+  /** video_plan 事件携带的后端消息 id（human_input/video_plan 均带 messageId） */
+  messageId?: string;
   // 卡片模型/参数选项 + LLM 推荐（后端 video_plan 事件下发；无配置时为空数组/空对象）
   models?: GatewayModelOption[];
   recommended?: Record<string, string>;
@@ -76,7 +81,17 @@ interface AgentState {
   messages: AgentMessage[];
   streaming: boolean;
   /** 会话级进行中生成状态（key=conversationId）：切走保留、切回恢复；streaming/workflowHint 由此派生 */
-  generating: Record<string, { hint: string; assistantId?: string; assistantContent?: string }>;
+  generating: Record<string, {
+    hint: string;
+    assistantId?: string;
+    assistantContent?: string;
+    /** 实时推理草稿（reasoning_delta 累积；message_end 后清空并写入 assistantMessageMetadata） */
+    reasoningDraft?: AgentReasoning;
+    /** 实时轨迹草稿（agent_trace 追加；message_end 后清空并写入 assistantMessageMetadata） */
+    traceDraft?: AgentTraceEvent[];
+    /** message_end 最终消息元数据（切会话后恢复占位气泡用） */
+    assistantMessageMetadata?: AgentMessageMetadata;
+  }>;
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
   confirmResult: ConfirmResultInfo | null;
@@ -114,7 +129,7 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string, opts?: { picUrls?: string[]; assetIds?: string[] }) => Promise<void>;
+  sendMessage: (content: string, opts?: { picUrls?: string[]; assetIds?: string[]; routingHint?: string; cancelActiveTasks?: boolean }) => Promise<void>;
   submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
@@ -155,6 +170,32 @@ let initialSceneCount = 0;
 // 当前流式会话的 AbortController + 用户手动停止标志：点「停止生成」时中断 SSE fetch（typewriter 停）并委托后端协作式取消
 let streamAbort: AbortController | null = null;
 let manualStop = false;
+// 视频异步任务轮询句柄 + 代次令牌：新一轮发送/停止时作废旧轮询，防止过期轮询结果污染新流
+let videoPollTimer: ReturnType<typeof setInterval> | null = null;
+let videoPollToken = 0;
+
+/** 从会话 generating 记录恢复 assistant 占位气泡的消息元数据（切会话后重建占位用） */
+function buildGeneratingMetadata(g?: { reasoningDraft?: AgentReasoning; traceDraft?: AgentTraceEvent[]; assistantMessageMetadata?: AgentMessageMetadata }): AgentMessageMetadata | undefined {
+  if (g?.assistantMessageMetadata) return g.assistantMessageMetadata;
+  if (g?.reasoningDraft || (g?.traceDraft && g.traceDraft.length > 0)) {
+    return { kind: 'assistant-reply', reasoning: g.reasoningDraft, agentTrace: g.traceDraft };
+  }
+  return undefined;
+}
+
+/** 从消息元数据反解出 HITL 卡片信息（刷新后从 AgentMessage.metadata.hitl 恢复） */
+export function hitlFromMetadata(metadata?: AgentMessageMetadata): HumanInputInfo | null {
+  const h = metadata?.hitl;
+  if (!h) return null;
+  return {
+    formToken: '',
+    taskId: '',
+    formContent: h.formContent ?? '',
+    actions: h.actions ?? [],
+    expirationTime: 0,
+    messageId: h.messageId,
+  };
+}
 
 /** 刷新当前项目的视频/图片任务队列：分镜审查触发的生成（全自动视频/完善图片）入队后即时可见，无需刷新页面。 */
 function refreshStoryboardQueues() {
@@ -284,7 +325,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const g = get().generating[id];
     const base = res.data.data ?? [];
     set({ messages: g?.assistantId
-      ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString() }]
+      ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
       : base });
     const conv = get().conversations.find((c) => c.id === id);
     if (conv) {
@@ -386,9 +427,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, opts?: { picUrls?: string[]; assetIds?: string[] }) => {
-    if (get().streaming || !content.trim()) return;
-    // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
+  sendMessage: async (content, opts?: { picUrls?: string[]; assetIds?: string[]; routingHint?: string; cancelActiveTasks?: boolean }) => {
+    // 输入禁用条件：(streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan
+    // 视频异步任务轮询期间（agentVideoTask 存在）允许继续发送新消息
+    if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan || !content.trim()) return;
+    // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）。
+    // 若视频异步任务仍轮询，先停止旧轮询并告知后端取消在途任务（cancelActiveTasks: true）。
+    if (get().agentVideoTask) {
+      if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
+      videoPollToken += 1;
+      set({ agentVideoTask: null });
+      opts = { ...opts, cancelActiveTasks: true };
+    }
     manualStop = false;
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
@@ -470,6 +520,64 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
+    // 推理/轨迹实时草稿（reasoning_delta / agent_trace）写入属主会话 generating + 当前气泡 metadata
+    const updateLiveReasoning = (reasoning: AgentReasoning) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextG = { ...g, reasoningDraft: reasoning };
+        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+        return {
+          messages: s.messages.map((m) =>
+            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
+          generating: { ...s.generating, [snapshotId]: nextG },
+        };
+      });
+    };
+    const updateLiveTrace = (ev: AgentTraceEvent) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextTrace = [...(g.traceDraft ?? []), ev];
+        const nextG = { ...g, traceDraft: nextTrace };
+        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+        return {
+          messages: s.messages.map((m) =>
+            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
+          generating: { ...s.generating, [snapshotId]: nextG },
+        };
+      });
+    };
+    const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextG = { ...g, assistantMessageMetadata: metadata };
+        delete nextG.reasoningDraft;
+        delete nextG.traceDraft;
+        const base = { ...s.generating, [snapshotId]: nextG };
+        if (s.activeConversationId !== snapshotId) return { generating: base };
+        return {
+          messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
+          generating: base,
+        };
+      });
+    };
+    const mergeFinalMetadata = (e: SseEvent) => {
+      const g = get().generating[snapshotId] ?? { hint: '' };
+      const reasoning = e.reasoning ?? g.reasoningDraft;
+      const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
+      const suggestedActions = e.suggestedActions;
+      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
+        setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+      }
+    };
+    /** 从 agent_trace 事件里提取轨迹事件（兼容单条直发 / traceEvent 包装 / agentTrace 数组） */
+    const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
+      const out: AgentTraceEvent[] = [];
+      if (e.traceEvent) out.push(e.traceEvent);
+      if (e.agentTrace) out.push(...e.agentTrace);
+      const raw = e as unknown as AgentTraceEvent;
+      if (raw.id && raw.phase && raw.agent) out.push(raw);
+      return out;
+    };
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
@@ -488,6 +596,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             updateAssistant(e.content ?? '');
             break;
+          case 'reasoning_delta': {
+            // 实时推理：拼接 details、按需更新 summary/durationMs/source，写入当前气泡 metadata.reasoning
+            const prev = get().generating[snapshotId]?.reasoningDraft;
+            const reasoning: AgentReasoning = {
+              summary: e.summary ?? prev?.summary ?? '',
+              details: (prev?.details ?? '') + (e.details ?? ''),
+              durationMs: e.durationMs ?? prev?.durationMs,
+              source: e.source ?? prev?.source ?? 'assistant',
+            };
+            updateLiveReasoning(reasoning);
+            break;
+          }
+          case 'agent_trace': {
+            const events = collectTraceEvents(e);
+            if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
+            break;
+          }
           case 'workflow':
             // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
             if (get().activeConversationId !== snapshotId) break;
@@ -501,26 +626,38 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 跨会话守卫：已切换会话则忽略旧流事件
             if (get().activeConversationId !== snapshotId) break;
             receivedHumanInput = true;
-            set({
-              workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-               waitingHumanInput: {
-                formToken: e.formToken ?? '',
-                taskId: e.taskId ?? '',
-                formContent: e.formContent ?? '',
-                actions: e.actions ?? [],
-                expirationTime: e.expirationTime ?? 0,
-                models: e.models,
-                imageModels: e.imageModels,
-                videoModels: e.videoModels,
-                recommended: e.recommended,
-                reasons: e.reasons,
-                assets: e.assets,
-              },
-            });
+            {
+              const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
+              set((s) => ({
+                workflowHint: '', // HITL 卡片接管展示，阶段提示清空
+                waitingHumanInput: {
+                  formToken: e.formToken ?? '',
+                  taskId: e.taskId ?? '',
+                  formContent: e.formContent ?? '',
+                  actions: e.actions ?? [],
+                  expirationTime: e.expirationTime ?? 0,
+                  models: e.models,
+                  imageModels: e.imageModels,
+                  videoModels: e.videoModels,
+                  recommended: e.recommended,
+                  reasons: e.reasons,
+                  assets: e.assets,
+                  messageId: cardId,
+                },
+                // 未提交期间不生成卡片消息（卡片仅从输入区上方展示）；占位气泡补方案文本，避免空气泡
+                messages: s.messages.map((m) =>
+                  m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                generating: {
+                  ...s.generating,
+                  [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
+                },
+              }));
+            }
             break;
           case 'message_end':
             receivedMessageEnd = true;
-            // 跨会话守卫：已切换会话则跳过互斥判断与刷新
+            // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
+            mergeFinalMetadata(e);
             if (get().activeConversationId !== snapshotId) break;
             // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
@@ -561,6 +698,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
+                messageId: e.messageId,
                 models: e.models,
                 recommended: e.recommended,
                 reasons: e.reasons,
@@ -577,7 +715,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
         : assetIdsBefore.length > 0 ? assetIdsBefore
-        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal);
+        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal, opts);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -623,35 +761,43 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
     // 与 sendMessage 一致：提交时清除上次的 streamError，避免旧错误文案残留
-    // 保存已提交的人工介入信息（用于选择后仍显示卡片）
-    const hitlMessage = {
-      id: `hitl-${Date.now()}`,
-      conversationId: id,
-      role: 'assistant' as const,
-      content: '',
-      createdAt: new Date().toISOString(),
-      hitlCard: {
+    // 保存已提交的人工介入信息：human_input 事件已把当前 assistant 占位气泡转为 HITL 卡片
+    // （metadata.hitl），提交后仅更新该卡片选中状态（不再 push 新的用户「确认：xxx」气泡）。
+    const act = info.actions.find((a) => a.id === actionId);
+    const cardId = info.messageId ?? `hitl-${Date.now()}`;
+    const hitlMeta: AgentMessageMetadata = {
+      kind: 'hitl',
+      hitl: {
         formContent: info.formContent || '',
         actions: info.actions || [],
         selectedActionId: actionId,
-        selectedActionTitle: info.actions.find(a => a.id === actionId)?.title || actionId,
+        selectedActionTitle: act?.title ?? actionId,
+        customText: actionId === 'custom' ? customText : undefined,
+        params,
+        assetIds,
+        messageId: cardId,
       },
     };
-    set((s) => ({
-      streaming: true,
-      generating: { ...s.generating, [id]: { hint: '' } },
-      waitingHumanInput: null,
-      messages: [...s.messages, hitlMessage],
-      streamError: null,
-    }));
-    // 找到最后一条非 HITL 的 assistant 消息
-    const lastAssistant = [...get().messages].reverse().find((m) => m.role === 'assistant' && !m.hitlCard);
-    if (info.formContent && lastAssistant && !lastAssistant.content) {
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === lastAssistant.id ? { ...m, content: info.formContent as string } : m),
-      }));
-    }
+    set((s) => {
+      const hasCard = s.messages.some((m) => m.id === cardId && m.metadata?.kind === 'hitl');
+      const newCard: AgentMessage = {
+        id: cardId,
+        conversationId: id,
+        role: 'assistant',
+        content: info.formContent || '',
+        createdAt: new Date().toISOString(),
+        metadata: hitlMeta,
+      };
+      return {
+        streaming: true,
+        generating: { ...s.generating, [id]: { hint: '' } },
+        waitingHumanInput: null,
+        streamError: null,
+        messages: hasCard
+          ? s.messages.map((m) => (m.id === cardId ? { ...m, metadata: hitlMeta } : m))
+          : [...s.messages, newCard],
+      };
+    });
 
     const assistantId = `tmp-assistant-${Date.now()}`;
     const updateAssistant = (delta: string) => {
@@ -670,23 +816,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } },
       }));
 
-    // HITL 确认动作本地落位（与后端落库对齐，点击按钮后消息不消失）：
-    // 1) 方案文本（formContent）填入 assistant 占位——后端在 HITL 暂停时已将其落库为 assistant 消息；
-    // 2) 用户确认动作 push 为 user 消息——后端 submitFormAndResume 同步落库「确认：{标题}」。
-    // 刷新后由后端持久化的同序消息替换本地临时项，顺序一致（方案在前、确认在后）。
-    // 顺序：先 push 用户确认消息，再 push assistant 占位气泡——确认在前、回复在后
-    const act = info.actions.find((a) => a.id === actionId);
-    const confirmTitle = act?.title ?? actionId;
-    const confirmMsg: AgentMessage = {
-      id: `tmp-user-${Date.now()}`,
-      conversationId: id,
-      role: 'user',
-      // 自定义输入：落库用户原文（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
-      content: actionId === 'custom' ? customText : `确认：${confirmTitle}`,
-      
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, confirmMsg] }));
+    // 预定义选项不 push 用户气泡（选中状态已标记在卡片 metadata.hitl 上）；
+    // action=custom 只 push 用户原文气泡（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
+    if (actionId === 'custom' && customText) {
+      const confirmMsg: AgentMessage = {
+        id: `tmp-user-${Date.now()}`,
+        conversationId: id,
+        role: 'user',
+        content: customText,
+        createdAt: new Date().toISOString(),
+      };
+      set((s) => ({ messages: [...s.messages, confirmMsg] }));
+    }
 
     const optimisticAssistant: AgentMessage = {
       id: assistantId,
@@ -704,6 +845,63 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
+    // 推理/轨迹实时草稿写入属主会话 generating + 当前气泡 metadata（与 sendMessage 一致）
+    const updateLiveReasoning = (reasoning: AgentReasoning) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextG = { ...g, reasoningDraft: reasoning };
+        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+        return {
+          messages: s.messages.map((m) =>
+            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
+          generating: { ...s.generating, [snapshotId]: nextG },
+        };
+      });
+    };
+    const updateLiveTrace = (ev: AgentTraceEvent) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextTrace = [...(g.traceDraft ?? []), ev];
+        const nextG = { ...g, traceDraft: nextTrace };
+        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+        return {
+          messages: s.messages.map((m) =>
+            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
+          generating: { ...s.generating, [snapshotId]: nextG },
+        };
+      });
+    };
+    const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
+      set((s) => {
+        const g = s.generating[snapshotId] ?? { hint: '' };
+        const nextG = { ...g, assistantMessageMetadata: metadata };
+        delete nextG.reasoningDraft;
+        delete nextG.traceDraft;
+        const base = { ...s.generating, [snapshotId]: nextG };
+        if (s.activeConversationId !== snapshotId) return { generating: base };
+        return {
+          messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
+          generating: base,
+        };
+      });
+    };
+    const mergeFinalMetadata = (e: SseEvent) => {
+      const g = get().generating[snapshotId] ?? { hint: '' };
+      const reasoning = e.reasoning ?? g.reasoningDraft;
+      const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
+      const suggestedActions = e.suggestedActions;
+      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
+        setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+      }
+    };
+    const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
+      const out: AgentTraceEvent[] = [];
+      if (e.traceEvent) out.push(e.traceEvent);
+      if (e.agentTrace) out.push(...e.agentTrace);
+      const raw = e as unknown as AgentTraceEvent;
+      if (raw.id && raw.phase && raw.agent) out.push(raw);
+      return out;
+    };
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
@@ -719,6 +917,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             updateAssistant(e.content ?? '');
             break;
+          case 'reasoning_delta': {
+            const prev = get().generating[snapshotId]?.reasoningDraft;
+            const reasoning: AgentReasoning = {
+              summary: e.summary ?? prev?.summary ?? '',
+              details: (prev?.details ?? '') + (e.details ?? ''),
+              durationMs: e.durationMs ?? prev?.durationMs,
+              source: e.source ?? prev?.source ?? 'assistant',
+            };
+            updateLiveReasoning(reasoning);
+            break;
+          }
+          case 'agent_trace': {
+            const events = collectTraceEvents(e);
+            if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
+            break;
+          }
           case 'workflow':
             // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
             if (get().activeConversationId !== snapshotId) break;
@@ -732,26 +946,38 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 跨会话守卫：已切换会话则忽略旧流事件
             if (get().activeConversationId !== snapshotId) break;
             receivedHumanInput = true;
-            set({
-              workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-               waitingHumanInput: {
-                formToken: e.formToken ?? '',
-                taskId: e.taskId ?? '',
-                formContent: e.formContent ?? '',
-                actions: e.actions ?? [],
-                expirationTime: e.expirationTime ?? 0,
-                models: e.models,
-                imageModels: e.imageModels,
-                videoModels: e.videoModels,
-                recommended: e.recommended,
-                reasons: e.reasons,
-                assets: e.assets,
-              },
-            });
+            {
+              const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
+              set((s) => ({
+                workflowHint: '', // HITL 卡片接管展示，阶段提示清空
+                waitingHumanInput: {
+                  formToken: e.formToken ?? '',
+                  taskId: e.taskId ?? '',
+                  formContent: e.formContent ?? '',
+                  actions: e.actions ?? [],
+                  expirationTime: e.expirationTime ?? 0,
+                  models: e.models,
+                  imageModels: e.imageModels,
+                  videoModels: e.videoModels,
+                  recommended: e.recommended,
+                  reasons: e.reasons,
+                  assets: e.assets,
+                  messageId: cardId,
+                },
+                // 未提交期间不生成卡片消息；占位气泡补方案文本，避免空气泡
+                messages: s.messages.map((m) =>
+                  m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                generating: {
+                  ...s.generating,
+                  [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
+                },
+              }));
+            }
             break;
           case 'message_end':
             receivedMessageEnd = true;
-            // 跨会话守卫：已切换会话则跳过互斥判断与刷新
+            // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
+            mergeFinalMetadata(e);
             if (get().activeConversationId !== snapshotId) break;
             // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
@@ -792,6 +1018,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
+                messageId: e.messageId,
                 models: e.models,
                 recommended: e.recommended,
                 reasons: e.reasons,
@@ -885,6 +1112,62 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const updateAssistantFull = (full: string) =>
         set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: full } : m), generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } } }));
       const snapshotId = id;
+      const updateLiveReasoning = (reasoning: AgentReasoning) => {
+        set((s) => {
+          const g = s.generating[snapshotId] ?? { hint: '' };
+          const nextG = { ...g, reasoningDraft: reasoning };
+          if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+          return {
+            messages: s.messages.map((m) =>
+              m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
+            generating: { ...s.generating, [snapshotId]: nextG },
+          };
+        });
+      };
+      const updateLiveTrace = (ev: AgentTraceEvent) => {
+        set((s) => {
+          const g = s.generating[snapshotId] ?? { hint: '' };
+          const nextTrace = [...(g.traceDraft ?? []), ev];
+          const nextG = { ...g, traceDraft: nextTrace };
+          if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
+          return {
+            messages: s.messages.map((m) =>
+              m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
+            generating: { ...s.generating, [snapshotId]: nextG },
+          };
+        });
+      };
+      const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
+        set((s) => {
+          const g = s.generating[snapshotId] ?? { hint: '' };
+          const nextG = { ...g, assistantMessageMetadata: metadata };
+          delete nextG.reasoningDraft;
+          delete nextG.traceDraft;
+          const base = { ...s.generating, [snapshotId]: nextG };
+          if (s.activeConversationId !== snapshotId) return { generating: base };
+          return {
+            messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
+            generating: base,
+          };
+        });
+      };
+      const mergeFinalMetadata = (e: SseEvent) => {
+        const g = get().generating[snapshotId] ?? { hint: '' };
+        const reasoning = e.reasoning ?? g.reasoningDraft;
+        const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
+        const suggestedActions = e.suggestedActions;
+        if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
+          setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+        }
+      };
+      const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
+        const out: AgentTraceEvent[] = [];
+        if (e.traceEvent) out.push(e.traceEvent);
+        if (e.agentTrace) out.push(...e.agentTrace);
+        const raw = e as unknown as AgentTraceEvent;
+        if (raw.id && raw.phase && raw.agent) out.push(raw);
+        return out;
+      };
       let receivedMessageEnd = false;
       let receivedHumanInput = false;
       try {
@@ -897,6 +1180,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 break;
               }
               updateAssistant(e.content ?? ''); break;
+            case 'reasoning_delta': {
+              const prev = get().generating[snapshotId]?.reasoningDraft;
+              const reasoning: AgentReasoning = {
+                summary: e.summary ?? prev?.summary ?? '',
+                details: (prev?.details ?? '') + (e.details ?? ''),
+                durationMs: e.durationMs ?? prev?.durationMs,
+                source: e.source ?? prev?.source ?? 'assistant',
+              };
+              updateLiveReasoning(reasoning);
+              break;
+            }
+            case 'agent_trace': {
+              const events = collectTraceEvents(e);
+              if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
+              break;
+            }
             case 'workflow':
               // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
               if (get().activeConversationId !== snapshotId) break;
@@ -904,15 +1203,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'human_input':
               if (get().activeConversationId !== snapshotId) break;
               receivedHumanInput = true;
-              set({
-                workflowHint: '',
-                 waitingHumanInput: {
-                  formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
-                  actions: e.actions ?? [], expirationTime: e.expirationTime ?? 0,
-                  models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
-                  recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
-                },
-              });
+              {
+                const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
+                set((s) => ({
+                  workflowHint: '',
+                  waitingHumanInput: {
+                    formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
+                    actions: e.actions ?? [], expirationTime: e.expirationTime ?? 0,
+                    models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
+                    recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
+                    messageId: cardId,
+                  },
+                  // 未提交期间不生成卡片消息；占位气泡补方案文本，避免空气泡
+                  messages: s.messages.map((m) =>
+                    m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                  generating: {
+                    ...s.generating,
+                    [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
+                  },
+                }));
+              }
               break;
             case 'video_plan':
               if (get().activeConversationId !== snapshotId) break;
@@ -920,14 +1230,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 const info = {
                   planToken: e.formToken ?? e.planToken ?? '', message: e.message ?? '',
                   duration: e.duration ?? 8, picUrl: e.picUrl ?? '', actions: e.actions ?? [],
+                  messageId: e.messageId,
                   models: e.models, recommended: e.recommended, reasons: e.reasons,
                 };
                 return { waitingVideoPlan: info, hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info } };
               });
               break;
             case 'message_end':
-              if (get().activeConversationId !== snapshotId) break;
               receivedMessageEnd = true;
+              mergeFinalMetadata(e);
+              if (get().activeConversationId !== snapshotId) break;
               if (e.content) updateAssistantFull(e.content);
               if (e.title) {
                 set((s) => ({
@@ -975,17 +1287,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return { streaming: true, generating: { ...s.generating, [id]: { hint: '' } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
     });
 
-    // 确认动作 push 为 user 消息（与后端 persistUserConfirmation 落库对齐，刷新后同序）
-    const confirmMsg: AgentMessage = {
-      id: `tmp-user-${Date.now()}`,
-      conversationId: id,
-      role: 'user',
-      content: '确认：开始生成视频',
-      
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, confirmMsg] }));
-
     // 新建 assistant 占位气泡：视频异步生成期间为空（AgentChatPanel 显示生成中加载条），
     // 完成后由轮询结果填充，MessageBubble 渲染 <video> 播放器
     const assistantId = `tmp-assistant-${Date.now()}`;
@@ -1019,14 +1320,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const startTaskPolling = (taskId: string) => {
       // 任务中心：任务开始，暴露进行中状态（completed/failed 清空）
       set({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
+      const myToken = ++videoPollToken;
       const timer = setInterval(async () => {
-        if (acceptedTaskId === null) { clearInterval(timer); return; }
+        if (acceptedTaskId === null) { clearInterval(timer); videoPollTimer = null; return; }
+        // 新一轮发送/停止生成时已作废旧轮询：直接退出（防止过期任务结果污染新流）
+        if (videoPollToken !== myToken || get().agentVideoTask?.taskId !== taskId) { clearInterval(timer); return; }
         pollTick += 1;
         try {
           const res = await agentApi.getVideoTaskStatus(taskId);
           const t: VideoTaskStatus = res.data.data;
           if (t.status === 'completed') {
-            clearInterval(timer);
+            clearInterval(timer); videoPollTimer = null;
             receivedResult = true;
             updateAssistantFull(t.url || '');
             set((s) => {
@@ -1047,7 +1351,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             });
             void get().loadAssets();
           } else if (t.status === 'failed') {
-            clearInterval(timer);
+            clearInterval(timer); videoPollTimer = null;
             set((s) => {
               const g = { ...s.generating };
               delete g[snapshotId];
@@ -1083,6 +1387,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           // 单次轮询失败不终止：下一 tick 重试（后端瞬时故障容错）
         }
       }, VIDEO_POLL_INTERVAL);
+      videoPollTimer = timer;
     };
 
     try {
@@ -1154,6 +1459,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 中断当前 SSE fetch（若有）：consumeSse 循环检测 signal.aborted 会立即跳出 → 触发 sendMessage 等的 finally 清理
     streamAbort?.abort();
     streamAbort = null;
+    // 视频异步任务轮询期：停止轮询并作废代次令牌
+    if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
+    videoPollToken += 1;
     // 后端协作式取消：置位会话级 interrupt 标志（编排流式循环/阶段边界检测后停止生成、释放会话锁）
     if (id) void agentApi.interrupt(id).catch(() => { /* 静默：后端取消尽力而为 */ });
     // 视频异步任务轮询期 / 无活跃 SSE 流：直接复位当前会话视图（后端视频任务仍会后台跑完）
@@ -1270,9 +1578,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  resetChatState: () =>
+  resetChatState: () => {
+    if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
+    videoPollToken += 1;
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
-       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [] }),
+       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [] });
+  },
 
   activeModal: null,
   setActiveModal: (modal) => set({ activeModal: modal }),

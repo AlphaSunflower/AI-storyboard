@@ -326,6 +326,7 @@ export function ChatPage() {
                     <MessageBubble
                       role={m.role}
                       content={m.content}
+                      metadata={m.metadata}
                       variant="deepseek"
                       createdAt={m.createdAt}
                       streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
@@ -726,6 +727,7 @@ export function ChatPage() {
                     <MessageBubble
                       role={m.role}
                       content={m.content}
+                      metadata={m.metadata}
                       variant="deepseek"
                       createdAt={m.createdAt}
                       streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
