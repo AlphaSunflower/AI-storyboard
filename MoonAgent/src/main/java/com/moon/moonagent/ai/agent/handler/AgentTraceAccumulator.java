@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.AgentTraceEvent;
+import com.moon.moonagent.ai.agent.SuggestedAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -34,6 +35,10 @@ public class AgentTraceAccumulator {
     private final Map<String, OffsetDateTime> pendingStart = new ConcurrentHashMap<>();
     private final OffsetDateTime startedAt;
     private volatile AgentReasoningSnapshot reasoning;
+    private volatile Map<String, Object> turnMetadata = Map.of();
+    private volatile boolean hitlPaused;
+    private volatile String hitlMessageId = "";
+    private volatile List<SuggestedAction> suggestedActions = List.of();
 
     public AgentTraceAccumulator(OrchestrationRequest request) {
         this.request = request;
@@ -99,6 +104,38 @@ public class AgentTraceAccumulator {
         return reasoning;
     }
 
+    public void setTurnMetadata(Map<String, Object> turnMetadata) {
+        this.turnMetadata = turnMetadata == null ? Map.of() : turnMetadata;
+    }
+
+    public Map<String, Object> getTurnMetadata() {
+        return turnMetadata;
+    }
+
+    public void setHitlPaused(boolean hitlPaused) {
+        this.hitlPaused = hitlPaused;
+    }
+
+    public boolean isHitlPaused() {
+        return hitlPaused;
+    }
+
+    public void setHitlMessageId(String hitlMessageId) {
+        this.hitlMessageId = hitlMessageId == null ? "" : hitlMessageId;
+    }
+
+    public String getHitlMessageId() {
+        return hitlMessageId;
+    }
+
+    public void setSuggestedActions(List<SuggestedAction> suggestedActions) {
+        this.suggestedActions = suggestedActions == null ? List.of() : suggestedActions;
+    }
+
+    public List<SuggestedAction> getSuggestedActions() {
+        return suggestedActions;
+    }
+
     public List<AgentTraceEvent> getEvents() {
         synchronized (events) { return new ArrayList<>(events); }
     }
@@ -123,7 +160,7 @@ public class AgentTraceAccumulator {
             SseEmitter emitter = request.getEmitter();
             if (emitter != null) {
                 emitter.send(SseEmitter.event().name("agent_trace")
-                        .data(AgentOrchestratorSupport.sseJson(Map.of("event", event))));
+                        .data(AgentOrchestratorSupport.sseJson(Map.of("traceEvent", event))));
             }
         } catch (Exception e) {
             log.debug("agent_trace 发送失败（前端可能已断开）: {}",

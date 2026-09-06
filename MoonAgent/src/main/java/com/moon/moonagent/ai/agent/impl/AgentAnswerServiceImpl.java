@@ -9,7 +9,6 @@ import com.moon.moonagent.ai.agent.AgentAnswerService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
-import com.moon.moonagent.ai.agent.handler.AgentSessionState;
 import com.moon.moonagent.ai.AiConfigProperties;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -52,8 +51,6 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     private final FileStorageService fileStorageService;
-    /** 会话级打断标志（「停止生成」按钮 → 中断主回答流式打字机） */
-    private final AgentSessionState sessionState;
 
     /** 主回答 ChatClient（懒加载，默认视觉模型，超时 60s） */
     private volatile ChatClient chatClient;
@@ -81,42 +78,43 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
     @Override
     public AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
         StringBuilder sb = new StringBuilder();
-        StringBuilder reasoningSb = new StringBuilder();
+        String reasonText = "";
         OffsetDateTime start = OffsetDateTime.now();
         try {
-            chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(promptConfig.get("services/agent-answer"))
-                .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
-                .stream()
-                .chatResponse()
-                .doOnNext(response -> {
-                    if (response == null) return;
-                    // 打断：用户点击「停止生成」→ 中断主回答流式打字机，异常上抛到编排壳层收尾
-                    if (sessionState.isInterrupted(conversation.getId())) {
-                        throw new AgentInterruptException();
-                    }
-                    AssistantMessage output = response.getResult() != null ? response.getResult().getOutput() : null;
-                    String chunk = output != null ? output.getText() : null;
-                    if (chunk != null && !chunk.isBlank()) {
-                        sb.append(chunk);
-                        try {
-                            emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", chunk))));
-                        } catch (Exception e) {
-                            log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
-                        }
-                    }
-                    // reasoning delta
-                    String reasonDelta = extractReasoning(output != null ? output.getMetadata() : null);
-                    if (reasonDelta != null && !reasonDelta.isBlank()) {
-                        reasoningSb.append(reasonDelta);
-                        try {
-                            emitter.send(SseEmitter.event().name("reasoning_delta").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("delta", reasonDelta))));
-                        } catch (Exception e) {
-                            log.debug("SseEmitter reasoning 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
-                        }
-                    }
-                })
-                .blockLast();
+            // Spring AI 2.0 的流式 chatResponse 在 OpenAI SDK chunk 转换时会丢掉
+            // reasoning_content，因此这里取非流式响应，保留模型真实思考内容后一次转发。
+            ChatResponse response = chatClient().prompt()
+                    .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                    .system(promptConfig.get("services/agent-answer"))
+                    .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
+                    .call()
+                    .chatResponse();
+            AssistantMessage output = response != null && response.getResult() != null
+                    ? response.getResult().getOutput() : null;
+            String chunk = output != null ? output.getText() : null;
+            if (chunk != null && !chunk.isBlank()) {
+                sb.append(chunk);
+                try {
+                    emitter.send(SseEmitter.event().name("message").data(
+                            com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(
+                                    java.util.Map.of("content", chunk))));
+                } catch (Exception e) {
+                    log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                }
+            }
+            String reasonDelta = extractReasoning(output == null ? null : output.getMetadata());
+            if (reasonDelta != null && !reasonDelta.isBlank()) {
+                reasonText = reasonDelta;
+                try {
+                    emitter.send(SseEmitter.event().name("reasoning_delta").data(
+                            com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of(
+                                    "details", reasonDelta,
+                                    "summary", summarize(reasonDelta),
+                                    "source", gatewayModelService.getDefaultTextModel()))));
+                } catch (Exception e) {
+                    log.debug("SseEmitter reasoning 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                }
+            }
         } catch (AgentInterruptException e) {
             throw e; // 用户打断：跳过降级文案补发，交给编排壳层收尾
         } catch (Exception e) {
@@ -131,15 +129,13 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
             } catch (Exception ignore) { }
         }
         Long durationMs = Duration.between(start, OffsetDateTime.now()).toMillis();
-        String reasonText = reasoningSb.length() > 0 ? reasoningSb.toString() : "";
-        AgentReasoningSnapshot reasoning;
-        if (!reasonText.isBlank()) {
-            reasoning = new AgentReasoningSnapshot(summarize(reasonText), reasonText, durationMs, gatewayModelService.getDefaultTextModel());
-        } else {
-            // 无 reasoningContent：生成 trace 摘要（安全且不暴露 prompt）
-            String trace = "模型未返回可见推理过程，已生成回答（" + full.length() + " 字符）。";
-            reasoning = new AgentReasoningSnapshot(trace, trace, durationMs, "trace-summary");
-        }
+        AgentReasoningSnapshot reasoning = !reasonText.isBlank()
+                ? new AgentReasoningSnapshot(summarize(reasonText), reasonText,
+                        durationMs, gatewayModelService.getDefaultTextModel())
+                : new AgentReasoningSnapshot(
+                        "模型未返回可见推理过程，已生成回答（" + full.length() + " 字符）。",
+                        "模型未返回可见推理过程，已生成回答（" + full.length() + " 字符）。",
+                        durationMs, "trace-summary");
         return AgentAnswerResult.of(full, reasoning, reasoning.source());
     }
 

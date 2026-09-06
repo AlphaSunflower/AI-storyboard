@@ -1,6 +1,10 @@
 package com.moon.moonagent.ai.agent.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -15,12 +19,15 @@ import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.AssetRelevanceResult;
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.config.PromptResolver;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
@@ -33,7 +40,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -393,40 +399,74 @@ public class AgentOrchestratorSupport {
     }
 
     /**
-     * 流式调用 planClient：逐 token 收集完整响应，同时提取 JSON 中 {@code message} 字段值
-     * 增量转发为 SSE message 事件（打字机效果；结构化输出本身仍需完整 JSON 解析，故不转发原始 token）。
+     * 调用 planClient 并保留真实推理摘要。
+     *
+     * <p>Spring AI 2.0 的 {@code stream().chatResponse()} 在 OpenAI SDK 转换增量 chunk 时会
+     * 丢弃非标准 {@code reasoning_content}（chunk 的 reasoningContent 恒为空），因此这里使用
+     * 非流式 {@code call().chatResponse()} 读取元数据。正文仍从结构化 JSON 的 message 字段
+     * 转发给前端，不暴露原始 JSON。
      *
      * @return 完整响应文本（调用方 BeanOutputConverter 解析）
      */
     public String streamPlanWithMessage(String systemPrompt, String userContent, OrchestrationRequest req) {
-        StringBuilder full = new StringBuilder();
-        // 已转发的 message 字段值（增量对比基准）
-        AtomicReference<String> emitted = new AtomicReference<>("");
+        OffsetDateTime started = OffsetDateTime.now();
+        String raw = "";
         try {
-            planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                .system(systemPrompt)
-                .user(userContent)
-                .stream()
-                .content()
-                .doOnNext(chunk -> {
-                    if (chunk == null || chunk.isBlank()) return;
-                    // 打断：用户点击「停止生成」→ 中断流式打字机，异常上抛到编排壳层收尾
-                    checkInterrupted(req);
-                    full.append(chunk);
-                    String msg = extractMessageField(full.toString());
-                    if (msg != null && msg.length() > emitted.get().length()) {
-                        String delta = msg.substring(emitted.get().length());
-                        emitted.set(msg);
-                        sendEvent(req, "message", Map.of("content", delta));
-                    }
-                })
-                .blockLast();
+            checkInterrupted(req);
+            ChatResponse response = planClient().prompt()
+                    .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                    .system(systemPrompt)
+                    .user(userContent)
+                    .call()
+                    .chatResponse();
+            checkInterrupted(req);
+            AssistantMessage output = response != null && response.getResult() != null
+                    ? response.getResult().getOutput() : null;
+            if (output != null && output.getText() != null) raw = output.getText();
+
+            String reason = extractReasoning(output == null ? null : output.getMetadata());
+            String fallback = "模型未返回可见推理过程，已完成方案分析。";
+            String reasonText = reason == null || reason.isBlank() ? fallback : reason;
+            AgentReasoningSnapshot snapshot = new AgentReasoningSnapshot(
+                    summarizeReasoning(reasonText), reasonText,
+                    Duration.between(started, OffsetDateTime.now()).toMillis(),
+                    reason == null || reason.isBlank() ? "trace-summary" : gatewayModelService.getDefaultTextModel());
+            req.setReasoning(snapshot);
+            if (req.getTrace() != null) req.getTrace().reasoning(snapshot);
+            sendEvent(req, "reasoning_delta", Map.of(
+                    "details", reasonText,
+                    "summary", snapshot.summary(),
+                    "durationMs", snapshot.durationMs(),
+                    "source", snapshot.source()));
+
+            String msg = extractMessageField(raw);
+            if (msg != null && !msg.isBlank()) {
+                sendEvent(req, "message", Map.of("content", msg));
+            }
         } catch (AgentInterruptException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("流式 LLM 调用失败: {}", e.getMessage());
+            log.warn("planClient 调用失败: {}", e.getMessage());
         }
-        return full.toString();
+        return raw;
+    }
+
+    /** 从 Spring AI AssistantMessage metadata 提取网关返回的推理内容。 */
+    private String extractReasoning(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) return null;
+        for (String key : new String[]{"reasoning_content", "reasoningContent", "thoughts", "thinking"}) {
+            Object value = metadata.get(key);
+            if (value == null) continue;
+            String text = value instanceof String s ? s : String.valueOf(value);
+            if (text != null && !text.isBlank()) return text;
+        }
+        return null;
+    }
+
+    private String summarizeReasoning(String text) {
+        if (text == null || text.isBlank()) return "";
+        String trimmed = text.trim();
+        return trimmed.length() > 200 ? trimmed.substring(0, 200) + "…" : trimmed;
     }
 
     /** 宽松提取 JSON 字符串中的 message 字段值（未闭合/截断时返回已见部分；失败返回 null） */
@@ -867,9 +907,15 @@ public class AgentOrchestratorSupport {
                 plan.imageModels(), plan.videoModels(), plan.assets());
         // 落库 assistant HITL 卡片消息（metadata 保留 kind/formContent/actions/formToken/expirationTime）
         String hitlMessageId = persistHitlCard(req, plan, formToken);
-        req.setHitlPaused(true);
-        req.setHitlMessageId(hitlMessageId);
-        attachHitlMessageIdToPlan(formToken, hitlMessageId);
+        if (hitlMessageId != null && !hitlMessageId.isBlank()) {
+            req.setHitlPaused(true);
+            req.setHitlMessageId(hitlMessageId);
+            attachHitlMessageIdToPlan(formToken, hitlMessageId);
+        } else {
+            // 卡片落库失败时仍允许本轮正常收尾，避免 HITL 暂停后没有任何 assistant 消息可恢复。
+            req.setHitlPaused(false);
+            req.setHitlMessageId("");
+        }
         Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
             "formToken", formToken, "taskId", "",
             "formContent", plan.planText(),
@@ -897,13 +943,31 @@ public class AgentOrchestratorSupport {
             m.setRole("assistant");
             m.setContent(plan.planText());
             Map<String, Object> metadata = new java.util.LinkedHashMap<>();
-            metadata.put("kind", "hitl");
+            metadata.put("kind", "video_plan".equals(plan.eventName()) ? "video-plan" : "hitl");
+            metadata.put("pending", true);
             metadata.put("formContent", plan.planText());
+            metadata.put("hitlType", plan.eventName());
             if (plan.actions() != null) metadata.put("actions", plan.actions());
             metadata.put("formToken", formToken);
             metadata.put("expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString());
+            Map<String, Object> hitl = new java.util.LinkedHashMap<>();
+            hitl.put("formContent", plan.planText());
+            if (plan.actions() != null) hitl.put("actions", plan.actions());
+            hitl.put("pending", true);
+            hitl.put("formToken", formToken);
+            hitl.put("expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString());
+            metadata.put("hitl", hitl);
             m.setMetadata(metadata);
             messageMapper.insert(m);
+            hitl.put("messageId", m.getId());
+            metadata.put("hitl", hitl);
+            m.setMetadata(metadata);
+            messageMapper.updateById(m);
+            if ("video_plan".equals(plan.eventName())) {
+                metadata.put("videoPlan", buildVideoPlanMetadata(req, plan, formToken, m.getId()));
+                m.setMetadata(metadata);
+                messageMapper.updateById(m);
+            }
             log.info("AgentOrchestrator: HITL 卡片已落库 assistant 消息 conversationId={} messageId={} formToken={}",
                     req.getConversation().getId(), m.getId(), formToken);
             return m.getId();
@@ -948,10 +1012,10 @@ public class AgentOrchestratorSupport {
                 messageId = planField(cp.getPlan(), "_hitlMessageId");
             }
             if (messageId == null || messageId.isBlank()) return;
+            String selectedTitle = planActionTitle(cp == null ? null : cp.getPlan(), action);
             Map<String, Object> metadata = new java.util.LinkedHashMap<>();
-            metadata.put("kind", "hitl");
             metadata.put("selectedActionId", action == null ? "" : action);
-            metadata.put("selectedActionTitle", actionTitle(action));
+            metadata.put("selectedActionTitle", selectedTitle);
             metadata.put("selectedCustomText", customText == null ? "" : customText);
             metadata.put("selectedParams", params == null ? Map.of() : params);
             metadata.put("selectedAssetIds", assetIds == null ? List.of() : assetIds);
@@ -961,6 +1025,22 @@ public class AgentOrchestratorSupport {
             if (msg != null) {
                 Map<String, Object> merged = msg.getMetadata() == null ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(msg.getMetadata());
                 merged.putAll(metadata);
+                merged.put("pending", false);
+                Object oldHitl = merged.get("hitl");
+                Map<String, Object> hitl = oldHitl instanceof Map<?, ?> old ? new java.util.LinkedHashMap<>((Map<String, Object>) old) : new java.util.LinkedHashMap<>();
+                hitl.put("pending", false);
+                hitl.putIfAbsent("formContent", merged.get("formContent"));
+                hitl.putIfAbsent("actions", merged.get("actions"));
+                hitl.putIfAbsent("formToken", merged.get("formToken"));
+                hitl.putIfAbsent("expirationTime", merged.get("expirationTime"));
+                hitl.putIfAbsent("messageId", messageId);
+                hitl.put("selectedActionId", action == null ? "" : action);
+                hitl.put("selectedActionTitle", selectedTitle);
+                hitl.put("selectedCustomText", customText == null ? "" : customText);
+                hitl.put("selectedParams", params == null ? Map.of() : params);
+                hitl.put("selectedAssetIds", assetIds == null ? List.of() : assetIds);
+                hitl.put("submittedAt", OffsetDateTime.now().toString());
+                merged.put("hitl", hitl);
                 msg.setMetadata(merged);
                 messageMapper.updateById(msg);
             }
@@ -970,6 +1050,79 @@ public class AgentOrchestratorSupport {
             log.warn("AgentOrchestrator: markHitlCardSubmitted 失败 conversationId={} formToken={} error={}",
                     conversationId, formToken, e.getMessage());
         }
+    }
+
+    /** 从 checkpoint 的固定/动态动作清单解析用户看到的标题；找不到回退静态映射。 */
+    private String planActionTitle(String planJson, String action) {
+        if (planJson == null || planJson.isBlank()) return actionTitle(action);
+        try {
+            var root = objectMapper.readTree(planJson);
+            JsonNode actions = root.path("_actions");
+            if (!actions.isArray() || actions.isEmpty()) {
+                var items = root.path("items");
+                actions = items.isArray() && !items.isEmpty() ? items.get(0).path("actions") : null;
+            }
+            if (actions != null && actions.isArray()) {
+                for (var item : actions) {
+                    if (action != null && action.equals(item.path("id").asText(""))) {
+                        String title = item.path("title").asText("");
+                        if (!title.isBlank()) return title;
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("解析动作标题失败: {}", e.getMessage());
+        }
+        return actionTitle(action);
+    }
+
+    /** HITL 视频方案卡片的持久化字段，刷新后前端可恢复 VideoPlanCard。 */
+    private Map<String, Object> buildVideoPlanMetadata(OrchestrationRequest req, StagePlan plan,
+                                                        String formToken, String messageId) {
+        String rawMessage = planPayloadString(plan, "message");
+        Object rawDuration = planPayloadValue(plan, "duration");
+        int duration = rawDuration instanceof Number n ? n.intValue() : 8;
+        String message = rawMessage == null || rawMessage.isBlank() ? plan.planText() : rawMessage;
+        String picUrl = planPayloadPicUrl(plan, req, "picUrl", "picUrls");
+        Map<String, Object> video = new java.util.LinkedHashMap<>();
+        video.put("formToken", formToken);
+        video.put("messageId", messageId);
+        video.put("message", message);
+        video.put("duration", duration);
+        video.put("picUrl", picUrl);
+        video.put("actions", plan.actions() == null ? List.of() : plan.actions());
+        if (plan.models() != null) video.put("models", plan.models());
+        if (plan.recommended() != null) video.put("recommended", plan.recommended());
+        if (plan.reasons() != null) video.put("reasons", plan.reasons());
+        return video;
+    }
+
+    /** 从 planPayload[0] 或请求参考图中提取视频方案首图 URL。 */
+    private String planPayloadPicUrl(StagePlan plan, OrchestrationRequest req, String directKey, String listKey) {
+        String direct = planPayloadString(plan, directKey);
+        if (direct != null && !direct.isBlank()) return direct;
+        if (plan.planPayload() != null && !plan.planPayload().isEmpty()) {
+            Object listValue = plan.planPayload().getFirst().get(listKey);
+            if (listValue instanceof java.util.List<?> list && !list.isEmpty()) {
+                String first = String.valueOf(list.getFirst());
+                if (!first.isBlank()) return first;
+            }
+        }
+        return req.getPicUrls() == null || req.getPicUrls().isEmpty() ? "" : req.getPicUrls().getFirst();
+    }
+
+    /** 读取 planPayload[0] 的字符串字段；缺失返回 null。 */
+    private String planPayloadString(StagePlan plan, String key) {
+        if (plan.planPayload() == null || plan.planPayload().isEmpty()) return null;
+        Object value = plan.planPayload().getFirst().get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    /** 读取 planPayload[0] 的字段；缺失返回 null。 */
+    private Object planPayloadValue(StagePlan plan, String key) {
+        if (plan.planPayload() == null || plan.planPayload().isEmpty()) return null;
+        return plan.planPayload().getFirst().get(key);
     }
 
     private String actionTitle(String action) {
@@ -1417,14 +1570,45 @@ public class AgentOrchestratorSupport {
         if (planJson == null || planJson.isBlank()) return "";
         try {
             var root = objectMapper.readTree(planJson);
+            if (root.has(field)) {
+                return root.path(field).asText("");
+            }
             var items = root.path("items");
             if (items.isArray() && !items.isEmpty()) {
                 return items.get(0).path(field).asText("");
             }
-            return root.path(field).asText("");
+            return "";
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** checkpoint plan 恢复勾选资产 ID：读取 items[0].assetIds（字符串逗号或 JSON 数组），缺失返回空列表。 */
+    public static List<String> planAssetIds(String planJson) {
+        if (planJson == null || planJson.isBlank()) return List.of();
+        try {
+            var root = new ObjectMapper().readTree(planJson);
+            var items = root.path("items");
+            var node = items.isArray() && !items.isEmpty() ? items.get(0) : root;
+            JsonNode assetNode = node.path("assetIds");
+            if (assetNode.isArray()) {
+                List<String> out = new java.util.ArrayList<>();
+                for (JsonNode item : assetNode) {
+                    String v = item.asText("");
+                    if (!v.isBlank()) out.add(v);
+                }
+                return out;
+            }
+            if (assetNode.isTextual() && !assetNode.asText().isBlank()) {
+                return java.util.Arrays.stream(assetNode.asText().split(","))
+                        .map(String::trim)
+                        .filter(v -> !v.isEmpty())
+                        .toList();
+            }
+        } catch (Exception e) {
+            log.warn("解析 checkpoint 资产 ID 失败: {}", e.getMessage());
+        }
+        return List.of();
     }
 
     /** 枚举重载：planField(planJson, PlanField.CONTENT) */
@@ -1632,7 +1816,10 @@ public class AgentOrchestratorSupport {
     }
 
     /** SSE data 统一序列化为 JSON 字符串（SSE 规范 data 为文本；避免经 api-gateway 转发时无 text/event-stream converter 崩溃） */
-    private static final ObjectMapper SSE_JSON = new ObjectMapper();
+    private static final ObjectMapper SSE_JSON = JsonMapper.builder()
+            .addModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .build();
     public static String sseJson(Object data) {
         try { return SSE_JSON.writeValueAsString(data); }
         catch (Exception e) { return String.valueOf(data); }
@@ -1640,6 +1827,23 @@ public class AgentOrchestratorSupport {
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {
+        if ("message_end".equals(eventName)) {
+            Map<String, Object> enriched = new java.util.LinkedHashMap<>(data);
+            if (!enriched.containsKey("reasoning")) {
+                Object reasoning = req.getReasoning() != null ? req.getReasoning()
+                        : req.getTrace() != null ? req.getTrace().getReasoning() : null;
+                if (reasoning != null) enriched.put("reasoning", reasoning);
+            }
+            if (!enriched.containsKey("agentTrace") && req.getTrace() != null) {
+                java.util.List<com.moon.moonagent.ai.agent.AgentTraceEvent> events = req.getTrace().snapshot();
+                if (!events.isEmpty()) enriched.put("agentTrace", events);
+            }
+            if (!enriched.containsKey("suggestedActions") && req.getSuggestedActions() != null
+                    && !req.getSuggestedActions().isEmpty()) {
+                enriched.put("suggestedActions", req.getSuggestedActions());
+            }
+            data = enriched;
+        }
         if ("message".equals(eventName) && data.get("content") != null) {
             req.setLastMessage(String.valueOf(data.get("content")));
         }

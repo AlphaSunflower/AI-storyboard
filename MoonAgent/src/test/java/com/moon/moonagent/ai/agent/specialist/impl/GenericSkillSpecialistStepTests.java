@@ -15,6 +15,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -78,7 +81,7 @@ class GenericSkillSpecialistStepTests {
 
     @Test
     void runFirstStepClarifies() {
-        when(callSpec.content()).thenReturn("{\"needClarify\":true,\"message\":\"请选择风格\","
+        stubChatResponse("{\"needClarify\":true,\"message\":\"请选择风格\","
                 + "\"options\":[{\"id\":\"style1\",\"title\":\"赛博朋克\"},{\"id\":\"style2\",\"title\":\"水墨画\"}]}");
 
         String result = specialist.execute(ctx(testSkill(), "测试", "", "", "", "")).message();
@@ -94,7 +97,7 @@ class GenericSkillSpecialistStepTests {
     @Test
     void resumeAdvancesToFinish() {
         // 后续步骤都 needClarify=false → 直接推进到收尾
-        when(callSpec.content()).thenReturn("{\"needClarify\":false,\"message\":\"已明确\"}");
+        stubChatResponse("{\"needClarify\":false,\"message\":\"已明确\"}");
         AgentSkill skill = testSkill();
         String cpPlan = buildPlan("clarify_style",
                 List.of(Map.of("step", "clarify_style", "value", "赛博朋克")),
@@ -111,6 +114,17 @@ class GenericSkillSpecialistStepTests {
 
         assertTrue(result.startsWith("测试成功"), "走到 flow 末尾应返回测试成功，实际=" + result);
         verify(support, never()).runHITLStage(any(), any(), any());
+    }
+
+    private void stubChatResponse(String raw) {
+        AssistantMessage message = mock(AssistantMessage.class);
+        when(message.getText()).thenReturn(raw);
+        when(message.getMetadata()).thenReturn(Map.of("reasoningContent", "正在思考"));
+        Generation generation = mock(Generation.class);
+        when(generation.getOutput()).thenReturn(message);
+        ChatResponse response = mock(ChatResponse.class);
+        when(response.getResult()).thenReturn(generation);
+        when(callSpec.chatResponse()).thenReturn(response);
     }
 
     private AgentSkill testSkill() {

@@ -1,8 +1,9 @@
 package com.moon.moonagent.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.moon.moonagent.type.JsonbTypeHandler;
 import lombok.Data;
+import org.apache.ibatis.type.JdbcType;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -16,7 +17,7 @@ public class AgentMessage {
     private String role;
     private String content;
     /** 结构化元数据（HITL 卡片、reasoning、trace、suggestedActions 等）；缺失时前端仍可工作 */
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = JsonbTypeHandler.class, jdbcType = JdbcType.OTHER)
     private Map<String, Object> metadata;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;

@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -56,10 +57,15 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Override
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, false, emitter);
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
         request.setRoutingHint(routingHint);
         try {
-            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint, emitter);
+            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, emitter);
             log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成", conversation.getId(), result.hitlPaused());
             return result;
         } catch (AgentInterruptException e) {
@@ -111,10 +117,16 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             // 素材上下文接力：恢复上一张卡保存的参考图；表单未携带资产时回填会话级已确认资产
             request.setPicUrls(support.planPicUrls(cp.getPlan()));
             if (request.getAssetIds().isEmpty()) {
-                request.setAssetIds(support.getSessionAssets(conversation.getId()));
+                // 资产上下文接力：优先从 checkpoint 的 items[0].assetIds 恢复（如 video_plan 勾选的资产），
+                // 再回退会话级 _sessionAssets 快照。这样「我要分镜」等自定义切链不会把已选资产丢掉。
+                List<String> fromPlan = support.planAssetIds(cp.getPlan());
+                request.setAssetIds(fromPlan.isEmpty()
+                        ? support.getSessionAssets(conversation.getId())
+                        : fromPlan);
             }
 
-            AgentTurnResult result = planGraph.resumeTurn(conversation, cp, action, customText, params, assetIds, routingHint, emitter);
+            AgentTurnResult result = planGraph.resumeTurn(conversation, cp, action, customText, params,
+                    request.getAssetIds(), routingHint, emitter);
             log.info("AgentOrchestrator(PlanGraph).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
                     conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
             return result;

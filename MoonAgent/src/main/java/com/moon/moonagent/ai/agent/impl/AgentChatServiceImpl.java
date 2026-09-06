@@ -425,10 +425,14 @@ public class AgentChatServiceImpl implements AgentChatService {
      * message_end → 落库 assistant 消息 + 回填 conversation_id + 附带 sceneCount。
      */
     public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
-        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, "");
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, "", false);
     }
 
     public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint) {
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, routingHint, false);
+    }
+
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint, boolean cancelActiveTasks) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
@@ -466,9 +470,11 @@ public class AgentChatServiceImpl implements AgentChatService {
             lastPicUrlByConversation.remove(conversationId);
         }
 
-        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开即置取消标志；同时置位会话打断标志供编排协作式取消
+        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开只置取消标志（停止发给已断开的 emitter）。
+        // 刷新/切走是「断开」而非「用户主动停止」，不能触发会话 interrupt；
+        // 真正的「停止生成」由 /interrupt 端点显式置位，避免刷新把长任务误停并落「已停止生成」。
         AtomicBoolean cancel = new AtomicBoolean(false);
-        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        Runnable interruptTrap = () -> cancel.set(true);
         emitter.onCompletion(interruptTrap);
         emitter.onTimeout(interruptTrap);
         emitter.onError(ignored -> interruptTrap.run());
@@ -488,7 +494,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint, emitter);
+                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, emitter);
                 // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）；
                 // HITL 暂停已由 runHITLStage 落库 assistant 消息，不重复插入，仅补全 trace/reasoning 到该行 metadata
                 if (turn != null) {
@@ -609,7 +615,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         Map<String, Object> metadata = new java.util.LinkedHashMap<>();
         if (turn.metadata() != null) metadata.putAll(turn.metadata());
-        if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("trace", turn.agentTrace());
+        if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("agentTrace", turn.agentTrace());
         if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
         if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
         persistAssistant(conversation, turn.content(), metadata);
@@ -624,7 +630,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 if (msg == null) return;
                 Map<String, Object> metadata = msg.getMetadata() == null
                         ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(msg.getMetadata());
-                if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("trace", turn.agentTrace());
+                if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("agentTrace", turn.agentTrace());
                 if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
                 if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
                 msg.setMetadata(metadata);
@@ -674,9 +680,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流）
         orchestratorSupport.clearInterrupt(conversationId);
-        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage / submitFormAndResume）
+        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage / submitFormAndResume；断开不触发会话打断）
         AtomicBoolean cancel = new AtomicBoolean(false);
-        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        Runnable interruptTrap = () -> cancel.set(true);
         emitter.onCompletion(interruptTrap);
         emitter.onTimeout(interruptTrap);
         emitter.onError(ignored -> interruptTrap.run());
@@ -814,9 +820,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流）
         orchestratorSupport.clearInterrupt(conversationId);
-        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage，语义见上）
+        // I1：注册 SseEmitter 断开/超时/异常回调（同 streamMessage，语义见上；断开不触发会话打断）
         AtomicBoolean cancel = new AtomicBoolean(false);
-        Runnable interruptTrap = () -> { cancel.set(true); orchestratorSupport.interrupt(conversationId); };
+        Runnable interruptTrap = () -> cancel.set(true);
         emitter.onCompletion(interruptTrap);
         emitter.onTimeout(interruptTrap);
         emitter.onError(ignored -> interruptTrap.run());
@@ -838,6 +844,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     if (turn.hitlPaused()) {
                         // 再次 HITL 暂停：runHITLStage 已落库新 assistant 消息，不重复插入
                         log.info("HITL 提交后再次 HITL 暂停，runHITLStage 已落库 assistant 消息，跳过重复插入: conversationId={}", conversationId);
+                        persistTurnMetadata(conversation.getId(), turn.messageId(), turn);
                     } else if (turn.content() != null && !turn.content().isBlank()) {
                         persistAssistant(conversation, turn);
                     }
@@ -921,6 +928,20 @@ public class AgentChatServiceImpl implements AgentChatService {
             result.put("formToken", cp.getFormToken());
             result.put("taskId", "");
             result.put("expirationTime", cp.getExpirationTime().toEpochSecond());
+            result.put("hitlType", cp.getAction() == null ? "" : cp.getAction());
+            if ("generate_video".equals(cp.getAction())) {
+                result.put("kind", "video-plan");
+                result.put("message", orchestratorSupport.planField(cp.getPlan(), "message"));
+                String duration = orchestratorSupport.planField(cp.getPlan(), "duration");
+                if (duration != null && !duration.isBlank()) {
+                    try { result.put("duration", Integer.parseInt(duration.trim())); }
+                    catch (NumberFormatException ignored) { result.put("duration", 8); }
+                } else {
+                    result.put("duration", 8);
+                }
+                var picUrls = orchestratorSupport.planPicUrls(cp.getPlan());
+                result.put("picUrl", picUrls == null || picUrls.isEmpty() ? "" : picUrls.getFirst());
+            }
             // 从 plan 的 _ 前缀字段恢复（新 checkpoint 格式）
             result.put("formContent", plan.has("_formContent") ? plan.get("_formContent").asText() : "");
             if (plan.has("_actions")) {

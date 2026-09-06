@@ -59,6 +59,8 @@ public interface AgentOrchestrator {
      */
     AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
 
+    AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter);
+
     /**
      * HITL 表单提交后续流并返回完整 turn 结果（含 metadata / trace / reasoning / hitlPaused）。
      * 兼容入口：{@link #resume} 为 {@code resumeTurn(...).content()} 的薄包装。

@@ -216,18 +216,19 @@ export function ChatComposer() {
     void loadAssetList();
   };
   const handleAssetConfirm = async () => {
-    if (assetSelected.size === 0) { setAssetError('请至少选择一个资产'); return; }
     if (!useAgentStore.getState().activeConversationId) {
       await useAgentStore.getState().createConversation();
     }
     // 只选中资产 id；资产图片由后端在生成阶段按资产 id 读取，不混入参考图列表
     const picked = assetList.filter((a) => assetSelected.has(a.id));
+    // 允许确认 0 项 = 清空已选资产（用户全部取消勾选后也能正常确认，而不是被禁用卡住）
     setPickedAssetIds(Array.from(assetSelected));
     if (picked.length) {
       addLocalUserMessage(`已选择资产：${picked.map((a) => a.name).join('、')}（${picked.length} 个）`);
     }
     setAssetOpen(false);
     setAssetSelected(new Set());
+    setAssetError('');
   };
   const toggleAsset = (id: string) => {
     setAssetSelected((prev) => {
@@ -280,14 +281,25 @@ export function ChatComposer() {
             </button>
           )}
           {pickedAssetIds.length > 0 && (
-            <button onClick={handleAssetOpen} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
-              background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
-              padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
-            }}>
-              <Package size={14} strokeWidth={2} style={{ color: DS.brand }} />
-              资产 {pickedAssetIds.length} 个
-            </button>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <button onClick={handleAssetOpen} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
+                background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
+                padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+              }}>
+                <Package size={14} strokeWidth={2} style={{ color: DS.brand }} />
+                资产 {pickedAssetIds.length} 个
+              </button>
+              <button
+                onClick={() => clearPickedAssetIds()}
+                title="移除已选资产"
+                aria-label="移除已选资产"
+                style={{
+                  border: 'none', background: 'white', color: DS.textSecondary,
+                  cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '5px 6px', borderRadius: 8,
+                }}
+              >×</button>
+            </span>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <button
@@ -564,9 +576,9 @@ export function ChatComposer() {
                 padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
                 color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
               }}>取消</button>
-              <button onClick={handleAssetConfirm} disabled={assetSelected.size === 0} style={{
+              <button onClick={handleAssetConfirm} style={{
                 padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
-                fontSize: 14, cursor: assetSelected.size === 0 ? 'not-allowed' : 'pointer', opacity: assetSelected.size === 0 ? 0.45 : 1,
+                fontSize: 14, cursor: 'pointer', opacity: 1,
               }}>确认选择{assetSelected.size ? `（${assetSelected.size}）` : ''}</button>
             </div>
           </div>

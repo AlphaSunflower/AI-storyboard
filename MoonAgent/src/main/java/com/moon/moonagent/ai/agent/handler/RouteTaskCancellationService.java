@@ -93,6 +93,13 @@ public class RouteTaskCancellationService {
                     .in(StoryboardVideoQueue::getStatus, List.of("queued", "running")));
             for (StoryboardVideoQueue row : rows) {
                 try {
+                    if (row.getTaskId() != null && !row.getTaskId().isBlank()) {
+                        try { generationService.cancelVideoTask(row.getTaskId()); }
+                        catch (Exception e) {
+                            log.warn("切链取消分镜视频队列上游任务失败 queueId={} taskId={}: {}",
+                                    row.getId(), row.getTaskId(), e.getMessage());
+                        }
+                    }
                     videoQueueMapper.update(null, new LambdaUpdateWrapper<StoryboardVideoQueue>()
                             .eq(StoryboardVideoQueue::getId, row.getId())
                             .set(StoryboardVideoQueue::getStatus, "cancelled"));

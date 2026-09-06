@@ -14,7 +14,7 @@ export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {events.map((ev, i) => {
-          const ok = ev.status === 'completed' || ev.status === 'success';
+          const ok = ['completed', 'success', 'node_completed', 'route_changed', 'node_started'].includes(ev.status);
           return (
             <div key={ev.id || i} style={{ display: 'flex', gap: 10, position: 'relative', paddingBottom: i < events.length - 1 ? 12 : 0 }}>
               {i < events.length - 1 && (

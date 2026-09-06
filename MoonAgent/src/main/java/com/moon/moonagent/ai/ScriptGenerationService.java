@@ -3,11 +3,16 @@ package com.moon.moonagent.ai;
 import java.util.List;
 import java.util.Map;
 
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+
 /**
  * 分镜脚本生成：通过 Spring AI ChatClient 调用 LLM 网关（spring.ai.openai.base-url 已指向网关 /v1，
  * 即原手写 HttpClient 直连的 /v1/chat/completions），生成并解析分镜脚本。
  */
 public interface ScriptGenerationService {
+
+    /** 分镜生成结果：分镜列表 + 本次 LLM 推理摘要（无推理时为 trace 摘要）。 */
+    record GeneratedScenes(List<Map<String, Object>> scenes, AgentReasoningSnapshot reasoning) {}
 
     /**
      * 生成分镜脚本：调用 LLM 生成 JSON 分镜列表并解析为 Map 列表。
@@ -38,6 +43,16 @@ public interface ScriptGenerationService {
                                              String aspectRatio, String model,
                                              String understandingModel, List<String> referenceImages,
                                              List<String> assetIds);
+
+    /**
+     * 生成分镜脚本并返回推理摘要：供 Agent 编排把 LLM 思考持久化到消息 metadata。
+     * 其余语义与 {@link #generateScenes(String, String, String, String, String, String, String, List, List)} 一致。
+     */
+    GeneratedScenes generateScenesWithReasoning(String projectId, String scriptText,
+                                                String creationType, String customTypeDesc,
+                                                String aspectRatio, String model,
+                                                String understandingModel, List<String> referenceImages,
+                                                List<String> assetIds);
 
     /**
      * 生成分镜脚本并直接落库（generateScenes + 批量写 scenes 表）。

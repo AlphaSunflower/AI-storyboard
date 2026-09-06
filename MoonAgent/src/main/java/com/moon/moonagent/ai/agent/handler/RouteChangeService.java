@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,16 +20,16 @@ public class RouteChangeService {
     private static final Logger log = LoggerFactory.getLogger(RouteChangeService.class);
 
     /** 短语 → 目标 intentType；同一短语命中多个时按数组顺序取首个。 */
-    private static final Map<String, String> PHRASE_TO_INTENT = Map.ofEntries(
+    private static final List<Map.Entry<String, String>> PHRASE_TO_INTENT = List.of(
             Map.entry("我要分镜", "intent-aisplit"),
             Map.entry("我要故事板", "intent-aisplit"),
             Map.entry("生成分镜", "intent-aisplit"),
             Map.entry("改成图片", "intent-pic"),
             Map.entry("改成视频", "intent-video"),
-            Map.entry("不是视频", "intent-pic"),
-            Map.entry("不是图片", "intent-video"),
             Map.entry("审查分镜", "intent-scene-review"),
-            Map.entry("我要审查", "intent-scene-review")
+            Map.entry("我要审查", "intent-scene-review"),
+            Map.entry("不是视频", "intent-pic"),
+            Map.entry("不是图片", "intent-video")
     );
 
     /**
@@ -53,7 +54,7 @@ public class RouteChangeService {
         // 切到...：后续跟分镜/故事板/图片/视频/审查
         String ct = cutTo(text);
         if (ct != null) return ct;
-        for (Map.Entry<String, String> e : PHRASE_TO_INTENT.entrySet()) {
+        for (Map.Entry<String, String> e : PHRASE_TO_INTENT) {
             if (text.contains(e.getKey())) {
                 log.debug("RouteChangeService: 命中切链短语 {} → {}", e.getKey(), e.getValue());
                 return e.getValue();

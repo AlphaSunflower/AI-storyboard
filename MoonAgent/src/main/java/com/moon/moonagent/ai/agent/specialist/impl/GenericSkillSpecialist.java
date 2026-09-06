@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
@@ -19,6 +20,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
@@ -29,6 +32,7 @@ import org.springframework.util.MimeType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -95,25 +99,25 @@ public class GenericSkillSpecialist implements SpecialistAgent {
             if (isMultiStep(skill)) {
                 // 多步澄清（flow 声明）：run 进入第 1 步；resume 恢复第 N 步继续推进
                 if (!resume) {
-                    return SpecialistResult.done(runMultiStep(context, skill, request));
+                    return finish(context, request, SpecialistResult.done(runMultiStep(context, skill, request)));
                 }
-                return SpecialistResult.done(resumeMultiStep(context, skill, request));
+                return finish(context, request, SpecialistResult.done(resumeMultiStep(context, skill, request)));
             }
             boolean dynamicHitl = isDynamicHitl(skill);
             if (dynamicHitl) {
                 // 动态 HITL：先弹卡（4 个 LLM 随机选项 + 第 5 项「测试成功」）；resume 按所选返回
                 if (!resume) {
-                    return SpecialistResult.done(confirmDynamicAndPause(context, skill, request));
+                    return finish(context, request, SpecialistResult.done(confirmDynamicAndPause(context, skill, request)));
                 }
-                return SpecialistResult.done(resumeDynamicChoice(context, skill, request));
+                return finish(context, request, SpecialistResult.done(resumeDynamicChoice(context, skill, request)));
             }
             if (!skill.hitlManifest().isEmpty() && !resume) {
-                return SpecialistResult.done(confirmAndPause(context, skill, request));
+                return finish(context, request, SpecialistResult.done(confirmAndPause(context, skill, request)));
             }
-            return SpecialistResult.done(executeTools(context, skill, request, resume));
+            return finish(context, request, SpecialistResult.done(executeTools(context, skill, request, resume)));
         } catch (Exception e) {
             log.error("GenericSkillSpecialist({}) 执行失败: {}", skill.intentType(), e.getMessage(), e);
-            return SpecialistResult.done(support.sendFriendlyError(request, e.getMessage(), "处理出了点问题，请稍后重试。"));
+            return finish(context, request, SpecialistResult.done(support.sendFriendlyError(request, e.getMessage(), "处理出了点问题，请稍后重试。")));
         }
     }
 
@@ -216,6 +220,8 @@ public class GenericSkillSpecialist implements SpecialistAgent {
                 ? SUCCESS_LABEL
                 : (title != null && !title.isBlank() ? "你选择了：" + title : "你选择了：" + actionId);
         support.sendMessage(request, reply);
+        support.sendEvent(request, "message_end", Map.of(
+                "messageId", "", "sceneCount", -1L, "content", reply));
         return reply;
     }
 
@@ -270,7 +276,7 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         }
         String stepId = flow.get(index);
         String prompt = stepPrompt(stepId, skill);
-        StepResult result = callStepLlm(context, skill, prompt, collected, currentInput);
+        StepResult result = callStepLlm(context, skill, request, prompt, collected, currentInput);
         if (result.needClarify()) {
             List<Map<String, Object>> actions = result.options();
             if (actions == null || actions.isEmpty()) {
@@ -295,7 +301,8 @@ public class GenericSkillSpecialist implements SpecialistAgent {
     }
 
     /** 本步 LLM：system=该步提示词，user=已收集 + 本次输入；期望输出 needClarify/message/options。 */
-    private StepResult callStepLlm(SpecialistContext context, AgentSkill skill, String prompt,
+    private StepResult callStepLlm(SpecialistContext context, AgentSkill skill, OrchestrationRequest request,
+                                   String prompt,
                                    List<Map<String, Object>> collected, String currentInput) {
         String model = isVision(skill) ? gatewayModelService.getDefaultVisionModel()
                 : gatewayModelService.getDefaultTextModel();
@@ -314,13 +321,61 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         if (user.length() == 0) {
             user.append(context.userMessage() == null ? "" : context.userMessage());
         }
-        String raw = getClient().prompt()
+        OffsetDateTime started = OffsetDateTime.now();
+        ChatResponse response = getClient().prompt()
                 .options(OpenAiChatOptions.builder().model(model).timeout(TIMEOUT))
                 .system(sys.toString())
                 .user(user.toString())
                 .call()
-                .content();
+                .chatResponse();
+        AssistantMessage output = response != null && response.getResult() != null
+                ? response.getResult().getOutput() : null;
+        String raw = output == null ? "" : (output.getText() == null ? "" : output.getText());
+        publishReasoning(context, request, output, model, started);
         return parseStepResult(raw);
+    }
+
+    /** 非流式响应保存真实推理摘要；模型无可见推理时给用户一个可展开的完成摘要。 */
+    private void publishReasoning(SpecialistContext context, OrchestrationRequest request,
+                                  AssistantMessage output, String model, OffsetDateTime started) {
+        String reason = extractReasoning(output == null ? null : output.getMetadata());
+        String fallback = "已完成当前步骤的判断。";
+        String reasonText = reason == null || reason.isBlank() ? fallback : reason;
+        Long durationMs = Duration.between(started, OffsetDateTime.now()).toMillis();
+        AgentReasoningSnapshot snapshot = new AgentReasoningSnapshot(
+                summarize(reasonText), reasonText, durationMs,
+                reason == null || reason.isBlank() ? "trace-summary" : model);
+        request.setReasoning(snapshot);
+        if (request.getTrace() != null) request.getTrace().reasoning(snapshot);
+        if (context.emitter() != null) {
+            try {
+                context.emitter().send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                        .name("reasoning_delta").data(AgentOrchestratorSupport.sseJson(Map.of(
+                                "details", reasonText,
+                                "summary", snapshot.summary(),
+                                "durationMs", durationMs,
+                                "source", snapshot.source()))));
+            } catch (Exception e) {
+                log.debug("GenericSkill reasoning 发送失败: error={}", e.getMessage());
+            }
+        }
+    }
+
+    private String extractReasoning(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) return null;
+        for (String key : new String[]{"reasoning_content", "reasoningContent", "thoughts", "thinking"}) {
+            Object value = metadata.get(key);
+            if (value == null) continue;
+            String text = value instanceof String s ? s : String.valueOf(value);
+            if (text != null && !text.isBlank()) return text;
+        }
+        return null;
+    }
+
+    private String summarize(String text) {
+        if (text == null || text.isBlank()) return "";
+        String trimmed = text.trim();
+        return trimmed.length() > 200 ? trimmed.substring(0, 200) + "…" : trimmed;
     }
 
     private String stepPrompt(String stepId, AgentSkill skill) {
@@ -354,6 +409,8 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         String finalMsg = SUCCESS_LABEL
                 + (collected != null && !collected.isEmpty() ? "（已收集 " + collected.size() + " 项信息）" : "");
         support.sendMessage(request, finalMsg);
+        support.sendEvent(request, "message_end", Map.of(
+                "messageId", "", "sceneCount", -1L, "content", finalMsg));
         return finalMsg;
     }
 
@@ -405,15 +462,22 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         String text = buildHistoryText(context) + "\n\n用户: " + context.userMessage();
         UserMessage userMessage = buildUserMessage(text, context.picUrls(), isVision(skill));
 
-        String answer = client.prompt()
+        OffsetDateTime started = OffsetDateTime.now();
+        ChatResponse response = client.prompt()
                 .options(OpenAiChatOptions.builder().model(model).timeout(TIMEOUT))
                 .system(systemPrompt)
                 .messages(userMessage)
                 .tools((Object[]) tools)
                 .call()
-                .content();
+                .chatResponse();
+        AssistantMessage output = response != null && response.getResult() != null
+                ? response.getResult().getOutput() : null;
+        String answer = output == null ? "" : (output.getText() == null ? "" : output.getText());
+        publishReasoning(context, request, output, model, started);
         String content = answer == null ? "" : answer;
         support.sendMessage(request, content);
+        support.sendEvent(request, "message_end", Map.of(
+                "messageId", "", "sceneCount", -1L, "content", content));
         return content;
     }
 
@@ -470,7 +534,20 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         request.setAction(context.action() == null ? "" : context.action());
         request.setCustomText(context.customText() == null ? "" : context.customText());
         request.setParams(context.params() == null ? Map.of() : context.params());
+        request.setAssetIds(context.assetIds() == null ? java.util.List.of() : context.assetIds());
+        request.setTrace(context.trace());
         return request;
+    }
+
+    private SpecialistResult finish(SpecialistContext context, OrchestrationRequest request, SpecialistResult result) {
+        if (context.trace() != null) {
+            context.trace().setTurnMetadata(request.getTurnMetadata());
+            context.trace().setHitlPaused(request.isHitlPaused());
+            context.trace().setHitlMessageId(request.getHitlMessageId());
+            context.trace().setSuggestedActions(request.getSuggestedActions());
+            context.trace().reasoning(request.getReasoning());
+        }
+        return result;
     }
 
     private ChatClient getClient() {

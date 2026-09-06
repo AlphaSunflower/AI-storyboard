@@ -10,6 +10,7 @@ import { hitlFromMetadata } from '../../stores/agentStore';
 import { ReasoningPanel } from './ReasoningPanel';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
+import { VideoPlanCard } from './VideoPlanCard';
 
 /**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
@@ -179,12 +180,25 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
   const bubbleRef = useRef<HTMLDivElement>(null);
   // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
   const hitlMeta = metadata?.hitl;
-  const isHitl = !!hitlMeta;
+  const isHitl = !!hitlMeta && !hitlMeta.pending && metadata?.kind !== 'video-plan';
   const hitlInfo = hitlMeta
     ? hitlFromMetadata(metadata)
     : null;
   const submittedActionId = hitlMeta?.selectedActionId;
   const submittedActionTitle = hitlMeta?.selectedActionTitle;
+  const videoPlanInfo = metadata?.kind === 'video-plan' && metadata.videoPlan && !metadata.hitl?.pending
+    ? {
+        planToken: metadata.videoPlan.formToken ?? '',
+        message: metadata.videoPlan.message,
+        duration: metadata.videoPlan.duration,
+        picUrl: metadata.videoPlan.picUrl ?? '',
+        actions: metadata.videoPlan.actions,
+        messageId: metadata.videoPlan.messageId ?? metadata.hitl?.messageId,
+        models: metadata.videoPlan.models,
+        recommended: metadata.videoPlan.recommended,
+        reasons: metadata.videoPlan.reasons,
+      }
+    : null;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -210,6 +224,22 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
   }, { scope: bubbleRef });
 
   // HITL 卡片消息：渲染确认卡片（选择后高亮 + 禁用），不单独渲染 content 文本避免重复
+  if (videoPlanInfo) {
+    return (
+      <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
+        {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
+          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
+        ) : null}
+        <VideoPlanCard
+          info={videoPlanInfo}
+          submitted
+          submittedActionId={metadata?.hitl?.selectedActionId}
+          submittedActionTitle={metadata?.hitl?.selectedActionTitle}
+        />
+      </div>
+    );
+  }
+
   if (isHitl && hitlInfo) {
     return (
       <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
@@ -220,9 +250,9 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
           info={hitlInfo}
           submittedActionId={submittedActionId}
           submittedActionTitle={submittedActionTitle}
-          customText={hitlMeta?.customText}
-          params={hitlMeta?.params}
-          assetIds={hitlMeta?.assetIds}
+          customText={hitlMeta?.customText ?? hitlMeta?.selectedCustomText}
+          params={hitlMeta?.params ?? hitlMeta?.selectedParams}
+          assetIds={hitlMeta?.assetIds ?? hitlMeta?.selectedAssetIds}
         />
       </div>
     );

@@ -578,11 +578,19 @@ public class PlanGraph {
     }
 
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, false, emitter);
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, content, picUrls == null ? java.util.List.of() : picUrls, emitter));
         traceByThread.put(conversation.getId(), trace);
         try {
+            if (cancelActiveTasks) {
+                routeTaskCancellationService.cancelPendingTasks(conversation.getId());
+                trace.add("route_change", "moon", "取消旧任务", "用户已发起新需求，取消当前异步任务", "", "", "node_completed");
+            }
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
             // 关键：run() 是全新消息，必须重置 resume 专用状态键——graph-core 的 CompileConfig 默认
             // 注册 MemorySaver，GraphRunnerContext.initializeFromStart → getInitialState 会按
@@ -673,12 +681,23 @@ public class PlanGraph {
                 metadata.put("suggestedActions", req.getSuggestedActions());
             }
         }
+        if (trace != null) {
+            metadata.putAll(trace.getTurnMetadata());
+            if (!metadata.containsKey("reasoning") && trace.getReasoning() != null) {
+                metadata.put("reasoning", trace.getReasoning());
+            }
+            if (!metadata.containsKey("suggestedActions") && !trace.getSuggestedActions().isEmpty()) {
+                metadata.put("suggestedActions", trace.getSuggestedActions());
+            }
+        }
         AgentReasoningSnapshot reasoning = req != null ? req.getReasoning() : null;
         if (reasoning == null && trace != null) reasoning = trace.getReasoning();
         List<AgentTraceEvent> events = trace != null ? trace.snapshot() : List.of();
-        List<SuggestedAction> suggestedActions = req != null ? req.getSuggestedActions() : List.of();
-        boolean hitlPaused = req != null && req.isHitlPaused();
-        String messageId = req != null ? req.getHitlMessageId() : "";
+        List<SuggestedAction> suggestedActions = req != null && !req.getSuggestedActions().isEmpty()
+                ? req.getSuggestedActions() : trace != null ? trace.getSuggestedActions() : List.of();
+        boolean hitlPaused = (req != null && req.isHitlPaused()) || (trace != null && trace.isHitlPaused());
+        String messageId = req != null && !req.getHitlMessageId().isBlank()
+                ? req.getHitlMessageId() : trace != null ? trace.getHitlMessageId() : "";
         return new AgentTurnResult(lastMessage == null ? "" : lastMessage, metadata, events,
                 reasoning, suggestedActions, hitlPaused, messageId);
     }

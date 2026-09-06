@@ -47,8 +47,10 @@ export function HumanInputCard({
   const mergeParams = (p: Record<string, string>) => setSelectedParams((prev) => ({ ...prev, ...p }));
   // 分区选择器模式：后端下发 imageModels/videoModels 时渲染图片+视频两组；否则保持原单选择器逻辑
   const hasSplitSelectors = !!((info.imageModels && info.imageModels.length > 0) || (info.videoModels && info.videoModels.length > 0));
-  // 资产/分镜勾选状态：默认不选（用户自行勾选需要的项）
-  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(() => new Set());
+  // 资产/分镜勾选状态：默认全选（与卡片文档一致）；用户可逐个取消勾选，再点下方动作按钮确认
+  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(
+    () => new Set((info.assets ?? []).map((a) => a.id)),
+  );
   const toggleAsset = (id: string) =>
     setSelectedAssets((prev) => {
       const next = new Set(prev);
@@ -127,6 +129,10 @@ export function HumanInputCard({
       border: "1px solid var(--color-hairline)",
       boxShadow: "0 2px 8px rgba(20,20,19,0.06)",
       padding: 20,
+      maxHeight: "min(46vh, 480px)",
+      overflowY: "auto",
+      overflowX: "hidden",
+      scrollbarWidth: "thin",
       textAlign: "left",
     }}>
       {/* 头部：标题 + 折叠按钮 */}
@@ -178,6 +184,9 @@ export function HumanInputCard({
               style={{ accentColor: "var(--color-primary)", cursor: "inherit" }}
             />
             <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-ink)" }}>全选</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--color-muted)" }}>
+              已选 {selectedAssets.size}/{info.assets.length} 项，取消勾选后点下方按钮确认
+            </span>
           </label>
           {info.assets.map((a) => (
             <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", cursor: streaming ? "not-allowed" : "pointer", opacity: streaming ? 0.6 : 1 }}>

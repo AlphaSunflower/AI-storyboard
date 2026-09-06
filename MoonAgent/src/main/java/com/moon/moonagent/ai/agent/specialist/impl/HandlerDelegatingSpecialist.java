@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.specialist.impl;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
@@ -76,12 +77,19 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
                 log.info("HandlerDelegatingSpecialist({}): handler 声明移交 → {}", handler.intentType(), handoffTarget);
                 traceEnd(trace, traceId, "node_completed", "完成，移交至 " + handoffTarget);
                 traceAdd(trace, "handoff", intent, "移交", intent, handoffTarget, "route_changed");
+                copyTurnMetadata(trace, request);
                 return SpecialistResult.handoff(handoffTarget, "环节完成，自动移交",
                         request.getHandoffState() != null ? request.getHandoffState() : java.util.Map.of());
             }
             String result = lastMessage != null ? lastMessage : "";
             traceEnd(trace, traceId, "node_completed", "完成");
+            copyTurnMetadata(trace, request);
             return SpecialistResult.done(result);
+        } catch (AgentInterruptException e) {
+            // 用户主动停止（/interrupt）或中断协作：不是业务错误，不落「处理出了点问题」文案，干净收尾。
+            log.info("HandlerDelegatingSpecialist({}) 被停止: {}", handler.intentType(), e.getMessage());
+            traceEnd(trace, traceId, "cancelled", "用户停止生成");
+            return SpecialistResult.done("");
         } catch (Exception e) {
             log.error("HandlerDelegatingSpecialist({}) 执行失败: {}", handler.intentType(), e.getMessage(), e);
             traceEnd(trace, traceId, "failed", "执行失败");
@@ -109,5 +117,14 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
                 title, "", currentIntent == null ? "" : currentIntent,
                 targetIntent == null ? "" : targetIntent,
                 OffsetDateTime.now(), null));
+    }
+
+    private void copyTurnMetadata(AgentTraceAccumulator trace, OrchestrationRequest request) {
+        if (trace == null || request == null) return;
+        trace.setTurnMetadata(request.getTurnMetadata());
+        trace.setHitlPaused(request.isHitlPaused());
+        trace.setHitlMessageId(request.getHitlMessageId());
+        trace.setSuggestedActions(request.getSuggestedActions());
+        trace.reasoning(request.getReasoning());
     }
 }

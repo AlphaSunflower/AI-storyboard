@@ -49,18 +49,37 @@ export interface SuggestedAction {
 export interface AgentMessageHitl {
   formContent: string;
   actions: { id: string; title: string }[];
+  pending?: boolean;
   selectedActionId?: string;
   selectedActionTitle?: string;
   customText?: string;
+  selectedCustomText?: string;
   params?: Record<string, string>;
+  selectedParams?: Record<string, string>;
   assetIds?: string[];
+  selectedAssetIds?: string[];
   messageId?: string;
+}
+
+/** 图生视频方案卡片（metadata.videoPlan；刷新后恢复 VideoPlanCard） */
+export interface AgentMessageVideoPlan {
+  message: string;
+  duration: number;
+  picUrl?: string;
+  actions: { id: string; title: string }[];
+  formToken?: string;
+  messageId?: string;
+  models?: GatewayModelOption[];
+  recommended?: Record<string, string>;
+  reasons?: Record<string, string>;
 }
 
 /** 消息元数据 */
 export interface AgentMessageMetadata {
   kind: 'hitl' | 'assistant-reply' | 'video-plan';
   hitl?: AgentMessageHitl;
+  videoPlan?: AgentMessageVideoPlan;
+  pending?: boolean;
   reasoning?: AgentReasoning;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];

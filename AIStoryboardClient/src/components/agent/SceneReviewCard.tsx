@@ -130,7 +130,7 @@ export function SceneReviewCard({ info }: { info: HumanInputInfo }) {
   const [refineFor, setRefineFor] = useState<string | null>(null);
   const [confirmGenImage, setConfirmGenImage] = useState(false);
   const [pane, setPane] = useState<'image' | 'video'>('image');
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, Record<'image' | 'video', string>>>(() =>
     Object.fromEntries(items.map((i) => [i.id, {

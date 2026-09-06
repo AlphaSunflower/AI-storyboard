@@ -51,4 +51,16 @@ class AgentOrchestratorSupportMaterialContextTest {
 
         assertTrue(enriched == payload);
     }
+
+    @Test
+    void planAssetIds_readsCheckpointCommaString() {
+        String plan = "{\"items\":[{\"assetIds\":\"asset-1,asset-2\",\"picUrls\":[]}],\"_formContent\":\"x\"}";
+        assertEquals(List.of("asset-1", "asset-2"), AgentOrchestratorSupport.planAssetIds(plan));
+    }
+
+    @Test
+    void planAssetIds_readsCheckpointJsonArray() {
+        String plan = "{\"items\":[{\"assetIds\":[\"asset-a\",\"asset-b\"]}]}";
+        assertEquals(List.of("asset-a", "asset-b"), AgentOrchestratorSupport.planAssetIds(plan));
+    }
 }

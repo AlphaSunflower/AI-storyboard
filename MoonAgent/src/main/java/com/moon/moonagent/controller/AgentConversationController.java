@@ -183,7 +183,7 @@ public class AgentConversationController {
         SseEmitter emitter = new SseEmitter(600_000L);
         chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request),
                 request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                request.routingHint());
+                request.routingHint(), Boolean.TRUE.equals(request.cancelActiveTasks()));
         return emitter;
     }
 

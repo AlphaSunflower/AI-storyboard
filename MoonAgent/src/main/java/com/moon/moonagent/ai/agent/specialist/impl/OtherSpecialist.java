@@ -3,6 +3,8 @@ package com.moon.moonagent.ai.agent.specialist.impl;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
@@ -50,6 +52,7 @@ public class OtherSpecialist implements SpecialistAgent {
     private final GatewayModelService gatewayModelService;
     private final AgentMessageMapper messageMapper;
     private final FileStorageService fileStorageService;
+    private final AgentOrchestratorSupport support;
 
     private volatile ChatClient chatClient;
 
@@ -97,7 +100,11 @@ public class OtherSpecialist implements SpecialistAgent {
             if (reasonDelta != null && !reasonDelta.isBlank()) {
                 if (emitter != null) {
                     emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                            .name("reasoning_delta").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(Map.of("delta", reasonDelta))));
+                            .name("reasoning_delta").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(Map.of(
+                                    "details", reasonDelta,
+                                    "summary", summarize(reasonDelta),
+                                    "durationMs", durationMs,
+                                    "source", gatewayModelService.getDefaultTextModel()))));
                 }
                 reasoning = new AgentReasoningSnapshot(summarize(reasonDelta), reasonDelta, durationMs, gatewayModelService.getDefaultTextModel());
             } else {
@@ -108,6 +115,12 @@ public class OtherSpecialist implements SpecialistAgent {
             // 把 reasoning 回写到 context trace / request metadata（供 turn 落库）；SpecialistResult 不直接带 metadata，
             // 交由 AgentTraceAccumulator 记录（若 trace 非空）。
             if (context.trace() != null) context.trace().reasoning(reasoning);
+            OrchestrationRequest request = new OrchestrationRequest(
+                    context.conversation(), context.userMessage(), context.picUrls(), emitter);
+            request.setReasoning(reasoning);
+            request.setTrace(context.trace());
+            support.sendEvent(request, "message_end", Map.of(
+                    "messageId", "", "sceneCount", -1L, "content", answer == null ? "" : answer));
 
             return SpecialistResult.done(answer != null ? answer : "");
         } catch (Exception e) {

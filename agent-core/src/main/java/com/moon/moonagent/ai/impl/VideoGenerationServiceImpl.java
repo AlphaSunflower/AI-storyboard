@@ -32,8 +32,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoGenerationServiceImpl.class);
 
-    /** H3 参考图硬上限（资产参考图 + 手动参考素材合并后截断）。 */
-    private static final int MAX_REFERENCE_IMAGES = 9;
+    /** MiniMax H3 参考图硬上限（模型 refImages.max=3；资产参考图 + 手动参考素材合并后截断，超出会报错）。 */
+    private static final int MAX_REFERENCE_IMAGES = 3;
 
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;

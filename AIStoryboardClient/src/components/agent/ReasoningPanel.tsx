@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Brain, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import type { AgentReasoning, AgentTraceEvent } from '../../api/agent';
 import { AgentTraceTimeline } from './AgentTraceTimeline';
@@ -23,6 +23,9 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!reasoning || (agentTrace && agentTrace.length > 0);
+  useEffect(() => {
+    if (!streaming) setExpanded(false);
+  }, [streaming]);
   if (!hasContent && !streaming) return null;
   const live = !!streaming;
   const duration = reasoning?.durationMs != null ? formatDuration(reasoning.durationMs) : '';

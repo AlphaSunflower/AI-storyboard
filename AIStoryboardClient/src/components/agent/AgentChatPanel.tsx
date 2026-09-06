@@ -41,7 +41,7 @@ export function AgentChatPanel() {
   const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
   const [assetError, setAssetError] = useState('');
   // HumanInputCard 折叠状态
-  const [hitlCollapsed, setHitlCollapsed] = useState(false);
+  const [hitlCollapsed, setHitlCollapsed] = useState(true);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -65,6 +65,11 @@ export function AgentChatPanel() {
       inputRef.current?.focus();
     }
   }, [pendingPicUrls]);
+
+  // 新的 HITL 卡片默认折叠，保证下方输入框始终可见
+  useEffect(() => {
+    setHitlCollapsed(true);
+  }, [waitingHumanInput?.formToken, waitingVideoPlan?.planToken]);
 
   // 点击外部关闭"+"菜单
   useEffect(() => {
@@ -150,17 +155,18 @@ export function AgentChatPanel() {
     });
   };
   const handleAssetConfirm = async () => {
-    if (assetSelected.size === 0) { setAssetError('请至少选择一个资产'); return; }
     if (!useAgentStore.getState().activeConversationId) {
       await useAgentStore.getState().createConversation();
     }
     const picked = assetList.filter((a) => assetSelected.has(a.id));
+    // 允许确认 0 项 = 清空已选资产（全部取消勾选后也能正常确认，而不是被禁用卡住）
     setPickedAssetIds(Array.from(assetSelected));
     if (picked.length) {
       addLocalUserMessage(`已选择资产：${picked.map((a) => a.name).join('、')}（${picked.length} 个）`);
     }
     setAssetOpen(false);
     setAssetSelected(new Set());
+    setAssetError('');
   };
 
   // 麦克风录制完成 → 上传识别 → 回填输入框
@@ -308,7 +314,11 @@ export function AgentChatPanel() {
 
       {/* HumanInputCard: 人工介入卡片 - 在输入区上方显示 */}
       {waitingHumanInput && (
-        <div style={{ padding: '0 16px', background: 'white' }}>
+        <div style={{
+          padding: '0 16px', background: 'white', flexShrink: 0,
+          maxHeight: 'min(46vh, 520px)', overflowY: 'auto', overflowX: 'hidden',
+          scrollbarWidth: 'thin',
+        }}>
           {waitingHumanInput.assets?.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined)) ? (
             <SceneReviewCard info={waitingHumanInput} />
           ) : (
@@ -515,9 +525,9 @@ export function AgentChatPanel() {
                 padding: '8px 16px', borderRadius: 10, border: '1px solid var(--color-hairline)', background: 'white',
                 color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer',
               }}>取消</button>
-              <button onClick={handleAssetConfirm} disabled={assetSelected.size === 0} style={{
+              <button onClick={handleAssetConfirm} style={{
                 padding: '8px 16px', borderRadius: 10, border: 'none', background: '#cc785c', color: 'white',
-                fontSize: 14, cursor: assetSelected.size === 0 ? 'not-allowed' : 'pointer', opacity: assetSelected.size === 0 ? 0.45 : 1,
+                fontSize: 14, cursor: 'pointer', opacity: 1,
               }}>确认选择{assetSelected.size ? `（${assetSelected.size}）` : ''}</button>
             </div>
           </div>

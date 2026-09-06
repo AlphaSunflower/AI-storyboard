@@ -19,6 +19,13 @@ export interface HumanInputInfo {
   expirationTime: number;
   /** HITL 卡片对应的后端消息 id（human_input 事件 messageId；提交后写入 metadata.hitl） */
   messageId?: string;
+  /** checkpoint 分类/事件名，用于刷新后区分 human_input 与 video_plan */
+  kind?: 'human-input' | 'video-plan';
+  hitlType?: string;
+  /** video_plan checkpoint 恢复字段 */
+  message?: string;
+  duration?: number;
+  picUrl?: string;
   // 卡片模型/参数选项 + LLM 推荐（后端 human_input 事件下发；无配置时为空数组/空对象）
   models?: GatewayModelOption[];
   imageModels?: GatewayModelOption[];
@@ -138,6 +145,8 @@ interface AgentState {
   submitVideoPlan: (actionId: string, params?: Record<string, string>, customText?: string) => Promise<void>;
   // 跳过当前 HITL 卡片（用户想切换话题时使用，checkpoint 30 分钟后自动过期）
   skipCurrentHITL: () => void;
+  /** 流结束后恢复已落库但未送达的待处理 HITL 卡片（SSE 被断开/超时后无需刷新即可补显）。 */
+  recoverPendingCheckpoint: (conversationId: string) => Promise<void>;
   // ── 分镜视频批量生成队列（右上角任务队列） ──
   storyboardVideoQueue: StoryboardVideoQueueItem[];
   enqueueStoryboardVideoQueue: (items: StoryboardVideoEnqueueItem[], projectId?: string) => Promise<string[]>;
@@ -335,9 +344,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 页面刷新恢复：检查是否有待处理的 HITL checkpoint，恢复 waitingHumanInput
     try {
       const cpRes = await agentApi.getPendingCheckpoint(id);
-      const cp = cpRes.data.data as HumanInputInfo | null;
+      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo>) | null;
       if (cp && cp.formToken && cp.actions && cp.actions.length > 0) {
-        set({ waitingHumanInput: cp });
+        if (cp.kind === 'video-plan' || cp.hitlType === 'generate_video') {
+          const videoInfo: VideoPlanInfo = {
+            planToken: cp.formToken,
+            message: cp.message ?? cp.formContent,
+            duration: cp.duration ?? 8,
+            picUrl: cp.picUrl ?? '',
+            actions: cp.actions,
+            messageId: cp.messageId,
+            models: cp.models,
+            recommended: cp.recommended,
+            reasons: cp.reasons,
+          };
+          set((s) => ({ waitingVideoPlan: videoInfo, hitlVideoPlan: { ...s.hitlVideoPlan, [id]: videoInfo } }));
+        } else {
+          set({ waitingHumanInput: cp });
+        }
       }
     } catch { /* 静默失败，不影响正常加载 */ }
   },
@@ -536,7 +560,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const updateLiveTrace = (ev: AgentTraceEvent) => {
       set((s) => {
         const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextTrace = [...(g.traceDraft ?? []), ev];
+        const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
+        const nextTrace = existingIndex >= 0
+          ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
+          : [...(g.traceDraft ?? []), ev];
         const nextG = { ...g, traceDraft: nextTrace };
         if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
         return {
@@ -600,7 +627,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 实时推理：拼接 details、按需更新 summary/durationMs/source，写入当前气泡 metadata.reasoning
             const prev = get().generating[snapshotId]?.reasoningDraft;
             const reasoning: AgentReasoning = {
-              summary: e.summary ?? prev?.summary ?? '',
+              summary: prev?.summary ?? e.summary ?? '',
               details: (prev?.details ?? '') + (e.details ?? ''),
               durationMs: e.durationMs ?? prev?.durationMs,
               source: e.source ?? prev?.source ?? 'assistant',
@@ -644,9 +671,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   assets: e.assets,
                   messageId: cardId,
                 },
-                // 未提交期间不生成卡片消息（卡片仅从输入区上方展示）；占位气泡补方案文本，避免空气泡
+                // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
                 messages: s.messages.map((m) =>
-                  m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                  m.id === assistantId ? {
+                    ...m,
+                    id: cardId,
+                    content: e.formContent ?? '',
+                    metadata: {
+                      ...(m.metadata ?? {}),
+                      kind: 'hitl',
+                      hitl: {
+                        formContent: e.formContent ?? '',
+                        actions: e.actions ?? [],
+                        pending: true,
+                        messageId: cardId,
+                      },
+                    },
+                  } : m),
                 generating: {
                   ...s.generating,
                   [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
@@ -691,6 +732,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
             if (get().activeConversationId !== snapshotId) break;
             set((s) => {
+              const cardId = e.messageId ?? `video-plan-${Date.now()}`;
               const info = {
                 // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
                 planToken: e.formToken ?? e.planToken ?? '',
@@ -698,12 +740,43 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
-                messageId: e.messageId,
+                messageId: cardId,
                 models: e.models,
                 recommended: e.recommended,
                 reasons: e.reasons,
               };
-              return { waitingVideoPlan: info, hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info } };
+              const videoPlanMeta = {
+                message: info.message,
+                duration: info.duration,
+                picUrl: info.picUrl,
+                actions: info.actions,
+                formToken: info.planToken,
+                messageId: cardId,
+                models: info.models,
+                recommended: info.recommended,
+                reasons: info.reasons,
+              };
+              return {
+                waitingVideoPlan: info,
+                hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
+                messages: s.messages.map((m) =>
+                  m.id === assistantId ? {
+                    ...m,
+                    id: cardId,
+                    content: info.message || info.picUrl || '',
+                    metadata: {
+                      ...(m.metadata ?? {}),
+                      kind: 'video-plan',
+                      hitl: {
+                        formContent: info.message,
+                        actions: info.actions,
+                        pending: true,
+                        messageId: cardId,
+                      },
+                      videoPlan: videoPlanMeta,
+                    },
+                  } : m),
+              };
             });
             break;
           case 'error':
@@ -747,6 +820,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : s.messages,
         };
       });
+      // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
+      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
+        void get().recoverPendingCheckpoint(snapshotId);
+      }
     }
     // 不再自动清空参考图和资产ID——用户要求持久化到意图节点消费
     // if (get().activeConversationId === snapshotId) set({ refImageUrls: [] });
@@ -767,9 +844,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const cardId = info.messageId ?? `hitl-${Date.now()}`;
     const hitlMeta: AgentMessageMetadata = {
       kind: 'hitl',
+      pending: false,
       hitl: {
         formContent: info.formContent || '',
         actions: info.actions || [],
+        pending: false,
         selectedActionId: actionId,
         selectedActionTitle: act?.title ?? actionId,
         customText: actionId === 'custom' ? customText : undefined,
@@ -794,7 +873,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingHumanInput: null,
         streamError: null,
         messages: hasCard
-          ? s.messages.map((m) => (m.id === cardId ? { ...m, metadata: hitlMeta } : m))
+          ? s.messages.map((m) => (m.id === cardId ? { ...m, metadata: { ...(m.metadata ?? {}), ...hitlMeta } } : m))
           : [...s.messages, newCard],
       };
     });
@@ -861,7 +940,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const updateLiveTrace = (ev: AgentTraceEvent) => {
       set((s) => {
         const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextTrace = [...(g.traceDraft ?? []), ev];
+        const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
+        const nextTrace = existingIndex >= 0
+          ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
+          : [...(g.traceDraft ?? []), ev];
         const nextG = { ...g, traceDraft: nextTrace };
         if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
         return {
@@ -920,7 +1002,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           case 'reasoning_delta': {
             const prev = get().generating[snapshotId]?.reasoningDraft;
             const reasoning: AgentReasoning = {
-              summary: e.summary ?? prev?.summary ?? '',
+              summary: prev?.summary ?? e.summary ?? '',
               details: (prev?.details ?? '') + (e.details ?? ''),
               durationMs: e.durationMs ?? prev?.durationMs,
               source: e.source ?? prev?.source ?? 'assistant',
@@ -964,9 +1046,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   assets: e.assets,
                   messageId: cardId,
                 },
-                // 未提交期间不生成卡片消息；占位气泡补方案文本，避免空气泡
+                // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
                 messages: s.messages.map((m) =>
-                  m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                  m.id === assistantId ? {
+                    ...m,
+                    id: cardId,
+                    content: e.formContent ?? '',
+                    metadata: {
+                      ...(m.metadata ?? {}),
+                      kind: 'hitl',
+                      hitl: {
+                        formContent: e.formContent ?? '',
+                        actions: e.actions ?? [],
+                        pending: true,
+                        messageId: cardId,
+                      },
+                    },
+                  } : m),
                 generating: {
                   ...s.generating,
                   [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
@@ -1011,6 +1107,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
             if (get().activeConversationId !== snapshotId) break;
             set((s) => {
+              const cardId = e.messageId ?? `video-plan-${Date.now()}`;
               const info = {
                 // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
                 planToken: e.formToken ?? e.planToken ?? '',
@@ -1018,12 +1115,43 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 duration: e.duration ?? 8,
                 picUrl: e.picUrl ?? '',
                 actions: e.actions ?? [],
-                messageId: e.messageId,
+                messageId: cardId,
                 models: e.models,
                 recommended: e.recommended,
                 reasons: e.reasons,
               };
-              return { waitingVideoPlan: info, hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info } };
+              const videoPlanMeta = {
+                message: info.message,
+                duration: info.duration,
+                picUrl: info.picUrl,
+                actions: info.actions,
+                formToken: info.planToken,
+                messageId: cardId,
+                models: info.models,
+                recommended: info.recommended,
+                reasons: info.reasons,
+              };
+              return {
+                waitingVideoPlan: info,
+                hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
+                messages: s.messages.map((m) =>
+                  m.id === assistantId ? {
+                    ...m,
+                    id: cardId,
+                    content: info.message || info.picUrl || '',
+                    metadata: {
+                      ...(m.metadata ?? {}),
+                      kind: 'video-plan',
+                      hitl: {
+                        formContent: info.message,
+                        actions: info.actions,
+                        pending: true,
+                        messageId: cardId,
+                      },
+                      videoPlan: videoPlanMeta,
+                    },
+                  } : m),
+              };
             });
             break;
           case 'error':
@@ -1065,6 +1193,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : s.messages,
         };
       });
+      // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
+      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
+        void get().recoverPendingCheckpoint(snapshotId);
+      }
     }
   },
 
@@ -1084,6 +1216,55 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     manualStop = false;
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
+    const cardId = info.messageId ?? `video-plan-${Date.now()}`;
+    const selectedActionTitle = info.actions.find((a) => a.id === actionId)?.title ?? actionId;
+    const videoPlanMeta = {
+      message: info.message,
+      duration: info.duration,
+      picUrl: info.picUrl,
+      actions: info.actions,
+      formToken: info.planToken,
+      messageId: cardId,
+      models: info.models,
+      recommended: info.recommended,
+      reasons: info.reasons,
+    };
+    const markVideoCardSubmitted = () => set((s) => {
+      const hasCard = s.messages.some((m) => m.id === cardId);
+      const nextCard: AgentMessage = {
+        id: cardId,
+        conversationId: id,
+        role: 'assistant',
+        content: info.message,
+        createdAt: new Date().toISOString(),
+        metadata: {
+          kind: 'video-plan',
+          hitl: {
+            formContent: info.message,
+            actions: info.actions,
+            pending: false,
+            selectedActionId: actionId,
+            selectedActionTitle,
+            customText: actionId === 'custom' ? customText : undefined,
+            params,
+            messageId: cardId,
+          },
+          videoPlan: videoPlanMeta,
+        },
+      };
+      return {
+        messages: hasCard
+          ? s.messages.map((m) => m.id === cardId ? {
+              ...m,
+              metadata: {
+                ...(m.metadata ?? {}),
+                ...(nextCard.metadata ?? {}),
+              } as AgentMessageMetadata,
+            } : m)
+          : [...s.messages, nextCard],
+      };
+    });
+    markVideoCardSubmitted();
     // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，后端容器内可访问）
     if (actionId === 'refine') {
       set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { waitingVideoPlan: null, hitlVideoPlan: h, pendingPicUrl: assetUrl(info.picUrl) }; });
@@ -1127,7 +1308,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const updateLiveTrace = (ev: AgentTraceEvent) => {
         set((s) => {
           const g = s.generating[snapshotId] ?? { hint: '' };
-          const nextTrace = [...(g.traceDraft ?? []), ev];
+          const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
+          const nextTrace = existingIndex >= 0
+            ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
+            : [...(g.traceDraft ?? []), ev];
           const nextG = { ...g, traceDraft: nextTrace };
           if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
           return {
@@ -1183,7 +1367,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'reasoning_delta': {
               const prev = get().generating[snapshotId]?.reasoningDraft;
               const reasoning: AgentReasoning = {
-                summary: e.summary ?? prev?.summary ?? '',
+                summary: prev?.summary ?? e.summary ?? '',
                 details: (prev?.details ?? '') + (e.details ?? ''),
                 durationMs: e.durationMs ?? prev?.durationMs,
                 source: e.source ?? prev?.source ?? 'assistant',
@@ -1214,9 +1398,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                     recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
                     messageId: cardId,
                   },
-                  // 未提交期间不生成卡片消息；占位气泡补方案文本，避免空气泡
+                  // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
                   messages: s.messages.map((m) =>
-                    m.id === assistantId && !m.content ? { ...m, content: e.formContent ?? '' } : m),
+                    m.id === assistantId ? {
+                      ...m,
+                      id: cardId,
+                      content: e.formContent ?? '',
+                      metadata: {
+                        ...(m.metadata ?? {}),
+                        kind: 'hitl',
+                        hitl: {
+                          formContent: e.formContent ?? '',
+                          actions: e.actions ?? [],
+                          pending: true,
+                          messageId: cardId,
+                        },
+                      },
+                    } : m),
                   generating: {
                     ...s.generating,
                     [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
@@ -1227,13 +1425,45 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'video_plan':
               if (get().activeConversationId !== snapshotId) break;
               set((s) => {
+                const cardId = e.messageId ?? `video-plan-${Date.now()}`;
                 const info = {
                   planToken: e.formToken ?? e.planToken ?? '', message: e.message ?? '',
                   duration: e.duration ?? 8, picUrl: e.picUrl ?? '', actions: e.actions ?? [],
-                  messageId: e.messageId,
+                  messageId: cardId,
                   models: e.models, recommended: e.recommended, reasons: e.reasons,
                 };
-                return { waitingVideoPlan: info, hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info } };
+                const videoPlanMeta = {
+                  message: info.message,
+                  duration: info.duration,
+                  picUrl: info.picUrl,
+                  actions: info.actions,
+                  formToken: info.planToken,
+                  messageId: cardId,
+                  models: info.models,
+                  recommended: info.recommended,
+                  reasons: info.reasons,
+                };
+                return {
+                  waitingVideoPlan: info,
+                  hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
+                  messages: s.messages.map((m) =>
+                    m.id === assistantId ? {
+                      ...m,
+                      id: cardId,
+                      content: info.message || info.picUrl || '',
+                      metadata: {
+                        ...(m.metadata ?? {}),
+                        kind: 'video-plan',
+                        hitl: {
+                          formContent: info.message,
+                          actions: info.actions,
+                          pending: true,
+                          messageId: cardId,
+                        },
+                        videoPlan: videoPlanMeta,
+                      },
+                    } : m),
+                };
               });
               break;
             case 'message_end':
@@ -1480,6 +1710,40 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (id) void agentApi.skipPendingCheckpoint(id).catch(() => {});
     set((s) => { const h = { ...s.hitlVideoPlan }; if (id) delete h[id]; return { waitingHumanInput: null,
        waitingVideoPlan: null, hitlVideoPlan: h }; });
+  },
+
+  /** 流结束后恢复已落库的待处理 HITL 卡片：SSE 被网关/代理断开或超时，卡片只落库未送达时，可在不刷新页面的情况下补显。 */
+  recoverPendingCheckpoint: async (conversationId: string) => {
+    if (!conversationId) return;
+    try {
+      const cpRes = await agentApi.getPendingCheckpoint(conversationId);
+      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo>) | null;
+      if (!cp || !cp.formToken || !cp.actions || cp.actions.length === 0) return;
+      const isActive = get().activeConversationId === conversationId;
+      if (cp.kind === 'video-plan' || cp.hitlType === 'generate_video') {
+        const videoInfo: VideoPlanInfo = {
+          planToken: cp.formToken,
+          message: cp.message ?? cp.formContent,
+          duration: cp.duration ?? 8,
+          picUrl: cp.picUrl ?? '',
+          actions: cp.actions,
+          messageId: cp.messageId,
+          models: cp.models,
+          recommended: cp.recommended,
+          reasons: cp.reasons,
+        };
+        set((s) => ({
+          waitingVideoPlan: videoInfo,
+          hitlVideoPlan: { ...s.hitlVideoPlan, [conversationId]: videoInfo },
+          workflowHint: isActive ? '' : s.workflowHint,
+        }));
+      } else {
+        set((s) => ({
+          waitingHumanInput: cp,
+          workflowHint: isActive ? '' : s.workflowHint,
+        }));
+      }
+    } catch { /* 静默：网络抖动不打断聊天 */ }
   },
 
   /** 分镜视频批量入队（全自动生成视频门禁确认后调用）。 */
