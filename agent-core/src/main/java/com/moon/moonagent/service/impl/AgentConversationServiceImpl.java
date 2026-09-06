@@ -41,10 +41,16 @@ public class AgentConversationServiceImpl implements AgentConversationService {
 
     @Override
     public void persistMessage(String conversationId, String role, String content) {
+        persistMessage(conversationId, role, content, null);
+    }
+
+    @Override
+    public void persistMessage(String conversationId, String role, String content, java.util.Map<String, Object> metadata) {
         AgentMessage m = new AgentMessage();
         m.setConversationId(conversationId);
         m.setRole(role);
         m.setContent(content);
+        if (metadata != null) m.setMetadata(metadata);
         messageMapper.insert(m);
     }
 

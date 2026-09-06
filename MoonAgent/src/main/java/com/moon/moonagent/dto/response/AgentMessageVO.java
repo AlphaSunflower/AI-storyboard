@@ -1,6 +1,7 @@
 package com.moon.moonagent.dto.response;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 /**
  * Agent 消息视图对象（对应实体 AgentMessage）。
@@ -11,5 +12,6 @@ public record AgentMessageVO(
     String conversationId,
     String role,
     String content,
+    Map<String, Object> metadata,
     OffsetDateTime createdAt
 ) {}

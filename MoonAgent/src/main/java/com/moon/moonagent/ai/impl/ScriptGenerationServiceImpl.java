@@ -8,11 +8,14 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.ScriptGenerationService;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardJsonParser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.converter.BeanOutputConverter;
@@ -69,6 +72,16 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                                                       String aspectRatio, String model,
                                                       String understandingModel, List<String> referenceImages,
                                                       List<String> assetIds) {
+        return generateScenesWithReasoning(projectId, scriptText, creationType, customTypeDesc,
+                aspectRatio, model, understandingModel, referenceImages, assetIds).scenes();
+    }
+
+    @Override
+    public GeneratedScenes generateScenesWithReasoning(String projectId, String scriptText,
+                                                       String creationType, String customTypeDesc,
+                                                       String aspectRatio, String model,
+                                                       String understandingModel, List<String> referenceImages,
+                                                       List<String> assetIds) {
         String systemPrompt = buildSystemPrompt();
 
         // 资产库设定集注入：项目资产 + 用户全局资产 → 文字卡塞进 system prompt 约束分镜
@@ -98,10 +111,13 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         }
         String userPrompt = buildUserPrompt(scriptText, understanding, assetSheet);
 
-        String content = callLLM(model, systemPrompt, userPrompt);
+        LlmCall llm = callLLM(model, systemPrompt, userPrompt);
+        String content = llm.content();
         // 容错解析优先：裸数组/包装对象/代码块/字符串数字都兼容；存在合法分镜就不清空
         List<Map<String, Object>> parsed = StoryboardJsonParser.parseScenes(content);
-        return decorateH3(normalizeParsedScenes(parsed, projectId), understanding, assetSheet);
+        return new GeneratedScenes(
+                decorateH3(normalizeParsedScenes(parsed, projectId), understanding, assetSheet),
+                llm.reasoning());
     }
 
     /** 解析器输出 → 标准分镜 Map（sceneNumber 按项目 max+1 递增；字段兜底空串）。 */
@@ -225,7 +241,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         return promptConfig.get("script/storyboard-system");
     }
 
-    private String callLLM(String model, String systemPrompt, String userPrompt) {
+    private LlmCall callLLM(String model, String systemPrompt, String userPrompt) {
         int attempts = 0;
         while (true) {
             attempts++;
@@ -238,7 +254,12 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                     // 单次调用覆盖模型（默认模型已在 defaultOptions 固定）
                     spec = spec.options(OpenAiChatOptions.builder().model(model));
                 }
-                return spec.call().content();
+                ChatResponse response = spec.call().chatResponse();
+                AssistantMessage output = response != null && response.getResult() != null
+                        ? response.getResult().getOutput() : null;
+                String raw = output == null ? "" : (output.getText() == null ? "" : output.getText());
+                AgentReasoningSnapshot reasoning = buildReasoning(output, model);
+                return new LlmCall(raw, reasoning);
             } catch (Exception e) {
                 if (attempts < 2 && isTransient(e)) {
                     try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
@@ -248,6 +269,33 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             }
         }
     }
+
+    /** 从 AssistantMessage metadata 提取推理；模型未返回时给出可展开的摘要。 */
+    private AgentReasoningSnapshot buildReasoning(AssistantMessage output, String model) {
+        String reason = extractReasoning(output == null ? null : output.getMetadata());
+        String fallback = "已完成分镜方案推理。";
+        String text = reason == null || reason.isBlank() ? fallback : reason;
+        return new AgentReasoningSnapshot(
+                text.length() > 200 ? text.substring(0, 200) + "…" : text,
+                text,
+                null,
+                reason == null || reason.isBlank() ? "trace-summary"
+                        : (model == null || model.isBlank() ? gatewayModelService.getDefaultTextModel() : model));
+    }
+
+    private String extractReasoning(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) return null;
+        for (String key : new String[]{"reasoning_content", "reasoningContent", "thoughts", "thinking"}) {
+            Object value = metadata.get(key);
+            if (value == null) continue;
+            String text = value instanceof String s ? s : String.valueOf(value);
+            if (text != null && !text.isBlank()) return text;
+        }
+        return null;
+    }
+
+    /** LLM 调用结果：正文 + 推理摘要。 */
+    private record LlmCall(String content, AgentReasoningSnapshot reasoning) {}
 
     /** 瞬态失败重试：429/5xx、连接/超时。 */
     private static boolean isTransient(Throwable e) {

@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.specialist;
 
+import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
@@ -31,8 +32,20 @@ public record SpecialistContext(
         /** checkpoint 真实 action（区别于提交 action，如 user 点的选项 id） */
         String cpAction,
         /** checkpoint plan JSON（方案载荷；缺失时 resume 读字段得空串） */
-        String cpPlan
+        String cpPlan,
+        /** 本轮轨迹累积器（可空；null 表示无 trace） */
+        AgentTraceAccumulator trace
 ) {
+    /** 兼容旧 12 参数构造器：trace 置 null（无轨迹）。 */
+    public SpecialistContext(AgentConversation conversation, String userMessage,
+                             java.util.List<String> picUrls, SseEmitter emitter,
+                             SpecialistResult previousResult, AgentSkill skill,
+                             String action, String customText, Map<String, String> params,
+                             java.util.List<String> assetIds, String cpAction, String cpPlan) {
+        this(conversation, userMessage, picUrls, emitter, previousResult, skill,
+                action, customText, params, assetIds, cpAction, cpPlan, null);
+    }
+
     public static SpecialistContext from(OrchestrationRequest request, AgentSkill skill) {
         return new SpecialistContext(
                 request.getConversation(),
@@ -46,7 +59,8 @@ public record SpecialistContext(
                 request.getParams(),
                 request.getAssetIds(),
                 "",
-                ""
+                "",
+                request.getTrace()
         );
     }
 }

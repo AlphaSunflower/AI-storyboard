@@ -26,6 +26,8 @@ export function ConfirmResultCard() {
           maxWidth: '82%', padding: 20, borderRadius: 16,
           background: 'white', border: '1px solid var(--color-hairline)',
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
+          maxHeight: 'min(56vh, 560px)', overflowY: 'auto', overflowX: 'hidden',
+          scrollbarWidth: 'thin',
         }}
       >
         <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1 }}>

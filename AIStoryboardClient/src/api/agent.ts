@@ -12,6 +12,79 @@ export interface AgentConversation {
   updatedAt: string;
 }
 
+/** 推理过程（后端 reasoning_delta / message_end 下发） */
+export interface AgentReasoning {
+  summary: string;
+  details: string;
+  durationMs?: number;
+  source: string;
+}
+
+/** 智能体交接轨迹事件（agent_trace / message_end 下发） */
+export interface AgentTraceEvent {
+  id: string;
+  phase: string;
+  agent: string;
+  specialist?: string;
+  status: string;
+  title: string;
+  summary: string;
+  currentIntent?: string;
+  targetIntent?: string;
+  startedAt: string;
+  durationMs?: number;
+}
+
+/** SSE 轨迹事件（与 AgentTraceEvent 同构） */
+export type SseTraceEvent = AgentTraceEvent;
+
+/** 建议动作按钮（message_end 下发）：点击后以 routingHint 重新发送 */
+export interface SuggestedAction {
+  id: string;
+  title: string;
+  routingHint: string;
+}
+
+/** HITL 卡片信息（metadata.hitl） */
+export interface AgentMessageHitl {
+  formContent: string;
+  actions: { id: string; title: string }[];
+  pending?: boolean;
+  selectedActionId?: string;
+  selectedActionTitle?: string;
+  customText?: string;
+  selectedCustomText?: string;
+  params?: Record<string, string>;
+  selectedParams?: Record<string, string>;
+  assetIds?: string[];
+  selectedAssetIds?: string[];
+  messageId?: string;
+}
+
+/** 图生视频方案卡片（metadata.videoPlan；刷新后恢复 VideoPlanCard） */
+export interface AgentMessageVideoPlan {
+  message: string;
+  duration: number;
+  picUrl?: string;
+  actions: { id: string; title: string }[];
+  formToken?: string;
+  messageId?: string;
+  models?: GatewayModelOption[];
+  recommended?: Record<string, string>;
+  reasons?: Record<string, string>;
+}
+
+/** 消息元数据 */
+export interface AgentMessageMetadata {
+  kind: 'hitl' | 'assistant-reply' | 'video-plan';
+  hitl?: AgentMessageHitl;
+  videoPlan?: AgentMessageVideoPlan;
+  pending?: boolean;
+  reasoning?: AgentReasoning;
+  agentTrace?: AgentTraceEvent[];
+  suggestedActions?: SuggestedAction[];
+}
+
 export interface AgentMessage {
   id: string;
   conversationId: string;
@@ -25,6 +98,8 @@ export interface AgentMessage {
     selectedActionId: string;
     selectedActionTitle: string;
   };
+  /** 消息元数据（reasoning / agentTrace / suggestedActions / hitl） */
+  metadata?: AgentMessageMetadata;
 }
 
 export interface AgentAsset {
@@ -106,7 +181,7 @@ export interface AssetOption {
 }
 
 export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error';
+  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace';
   content?: string;
   title?: string;
   status?: string;
@@ -138,6 +213,20 @@ export interface SseEvent {
   picUrl?: string;
   // 资产选择卡片（human_input 事件带 assets 时渲染勾选列表）
   assets?: AssetOption[];
+  // reasoning / agentTrace / suggestedActions（reasoning_delta / agent_trace / message_end）
+  reasoning?: AgentReasoning;
+  agentTrace?: SseTraceEvent[];
+  suggestedActions?: SuggestedAction[];
+  // reasoning_delta 增量字段
+  summary?: string;
+  details?: string;
+  durationMs?: number;
+  source?: string;
+  // agent_trace 单条事件（后端可能直接下发事件对象，也可能包在 traceEvent 中）
+  traceEvent?: AgentTraceEvent;
+  // /messages/stream 请求可选参数（后端可能透传/回显）
+  routingHint?: string;
+  cancelActiveTasks?: boolean;
   code?: string;
   message?: string;
 }
@@ -396,12 +485,13 @@ export async function streamChat(
   onEvent: (e: SseEvent) => void,
   assetIds?: string[],
   signal?: AbortSignal,
+  opts?: { routingHint?: string; cancelActiveTasks?: boolean },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ content, picUrls: picUrls ?? [], assetIds: assetIds ?? [] }),
+    body: JSON.stringify({ content, picUrls: picUrls ?? [], assetIds: assetIds ?? [], routingHint: opts?.routingHint, cancelActiveTasks: opts?.cancelActiveTasks }),
     signal,
   });
   await consumeSse(res, onEvent, signal);

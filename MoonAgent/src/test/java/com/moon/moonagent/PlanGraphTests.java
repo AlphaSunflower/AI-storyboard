@@ -4,6 +4,7 @@ import com.moon.moonagent.ai.agent.PlanGraph;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * run() 入口可调用（不触发真实 LLM——意图识别需真实调用，此处仅验证装配与图编译）。
  */
 @SpringBootTest
+@TestPropertySource(properties = "storyboard.internal-secret=test-internal-secret")
 class PlanGraphTests {
 
     @Autowired(required = false)

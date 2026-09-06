@@ -20,11 +20,13 @@ public class GatewayConfig {
 
     @Bean
     public RestClientProxyExchange proxyExchange(GatewayMvcProperties properties) {
-        // 连接超时 5s，socket 读超时 300s（5 分钟，覆盖 LLM 编排最坏情况）
+        // 连接超时 5s，socket 读超时 900s（15 分钟）。
+        // 覆盖 aisplit 分镜方案编排（素材绑定 + 方案设计 + JSON 转换）最坏 ~9 分钟，
+        // 避免网关在读超时窗口内切断 SSE，导致 HITL 卡片只落库、刷新后才可见。
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectTimeout(Timeout.ofSeconds(5))
                 .setConnectionRequestTimeout(Timeout.ofSeconds(5))
-                .setResponseTimeout(Timeout.ofSeconds(300))
+                .setResponseTimeout(Timeout.ofSeconds(900))
                 .build();
 
         var cm = new PoolingHttpClientConnectionManager();

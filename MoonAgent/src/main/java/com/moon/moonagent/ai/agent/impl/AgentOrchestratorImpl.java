@@ -5,6 +5,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.ai.agent.AgentOrchestrator;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -40,32 +42,49 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Override
     public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
-        OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
-        try {
-            // P2（2026-08-21）：run 路径迁入 PlanGraph（StateGraph 主图）——
-            // 意图识别（intent_recognize 节点）→ 条件边路由（低置信度 → intent_clarify 卡片 / 否则 → handler 适配器节点）
-            // 图内节点调用与原先完全相同的 handler/support，SSE 事件协议零变化
-            String answer = planGraph.run(conversation, content, picUrls, assetIds, emitter);
-            log.info("AgentOrchestrator(PlanGraph): conversationId={} 编排完成", conversation.getId());
-            return answer;
-        } catch (AgentInterruptException e) {
-            // 用户主动打断：静默收尾（不补发友好错误、不落库），返回空串表示本轮无回答
-            log.info("AgentOrchestrator 编排被用户打断: conversationId={}", conversation.getId());
-            return "";
-        } catch (Exception e) {
-            log.error("AgentOrchestrator 编排失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            // 上游错误不直接展示：LLM 翻译成友好中文回复（踩线→改措辞 / 网络→稍后重试），正常 message 收尾
-            return support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再问我一次。");
-        }
-        // 注意：emitter.complete() 由调用方（AgentChatServiceImpl）统一执行，
-        // 且调用方 finally 先释放会话锁再 complete——避免前端收到 EOF 立即发下一条时锁未释放（竞态 40901）
+        return runTurn(conversation, content, picUrls, assetIds, "", emitter).content();
     }
 
     @Override
     public String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return resumeTurn(conversation, formToken, action, customText, params, assetIds, routingHint, emitter).content();
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, "", emitter);
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, false, emitter);
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter) {
+        OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
+        request.setRoutingHint(routingHint);
+        try {
+            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, emitter);
+            log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成", conversation.getId(), result.hitlPaused());
+            return result;
+        } catch (AgentInterruptException e) {
+            log.info("AgentOrchestrator.runTurn 被用户打断: conversationId={}", conversation.getId());
+            return AgentTurnResult.done("");
+        } catch (Exception e) {
+            log.error("AgentOrchestrator.runTurn 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
+            return AgentTurnResult.done(support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再问我一次。"));
+        }
+    }
+
+    @Override
+    public AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
         request.setParams(params == null ? Map.of() : params);
         request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
+        request.setAction(action == null ? "" : action);
+        request.setCustomText(customText == null ? "" : customText);
+        request.setRoutingHint(routingHint);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
@@ -74,12 +93,12 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .last("LIMIT 1"));
             if (cp == null) {
                 support.sendEvent(request, "error", Map.of("code", "40401", "message", "确认信息不存在或已失效，请重新发起"));
-                return "";
+                return AgentTurnResult.done("");
             }
             if (!"pending".equals(cp.getStatus()) || cp.getExpirationTime() == null
                     || cp.getExpirationTime().isBefore(OffsetDateTime.now())) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已过期，请重新发起"));
-                return "";
+                return AgentTurnResult.done("");
             }
             // 一次性消费：status → used（原子条件防并发重放）
             int updated = checkpointMapper.update(null,
@@ -89,7 +108,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                     .set(AgentCheckpoint::getStatus, "used"));
             if (updated == 0) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已被使用，请重新发起"));
-                return "";
+                return AgentTurnResult.done("");
             }
 
             // P4：从 checkpoint.plan 恢复会话级内存计数（regenCount/clarifyCount/sessionAssets）——
@@ -98,26 +117,25 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             // 素材上下文接力：恢复上一张卡保存的参考图；表单未携带资产时回填会话级已确认资产
             request.setPicUrls(support.planPicUrls(cp.getPlan()));
             if (request.getAssetIds().isEmpty()) {
-                request.setAssetIds(support.getSessionAssets(conversation.getId()));
+                // 资产上下文接力：优先从 checkpoint 的 items[0].assetIds 恢复（如 video_plan 勾选的资产），
+                // 再回退会话级 _sessionAssets 快照。这样「我要分镜」等自定义切链不会把已选资产丢掉。
+                List<String> fromPlan = support.planAssetIds(cp.getPlan());
+                request.setAssetIds(fromPlan.isEmpty()
+                        ? support.getSessionAssets(conversation.getId())
+                        : fromPlan);
             }
 
-            // P3（2026-08-21）：resume 路由迁入 PlanGraph（StateGraph 条件边）——
-            // 12+ if/else 硬编码分支收敛为图内条件边路由（cpAction/提交 action/customText → handler 节点），
-            // 含切链出口（customText 识别为新意图 → 回 intent_recognize 重新分发）。
-            // checkpoint 校验/一次性消费保留在此（表单协议不变）；handler 内部零改动。
-            String answer = planGraph.resume(conversation, cp, action, customText, params, assetIds, routingHint, emitter);
-            log.info("AgentOrchestrator(PlanGraph).resume: conversationId={} cpAction={} action={} routingHint={} 完成",
-                    conversation.getId(), cp.getAction(), action, routingHint);
-            return answer;
+            AgentTurnResult result = planGraph.resumeTurn(conversation, cp, action, customText, params,
+                    request.getAssetIds(), routingHint, emitter);
+            log.info("AgentOrchestrator(PlanGraph).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
+                    conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
+            return result;
         } catch (AgentInterruptException e) {
-            // 用户主动打断：静默收尾（不补发友好错误、不落库），返回空串表示本轮无回答
-            log.info("AgentOrchestrator.resume 被用户打断: conversationId={}", conversation.getId());
-            return "";
+            log.info("AgentOrchestrator.resumeTurn 被用户打断: conversationId={}", conversation.getId());
+            return AgentTurnResult.done("");
         } catch (Exception e) {
-            log.error("AgentOrchestrator.resume 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            // 上游错误不直接展示：LLM 翻译成友好中文回复，正常 message 收尾（同 run）
-            return support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再试一次。");
+            log.error("AgentOrchestrator.resumeTurn 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
+            return AgentTurnResult.done(support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再试一次。"));
         }
-        // 同上：complete 由调用方统一执行（先释放锁再 complete，防 EOF 竞态）
     }
 }

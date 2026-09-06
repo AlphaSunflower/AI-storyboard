@@ -46,6 +46,11 @@
             <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
             <version>3.5.16</version>
         </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>provided</scope>
+        </dependency>
 
         <!-- Spring AI（LLM 网关直连；ChatClient/ImageModel 由消费方基于 spring.ai.openai.* 装配） -->
         <dependency>
@@ -64,6 +69,10 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
 
         <!-- MinIO 对象存储（S3 兼容端点；可迁阿里云 OSS / AWS S3 仅改配置） -->

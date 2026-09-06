@@ -34,8 +34,10 @@ public class OtherIntentHandler implements IntentHandler {
         // 发送"正在思考…"workflow 事件，避免闲聊回答期间前端只显示"正在生成"
         support.sendEvent(request, "workflow", Map.of("title", "正在思考…", "status", "node_started"));
         // streamAnswer 内部逐 token 发 message 事件（打字机效果），返回完整文本
-        String answer = answerService.streamAnswer(
+        var answerResult = answerService.streamAnswerWithResult(
                 request.getConversation(), request.getContent(), request.getPicUrl(), request.getEmitter());
+        request.setReasoning(answerResult.reasoning());
+        String answer = answerResult.content();
         // 完整文本作为本轮最后一条 message（streamAnswer 的增量不走 support.sendEvent，需显式记录）
         request.setLastMessage(answer);
         support.sendEvent(request, "message_end",

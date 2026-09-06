@@ -5,6 +5,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import type { AgentMessageMetadata } from '../../api/agent';
+import { hitlFromMetadata } from '../../stores/agentStore';
+import { ReasoningPanel } from './ReasoningPanel';
+import { SuggestedActions } from './SuggestedActions';
+import { HumanInputCard } from './HumanInputCard';
+import { VideoPlanCard } from './VideoPlanCard';
 
 /**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
@@ -162,9 +168,9 @@ function formatTime(iso?: string): string {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`;
 }
 
-export function MessageBubble({ role, content, streaming, variant = 'default', createdAt }: {
+export function MessageBubble({ role, content, streaming, variant = 'default', createdAt, metadata }: {
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
-  variant?: 'default' | 'deepseek'; createdAt?: string;
+  variant?: 'default' | 'deepseek'; createdAt?: string; metadata?: AgentMessageMetadata;
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
@@ -172,6 +178,27 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
+  // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
+  const hitlMeta = metadata?.hitl;
+  const isHitl = !!hitlMeta && !hitlMeta.pending && metadata?.kind !== 'video-plan';
+  const hitlInfo = hitlMeta
+    ? hitlFromMetadata(metadata)
+    : null;
+  const submittedActionId = hitlMeta?.selectedActionId;
+  const submittedActionTitle = hitlMeta?.selectedActionTitle;
+  const videoPlanInfo = metadata?.kind === 'video-plan' && metadata.videoPlan && !metadata.hitl?.pending
+    ? {
+        planToken: metadata.videoPlan.formToken ?? '',
+        message: metadata.videoPlan.message,
+        duration: metadata.videoPlan.duration,
+        picUrl: metadata.videoPlan.picUrl ?? '',
+        actions: metadata.videoPlan.actions,
+        messageId: metadata.videoPlan.messageId ?? metadata.hitl?.messageId,
+        models: metadata.videoPlan.models,
+        recommended: metadata.videoPlan.recommended,
+        reasons: metadata.videoPlan.reasons,
+      }
+    : null;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -196,9 +223,48 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
     );
   }, { scope: bubbleRef });
 
+  // HITL 卡片消息：渲染确认卡片（选择后高亮 + 禁用），不单独渲染 content 文本避免重复
+  if (videoPlanInfo) {
+    return (
+      <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
+        {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
+          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
+        ) : null}
+        <VideoPlanCard
+          info={videoPlanInfo}
+          submitted
+          submittedActionId={metadata?.hitl?.selectedActionId}
+          submittedActionTitle={metadata?.hitl?.selectedActionTitle}
+        />
+      </div>
+    );
+  }
+
+  if (isHitl && hitlInfo) {
+    return (
+      <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
+        {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
+          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
+        ) : null}
+        <HumanInputCard
+          info={hitlInfo}
+          submittedActionId={submittedActionId}
+          submittedActionTitle={submittedActionTitle}
+          customText={hitlMeta?.customText ?? hitlMeta?.selectedCustomText}
+          params={hitlMeta?.params ?? hitlMeta?.selectedParams}
+          assetIds={hitlMeta?.assetIds ?? hitlMeta?.selectedAssetIds}
+        />
+      </div>
+    );
+  }
+
   return (
     <>
     <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
+      {/* 助手消息：正文上方渲染推理面板（实时/已思考） */}
+      {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
+        <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} />
+      )}
       <div
         style={ds
           ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
@@ -245,6 +311,10 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
+      {/* 助手消息：正文下方渲染建议动作 */}
+      {!isUser && metadata?.suggestedActions && metadata.suggestedActions.length > 0 && (
+        <SuggestedActions actions={metadata.suggestedActions} />
+      )}
       {/* 消息 meta 行：时间 + 复制，直接常显 */}
       {!streaming && (
         <div

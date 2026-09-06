@@ -181,23 +181,22 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         }
         List<ReferenceImage> refImages = buildRefImages(row.getRefImageUrls());
 
-        // 资产参考图（视频用途）在角色图之后以 REFERENCE 追加（不覆盖首尾帧角色）
+        // 资产参考图（视频用途）在角色图之后以 REFERENCE 追加（不覆盖首尾帧角色）。
+        // 直接按 scene_assets 关联聚合，不依赖入队时是否显式传 refAssetIds，
+        // 避免分镜已关联资产但队列行 refAssetIds 为空导致 asset 图被丢成纯文生视频。
         LinkedHashSet<String> assetRefs = new LinkedHashSet<>();
-        if (row.getRefAssetIds() != null && !row.getRefAssetIds().isBlank()) {
-            try {
-                List<AssetVO> sceneAssets = assetService.sceneAssets(row.getSceneId(), "video");
+        try {
+            List<AssetVO> sceneAssets = assetService.sceneAssets(row.getSceneId(), "video");
+            if (sceneAssets != null && !sceneAssets.isEmpty()) {
                 assetRefs.addAll(assetService.buildReferenceImages(sceneAssets));
-            } catch (Exception e) {
-                log.warn("[分镜视频队列] 资产参考图聚合失败: {}", e.getMessage());
             }
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 资产参考图聚合失败: {}", e.getMessage());
         }
-        List<ReferenceImage> combined = new ArrayList<>(refImages);
-        for (String u : assetRefs) {
-            if (u == null || u.isBlank()) continue;
-            boolean dup = combined.stream().anyMatch(r -> u.equals(r.url()));
-            if (!dup) combined.add(ReferenceImage.ofReference(u));
-        }
-        // 分镜已挂载的参考图（SceneReviewCard/Agent 自动挂载）按 role 追加；不覆盖首尾帧角色
+        // 分镜已挂载的参考图（SceneReviewCard/Agent 自动挂载）按 role 追加，且【优先】：
+        // 先加入带 role 的图（FIRST_LAST_FRAME → 首帧/尾帧），避免被随后纯 REFERENCE 的资产/用户图
+        // 按 URL 去重挤掉，否则 2 张资产图会退化成「一张 REFERENCE」，模型只读到首张。
+        List<ReferenceImage> combined = new ArrayList<>();
         try {
             List<Map<String, Object>> sceneRefs = storyboardClient.getSceneReferences(row.getSceneId());
             List<ReferenceImage> roleRefs = mapSceneReferenceRoles(sceneRefs);
@@ -207,6 +206,17 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             }
         } catch (Exception e) {
             log.warn("[分镜视频队列] 读取分镜参考素材失败: {}", e.getMessage());
+        }
+        // 队列行/用户显式参考图（可能已带 role，不覆盖分镜参考的角色）
+        for (ReferenceImage ref : refImages) {
+            boolean dup = combined.stream().anyMatch(r -> ref.url().equals(r.url()));
+            if (!dup) combined.add(ref);
+        }
+        // 资产参考图（视频用途）以纯 REFERENCE 追加，仅在未被角色图覆盖时加入
+        for (String u : assetRefs) {
+            if (u == null || u.isBlank()) continue;
+            boolean dup = combined.stream().anyMatch(r -> u.equals(r.url()));
+            if (!dup) combined.add(ReferenceImage.ofReference(u));
         }
         refImages = combined;
         // H3 约束：多模态参考素材与首帧图生视频互斥。已有参考图（含角色）时不再传 scene.imageUrl，

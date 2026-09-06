@@ -7,6 +7,7 @@ import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
+import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardDesignPlan;
@@ -26,6 +27,9 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * aisplit 分镜链：现有分镜检测 → 处理方式卡片 → 剧本优化 gate → 分镜方案 → 分镜 JSON → HITL 确认 → resume 写库。
@@ -55,6 +59,8 @@ public class AisplitIntentHandler implements IntentHandler {
     private final AssetMatchingService assetMatchingService;
     private final StoryboardPortfolioService portfolioService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    /** 并行 LLM 步骤专用：互不依赖的调用放虚拟线程并发，避免整条分镜链串行卡住。 */
+    private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     /**
      * 连续不满意调整计数与本轮勾选资产已迁入 {@link AgentOrchestratorSupport}
@@ -110,10 +116,12 @@ public class AisplitIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
                     effective);
+            support.sendEvent(request, "workflow", Map.of("title", "正在分析素材…", "status", "node_started"));
             List<StoryboardReferenceBinding> bindings = portfolioService.bindMaterials(
                     content, picUrls, chosen,
                     support.referenceMaterialPurposes(request.getConversation().getId()),
                     support.referenceMaterialKinds(request.getConversation().getId()));
+            support.sendEvent(request, "workflow", Map.of("title", "正在设计分镜方案…", "status", "node_started"));
             plan = portfolioService.designPlan(content, bindings);
         } catch (Exception e) {
             log.warn("[分镜] 素材整理/方案设计失败，回退常规分镜链（资产已保留）: {}", e.getMessage());
@@ -356,17 +364,43 @@ public class AisplitIntentHandler implements IntentHandler {
         // 3. 分镜 JSON（复用 ScriptGenerationService：LLM 生成 8 字段分镜列表；
         // assetIds 非 null 时只注入勾选资产设定集——空=用户不使用资产不注入，null=全量旧行为）
         support.sendEvent(request, "workflow", Map.of("title", "正在生成分镜…", "status", "node_started"));
-        List<Map<String, Object>> scenes;
-        try {
-            scenes = scriptGenerationService.generateScenes(
-                    request.getConversation().getProjectId(), script, "movie", null, "16:9", null, null, null,
-                    assetIds == null || assetIds.isEmpty() ? java.util.Collections.emptyList() : assetIds);
-        } catch (Exception e) {
-            log.warn("分镜 JSON 生成失败，走设计方案兜底: {}", e.getMessage());
-            scenes = fallbackSceneItems == null || fallbackSceneItems.isEmpty()
-                    ? List.of()
-                    : fallbackItemsToMaps(fallbackSceneItems, request.getConversation().getProjectId());
+        String projectId = request.getConversation().getProjectId();
+        List<Map<String, Object>> preSceneMaps = fallbackSceneItems == null || fallbackSceneItems.isEmpty()
+                ? List.of()
+                : fallbackItemsToMaps(fallbackSceneItems, projectId);
+        List<AssetVO> chosen = support.pickAssets(storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
+                assetIds == null ? List.of() : assetIds);
+
+        // 并行优化 1：分镜 JSON、自动资产关联、参数推荐互不依赖，放虚拟线程并发（失败各自兜底，不阻塞）。
+        // asset 关联在素材编排路径可先用 portfolio 的 fallbackSceneItems 提前匹配，避免等 generateScenes 串行。
+        CompletableFuture<List<Map<String, Object>>> scenesFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                var generated = scriptGenerationService.generateScenesWithReasoning(
+                        projectId, script, "movie", null, "16:9", null, null, null,
+                        assetIds == null || assetIds.isEmpty() ? java.util.Collections.emptyList() : assetIds);
+                if (generated.reasoning() != null) {
+                    request.setReasoning(generated.reasoning());
+                    if (request.getTrace() != null) request.getTrace().reasoning(generated.reasoning());
+                }
+                return generated.scenes();
+            } catch (Exception e) {
+                log.warn("分镜 JSON 生成失败，走设计方案兜底: {}", e.getMessage());
+                return fallbackSceneItems == null || fallbackSceneItems.isEmpty()
+                        ? List.of()
+                        : fallbackItemsToMaps(fallbackSceneItems, projectId);
+            }
+        }, agentExecutor);
+
+        support.sendEvent(request, "workflow", Map.of("title", "正在关联资产…", "status", "node_started"));
+        CompletableFuture<List<SceneAssetMatch>> assetFuture = null;
+        if (!chosen.isEmpty() && !preSceneMaps.isEmpty()) {
+            assetFuture = CompletableFuture.supplyAsync(() -> assetMatchingService.matchScenes(preSceneMaps, chosen), agentExecutor);
         }
+        support.sendEvent(request, "workflow", Map.of("title", "正在推荐生成参数…", "status", "node_started"));
+        CompletableFuture<AgentOrchestratorSupport.SceneParamsRecommendation> recFuture =
+                CompletableFuture.supplyAsync(() -> support.recommendSceneParams(script, request), agentExecutor);
+
+        List<Map<String, Object>> scenes = scenesFuture.join();
         if (scenes == null || scenes.isEmpty()) {
             support.sendMessage(request, "⚠ 未能生成分镜内容，请重新描述需求。");
             return request.getLastMessage();
@@ -376,10 +410,18 @@ public class AisplitIntentHandler implements IntentHandler {
         // 3.5 自动关联判定：分镜列表 + 勾选资产 → 每镜出现的资产（单独 LLM 调用；失败降级不关联，不阻塞）
         // 结果写进 scenes 的 assetIds 字段随 checkpoint plan 落库，写库时按分镜号写 scene_assets
         List<SceneAssetMatch> matches = List.of();
-        List<AssetVO> chosen = support.pickAssets(storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
-                assetIds == null ? List.of() : assetIds);
         if (!chosen.isEmpty()) {
-            matches = assetMatchingService.matchScenes(scenes, chosen);
+            if (assetFuture == null) {
+                List<Map<String, Object>> sceneMaps = scenes.stream()
+                        .map(s -> {
+                            Map<String, Object> m = new java.util.LinkedHashMap<>();
+                            m.put("sceneNumber", s.get("sceneNumber"));
+                            m.put("scriptContent", s.get("scriptContent") == null ? "" : s.get("scriptContent"));
+                            return m;
+                        }).toList();
+                assetFuture = CompletableFuture.supplyAsync(() -> assetMatchingService.matchScenes(sceneMaps, chosen), agentExecutor);
+            }
+            matches = assetFuture.join();
             if (!matches.isEmpty()) {
                 for (Map<String, Object> s : scenes) {
                     int num = s.get("sceneNumber") instanceof Number n ? n.intValue() : 0;
@@ -390,6 +432,7 @@ public class AisplitIntentHandler implements IntentHandler {
         }
 
         // 4. HITL 通用模板：方案消息 → checkpoint(agree) → human_input 事件。
+        AgentOrchestratorSupport.SceneParamsRecommendation rec = recFuture.join();
         // 已有分镜 → 选项变为写库策略（replace/append/disagree/cancel）+ 覆盖警告；无 → 现状（满意/不满意）
         long existing = existingSceneCount(request.getConversation().getProjectId());
         // 部分替换判定：方案只覆盖部分现有分镜（用户「只优化分镜N」/分镜选择卡只勾选几镜）时，
@@ -416,8 +459,6 @@ public class AisplitIntentHandler implements IntentHandler {
                     : "⚠ 检测到您当前已有 " + existing + " 个分镜（含已生成的图片/视频素材），覆盖导入将全部删除。\n")
                     + planText;
         }
-        // 5. 整套统一推荐一套生成参数（图片+视频，LLM 预选 + 用户可改；推荐失败静默回退，卡片照常）
-        AgentOrchestratorSupport.SceneParamsRecommendation rec = support.recommendSceneParams(script, request);
         // 步骤 4：确认卡按钮由 LLM 声明（id 落在上方状态感知 manifest 内；LLM 失败回退静态列表）
         actions = support.buildHITLCard(request, planText, actions);
         List<Map<String, Object>> payloadScenes = scenes;
@@ -751,12 +792,18 @@ public class AisplitIntentHandler implements IntentHandler {
         // 用户想查看缺图缺视频时主动说「审查分镜」即由意图识别正常路由到 scene-review。
         String msg2 = count > 0
                 ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表。\n\n"
-                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？可以说「审查分镜」。"
+                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？"
                 : msg;
+        // 推荐动作：审查分镜（不要求用户手动输入「审查分镜」，点按钮即带 routingHint 切链）
+        java.util.List<SuggestedAction> suggestedActions = count > 0
+                ? java.util.List.of(new SuggestedAction("scene-review", "审查分镜", "intent-scene-review"))
+                : java.util.List.of();
+        request.setSuggestedActions(suggestedActions);
         support.resumeStage(request, "正在写入分镜…", Map.of(
                 "content", msg2,
                 "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
-                "sceneCount", totalScenes));
+                "sceneCount", totalScenes,
+                "suggestedActions", suggestedActions));
         return msg2;
     }
 

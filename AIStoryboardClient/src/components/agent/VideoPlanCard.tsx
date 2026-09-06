@@ -5,7 +5,17 @@ import { AgentParamSelector } from './AgentParamSelector';
 import { Video } from 'lucide-react';
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
-export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
+export function VideoPlanCard({
+  info,
+  submitted = false,
+  submittedActionId,
+  submittedActionTitle,
+}: {
+  info: VideoPlanInfo;
+  submitted?: boolean;
+  submittedActionId?: string;
+  submittedActionTitle?: string;
+}) {
   const submitVideoPlan = useAgentStore((s) => s.submitVideoPlan);
   const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
   const streaming = useAgentStore((s) => s.streaming);
@@ -22,10 +32,15 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
           maxWidth: '82%', padding: 20, borderRadius: 16,
           background: 'white', border: '1px solid var(--color-hairline)',
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
+          maxHeight: 'min(56vh, 560px)', overflowY: 'auto', overflowX: 'hidden',
+          scrollbarWidth: 'thin',
         }}
       >
         <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <Video size={13} strokeWidth={1.8} /> 视频方案已生成
+          {submitted && submittedActionTitle && (
+            <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>（已选择：{submittedActionTitle}）</span>
+          )}
         </div>
         {/* 参考图缩略图 + 参数行 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -112,41 +127,44 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
               {info.actions.map((a) => {
                 const primary = a.id === 'generate_video';
+                const selected = a.id === submittedActionId;
                 return (
                   <button
                     key={a.id}
-                    disabled={streaming}
+                    disabled={streaming || submitted}
                     onClick={() => {
                       if (a.id === 'custom') { setCustomOpen(true); return; }
                       submitVideoPlan(a.id, selectedParams);
                     }}
                     style={{
                       padding: '10px 18px', borderRadius: 'var(--rounded-md)', fontSize: 15,
-                      background: primary ? 'var(--color-primary)' : 'white',
-                      color: primary ? 'white' : 'var(--color-muted)',
+                      background: selected ? 'var(--color-primary)' : primary ? 'var(--color-primary)' : 'white',
+                      color: selected || primary ? 'white' : 'var(--color-muted)',
                       border: primary ? 'none' : '1px solid var(--color-hairline)',
-                      cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                      cursor: streaming || submitted ? 'not-allowed' : 'pointer', opacity: streaming || submitted ? 0.6 : 1,
                       width: '100%', textAlign: 'center',
                     }}
                   >
                     {a.title}
+                    {selected && ' ✓'}
                   </button>
                 );
               })}
             </div>
-            {/* 跳过按钮：允许用户切换话题（checkpoint 30 分钟后自动过期） */}
-            <button
-              disabled={streaming}
-              onClick={skipCurrentHITL}
-              style={{
-                padding: '6px 12px', border: 'none', borderRadius: 'var(--rounded-md)',
-                background: 'transparent', color: 'var(--color-muted)', fontSize: 12,
-                cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
-                width: '100%', textAlign: 'center',
-              }}
-            >
-              跳过，换个话题
-            </button>
+            {!submitted && (
+              <button
+                disabled={streaming}
+                onClick={skipCurrentHITL}
+                style={{
+                  padding: '6px 12px', border: 'none', borderRadius: 'var(--rounded-md)',
+                  background: 'transparent', color: 'var(--color-muted)', fontSize: 12,
+                  cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
+                  width: '100%', textAlign: 'center',
+                }}
+              >
+                跳过，换个话题
+              </button>
+            )}
           </>
         )}
       </div>

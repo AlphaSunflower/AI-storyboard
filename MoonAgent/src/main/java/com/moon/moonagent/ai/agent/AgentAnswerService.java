@@ -46,4 +46,10 @@ public interface AgentAnswerService {
      * @return 回答文本（调用方可落库）
      */
     String answer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
+
+    /**
+     * 流式生成回答并返回完整结果（正文 + 推理摘要）：使用 {@code chatResponse()} 读取 reasoning delta，
+     * 正文仍按 {@code message} 增量发送，推理按 {@code reasoning_delta} 增量发送。
+     */
+    AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
 }
