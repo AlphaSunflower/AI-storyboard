@@ -205,9 +205,9 @@ class BackendControllerSmokeTest {
         when(sceneService.addScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.updateScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.listReferences(anyString(), anyString()))
-            .thenReturn(List.of(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "x.png", 1L)));
+            .thenReturn(List.of(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "REFERENCE", "x.png", 1L)));
         when(sceneService.uploadReference(anyString(), anyString(), anyString(), anyString(), any()))
-            .thenReturn(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "x.png", 1L));
+            .thenReturn(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "REFERENCE", "x.png", 1L));
 
         mockMvc.perform(post("/api/projects/p1/scenes").with(user("u1"))
                 .contentType("application/json").content("{\"scriptContent\":\"内容\"}"))

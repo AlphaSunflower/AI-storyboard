@@ -19,6 +19,7 @@ export interface SceneReferenceAsset {
   type: 'image' | 'video' | 'audio';
   purpose: 'image' | 'video';
   url: string;
+  role?: string;
   fileName: string;
   fileSize: number;
 }

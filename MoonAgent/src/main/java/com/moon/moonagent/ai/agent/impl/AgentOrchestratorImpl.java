@@ -95,6 +95,11 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             // P4：从 checkpoint.plan 恢复会话级内存计数（regenCount/clarifyCount/sessionAssets）——
             // 重启后 resume 上限判定与资产接力不丢（_regenCount/_clarifyCount/_sessionAssets 私有键）
             support.restoreCountersFromPlan(conversation.getId(), cp.getPlan());
+            // 素材上下文接力：恢复上一张卡保存的参考图；表单未携带资产时回填会话级已确认资产
+            request.setPicUrls(support.planPicUrls(cp.getPlan()));
+            if (request.getAssetIds().isEmpty()) {
+                request.setAssetIds(support.getSessionAssets(conversation.getId()));
+            }
 
             // P3（2026-08-21）：resume 路由迁入 PlanGraph（StateGraph 条件边）——
             // 12+ if/else 硬编码分支收敛为图内条件边路由（cpAction/提交 action/customText → handler 节点），

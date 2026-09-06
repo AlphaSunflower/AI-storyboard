@@ -86,6 +86,7 @@ export function SceneCard({
   const promptPanelRef = useRef<HTMLDivElement>(null);
 
   const [expanded, setExpanded] = useState(false);
+  const [promptTab, setPromptTab] = useState<'script' | 'image' | 'video'>('script');
   const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
   const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
   const [scriptContent, setScriptContent] = useState(scene.scriptContent || '');
@@ -243,6 +244,8 @@ export function SceneCard({
     <div
       ref={cardRef}
       onClick={onSelect}
+      onMouseEnter={(e) => { if (!isSelected) { e.currentTarget.style.background = 'var(--color-surface-soft)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; } }}
+      onMouseLeave={(e) => { if (!isSelected) { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; } }}
       style={{
         padding: 12,
         borderRadius: 'var(--rounded-md)',
@@ -416,78 +419,67 @@ export function SceneCard({
         }}
       >
         <div style={{ marginBottom: 8 }}>
-          <label
-            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
-          >
-            注释(跟生图/生视频无关)
-          </label>
-          <textarea
-            value={scriptContent}
-            onChange={(e) => setScriptContent(e.target.value)}
-            onBlur={() => handlePromptBlur('scriptContent')}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="输入分镜描述..."
-            rows={3}
-            style={{
-              width: '100%',
-              fontSize: 11,
-              padding: '6px 8px',
-              borderRadius: 'var(--rounded-sm)',
-              border: '1px solid var(--color-hairline)',
-              resize: 'vertical',
-              marginBottom: 8,
-              boxSizing: 'border-box',
-              fontFamily: 'inherit',
-            }}
-          />
-          <label
-            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
-          >
-            生图提示词
-          </label>
-          <textarea
-            value={imagePrompt}
-            onChange={(e) => setImagePrompt(e.target.value)}
-            onBlur={() => handlePromptBlur('imagePrompt')}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="输入生图提示词..."
-            rows={3}
-            style={{
-              width: '100%',
-              fontSize: 11,
-              padding: '6px 8px',
-              borderRadius: 'var(--rounded-sm)',
-              border: '1px solid var(--color-hairline)',
-              resize: 'vertical',
-              marginBottom: 8,
-              boxSizing: 'border-box',
-              fontFamily: 'inherit',
-            }}
-          />
-          <label
-            style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}
-          >
-            生视频提示词
-          </label>
-          <textarea
-            value={videoPrompt}
-            onChange={(e) => setVideoPrompt(e.target.value)}
-            onBlur={() => handlePromptBlur('videoPrompt')}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="输入生视频提示词..."
-            rows={3}
-            style={{
-              width: '100%',
-              fontSize: 11,
-              padding: '6px 8px',
-              borderRadius: 'var(--rounded-sm)',
-              border: '1px solid var(--color-hairline)',
-              resize: 'vertical',
-              marginBottom: 8,
-              boxSizing: 'border-box',
-              fontFamily: 'inherit',
-            }}
-          />
+          {/* 三个子按钮：注释 / 生成提示词 / 视频提示词，一次只显示一个输入框，避免展开臃肿 */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+            {([
+              { k: 'script' as const, label: '注释' },
+              { k: 'image' as const, label: '生成提示词' },
+              { k: 'video' as const, label: '视频提示词' },
+            ]).map((t) => (
+              <button
+                key={t.k}
+                onClick={(e) => { e.stopPropagation(); setPromptTab(t.k); }}
+                style={{
+                  flex: 1, padding: '5px 6px', fontSize: 11, borderRadius: 'var(--rounded-sm)',
+                  border: promptTab === t.k ? '1px solid var(--color-primary)' : '1px solid var(--color-hairline)',
+                  background: promptTab === t.k ? 'var(--color-primary)' : 'white',
+                  color: promptTab === t.k ? 'white' : 'var(--color-muted)', cursor: 'pointer', fontWeight: 500,
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={(e) => { if (promptTab !== t.k) e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = promptTab === t.k ? 'var(--color-primary)' : 'var(--color-hairline)'; }}
+              >{t.label}</button>
+            ))}
+          </div>
+          {promptTab === 'script' && (<>
+            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>注释(跟生图/生视频无关)</label>
+            <textarea
+              value={scriptContent}
+              onChange={(e) => setScriptContent(e.target.value)}
+              onBlur={(e) => { handlePromptBlur('scriptContent'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              placeholder="输入分镜描述..."
+              rows={3}
+              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
+            />
+          </>)}
+          {promptTab === 'image' && (<>
+            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>生图提示词</label>
+            <textarea
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
+              onBlur={(e) => { handlePromptBlur('imagePrompt'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              placeholder="输入生图提示词..."
+              rows={3}
+              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
+            />
+          </>)}
+          {promptTab === 'video' && (<>
+            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>生视频提示词</label>
+            <textarea
+              value={videoPrompt}
+              onChange={(e) => setVideoPrompt(e.target.value)}
+              onBlur={(e) => { handlePromptBlur('videoPrompt'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              placeholder="输入生视频提示词..."
+              rows={3}
+              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
+            />
+          </>)}
         </div>
       </div>
     </div>

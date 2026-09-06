@@ -8,6 +8,7 @@ public record SceneReferenceResponse(
     String type,
     String purpose,
     String url,
+    String role,
     String fileName,
     Long fileSize
 ) {}

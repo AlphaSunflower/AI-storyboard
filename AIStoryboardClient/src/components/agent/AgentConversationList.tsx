@@ -126,8 +126,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
         background: DS.sidebarBg,
         display: 'flex',
         flexDirection: 'column',
-        overflowY: 'auto',
-        overflowX: 'hidden',
+        overflow: 'hidden',
       }}
     >
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
@@ -200,6 +199,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
         )}
       </div>
 
+      {/* 会话列表（仅此区域滚动，头部/工具栏/操作区固定） */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
       {/* 按时间分组的会话列表 */}
       {groups.map((g) => (
         <div key={g.label}>
@@ -300,14 +301,14 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           {showArchived ? '暂无已归档对话' : '暂无对话'}
         </p>
       )}
+      </div>
 
-      {/* 多选模式：底部删除栏（position: sticky 底部，gsap 滑入动画） */}
+      {/* 多选模式：底部删除栏（固定于列表下方，gsap 滑入动画） */}
       {multiSelect && (
         <div
           ref={barRef}
           style={{
-            position: 'sticky',
-            bottom: 0,
+            flexShrink: 0,
             padding: '12px 14px',
             background: 'white',
             borderTop: `1px solid ${DS.border}`,

@@ -3,8 +3,12 @@ import { createPortal } from 'react-dom';
 import { MicButton } from './MicButton';
 import { sttStream } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
+import { useProjectStore } from '../../stores/projectStore';
+import { assetApi, type Asset } from '../../api/assets';
+import { assetUrl } from '../../config';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
+import { SceneReviewCard } from './SceneReviewCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
@@ -15,7 +19,7 @@ import { Folder, Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -31,6 +35,11 @@ export function AgentChatPanel() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [assetOpen, setAssetOpen] = useState(false);
+  const [assetList, setAssetList] = useState<Asset[]>([]);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
+  const [assetError, setAssetError] = useState('');
   // HumanInputCard 折叠状态
   const [hitlCollapsed, setHitlCollapsed] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -71,7 +80,7 @@ export function AgentChatPanel() {
     const content = text.trim();
     if (!content || streaming || waitingHumanInput || waitingVideoPlan) return;
     setText('');
-    sendMessage(content);
+    sendMessage(content, { assetIds: pickedAssetIds });
   };
 
   const openMenu = () => {
@@ -113,6 +122,45 @@ export function AgentChatPanel() {
     // 轻量提示：直接复用 streamError 展示
     void msg;
     alert(msg);
+  };
+
+  // 资产库选择：打开时回显已选，多选/再次点击取消，只记录资产 id（不混入参考图列表）
+  const loadAssetList = async () => {
+    setAssetLoading(true); setAssetError('');
+    try {
+      const projectId = useProjectStore.getState().currentProject?.id;
+      const res = await assetApi.list(projectId);
+      setAssetList(res.data.data ?? []);
+    } catch (err) {
+      setAssetError(err instanceof Error ? err.message : '获取资产列表失败');
+    } finally {
+      setAssetLoading(false);
+    }
+  };
+  const handleAssetOpen = () => {
+    setAssetOpen(true);
+    setAssetSelected(new Set(pickedAssetIds));
+    void loadAssetList();
+  };
+  const toggleAsset = (id: string) => {
+    setAssetSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const handleAssetConfirm = async () => {
+    if (assetSelected.size === 0) { setAssetError('请至少选择一个资产'); return; }
+    if (!useAgentStore.getState().activeConversationId) {
+      await useAgentStore.getState().createConversation();
+    }
+    const picked = assetList.filter((a) => assetSelected.has(a.id));
+    setPickedAssetIds(Array.from(assetSelected));
+    if (picked.length) {
+      addLocalUserMessage(`已选择资产：${picked.map((a) => a.name).join('、')}（${picked.length} 个）`);
+    }
+    setAssetOpen(false);
+    setAssetSelected(new Set());
   };
 
   // 麦克风录制完成 → 上传识别 → 回填输入框
@@ -260,11 +308,15 @@ export function AgentChatPanel() {
       {/* HumanInputCard: 人工介入卡片 - 在输入区上方显示 */}
       {waitingHumanInput && (
         <div style={{ padding: '0 16px', background: 'white' }}>
-          <HumanInputCard
-            info={waitingHumanInput}
-            collapsed={hitlCollapsed}
-            onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
-          />
+          {waitingHumanInput.assets?.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined)) ? (
+            <SceneReviewCard info={waitingHumanInput} />
+          ) : (
+            <HumanInputCard
+              info={waitingHumanInput}
+              collapsed={hitlCollapsed}
+              onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
+            />
+          )}
         </div>
       )}
 
@@ -343,6 +395,19 @@ export function AgentChatPanel() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                   上传图片
                 </button>
+                <button
+                  onClick={() => { setMenuOpen(false); handleAssetOpen(); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
+                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
+                    color: 'var(--color-ink)', borderRadius: 8,
+                  }}
+                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
+                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                  选择资产
+                </button>
               </div>,
               document.body,
             )}
@@ -372,6 +437,11 @@ export function AgentChatPanel() {
                 已携带{n}张图片
               </span>
             ) : null; })()}
+            {pickedAssetIds.length > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 500, whiteSpace: 'nowrap', paddingBottom: 2 }}>
+                资产 {pickedAssetIds.length} 个
+              </span>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
             <MicButton
               onToggle={handleMicToggle}
@@ -407,6 +477,52 @@ export function AgentChatPanel() {
         onClose={() => setSceneModalOpen(false)}
         onConfirm={handleSceneConfirm}
       />
+      {/* 资产库选择弹窗：多选/再次点击取消，只记录资产 id */}
+      {assetOpen && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}
+          onClick={() => setAssetOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: 420, maxWidth: '90vw', background: 'white', borderRadius: 14, padding: 18,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>选择资产（可多选，再次点击取消）</div>
+            <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>资产图会在生成阶段按资产读取，不会加入“参考图”列表。</div>
+            {assetLoading ? <div style={{ color: 'var(--color-muted)', fontSize: 13, padding: '12px 0' }}>加载中…</div>
+              : assetList.length === 0 ? <div style={{ color: 'var(--color-muted)', fontSize: 13, padding: '12px 0' }}>当前资产库为空，可在资源库先创建资产</div>
+              : <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {assetList.map((a) => (
+                    <button key={a.id} onClick={() => toggleAsset(a.id)} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 8, borderRadius: 12,
+                      border: `1px solid ${assetSelected.has(a.id) ? 'rgb(204,120,92)' : 'var(--color-hairline)'}`,
+                      background: assetSelected.has(a.id) ? 'rgba(204,120,92,0.07)' : 'white',
+                      cursor: 'pointer', textAlign: 'left',
+                    }}>
+                      {a.images?.[0]
+                        ? <img src={assetUrl(a.images[0].url)} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                        : <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--color-surface-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--color-muted)', flexShrink: 0 }}>无图</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{a.type} · {a.images?.length ?? 0} 图</div>
+                      </div>
+                      <span style={{ fontSize: 16, color: assetSelected.has(a.id) ? 'rgb(204,120,92)' : 'transparent' }}>✓</span>
+                    </button>
+                  ))}
+                </div>}
+            {assetError && <div style={{ color: 'rgb(217,45,32)', fontSize: 13 }}>{assetError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => { setAssetOpen(false); setAssetSelected(new Set()); }} style={{
+                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--color-hairline)', background: 'white',
+                color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer',
+              }}>取消</button>
+              <button onClick={handleAssetConfirm} disabled={assetSelected.size === 0} style={{
+                padding: '8px 16px', borderRadius: 10, border: 'none', background: '#cc785c', color: 'white',
+                fontSize: 14, cursor: assetSelected.size === 0 ? 'not-allowed' : 'pointer', opacity: assetSelected.size === 0 ? 0.45 : 1,
+              }}>确认选择{assetSelected.size ? `（${assetSelected.size}）` : ''}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

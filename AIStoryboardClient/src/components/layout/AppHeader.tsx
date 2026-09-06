@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
-import { Save, Puzzle, Pencil, Trash2, ChevronDown } from 'lucide-react';
-import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
+import { Save, Pencil, Trash2, ChevronDown } from 'lucide-react';
 import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 import { ProjectDropdown } from './ProjectDropdown';
 import { ContextMenu } from '../common/ContextMenu';
@@ -21,7 +20,6 @@ export function AppHeader() {
   const { currentProject, updateProject } = useProjectStore();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [renameProjectOpen, setRenameProjectOpen] = useState(false);
   const [renameProjectName, setRenameProjectName] = useState('');
@@ -56,17 +54,17 @@ export function AppHeader() {
         style={{
           height: headerHeight,
           minHeight: headerHeight,
-          display: 'flex',
+          display: 'grid',
+          gridTemplateColumns: '1fr auto 1fr',
           alignItems: 'center',
-          justifyContent: 'space-between',
           padding: '0 var(--space-md)',
           borderBottom: '1px solid var(--color-hairline)',
           background: 'var(--color-canvas)',
           zIndex: 10,
         }}
       >
-        {/* Left: 品牌字 + 保存 + 项目选择 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Left: 品牌字 + 保存 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-start' }}>
           <span
             style={{
               fontSize: 19,
@@ -102,7 +100,10 @@ export function AppHeader() {
             </button>
           )}
 
-          {/* Project dropdown（提取组件，编辑器/聊天页共用） */}
+        </div>
+
+        {/* Center: 项目选择（居中且大） */}
+        <div style={{ justifySelf: 'center' }}>
           <div style={{ position: 'relative' }}>
             <ContextMenu
               items={[
@@ -133,22 +134,26 @@ export function AppHeader() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 12px',
-                  height: 32,
+                  gap: 8,
+                  padding: '0 16px',
+                  height: 42,
                   border: '1px solid var(--color-hairline)',
                   borderRadius: 'var(--rounded-md)',
                   background: 'var(--color-canvas)',
-                  font: 'var(--text-caption)',
+                  fontSize: 15,
+                  fontWeight: 600,
                   color: 'var(--color-ink)',
                   cursor: 'pointer',
-                  minWidth: 140,
+                  minWidth: 240,
+                  transition: 'border-color 0.15s, background 0.15s, box-shadow 0.15s',
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(204,120,92,0.12)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
               >
-                <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ flex: 1, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {currentName}
                 </span>
-                <ChevronDown size={12} strokeWidth={2} color="var(--color-muted)" />
+                <ChevronDown size={14} strokeWidth={2} color="var(--color-muted)" />
               </button>
             </ContextMenu>
             <ProjectDropdown open={dropdownOpen} onClose={() => setDropdownOpen(false)} />
@@ -156,26 +161,7 @@ export function AppHeader() {
         </div>
 
         {/* Right: 资产库 + 菜单 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            onClick={() => setAssetLibraryOpen(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 14px',
-              height: 32,
-              border: '1px solid var(--color-hairline)',
-              borderRadius: 'var(--rounded-md)',
-              background: 'var(--color-canvas)',
-              font: 'var(--text-caption)',
-              color: 'var(--color-ink)',
-              cursor: 'pointer',
-            }}
-          >
-            <Puzzle size={14} strokeWidth={1.8} />
-            资产库
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
           <StaggeredMenu
             position="right"
             menuButtonColor="#141413"
@@ -194,8 +180,6 @@ export function AppHeader() {
         </div>
       </div>
 
-      {/* ── AI 资产库面板 ─────────────────────────────────────────── */}
-      {assetLibraryOpen && <AssetLibraryPanel onClose={() => setAssetLibraryOpen(false)} />}
       {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
       {renameProjectOpen && currentProject && (

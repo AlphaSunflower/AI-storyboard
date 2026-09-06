@@ -26,7 +26,7 @@ const TABS: { key: AssetsTab; label: string; icon: React.ReactNode }[] = [
  */
 export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
-  const { assets, loadAssets, deleteAsset } = useAgentStore();
+  const { assets, loadAssets, deleteAsset, addRefImageUrls, refImageUrls } = useAgentStore();
   const scenes = useProjectStore((s) => s.scenes);
   const [tab, setTab] = useState<AssetsTab>('image');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -269,6 +269,21 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                     >
                       ×
                     </button>
+                    {a.type === 'image' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); addRefImageUrls([url]); }}
+                        disabled={refImageUrls.includes(url)}
+                        title={refImageUrls.includes(url) ? '已设为参考图' : '设为下一条消息的参考图'}
+                        style={{
+                          position: 'absolute', bottom: 4, right: 4, padding: '3px 6px',
+                          border: 'none', borderRadius: 6, fontSize: 10, lineHeight: 1,
+                          background: refImageUrls.includes(url) ? 'rgba(93,184,114,0.9)' : 'rgba(204,120,92,0.92)',
+                          color: 'white', cursor: refImageUrls.includes(url) ? 'default' : 'pointer',
+                        }}
+                      >
+                        {refImageUrls.includes(url) ? '已设参考' : '设为参考'}
+                      </button>
+                    )}
                   </div>
                 )))}
               </div>

@@ -861,7 +861,8 @@ public class AgentOrchestratorSupport {
         if (!skipMessage) {
             sendEvent(req, "message", Map.of("content", plan.planText()));
         }
-        String formToken = createCheckpoint(req.getConversation(), plan.action(), plan.planPayload(), STEP_EXECUTE,
+        String formToken = createCheckpoint(req.getConversation(), plan.action(),
+                enrichMaterialContext(req, plan.planPayload()), STEP_EXECUTE,
                 plan.planText(), plan.actions(), plan.models(), plan.recommended(), plan.reasons(),
                 plan.imageModels(), plan.videoModels(), plan.assets());
         Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
@@ -880,6 +881,27 @@ public class AgentOrchestratorSupport {
         if (plan.assets() != null && !plan.assets().isEmpty()) event.put("assets", plan.assets());
         sendEvent(req, plan.eventName(), event);
         return plan.planText();
+    }
+
+    /**
+     * 所有 HITL 卡统一携带当前素材/资产上下文：把本轮已上传参考图（picUrls）与已确认资产（assetIds）
+     * 合并进 checkpoint plan，resume 后不会丢失（用户上传了资产和提示词，下一张澄清卡仍能接力）。
+     */
+    static List<Map<String, Object>> enrichMaterialContext(OrchestrationRequest req,
+                                                           List<Map<String, Object>> payload) {
+        if (payload == null || payload.isEmpty()) return payload;
+        List<String> picUrls = req.getPicUrls() == null ? List.of() : req.getPicUrls();
+        List<String> assetIds = req.getAssetIds() == null ? List.of() : req.getAssetIds();
+        if (picUrls.isEmpty() && assetIds.isEmpty()) return payload;
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (Map<String, Object> item : payload) {
+            if (item == null) continue;
+            Map<String, Object> copy = new java.util.LinkedHashMap<>(item);
+            if (!picUrls.isEmpty() && !copy.containsKey("picUrls")) copy.put("picUrls", picUrls);
+            if (!assetIds.isEmpty() && !copy.containsKey("assetIds")) copy.put("assetIds", assetIds);
+            out.add(copy);
+        }
+        return out;
     }
 
     /** 资产门禁 resume 结果：proceed=true 继续（prompt=本轮需求文本，assetIds=实际生效资产）；false=本轮已结束（澄清卡片已发） */
@@ -941,6 +963,75 @@ public class AgentOrchestratorSupport {
     public String firstAssetImageUrl(String projectId, String assetIdsCsv) {
         List<String> urls = assetImageUrls(projectId, assetIdsCsv);
         return urls.isEmpty() ? "" : urls.getFirst();
+    }
+
+    /** 会话内用户上传参考素材的 URL → purpose（agent_assets.purpose；无/读取失败返回空 Map） */
+    public Map<String, String> referenceMaterialPurposes(String conversationId) {
+        return referenceMaterialField(conversationId, true);
+    }
+
+    /** 会话内用户上传参考素材的 URL → kind（agent_assets.kind；无/读取失败返回空 Map） */
+    public Map<String, String> referenceMaterialKinds(String conversationId) {
+        return referenceMaterialField(conversationId, false);
+    }
+
+    /** 会话内用户上传过的参考图 URL（按上传顺序，最多 9 张）；前端漏传时后端找回用。 */
+    public List<String> referenceMaterialUrls(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return List.of();
+        try {
+            List<AgentAsset> assets = assetMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
+                            .eq(AgentAsset::getConversationId, conversationId)
+                            .eq(AgentAsset::getType, "reference")
+                            .orderByAsc(AgentAsset::getCreatedAt)
+                            .last("LIMIT 9"));
+            if (assets == null || assets.isEmpty()) return List.of();
+            return assets.stream().map(AgentAsset::getUrl)
+                    .filter(u -> u != null && !u.isBlank())
+                    .toList();
+        } catch (Exception e) {
+            log.warn("读取会话参考图失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private Map<String, String> referenceMaterialField(String conversationId, boolean purpose) {
+        if (conversationId == null || conversationId.isBlank()) return Map.of();
+        try {
+            List<AgentAsset> assets = assetMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
+                            .eq(AgentAsset::getConversationId, conversationId)
+                            .eq(AgentAsset::getType, "reference")
+                            .orderByAsc(AgentAsset::getCreatedAt));
+            if (assets == null || assets.isEmpty()) return Map.of();
+            Map<String, String> out = new java.util.HashMap<>();
+            for (AgentAsset a : assets) {
+                if (a.getUrl() == null || a.getUrl().isBlank()) continue;
+                out.put(a.getUrl(), purpose ? (a.getPurpose() == null ? "" : a.getPurpose())
+                        : (a.getKind() == null || a.getKind().isBlank() ? "reference" : a.getKind()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("读取参考素材用途/类型失败: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** 当前会话最近一条未过期 pending checkpoint 的 action；无则返回空串。 */
+    public String pendingCheckpointAction(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return "";
+        try {
+            AgentCheckpoint cp = checkpointMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
+                            .eq(AgentCheckpoint::getConversationId, conversationId)
+                            .eq(AgentCheckpoint::getStatus, "pending")
+                            .orderByDesc(AgentCheckpoint::getCreatedAt)
+                            .last("LIMIT 1"));
+            return cp == null || cp.getAction() == null ? "" : cp.getAction();
+        } catch (Exception e) {
+            log.warn("读取待处理 checkpoint 失败: {}", e.getMessage());
+            return "";
+        }
     }
 
     /**
@@ -1278,6 +1369,20 @@ public class AgentOrchestratorSupport {
         } catch (Exception e) {
             return List.of();
         }
+    }
+
+    /** checkpoint plan 的 LLM 推荐参数（_recommended）；缺失/失败返回空 Map。 */
+    public Map<String, String> planRecommendedParams(String planJson) {
+        if (planJson == null || planJson.isBlank()) return Map.of();
+        try {
+            var node = objectMapper.readTree(planJson).path("_recommended");
+            if (node.isObject()) {
+                Map<String, String> out = new java.util.LinkedHashMap<>();
+                node.fields().forEachRemaining(e -> out.put(e.getKey(), e.getValue().asText("")));
+                return out;
+            }
+        } catch (Exception ignored) {}
+        return Map.of();
     }
 
     /** checkpoint plan JSON 取 sources 列表（video-role-select 专用）。

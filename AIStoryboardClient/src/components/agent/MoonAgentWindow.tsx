@@ -5,7 +5,7 @@ import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { AgentConversationList } from './AgentConversationList';
 import { AgentChatPanel } from './AgentChatPanel';
-import { Moon, X, ExternalLink } from 'lucide-react';
+import { Moon, X, Maximize } from 'lucide-react';
 
 /**
  * /editor 的 Moon 智能体窗口：固定宽度圆角浮动卡片（宽度与旧 62vw 抽屉一致）。
@@ -89,6 +89,13 @@ export function MoonAgentWindow() {
           }}
         >
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: 'var(--color-ink)' }}>
+            <button
+              onClick={() => { setWindowOpen(false); navigate('/chat'); }}
+              title="全屏对话"
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'rgb(65, 118, 230)', padding: '2px 4px', borderRadius: 6, display: 'inline-flex', alignItems: 'center' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(65, 118, 230, 0.08)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            ><Maximize size={14} strokeWidth={1.8} /></button>
             <Moon size={13} strokeWidth={1.8} /> Moon 智能体
           </span>
           <button
@@ -104,19 +111,6 @@ export function MoonAgentWindow() {
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               <AgentConversationList width={convWidth} hideHeader />
             </div>
-            {/* 底部固定：全屏对话入口 → 独立 /chat 页 */}
-            <button
-              onClick={() => { setWindowOpen(false); navigate('/chat'); }}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                border: 'none', borderTop: '1px solid var(--color-hairline)',
-                background: 'transparent', padding: '0 16px', height: 44, fontSize: 15,
-                color: 'rgb(65, 118, 230)', cursor: 'pointer', textAlign: 'left',
-                transition: 'transform 0.18s ease, background 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(65, 118, 230, 0.06)'; e.currentTarget.style.transform = 'scale(1.02)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'scale(1)'; }}
-            ><ExternalLink size={14} strokeWidth={1.8} /> 全屏对话</button>
           </div>
           <div
             onMouseDown={handleConvDrag}

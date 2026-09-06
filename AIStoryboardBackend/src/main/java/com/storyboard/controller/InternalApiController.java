@@ -3,6 +3,8 @@ package com.storyboard.controller;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.SceneFull;
+import com.storyboard.dto.response.SceneReferenceResponse;
+import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.SceneAsset;
 import com.storyboard.service.InternalApiService;
@@ -64,6 +66,20 @@ public class InternalApiController {
         return ApiResponse.ok("ok");
     }
 
+    /** 挂载参考素材 URL 到场景（Agent 生成分镜后自动关联） */
+    @PostMapping("/scenes/{sceneId}/reference-links")
+    public ApiResponse<String> linkSceneReferences(@PathVariable String sceneId,
+                                                   @RequestBody List<SceneReferenceLinkRequest> links) {
+        internalApiService.linkSceneReferences(sceneId, links);
+        return ApiResponse.ok("ok");
+    }
+
+    /** 查场景参考素材（含 role） */
+    @GetMapping("/scenes/{sceneId}/references")
+    public ApiResponse<List<SceneReferenceResponse>> getSceneReferences(@PathVariable String sceneId) {
+        return ApiResponse.ok(internalApiService.getSceneReferences(sceneId));
+    }
+
     /** 查单个场景 */
     @GetMapping("/scenes/{sceneId}")
     public ApiResponse<SceneFull> getScene(@PathVariable String sceneId) {
@@ -77,8 +93,8 @@ public class InternalApiController {
         return ApiResponse.ok("ok");
     }
 
-    /** 批量更新项目全部分镜的生成参数 */
-    @PatchMapping("/scenes/project/{projectId}/params")
+    /** 批量更新项目全部分镜的生成参数（POST：内部 RestTemplate 的 JDK 客户端不支持 PATCH） */
+    @PostMapping("/scenes/project/{projectId}/params")
     public ApiResponse<String> updateProjectSceneParams(@PathVariable String projectId,
                                                         @RequestBody Map<String, String> params) {
         internalApiService.updateProjectSceneParams(projectId, params);

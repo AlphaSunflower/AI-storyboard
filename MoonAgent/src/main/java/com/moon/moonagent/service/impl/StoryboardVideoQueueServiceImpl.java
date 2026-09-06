@@ -2,6 +2,7 @@ package com.moon.moonagent.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.video.ReferenceImage;
+import com.moon.moonagent.ai.video.ReferenceImageRole;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
@@ -72,7 +73,10 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             row.setDuration(item.duration());
             row.setNegativePrompt(item.negativePrompt());
             row.setSourceImageUrl(item.sourceImageUrl());
-            row.setRefImageUrls(join(item.refImageUrls()));
+            // 带角色的参考图以 JSON 数组存 refImageUrls（兼容旧逗号列表：无角色时按 REFERENCE）
+            row.setRefImageUrls(item.refImageRoles() == null || item.refImageRoles().isEmpty()
+                    ? join(item.refImageUrls())
+                    : rolesToJson(item.refImageRoles()));
             row.setRefAssetIds(join(item.refAssetIds()));
             row.setProgress(0);
             queueMapper.insert(row);
@@ -175,19 +179,41 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         if (sourceImageUrl == null || sourceImageUrl.isBlank()) {
             sourceImageUrl = scene != null ? scene.getImageUrl() : null;
         }
-        LinkedHashSet<String> refs = new LinkedHashSet<>(split(row.getRefImageUrls()));
+        List<ReferenceImage> refImages = buildRefImages(row.getRefImageUrls());
+
+        // 资产参考图（视频用途）在角色图之后以 REFERENCE 追加（不覆盖首尾帧角色）
+        LinkedHashSet<String> assetRefs = new LinkedHashSet<>();
         if (row.getRefAssetIds() != null && !row.getRefAssetIds().isBlank()) {
             try {
                 List<AssetVO> sceneAssets = assetService.sceneAssets(row.getSceneId(), "video");
-                refs.addAll(assetService.buildReferenceImages(sceneAssets));
+                assetRefs.addAll(assetService.buildReferenceImages(sceneAssets));
             } catch (Exception e) {
                 log.warn("[分镜视频队列] 资产参考图聚合失败: {}", e.getMessage());
             }
         }
-        List<ReferenceImage> refImages = refs.stream()
-                .filter(u -> u != null && !u.isBlank())
-                .map(ReferenceImage::ofReference)
-                .toList();
+        List<ReferenceImage> combined = new ArrayList<>(refImages);
+        for (String u : assetRefs) {
+            if (u == null || u.isBlank()) continue;
+            boolean dup = combined.stream().anyMatch(r -> u.equals(r.url()));
+            if (!dup) combined.add(ReferenceImage.ofReference(u));
+        }
+        // 分镜已挂载的参考图（SceneReviewCard/Agent 自动挂载）按 role 追加；不覆盖首尾帧角色
+        try {
+            List<Map<String, Object>> sceneRefs = storyboardClient.getSceneReferences(row.getSceneId());
+            List<ReferenceImage> roleRefs = mapSceneReferenceRoles(sceneRefs);
+            for (ReferenceImage ref : roleRefs) {
+                boolean dup = combined.stream().anyMatch(r -> ref.url().equals(r.url()));
+                if (!dup) combined.add(ref);
+            }
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 读取分镜参考素材失败: {}", e.getMessage());
+        }
+        refImages = combined;
+        // H3 约束：多模态参考素材与首帧图生视频互斥。已有参考图（含角色）时不再传 scene.imageUrl，
+        // 参考图即唯一素材输入（用户行内参考图/资产图优先于场景首帧图）。
+        if (!refImages.isEmpty()) {
+            sourceImageUrl = null;
+        }
 
         String taskId;
         try {
@@ -348,6 +374,81 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
     private static String join(List<String> values) {
         if (values == null || values.isEmpty()) return null;
         return String.join(",", values.stream().filter(v -> v != null && !v.isBlank()).toList());
+    }
+
+    /** 带角色参考图 → JSON 数组字符串（存 refImageUrls）。 */
+    private static String rolesToJson(List<java.util.Map<String, String>> roles) {
+        if (roles == null || roles.isEmpty()) return null;
+        List<java.util.Map<String, String>> clean = roles.stream()
+                .filter(m -> m != null && m.get("url") != null && !m.get("url").isBlank())
+                .toList();
+        if (clean.isEmpty()) return null;
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(clean);
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 参考图角色序列化失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 解析参考图（带角色 JSON 或旧逗号列表），全部转 ReferenceImage；非法 role 回退 REFERENCE。 */
+    private static List<ReferenceImage> buildRefImages(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        String t = raw.trim();
+        // 旧格式：逗号分隔 URL（全部 REFERENCE）
+        if (!t.startsWith("[")) {
+            return split(raw).stream()
+                    .filter(u -> u != null && !u.isBlank())
+                    .map(ReferenceImage::ofReference)
+                    .toList();
+        }
+        // 新格式：[{url, role}]
+        try {
+            var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(t);
+            List<ReferenceImage> out = new ArrayList<>();
+            for (var node : arr) {
+                String url = node.path("url").asText("");
+                if (url.isBlank()) continue;
+                String role = node.path("role").asText("");
+                out.add(new ReferenceImage(url, mapRole(role)));
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 参考图角色 JSON 解析失败，按逗号回退: {}", e.getMessage());
+            return split(raw).stream().map(ReferenceImage::ofReference).toList();
+        }
+    }
+
+    private static ReferenceImageRole mapRole(String role) {
+        if (role == null || role.isBlank()) return ReferenceImageRole.REFERENCE;
+        return switch (role.trim().toUpperCase()) {
+            case "FIRST_FRAME", "首帧" -> ReferenceImageRole.FIRST_FRAME;
+            case "LAST_FRAME", "尾帧" -> ReferenceImageRole.LAST_FRAME;
+            default -> ReferenceImageRole.REFERENCE;
+        };
+    }
+
+    /** 分镜挂载参考图 → ReferenceImage（含 role；FIRST_LAST_FRAME 按首/尾/中间拆分）。 */
+    private static List<ReferenceImage> mapSceneReferenceRoles(List<Map<String, Object>> refs) {
+        if (refs == null || refs.isEmpty()) return List.of();
+        List<ReferenceImage> out = new ArrayList<>();
+        int n = refs.size();
+        for (int i = 0; i < n; i++) {
+            Map<String, Object> ref = refs.get(i);
+            String url = ref.get("url") == null ? "" : String.valueOf(ref.get("url"));
+            if (url.isBlank()) continue;
+            String role = ref.get("role") == null ? "" : String.valueOf(ref.get("role"));
+            ReferenceImageRole r;
+            if ("FIRST_LAST_FRAME".equalsIgnoreCase(role)) {
+                r = i == 0 ? ReferenceImageRole.FIRST_FRAME
+                        : i == n - 1 ? ReferenceImageRole.LAST_FRAME
+                        : ReferenceImageRole.REFERENCE;
+            } else {
+                r = mapRole(role);
+            }
+            out.add(new ReferenceImage(url, r));
+        }
+        return out;
     }
 
     private static List<String> split(String value) {

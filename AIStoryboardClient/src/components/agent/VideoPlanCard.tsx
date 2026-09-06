@@ -46,7 +46,8 @@ export function VideoPlanCard({ info }: { info: VideoPlanInfo }) {
         <div
           style={{
             fontSize: 15, color: 'var(--color-ink)', lineHeight: 1.7,
-            marginBottom: 12, whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'hidden',
+            marginBottom: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            maxHeight: 420, overflowY: 'auto',
           }}
         >
           {info.message}

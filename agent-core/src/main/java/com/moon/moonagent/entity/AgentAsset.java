@@ -15,6 +15,8 @@ public class AgentAsset {
     private String url;     // /api/files/images/xxx.png 或 /api/files/videos/xxx.mp4
     private String prompt;
     private String model;
+    private String purpose; // 用户上传素材时填写的用途/说明（人物/场景/风格参考等）
+    private String kind;    // reference | asset（asset=带文字约束，无需整理智能体再次分类）
     private String status;  // queued | generating | completed | failed
     private String taskId;  // 视频异步任务 ID
     private String error;

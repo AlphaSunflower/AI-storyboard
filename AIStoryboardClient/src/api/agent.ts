@@ -269,10 +269,12 @@ export const agentApi = {
   retryGenerationRecord: (id: string) =>
     client.post<{ data: { id: string; taskId: string } }>(`/agent/generation-records/${id}/retry`),
 
-  uploadImage: (file: File, conversationId?: string) => {
+  uploadImage: (file: File, conversationId?: string, purpose?: string, kind?: string) => {
     const form = new FormData();
     form.append('file', file);
     if (conversationId) form.append('conversationId', conversationId);
+    if (purpose?.trim()) form.append('purpose', purpose.trim());
+    if (kind) form.append('kind', kind);
     return client.post<{ data: { url: string } }>('/agent/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -307,6 +309,10 @@ export const agentApi = {
   // 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）
   getPendingCheckpoint: (conversationId: string) =>
     client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
+
+  // 跳过/作废当前会话待处理 HITL checkpoint（「换个话题」按钮用）
+  skipPendingCheckpoint: (conversationId: string) =>
+    client.post<{ data: null }>(`/agent/conversations/${conversationId}/checkpoint/skip`),
 
   // 打断当前会话的生成（「停止生成」按钮触发）：后端置位会话级 interrupt 标志 → 编排协作式取消
   interrupt: (conversationId: string) =>

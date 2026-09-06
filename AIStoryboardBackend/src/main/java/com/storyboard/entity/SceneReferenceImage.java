@@ -15,6 +15,8 @@ public class SceneReferenceImage {
     private String type;
     // 用途：image=图片生成参考 / video=视频生成参考
     private String purpose;
+    // 参考角色：FIRST_FRAME / LAST_FRAME / FIRST_LAST_FRAME / FULL_REFERENCE / REFERENCE
+    private String role;
     private String fileName;
     private Long fileSize;
 }

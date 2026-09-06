@@ -140,16 +140,15 @@ export function SceneListPanel({ width }: { width: number }) {
 
   return (
     <div
-      ref={listRef}
       style={{
         width: `${width}px`,
         minWidth: `${width}px`,
         borderRight: '1px solid var(--color-hairline)',
         background: 'var(--color-canvas)',
         padding: 'var(--space-md)',
-        overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
       {/* Header row */}
@@ -184,11 +183,13 @@ export function SceneListPanel({ width }: { width: number }) {
                 cursor: 'pointer',
                 color: sortMode ? 'white' : 'var(--color-body)',
                 fontWeight: 500,
-                transition: 'all 0.2s',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
+                transition: 'all 0.2s',
               }}
+              onMouseEnter={(e) => { if (!sortMode) { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; } }}
+              onMouseLeave={(e) => { if (!sortMode) { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-body)'; } }}
             >
               {sortMode
                 ? <><Check size={12} strokeWidth={2} /> 完成排序</>
@@ -196,10 +197,10 @@ export function SceneListPanel({ width }: { width: number }) {
             </button>
           )}
           {currentProject && !sortMode && (
-            <button
-              onClick={() => addScene(currentProject.id)}
-              style={{
-                padding: '4px 14px',
+              <button
+                onClick={() => addScene(currentProject.id)}
+                style={{
+                  padding: '4px 14px',
                 height: 28,
                 fontSize: 12,
                 borderRadius: 'var(--rounded-md)',
@@ -208,7 +209,10 @@ export function SceneListPanel({ width }: { width: number }) {
                 cursor: 'pointer',
                 color: 'var(--color-body)',
                 fontWeight: 500,
+                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-body)'; }}
             >
               + 添加
             </button>
@@ -216,75 +220,78 @@ export function SceneListPanel({ width }: { width: number }) {
         </div>
       </div>
 
-      {/* Empty state */}
-      {scenes.length === 0 ? (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <LiveOrb
-              variant="webgl"
-              colors={["#A33A18", "#D4682A", "#E8B45A"]}
-              size={80}
-            />
-            <p
-              style={{
-                color: 'var(--color-muted-soft)',
-                fontSize: 13,
-                textAlign: 'center',
-                animation: 'emptyGuideFloat 2.6s ease-in-out infinite',
-              }}
-            >
-            <span style={{ display: 'block', marginBottom: 8 }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
-            暂无分镜
-            <br />
-            请输入剧本并点击"生成分镜脚本"
-            <style>{`
-              @keyframes emptyGuideFloat {
-                0%, 100% { transform: translateY(0); opacity: 0.75; }
-                50% { transform: translateY(-6px); opacity: 1; }
-              }
-            `}</style>
-            </p>
-          </div>
-        </div>
-      ) : sortMode ? (
-        /* 排序模式：拖拽列表 */
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={scenes.map(s => s.id)}
-            strategy={verticalListSortingStrategy}
+      {/* 分镜列表滚动区（仅此区域滚动，「分镜列表」标题行固定） */}
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+        {/* Empty state */}
+        {scenes.length === 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '100%',
+            }}
           >
-            {scenes.map((scene) => (
-              <SortableSceneCard
-                key={scene.id}
-                scene={scene}
-                isSelected={selectedSceneId === scene.id}
-                onSelect={() => selectScene(scene.id)}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <LiveOrb
+                variant="webgl"
+                colors={["#A33A18", "#D4682A", "#E8B45A"]}
+                size={80}
               />
-            ))}
-          </SortableContext>
-        </DndContext>
-      ) : (
-        /* 普通模式：场景卡片 */
-        scenes.map((scene) => (
-          <SceneCard
-            key={scene.id}
-            scene={scene}
-            isSelected={selectedSceneId === scene.id}
-            onSelect={() => selectScene(scene.id)}
-          />
-        ))
-      )}
+              <p
+                style={{
+                  color: 'var(--color-muted-soft)',
+                  fontSize: 13,
+                  textAlign: 'center',
+                  animation: 'emptyGuideFloat 2.6s ease-in-out infinite',
+                }}
+              >
+              <span style={{ display: 'block', marginBottom: 8 }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
+              暂无分镜
+              <br />
+              请输入剧本并点击"生成分镜脚本"
+              <style>{`
+                @keyframes emptyGuideFloat {
+                  0%, 100% { transform: translateY(0); opacity: 0.75; }
+                  50% { transform: translateY(-6px); opacity: 1; }
+                }
+              `}</style>
+              </p>
+            </div>
+          </div>
+        ) : sortMode ? (
+          /* 排序模式：拖拽列表 */
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={scenes.map(s => s.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {scenes.map((scene) => (
+                <SortableSceneCard
+                  key={scene.id}
+                  scene={scene}
+                  isSelected={selectedSceneId === scene.id}
+                  onSelect={() => selectScene(scene.id)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        ) : (
+          /* 普通模式：场景卡片 */
+          scenes.map((scene) => (
+            <SceneCard
+              key={scene.id}
+              scene={scene}
+              isSelected={selectedSceneId === scene.id}
+              onSelect={() => selectScene(scene.id)}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 }

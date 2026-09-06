@@ -113,8 +113,7 @@ public class StoryboardClient {
     public void updateProjectSceneParams(String projectId, Map<String, String> params) {
         String url = baseUrl + "/api/internal/scenes/project/" + projectId + "/params";
         try {
-            restTemplate.exchange(url, HttpMethod.PATCH,
-                    new HttpEntity<>(params, headers()), String.class);
+            restTemplate.postForEntity(url, new HttpEntity<>(params, headers()), String.class);
             sceneCache.invalidate(projectId);
         } catch (ResourceAccessException e) {
             log.error("StoryboardClient.updateProjectSceneParams: 主后端不可用 {}", e.getMessage());
@@ -126,6 +125,21 @@ public class StoryboardClient {
     public void linkSceneAssets(String sceneId, List<String> assetIds) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId + "/assets";
         restTemplate.postForEntity(url, new HttpEntity<>(assetIds, headers()), String.class);
+    }
+
+    /** 挂载参考素材 URL 到场景（Agent 生成分镜后自动关联，字段 url/type/purpose/role/fileName/fileSize） */
+    public void linkSceneReferences(String sceneId, List<Map<String, Object>> refs) {
+        String url = baseUrl + "/api/internal/scenes/" + sceneId + "/reference-links";
+        restTemplate.postForEntity(url, new HttpEntity<>(refs, headers()), String.class);
+    }
+
+    /** 查场景参考素材（含 url/type/purpose/role，按 sortOrder 升序） */
+    public List<Map<String, Object>> getSceneReferences(String sceneId) {
+        String url = baseUrl + "/api/internal/scenes/" + sceneId + "/references";
+        var resp = restTemplate.exchange(url, HttpMethod.GET,
+                new HttpEntity<>(headers()),
+                new ParameterizedTypeReference<ApiResponse<List<Map<String, Object>>>>() {});
+        return resp.getBody() != null ? resp.getBody().data() : List.of();
     }
 
     // ===== 资产 =====

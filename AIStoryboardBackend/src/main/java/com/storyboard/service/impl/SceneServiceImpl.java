@@ -161,7 +161,7 @@ public class SceneServiceImpl implements SceneService {
         checkProjectOwnership(userId, scene.getProjectId());
         return refImageMapper.findBySceneId(sceneId).stream()
             .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
-                    r.getFileName(), r.getFileSize()))
+                    r.getRole(), r.getFileName(), r.getFileSize()))
             .toList();
     }
 
@@ -198,12 +198,13 @@ public class SceneServiceImpl implements SceneService {
         ref.setSceneId(sceneId);
         ref.setType(t);
         ref.setPurpose(p);
+        ref.setRole("REFERENCE");
         ref.setImageUrl(url);
         ref.setFileName(file.getOriginalFilename());
         ref.setFileSize(file.getSize());
         ref.setSortOrder((int) existing);
         refImageMapper.insert(ref);
-        return new SceneReferenceResponse(ref.getId(), t, p, url, ref.getFileName(), ref.getFileSize());
+        return new SceneReferenceResponse(ref.getId(), t, p, url, "REFERENCE", ref.getFileName(), ref.getFileSize());
     }
 
     @Override

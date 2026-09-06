@@ -271,7 +271,7 @@ public class SceneReviewIntentHandler implements IntentHandler {
             items.add(new StoryboardVideoEnqueueItem(
                     s.getId(), prompt, s.getVideoModel(), s.getVideoResolution(), null,
                     s.getVideoAspectRatio(), s.getDuration(), s.getNegativePrompt(),
-                    s.getImageUrl(), null, null));
+                    s.getImageUrl(), null, null, java.util.List.of()));
         }
         int count = items.size();
         support.sendEvent(request, "workflow", Map.of("title", "正在提交视频生成队列…", "status", "node_started"));

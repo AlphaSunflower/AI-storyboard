@@ -22,6 +22,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -29,6 +30,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class StoryboardVideoQueueServiceImplTest {
@@ -66,7 +68,7 @@ class StoryboardVideoQueueServiceImplTest {
                 "conv-1", "proj-1",
                 List.of(new StoryboardVideoEnqueueItem(
                         "scene-1", "测试提示词", "MiniMax-H3", "1080p", null,
-                        "16:9", 8, null, scene.getImageUrl(), null, null)));
+                        "16:9", 8, null, scene.getImageUrl(), null, null, java.util.List.of())));
 
         List<StoryboardVideoQueue> rows = service.enqueue(request);
 
@@ -82,6 +84,26 @@ class StoryboardVideoQueueServiceImplTest {
     void enqueue_emptyItems_throws() {
         StoryboardVideoEnqueueRequest request = new StoryboardVideoEnqueueRequest("conv-1", "proj-1", List.of());
         assertThrows(IllegalArgumentException.class, () -> service.enqueue(request));
+    }
+
+    @Test
+    void enqueue_withRefImageRoles_serializesJsonRefImageUrls() {
+        StoryboardVideoEnqueueItem item = new StoryboardVideoEnqueueItem(
+                "scene-1", "测试提示词", "MiniMax-H3", "1080p", null,
+                "16:9", 8, null, null, List.of("u1", "u2"), null,
+                List.of(Map.of("url", "u1", "role", "FIRST_FRAME"),
+                        Map.of("url", "u2", "role", "REFERENCE")));
+        StoryboardVideoEnqueueRequest request = new StoryboardVideoEnqueueRequest("conv-1", "proj-1", List.of(item));
+
+        service.enqueue(request);
+
+        ArgumentCaptor<StoryboardVideoQueue> captor = ArgumentCaptor.forClass(StoryboardVideoQueue.class);
+        verify(queueMapper).insert(captor.capture());
+        String ref = captor.getValue().getRefImageUrls();
+        assertNotNull(ref);
+        assertTrue(ref.startsWith("["), "带角色参考图应序列化为 JSON 数组，实际=" + ref);
+        assertTrue(ref.contains("FIRST_FRAME"));
+        assertTrue(ref.contains("u1"));
     }
 
     @Test

@@ -102,7 +102,7 @@ class MoonAgentControllerSmokeTest {
         when(chatService.sendMessage(anyString(), anyString(), anyString())).thenReturn(message());
         when(chatService.listAssets(anyString(), anyInt(), anyInt()))
             .thenReturn(Map.of("records", List.of(), "total", 0));
-        when(chatService.uploadReferenceImage(anyString(), any(), any()))
+        when(chatService.uploadReferenceImage(anyString(), any(), any(), any(), any()))
             .thenReturn("/api/files/images/x.png");
         when(chatService.confirmImageDone(anyString(), anyString())).thenReturn(true);
         when(chatService.interrupt(anyString(), anyString())).thenReturn(true);
