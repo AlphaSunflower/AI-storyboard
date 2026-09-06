@@ -865,11 +865,17 @@ public class AgentOrchestratorSupport {
                 enrichMaterialContext(req, plan.planPayload()), STEP_EXECUTE,
                 plan.planText(), plan.actions(), plan.models(), plan.recommended(), plan.reasons(),
                 plan.imageModels(), plan.videoModels(), plan.assets());
+        // 落库 assistant HITL 卡片消息（metadata 保留 kind/formContent/actions/formToken/expirationTime）
+        String hitlMessageId = persistHitlCard(req, plan, formToken);
+        req.setHitlPaused(true);
+        req.setHitlMessageId(hitlMessageId);
+        attachHitlMessageIdToPlan(formToken, hitlMessageId);
         Map<String, Object> event = new java.util.LinkedHashMap<>(Map.of(
             "formToken", formToken, "taskId", "",
             "formContent", plan.planText(),
             "actions", plan.actions(),
-            "expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString()));
+            "expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString(),
+            "messageId", hitlMessageId));
         // 模型/参数选项与 LLM 推荐（非空才下发；旧前端/无配置时字段缺失，行为与现状一致）
         if (plan.models() != null && !plan.models().isEmpty()) event.put("models", plan.models());
         // aisplit 分镜确认卡片：图片/视频两组模型列表（前端渲染分区参数选择器）
@@ -881,6 +887,103 @@ public class AgentOrchestratorSupport {
         if (plan.assets() != null && !plan.assets().isEmpty()) event.put("assets", plan.assets());
         sendEvent(req, plan.eventName(), event);
         return plan.planText();
+    }
+
+    /** 落库一条 assistant HITL 卡片消息，metadata 保留 kind/formContent/actions/formToken/expirationTime；返回消息 id。 */
+    private String persistHitlCard(OrchestrationRequest req, StagePlan plan, String formToken) {
+        try {
+            AgentMessage m = new AgentMessage();
+            m.setConversationId(req.getConversation().getId());
+            m.setRole("assistant");
+            m.setContent(plan.planText());
+            Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("kind", "hitl");
+            metadata.put("formContent", plan.planText());
+            if (plan.actions() != null) metadata.put("actions", plan.actions());
+            metadata.put("formToken", formToken);
+            metadata.put("expirationTime", OffsetDateTime.now().plus(CHECKPOINT_TTL).toString());
+            m.setMetadata(metadata);
+            messageMapper.insert(m);
+            log.info("AgentOrchestrator: HITL 卡片已落库 assistant 消息 conversationId={} messageId={} formToken={}",
+                    req.getConversation().getId(), m.getId(), formToken);
+            return m.getId();
+        } catch (Exception e) {
+            log.warn("AgentOrchestrator: HITL 卡片 assistant 消息落库失败 conversationId={} error={}",
+                    req.getConversation().getId(), e.getMessage());
+            return "";
+        }
+    }
+
+    /** checkpoint plan 记录 `_hitlMessageId`，供表单提交后按消息 id 更新该行 metadata。 */
+    private void attachHitlMessageIdToPlan(String formToken, String messageId) {
+        if (formToken == null || formToken.isBlank() || messageId == null || messageId.isBlank()) return;
+        try {
+            AgentCheckpoint cp = checkpointMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
+                            .eq(AgentCheckpoint::getFormToken, formToken)
+                            .last("LIMIT 1"));
+            if (cp == null || cp.getPlan() == null || cp.getPlan().isBlank()) return;
+            Map<String, Object> plan = objectMapper.readValue(cp.getPlan(),
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+            if (plan == null) return;
+            plan.put("_hitlMessageId", messageId);
+            cp.setPlan(objectMapper.writeValueAsString(plan));
+            checkpointMapper.updateById(cp);
+        } catch (Exception e) {
+            log.warn("AgentOrchestrator: checkpoint plan 附加 _hitlMessageId 失败 formToken={} error={}", formToken, e.getMessage());
+        }
+    }
+
+    /** 供 AgentChatService 在表单提交前置位时更新 HITL 卡片 metadata（按 formToken 查 `_hitlMessageId`）。 */
+    public void markHitlCardSubmitted(String conversationId, String formToken, String action, String customText,
+                                      Map<String, String> params, java.util.List<String> assetIds) {
+        try {
+            AgentCheckpoint cp = checkpointMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
+                            .eq(AgentCheckpoint::getFormToken, formToken)
+                            .eq(AgentCheckpoint::getConversationId, conversationId)
+                            .last("LIMIT 1"));
+            String messageId = null;
+            if (cp != null && cp.getPlan() != null && !cp.getPlan().isBlank()) {
+                messageId = planField(cp.getPlan(), "_hitlMessageId");
+            }
+            if (messageId == null || messageId.isBlank()) return;
+            Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("kind", "hitl");
+            metadata.put("selectedActionId", action == null ? "" : action);
+            metadata.put("selectedActionTitle", actionTitle(action));
+            metadata.put("selectedCustomText", customText == null ? "" : customText);
+            metadata.put("selectedParams", params == null ? Map.of() : params);
+            metadata.put("selectedAssetIds", assetIds == null ? List.of() : assetIds);
+            metadata.put("submittedAt", OffsetDateTime.now().toString());
+            // 用 updateById 走 JacksonTypeHandler 序列化 metadata（LambdaUpdateWrapper.set 不保证 apply typeHandler）
+            AgentMessage msg = messageMapper.selectById(messageId);
+            if (msg != null) {
+                Map<String, Object> merged = msg.getMetadata() == null ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(msg.getMetadata());
+                merged.putAll(metadata);
+                msg.setMetadata(merged);
+                messageMapper.updateById(msg);
+            }
+            log.info("AgentOrchestrator: HITL 卡片已标记提交 conversationId={} messageId={} action={}",
+                    conversationId, messageId, action);
+        } catch (Exception e) {
+            log.warn("AgentOrchestrator: markHitlCardSubmitted 失败 conversationId={} formToken={} error={}",
+                    conversationId, formToken, e.getMessage());
+        }
+    }
+
+    private String actionTitle(String action) {
+        switch (action == null ? "" : action) {
+            case "agree": return "满意";
+            case "disagree": return "不满意";
+            case "replace": return "先删除现有分镜再导入";
+            case "append": return "追加到现有分镜后面";
+            case "cancel": return "不生成分镜";
+            case "generate_image": return "开始生成图片";
+            case "generate_video": return "开始生成视频";
+            case "custom": return "自定义输入";
+            default: return action == null ? "" : action;
+        }
     }
 
     /**
@@ -1155,7 +1258,12 @@ public class AgentOrchestratorSupport {
         Map<String, Object> confirm = (Map<String, Object>) result.getOrDefault("confirm", Map.of());
         sendEvent(req, "confirm_result", confirm);
         long sceneCount = result.get("sceneCount") instanceof Number n ? n.longValue() : -1L;
-        sendEvent(req, "message_end", Map.of("messageId", "", "sceneCount", sceneCount, "content", content));
+        Map<String, Object> endPayload = new java.util.LinkedHashMap<>(Map.of(
+                "messageId", "", "sceneCount", sceneCount, "content", content));
+        if (result.get("suggestedActions") != null) {
+            endPayload.put("suggestedActions", result.get("suggestedActions"));
+        }
+        sendEvent(req, "message_end", endPayload);
     }
 
     /**

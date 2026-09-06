@@ -16,6 +16,7 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
@@ -424,6 +425,10 @@ public class AgentChatServiceImpl implements AgentChatService {
      * message_end → 落库 assistant 消息 + 回填 conversation_id + 附带 sceneCount。
      */
     public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, "");
+    }
+
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
@@ -483,10 +488,15 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                String answer = orchestrator.run(conversation, content, picUrls, assetIds, emitter);
-                // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）
-                if (answer != null && !answer.isBlank()) {
-                    persistAssistant(conversation, answer);
+                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint, emitter);
+                // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）；
+                // HITL 暂停已由 runHITLStage 落库 assistant 消息，不重复插入，仅补全 trace/reasoning 到该行 metadata
+                if (turn != null) {
+                    if (turn.hitlPaused()) {
+                        persistTurnMetadata(conversation.getId(), turn.messageId(), turn);
+                    } else if (turn.content() != null && !turn.content().isBlank()) {
+                        persistAssistant(conversation, turn);
+                    }
                 }
             } catch (AgentInterruptException e) {
                 // 用户主动打断：不补发错误、不落库被截断的回答，静默收尾（锁在 finally 释放）
@@ -569,6 +579,73 @@ public class AgentChatServiceImpl implements AgentChatService {
             messageMapper.insert(assistantMessage);
             conversationMapper.updateById(conversation); // 触发 updatedAt fill
         });
+    }
+
+    /**
+     * 落库 assistant 消息带结构化 metadata（trace/reasoning/suggestedActions/hitl 等）。
+     */
+    private void persistAssistant(AgentConversation conversation, String content, Map<String, Object> metadata) {
+        if (content == null || content.isBlank()) return;
+        transactionTemplate().executeWithoutResult(tx -> {
+            AgentMessage assistantMessage = new AgentMessage();
+            assistantMessage.setConversationId(conversation.getId());
+            assistantMessage.setRole("assistant");
+            assistantMessage.setContent(content);
+            if (metadata != null && !metadata.isEmpty()) assistantMessage.setMetadata(metadata);
+            messageMapper.insert(assistantMessage);
+            conversationMapper.updateById(conversation); // 触发 updatedAt fill
+        });
+    }
+
+    /**
+     * 按 AgentTurnResult 落库 assistant 消息：content + metadata（含 trace/reasoning/suggestedActions/hitl）。
+     * hitlPaused=true 时由 runHITLStage 已落库，调用方应在调用前跳过（本方法防御性跳过）。
+     */
+    private void persistAssistant(AgentConversation conversation, AgentTurnResult turn) {
+        if (turn == null) return;
+        if (turn.hitlPaused()) {
+            log.info("persistAssistant 跳过 HITL 暂停消息（runHITLStage 已落库）: conversationId={}", conversation.getId());
+            return;
+        }
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        if (turn.metadata() != null) metadata.putAll(turn.metadata());
+        if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("trace", turn.agentTrace());
+        if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
+        if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
+        persistAssistant(conversation, turn.content(), metadata);
+    }
+
+    /** 将 turn 的 trace/reasoning/suggestedActions 合并进已落库消息的 metadata（按 messageId；供 HITL 卡补全）。 */
+    private void persistTurnMetadata(String conversationId, String messageId, AgentTurnResult turn) {
+        if (messageId == null || messageId.isBlank() || turn == null) return;
+        try {
+            transactionTemplate().executeWithoutResult(tx -> {
+                AgentMessage msg = messageMapper.selectById(messageId);
+                if (msg == null) return;
+                Map<String, Object> metadata = msg.getMetadata() == null
+                        ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(msg.getMetadata());
+                if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("trace", turn.agentTrace());
+                if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
+                if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
+                msg.setMetadata(metadata);
+                messageMapper.updateById(msg);
+            });
+        } catch (Exception e) {
+            log.warn("持久化 turn metadata 失败: conversationId={} messageId={} error={}", conversationId, messageId, e.getMessage());
+        }
+    }
+
+    /** HITL 自定义输入落一条 user 消息（内容=自定义原文，不带「确认：」前缀）。 */
+    private void persistUserText(AgentConversation conversation, String text) {
+        if (text == null || text.isBlank()) return;
+        transactionTemplate().executeWithoutResult(tx -> {
+            AgentMessage userMessage = new AgentMessage();
+            userMessage.setConversationId(conversation.getId());
+            userMessage.setRole("user");
+            userMessage.setContent(text);
+            messageMapper.insert(userMessage);
+        });
+        log.info("HITL 自定义输入已落库: conversationId={}, text={}", conversation.getId(), text);
     }
 
 
@@ -745,14 +822,25 @@ public class AgentChatServiceImpl implements AgentChatService {
         emitter.onError(ignored -> interruptTrap.run());
         CompletableFuture.runAsync(() -> {
             try {
-                // 生成后端化：HITL 人工确认动作落库为用户消息（独立事务立即提交，刷新/历史可见）
-                persistUserConfirmation(conversation, action, "custom".equals(action) ? customText : null);
-                // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resume 内处理）；
+                // HITL 自定义输入仍落一条 user 消息（内容=自定义原文）；预定义选项不落用户消息（不再生成「确认：xxx」）
+                if ("custom".equals(action) && customText != null && !customText.isBlank()) {
+                    persistUserText(conversation, customText);
+                } else {
+                    log.info("HITL 预定义选项提交，不落用户消息: conversationId={} action={}", conversationId, action);
+                }
+                // 先更新该条 assistant HITL 行 metadata（selectedActionId/selectedCustomText/selectedParams/selectedAssetIds/submittedAt），再继续 resume
+                orchestratorSupport.markHitlCardSubmitted(conversation.getId(), formToken, action, customText, params, assetIds);
+                // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resumeTurn 内处理）；
                 // resume 返回本轮最后一条 message（如生成图片的 ![...](url)），落库 assistant 消息，
                 // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
-                String answer = orchestrator.resume(conversation, formToken, action, customText, params, assetIds, routingHint, emitter);
-                if (answer != null && !answer.isBlank()) {
-                    persistAssistant(conversation, answer);
+                AgentTurnResult turn = orchestrator.resumeTurn(conversation, formToken, action, customText, params, assetIds, routingHint, emitter);
+                if (turn != null) {
+                    if (turn.hitlPaused()) {
+                        // 再次 HITL 暂停：runHITLStage 已落库新 assistant 消息，不重复插入
+                        log.info("HITL 提交后再次 HITL 暂停，runHITLStage 已落库 assistant 消息，跳过重复插入: conversationId={}", conversationId);
+                    } else if (turn.content() != null && !turn.content().isBlank()) {
+                        persistAssistant(conversation, turn);
+                    }
                 }
             } catch (AgentInterruptException e) {
                 // 用户主动打断：不补发错误、不落库被截断的回答，静默收尾（锁在 finally 释放）

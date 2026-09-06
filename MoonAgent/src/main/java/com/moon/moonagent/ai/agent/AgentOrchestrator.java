@@ -47,4 +47,21 @@ public interface AgentOrchestrator {
      *         异步任务/失败分支返回空串）
      */
     String resume(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
+
+    /**
+     * 编排一轮用户消息并返回完整 turn 结果（含 metadata / trace / reasoning / suggestedActions / hitlPaused）。
+     * 兼容入口：{@link #run} 为 {@code runTurn(...).content()} 的薄包装。
+     */
+    AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter);
+
+    /**
+     * 编排一轮用户消息（带显式路由提示）：routingHint 非空时绕过意图模型直接锁定目标意图。
+     */
+    AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
+
+    /**
+     * HITL 表单提交后续流并返回完整 turn 结果（含 metadata / trace / reasoning / hitlPaused）。
+     * 兼容入口：{@link #resume} 为 {@code resumeTurn(...).content()} 的薄包装。
+     */
+    AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
 }

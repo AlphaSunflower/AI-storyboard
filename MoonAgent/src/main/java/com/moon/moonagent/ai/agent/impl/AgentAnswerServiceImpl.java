@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.ai.agent.AgentAnswerResult;
 import com.moon.moonagent.ai.agent.AgentAnswerService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.handler.AgentSessionState;
 import com.moon.moonagent.ai.AiConfigProperties;
@@ -14,12 +16,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.service.FileStorageService;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -27,10 +33,12 @@ import org.springframework.ai.content.Media;
 import org.springframework.util.MimeType;
 
 /**
- * Agent 主回答实现：ChatClient 拼历史，非流式。
+ * Agent 主回答实现：ChatClient 拼历史，支持流式正文 + reasoning delta。
  *
  * <p>D3 定案（2026-08-11 Phase 0 spike）：非流式。前端打字机按 message 事件
  * 逐段拼接，整段 message 也兼容；流式列为后续增强（Phase 0 汇报 D3 结论）。
+ * <p>2026-09-06：新增 {@link #streamAnswerWithResult}，使用 {@code chatResponse()} 读取
+ * reasoning_content（兼容 reasoning_content/thoughts/thinking），正文仍按 message 增量发送。
  */
 @Service
 @RequiredArgsConstructor
@@ -67,24 +75,45 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
 
     @Override
     public String streamAnswer(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
+        return streamAnswerWithResult(conversation, content, picUrl, emitter).content();
+    }
+
+    @Override
+    public AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
         StringBuilder sb = new StringBuilder();
+        StringBuilder reasoningSb = new StringBuilder();
+        OffsetDateTime start = OffsetDateTime.now();
         try {
             chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                 .system(promptConfig.get("services/agent-answer"))
                 .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
                 .stream()
-                .content()
-                .doOnNext(chunk -> {
-                    if (chunk == null || chunk.isBlank()) return;
+                .chatResponse()
+                .doOnNext(response -> {
+                    if (response == null) return;
                     // 打断：用户点击「停止生成」→ 中断主回答流式打字机，异常上抛到编排壳层收尾
                     if (sessionState.isInterrupted(conversation.getId())) {
                         throw new AgentInterruptException();
                     }
-                    sb.append(chunk);
-                    try {
-                        emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", chunk))));
-                    } catch (Exception e) {
-                        log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                    AssistantMessage output = response.getResult() != null ? response.getResult().getOutput() : null;
+                    String chunk = output != null ? output.getText() : null;
+                    if (chunk != null && !chunk.isBlank()) {
+                        sb.append(chunk);
+                        try {
+                            emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", chunk))));
+                        } catch (Exception e) {
+                            log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                        }
+                    }
+                    // reasoning delta
+                    String reasonDelta = extractReasoning(output != null ? output.getMetadata() : null);
+                    if (reasonDelta != null && !reasonDelta.isBlank()) {
+                        reasoningSb.append(reasonDelta);
+                        try {
+                            emitter.send(SseEmitter.event().name("reasoning_delta").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("delta", reasonDelta))));
+                        } catch (Exception e) {
+                            log.debug("SseEmitter reasoning 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
+                        }
                     }
                 })
                 .blockLast();
@@ -101,7 +130,17 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
                 emitter.send(SseEmitter.event().name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(java.util.Map.of("content", full))));
             } catch (Exception ignore) { }
         }
-        return full;
+        Long durationMs = Duration.between(start, OffsetDateTime.now()).toMillis();
+        String reasonText = reasoningSb.length() > 0 ? reasoningSb.toString() : "";
+        AgentReasoningSnapshot reasoning;
+        if (!reasonText.isBlank()) {
+            reasoning = new AgentReasoningSnapshot(summarize(reasonText), reasonText, durationMs, gatewayModelService.getDefaultTextModel());
+        } else {
+            // 无 reasoningContent：生成 trace 摘要（安全且不暴露 prompt）
+            String trace = "模型未返回可见推理过程，已生成回答（" + full.length() + " 字符）。";
+            reasoning = new AgentReasoningSnapshot(trace, trace, durationMs, "trace-summary");
+        }
+        return AgentAnswerResult.of(full, reasoning, reasoning.source());
     }
 
     @Override
@@ -113,6 +152,25 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
             log.debug("SseEmitter 发送失败（前端可能已断开）: conversationId={}", conversation.getId());
         }
         return answer;
+    }
+
+    /** 从 AssistantMessage metadata 提取 reasoning（兼容 reasoning_content / reasoningContent / thoughts / thinking）。 */
+    private String extractReasoning(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) return null;
+        for (String key : new String[]{"reasoning_content", "reasoningContent", "thoughts", "thinking"}) {
+            Object v = metadata.get(key);
+            if (v == null) continue;
+            String s = v instanceof String str ? str : String.valueOf(v);
+            if (s != null && !s.isBlank()) return s;
+        }
+        return null;
+    }
+
+    /** 摘要：首 200 字符 + 省略号。 */
+    private String summarize(String text) {
+        if (text == null || text.isBlank()) return "";
+        String t = text.trim();
+        return t.length() > 200 ? t.substring(0, 200) + "…" : t;
     }
 
     /** 构造用户消息：picUrl 非空时读本地图转 data URI 作为多模态图片加入；读图失败降级纯文本 */

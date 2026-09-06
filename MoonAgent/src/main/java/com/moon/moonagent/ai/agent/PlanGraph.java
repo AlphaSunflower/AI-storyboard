@@ -9,6 +9,7 @@ import com.alibaba.cloud.ai.graph.StateGraph;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
@@ -99,6 +100,8 @@ public class PlanGraph {
     private final List<IntentHandler> intentHandlers;
     private final SkillManager skillManager;
     private final SpecialistAgentRegistry specialistRegistry;
+    private final com.moon.moonagent.ai.agent.handler.RouteChangeService routeChangeService;
+    private final com.moon.moonagent.ai.agent.handler.RouteTaskCancellationService routeTaskCancellationService;
 
     /**
      * emitter 外部注册表：threadId(=conversationId) → SseEmitter。
@@ -106,6 +109,14 @@ public class PlanGraph {
      * SseEmitter 克隆后身份改变，send 到克隆对象上 Tomcat 收不到 → SSE 空流（2026-08-21 实测根因）
      */
     private final java.util.concurrent.ConcurrentHashMap<String, SseEmitter> emittersByThread =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 一轮轨迹累积器注册表：threadId(=conversationId) → AgentTraceAccumulator（不参与状态序列化）。 */
+    private final java.util.concurrent.ConcurrentHashMap<String, AgentTraceAccumulator> traceByThread =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 本轮最后一个 OrchestrationRequest（供 runTurn/resumeTurn 读 hitlPaused/metadata/suggestedActions）。 */
+    private final java.util.concurrent.ConcurrentHashMap<String, OrchestrationRequest> requestsByThread =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     /** intent → handler 适配器节点名（node_aisplit / node_pic / ...） */
@@ -181,6 +192,19 @@ public class PlanGraph {
                 .addNode("intent_recognize", node_async(state -> {
                     AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
                     String content = state.<String>value(K_CONTENT).orElse("");
+                    String routingHint = state.<String>value(K_ROUTING_HINT).orElse("");
+                    AgentTraceAccumulator trace = traceByThread.get(conversation.getId());
+                    // 显式 routingHint（前端推荐动作/切链按钮）：绕过意图模型，直接锁定目标意图
+                    if (!routingHint.isBlank()) {
+                        log.info("PlanGraph: run 显式 routingHint={} → 绕过意图模型锁定意图", routingHint);
+                        support.resetClarify(conversation.getId());
+                        if (trace != null) trace.add("route_change", "moon", "路由提示", "命中显式 routingHint，锁定意图 " + routingHint, "", routingHint, "route_changed");
+                        return Map.of(
+                                K_INTENT, routingHint,
+                                K_CONFIDENCE, 1.0,
+                                K_LOW_CONFIDENCE, false,
+                                K_SWITCH, false);
+                    }
                     // 发送"正在理解你的需求…"workflow 事件，避免意图识别期间前端只显示"正在生成"
                     SseEmitter emitter = emittersByThread.get(conversation.getId());
                     if (emitter != null) {
@@ -194,6 +218,7 @@ public class PlanGraph {
                     IntentResult intentResult = intentRecognitionService.recognize(content, recent);
                     log.info("PlanGraph: conversationId={} intent={} confidence={} source={}",
                             conversation.getId(), intentResult.type(), intentResult.confidence(), intentResult.source());
+                    if (trace != null) trace.add("intent_recognize", "moon", "意图识别", "识别为 " + intentResult.type() + "，置信度 " + intentResult.confidence(), "", intentResult.type(), "node_completed");
                     if (!"intent-aisplit".equals(intentResult.type()) && !"intent-pic".equals(intentResult.type())) {
                         support.resetClarify(conversation.getId());
                     }
@@ -268,7 +293,9 @@ public class PlanGraph {
                 // ---- 切链出口节点（resume 检测到新意图时：用 customText 重新走 run 编排） ----
                 .addNode("switch_to_run", node_async(state -> {
                     // 把自定义文本作为新用户消息，清 resume 标记 → intent_recognize 重新识别
+                    AgentConversation conv = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
                     String customText = state.<String>value(K_CUSTOM_TEXT).orElse("");
+                    routeTaskCancellationService.cancelPendingTasks(conv.getId());
                     return Map.of(
                             K_CONTENT, customText.isBlank() ? state.<String>value(K_CONTENT).orElse("") : customText,
                             K_RESUME, false,
@@ -277,10 +304,12 @@ public class PlanGraph {
                 }))
                 // ---- intent-clarify 点选目标意图 / 显式 routingHint 切链：清 resume 标记 + 锁定意图 → 走 run 路由（重新 handle，非 resume） ----
                 .addNode("rerun_selected", node_async(state -> {
+                    AgentConversation conv = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
                     String hint = state.<String>value(K_ROUTING_HINT).orElse("");
                     String selected = hint.isBlank()
                             ? state.<String>value(K_SUBMIT_ACTION).orElse(IntentRecognitionService.FALLBACK_TYPE)
                             : hint;
+                    routeTaskCancellationService.cancelPendingTasks(conv.getId());
                     return Map.of(
                             K_INTENT, selected,
                             K_CONFIDENCE, 1.0,
@@ -328,9 +357,21 @@ public class PlanGraph {
                                 return "skill_manager";
                             }
 
-                            // ★ 切链出口（2026-09-05 收紧）：链内澄清卡的自定义输入一律留在当前链。
-                            // 只有「intent-clarify」全局意图菜单和前端显式 routingHint 才允许切链，
-                            // 否则用户在分镜澄清里输入「根据这个资产做一个多图转场」会被误识别为视频。
+                            // ★ 切链出口（2026-09-06 收紧）：链内澄清卡的自定义输入一律留在当前链。
+                            // 只有「intent-clarify」全局意图菜单、前端显式 routingHint、以及命中显式切链短语
+                            // （routeChangeService）才允许切链，否则用户在分镜澄清里输入「根据这个资产做一个多图转场」
+                            // 会被误识别为视频。
+                            // 显式切链短语（我要分镜/改成图片/切到.../审查分镜等）先走 RouteChangeService 判定。
+                            if ("custom".equals(submitAction) && !customText.isBlank()) {
+                                if (routeChangeService.shouldSwitch(customText)) {
+                                    AgentTraceAccumulator traceForRoute = traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId());
+                                    if (traceForRoute != null) {
+                                        traceForRoute.add("route_change", "moon", "切链", "命中显式切链短语: " + customText, intent, routeChangeService.detectTargetIntent(customText), "route_changed");
+                                    }
+                                    return "switch_to_run";
+                                }
+                                log.info("PlanGraph: resume 自定义输入未命中显式切链短语，留在当前链 cpAction={} text={}", cpAction, customText);
+                            }
 
                             // intent-clarify：用户点选目标意图 → 重新 handle（rerun_selected 清 resume 标记 + 锁定意图）；custom → 重新 run（意图识别）
                             if ("intent-clarify".equals(cpAction)) {
@@ -422,11 +463,16 @@ public class PlanGraph {
                         state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
                         state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                         state.<String>value(K_CP_ACTION).orElse(""),
-                        state.<String>value(K_CP_PLAN).orElse("")
+                        state.<String>value(K_CP_PLAN).orElse(""),
+                        traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId())
                 );
                 SpecialistResult result = specialist.execute(ctx);
                 if (result.needsHandoff()) {
                     log.info("PlanGraph: {} 移交到 {} 原因={}", intent, result.handoffTarget(), result.handoffReason());
+                    AgentTraceAccumulator hTrace = traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId());
+                    if (hTrace != null) {
+                        hTrace.add("handoff", intent, "移交", "移交至 " + result.handoffTarget(), intent, result.handoffTarget(), "route_changed");
+                    }
                     // 移交语义：上一专家完成 → 交给下一专家走 handle（新环节）。清 resume 痕迹，
                     // 避免下一专家继承上游表单提交的 action/cpAction 误走 resume（如 scene-review 收到 action=replace）。
                     return Map.of(
@@ -493,7 +539,8 @@ public class PlanGraph {
                     state.<Map<String, String>>value(K_PARAMS).orElse(Map.of()),
                     state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                     state.<String>value(K_CP_ACTION).orElse(""),
-                    state.<String>value(K_CP_PLAN).orElse(""));
+                    state.<String>value(K_CP_PLAN).orElse(""),
+                    traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()));
             SpecialistResult result;
             try {
                 result = specialist.execute(ctx);
@@ -519,7 +566,22 @@ public class PlanGraph {
      * @return 本轮最后一条 message 内容（供调用方落库 assistant 消息）
      */
     public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, "", emitter).content();
+    }
+
+    public String run(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, emitter).content();
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, "", emitter);
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
+        AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                new OrchestrationRequest(conversation, content, picUrls == null ? java.util.List.of() : picUrls, emitter));
+        traceByThread.put(conversation.getId(), trace);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
             // 关键：run() 是全新消息，必须重置 resume 专用状态键——graph-core 的 CompileConfig 默认
@@ -538,15 +600,18 @@ public class PlanGraph {
             inputs.put(K_CP_ACTION, "");
             inputs.put(K_CP_PLAN, "");
             inputs.put(K_CUSTOM_TEXT, "");
-            inputs.put(K_ROUTING_HINT, "");
+            inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
             inputs.put(K_PARAMS, Map.of());
             inputs.put(K_HANDOFF_TARGET, "");
             inputs.put(K_HANDOFF_STATE, Map.of());
             inputs.put(K_LAST_MESSAGE, "");
             Optional<OverAllState> result = compiledGraph.invoke(inputs, config);
-            return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+            String lastMessage = result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+            return buildTurnResult(conversation, lastMessage, trace);
         } finally {
             emittersByThread.remove(conversation.getId());
+            traceByThread.remove(conversation.getId());
+            requestsByThread.remove(conversation.getId());
         }
     }
 
@@ -559,7 +624,16 @@ public class PlanGraph {
     public String resume(AgentConversation conversation, AgentCheckpoint checkpoint,
                          String action, String customText, Map<String, String> params,
                          java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return resumeTurn(conversation, checkpoint, action, customText, params, assetIds, routingHint, emitter).content();
+    }
+
+    public AgentTurnResult resumeTurn(AgentConversation conversation, AgentCheckpoint checkpoint,
+                         String action, String customText, Map<String, String> params,
+                         java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
+        AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                new OrchestrationRequest(conversation, "", java.util.List.of(), emitter));
+        traceByThread.put(conversation.getId(), trace);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
             Map<String, Object> inputs = new HashMap<>();
@@ -579,10 +653,34 @@ public class PlanGraph {
             inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
             inputs.put(K_LAST_MESSAGE, "");
             Optional<OverAllState> result = compiledGraph.invoke(inputs, config);
-            return result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+            String lastMessage = result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
+            return buildTurnResult(conversation, lastMessage, trace);
         } finally {
             emittersByThread.remove(conversation.getId());
+            traceByThread.remove(conversation.getId());
+            requestsByThread.remove(conversation.getId());
         }
+    }
+
+    /** 构建 AgentTurnResult：从最后一个 OrchestrationRequest 读取 metadata/reasoning/suggestedActions/hitl，从 trace 读取事件。 */
+    private AgentTurnResult buildTurnResult(AgentConversation conversation, String lastMessage, AgentTraceAccumulator trace) {
+        OrchestrationRequest req = requestsByThread.get(conversation.getId());
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        if (req != null) {
+            metadata.putAll(req.getTurnMetadata());
+            if (req.getReasoning() != null) metadata.put("reasoning", req.getReasoning());
+            if (req.getSuggestedActions() != null && !req.getSuggestedActions().isEmpty()) {
+                metadata.put("suggestedActions", req.getSuggestedActions());
+            }
+        }
+        AgentReasoningSnapshot reasoning = req != null ? req.getReasoning() : null;
+        if (reasoning == null && trace != null) reasoning = trace.getReasoning();
+        List<AgentTraceEvent> events = trace != null ? trace.snapshot() : List.of();
+        List<SuggestedAction> suggestedActions = req != null ? req.getSuggestedActions() : List.of();
+        boolean hitlPaused = req != null && req.isHitlPaused();
+        String messageId = req != null ? req.getHitlMessageId() : "";
+        return new AgentTurnResult(lastMessage == null ? "" : lastMessage, metadata, events,
+                reasoning, suggestedActions, hitlPaused, messageId);
     }
 
     /** cpAction → 当前链意图（切链检测的"当前链"判定；动态特判按常见语义归组） */
@@ -616,7 +714,12 @@ public class PlanGraph {
         if (emitter == null) {
             throw new IllegalStateException("PlanGraph: emitter 未注册 conversationId=" + conversation.getId());
         }
-        return new OrchestrationRequest(conversation, content, picUrls == null || picUrls.isEmpty() ? java.util.List.of() : picUrls, emitter);
+        OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls == null || picUrls.isEmpty() ? java.util.List.of() : picUrls, emitter);
+        AgentTraceAccumulator trace = traceByThread.get(conversation.getId());
+        if (trace != null) request.setTrace(trace);
+        request.setRoutingHint(state.<String>value(K_ROUTING_HINT).orElse(""));
+        requestsByThread.put(conversation.getId(), request);
+        return request;
     }
 
     /** 条件边输出 → 节点映射（run 路由：intent_clarify + 各 handler 节点） */

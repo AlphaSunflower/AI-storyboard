@@ -1,5 +1,7 @@
 package com.moon.moonagent.ai.agent.handler;
 
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.entity.AgentConversation;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -69,4 +71,81 @@ public class OrchestrationRequest {
 
     /** 移交附带的下游状态（如 projectId / sceneNums）；与 {@link #handoffTarget} 一起被下一专家消费 */
     private Map<String, Object> handoffState = Map.of();
+
+    /** 本轮轨迹累积器（不参与状态序列化；由 PlanGraph 在 runTurn/resumeTurn 创建）。 */
+    private AgentTraceAccumulator trace;
+
+    /** 本轮 turn 落库用的结构化元数据（trace/reasoning/suggestedActions/hitl 等）。 */
+    private Map<String, Object> turnMetadata = Map.of();
+
+    /** 本轮是否 HITL 暂停（true=runHITLStage 已落库 assistant 消息，不得重复插入）。 */
+    private boolean hitlPaused = false;
+
+    /** HITL 卡片已落库的 assistant 消息 id（供 markHitlCardSubmitted 更新 metadata）。 */
+    private String hitlMessageId = "";
+
+    /** 本轮推理摘要快照。 */
+    private AgentReasoningSnapshot reasoning;
+
+    /** 本轮推荐的后续动作按钮（如「审查分镜」）。 */
+    private java.util.List<SuggestedAction> suggestedActions = java.util.List.of();
+
+    public AgentTraceAccumulator getTrace() {
+        return trace;
+    }
+
+    public void setTrace(AgentTraceAccumulator trace) {
+        this.trace = trace;
+    }
+
+    public Map<String, Object> getTurnMetadata() {
+        return turnMetadata == null ? Map.of() : turnMetadata;
+    }
+
+    public void setTurnMetadata(Map<String, Object> turnMetadata) {
+        this.turnMetadata = turnMetadata == null ? Map.of() : turnMetadata;
+    }
+
+    public boolean isHitlPaused() {
+        return hitlPaused;
+    }
+
+    public void setHitlPaused(boolean hitlPaused) {
+        this.hitlPaused = hitlPaused;
+    }
+
+    public String getHitlMessageId() {
+        return hitlMessageId == null ? "" : hitlMessageId;
+    }
+
+    public void setHitlMessageId(String hitlMessageId) {
+        this.hitlMessageId = hitlMessageId == null ? "" : hitlMessageId;
+    }
+
+    public AgentReasoningSnapshot getReasoning() {
+        return reasoning;
+    }
+
+    public void setReasoning(AgentReasoningSnapshot reasoning) {
+        this.reasoning = reasoning;
+    }
+
+    public java.util.List<SuggestedAction> getSuggestedActions() {
+        return suggestedActions == null ? java.util.List.of() : suggestedActions;
+    }
+
+
+    /** 显式路由提示（前端「换个话题」等按钮；非空时意图识别绕过高置信度锁定目标链）。 */
+    private String routingHint = "";
+
+    public String getRoutingHint() {
+        return routingHint == null ? "" : routingHint;
+    }
+
+    public void setRoutingHint(String routingHint) {
+        this.routingHint = routingHint == null ? "" : routingHint;
+    }
+    public void setSuggestedActions(java.util.List<SuggestedAction> suggestedActions) {
+        this.suggestedActions = suggestedActions == null ? java.util.List.of() : suggestedActions;
+    }
 }

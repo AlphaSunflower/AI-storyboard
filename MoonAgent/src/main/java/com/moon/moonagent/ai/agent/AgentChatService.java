@@ -100,6 +100,13 @@ public interface AgentChatService {
     void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter);
 
     /**
+     * 流式发送消息（带显式路由提示）：
+     * 
+     * @param routingHint 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-scene-review）
+     */
+    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint);
+
+    /**
      * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
      * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 → 执行视频生成。
      */

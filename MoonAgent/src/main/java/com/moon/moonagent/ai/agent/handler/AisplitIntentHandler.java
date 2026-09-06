@@ -7,6 +7,7 @@ import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
+import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardDesignPlan;
@@ -751,12 +752,18 @@ public class AisplitIntentHandler implements IntentHandler {
         // 用户想查看缺图缺视频时主动说「审查分镜」即由意图识别正常路由到 scene-review。
         String msg2 = count > 0
                 ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表。\n\n"
-                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？可以说「审查分镜」。"
+                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？"
                 : msg;
+        // 推荐动作：审查分镜（不要求用户手动输入「审查分镜」，点按钮即带 routingHint 切链）
+        java.util.List<SuggestedAction> suggestedActions = count > 0
+                ? java.util.List.of(new SuggestedAction("scene-review", "审查分镜", "intent-scene-review"))
+                : java.util.List.of();
+        request.setSuggestedActions(suggestedActions);
         support.resumeStage(request, "正在写入分镜…", Map.of(
                 "content", msg2,
                 "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
-                "sceneCount", totalScenes));
+                "sceneCount", totalScenes,
+                "suggestedActions", suggestedActions));
         return msg2;
     }
 
