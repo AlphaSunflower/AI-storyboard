@@ -21,12 +21,18 @@ export function HumanInputCard({
   onToggleCollapse,
   submittedActionId,
   submittedActionTitle,
+  customText,
+  params,
+  assetIds,
 }: {
   info: HumanInputInfo;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   submittedActionId?: string;
   submittedActionTitle?: string;
+  customText?: string;
+  params?: Record<string, string>;
+  assetIds?: string[];
 }) {
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
@@ -34,7 +40,7 @@ export function HumanInputCard({
   const expired = info.expirationTime > 0 && Date.now() / 1000 > info.expirationTime;
   // 自定义输入展开态：点「自定义输入」按钮展开内联输入框，确认后 submitHumanInput("custom", text)
   const [customOpen, setCustomOpen] = useState(false);
-  const [customText, setCustomText] = useState("");
+  const [customInputText, setCustomInputText] = useState("");
   // 卡片参数选择器的当前选择（模型/尺寸等；无选择器时为 {}）
   const [selectedParams, setSelectedParams] = useState<Record<string, string>>({});
   // aisplit 分镜卡片：图片/视频两个分区选择器的提交值（键带 image*/video* 前缀）
@@ -148,6 +154,14 @@ export function HumanInputCard({
       <div style={{ fontSize: 15, color: "var(--color-ink)", lineHeight: 1.7, marginBottom: 12, whiteSpace: "pre-wrap" }}>
         {info.formContent || "请确认是否继续？"}
       </div>
+      {/* 已提交信息：自定义文本 / 勾选资产 / 参数摘要 */}
+      {submittedActionId && (
+        <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {customText && <span style={{ background: "var(--color-surface-soft)", borderRadius: 6, padding: "2px 8px" }}>输入：{customText}</span>}
+          {assetIds && assetIds.length > 0 && <span style={{ background: "var(--color-surface-soft)", borderRadius: 6, padding: "2px 8px" }}>勾选 {assetIds.length} 项</span>}
+          {params && Object.keys(params).length > 0 && <span style={{ background: "var(--color-surface-soft)", borderRadius: 6, padding: "2px 8px" }}>已选参数</span>}
+        </div>
+      )}
       
       {/* 资产/分镜勾选列表：默认不选，用户自行勾选 */}
       {info.assets && info.assets.length > 0 && (
@@ -227,11 +241,11 @@ export function HumanInputCard({
         <div>
           <input
             autoFocus
-            value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
+            value={customInputText}
+            onChange={(e) => setCustomInputText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && customText.trim() && !streaming) {
-                submitHumanInput("custom", customText.trim(), selectedParams);
+              if (e.key === "Enter" && customInputText.trim() && !streaming) {
+                submitHumanInput("custom", customInputText.trim(), selectedParams);
               }
             }}
             placeholder="输入你的想法…"
@@ -243,20 +257,20 @@ export function HumanInputCard({
           />
           <div style={{ display: "flex", gap: 8 }}>
             <button
-              disabled={streaming || !customText.trim()}
-              onClick={() => submitHumanInput("custom", customText.trim(), selectedParams)}
+              disabled={streaming || !customInputText.trim()}
+              onClick={() => submitHumanInput("custom", customInputText.trim(), selectedParams)}
               style={{
                 padding: "10px 18px", border: "none", borderRadius: "var(--rounded-md)",
                 background: "var(--color-primary)", color: "white", fontSize: 15,
-                cursor: streaming || !customText.trim() ? "not-allowed" : "pointer",
-                opacity: streaming || !customText.trim() ? 0.6 : 1,
+                cursor: streaming || !customInputText.trim() ? "not-allowed" : "pointer",
+                opacity: streaming || !customInputText.trim() ? 0.6 : 1,
               }}
             >
               确认输入
             </button>
             <button
               disabled={streaming}
-              onClick={() => { setCustomOpen(false); setCustomText(""); }}
+              onClick={() => { setCustomOpen(false); setCustomInputText(""); }}
               style={{
                 padding: "10px 18px", border: "1px solid var(--color-hairline)",
                 borderRadius: "var(--rounded-md)", background: "transparent",

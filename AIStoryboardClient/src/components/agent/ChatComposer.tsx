@@ -137,7 +137,7 @@ export function ChatComposer() {
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const busy = streaming || !!waitingHumanInput || !!waitingVideoPlan;
+  const busy = (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan;
 
   const handleSend = () => {
     const content = text.trim();

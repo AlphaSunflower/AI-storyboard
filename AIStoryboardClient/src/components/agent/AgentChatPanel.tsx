@@ -19,7 +19,7 @@ import { Folder, Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -78,7 +78,7 @@ export function AgentChatPanel() {
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || streaming || waitingHumanInput || waitingVideoPlan) return;
+    if (!content || (streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan) return;
     setText('');
     sendMessage(content, { assetIds: pickedAssetIds });
   };
@@ -267,6 +267,7 @@ export function AgentChatPanel() {
             role={m.role}
             content={m.content}
             createdAt={m.createdAt}
+            metadata={m.metadata}
             streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
           />
         ))}
@@ -422,7 +423,7 @@ export function AgentChatPanel() {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
             placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-            disabled={streaming || !!waitingHumanInput || !!waitingVideoPlan}
+            disabled={(streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan}
             rows={2}
             style={{
               flex: 1, padding: '12px 14px', border: '1px solid var(--color-hairline)',
@@ -447,7 +448,7 @@ export function AgentChatPanel() {
               onToggle={handleMicToggle}
               onPcm={handlePcm}
               // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
-              disabled={(streaming || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
+              disabled={((streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
             />
             <SpecularButton
               size="sm"
@@ -459,7 +460,7 @@ export function AgentChatPanel() {
               baseColor="#ffffff"
               intensity={1}
               thickness={1.2}
-              disabled={recording || streaming || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
+              disabled={recording || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
               onClick={handleSend}
             >
               发送
