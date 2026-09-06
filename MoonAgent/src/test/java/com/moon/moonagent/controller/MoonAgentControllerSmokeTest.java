@@ -207,7 +207,7 @@ class MoonAgentControllerSmokeTest {
     void sseEndpoints_requireAuth_andStartStream() throws Exception {
         when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
         doAnswer(inv -> { inv.<SseEmitter>getArgument(5).complete(); return null; })
-            .when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(), any());
+            .when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(), any(SseEmitter.class), anyString());
         doAnswer(inv -> { inv.<SseEmitter>getArgument(9).complete(); return null; })
             .when(chatService).submitFormAndResume(anyString(), anyString(), any(), any(), any(), any(), any(), any(), any(), any());
         doAnswer(inv -> { inv.<SseEmitter>getArgument(3).complete(); return null; })

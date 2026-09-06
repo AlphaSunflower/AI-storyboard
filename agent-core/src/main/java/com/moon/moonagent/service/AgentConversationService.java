@@ -30,6 +30,16 @@ public interface AgentConversationService {
     void persistMessage(String conversationId, String role, String content);
 
     /**
+     * 追加一条消息到会话（带结构化元数据）。
+     *
+     * @param conversationId 会话 id
+     * @param role           user | assistant
+     * @param content        消息正文
+     * @param metadata       结构化元数据（HITL/推理/trace 等；null 时存空对象）
+     */
+    void persistMessage(String conversationId, String role, String content, java.util.Map<String, Object> metadata);
+
+    /**
      * 按时间正序取会话消息历史。
      *
      * @param conversationId 会话 id

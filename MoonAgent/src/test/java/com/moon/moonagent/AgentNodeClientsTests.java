@@ -8,6 +8,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * ChatMemory bean 自动装配 + AgentNodeClients 图节点工厂 advisor 组合正确。
  */
 @SpringBootTest
+@TestPropertySource(properties = "storyboard.internal-secret=test-internal-secret")
 class AgentNodeClientsTests {
 
     @Autowired(required = false)
