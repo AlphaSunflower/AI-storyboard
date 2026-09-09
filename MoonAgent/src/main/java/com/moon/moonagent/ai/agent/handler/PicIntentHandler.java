@@ -47,7 +47,7 @@ public class PicIntentHandler implements IntentHandler {
         try {
             if (sources != null && !sources.isEmpty()) {
                 // 1. 视觉模型看图 + 诉求 → 改图提示词（图改图方案）
-                support.sendEvent(request, "workflow", Map.of("title", "正在理解图片与需求…", "status", "node_started"));
+                support.sendWorkflowEvent(request, "understand_image", "正在理解图片与需求…", "node_started");
                 String refinedPrompt = imageRefinePromptService.buildRefinedPrompt(sources, request.getContent());
                 String planText = "🖼 已结合你的参考图与需求，生成了改图方案：\n" + refinedPrompt
                         + "\n\n点击「生成图片」开始生成，或「继续完善」调整需求。";
@@ -115,7 +115,7 @@ public class PicIntentHandler implements IntentHandler {
     private String handleImagePrompt(OrchestrationRequest request, String content) {
         String ctx = support.historyContext(request.getConversation().getId(), 15);
         String contentWithCtx = content + ctx;
-        support.sendEvent(request, "workflow", Map.of("title", "正在设计图片方案…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "design_image_plan", "正在设计图片方案…", "node_started");
         List<Map<String, Object>> models = support.buildModels("image");
         String modelOptionsText = support.buildModelOptionsText("image");
         AgentOrchestratorSupport.ImagePlanResult plan = support.callImagePromptWithParams(contentWithCtx, modelOptionsText, request);

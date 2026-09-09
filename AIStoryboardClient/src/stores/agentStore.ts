@@ -11,6 +11,23 @@ import { useProjectStore } from './projectStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 
+/** 阶段完成/失败事件若未携带标题，不清空仍在运行的阶段提示。 */
+function resolveWorkflowHint(current: string, event: SseEvent): string {
+  const title = event.title ?? '';
+  if (!title && (event.status === 'node_finished' || event.status === 'node_failed')) return current;
+  return title;
+}
+
+/** 阶段级推理快照之间换行分隔；未来若恢复逐 token delta，仍保持原样拼接。 */
+function appendReasoningDetails(prev: AgentReasoning | undefined, event: SseEvent): string {
+  const previous = prev?.details ?? '';
+  const delta = event.details ?? '';
+  if (!previous || !delta) return previous + delta;
+  return (prev?.source === 'stage' || event.source === 'stage')
+    ? `${previous}\n${delta}`
+    : previous + delta;
+}
+
 export interface HumanInputInfo {
   formToken: string;
   taskId: string;
@@ -627,8 +644,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 实时推理：拼接 details、按需更新 summary/durationMs/source，写入当前气泡 metadata.reasoning
             const prev = get().generating[snapshotId]?.reasoningDraft;
             const reasoning: AgentReasoning = {
-              summary: prev?.summary ?? e.summary ?? '',
-              details: (prev?.details ?? '') + (e.details ?? ''),
+              summary: e.summary ?? prev?.summary ?? '',
+              details: appendReasoningDetails(prev, e),
               durationMs: e.durationMs ?? prev?.durationMs,
               source: e.source ?? prev?.source ?? 'assistant',
             };
@@ -644,10 +661,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
             if (get().activeConversationId !== snapshotId) break;
             // 阶段进度提示：写入属主会话 generating（切走保留、切回恢复）；当前视图同步 workflowHint
-            set((s) => ({
-              workflowHint: e.title ?? '',
-              generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: e.title ?? '' } },
-            }));
+            set((s) => {
+              const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
+              return {
+                workflowHint: hint,
+                generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } },
+              };
+            });
             break;
           case 'human_input':
             // 跨会话守卫：已切换会话则忽略旧流事件
@@ -1002,8 +1022,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           case 'reasoning_delta': {
             const prev = get().generating[snapshotId]?.reasoningDraft;
             const reasoning: AgentReasoning = {
-              summary: prev?.summary ?? e.summary ?? '',
-              details: (prev?.details ?? '') + (e.details ?? ''),
+              summary: e.summary ?? prev?.summary ?? '',
+              details: appendReasoningDetails(prev, e),
               durationMs: e.durationMs ?? prev?.durationMs,
               source: e.source ?? prev?.source ?? 'assistant',
             };
@@ -1019,10 +1039,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
             if (get().activeConversationId !== snapshotId) break;
             // 阶段进度提示：写入属主会话 generating（切走保留、切回恢复）；当前视图同步 workflowHint
-            set((s) => ({
-              workflowHint: e.title ?? '',
-              generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: e.title ?? '' } },
-            }));
+            set((s) => {
+              const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
+              return {
+                workflowHint: hint,
+                generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } },
+              };
+            });
             break;
           case 'human_input':
             // 跨会话守卫：已切换会话则忽略旧流事件
@@ -1367,8 +1390,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'reasoning_delta': {
               const prev = get().generating[snapshotId]?.reasoningDraft;
               const reasoning: AgentReasoning = {
-                summary: prev?.summary ?? e.summary ?? '',
-                details: (prev?.details ?? '') + (e.details ?? ''),
+                summary: e.summary ?? prev?.summary ?? '',
+                details: appendReasoningDetails(prev, e),
                 durationMs: e.durationMs ?? prev?.durationMs,
                 source: e.source ?? prev?.source ?? 'assistant',
               };
@@ -1383,7 +1406,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'workflow':
               // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
               if (get().activeConversationId !== snapshotId) break;
-              set((s) => ({ workflowHint: e.title ?? '', generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: e.title ?? '' } } })); break;
+              set((s) => {
+                const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
+                return { workflowHint: hint, generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } } };
+              }); break;
             case 'human_input':
               if (get().activeConversationId !== snapshotId) break;
               receivedHumanInput = true;

@@ -134,6 +134,7 @@ public class PlanGraph {
             Map.entry("scene-regenerate", "intent-aisplit"),
             Map.entry("scene-select", "intent-aisplit"),
             Map.entry("script-source", "intent-aisplit"),
+            Map.entry("expand-review", "intent-aisplit"),
             Map.entry("video-clarify", "intent-video"),
             Map.entry("video-source", "intent-video"),
             Map.entry("video-role-select", "intent-video"),
@@ -205,17 +206,15 @@ public class PlanGraph {
                                 K_LOW_CONFIDENCE, false,
                                 K_SWITCH, false);
                     }
-                    // 发送"正在理解你的需求…"workflow 事件，避免意图识别期间前端只显示"正在生成"
-                    SseEmitter emitter = emittersByThread.get(conversation.getId());
-                    if (emitter != null) {
-                        try { emitter.send(SseEmitter.event().name("workflow").data(AgentOrchestratorSupport.sseJson(Map.of("title", "正在理解你的需求…", "status", "node_started")))); } catch (Exception ignored) {}
-                    }
+                    OrchestrationRequest request = stateRequest(state);
                     List<AgentMessage> recent = messageMapper.selectList(
                             new LambdaQueryWrapper<AgentMessage>()
                                     .eq(AgentMessage::getConversationId, conversation.getId())
                                     .orderByDesc(AgentMessage::getCreatedAt)
                                     .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
-                    IntentResult intentResult = intentRecognitionService.recognize(content, recent);
+                    IntentResult intentResult = support.runWorkflowStage(
+                            request, "intent_recognize", "正在理解你的需求…",
+                            () -> intentRecognitionService.recognize(content, recent));
                     log.info("PlanGraph: conversationId={} intent={} confidence={} source={}",
                             conversation.getId(), intentResult.type(), intentResult.confidence(), intentResult.source());
                     if (trace != null) trace.add("intent_recognize", "moon", "意图识别", "识别为 " + intentResult.type() + "，置信度 " + intentResult.confidence(), "", intentResult.type(), "node_completed");
@@ -296,11 +295,15 @@ public class PlanGraph {
                     AgentConversation conv = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
                     String customText = state.<String>value(K_CUSTOM_TEXT).orElse("");
                     routeTaskCancellationService.cancelPendingTasks(conv.getId());
-                    return Map.of(
-                            K_CONTENT, customText.isBlank() ? state.<String>value(K_CONTENT).orElse("") : customText,
-                            K_RESUME, false,
-                            K_CP_ACTION, "",
-                            K_SUBMIT_ACTION, "");
+                    // ★ 不返回 K_PIC_URLS / K_ASSET_IDS / K_PARAMS / K_ROUTING_HINT——
+                    // graph-core ReplaceStrategy 下省略的键保留原值，切链时上下文/参考图/资产/参数不丢失
+                    Map<String, Object> out = new java.util.LinkedHashMap<>();
+                    out.put(K_CONTENT, customText.isBlank() ? state.<String>value(K_CONTENT).orElse("") : customText);
+                    out.put(K_RESUME, false);
+                    out.put(K_CP_ACTION, "");
+                    out.put(K_SUBMIT_ACTION, "");
+                    out.put(K_CUSTOM_TEXT, "");
+                    return out;
                 }))
                 // ---- intent-clarify 点选目标意图 / 显式 routingHint 切链：清 resume 标记 + 锁定意图 → 走 run 路由（重新 handle，非 resume） ----
                 .addNode("rerun_selected", node_async(state -> {
@@ -310,11 +313,16 @@ public class PlanGraph {
                             ? state.<String>value(K_SUBMIT_ACTION).orElse(IntentRecognitionService.FALLBACK_TYPE)
                             : hint;
                     routeTaskCancellationService.cancelPendingTasks(conv.getId());
-                    return Map.of(
-                            K_INTENT, selected,
-                            K_CONFIDENCE, 1.0,
-                            K_LOW_CONFIDENCE, false,
-                            K_RESUME, false);
+                    // ★ 不返回 K_PIC_URLS / K_ASSET_IDS / K_PARAMS——
+                    // graph-core ReplaceStrategy 下省略的键保留原值，切链时上下文/参考图/资产/参数不丢失
+                    Map<String, Object> out = new java.util.LinkedHashMap<>();
+                    out.put(K_INTENT, selected);
+                    out.put(K_CONFIDENCE, 1.0);
+                    out.put(K_LOW_CONFIDENCE, false);
+                    out.put(K_RESUME, false);
+                    out.put(K_SUBMIT_ACTION, "");
+                    out.put(K_CUSTOM_TEXT, "");
+                    return out;
                 }))
                 // ---- resume 路由节点：读 checkpoint.action / 提交 action / customText → 条件边分发 ----
                 .addNode("resume_route", node_async(state -> Map.of()))

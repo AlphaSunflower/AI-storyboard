@@ -3,6 +3,7 @@ package com.moon.moonagent.controller;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
+import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.config.SecurityConfig;
 import com.moon.moonagent.entity.AgentAsset;
@@ -13,6 +14,7 @@ import com.moon.moonagent.service.StoryboardVideoQueueService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -21,8 +23,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -41,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     StoryboardVideoQueueController.class
 })
 @Import(SecurityConfig.class)
+@EnableConfigurationProperties(AgentAiConfigProperties.class)
 class MoonAgentControllerSmokeTest {
 
     @Autowired
@@ -205,12 +210,29 @@ class MoonAgentControllerSmokeTest {
 
     @Test
     void sseEndpoints_requireAuth_andStartStream() throws Exception {
+        List<Long> emitterTimeouts = new ArrayList<>();
         when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
-        doAnswer(inv -> { inv.<SseEmitter>getArgument(5).complete(); return null; })
-            .when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(), any(SseEmitter.class), anyString());
-        doAnswer(inv -> { inv.<SseEmitter>getArgument(9).complete(); return null; })
+        doAnswer(inv -> {
+            SseEmitter emitter = inv.getArgument(5);
+            emitterTimeouts.add(emitter.getTimeout());
+            emitter.complete();
+            return null;
+        })
+            .when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(),
+                any(SseEmitter.class), any(), anyBoolean());
+        doAnswer(inv -> {
+            SseEmitter emitter = inv.getArgument(9);
+            emitterTimeouts.add(emitter.getTimeout());
+            emitter.complete();
+            return null;
+        })
             .when(chatService).submitFormAndResume(anyString(), anyString(), any(), any(), any(), any(), any(), any(), any(), any());
-        doAnswer(inv -> { inv.<SseEmitter>getArgument(3).complete(); return null; })
+        doAnswer(inv -> {
+            SseEmitter emitter = inv.getArgument(3);
+            emitterTimeouts.add(emitter.getTimeout());
+            emitter.complete();
+            return null;
+        })
             .when(chatService).generateVideoFromPlan(anyString(), anyString(), any(), any(SseEmitter.class));
 
         mockMvc.perform(post("/api/agent/conversations/c1/messages/stream").header("X-User-Id", "u1")
@@ -222,5 +244,7 @@ class MoonAgentControllerSmokeTest {
         mockMvc.perform(post("/api/agent/conversations/c1/video/plan/generate").header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"planToken\":\"pt\"}"))
             .andExpect(status().isOk());
+        org.assertj.core.api.Assertions.assertThat(emitterTimeouts)
+            .containsExactly(1_200_000L, 1_200_000L, 1_200_000L);
     }
 }

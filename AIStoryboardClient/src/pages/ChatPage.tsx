@@ -7,6 +7,7 @@ import { MessageBubble } from '../components/agent/MessageBubble';
 
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
+import { HitlPromptCard } from '../components/agent/HitlPromptCard';
 import { TaskQueuePanel } from '../components/agent/TaskQueuePanel';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
@@ -27,6 +28,10 @@ import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
+
+/** 待选人工介入卡占位消息（metadata.kind='hitl' 且 pending）：过滤掉，避免与流内卡片重复渲染 formContent。 */
+const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boolean } } }) =>
+  m.metadata?.kind === 'hitl' && !!m.metadata.hitl?.pending;
 
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
@@ -321,7 +326,7 @@ export function ChatPage() {
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
               <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
-                {messages.map((m) => (
+                {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       role={m.role}
@@ -348,6 +353,7 @@ export function ChatPage() {
                   </div>
                 )}
                 
+                {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
@@ -722,7 +728,7 @@ export function ChatPage() {
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
               <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
-                {messages.map((m) => (
+                {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       role={m.role}
@@ -752,6 +758,7 @@ export function ChatPage() {
                   </div>
                 )}
                 
+                {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (

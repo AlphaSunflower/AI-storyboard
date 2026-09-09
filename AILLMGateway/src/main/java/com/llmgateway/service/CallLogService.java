@@ -12,6 +12,12 @@ public interface CallLogService {
     /** 记录一次调用日志：异步落库，落库失败仅告警不抛出，不阻塞调用方 */
     void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId);
 
+    /** 记录一次带逻辑调用 ID 的日志；旧调用点未传 ID 时兼容为 null。 */
+    default void log(String model, String channelId, String status, long durationMs,
+                     String error, String videoUrl, String taskId, String callId) {
+        log(model, channelId, status, durationMs, error, videoUrl, taskId);
+    }
+
     // ===== 管理后台查询（admin 模块使用）=====
 
     /** 分页查询调用日志（按 createdAt 倒序；size 钳制 1~50；model 非空时精确过滤） */

@@ -114,7 +114,9 @@ public class AiConfigProperties {
 
     // ── 脚本生成超时 ──
     /** 脚本生成 ChatClient 超时（秒） */
-    @Setter @Getter private int scriptTimeout = 120;
+    @Setter @Getter private int scriptTimeout = 300;
+    /** 单次脚本模型调用最大输出 token（<=0 时不显式设置） */
+    @Setter @Getter private int scriptMaxTokens = 8192;
 
     // ── 网关模型服务超时 ──
     /** 网关模型列表请求超时（秒，connect + request 共用） */

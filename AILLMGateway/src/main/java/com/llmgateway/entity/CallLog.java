@@ -17,6 +17,8 @@ public class CallLog {
     private String status;
     private Long durationMs;
     private String error;
+    /** 跨重试复用的逻辑调用 ID，用于串联网关日志 */
+    private String callId;
     /** 视频 succeeded 时暂存 content.url（限时） */
     private String videoUrl;
     /** 视频任务 ID：下载端点按 taskId+channelId 精确定位限时直链（同渠道并发任务不串号） */

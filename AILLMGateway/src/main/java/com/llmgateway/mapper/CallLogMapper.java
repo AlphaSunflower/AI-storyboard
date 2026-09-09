@@ -42,7 +42,7 @@ public interface CallLogMapper extends BaseMapper<CallLog> {
             + "  ORDER BY created_at LIMIT #{batchSize})"
             + " RETURNING *) "
             + "INSERT INTO call_log_archive "
-            + "(id, model, channel_id, status, duration_ms, error, video_url, task_id, created_at) "
-            + "SELECT id, model, channel_id, status, duration_ms, error, video_url, task_id, created_at FROM moved")
+            + "(id, model, channel_id, status, duration_ms, error, call_id, video_url, task_id, created_at) "
+            + "SELECT id, model, channel_id, status, duration_ms, error, call_id, video_url, task_id, created_at FROM moved")
     int archiveOlderThan(@Param("days") int days, @Param("batchSize") int batchSize);
 }

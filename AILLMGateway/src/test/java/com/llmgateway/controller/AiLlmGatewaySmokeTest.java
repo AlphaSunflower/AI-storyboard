@@ -44,6 +44,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -126,6 +128,7 @@ class AiLlmGatewaySmokeTest {
     void v1Endpoints_returnContract() throws Exception {
         allowApiKey();
         when(routingService.route(anyString(), anyString())).thenReturn(new RouteResult(200, "{}"));
+        when(routingService.route(anyString(), anyString(), any())).thenReturn(new RouteResult(200, "{}"));
         when(routingService.fetchModels(any())).thenReturn("{\"data\":[]}");
         when(videoGatewayService.create(anyString())).thenReturn(new VideoResult(200, "{}"));
         when(videoGatewayService.poll(anyString())).thenReturn(new VideoResult(200, "{}"));
@@ -136,8 +139,10 @@ class AiLlmGatewaySmokeTest {
         when(fileUploadService.upload(anyString(), any())).thenReturn("file-1");
 
         mockMvc.perform(post("/v1/chat/completions").header("Authorization", "Bearer valid")
+                .header("X-Call-Id", "call-1")
                 .contentType("application/json").content("{\"model\":\"m\",\"messages\":[]}"))
             .andExpect(status().isOk());
+        verify(routingService).route(eq("/chat/completions"), anyString(), eq("call-1"));
         mockMvc.perform(post("/v1/images/generations").header("Authorization", "Bearer valid")
                 .contentType("application/json").content("{\"prompt\":\"p\"}"))
             .andExpect(status().isOk());

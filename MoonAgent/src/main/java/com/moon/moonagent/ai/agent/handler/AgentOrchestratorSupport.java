@@ -80,8 +80,12 @@ public class AgentOrchestratorSupport {
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-    /** 剧本优化 / 分镜方案 LLM（懒加载，复用网关默认对话模型，超时 120s） */
+    /** 主计划 LLM（懒加载，复用网关默认对话模型，超时由 ai.agent.plan-timeout-seconds 控制） */
     private volatile ChatClient planClient;
+    /** 参数推荐 LLM（可降级步骤，超时由 ai.agent.recommend-timeout-seconds 控制） */
+    private volatile ChatClient recommendClient;
+    /** 轻量意图判定 LLM（超时由 ai.agent.intent-timeout-seconds 控制） */
+    private volatile ChatClient intentClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -341,7 +345,7 @@ public class AgentOrchestratorSupport {
     /** 安静调用（非流式、不转发 message 字段）：供修复重试用 */
     private String callQuiet(String systemPrompt, String userContent, OrchestrationRequest req) {
         try {
-            return planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            return planClient().prompt().options(planOptions())
                     .system(systemPrompt)
                     .user(userContent)
                     .call()
@@ -414,7 +418,7 @@ public class AgentOrchestratorSupport {
         try {
             checkInterrupted(req);
             ChatResponse response = planClient().prompt()
-                    .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                    .options(planOptions())
                     .system(systemPrompt)
                     .user(userContent)
                     .call()
@@ -424,20 +428,7 @@ public class AgentOrchestratorSupport {
                     ? response.getResult().getOutput() : null;
             if (output != null && output.getText() != null) raw = output.getText();
 
-            String reason = extractReasoning(output == null ? null : output.getMetadata());
-            String fallback = "模型未返回可见推理过程，已完成方案分析。";
-            String reasonText = reason == null || reason.isBlank() ? fallback : reason;
-            AgentReasoningSnapshot snapshot = new AgentReasoningSnapshot(
-                    summarizeReasoning(reasonText), reasonText,
-                    Duration.between(started, OffsetDateTime.now()).toMillis(),
-                    reason == null || reason.isBlank() ? "trace-summary" : gatewayModelService.getDefaultTextModel());
-            req.setReasoning(snapshot);
-            if (req.getTrace() != null) req.getTrace().reasoning(snapshot);
-            sendEvent(req, "reasoning_delta", Map.of(
-                    "details", reasonText,
-                    "summary", snapshot.summary(),
-                    "durationMs", snapshot.durationMs(),
-                    "source", snapshot.source()));
+            publishReasoning(req, output, started, "模型未返回可见推理过程，已完成方案分析。");
 
             String msg = extractMessageField(raw);
             if (msg != null && !msg.isBlank()) {
@@ -498,7 +489,7 @@ public class AgentOrchestratorSupport {
     /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次；强制中文输出——方案卡片直接展示给用户） */
     public String callImagePrompt(String content, OrchestrationRequest req) {
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
                 .system(prompt(req, "image-prompt", "orchestrator/image-prompt", null))
                 .user(content)
                 .call()
@@ -511,6 +502,61 @@ public class AgentOrchestratorSupport {
     }
 
     /**
+     * 非流式 LLM 文本生成（不转发 message 事件，无 SSE 副作用）。
+     * 供扩写方案等需要「取整段文本、再单独展示」的场景使用；失败返回空串。
+     */
+    public String callPlainText(String systemPrompt, String userContent, OrchestrationRequest req) {
+        return callPlainText(systemPrompt, userContent, req, "已完成当前文本生成，正在整理结果。");
+    }
+
+    /** 非流式文本生成；保留模型 reasoning_content，并立即通过 reasoning_delta 下发给前端。 */
+    public String callPlainText(String systemPrompt, String userContent, OrchestrationRequest req,
+                                String fallbackReason) {
+        OffsetDateTime started = OffsetDateTime.now();
+        try {
+            ChatResponse response = retryTransient(() -> planClient().prompt()
+                    .options(planOptions())
+                    .system(systemPrompt)
+                    .user(userContent)
+                    .call()
+                    .chatResponse());
+            AssistantMessage output = response != null && response.getResult() != null
+                    ? response.getResult().getOutput() : null;
+            String raw = output == null ? "" : (output.getText() == null ? "" : output.getText());
+            publishReasoning(req, output, started, fallbackReason);
+            return raw == null ? "" : raw.trim();
+        } catch (Exception e) {
+            log.warn("LLM 文本生成失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** 把推理快照写入当前 request/trace，并实时下发 reasoning_delta。 */
+    public void publishReasoning(OrchestrationRequest req, AgentReasoningSnapshot snapshot) {
+        if (req == null || snapshot == null) return;
+        req.setReasoning(snapshot);
+        if (req.getTrace() != null) req.getTrace().reasoning(snapshot);
+        sendEvent(req, "reasoning_delta", Map.of(
+                "details", snapshot.details() == null ? "" : snapshot.details(),
+                "summary", snapshot.summary() == null ? "" : snapshot.summary(),
+                "durationMs", snapshot.durationMs(),
+                "source", snapshot.source() == null ? "" : snapshot.source()));
+    }
+
+    /** 从 AssistantMessage 提取 reasoning_content；模型未返回时使用调用方提供的阶段摘要。 */
+    public void publishReasoning(OrchestrationRequest req, AssistantMessage output,
+                                 OffsetDateTime started, String fallbackReason) {
+        String reason = extractReasoning(output == null ? null : output.getMetadata());
+        String reasonText = reason == null || reason.isBlank() ? fallbackReason : reason;
+        long durationMs = started == null ? 0L : Duration.between(started, OffsetDateTime.now()).toMillis();
+        publishReasoning(req, new AgentReasoningSnapshot(
+                summarizeReasoning(reasonText),
+                reasonText,
+                durationMs,
+                reason == null || reason.isBlank() ? "trace-summary" : gatewayModelService.getDefaultTextModel()));
+    }
+
+    /**
      * 带参数推荐的图片方案生成：LLM 同时输出提示词 + 推荐生成参数（模型/尺寸/质量）。
      * 复用 callVideoPlan 的结构化输出模式，返回 ImagePlanResult。
      */
@@ -519,7 +565,7 @@ public class AgentOrchestratorSupport {
         String systemPrompt = prompt(req, "image-prompt-with-params", "orchestrator/image-prompt-with-params",
                 Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
                     .system(systemPrompt)
                     .user(content)
                     .call()
@@ -549,7 +595,7 @@ public class AgentOrchestratorSupport {
      */
     public ImageClarifyResult callImageClarify(String content, OrchestrationRequest req) {
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
                 .system(prompt(req, "image-clarify", "orchestrator/image-clarify", null))
                 .user(content)
                 .call()
@@ -595,7 +641,7 @@ public class AgentOrchestratorSupport {
         try {
             String sourceNote = hasSource
                     ? prompt(req, "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note", null) : "";
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
                 .system(prompt(req, "pic-refine-options", "orchestrator/pic-refine-options",
                     Map.of("hasSourceNote", sourceNote)))
                 .user("当前图片方案：" + basePrompt)
@@ -631,7 +677,7 @@ public class AgentOrchestratorSupport {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
             String system = prompt(req, "video-plan", "orchestrator/video-plan",
                     Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
                 .system(system)
                 .user(content)
                 .call()
@@ -666,16 +712,14 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /** 瞬态判定：HTTP 429/5xx（Spring 状态码异常）或网络超时/连接失败 */
+    /** 瞬态判定：HTTP 429/5xx（Spring 状态码异常）或连接失败；超时不重试。 */
     private static boolean isTransient(Throwable e) {
         for (Throwable c = e; c != null; c = c.getCause()) {
             if (c instanceof org.springframework.web.client.HttpStatusCodeException sce) {
                 int s = sce.getStatusCode().value();
                 if (s == 429 || s >= 500) return true;
             }
-            if (c instanceof java.net.ConnectException
-                    || c instanceof java.net.http.HttpTimeoutException
-                    || c instanceof java.net.SocketTimeoutException) {
+            if (c instanceof java.net.ConnectException) {
                 return true;
             }
         }
@@ -687,14 +731,65 @@ public class AgentOrchestratorSupport {
         if (planClient == null) {
             synchronized (this) {
                 if (planClient == null) {
-                    planClient = chatClientBuilder
-                        .defaultOptions(OpenAiChatOptions.builder()
-                            .timeout(Duration.ofSeconds(300)))
-                        .build();
+                    planClient = buildClient(agentConfig.getPlanTimeoutSeconds());
                 }
             }
         }
         return planClient;
+    }
+
+    /** 懒加载推荐客户端：超时后直接使用模型默认参数，不重试。 */
+    private ChatClient recommendClient() {
+        if (recommendClient == null) {
+            synchronized (this) {
+                if (recommendClient == null) {
+                    recommendClient = buildClient(agentConfig.getRecommendTimeoutSeconds());
+                }
+            }
+        }
+        return recommendClient;
+    }
+
+    /** 懒加载轻量意图客户端：超时按不取消处理。 */
+    private ChatClient intentClient() {
+        if (intentClient == null) {
+            synchronized (this) {
+                if (intentClient == null) {
+                    intentClient = buildClient(agentConfig.getIntentTimeoutSeconds());
+                }
+            }
+        }
+        return intentClient;
+    }
+
+    private ChatClient buildClient(int timeoutSeconds) {
+        return chatClientBuilder
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(gatewayModelService.getDefaultTextModel())
+                        .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds))))
+                .build();
+    }
+
+    private OpenAiChatOptions.Builder planOptions() {
+        return requestOptions(agentConfig.getPlanTimeoutSeconds());
+    }
+
+    private OpenAiChatOptions.Builder recommendOptions() {
+        return requestOptions(agentConfig.getRecommendTimeoutSeconds());
+    }
+
+    private OpenAiChatOptions.Builder intentOptions() {
+        return requestOptions(agentConfig.getIntentTimeoutSeconds());
+    }
+
+    static OpenAiChatOptions.Builder requestOptions(String model, int timeoutSeconds) {
+        return OpenAiChatOptions.builder()
+                .model(model)
+                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)));
+    }
+
+    private OpenAiChatOptions.Builder requestOptions(int timeoutSeconds) {
+        return requestOptions(gatewayModelService.getDefaultTextModel(), timeoutSeconds);
     }
 
     // ===== 模型能力选项（网关 fetchModels 透传，卡片/LLM 选参共用） =====
@@ -709,67 +804,12 @@ public class AgentOrchestratorSupport {
         return modelOptionsAssembler.buildModelOptionsText(type);
     }
 
-    // ===== LLM 声明式 HITL 卡（步骤 4：按钮由 LLM 挑选/拟文案，id 须落在 manifest 内，回退静态） =====
+    // ===== HITL 卡按钮 =====
 
-    /** LLM 输出的确认卡按钮（id 已在 manifest 内校验） */
-    public record CardResult(List<CardAction> actions) {
-        public record CardAction(String id, String title) {}
-    }
-
-    /**
-     * 专职 HITL 卡构造 LLM：为 manifest 中每个按钮拟定简短中文文案（自由表达），但<b>按钮 id 集合保持完整</b>——
-     * 绝不遗漏（e2e 实测：LLM 若被允许丢弃按钮，会把 aisplit 确认卡降级成只剩「取消」，用户无法确认/导入）。
-     *
-     * <p>实现：LLM 输出 {actions:[{id,title}]} 仅作为 title 覆盖来源；最终按 manifest 全量 id 生成，
-     * title 优先取 LLM 拟的（缺失回退 manifest 原标题）。LLM 失败 → 回退静态 manifest（当前行为，绝不空卡）。
-     *
-     * @param planText        方案正文（仅作 LLM 上下文；卡正文仍用原值，不替换）
-     * @param manifestActions 状态感知的可选按钮清单（[{id,title}]）
-     * @return 全量 manifest 按钮（title 经 LLM 拟词；失败回退 manifestActions）
-     */
+    /** 直接使用状态感知的 manifest，避免为按钮文案额外调用一次 LLM。 */
     public List<Map<String, Object>> buildHITLCard(OrchestrationRequest req, String planText,
                                                    List<Map<String, Object>> manifestActions) {
-        if (manifestActions == null || manifestActions.isEmpty()) return manifestActions;
-        String manifestText = manifestActions.stream()
-                .map(a -> a.get("id") + "=" + a.get("title"))
-                .collect(java.util.stream.Collectors.joining("；"));
-        String context = planText == null ? "" : (planText.length() > 600 ? planText.substring(0, 600) : planText);
-        try {
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                    .system(promptConfig.get("orchestrator/hitl-card", Map.of("buttons", manifestText)))
-                    .user("方案（仅供理解上下文，不用改它）：\n" + context)
-                    .call()
-                    .content());
-            CardResult r = new BeanOutputConverter<>(CardResult.class).convert(raw);
-            java.util.Map<String, String> llmTitle = new java.util.HashMap<>();
-            if (r != null && r.actions() != null) {
-                for (CardResult.CardAction a : r.actions()) {
-                    if (a.id() != null && a.title() != null && !a.title().isBlank()) {
-                        llmTitle.putIfAbsent(a.id(), a.title());
-                    }
-                }
-            }
-            // 保持全量 manifest id 集合，title 优先用 LLM 拟词（缺失回退 manifest 原标题）+ 按 manifest 顺序
-            return mergeCardActions(manifestActions, llmTitle);
-        } catch (Exception e) {
-            log.warn("HITL 卡 LLM 构造失败，回退静态按钮清单: {}", e.getMessage());
-            return manifestActions;
-        }
-    }
-
-    /**
-     * 合并 LLM 拟词与 manifest：<b>保持全量 manifest id 集合</b>（绝不丢按钮），title 优先 LLM 拟词、
-     * 缺失回退 manifest 原标题、再回退 id；按 manifest 顺序输出。包可见供离线验证 harness 直接调用。
-     */
-    static java.util.List<Map<String, Object>> mergeCardActions(
-            java.util.List<Map<String, Object>> manifestActions, java.util.Map<String, String> llmTitle) {
-        java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
-        for (Map<String, Object> m : manifestActions) {
-            String id = String.valueOf(m.get("id"));
-            String title = llmTitle.getOrDefault(id, String.valueOf(m.getOrDefault("title", id)));
-            out.add(Map.of("id", id, "title", title.isBlank() ? id : title));
-        }
-        return out;
+        return manifestActions;
     }
 
     // ===== HITL checkpoint =====
@@ -786,7 +826,7 @@ public class AgentOrchestratorSupport {
         try {
             String imageOpts = buildModelOptionsText("image");
             String videoOpts = buildModelOptionsText("video");
-            String raw = retryTransient(() -> planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> recommendClient().prompt().options(recommendOptions())
                 .system(prompt(req, "scene-params-recommend", "orchestrator/scene-params-recommend", null))
                 .user("剧本：\n" + script
                     + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
@@ -896,7 +936,7 @@ public class AgentOrchestratorSupport {
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan, boolean skipMessage) {
         checkInterrupted(req); // 打断：不再弹出确认卡片/落库 checkpoint
         if (workflowTitle != null) {
-            sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
+            sendWorkflowEvent(req, "hitl_plan", workflowTitle, "node_started");
         }
         if (!skipMessage) {
             sendEvent(req, "message", Map.of("content", plan.planText()));
@@ -1188,7 +1228,9 @@ public class AgentOrchestratorSupport {
 
     /** 勾选资产 → 设定集文字（委托 StoryboardClient.buildSheetText；空列表返回空串） */
     public String assetSheetText(List<AssetVO> assets) {
-        return StoryboardClient.buildSheetText(assets);
+        String sheet = StoryboardClient.buildSheetText(assets);
+        int maxChars = agentConfig.getHistoryContextMaxChars();
+        return maxChars > 0 ? truncateText(sheet, maxChars) : sheet;
     }
 
     /** 勾选资产（逗号分隔 ID）的全部图片 URL（去重；人物多角度参考——2026-08-17 用户反馈
@@ -1294,6 +1336,9 @@ public class AgentOrchestratorSupport {
      * 会话历史上下文文本（最近 max 条消息，按时间正序），供各编排 LLM 调用拼接——
      * 用户本条消息可能只有「重新生成/继续」等简短指令，真实需求在历史消息里，
      * 不读上下文会误判（如门禁判定资产不相关、方案生成跑偏）。读取失败/无消息返回空串。
+     *
+     * <p>单条消息与总量均受 {@code ai.agent.history-message-max-chars} /
+     * {@code ai.agent.history-context-max-chars} 软限制；按最新消息优先保留，超预算的旧消息不再拼接。
      */
     public String historyContext(String conversationId, int max) {
         if (conversationId == null || conversationId.isBlank() || max <= 0) return "";
@@ -1303,19 +1348,45 @@ public class AgentOrchestratorSupport {
                             .eq(com.moon.moonagent.entity.AgentMessage::getConversationId, conversationId)
                             .orderByDesc(com.moon.moonagent.entity.AgentMessage::getCreatedAt)
                             .last("LIMIT " + max));
-            if (msgs == null || msgs.isEmpty()) return "";
-            StringBuilder sb = new StringBuilder("\n\n【最近对话上下文（用于理解完整需求，按时间顺序）】\n");
-            for (int i = msgs.size() - 1; i >= 0; i--) {
-                com.moon.moonagent.entity.AgentMessage m = msgs.get(i);
-                String c = m.getContent() == null ? "" : m.getContent().trim();
-                if (c.isBlank()) continue;
-                sb.append("user".equals(m.getRole()) ? "用户" : "助手").append("：").append(c).append("\n");
-            }
-            return sb.toString();
+            return renderHistoryContext(msgs,
+                    agentConfig.getHistoryMessageMaxChars(),
+                    agentConfig.getHistoryContextMaxChars());
         } catch (Exception e) {
             log.warn("会话历史上下文读取失败: {}", e.getMessage());
             return "";
         }
+    }
+
+    /** 历史上下文渲染：msgs 按时间倒序（最新在前），输出按时间正序；包可见供预算裁剪测试。 */
+    static String renderHistoryContext(List<com.moon.moonagent.entity.AgentMessage> msgs,
+                                       int messageMaxChars, int contextMaxChars) {
+        if (msgs == null || msgs.isEmpty()) return "";
+        String header = "\n\n【最近对话上下文（用于理解完整需求，按时间顺序）】\n";
+        int remaining = contextMaxChars <= 0 ? Integer.MAX_VALUE : contextMaxChars - header.length();
+        if (remaining <= 0) return "";
+        List<String> lines = new java.util.ArrayList<>();
+        for (com.moon.moonagent.entity.AgentMessage m : msgs) {
+            String content = m.getContent() == null ? "" : m.getContent().trim();
+            if (content.isBlank()) continue;
+            if (messageMaxChars > 0) content = truncateText(content, messageMaxChars);
+            String prefix = "user".equals(m.getRole()) ? "用户：" : "助手：";
+            int room = remaining - prefix.length() - 1;
+            if (room <= 0) break;
+            if (content.length() > room) content = truncateText(content, room);
+            String line = prefix + content + "\n";
+            lines.add(line);
+            remaining -= line.length();
+        }
+        if (lines.isEmpty()) return "";
+        java.util.Collections.reverse(lines);
+        return header + String.join("", lines);
+    }
+
+    /** 字符软裁剪：maxChars<=0 不限制；超长时保留前部并用省略号占满最后一个字符位。 */
+    static String truncateText(String text, int maxChars) {
+        if (text == null || text.isEmpty() || maxChars <= 0 || text.length() <= maxChars) return text;
+        if (maxChars == 1) return "…";
+        return text.substring(0, maxChars - 1) + "…";
     }
 
     /**
@@ -1403,7 +1474,7 @@ public class AgentOrchestratorSupport {
     public void resumeStage(OrchestrationRequest req, String workflowTitle, Map<String, Object> result) {
         checkInterrupted(req); // 打断：不再发送生成结果/confirm_result，跳过被截断内容的落库
         if (workflowTitle != null) {
-            sendEvent(req, "workflow", Map.of("title", workflowTitle, "status", "node_started"));
+            sendWorkflowEvent(req, "resume_action", workflowTitle, "node_started");
         }
         String content = String.valueOf(result.getOrDefault("content", ""));
         sendMessage(req, content);
@@ -1710,6 +1781,17 @@ public class AgentOrchestratorSupport {
             if (!items.isArray()) return List.of();
             List<AgentSceneItem> result = new java.util.ArrayList<>();
             for (var it : items) {
+                Integer duration = null;
+                var durationNode = it.path("duration");
+                if (durationNode.isInt() || durationNode.isLong()) {
+                    duration = durationNode.asInt();
+                } else if (durationNode.isTextual()) {
+                    try {
+                        duration = Integer.parseInt(durationNode.asText("").replaceAll("[^0-9-]", ""));
+                    } catch (NumberFormatException ignored) {
+                        duration = null;
+                    }
+                }
                 result.add(new AgentSceneItem(
                     it.path("sceneNumber").asInt(0),
                     it.path("scriptContent").asText(""),
@@ -1718,7 +1800,8 @@ public class AgentOrchestratorSupport {
                     it.path("negativePrompt").asText(""),
                     it.path("cameraMovement").asText(""),
                     it.path("shotType").asText(""),
-                    it.path("soundDesign").asText("")));
+                    it.path("soundDesign").asText(""),
+                    duration));
             }
             return result;
         } catch (Exception e) {
@@ -1771,7 +1854,7 @@ public class AgentOrchestratorSupport {
     public String friendlyErrorText(String rawError, String fallback) {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
-            String content = planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String content = planClient().prompt().options(planOptions())
                     .system(promptConfig.get("orchestrator/friendly-error"))
                     .user(raw)
                     .call()
@@ -1801,7 +1884,7 @@ public class AgentOrchestratorSupport {
     public ImageRecoveryResult attemptImageRecovery(String originalPrompt, String rawError) {
         try {
             String raw = rawError == null || rawError.isBlank() ? "(无错误详情)" : rawError;
-            String content = planClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String content = planClient().prompt().options(planOptions())
                     .system(promptConfig.get("orchestrator/image-recovery"))
                     .user("原提示词：\n" + originalPrompt + "\n\n上游错误：\n" + raw)
                     .call()
@@ -1823,6 +1906,44 @@ public class AgentOrchestratorSupport {
     public static String sseJson(Object data) {
         try { return SSE_JSON.writeValueAsString(data); }
         catch (Exception e) { return String.valueOf(data); }
+    }
+
+    /** 发送带稳定阶段标识的 workflow 事件；durationMs 仅在节点结束时写入。 */
+    public void sendWorkflowEvent(OrchestrationRequest req, String stage, String title, String status) {
+        sendWorkflowEvent(req, stage, title, status, null);
+    }
+
+    /** 发送阶段事件。startedAtNanos 由 {@link #workflowStart()} 获取，结束事件自动计算耗时。 */
+    public void sendWorkflowEvent(OrchestrationRequest req, String stage, String title, String status,
+                                  Long startedAtNanos) {
+        java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("stage", stage);
+        data.put("title", title == null ? "" : title);
+        data.put("status", status);
+        if (startedAtNanos != null) {
+            data.put("durationMs", Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L));
+        }
+        sendEvent(req, "workflow", data);
+    }
+
+    /** 统一阶段计时起点。 */
+    public static long workflowStart() {
+        return System.nanoTime();
+    }
+
+    /** 执行同步阶段：自动发送 started，成功发送 finished，异常发送 failed 后原样抛出。 */
+    public <T> T runWorkflowStage(OrchestrationRequest req, String stage, String title,
+                                  java.util.function.Supplier<T> action) {
+        long startedAtNanos = workflowStart();
+        sendWorkflowEvent(req, stage, title, "node_started");
+        try {
+            T result = action.get();
+            sendWorkflowEvent(req, stage, title, "node_finished", startedAtNanos);
+            return result;
+        } catch (RuntimeException | Error e) {
+            sendWorkflowEvent(req, stage, title, "node_failed", startedAtNanos);
+            throw e;
+        }
     }
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */
@@ -1881,8 +2002,8 @@ public class AgentOrchestratorSupport {
         }
         // ② LLM 兜底
         try {
-            String raw = retryTransient(() -> planClient().prompt()
-                    .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+            String raw = retryTransient(() -> intentClient().prompt()
+                    .options(intentOptions())
                     .system("你是意图判定助手。判断用户这句话是不是想【取消/终止当前的分镜生成操作】。"
                             + "只输出一个 JSON 对象 {\"cancel\": true 或 false}，不要任何其他文字。")
                     .user(t)

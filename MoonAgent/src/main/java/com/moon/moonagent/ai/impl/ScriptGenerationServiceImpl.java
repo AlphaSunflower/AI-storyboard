@@ -1,16 +1,14 @@
 package com.moon.moonagent.ai.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.dto.response.AssetVO;
-import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.ScriptGenerationService;
 import com.moon.moonagent.ai.AiConfigProperties;
+import com.moon.moonagent.ai.agent.storyboard.StoryboardBatchGenerator;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardJsonParser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -18,9 +16,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
 import org.slf4j.Logger;
@@ -40,18 +36,10 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(ScriptGenerationServiceImpl.class);
 
-    /**
-     * 结构化解析用的分镜定义（字段名与 AI 返回的 JSON 键一致；sceneNumber 仅占位，实际递增逻辑见 toSceneMaps/parseScenes）。
-     */
-    public record SceneSpec(String sceneNumber, String scriptContent, String imagePrompt,
-                            String videoPrompt, String negativePrompt, String cameraMovement,
-                            String shotType, String soundDesign) {}
-
     private final GatewayModelService gatewayModelService;
     private final AiConfigProperties config;
     private final StoryboardClient storyboardClient;
     private final AssetService assetService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final ChatClient.Builder chatClientBuilder;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     /** 懒加载：首次调用时用默认视觉模型构建（@RequiredArgsConstructor 无法承载原构造器内的构建逻辑） */
@@ -111,13 +99,60 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         }
         String userPrompt = buildUserPrompt(scriptText, understanding, assetSheet);
 
-        LlmCall llm = callLLM(model, systemPrompt, userPrompt);
-        String content = llm.content();
-        // 容错解析优先：裸数组/包装对象/代码块/字符串数字都兼容；存在合法分镜就不清空
-        List<Map<String, Object>> parsed = StoryboardJsonParser.parseScenes(content);
+        long startedAt = System.currentTimeMillis();
+        LlmCall planCall = null;
+        StoryboardBatchGenerator.Plan plan;
+        Integer explicitSceneCount = StoryboardBatchGenerator.detectExplicitSceneCount(scriptText);
+        if (explicitSceneCount != null) {
+            // 剧本明确声明镜头数时跳过模型估算，避免模型自行增删镜头。
+            plan = StoryboardBatchGenerator.fallbackPlan(
+                    scriptText,
+                    StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE,
+                    StoryboardBatchGenerator.DEFAULT_MAX_BATCH_SIZE,
+                    StoryboardBatchGenerator.DEFAULT_MAX_SCENES);
+            log.info("剧本显式声明分镜数，跳过模型规划: totalScenes={}, batchSize={}",
+                    plan.totalScenes(), plan.batchSize());
+        } else {
+            try {
+                planCall = callLLM(model, buildPlanningSystemPrompt(),
+                        buildPlanningPrompt(scriptText, understanding, assetSheet),
+                        "plan", UUID.randomUUID().toString());
+                plan = StoryboardBatchGenerator.parsePlan(
+                        planCall.content(), scriptText,
+                        StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE,
+                        StoryboardBatchGenerator.DEFAULT_MAX_BATCH_SIZE,
+                        StoryboardBatchGenerator.DEFAULT_MAX_SCENES);
+            } catch (Exception e) {
+                plan = StoryboardBatchGenerator.fallbackPlan(
+                        scriptText,
+                        StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE,
+                        StoryboardBatchGenerator.DEFAULT_MAX_BATCH_SIZE,
+                        StoryboardBatchGenerator.DEFAULT_MAX_SCENES);
+                log.warn("分镜规划调用失败，使用确定性兜底: totalScenes={}, batchSize={}, error={}",
+                        plan.totalScenes(), plan.batchSize(), e.getMessage());
+            }
+        }
+
+        final LlmCall finalPlanCall = planCall;
+        final StoryboardBatchGenerator.Plan finalPlan = plan;
+        final String finalSystemPrompt = systemPrompt;
+        final String finalUnderstanding = understanding;
+        final String finalAssetSheet = assetSheet;
+        StoryboardBatchGenerator.Result result = StoryboardBatchGenerator.generate(
+                finalPlan, StoryboardJsonParser::parseScenes, range -> {
+                    String callId = UUID.randomUUID().toString();
+                    LlmCall batchCall = callLLM(model, finalSystemPrompt,
+                            buildBatchUserPrompt(scriptText, finalUnderstanding, finalAssetSheet,
+                                    range, finalPlan.totalScenes()),
+                            "scenes-" + range.from() + "-" + range.to(), callId);
+                    String details = batchCall.reasoning() == null ? null : batchCall.reasoning().details();
+                    return new StoryboardBatchGenerator.CallOutput(batchCall.content(), details);
+                });
+
+        String mergedReasoning = mergeReasoning(finalPlanCall, result.reasoning());
         return new GeneratedScenes(
-                decorateH3(normalizeParsedScenes(parsed, projectId), understanding, assetSheet),
-                llm.reasoning());
+                decorateH3(normalizeParsedScenes(result.scenes(), projectId), understanding, assetSheet),
+                reasoningSnapshot(mergedReasoning, model, System.currentTimeMillis() - startedAt));
     }
 
     /** 解析器输出 → 标准分镜 Map（sceneNumber 按项目 max+1 递增；字段兜底空串）。 */
@@ -219,17 +254,23 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     }
 
     /**
-     * 懒加载获取 ChatClient：默认模型固定为网关默认文本模型（getDefaultTextModel），超时 120s
+     * 懒加载获取 ChatClient：默认模型固定为网关默认文本模型（getDefaultTextModel），
+     * 超时由 {@code ai.script-timeout} 控制（默认 300s）
      * （与原 HttpClient timeout 一致）；双重检查锁保证线程安全。
      */
     private ChatClient chatClient() {
         if (chatClient == null) {
             synchronized (this) {
                 if (chatClient == null) {
+                    OpenAiChatOptions.Builder defaults = OpenAiChatOptions.builder()
+                            .model(gatewayModelService.getDefaultTextModel())
+                            .timeout(Duration.ofSeconds(config.getScriptTimeout()))
+                            .maxRetries(0);
+                    if (config.getScriptMaxTokens() > 0) {
+                        defaults.maxTokens(config.getScriptMaxTokens());
+                    }
                     chatClient = chatClientBuilder
-                            .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(gatewayModelService.getDefaultTextModel())
-                                    .timeout(Duration.ofSeconds(config.getScriptTimeout())))
+                            .defaultOptions(defaults)
                             .build();
                 }
             }
@@ -241,33 +282,58 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         return promptConfig.get("script/storyboard-system");
     }
 
-    private LlmCall callLLM(String model, String systemPrompt, String userPrompt) {
+    private LlmCall callLLM(String model, String systemPrompt, String userPrompt,
+                            String stage, String callId) {
         int attempts = 0;
+        String effectiveModel = model == null || model.isBlank()
+                ? gatewayModelService.getDefaultTextModel() : model;
+        long startedAt = System.currentTimeMillis();
         while (true) {
             attempts++;
             try {
                 ChatClient.ChatClientRequestSpec spec = chatClient()
                         .prompt()
                         .system(systemPrompt)
-                        .user(userPrompt);
-                if (model != null) {
-                    // 单次调用覆盖模型（默认模型已在 defaultOptions 固定）
-                    spec = spec.options(OpenAiChatOptions.builder().model(model));
-                }
+                        .user(userPrompt)
+                        .options(buildRequestOptions(effectiveModel, callId));
                 ChatResponse response = spec.call().chatResponse();
                 AssistantMessage output = response != null && response.getResult() != null
                         ? response.getResult().getOutput() : null;
                 String raw = output == null ? "" : (output.getText() == null ? "" : output.getText());
-                AgentReasoningSnapshot reasoning = buildReasoning(output, model);
+                AgentReasoningSnapshot reasoning = buildReasoning(output, effectiveModel);
+                log.info("LLM调用完成: stage={}, model={}, inputChars={}, outputChars={}, duration={}ms, retry={}, callId={}",
+                        stage, effectiveModel, length(systemPrompt) + length(userPrompt), raw.length(),
+                        System.currentTimeMillis() - startedAt, attempts - 1, callId);
                 return new LlmCall(raw, reasoning);
             } catch (Exception e) {
                 if (attempts < 2 && isTransient(e)) {
+                    log.warn("LLM调用瞬态失败，准备重试: stage={}, model={}, retry={}, callId={}, error={}",
+                            stage, effectiveModel, attempts, callId, e.getMessage());
                     try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                     continue;
                 }
+                log.error("LLM调用失败: stage={}, model={}, inputChars={}, duration={}ms, retry={}, callId={}, error={}",
+                        stage, effectiveModel, length(systemPrompt) + length(userPrompt),
+                        System.currentTimeMillis() - startedAt, attempts - 1, callId, e.getMessage());
                 throw new BusinessException(50201, "AI 生成分镜脚本失败: " + e.getMessage(), e);
             }
         }
+    }
+
+    private OpenAiChatOptions.Builder buildRequestOptions(String model, String callId) {
+        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
+                .model(model)
+                .timeout(Duration.ofSeconds(config.getScriptTimeout()))
+                .maxRetries(0)
+                .customHeaders(Map.of("X-Call-Id", callId));
+        if (config.getScriptMaxTokens() > 0) {
+            builder.maxTokens(config.getScriptMaxTokens());
+        }
+        return builder;
+    }
+
+    private static int length(String value) {
+        return value == null ? 0 : value.length();
     }
 
     /** 从 AssistantMessage metadata 提取推理；模型未返回时给出可展开的摘要。 */
@@ -281,6 +347,29 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 null,
                 reason == null || reason.isBlank() ? "trace-summary"
                         : (model == null || model.isBlank() ? gatewayModelService.getDefaultTextModel() : model));
+    }
+
+    private AgentReasoningSnapshot reasoningSnapshot(String details, String model, long durationMs) {
+        String text = details == null || details.isBlank() ? "已完成分镜方案推理。" : details.trim();
+        return new AgentReasoningSnapshot(
+                text.length() > 200 ? text.substring(0, 200) + "…" : text,
+                text,
+                durationMs,
+                model == null || model.isBlank() ? gatewayModelService.getDefaultTextModel() : model);
+    }
+
+    private String mergeReasoning(LlmCall planCall, String batchReasoning) {
+        StringBuilder merged = new StringBuilder();
+        if (planCall != null && planCall.reasoning() != null
+                && planCall.reasoning().details() != null
+                && !planCall.reasoning().details().isBlank()) {
+            merged.append("【规划】").append(planCall.reasoning().details().trim());
+        }
+        if (batchReasoning != null && !batchReasoning.isBlank()) {
+            if (!merged.isEmpty()) merged.append("\n");
+            merged.append("【分镜】").append(batchReasoning.trim());
+        }
+        return merged.toString();
     }
 
     private String extractReasoning(Map<String, Object> metadata) {
@@ -297,16 +386,14 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     /** LLM 调用结果：正文 + 推理摘要。 */
     private record LlmCall(String content, AgentReasoningSnapshot reasoning) {}
 
-    /** 瞬态失败重试：429/5xx、连接/超时。 */
+    /** 瞬态失败重试：429/5xx、连接失败；超时不重试。 */
     private static boolean isTransient(Throwable e) {
         for (Throwable c = e; c != null; c = c.getCause()) {
             if (c instanceof org.springframework.web.client.HttpStatusCodeException sce) {
                 int s = sce.getStatusCode().value();
                 if (s == 429 || s >= 500) return true;
             }
-            if (c instanceof java.net.ConnectException
-                    || c instanceof java.net.http.HttpTimeoutException
-                    || c instanceof java.net.SocketTimeoutException) {
+            if (c instanceof java.net.ConnectException) {
                 return true;
             }
         }
@@ -319,6 +406,8 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
      */
     private String callUnderstandingModel(String model, List<String> referenceImages) {
         String effModel = (model != null && !model.isBlank()) ? model : gatewayModelService.getDefaultVisionModel();
+        String callId = UUID.randomUUID().toString();
+        long startedAt = System.currentTimeMillis();
         List<Media> medias = new ArrayList<>();
         for (String img : referenceImages) {
             medias.add(Media.builder()
@@ -331,16 +420,45 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                         + "用「图一：…」「图二：…」的格式输出，供后续分镜生成参考。")
                 .media(medias.toArray(new Media[0]))
                 .build();
-        return chatClient().prompt()
+        String content = chatClient().prompt()
                 .system(promptConfig.get("script/visual-understanding"))
                 .messages(msg)
-                .options(OpenAiChatOptions.builder().model(effModel))
+                .options(buildRequestOptions(effModel, callId))
                 .call()
                 .content();
+        log.info("LLM调用完成: stage=understanding, model={}, inputChars={}, outputChars={}, duration={}ms, retry=0, callId={}",
+                effModel, msg.getText() == null ? 0 : msg.getText().length(),
+                content == null ? 0 : content.length(), System.currentTimeMillis() - startedAt, callId);
+        return content;
+    }
+
+    private String buildPlanningSystemPrompt() {
+        return "你是分镜规划器。只输出一个 JSON 对象，不要代码块和解释，格式："
+                + "{\"totalScenes\":正整数,\"batchSize\":正整数}。"
+                + "totalScenes 必须根据剧本信息量估算，batchSize 必须在 "
+                + StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE + " 到 "
+                + StoryboardBatchGenerator.DEFAULT_MAX_BATCH_SIZE + " 之间。"
+                + "若剧本明确写出「共N个分镜/镜头」或列出N个分镜，totalScenes 必须严格等于 N，不得自行增删。";
+    }
+
+    private String buildPlanningPrompt(String scriptText, String understanding, String assetSheet) {
+        StringBuilder prompt = new StringBuilder("请估算剧本应拆分为多少个分镜，并给出每批生成数量。");
+        if (understanding != null && !understanding.isBlank()) {
+            prompt.append("\n参考图视觉要素：\n").append(understanding.trim());
+        }
+        if (assetSheet != null && !assetSheet.isBlank()) {
+            prompt.append("\n资产约束：\n").append(assetSheet.trim());
+        }
+        return prompt.append("\n剧本：\n").append(scriptText).toString();
     }
 
     /** 组装分镜生成 user prompt：有理解描述时前置参考图视觉要素，否则仅剧本。 */
     private String buildUserPrompt(String scriptText, String understanding, String assetSheet) {
+        return buildUserPrompt(scriptText, understanding, assetSheet, "");
+    }
+
+    private String buildUserPrompt(String scriptText, String understanding, String assetSheet,
+                                   String instruction) {
         String base = promptConfig.get("script/storyboard-user");
         if (understanding != null && !understanding.isBlank()) {
             base += "参考图视觉要素（请在分镜中体现这些风格与要素）：\n" + understanding + "\n\n";
@@ -348,7 +466,19 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         if (assetSheet != null && !assetSheet.isBlank()) {
             base += "【资产文字约束，必须逐条体现且不得违背】\n" + assetSheet.trim() + "\n\n";
         }
+        if (instruction != null && !instruction.isBlank()) {
+            base += instruction.trim() + "\n\n";
+        }
         return base + "剧本：\n" + scriptText;
+    }
+
+    private String buildBatchUserPrompt(String scriptText, String understanding, String assetSheet,
+                                        StoryboardBatchGenerator.Range range, int totalScenes) {
+        String instruction = "【本次批次】全片计划共 " + totalScenes + " 个分镜，本次只生成第 "
+                + range.from() + " 到 " + range.to() + " 个，共 " + range.count()
+                + " 个。sceneNumber 必须从 " + range.from() + " 连续编号到 " + range.to()
+                + "；不得重复、跳号或生成范围外镜头。";
+        return buildUserPrompt(scriptText, understanding, assetSheet, instruction);
     }
 
     /** 从 data URI 前缀提取图片 MIME（data:image/png;base64,... → image/png；非 data URI 兜底 png） */
@@ -360,63 +490,4 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         return "image/png";
     }
 
-    /** 结构化解析成功路径：SceneSpec → Map（sceneNumber 递增逻辑与 parseScenes 一致）。 */
-    private List<Map<String, Object>> toSceneMaps(List<SceneSpec> specs, String projectId) {
-        List<Map<String, Object>> scenes = new ArrayList<>();
-        int sceneNum = storyboardClient.maxSceneNumber(projectId);
-        for (SceneSpec s : specs) {
-            sceneNum++;
-            Map<String, Object> scene = new HashMap<>();
-            scene.put("projectId", projectId);
-            scene.put("sceneNumber", sceneNum);
-            scene.put("scriptContent", s.scriptContent() == null ? "" : s.scriptContent());
-            scene.put("imagePrompt", s.imagePrompt() == null ? "" : s.imagePrompt());
-            scene.put("videoPrompt", s.videoPrompt() == null ? "" : s.videoPrompt());
-            scene.put("negativePrompt", s.negativePrompt() == null ? "" : s.negativePrompt());
-            scene.put("cameraMovement", s.cameraMovement() == null ? "" : s.cameraMovement());
-            scene.put("shotType", s.shotType() == null ? "" : s.shotType());
-            scene.put("soundDesign", s.soundDesign() == null ? "" : s.soundDesign());
-            scenes.add(scene);
-        }
-        return scenes;
-    }
-
-    private List<Map<String, Object>> parseScenes(String content, String projectId) {
-        try {
-            // 提取 JSON 数组（AI 可能在前后包裹 markdown 代码块）
-            String json = content;
-            if (json.contains("```json")) {
-                json = json.substring(json.indexOf("```json") + 7);
-                json = json.substring(0, json.lastIndexOf("```"));
-            } else if (json.contains("```")) {
-                json = json.substring(json.indexOf("```") + 3);
-                json = json.substring(0, json.lastIndexOf("```"));
-            }
-            json = json.trim();
-            if (!json.startsWith("[")) {
-                json = json.substring(json.indexOf('['), json.lastIndexOf(']') + 1);
-            }
-
-            List<Map<String, Object>> scenes = new ArrayList<>();
-            JsonNode arr = objectMapper.readTree(json);
-            int sceneNum = storyboardClient.maxSceneNumber(projectId);
-            for (JsonNode node : arr) {
-                sceneNum++;
-                Map<String, Object> scene = new HashMap<>();
-                scene.put("projectId", projectId);
-                scene.put("sceneNumber", sceneNum);
-                scene.put("scriptContent", node.path("scriptContent").asText(""));
-                scene.put("imagePrompt", node.path("imagePrompt").asText(""));
-                scene.put("videoPrompt", node.path("videoPrompt").asText(""));
-                scene.put("negativePrompt", node.path("negativePrompt").asText(""));
-                scene.put("cameraMovement", node.path("cameraMovement").asText(""));
-                scene.put("shotType", node.path("shotType").asText(""));
-                scene.put("soundDesign", node.path("soundDesign").asText(""));
-                scenes.add(scene);
-            }
-            return scenes;
-        } catch (Exception e) {
-            throw new BusinessException(50201, "解析 AI 返回的分镜数据失败: " + e.getMessage(), e);
-        }
-    }
 }

@@ -183,6 +183,8 @@ export interface AssetOption {
 export interface SseEvent {
   type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace';
   content?: string;
+  /** workflow 阶段稳定标识（如 intent_recognize / generate_storyboard） */
+  stage?: string;
   title?: string;
   status?: string;
   formToken?: string;

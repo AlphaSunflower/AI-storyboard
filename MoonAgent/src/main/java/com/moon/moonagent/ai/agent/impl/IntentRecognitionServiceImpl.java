@@ -73,6 +73,7 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
     private final SkillManager skillManager;
+    private final com.moon.moonagent.ai.AgentAiConfigProperties agentConfig;
 
     /** 由 Skill 推导规则前置表 + 合法意图集（priority 升序：delete 先于 aisplit 的「分镜」；menu 顺序用于澄清菜单） */
     @PostConstruct
@@ -97,8 +98,8 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     }
 
     /**
-     * 懒加载 ChatClient：识别超时 30s（参照标题服务；识别失败兜底 intent-other，不值得长等，
-     * 与原 HttpClient timeout 一致）。构造器内构建逻辑迁移至此，统一 @RequiredArgsConstructor 注入。
+     * 懒加载 ChatClient：识别超时由 ai.agent.intent-timeout-seconds 控制（默认 10s）；
+     * 识别失败兜底 intent-other，不值得长等。
      */
     private volatile ChatClient chatClient;
 
@@ -108,7 +109,8 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .timeout(Duration.ofSeconds(30)))
+                                    .timeout(Duration.ofSeconds(
+                                            Math.max(1, agentConfig.getIntentTimeoutSeconds()))))
                             .build();
                 }
             }
@@ -237,16 +239,14 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
         }
     }
 
-    /** 瞬态判定：HTTP 429/5xx 或网络超时/连接失败 */
+    /** 瞬态判定：HTTP 429/5xx 或连接失败；超时不重试。 */
     private static boolean isTransient(Throwable e) {
         for (Throwable c = e; c != null; c = c.getCause()) {
             if (c instanceof org.springframework.web.client.HttpStatusCodeException sce) {
                 int s = sce.getStatusCode().value();
                 if (s == 429 || s >= 500) return true;
             }
-            if (c instanceof java.net.ConnectException
-                    || c instanceof java.net.http.HttpTimeoutException
-                    || c instanceof java.net.SocketTimeoutException) {
+            if (c instanceof java.net.ConnectException) {
                 return true;
             }
         }

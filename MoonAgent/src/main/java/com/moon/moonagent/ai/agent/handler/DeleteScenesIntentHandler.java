@@ -68,10 +68,10 @@ public class DeleteScenesIntentHandler implements IntentHandler {
         // confirm-delete：执行删除
         String projectId = request.getConversation().getProjectId();
         long existing = storyboardClient.getProjectScenes(projectId).size();
-        support.sendEvent(request, "workflow",
-                Map.of("title", "正在删除全部 " + existing + " 个分镜…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "delete_scenes",
+                "正在删除全部 " + existing + " 个分镜…", "node_started");
         storyboardClient.deleteProjectScenes(projectId);
-        support.sendEvent(request, "workflow", Map.of("title", "", "status", "node_finished"));
+        support.sendWorkflowEvent(request, "delete_scenes", "", "node_finished");
         String msg = "✅ 已删除全部 " + existing + " 个分镜，分镜列表已清空。";
         support.sendMessage(request, msg);
         support.sendEvent(request, "message_end",

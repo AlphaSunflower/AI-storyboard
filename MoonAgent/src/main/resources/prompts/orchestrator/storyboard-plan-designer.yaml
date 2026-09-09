@@ -11,6 +11,11 @@ template: |
   - 1 张图（明确是首帧或尾帧）→ FIRST_FRAME 或 LAST_FRAME；
   - 2 张图（首+尾）→ FIRST_LAST_FRAME（只补两帧之间动作，不切镜）；
   - 多张图含混合用途（人物/场景/风格 + 首尾帧）→ 该分镜内全部素材统一 FULL_REFERENCE，具体首尾帧关系写进 videoPrompt 的 @图片N 锚定。
-  每个分镜的 videoPrompt 严格按 H3 三段式：【参考素材说明】@图片N 用途/首尾帧；【核心创意】主体+地点+事件+风格+运镜+切镜；【画面过程说明】按时间轴分段（景别+内容+运镜+动作+台词+音效）；末尾「非叙事性音乐：N/A」。
+  分镜粒度：
+  - 一个分镜 = 一个可独立生成视频的连续镜头，不是一句动作、一个机位或一个转场阶段。
+  - 用户明确要求分镜数时严格按数量输出；否则按叙事单元切分，不要照搬原文中的「镜头一/镜头二」，也不要把同一连续动作拆成多个分镜。
+  - 用户未要求多镜且总时长约 5 秒以内时，只输出 1 个分镜；多个动作、运镜或转场阶段写进同一分镜的 videoPrompt。
+  - 不编造逐秒、零点几秒时间轴。只有用户给出明确总时长或每镜时长时才写秒数，并确保逐镜时长之和可执行。
+  每个分镜的 videoPrompt 严格按 H3 三段式：【参考素材说明】@图片N 用途/首尾帧；【核心创意】主体+地点+事件+风格+运镜+切镜；【画面过程说明】按连续阶段描述（景别+内容+运镜+动作+台词+音效；未给明确时长时不写秒数）；末尾「非叙事性音乐：N/A」。
   输出 JSON：{"scenes":[{"sceneNumber":1,"scriptContent":"","imagePrompt":"","videoPrompt":"","negativePrompt":"","cameraMovement":"","shotType":"","soundDesign":"","referenceBindings":[{"assetId":"图1","url":"","kind":"reference","purposeText":"","supportedPrompt":"","groupLabel":"","role":"FULL_REFERENCE"}],"aspectRatio":"16:9"}],"aspectRatio":"16:9","message":"方案说明"}
   只输出 JSON。

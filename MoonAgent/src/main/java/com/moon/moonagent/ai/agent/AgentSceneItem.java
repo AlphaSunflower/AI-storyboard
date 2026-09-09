@@ -14,6 +14,13 @@ public record AgentSceneItem(
         String negativePrompt,
         String cameraMovement,
         String shotType,
-        String soundDesign
+        String soundDesign,
+        Integer duration
 ) {
+    public AgentSceneItem(int sceneNumber, String scriptContent, String imagePrompt,
+                          String videoPrompt, String negativePrompt, String cameraMovement,
+                          String shotType, String soundDesign) {
+        this(sceneNumber, scriptContent, imagePrompt, videoPrompt, negativePrompt,
+                cameraMovement, shotType, soundDesign, null);
+    }
 }
