@@ -44,7 +44,7 @@ spring:
 # JWT 配置（与主后端共享 secret）
 jwt:
   access-secret: ${JWT_ACCESS_SECRET:}
-  issuer: ${JWT_ISSUER:newworkflow-backend}
+  issuer: ${JWT_ISSUER:ai-storyboard-backend}
 
 # 内部服务调用密钥（Agent → 主后端 /api/internal/* 共享）
 internal:

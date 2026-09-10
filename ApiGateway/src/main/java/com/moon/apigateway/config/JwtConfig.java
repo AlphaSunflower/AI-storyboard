@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "jwt")
 public class JwtConfig {
     private String accessSecret;
-    private String issuer = "newworkflow-backend";
+    private String issuer = "ai-storyboard-backend";
 
     public String getAccessSecret() { return accessSecret; }
     public void setAccessSecret(String accessSecret) { this.accessSecret = accessSecret; }
