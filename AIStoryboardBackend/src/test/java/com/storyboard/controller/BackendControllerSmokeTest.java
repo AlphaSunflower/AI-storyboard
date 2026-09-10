@@ -357,7 +357,7 @@ class BackendControllerSmokeTest {
         mockMvc.perform(put("/api/internal/scenes/s1").header(AUTH, SECRET)
                 .contentType("application/json").content("{\"id\":\"s1\"}"))
             .andExpect(status().isOk());
-        mockMvc.perform(patch("/api/internal/scenes/project/p1/params").header(AUTH, SECRET)
+        mockMvc.perform(post("/api/internal/scenes/project/p1/params").header(AUTH, SECRET)
                 .contentType("application/json").content("{\"imageModel\":\"gpt-image-2\"}"))
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/internal/projects/p1/assets").header(AUTH, SECRET))
