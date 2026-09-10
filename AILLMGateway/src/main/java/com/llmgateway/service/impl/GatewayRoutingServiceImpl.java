@@ -62,34 +62,67 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     @Override
     public void streamChat(String path, String requestBody, java.util.function.Consumer<byte[]> sink) throws Exception {
-        JsonNode body = objectMapper.readTree(requestBody);
-        String modelName = body.path("model").asText("");
-        if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
+        streamChat(path, requestBody, sink, null);
+    }
 
-        // 候选渠道（与 route 同规则：model_route → enabled 渠道按 priority 升序）
-        List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                .eq(ModelRoute::getModelName, modelName));
-        if (routes == null || routes.isEmpty()) throw new BusinessException(40401, "no route for model: " + modelName);
-        List<Channel> candidates = resolveCandidates(routes);
-        if (candidates.isEmpty()) throw new BusinessException(50301, "no available channel for model: " + modelName);
+    @Override
+    public void streamChat(String path, String requestBody,
+                           java.util.function.Consumer<byte[]> sink, String callId) throws Exception {
+        long start = System.currentTimeMillis();
+        String model = null;
+        String channelId = null;
+        try {
+            JsonNode body = objectMapper.readTree(requestBody);
+            String modelName = body.path("model").asText("");
+            model = modelName;
+            if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
 
-        // 逐个渠道尝试：各渠道协议由适配器转发；客户端中断不是渠道故障，停止不再换下一个
-        Exception lastError = null;
-        for (Channel channel : candidates) {
-            try {
-                String apiKey = keyService.decrypt(channel.getApiKey());
-                routeRegistry.resolve(channel.getType()).stream(path, requestBody, channel, apiKey, sink);
-                return;
-            } catch (Exception e) {
-                if (isClientAbort(e)) {
-                    log.debug("客户端中断流式转发，停止: channel={}", channel.getId());
-                    return;
-                }
-                lastError = e;
-                log.warn("流式渠道失败，尝试下一个: channel={}, error={}", channel.getId(), e.getMessage());
+            // 候选渠道（与 route 同规则：model_route → enabled 渠道按 priority 升序）
+            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                    .eq(ModelRoute::getModelName, modelName));
+            if (routes == null || routes.isEmpty()) {
+                throw new BusinessException(40401, "no route for model: " + modelName);
             }
+            List<Channel> candidates = resolveCandidates(routes);
+            if (candidates.isEmpty()) {
+                throw new BusinessException(50301, "no available channel for model: " + modelName);
+            }
+
+            // 逐个渠道尝试：各渠道协议由适配器转发；客户端中断不是渠道故障，停止不再换下一个
+            Exception lastError = null;
+            for (Channel channel : candidates) {
+                channelId = channel.getId();
+                try {
+                    String apiKey = keyService.decrypt(channel.getApiKey());
+                    routeRegistry.resolve(channel.getType()).stream(path, requestBody, channel, apiKey, sink);
+                    long duration = System.currentTimeMillis() - start;
+                    callLogService.log(model, channelId, "success", duration, null, null, null, callId);
+                    log.info("流式调用完成: model={}, channel={}, duration={}ms, callId={}",
+                            model, channelId, duration, callId);
+                    return;
+                } catch (Exception e) {
+                    if (isClientAbort(e)) {
+                        long duration = System.currentTimeMillis() - start;
+                        callLogService.log(model, channelId, "error", duration,
+                                "client aborted", null, null, callId);
+                        log.debug("客户端中断流式转发，停止: channel={}, callId={}", channel.getId(), callId);
+                        return;
+                    }
+                    lastError = e;
+                    log.warn("流式渠道失败，尝试下一个: channel={}, callId={}, error={}",
+                            channel.getId(), callId, e.getMessage());
+                }
+            }
+            throw lastError != null ? lastError : new BusinessException(50202, "upstream stream failed");
+        } catch (BusinessException be) {
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                    be.getMessage(), null, null, callId);
+            throw be;
+        } catch (Exception e) {
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                    e.getMessage(), null, null, callId);
+            throw e;
         }
-        throw lastError != null ? lastError : new BusinessException(50202, "upstream stream failed");
     }
 
     /** 判断异常链是否为客户端断开（ClientAbortException / AsyncRequestNotUsableException） */
@@ -105,6 +138,11 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     @Override
     public RouteResult route(String path, String requestBody) {
+        return route(path, requestBody, null);
+    }
+
+    @Override
+    public RouteResult route(String path, String requestBody, String callId) {
         long start = System.currentTimeMillis();
         String model = null;
         String channelId = null;
@@ -138,12 +176,14 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                         log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);
                         // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传
                         if (status != 429 && status < 500) {
-                            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, error, null, null);
+                            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                                    error, null, null, callId);
                             return new RouteResult(status, bodyStr);
                         }
                         continue;
                     }
-                    callLogService.log(model, channelId, "success", System.currentTimeMillis() - start, null, null, null);
+                    callLogService.log(model, channelId, "success", System.currentTimeMillis() - start,
+                            null, null, null, callId);
                     return new RouteResult(status, bodyStr);
                 } catch (BusinessException be) {
                     throw be;
@@ -154,10 +194,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             }
             throw new BusinessException(50301, "all channels failed for model: " + model);
         } catch (BusinessException be) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, be.getMessage(), null, null);
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                    be.getMessage(), null, null, callId);
             throw be;
         } catch (Exception e) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start, e.getMessage(), null, null);
+            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                    e.getMessage(), null, null, callId);
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
         }
     }

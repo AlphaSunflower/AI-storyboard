@@ -16,6 +16,7 @@ import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
+import com.moon.moonagent.ai.AgentAiConfigProperties;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -45,6 +46,7 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final PromptOptimizeService optimizeService;
     private final GenerationRecordService generationRecordService;
+    private final AgentAiConfigProperties agentConfig;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -180,7 +182,7 @@ public class AgentConversationController {
         if (request.content() == null || request.content().isBlank()) {
             throw new BusinessException(40001, "消息内容不能为空");
         }
-        SseEmitter emitter = new SseEmitter(600_000L);
+        SseEmitter emitter = createSseEmitter();
         chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request),
                 request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
                 request.routingHint(), Boolean.TRUE.equals(request.cancelActiveTasks()));
@@ -192,7 +194,7 @@ public class AgentConversationController {
     public SseEmitter submitForm(Authentication auth, @PathVariable String id,
                                  @RequestBody AgentFormSubmitRequest request) {
         chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = new SseEmitter(600_000L);
+        SseEmitter emitter = createSseEmitter();
         chatService.submitFormAndResume(auth.getName(), id,
             request.formToken(), request.taskId(), request.action(), request.content(),
             request.params() == null ? java.util.Map.of() : request.params(),
@@ -207,7 +209,7 @@ public class AgentConversationController {
                                             @RequestBody AgentVideoPlanGenerateRequest request) {
         // 同步快速校验归属（失败抛 401/404 而非 SSE）
         chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = new SseEmitter(600_000L);
+        SseEmitter emitter = createSseEmitter();
         chatService.generateVideoFromPlan(auth.getName(), id, request.planToken(), emitter);
         return emitter;
     }
@@ -283,6 +285,12 @@ public class AgentConversationController {
         if (r.picUrls() != null && !r.picUrls().isEmpty()) return r.picUrls();
         if (r.picUrl() != null && !r.picUrl().isBlank()) return List.of(r.picUrl());
         return List.of();
+    }
+
+    /** 统一 SSE 生命周期，默认 1200 秒以覆盖长剧本分批生成。 */
+    private SseEmitter createSseEmitter() {
+        long timeoutMillis = Math.max(1, agentConfig.getSseTimeoutSeconds()) * 1000L;
+        return new SseEmitter(timeoutMillis);
     }
 
     /** yyyy-MM-dd → LocalDate；非法/空返回 null（不筛选） */

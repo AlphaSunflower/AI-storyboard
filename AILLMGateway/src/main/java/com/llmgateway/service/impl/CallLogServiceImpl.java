@@ -29,6 +29,18 @@ public class CallLogServiceImpl implements CallLogService {
     @Async
     @Override
     public void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId) {
+        persist(model, channelId, status, durationMs, error, videoUrl, taskId, null);
+    }
+
+    @Async
+    @Override
+    public void log(String model, String channelId, String status, long durationMs,
+                    String error, String videoUrl, String taskId, String callId) {
+        persist(model, channelId, status, durationMs, error, videoUrl, taskId, callId);
+    }
+
+    private void persist(String model, String channelId, String status, long durationMs,
+                         String error, String videoUrl, String taskId, String callId) {
         try {
             CallLog record = new CallLog();
             record.setModel(model);
@@ -36,6 +48,7 @@ public class CallLogServiceImpl implements CallLogService {
             record.setStatus(status);
             record.setDurationMs(durationMs);
             record.setError(error);
+            record.setCallId(callId);
             record.setVideoUrl(videoUrl);
             record.setTaskId(taskId);
             record.setCreatedAt(OffsetDateTime.now());

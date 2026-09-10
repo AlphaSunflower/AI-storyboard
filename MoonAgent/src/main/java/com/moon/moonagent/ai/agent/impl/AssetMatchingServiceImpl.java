@@ -43,8 +43,9 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
+    private final com.moon.moonagent.ai.AgentAiConfigProperties agentConfig;
 
-    /** 懒加载 ChatClient（复用网关默认对话模型，超时 120s） */
+    /** 懒加载 ChatClient（复用网关默认对话模型，素材任务超时由 ai.agent.material-timeout-seconds 控制） */
     private volatile ChatClient chatClient;
 
     @Override
@@ -126,14 +127,15 @@ public class AssetMatchingServiceImpl implements AssetMatchingService {
         return sb.toString();
     }
 
-    /** 懒加载 ChatClient：对话模型从网关动态获取（与编排 planClient 一致），超时 120s */
+    /** 懒加载 ChatClient：对话模型从网关动态获取，素材任务超时可独立配置。 */
     private ChatClient chatClient() {
         if (chatClient == null) {
             synchronized (this) {
                 if (chatClient == null) {
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .timeout(Duration.ofSeconds(120)))
+                                    .timeout(Duration.ofSeconds(
+                                            Math.max(1, agentConfig.getMaterialTimeoutSeconds()))))
                             .build();
                 }
             }

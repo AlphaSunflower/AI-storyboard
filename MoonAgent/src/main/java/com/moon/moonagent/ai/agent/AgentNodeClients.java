@@ -25,9 +25,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AgentNodeClients {
 
-    /** 节点 LLM 默认超时（对齐编排 planClient 120s） */
-    private static final Duration NODE_TIMEOUT = Duration.ofSeconds(120);
-
     private final ChatClient.Builder chatClientBuilder;
     private final AgentAiConfigProperties agentConfig;
     private final GatewayModelService gatewayModelService;
@@ -44,7 +41,7 @@ public class AgentNodeClients {
                         new SimpleLoggerAdvisor())
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(gatewayModelService.getDefaultTextModel())
-                        .timeout(NODE_TIMEOUT))
+                        .timeout(nodeTimeout()))
                 .build();
     }
 
@@ -58,7 +55,11 @@ public class AgentNodeClients {
                         new SimpleLoggerAdvisor())
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(gatewayModelService.getDefaultVisionModel())
-                        .timeout(NODE_TIMEOUT))
+                        .timeout(nodeTimeout()))
                 .build();
+    }
+
+    private Duration nodeTimeout() {
+        return Duration.ofSeconds(Math.max(1, agentConfig.getPlanTimeoutSeconds()));
     }
 }

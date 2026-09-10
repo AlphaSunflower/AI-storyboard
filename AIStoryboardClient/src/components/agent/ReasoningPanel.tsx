@@ -24,12 +24,15 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!reasoning || (agentTrace && agentTrace.length > 0);
   useEffect(() => {
-    if (!streaming) setExpanded(false);
+    setExpanded(!!streaming);
   }, [streaming]);
   if (!hasContent && !streaming) return null;
   const live = !!streaming;
   const duration = reasoning?.durationMs != null ? formatDuration(reasoning.durationMs) : '';
-  const title = live ? '正在思考…' : `已思考${duration ? `（用时 ${duration}）` : ''}`;
+  const liveSummary = reasoning?.summary?.trim();
+  const title = live
+    ? (liveSummary ? `正在思考：${liveSummary}` : '正在思考…')
+    : `已思考${duration ? `（用时 ${duration}）` : ''}`;
   const showToggle = hasContent;
 
   return (
@@ -44,7 +47,7 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
         }}
       >
         <Brain size={14} strokeWidth={1.8} style={{ flexShrink: 0, color: live ? 'var(--color-primary)' : 'var(--color-muted)' }} />
-        <span>{title}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'min(70vw, 520px)' }}>{title}</span>
         {live && (
           <span style={{ display: 'inline-flex', gap: 2 }}>
             {[0, 1].map((i) => (

@@ -32,6 +32,6 @@ public class AdminLogController {
 
     private CallLogVO toVO(CallLog e) {
         return new CallLogVO(e.getId(), e.getModel(), e.getChannelId(), e.getStatus(),
-                e.getDurationMs(), e.getError(), e.getVideoUrl(), e.getTaskId(), e.getCreatedAt());
+                e.getDurationMs(), e.getError(), e.getCallId(), e.getVideoUrl(), e.getTaskId(), e.getCreatedAt());
     }
 }

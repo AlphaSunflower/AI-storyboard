@@ -53,10 +53,18 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         return value;
     }
 
-    /** 覆盖写分镜：先清空现有再批量写入（HTTP 两步调用，非事务） */
+    /** 覆盖写分镜：先清空现有再按 1..N 连续编号批量写入（HTTP 两步调用，非事务） */
     public int replaceScript(String projectId, List<AgentSceneItem> scenes) {
         storyboardClient.deleteProjectScenes(projectId);
-        return writeScript(projectId, scenes);
+        if (scenes == null || scenes.isEmpty()) return 0;
+        List<AgentSceneItem> normalized = new ArrayList<>(scenes.size());
+        int number = 1;
+        for (AgentSceneItem item : scenes) {
+            normalized.add(new AgentSceneItem(number++, item.scriptContent(), item.imagePrompt(),
+                    item.videoPrompt(), item.negativePrompt(), item.cameraMovement(),
+                    item.shotType(), item.soundDesign(), item.duration()));
+        }
+        return writeScript(projectId, normalized);
     }
 
     /** 批量写分镜（HTTP 批量插入） */
@@ -74,6 +82,7 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
             scene.setCameraMovement(item.cameraMovement());
             scene.setShotType(item.shotType());
             scene.setSoundDesign(item.soundDesign());
+            scene.setDuration(item.duration());
             batch.add(scene);
         }
         storyboardClient.batchInsertScenes(batch);
@@ -105,6 +114,7 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
             newScene.setCameraMovement(item.cameraMovement());
             newScene.setShotType(item.shotType());
             newScene.setSoundDesign(item.soundDesign());
+            newScene.setDuration(item.duration());
             Scene existing = byNumber.get(item.sceneNumber());
             if (existing != null) {
                 // 同编号已存在 → 更新（带原 id，保留 imageUrl/videoUrl/素材关联等已生成资产不丢）

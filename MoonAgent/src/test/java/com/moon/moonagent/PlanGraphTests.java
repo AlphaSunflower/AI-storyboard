@@ -7,6 +7,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.util.Map;
 
 /**
  * P2 PlanGraph 主图装配验证（StateGraph 编排重构）：
@@ -23,5 +26,15 @@ class PlanGraphTests {
     @Test
     void planGraphAutoConfigured() {
         assertNotNull(planGraph, "PlanGraph bean 应装配成功（@PostConstruct 已编译 StateGraph）");
+    }
+
+    @Test
+    void expandReviewCheckpointRoutesToAisplit() throws Exception {
+        var field = PlanGraph.class.getDeclaredField("CP_ACTION_TO_INTENT");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, String> map = (Map<String, String>) field.get(null);
+        assertEquals("intent-aisplit", map.get("expand-review"),
+                "扩写审核卡（cpAction=expand-review）应路由回 node_aisplit");
     }
 }

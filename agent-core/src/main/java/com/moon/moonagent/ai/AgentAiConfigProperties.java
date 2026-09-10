@@ -25,6 +25,38 @@ public class AgentAiConfigProperties {
     private int maxRegenerateRounds = 3;
 
     /**
+     * 编排类 LLM 调用默认超时（秒）：剧本优化、方案设计、意图判定等。
+     * 与分镜脚本生成 {@code ai.script-timeout} 分开，避免所有任务共用同一个 300 秒上限。
+     */
+    private int planTimeoutSeconds = 300;
+
+    /** 分镜参数推荐超时（秒）：这是可降级步骤，超时后直接使用模型默认参数。 */
+    private int recommendTimeoutSeconds = 20;
+
+    /** 素材绑定/分镜方案设计超时（秒）：超时后由上层回退常规分镜生成，不再重试。 */
+    private int materialTimeoutSeconds = 45;
+
+    /** 轻量意图判定超时（秒）：例如取消意图判断，超时按不取消处理。 */
+    private int intentTimeoutSeconds = 10;
+
+    /**
+     * SSE 异步连接最长存活时间（秒）：覆盖长剧本分批生成全过程。
+     * 该值只控制 Spring MVC 异步请求生命周期，不替代 Spring AI 单次模型调用超时。
+     */
+    private int sseTimeoutSeconds = 1200;
+
+    /**
+     * 历史上下文总字符预算（软限制）：按最近消息优先保留；{@code <=0} 表示不限制。
+     * 仅用于模型输入，不影响数据库中的完整消息。
+     */
+    private int historyContextMaxChars = 10_000;
+
+    /**
+     * 单条历史消息字符预算（软限制）：先截断单条消息，再受总预算约束；{@code <=0} 表示不限制。
+     */
+    private int historyMessageMaxChars = 2_000;
+
+    /**
      * 自动审查链：链首意图（如 aisplit）写库成功后自动 handoff 给 intent-scene-review 出审查卡。
      * 空=关闭（默认，行为与现状一致）；示例 {@code [aisplit]}。
      */

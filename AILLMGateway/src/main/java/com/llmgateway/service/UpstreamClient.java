@@ -139,7 +139,7 @@ public class UpstreamClient {
         }
     }
 
-    /** 带重试的 send：429/5xx 重试 retryCount 次（指数退避） */
+    /** 带重试的 send：仅 429/5xx 重试 retryCount 次（指数退避）；连接/超时异常不重试 */
     private HttpResponse<String> sendWithRetry(HttpRequest request) {
         int retries = config.getUpstream().getRetryCount();
         HttpResponse<String> resp = null;
@@ -147,9 +147,7 @@ public class UpstreamClient {
             try {
                 resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             } catch (Exception e) {
-                if (attempt == retries) throw new RuntimeException("上游请求失败: " + e.getMessage(), e);
-                sleep((long)(1000L * (1L << attempt)) + ThreadLocalRandom.current().nextInt(500));
-                continue;
+                throw new RuntimeException("上游请求失败: " + e.getMessage(), e);
             }
             int code = resp.statusCode();
             if (code != 429 && code < 500) return resp;

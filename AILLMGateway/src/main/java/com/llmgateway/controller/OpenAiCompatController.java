@@ -33,10 +33,11 @@ public class OpenAiCompatController {
     @PostMapping(value = "/chat/completions", produces = {
             MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public void chatCompletions(@RequestBody String body,
+                                @RequestHeader(value = "X-Call-Id", required = false) String callId,
                                 jakarta.servlet.http.HttpServletResponse response) throws Exception {
         boolean stream = body != null && body.contains("\"stream\":true");
         if (!stream) {
-            RouteResult result = routingService.route("/chat/completions", body);
+            RouteResult result = routingService.route("/chat/completions", body, callId);
             response.setStatus(result.status());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
@@ -57,7 +58,7 @@ public class OpenAiCompatController {
             } catch (java.io.IOException e) {
                 throw new RuntimeException(e); // 客户端断开：中断转发
             }
-        });
+        }, callId);
     }
 
     @PostMapping(value = "/images/generations", produces = MediaType.APPLICATION_JSON_VALUE)

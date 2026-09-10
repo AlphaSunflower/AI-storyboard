@@ -5,6 +5,7 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.SuggestedAction;
@@ -15,6 +16,7 @@ import com.moon.moonagent.ai.agent.storyboard.StoryboardPortfolioService;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardReferenceBinding;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardReferenceRole;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardScenePlan;
+import com.moon.moonagent.ai.agent.storyboard.SceneDurationPlanner;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.ScriptGenerationService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -76,7 +78,8 @@ public class AisplitIntentHandler implements IntentHandler {
     public Set<String> resumeActions() {
         // agree/replace/append/cancel/disagree：方案确认卡片（checkpoint action 恒为 agree）的写库策略选项；
         // scene-mode-* 与 scene-regenerate 的 custom 选项是动态 id，走 Orchestrator 特判，不注册
-        return Set.of("agree", "replace", "append", "cancel", "disagree");
+        return Set.of("agree", "replace", "append", "cancel", "disagree",
+                "expand-confirm", "expand-original", "expand-refine");
     }
 
     @Override
@@ -85,6 +88,10 @@ public class AisplitIntentHandler implements IntentHandler {
         log.info("[分镜] handle 素材: picUrls={}, assetIds={}, sessionAssets={}",
                 request.getPicUrls(), request.getAssetIds(),
                 support.getSessionAssets(request.getConversation().getId()));
+        // 扩写门禁：分镜链第一步 = 扩写/优化剧情 → 人工审核（指定/选择分镜优化不扩写）
+        if (shouldExpand(request)) {
+            return runExpandGate(request, request.getContent());
+        }
         // 不再弹「检测到资产库，本次生成分镜要使用哪些资产？（可多选）」门禁——该交互无意义。
         // 改为：用户本次上传了素材（PicUrls）或勾选了资产（assetIds）→ 走素材绑定+分镜方案设计前置增强；
         // 否则走常规文本生成链。素材用途随上传携带（text 字段）或从聊天文字说明提取。
@@ -116,16 +123,24 @@ public class AisplitIntentHandler implements IntentHandler {
             List<AssetVO> chosen = support.pickAssets(
                     storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
                     effective);
-            support.sendEvent(request, "workflow", Map.of("title", "正在分析素材…", "status", "node_started"));
+            support.sendWorkflowEvent(request, "analyze_material", "正在分析素材…", "node_started");
+            publishStageReasoning(request, "正在识别参考图与剧情的对应关系，并整理每个素材的用途。");
             List<StoryboardReferenceBinding> bindings = portfolioService.bindMaterials(
                     content, picUrls, chosen,
                     support.referenceMaterialPurposes(request.getConversation().getId()),
-                    support.referenceMaterialKinds(request.getConversation().getId()));
-            support.sendEvent(request, "workflow", Map.of("title", "正在设计分镜方案…", "status", "node_started"));
-            plan = portfolioService.designPlan(content, bindings);
+                    support.referenceMaterialKinds(request.getConversation().getId()),
+                    snapshot -> support.publishReasoning(request, snapshot));
+            support.sendWorkflowEvent(request, "design_storyboard_plan", "正在设计分镜方案…", "node_started");
+            publishStageReasoning(request, "已完成素材绑定，正在安排素材进入分镜并确定参考角色。");
+            plan = portfolioService.designPlan(content, bindings,
+                    snapshot -> support.publishReasoning(request, snapshot));
         } catch (Exception e) {
             log.warn("[分镜] 素材整理/方案设计失败，回退常规分镜链（资产已保留）: {}", e.getMessage());
-            return continueAisplit(request, content);
+            return handleFromPlanGate(request, content, effective);
+        }
+        if (plan == null || plan.scenes().isEmpty()) {
+            log.warn("[分镜] 素材方案不可用，回退常规分镜分批生成（资产已保留）");
+            return handleFromPlanGate(request, content, effective);
         }
         String bridged = content + "\n\n【分镜素材编排（已由方案设计师编排，不得违背）】\n"
                 + blueprintText(plan);
@@ -178,6 +193,7 @@ public class AisplitIntentHandler implements IntentHandler {
             m.put("cameraMovement", nvl(item.cameraMovement(), ""));
             m.put("shotType", nvl(item.shotType(), "全景"));
             m.put("soundDesign", nvl(item.soundDesign(), ""));
+            if (item.duration() != null) m.put("duration", item.duration());
             m.put("referenceBindings", List.of());
             out.add(m);
         }
@@ -245,7 +261,7 @@ public class AisplitIntentHandler implements IntentHandler {
      * type=1（需求已明确）→ 直接跳过进 handleFromScriptGate；type=0 → 发 HITL 选项卡片暂停。
      */
     private String handleFromClarifyGate(OrchestrationRequest request, String content, List<String> assetIds) {
-        support.sendEvent(request, "workflow", Map.of("title", "正在分析需求…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "analyze_requirement", "正在分析需求…", "node_started");
         AgentOrchestratorSupport.ScriptOptimizeResult clarify = support.callRequirementClarify(content, request);
         if (clarify != null && clarify.type() == 0) {
             // 需求模糊 → 多维度澄清卡片（用户可选或自定义输入）
@@ -288,7 +304,8 @@ public class AisplitIntentHandler implements IntentHandler {
         //    （剧本优化 gate、分镜方案、分镜 JSON 全部基于拼后的内容；checkpoint plan 仍存原始 content，resume 不重复拼）
         content = content + support.historyContext(request.getConversation().getId(), 15);
         // 1. 剧本优化（手动澄清循环：type=0 追问结束本轮 / type=1 继续；message 字段已流式增量转发）
-        support.sendEvent(request, "workflow", Map.of("title", "正在优化剧本…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "expand_script", "正在优化剧本…", "node_started");
+        publishStageReasoning(request, "正在分析剧情需求，并优化为更完整、可落地的分镜剧本。");
         AgentOrchestratorSupport.ScriptOptimizeResult opt = support.callScriptOptimize(content, request);
         String script;
         if (opt == null || opt.type() == 0) {
@@ -345,7 +362,7 @@ public class AisplitIntentHandler implements IntentHandler {
                                      List<Map<String, Object>> sceneBindings,
                                      List<AgentSceneItem> fallbackSceneItems) {
         // 2. 分镜方案设计（结构化 message，流式增量转发）
-        support.sendEvent(request, "workflow", Map.of("title", "正在设计分镜方案…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "design_storyboard_plan", "正在设计分镜方案…", "node_started");
         AgentOrchestratorSupport.StoryboardPlanResult plan = null;
         if (!skipDesignGate) {
             plan = support.callStoryboardPlan(script, request);
@@ -363,7 +380,8 @@ public class AisplitIntentHandler implements IntentHandler {
 
         // 3. 分镜 JSON（复用 ScriptGenerationService：LLM 生成 8 字段分镜列表；
         // assetIds 非 null 时只注入勾选资产设定集——空=用户不使用资产不注入，null=全量旧行为）
-        support.sendEvent(request, "workflow", Map.of("title", "正在生成分镜…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "generate_storyboard", "正在生成分镜…", "node_started");
+        publishStageReasoning(request, "正在生成分镜脚本、画面提示词、运镜与声音设计。");
         String projectId = request.getConversation().getProjectId();
         List<Map<String, Object>> preSceneMaps = fallbackSceneItems == null || fallbackSceneItems.isEmpty()
                 ? List.of()
@@ -371,32 +389,33 @@ public class AisplitIntentHandler implements IntentHandler {
         List<AssetVO> chosen = support.pickAssets(storyboardClient.getProjectAssets(request.getConversation().getProjectId()),
                 assetIds == null ? List.of() : assetIds);
 
-        // 并行优化 1：分镜 JSON、自动资产关联、参数推荐互不依赖，放虚拟线程并发（失败各自兜底，不阻塞）。
-        // asset 关联在素材编排路径可先用 portfolio 的 fallbackSceneItems 提前匹配，避免等 generateScenes 串行。
-        CompletableFuture<List<Map<String, Object>>> scenesFuture = CompletableFuture.supplyAsync(() -> {
-            try {
-                var generated = scriptGenerationService.generateScenesWithReasoning(
-                        projectId, script, "movie", null, "16:9", null, null, null,
-                        assetIds == null || assetIds.isEmpty() ? java.util.Collections.emptyList() : assetIds);
-                if (generated.reasoning() != null) {
-                    request.setReasoning(generated.reasoning());
-                    if (request.getTrace() != null) request.getTrace().reasoning(generated.reasoning());
-                }
-                return generated.scenes();
-            } catch (Exception e) {
-                log.warn("分镜 JSON 生成失败，走设计方案兜底: {}", e.getMessage());
-                return fallbackSceneItems == null || fallbackSceneItems.isEmpty()
-                        ? List.of()
-                        : fallbackItemsToMaps(fallbackSceneItems, projectId);
-            }
-        }, agentExecutor);
+        // 素材编排路径已由方案设计师产出标准分镜，直接复用，避免再次调用整套分镜生成。
+        // 无设计方案时才走 ScriptGenerationService；资产关联与参数推荐仍可并行。
+        CompletableFuture<List<Map<String, Object>>> scenesFuture = preSceneMaps.isEmpty()
+                ? CompletableFuture.supplyAsync(() -> {
+                    try {
+                        var generated = scriptGenerationService.generateScenesWithReasoning(
+                                projectId, script, "movie", null, "16:9", null, null, null,
+                                assetIds == null || assetIds.isEmpty() ? java.util.Collections.emptyList() : assetIds);
+                        if (generated.reasoning() != null) {
+                            request.setReasoning(generated.reasoning());
+                            if (request.getTrace() != null) request.getTrace().reasoning(generated.reasoning());
+                            support.publishReasoning(request, generated.reasoning());
+                        }
+                        return generated.scenes();
+                    } catch (Exception e) {
+                        log.warn("分镜 JSON 生成失败，走空结果兜底: {}", e.getMessage());
+                        return List.<Map<String, Object>>of();
+                    }
+                }, agentExecutor)
+                : CompletableFuture.completedFuture(preSceneMaps);
 
-        support.sendEvent(request, "workflow", Map.of("title", "正在关联资产…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "match_assets", "正在关联资产…", "node_started");
         CompletableFuture<List<SceneAssetMatch>> assetFuture = null;
         if (!chosen.isEmpty() && !preSceneMaps.isEmpty()) {
             assetFuture = CompletableFuture.supplyAsync(() -> assetMatchingService.matchScenes(preSceneMaps, chosen), agentExecutor);
         }
-        support.sendEvent(request, "workflow", Map.of("title", "正在推荐生成参数…", "status", "node_started"));
+        support.sendWorkflowEvent(request, "recommend_params", "正在推荐生成参数…", "node_started");
         CompletableFuture<AgentOrchestratorSupport.SceneParamsRecommendation> recFuture =
                 CompletableFuture.supplyAsync(() -> support.recommendSceneParams(script, request), agentExecutor);
 
@@ -406,6 +425,7 @@ public class AisplitIntentHandler implements IntentHandler {
             return request.getLastMessage();
         }
         List<Map<String, Object>> effectiveBindings = alignSceneBindings(sceneBindings, scenes);
+        String durationNote = applyExplicitDurationBudget(request, script, scenes);
 
         // 3.5 自动关联判定：分镜列表 + 勾选资产 → 每镜出现的资产（单独 LLM 调用；失败降级不关联，不阻塞）
         // 结果写进 scenes 的 assetIds 字段随 checkpoint plan 落库，写库时按分镜号写 scene_assets
@@ -451,6 +471,9 @@ public class AisplitIntentHandler implements IntentHandler {
         }
         if (!matches.isEmpty()) {
             planText += "\n\n🔗 建议资产关联：\n" + buildMatchSummary(matches, chosen);
+        }
+        if (!durationNote.isBlank()) {
+            planText += "\n\n" + durationNote;
         }
         if (existing > 0) {
             // 覆盖导入会删除现有分镜及其产出素材——卡片正文前置警告；部分替换时说明只更新选中分镜
@@ -505,9 +528,48 @@ public class AisplitIntentHandler implements IntentHandler {
         return true;
     }
 
+    /**
+     * 用户明确给出总时长时，按分镜正文权重分配逐镜时长并写入方案。
+     * 时长不可行时保留模型推荐参数，只在确认卡追加原因，避免静默改写用户目标。
+     */
+    private String applyExplicitDurationBudget(OrchestrationRequest request, String script,
+                                               List<Map<String, Object>> scenes) {
+        if (scenes == null || scenes.isEmpty()) return "";
+
+        Integer totalSeconds = SceneDurationPlanner.parseTotalSeconds(script);
+        if (totalSeconds == null && request != null) {
+            totalSeconds = SceneDurationPlanner.parseTotalSeconds(request.getContent());
+            if (totalSeconds == null && request.getConversation() != null) {
+                totalSeconds = SceneDurationPlanner.parseTotalSeconds(
+                        support.historyContext(request.getConversation().getId(), 15));
+            }
+        }
+        if (totalSeconds == null) return "";
+
+        List<String> contents = scenes.stream()
+                .map(scene -> scene == null ? "" : String.valueOf(scene.getOrDefault("scriptContent", "")))
+                .toList();
+        SceneDurationPlanner.Allocation allocation = SceneDurationPlanner.allocate(totalSeconds, contents);
+        if (!allocation.feasible()) {
+            log.warn("目标总时长分配不可行: total={}s, scenes={}, reason={}",
+                    totalSeconds, scenes.size(), allocation.message());
+            return "⚠ " + allocation.message();
+        }
+
+        for (int i = 0; i < scenes.size(); i++) {
+            scenes.get(i).put("duration", allocation.durations().get(i));
+        }
+        return "⏱ 已按目标总时长 " + totalSeconds + " 秒分配逐镜时长，合计 "
+                + allocation.durations().stream().mapToInt(Integer::intValue).sum() + " 秒。";
+    }
+
     @Override
     public String resume(OrchestrationRequest request, AgentCheckpoint checkpoint) {
         restoreMaterialsIfEmpty(request);
+        // 剧本优化审核卡续流（expand-confirm / expand-original / expand-refine）
+        if ("expand-review".equals(checkpoint.getAction())) {
+            return resumeExpand(request, checkpoint);
+        }
         // 资产选择卡片（asset-selection）：记录勾选 → 关联性门禁 → 进入正式分镜链（source=aisplit 由 Orchestrator 分派）
         if ("asset-selection".equals(checkpoint.getAction())) {
             String content = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
@@ -766,6 +828,11 @@ public class AisplitIntentHandler implements IntentHandler {
             if (effectiveParams == null || effectiveParams.isEmpty()) {
                 effectiveParams = support.planRecommendedParams(checkpoint.getPlan());
             }
+            boolean sceneDurationsPersisted = items.stream().anyMatch(item -> item.duration() != null);
+            if (sceneDurationsPersisted && effectiveParams != null && !effectiveParams.isEmpty()) {
+                effectiveParams = new java.util.LinkedHashMap<>(effectiveParams);
+                effectiveParams.remove("videoDuration");
+            }
             support.applySceneParamsToProject(request.getConversation().getProjectId(), effectiveParams);
         }
         // 写库成功后自动关联 scene_assets：按分镜号匹配 checkpoint plan 里的资产关联结果（matchScenes 判定），
@@ -840,6 +907,127 @@ public class AisplitIntentHandler implements IntentHandler {
             request.setPicUrls(urls);
             log.info("[分镜] 前端未携带参考图，已从会话资产找回 {} 张: {}", urls.size(), urls);
         }
+    }
+
+    // ================= 扩写门禁（分镜链第一步：扩写/优化剧情 → 人工审核） =================
+
+    /** 是否走剧本优化门禁：仅新鲜分镜请求（非「指定/选择分镜优化」、非空文本）。续流走 resume，不进 handle。 */
+    private boolean shouldExpand(OrchestrationRequest request) {
+        String content = request.getContent();
+        if (content == null || content.isBlank()) return false;
+        return !isSceneSelectionIntent(content);
+    }
+
+    /** 剧本优化门禁：调剧本优化师生成优化后剧本 → 弹人工审核卡，checkpoint action=expand-review。 */
+    private String runExpandGate(OrchestrationRequest request, String content) {
+        support.sendWorkflowEvent(request, "optimize_script", "正在优化剧本…", "node_started");
+        publishStageReasoning(request, "正在分析原始剧情，并扩写为可直接生成视频的连续镜头。");
+        String optimized = callExpand(request, content, null, null);
+        if (optimized == null || optimized.isBlank() || optimized.length() < 10) {
+            support.sendWorkflowEvent(request, "expand_script", "优化失败", "node_failed");
+            return support.sendFriendlyError(request, "stream empty", "剧本优化方案暂时没生成出来，请稍后重试或补充更多剧情。");
+        }
+        return showExpandCard(request, content, optimized, 0);
+    }
+
+    /** 剧本优化审核卡：展示优化后剧本 + 完成扩写/按原提示词生成/继续完善；rounds 为已完成的优化轮数。 */
+    private String showExpandCard(OrchestrationRequest request, String content, String optimized, int rounds) {
+        support.sendWorkflowEvent(request, "expand_script", "优化完成", "node_finished");
+        String planText = "优化后的剧本（请审核）：\n\n" + optimized
+                + "\n\n请选择：完成扩写（替换原提示词继续）/ 按照原提示词生成 / 继续完善。";
+        List<Map<String, Object>> actions = List.of(
+                Map.of("id", "expand-confirm", "title", "完成扩写"),
+                Map.of("id", "expand-original", "title", "按照原提示词生成"),
+                Map.of("id", "expand-refine", "title", "继续完善"));
+        List<String> assetIds = effectiveAssetIds(request);
+        List<String> picUrls = request.getPicUrls() == null ? List.of() : request.getPicUrls();
+        support.setSessionAssets(request.getConversation().getId(), assetIds);
+        // 参考图/资产随 checkpoint 落库，resume 后原样透传给下一节点（图片、资产不丢失）
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                planText, "expand-review",
+                List.of(Map.of("content", content, "expanded", optimized,
+                        "assetIds", assetIds, "picUrls", picUrls, "rounds", rounds)),
+                "human_input",
+                support.buildHITLCard(request, planText, actions),
+                List.of(), Map.of(), Map.of()));
+    }
+
+    /** 剧本优化审核卡续流：完成扩写/按原提示词生成 → 进下一节点；继续完善/自定义 → 结合反馈重新优化（达上限则回退继续）。 */
+    private String resumeExpand(OrchestrationRequest request, AgentCheckpoint checkpoint) {
+        String action = request.getAction();
+        String content = support.planField(checkpoint.getPlan(), PlanField.CONTENT);
+        String optimized = support.planField(checkpoint.getPlan(), "expanded");
+        List<String> assetIds = AgentOrchestratorSupport.planAssetIds(checkpoint.getPlan());
+        if (assetIds.isEmpty()) assetIds = effectiveAssetIds(request);
+        List<String> picUrls = support.planPicUrls(checkpoint.getPlan());
+        if (!picUrls.isEmpty()) request.setPicUrls(picUrls); // 恢复本次上传的参考图
+        support.setSessionAssets(request.getConversation().getId(), assetIds);
+        int rounds = parseIntSafe(support.planField(checkpoint.getPlan(), "rounds"));
+
+        // 完成扩写：用优化后的剧本替换原提示词，进下一节点（分镜方案设计）
+        if ("expand-confirm".equals(action)) {
+            if (optimized == null || optimized.isBlank()) {
+                return support.sendFriendlyError(request, "expanded blank", "优化后的剧本丢失，请重新优化。");
+            }
+            support.sendMessage(request, "已用优化后的剧本继续。");
+            return proceedFromExpand(request, optimized, assetIds);
+        }
+        // 按照原提示词生成：不采用优化结果，直接用用户原始提示词进下一节点
+        if ("expand-original".equals(action)) {
+            support.sendMessage(request, "按原提示词继续生成。");
+            return proceedFromExpand(request, content, assetIds);
+        }
+        // 继续完善 / 自定义输入：结合反馈重新优化
+        String feedback = "expand-refine".equals(action) ? "用户希望进一步完善/优化剧本。" : request.getCustomText();
+        if (feedback == null) feedback = "";
+        if (rounds >= agentConfig.getMaxRegenerateRounds()) {
+            support.sendMessage(request, "已多次尝试完善剧本，建议直接「完成扩写」继续，或换个话题重新开始。");
+            return proceedFromExpand(request, optimized, assetIds);
+        }
+        support.sendWorkflowEvent(request, "refine_script", "正在完善剧本…", "node_started");
+        publishStageReasoning(request, "正在根据你的修改意见继续完善剧本与镜头节奏。");
+        String refined = callExpand(request, content, optimized, feedback);
+        if (refined == null || refined.isBlank() || refined.length() < 10) {
+            support.sendWorkflowEvent(request, "refine_script", "优化失败", "node_failed");
+            return support.sendFriendlyError(request, "stream empty", "剧本优化完善失败，请稍后重试。");
+        }
+        return showExpandCard(request, content, refined, rounds + 1);
+    }
+
+    /** 用选定剧本（优化后或原提示词）继续：有素材/资产走素材绑定+分镜方案，否则直接分镜方案设计；图片/资产透传。 */
+    private String proceedFromExpand(OrchestrationRequest request, String script, List<String> assetIds) {
+        if (hasMaterials(request)) {
+            return handleMaterialBoundStoryboard(request, script, request.getPicUrls(), assetIds);
+        }
+        return handleFromPlanGate(request, script, assetIds);
+    }
+
+    /** 调剧本优化师 LLM：输入原生剧情 + 对话历史 + 上一版优化 + 用户反馈（非流式取文本，无 SSE 副作用）。 */
+    private String callExpand(OrchestrationRequest request, String content, String previous, String feedback) {
+        String system = support.prompt(request, "expand", "orchestrator/expand", null);
+        StringBuilder user = new StringBuilder();
+        user.append("用户剧情/想法：\n").append(content == null ? "" : content).append("\n");
+        String history = support.historyContext(request.getConversation().getId(), 15);
+        if (history != null && !history.isBlank()) {
+            user.append("\n\n【对话历史参考】\n").append(history);
+        }
+        if (previous != null && !previous.isBlank()) {
+            user.append("\n\n【上一版扩写方案】\n").append(previous);
+        }
+        if (feedback != null && !feedback.isBlank()) {
+            user.append("\n\n【用户修改意见】\n").append(feedback);
+        }
+        return support.callPlainText(system, user.toString(), request,
+                "已完成剧本扩写，正在整理剧情结构与镜头节奏。");
+    }
+
+    private static int parseIntSafe(String s) {
+        if (s == null || s.isBlank()) return 0;
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return 0; }
+    }
+
+    private void publishStageReasoning(OrchestrationRequest request, String details) {
+        support.publishReasoning(request, new AgentReasoningSnapshot(details, details, 0L, "stage"));
     }
 
     /** 是否为「指定/选择/哪些分镜」意图（需要让用户选分镜，而非全量优化）；命中返回 true */
@@ -958,11 +1146,12 @@ public class AisplitIntentHandler implements IntentHandler {
         List<SceneAssetMatch> matches = support.parsePlanAssetMatches(checkpoint.getPlan());
         if (matches.isEmpty()) return;
         try {
-            List<Scene> scenes = storyboardClient.getProjectScenes(
-                    request.getConversation().getProjectId());
-            for (Scene s : scenes) {
-                matches.stream().filter(m -> m.sceneNumber() == s.getSceneNumber()).findFirst()
-                        .ifPresent(m -> storyboardClient.linkSceneAssets(s.getId(), m.assetIds()));
+            List<AgentSceneItem> planItems = support.parsePlanScenes(checkpoint.getPlan());
+            Map<Integer, Scene> sceneByPlanNumber = resolvePlanSceneMap(
+                    planItems, storyboardClient.getProjectScenes(request.getConversation().getProjectId()));
+            for (SceneAssetMatch match : matches) {
+                Scene scene = sceneByPlanNumber.get(match.sceneNumber());
+                if (scene != null) storyboardClient.linkSceneAssets(scene.getId(), match.assetIds());
             }
         } catch (Exception e) {
             log.warn("分镜资产自动关联失败，跳过（分镜不受影响）: {}", e.getMessage());
@@ -984,11 +1173,13 @@ public class AisplitIntentHandler implements IntentHandler {
                     }
                 }
             }
-            List<Scene> scenes = storyboardClient.getProjectScenes(request.getConversation().getProjectId());
+            List<AgentSceneItem> planItems = support.parsePlanScenes(checkpoint.getPlan());
+            Map<Integer, Scene> sceneByPlanNumber = resolvePlanSceneMap(
+                    planItems, storyboardClient.getProjectScenes(request.getConversation().getProjectId()));
             for (Map<String, Object> binding : bindings) {
                 int num = binding.get("sceneNumber") instanceof Number n ? n.intValue()
                         : Integer.parseInt(String.valueOf(binding.getOrDefault("sceneNumber", "0")));
-                Scene scene = scenes.stream().filter(s -> s.getSceneNumber() == num).findFirst().orElse(null);
+                Scene scene = sceneByPlanNumber.get(num);
                 if (scene == null) continue;
                 int linkedRefs = 0;
                 for (StoryboardReferenceBinding ref : parseReferenceBindings(binding.get("referenceBindings"))) {
@@ -1043,14 +1234,40 @@ public class AisplitIntentHandler implements IntentHandler {
         List<AgentSceneItem> items = support.parsePlanScenes(checkpoint.getPlan());
         if (items.isEmpty()) return;
         try {
-            List<Scene> scenes = storyboardClient.getProjectScenes(request.getConversation().getProjectId());
+            Map<Integer, Scene> sceneByPlanNumber = resolvePlanSceneMap(
+                    items, storyboardClient.getProjectScenes(request.getConversation().getProjectId()));
             for (AgentSceneItem item : items) {
-                scenes.stream().filter(s -> s.getSceneNumber() == item.sceneNumber()).findFirst()
-                        .ifPresent(s -> storyboardClient.linkSceneAssets(s.getId(), ids));
+                Scene scene = sceneByPlanNumber.get(item.sceneNumber());
+                if (scene != null) storyboardClient.linkSceneAssets(scene.getId(), ids);
             }
         } catch (Exception e) {
             log.warn("分镜资产兜底关联失败，跳过（分镜不受影响）: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 方案编号 → 写库后实际分镜。覆盖写会清空旧分镜并从 1 重新编号，
+     * 因此不能直接按方案里的 sceneNumber 查询；优先精确匹配，缺失时按方案顺序回退。
+     */
+    static Map<Integer, Scene> resolvePlanSceneMap(List<AgentSceneItem> planItems,
+                                                   List<Scene> actualScenes) {
+        if (planItems == null || planItems.isEmpty() || actualScenes == null || actualScenes.isEmpty()) {
+            return Map.of();
+        }
+        List<Scene> ordered = new java.util.ArrayList<>(actualScenes);
+        ordered.sort(java.util.Comparator.comparingInt(Scene::getSceneNumber));
+        Map<Integer, Scene> byNumber = new java.util.HashMap<>();
+        for (Scene scene : ordered) {
+            byNumber.putIfAbsent(scene.getSceneNumber(), scene);
+        }
+        Map<Integer, Scene> out = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < planItems.size(); i++) {
+            AgentSceneItem item = planItems.get(i);
+            Scene target = byNumber.get(item.sceneNumber());
+            if (target == null && i < ordered.size()) target = ordered.get(i);
+            if (target != null) out.putIfAbsent(item.sceneNumber(), target);
+        }
+        return out;
     }
 
     /** 不满意调整上限判定：本次 +1；达上限返回 true（调用方提示后结束，不再弹卡片）并清零计数 */

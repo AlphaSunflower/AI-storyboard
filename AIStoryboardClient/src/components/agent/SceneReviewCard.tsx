@@ -76,7 +76,7 @@ function sceneBuiltValueFor(s: SceneConfigLike, kind: 'image' | 'video') {
   return out;
 }
 
-const isSceneReview = (info: HumanInputInfo) =>
+export const isSceneReview = (info: HumanInputInfo) =>
   Array.isArray(info.assets) && info.assets.length > 0 &&
   info.assets.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined));
 
@@ -87,7 +87,7 @@ const isSceneReview = (info: HumanInputInfo) =>
  * 选择指定资产 + 查看已投参考物 + 状态徽标。批量区提供「生成图片」「生成视频」「优化方案」，
  * 全部作用于勾选分镜。卡片整体限高可滚动，避免遮挡下方输入框。
  */
-export function SceneReviewCard({ info }: { info: HumanInputInfo }) {
+export function SceneReviewCard({ info, startExpanded = false }: { info: HumanInputInfo; startExpanded?: boolean }) {
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const streaming = useAgentStore((s) => s.streaming);
@@ -130,7 +130,7 @@ export function SceneReviewCard({ info }: { info: HumanInputInfo }) {
   const [refineFor, setRefineFor] = useState<string | null>(null);
   const [confirmGenImage, setConfirmGenImage] = useState(false);
   const [pane, setPane] = useState<'image' | 'video'>('image');
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(!startExpanded);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, Record<'image' | 'video', string>>>(() =>
     Object.fromEntries(items.map((i) => [i.id, {

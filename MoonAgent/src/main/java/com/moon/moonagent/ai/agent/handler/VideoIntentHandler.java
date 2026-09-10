@@ -252,7 +252,7 @@ public class VideoIntentHandler implements IntentHandler {
             // 网关模型列表（卡片参数选择器用）+ LLM 选参选项文本（网关不可用时为空）
             List<Map<String, Object>> models = support.buildModels("video");
             String modelOptionsText = support.buildModelOptionsText("video");
-            support.sendEvent(request, "workflow", Map.of("title", "正在设计视频方案…", "status", "node_started"));
+            support.sendWorkflowEvent(request, "design_video_plan", "正在设计视频方案…", "node_started");
             // 勾选资产设定集：文字拼入方案输入（视觉模型/LLM 都按设定生成，人物外貌/道具/场景不得改变）；
             // 方案输入同时拼最近会话上下文（用户可能只说「重新生成」，完整需求在历史消息里）
             List<AssetVO> chosen = support.pickAssets(

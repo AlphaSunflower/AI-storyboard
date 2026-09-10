@@ -10,6 +10,11 @@ public interface GatewayRoutingService {
     /** 处理 OpenAI 兼容 chat/images 请求（path 为 /chat/completions 或 /images/generations） */
     RouteResult route(String path, String requestBody);
 
+    /** 带逻辑调用 ID 的同步路由；旧调用点不传 ID 时保持原行为。 */
+    default RouteResult route(String path, String requestBody, String callId) {
+        return route(path, requestBody);
+    }
+
     /**
      * 处理 OpenAI 兼容 chat 流式请求（stream=true）：上游 SSE 响应逐块透传。
      *
@@ -22,6 +27,12 @@ public interface GatewayRoutingService {
      * @throws Exception    上游失败或渠道耗尽时抛出（调用方转错误响应）
      */
     void streamChat(String path, String requestBody, java.util.function.Consumer<byte[]> sink) throws Exception;
+
+    /** 带逻辑调用 ID 的流式路由；旧调用点不传 ID 时保持原行为。 */
+    default void streamChat(String path, String requestBody,
+                            java.util.function.Consumer<byte[]> sink, String callId) throws Exception {
+        streamChat(path, requestBody, sink);
+    }
 
     /**
      * 拉取可用模型列表（OpenAI 风格 JSON 字符串 {object:"list",data:[{id,object,type,params}]}）。

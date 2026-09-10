@@ -10,6 +10,7 @@ public record CallLogVO(
         String status,
         Long durationMs,
         String error,
+        String callId,
         String videoUrl,
         String taskId,
         OffsetDateTime createdAt
