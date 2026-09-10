@@ -18,8 +18,10 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
+      - name: Install common-core
+        run: mvn -B -q -f CommonCore/pom.xml install -DskipTests
       - name: Maven test
         run: mvn -B -q -f ${{ matrix.module }}/pom.xml test
       # 上传 surefire 报告（测试失败时可在 Actions 页面直接查看失败详情）
