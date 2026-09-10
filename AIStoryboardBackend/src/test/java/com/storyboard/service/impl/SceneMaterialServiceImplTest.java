@@ -143,6 +143,89 @@ class SceneMaterialServiceImplTest {
         verify(assetService, never()).setSceneAssets(any(), any(), any(), any());
     }
 
+    @Test
+    void linkReferences_appendsOutputImage_withoutReplacingUploadsOrAssets() {
+        SceneReferenceImage upload = ref("r-upload", "upload", "upload-1", null, "/api/files/images/user.png");
+        when(referenceMapper.findBySceneId("s1")).thenReturn(List.of(upload));
+
+        AgentAsset outputRecord = new AgentAsset();
+        outputRecord.setId("out-1");
+        outputRecord.setConversationId("c1");
+        outputRecord.setType("image");
+        outputRecord.setStatus("completed");
+        outputRecord.setUrl("/api/files/images/output.png");
+        outputRecord.setResultUrls("[\"/api/files/images/output.png\"]");
+        when(agentAssetMapper.findOwnedOutputRecord("u1", "p1", "out-1")).thenReturn(outputRecord);
+
+        List<com.storyboard.dto.response.SceneReferenceResponse> result = service.linkReferences(
+                "u1", "s1",
+                List.of(new SceneMaterialReferenceRequest(
+                        "image", "image", "/api/files/images/output.png", "REFERENCE",
+                        "output", "out-1", "c1")));
+
+        verify(assetService, never()).setSceneAssets(any(), any(), any(), any());
+        verify(referenceMapper, never()).deleteById(any(Serializable.class));
+        ArgumentCaptor<SceneReferenceImage> inserted = ArgumentCaptor.forClass(SceneReferenceImage.class);
+        verify(referenceMapper).insert(inserted.capture());
+        assertEquals("output", inserted.getValue().getSourceType());
+        assertEquals("out-1", inserted.getValue().getSourceId());
+        assertEquals("c1", inserted.getValue().getSourceConversationId());
+        assertEquals("/api/files/images/output.png", result.get(0).url());
+    }
+
+    @Test
+    void linkReferences_skipsDuplicateExistingUrl() {
+        SceneReferenceImage existing = ref(
+                "r-output", "output", "out-1", "c1", "/api/files/images/output.png");
+        when(referenceMapper.findBySceneId("s1")).thenReturn(List.of(existing));
+
+        AgentAsset outputRecord = new AgentAsset();
+        outputRecord.setId("out-1");
+        outputRecord.setConversationId("c1");
+        outputRecord.setType("image");
+        outputRecord.setStatus("completed");
+        outputRecord.setUrl("/api/files/images/output.png");
+        outputRecord.setResultUrls("[\"/api/files/images/output.png\"]");
+        when(agentAssetMapper.findOwnedOutputRecord("u1", "p1", "out-1")).thenReturn(outputRecord);
+
+        List<com.storyboard.dto.response.SceneReferenceResponse> result = service.linkReferences(
+                "u1", "s1",
+                List.of(new SceneMaterialReferenceRequest(
+                        "image", "image", "/api/files/images/output.png", "REFERENCE",
+                        "output", "out-1", "c1")));
+
+        verify(referenceMapper, never()).insert(any(SceneReferenceImage.class));
+        assertEquals("r-output", result.get(0).id());
+    }
+
+    @Test
+    void linkReferences_allowsSameOutputUrlForDifferentPurpose() {
+        SceneReferenceImage videoReference = ref(
+                "r-video", "output", "out-1", "c1", "/api/files/images/output.png");
+        videoReference.setPurpose("video");
+        when(referenceMapper.findBySceneId("s1")).thenReturn(List.of(videoReference));
+
+        AgentAsset outputRecord = new AgentAsset();
+        outputRecord.setId("out-1");
+        outputRecord.setConversationId("c1");
+        outputRecord.setType("image");
+        outputRecord.setStatus("completed");
+        outputRecord.setUrl("/api/files/images/output.png");
+        outputRecord.setResultUrls("[\"/api/files/images/output.png\"]");
+        when(agentAssetMapper.findOwnedOutputRecord("u1", "p1", "out-1")).thenReturn(outputRecord);
+
+        List<com.storyboard.dto.response.SceneReferenceResponse> result = service.linkReferences(
+                "u1", "s1",
+                List.of(new SceneMaterialReferenceRequest(
+                        "image", "image", "/api/files/images/output.png", "REFERENCE",
+                        "output", "out-1", "c1")));
+
+        ArgumentCaptor<SceneReferenceImage> inserted = ArgumentCaptor.forClass(SceneReferenceImage.class);
+        verify(referenceMapper).insert(inserted.capture());
+        assertEquals("image", inserted.getValue().getPurpose());
+        assertEquals("image", result.get(0).purpose());
+    }
+
     private static SceneReferenceImage ref(String id, String sourceType, String sourceId,
                                            String sourceConversationId, String url) {
         SceneReferenceImage ref = new SceneReferenceImage();

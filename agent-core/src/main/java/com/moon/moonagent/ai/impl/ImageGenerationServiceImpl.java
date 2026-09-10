@@ -9,6 +9,8 @@ import com.moon.moonagent.ai.ImageGenerationService;
 import com.moon.moonagent.ai.SceneGenerationBridge;
 import com.moon.moonagent.ai.SceneView;
 import com.storyboard.common.MultipartBuilder;
+import com.storyboard.common.image.SeedreamImageExecutor;
+import com.storyboard.common.image.SeedreamImageProtocol;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +41,7 @@ import com.storyboard.common.BusinessException;
 public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(ImageGenerationServiceImpl.class);
+    private static final Duration SEEDREAM_TIMEOUT = Duration.ofSeconds(900);
 
     /**
      * 合法生图尺寸白名单（OpenAI gpt-image 系列，Laozhang 网关仅认这些）。
@@ -147,8 +150,12 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             Integer effN = (n != null && n > 0) ? n
                     : (scene != null && scene.imageN != null && scene.imageN > 0) ? scene.imageN : null;
 
+            if (SeedreamImageProtocol.isSeedream(effectiveModel)) {
+                localPaths.addAll(callSeedreamImage(effectiveModel, effectivePrompt, effSize, effN,
+                        referenceImages, generatedImageUrl));
+
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
-            if (hasReferenceImages || "edit".equals(mode)) {
+            } else if (hasReferenceImages || "edit".equals(mode)) {
                 String result = callImageEdit(effectiveModel, effectivePrompt, referenceImages, generatedImageUrl);
                 localPaths.add(fileStorageService.saveImageFromBase64(result));
 
@@ -176,6 +183,40 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             }
             throw new BusinessException(50201, "AI 图片生成失败: " + e.getMessage(), e);
         }
+    }
+
+    /** Seedream 4.x：统一走 Ark 原生 JSON + SSE，支持文生图、图生图、多图融合和组图。 */
+    private List<String> callSeedreamImage(String model, String prompt, String size, Integer n,
+                                           List<String> referenceImages, String generatedImageUrl) {
+        List<String> orderedImages = new ArrayList<>();
+        if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+            orderedImages.add(generatedImageUrl);
+        }
+        if (referenceImages != null) {
+            referenceImages.stream()
+                    .filter(ref -> ref != null && !ref.isBlank())
+                    .forEach(orderedImages::add);
+        }
+
+        SeedreamImageExecutor.ImageStore store = new SeedreamImageExecutor.ImageStore() {
+            @Override
+            public String saveImage(String sourceUrl) {
+                return fileStorageService.saveImage(sourceUrl);
+            }
+
+            @Override
+            public String saveImageFromBase64(String base64Data) {
+                return fileStorageService.saveImageFromBase64(base64Data);
+            }
+
+            @Override
+            public byte[] readImage(String filename) {
+                return fileStorageService.readImage(filename);
+            }
+        };
+        return new SeedreamImageExecutor(store).execute(
+                new SeedreamImageExecutor.Config(config.getGatewayBaseUrl(), config.getGatewayApiKey(), SEEDREAM_TIMEOUT),
+                model, prompt, size, n, orderedImages);
     }
 
     // ═══════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@ import {
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
+import { useGenerationRecordsStore } from './generationRecordsStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 
@@ -26,6 +27,20 @@ function appendReasoningDetails(prev: AgentReasoning | undefined, event: SseEven
   return (prev?.source === 'stage' || event.source === 'stage')
     ? `${previous}\n${delta}`
     : previous + delta;
+}
+
+/** 审核分镜的同步生图结束后刷新编辑器和生成记录；卡片卸载后也必须执行。 */
+async function refreshAfterReviewImageGeneration(projectId: string | undefined) {
+  if (!projectId) return;
+  const currentProject = useProjectStore.getState().currentProject;
+  if (currentProject?.id === projectId) {
+    await useProjectStore.getState().loadProject(projectId).catch(() => undefined);
+  }
+  const recordsStore = useGenerationRecordsStore.getState();
+  await recordsStore.loadRecords().catch(() => undefined);
+  if (recordsStore.activeId) {
+    await recordsStore.openDetail(recordsStore.activeId).catch(() => undefined);
+  }
 }
 
 export interface HumanInputInfo {
@@ -853,6 +868,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    const reviewProjectId = actionId === 'review-gen-image'
+      ? useProjectStore.getState().currentProject?.id
+      : undefined;
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
     manualStop = false;
     streamAbort = new AbortController();
@@ -1216,6 +1234,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           : s.messages,
         };
       });
+      if (reviewProjectId) {
+        await refreshAfterReviewImageGeneration(reviewProjectId);
+      }
       // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
       if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
         void get().recoverPendingCheckpoint(snapshotId);

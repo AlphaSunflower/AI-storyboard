@@ -12,6 +12,8 @@ interface BounceCardsProps {
   easeType?: string;
   transformStyles?: string[];
   enableHover?: boolean;
+  /** 是否在每张卡片左上角显示“图 1、图 2…” */
+  showIndexLabels?: boolean;
   /** 点击某张卡片时回调（url 为传入的图片地址，index 为卡片序号） */
   onImageClick?: (url: string, index: number) => void;
 }
@@ -32,6 +34,7 @@ export default function BounceCards({
     'rotate(2deg) translate(170px)'
   ],
   enableHover = false,
+  showIndexLabels = false,
   onImageClick
 }: BounceCardsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -145,6 +148,7 @@ export default function BounceCards({
           onMouseLeave={resetSiblings}
           onClick={() => onImageClick?.(src, idx)}
         >
+          {showIndexLabels && <span className="card-index">图 {idx + 1}</span>}
           <img className="image" src={src} alt={`card-${idx}`} />
         </div>
       ))}

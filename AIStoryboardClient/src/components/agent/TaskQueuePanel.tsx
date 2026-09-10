@@ -4,6 +4,7 @@ import { useGSAP } from '@gsap/react';
 import { Check, CircleStop, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { agentApi, type GenerationRecord } from '../../api/agent';
 import { useDragSnap } from '../../hooks/useDragSnap';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -16,7 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const ACTIVE = new Set(['queued', 'running']);
 
-/** /chat 右上角任务队列：展示分镜视频生成排队/进度，可取消 queued 任务。 */
+/** /chat 右上角任务队列：展示分镜视频、图片队列与编辑器/智能体进行中的生图任务。 */
 export function TaskQueuePanel() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -30,6 +31,8 @@ export function TaskQueuePanel() {
   const cancelImage = useAgentStore((s) => s.cancelStoryboardImageQueue);
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const scenes = useProjectStore((s) => s.scenes);
+  const generatingImage = useProjectStore((s) => s.generatingImage);
+  const [activeGenerations, setActiveGenerations] = useState<GenerationRecord[]>([]);
   const drag = useDragSnap(() => {
     if (projectId) { void refetch(projectId); void refetchImage(projectId); }
     setOpen((v) => !v);
@@ -38,7 +41,44 @@ export function TaskQueuePanel() {
   // 有进行中任务时轮询刷进度（5s）
   const activeVideo = queue.filter((t) => ACTIVE.has(t.status));
   const activeImage = imageQueue.filter((t) => ACTIVE.has(t.status));
-  const activeCount = activeVideo.length + activeImage.length;
+  const activeImageSceneIds = new Set(activeImage.map((task) => task.sceneId));
+  const activeRecordImage = activeGenerations.filter((record) =>
+    record.type === 'image' && (!record.sceneId || !activeImageSceneIds.has(record.sceneId)));
+  const activeRecordVideo = activeGenerations.filter((record) => record.type === 'video');
+  const activeRecordImageSceneIds = new Set(activeRecordImage.map((record) => record.sceneId).filter(Boolean));
+  const activeDirectImage = scenes
+    .filter((scene) => generatingImage[scene.id] && !activeRecordImageSceneIds.has(scene.id))
+    .map((scene) => ({
+      id: `direct-image-${scene.id}`,
+      sceneId: scene.id,
+      status: 'running',
+      progress: null,
+      error: null,
+    }));
+  const activeGenerationImage = [...activeRecordImage, ...activeDirectImage];
+  const activeCount = activeVideo.length + activeRecordVideo.length + activeImage.length + activeGenerationImage.length;
+
+  useEffect(() => {
+    if (!projectId) {
+      setActiveGenerations([]);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      agentApi.listGenerationRecords({ status: 'active', page: 1, size: 50 })
+        .then((res) => {
+          if (cancelled) return;
+          setActiveGenerations((res.data.data.records ?? []).filter((record) => record.projectId === projectId));
+        })
+        .catch(() => { /* 任务列表静默降级到已有队列状态 */ });
+    };
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [projectId]);
 
   // 点击弹窗外（含任务列表按钮本身）关闭；按钮 onMouseDown stopPropagation 由 onClick 自行切换
   useEffect(() => {
@@ -137,20 +177,39 @@ export function TaskQueuePanel() {
               </small>
             </div>
             <div ref={rowsRef} style={{ display: 'flex', flexDirection: 'column' }}>
-              {activeVideo.length === 0 && activeImage.length === 0 ? (
+              {activeVideo.length === 0 && activeRecordVideo.length === 0
+                && activeImage.length === 0 && activeGenerationImage.length === 0 ? (
                 <div style={{ fontSize: 13, color: 'rgb(152, 158, 168)', padding: '18px 10px', textAlign: 'center' }}>
                   暂无任务
                 </div>
               ) : (
                 <>
-                  {activeVideo.length > 0 && (
+                  {(activeVideo.length > 0 || activeRecordVideo.length > 0) && (
                     <div style={{ padding: '4px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>视频生成</div>
                   )}
                   {activeVideo.map((t) => renderRow(t, '视频', scenes, cancel))}
+                  {activeRecordVideo.map((record) => renderRow({
+                    id: record.id,
+                    sceneId: record.sceneId ?? '',
+                    status: record.status,
+                    progress: null,
+                    error: record.error,
+                  }, '视频', scenes, undefined, record.sceneId ? undefined : '智能体视频生成中'))}
                   {activeImage.length > 0 && (
                     <div style={{ padding: '8px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>完善图片</div>
                   )}
                   {activeImage.map((t) => renderRow(t, '图片', scenes, cancelImage))}
+                  {activeGenerationImage.length > 0 && (
+                    <div style={{ padding: '8px 8px 2px', fontSize: 11, color: 'rgb(152, 158, 168)' }}>生成图片</div>
+                  )}
+                  {activeRecordImage.map((record) => renderRow({
+                    id: record.id,
+                    sceneId: record.sceneId ?? '',
+                    status: record.status,
+                    progress: null,
+                    error: record.error,
+                  }, '图片', scenes, undefined, record.sceneId ? undefined : '智能体图片生成中'))}
+                  {activeDirectImage.map((t) => renderRow(t, '图片', scenes, cancelImage))}
                 </>
               )}
             </div>
@@ -164,7 +223,13 @@ export function TaskQueuePanel() {
 type QueueRow = { id: string; sceneId: string; status: string; progress: number | null; error: string | null };
 
 /** 单条任务行：视频（视频生成）与图片（完善图片）共用。 */
-function renderRow(t: QueueRow, kind: '视频' | '图片', scenes: { id: string; sceneNumber?: number }[], onCancel: (id: string) => void) {
+function renderRow(
+  t: QueueRow,
+  kind: '视频' | '图片',
+  scenes: { id: string; sceneNumber?: number }[],
+  onCancel?: (id: string) => void,
+  titleOverride?: string,
+) {
   const active = ACTIVE.has(t.status);
   const sceneNum = scenes.find((s) => s.id === t.sceneId)?.sceneNumber;
   return (
@@ -183,7 +248,7 @@ function renderRow(t: QueueRow, kind: '视频' | '图片', scenes: { id: string;
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <strong style={{ fontSize: 13, color: 'rgb(15, 17, 21)' }}>
-            分镜 {sceneNum ?? ''} · {kind}
+            {titleOverride ?? `分镜 ${sceneNum ?? ''} · ${kind}`}
           </strong>
           <small style={{ fontSize: 11, color: 'rgb(96, 100, 108)' }}>{STATUS_LABEL[t.status] ?? t.status}</small>
         </div>
@@ -192,7 +257,7 @@ function renderRow(t: QueueRow, kind: '视频' | '图片', scenes: { id: string;
         </div>
         {t.error && <small style={{ fontSize: 11, color: 'rgb(217, 45, 32)' }}>{t.error}</small>}
       </div>
-      {t.status === 'queued' && (
+      {t.status === 'queued' && onCancel && (
         <button
           type="button"
           title="取消生成"

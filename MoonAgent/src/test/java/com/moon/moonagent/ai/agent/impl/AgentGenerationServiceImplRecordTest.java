@@ -3,9 +3,9 @@ package com.moon.moonagent.ai.agent.impl;
 import com.moon.moonagent.ai.ImageGenerationService;
 import com.moon.moonagent.ai.VideoGenerationService;
 import com.moon.moonagent.client.StoryboardClient;
-import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
-import com.moon.moonagent.mapper.AgentAssetMapper;
+import com.storyboard.common.generation.GenerationRecord;
+import com.storyboard.common.generation.GenerationRecordWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -30,7 +30,7 @@ class AgentGenerationServiceImplRecordTest {
     @Mock
     private StoryboardClient storyboardClient;
     @Mock
-    private AgentAssetMapper agentAssetMapper;
+    private GenerationRecordWriter generationRecordWriter;
 
     @InjectMocks
     private AgentGenerationServiceImpl service;
@@ -46,19 +46,20 @@ class AgentGenerationServiceImplRecordTest {
                 List.of("/api/files/videos/v.mp4"), "completed", null, 1234L,
                 Map.of("model", "MiniMax-H3", "duration", 8));
 
-        ArgumentCaptor<AgentAsset> captor = ArgumentCaptor.forClass(AgentAsset.class);
-        verify(agentAssetMapper).insert(captor.capture());
-        AgentAsset record = captor.getValue();
-        assertEquals("conv-1", record.getConversationId());
-        assertEquals("video", record.getType());
-        assertEquals("storyboard_video", record.getGenType());
-        assertEquals("completed", record.getStatus());
-        assertEquals("scene-1", record.getSceneId());
-        assertEquals("task-v1", record.getTaskId());
-        assertEquals("测试提示词", record.getPrompt());
-        assertEquals("MiniMax-H3", record.getModel());
-        assertEquals("/api/files/videos/v.mp4", record.getUrl());
-        assertEquals(1234L, record.getDurationMs());
-        assertNull(record.getError());
+        ArgumentCaptor<GenerationRecord> captor = ArgumentCaptor.forClass(GenerationRecord.class);
+        verify(generationRecordWriter).create(captor.capture());
+        GenerationRecord record = captor.getValue();
+        assertEquals("conv-1", record.conversationId());
+        assertEquals("proj-1", record.projectId());
+        assertEquals("video", record.type());
+        assertEquals("storyboard_video", record.genType());
+        assertEquals("completed", record.status());
+        assertEquals("scene-1", record.sceneId());
+        assertEquals("task-v1", record.taskId());
+        assertEquals("测试提示词", record.prompt());
+        assertEquals("MiniMax-H3", record.model());
+        assertEquals("/api/files/videos/v.mp4", record.url());
+        assertEquals(1234L, record.durationMs());
+        assertNull(record.error());
     }
 }

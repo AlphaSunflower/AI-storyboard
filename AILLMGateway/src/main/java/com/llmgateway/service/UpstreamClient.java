@@ -55,7 +55,7 @@ public class UpstreamClient {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofMillis(Math.max(config.getUpstream().getRequestTimeoutMs(), 300_000L)))
+                .timeout(Duration.ofMillis(config.getUpstream().getStreamTimeoutMs()))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
         addAuthorization(builder, apiKey);
         HttpRequest request = builder.build();

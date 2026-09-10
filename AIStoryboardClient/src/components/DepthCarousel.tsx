@@ -31,7 +31,9 @@ export interface DepthCarouselProps {
   loop?: boolean;
   showControls?: boolean;
   showIndicators?: boolean;
+  showIndexLabels?: boolean;
   onChange?: (index: number, item: { image: string; alt?: string }) => void;
+  onCardActivate?: (index: number, item: { image: string; alt?: string }) => void;
   className?: string;
 }
 
@@ -94,7 +96,9 @@ const DepthCarousel = ({
   loop = true,
   showControls = true,
   showIndicators = true,
+  showIndexLabels = false,
   onChange,
+  onCardActivate,
   className = ''
 }: DepthCarouselProps) => {
   const data = useMemo(() => (Array.isArray(items) ? items : []).map(normalizeItem), [items]);
@@ -332,12 +336,13 @@ const DepthCarousel = ({
     [navigateBy]
   );
 
-  const onCardClick = useCallback(
+  const handleCardClick = useCallback(
     (index: number) => {
       if (dragRef.current?.moved) return;
       setFocus(index, true);
+      onCardActivate?.(index, data[index]);
     },
-    [setFocus]
+    [data, onCardActivate, setFocus]
   );
 
   useEffect(() => {
@@ -425,9 +430,10 @@ const DepthCarousel = ({
             aria-roledescription="slide"
             aria-label={`${i + 1} of ${count}`}
             aria-hidden={active !== i}
-            onClick={() => onCardClick(i)}
+            onClick={() => handleCardClick(i)}
           >
             <img className="depth-carousel__img" src={item.image} alt={item.alt || ''} draggable={false} />
+            {showIndexLabels && <span className="depth-carousel__label">图 {i + 1}</span>}
             <span
               className="depth-carousel__tint"
               ref={el => {

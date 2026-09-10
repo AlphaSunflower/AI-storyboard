@@ -724,7 +724,7 @@ export function ChatPage() {
                   style={headerBtn(activeConversationId ? 1 : 0.4, embed ? 12 : 14)}
                   onMouseEnter={(e) => { if (activeConversationId) { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; } }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}</button>
+                ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && (assets.mediaTotal ?? assets.total) > 0 ? ` (${assets.mediaTotal ?? assets.total})` : ''}</button>
               </div>
             </div>
 

@@ -3,8 +3,10 @@ import { projectApi } from '../api/projects';
 import type { ProjectResponse, SceneReferenceAsset, SceneResponse } from '../api/projects';
 import { sceneApi } from '../api/scenes';
 import { aiApi } from '../api/ai';
+import type { SceneMaterialReferenceInput } from '../api/assets';
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, DEFAULT_UNDERSTANDING_MODEL, IMAGE_MODELS, VIDEO_MODELS, UNDERSTANDING_MODELS, type ModelOption, VIDEO_POLL_INTERVAL, IMAGE_POLL_INTERVAL } from '../config';
 import { resolveVideoPreset } from '../components/common/VideoPresetSelector';
+import { resolveSelectedSceneId } from '../lib/sceneImages';
 
 // 生成完成后的 toast 通知
 export interface ToastMessage {
@@ -80,6 +82,7 @@ interface ProjectState {
   sceneRefs: Record<string, SceneReferenceAsset[]>;
   fetchSceneRefs: (sceneId: string) => Promise<void>;
   uploadSceneRef: (sceneId: string, type: 'image' | 'video' | 'audio', purpose: 'image' | 'video', file: File) => Promise<void>;
+  linkSceneRefs: (sceneId: string, references: SceneMaterialReferenceInput[]) => Promise<void>;
   deleteSceneRef: (sceneId: string, refId: string) => Promise<void>;
 
   // ── 分镜生成参数覆盖（全局默认 + 分镜覆盖：空串/0 = 清覆盖回退全局默认）──
@@ -179,12 +182,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   loadProject: async (id) => {
     set({ isLoading: true });
+    const previousProjectId = get().currentProject?.id;
+    const previousSceneId = get().selectedSceneId;
     const res = await projectApi.get(id);
     const project = res.data.data;
     set({
       currentProject: project,
       scenes: project.scenes || [],
-      selectedSceneId: null,
+      selectedSceneId: resolveSelectedSceneId(
+        previousProjectId,
+        id,
+        previousSceneId,
+        (project.scenes || []).map((scene) => scene.id),
+      ),
       isLoading: false,
     });
     // 记录「最近进入」的项目，刷新/重登后恢复用
@@ -507,6 +517,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const res = await sceneApi.uploadReference(sceneId, type, purpose, file);
     const created = res.data.data;
     set((s) => ({ sceneRefs: { ...s.sceneRefs, [sceneId]: [...(s.sceneRefs[sceneId] || []), created] } }));
+  },
+  linkSceneRefs: async (sceneId, references) => {
+    const res = await sceneApi.linkMaterialReferences(sceneId, references);
+    const created = res.data.data ?? [];
+    set((s) => {
+      const current = s.sceneRefs[sceneId] || [];
+      const byId = new Map(current.map((ref) => [ref.id, ref]));
+      created.forEach((ref) => byId.set(ref.id, ref));
+      return { sceneRefs: { ...s.sceneRefs, [sceneId]: [...byId.values()] } };
+    });
   },
   deleteSceneRef: async (sceneId, refId) => {
     await sceneApi.deleteReference(refId);

@@ -3,9 +3,12 @@ import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
+import { UploadMaterialMenu } from './UploadMaterialMenu';
+import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
+import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
 import { sttStream } from '../../api/agent';
 import { Paperclip } from 'lucide-react';
-import { Image as ImageIcon, PlusCircle, FileText, Package } from 'lucide-react';
+import { Image as ImageIcon, PlusCircle, Package } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
@@ -38,6 +41,7 @@ export function ChatComposer() {
     refImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
+    addRefImageUrls,
     pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
   } = useAgentStore();
   const [text, setText] = useState('');
@@ -58,6 +62,7 @@ export function ChatComposer() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
+  const projectId = useProjectStore((s) => s.currentProject?.id);
   // 流式语音识别状态：活跃会话句柄 + 已确认文本（增量追加，不清空）
   const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
   const confirmedRef = useRef(''); // 已确认片段累积（vosk 每条 text 是增量，片段间逗号分隔）
@@ -107,6 +112,8 @@ export function ChatComposer() {
   // "+" 菜单状态
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   // ├─「上传资产」从已有资产库选择参考图状态（assetApi.list 拉取，选中资产图片作为参考图）
   const [assetOpen, setAssetOpen] = useState(false);
@@ -355,45 +362,11 @@ export function ChatComposer() {
               borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
               padding: 4, zIndex: 1000, minWidth: 140,
             }}>
-              <button
-                onClick={() => { setMenuOpen(false); setSceneModalOpen(true); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                  background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                  color: DS.ink, borderRadius: 8,
-                }}
-                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-              >
-                <FileText size={16} strokeWidth={2} />
-                上传分镜
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                  background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                  color: DS.ink, borderRadius: 8,
-                }}
-                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-              >
-                <ImageIcon size={16} strokeWidth={2} />
-                上传图片
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); handleAssetOpen(); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                  background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                  color: DS.ink, borderRadius: 8,
-                }}
-                onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-              >
-                <Package size={16} strokeWidth={2} />
-                上传资产
-              </button>
+              <UploadMaterialMenu
+                onClose={() => setMenuOpen(false)}
+                onLocalImage={() => fileRef.current?.click()}
+                onMaterialPicker={() => setMaterialPickerOpen(true)}
+              />
             </div>,
             document.body,
           )}
@@ -441,6 +414,23 @@ export function ChatComposer() {
         open={sceneModalOpen}
         onClose={() => setSceneModalOpen(false)}
         onConfirm={handleSceneConfirm}
+      />
+
+      <UploadMaterialPickerModal
+        open={materialPickerOpen}
+        onClose={() => setMaterialPickerOpen(false)}
+        onAsset={handleAssetOpen}
+        onProjectOutput={() => setOutputOpen(true)}
+        onScene={() => setSceneModalOpen(true)}
+      />
+
+      <ProjectOutputImagePickerModal
+        open={outputOpen}
+        projectId={projectId}
+        existingUrls={refImageUrls}
+        remaining={Math.max(0, 10 - refImageUrls.length)}
+        onClose={() => setOutputOpen(false)}
+        onConfirm={async (references) => addRefImageUrls(references.map((reference) => reference.url))}
       />
 
       {/* 参考图列表弹窗：指定移除单张（2026-08-28 用户反馈：不再一键清空，改为逐张指定移除） */}

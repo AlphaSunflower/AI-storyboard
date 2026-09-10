@@ -2,6 +2,7 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.ReorderScenesRequest;
 import com.storyboard.dto.request.SceneRequest;
+import com.storyboard.dto.request.SceneMaterialReferenceRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
@@ -67,6 +68,15 @@ public class SceneController {
     public ApiResponse<Void> deleteReference(Authentication auth, @PathVariable String referenceId) {
         sceneService.deleteReference(auth.getName(), referenceId);
         return ApiResponse.ok("删除成功", null);
+    }
+
+    /** 追加产出/分镜图片引用（不覆盖本地上传素材与已关联资产）。 */
+    @PostMapping("/scenes/{id}/references/link")
+    public ApiResponse<List<SceneReferenceResponse>> linkReferences(
+            Authentication auth,
+            @PathVariable String id,
+            @RequestBody List<SceneMaterialReferenceRequest> references) {
+        return ApiResponse.ok(sceneMaterialService.linkReferences(auth.getName(), id, references));
     }
 
     /** 原子保存分镜素材选择：AI 资产 + 产出/当前分镜图片引用。 */

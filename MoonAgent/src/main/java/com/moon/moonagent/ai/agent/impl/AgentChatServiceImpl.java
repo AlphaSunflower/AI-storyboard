@@ -310,18 +310,56 @@ public class AgentChatServiceImpl implements AgentChatService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(50, Math.max(1, size));
         // 产出素材 = 生成结果（image/video），排除用户自己上传的参考图（type=reference，不算产出）
-        long total = assetMapper.selectCount(
-                new LambdaQueryWrapper<AgentAsset>()
-                        .eq(AgentAsset::getConversationId, conversationId)
-                        .ne(AgentAsset::getType, "reference"));
-        List<AgentAsset> records = assetMapper.selectList(
+        List<AgentAsset> all = assetMapper.selectList(
                 new LambdaQueryWrapper<AgentAsset>()
                         .eq(AgentAsset::getConversationId, conversationId)
                         .ne(AgentAsset::getType, "reference")
-                        .orderByDesc(AgentAsset::getCreatedAt)
-                        // 先转 long 再乘，避免 (safePage - 1) * safeSize 在 int 域溢出（OFFSET 超出 21 亿行时）
-                        .last("LIMIT " + safeSize + " OFFSET " + ((long) (safePage - 1) * safeSize)));
-        return Map.of("records", records, "total", total, "page", safePage, "size", safeSize);
+                        .orderByDesc(AgentAsset::getCreatedAt));
+        all = all == null ? List.of() : all;
+        int total = all.size();
+        int from = (int) Math.min(total, (long) (safePage - 1) * safeSize);
+        int to = Math.min(total, from + safeSize);
+        List<AgentAsset> records = from >= total ? List.of() : all.subList(from, to);
+        int imageTotal = mediaCount(all, "image");
+        int videoTotal = mediaCount(all, "video");
+        return Map.of(
+                "records", records,
+                "total", total,
+                "imageTotal", imageTotal,
+                "videoTotal", videoTotal,
+                "mediaTotal", imageTotal + videoTotal,
+                "page", safePage,
+                "size", safeSize);
+    }
+
+    /** 统计某一类型下所有生成结果 URL；一次生成含多图时全部计入。 */
+    private int mediaCount(List<AgentAsset> assets, String type) {
+        return assets.stream()
+                .filter(asset -> type.equals(asset.getType()))
+                .mapToInt(asset -> resultUrls(asset).size())
+                .sum();
+    }
+
+    /** result_urls 支持字符串数组与历史对象数组；无结果时回退单 url。 */
+    private List<String> resultUrls(AgentAsset asset) {
+        java.util.LinkedHashSet<String> urls = new java.util.LinkedHashSet<>();
+        if (asset.getResultUrls() != null && !asset.getResultUrls().isBlank()) {
+            try {
+                JsonNode root = objectMapper.readTree(asset.getResultUrls());
+                if (root.isArray()) {
+                    for (JsonNode item : root) {
+                        String url = item.isTextual() ? item.asText("") : item.path("url").asText("");
+                        if (!url.isBlank()) urls.add(url);
+                    }
+                }
+            } catch (Exception ignored) {
+                // 坏数据回退 url 单字段
+            }
+        }
+        if (urls.isEmpty() && asset.getUrl() != null && !asset.getUrl().isBlank()) {
+            urls.add(asset.getUrl());
+        }
+        return List.copyOf(urls);
     }
 
     @Override

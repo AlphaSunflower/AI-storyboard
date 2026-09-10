@@ -2,16 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useProjectStore } from '../../stores/projectStore';
-import { assetUrl } from '../../config';
+import { assetUrl, REFERENCE_LIMITS } from '../../config';
+import { getSceneImageUrls } from '../../lib/sceneImages';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
+import { ProjectOutputImagePickerModal } from './ProjectOutputImagePickerModal';
 import { ReferenceUploader } from './ReferenceUploader';
 import { RefineImageModal } from './RefineImageModal';
 import { ContextMenu } from '../common/ContextMenu';
 import ElasticSlider from '../ElasticSlider';
-import BounceCards from '../BounceCards';
+import DepthCarousel from '../DepthCarousel';
 import SpecularButton from '../SpecularButton';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
-import { IMAGE_SIZES, IMAGE_QUALITIES } from '../../config';
+import { IMAGE_SIZES, IMAGE_QUALITIES, isSeedreamImageModel } from '../../config';
 import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
 import { assetApi, type Asset } from '../../api/assets';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
@@ -29,17 +31,6 @@ function downloadAsset(url: string, filename: string) {
       URL.revokeObjectURL(u);
     })
     .catch(() => window.open(url, '_blank'));
-}
-
-/** 按图片数量生成对称扇形 transform（BounceCards 多图浏览用） */
-function fanTransforms(count: number): string[] {
-  const mid = (count - 1) / 2;
-  return Array.from({ length: count }, (_, i) => {
-    const offset = i - mid;
-    const x = Math.round(offset * 85);
-    const rot = -Math.round(offset * 5);
-    return `rotate(${rot}deg) translate(${x}px)`;
-  });
 }
 
 type PreviewTab = 'image' | 'video';
@@ -154,6 +145,7 @@ export function PreviewPanel() {
   const sceneRefs = rawSceneRefs ?? [];
   const fetchSceneRefs = useProjectStore((s) => s.fetchSceneRefs);
   const uploadSceneRef = useProjectStore((s) => s.uploadSceneRef);
+  const linkSceneRefs = useProjectStore((s) => s.linkSceneRefs);
   const deleteSceneRef = useProjectStore((s) => s.deleteSceneRef);
   const setSceneParams = useProjectStore((s) => s.setSceneParams);
   const clearSceneParams = useProjectStore((s) => s.clearSceneParams);
@@ -171,6 +163,7 @@ export function PreviewPanel() {
   const globalImageQuality = useProjectStore((s) => s.imageQuality);
   const globalImageN = useProjectStore((s) => s.imageN);
   const globalVideoPreset = useProjectStore((s) => s.videoPreset);
+  const currentProject = useProjectStore((s) => s.currentProject);
 
   const [activeTab, setActiveTab] = useState<PreviewTab>('image');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null); // 图片点击放大预览（灯箱）
@@ -181,6 +174,7 @@ export function PreviewPanel() {
   const [sceneImageAssets, setSceneImageAssets] = useState<Asset[]>([]); // 本分镜图片关联资产
   const [sceneVideoAssets, setSceneVideoAssets] = useState<Asset[]>([]); // 本分镜视频关联资产
   const [assetPickerPurpose, setAssetPickerPurpose] = useState<'image' | 'video' | null>(null); // 资产选择弹窗用途
+  const [projectOutputPickerOpen, setProjectOutputPickerOpen] = useState(false); // 从项目产出素材选择参考图
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
   const animatedSrcRef = useRef<string | null>(null);
@@ -256,11 +250,8 @@ export function PreviewPanel() {
 
   // 多图列表（image_urls 逗号分隔；无则回退单图 imageUrl）
   const imageList = useMemo(() => {
-    if (!scene) return [] as string[];
-    const urls = scene.imageUrls ? scene.imageUrls.split(',').filter(Boolean) : [];
-    return urls.length ? urls : (scene.imageUrl ? [scene.imageUrl] : []);
+    return scene ? getSceneImageUrls(scene) : [];
   }, [scene]);
-
   useEffect(() => {
     setSelectedDownloads(new Set());
     setImageDraft({});
@@ -272,11 +263,14 @@ export function PreviewPanel() {
   const effVideoModel = (videoDraft.videoModel as string) || scene?.videoModel || globalVideoModel;
   const imageParams = parseParams(imageModelOptions.find((m) => m.value === effImageModel));
   const videoParams = parseParams(videoModelOptions.find((m) => m.value === effVideoModel));
+  const seedreamImage = isSeedreamImageModel(effImageModel);
 
   const sizeOptions = imageParams.sizes?.length ? imageParams.sizes : [...IMAGE_SIZES];
-  const qualityOptions = imageParams.qualities?.length ? imageParams.qualities : [...IMAGE_QUALITIES];
+  const qualityOptions = seedreamImage ? [] : (imageParams.qualities?.length ? imageParams.qualities : [...IMAGE_QUALITIES]);
   const effImageSize = (imageDraft.imageSize as string) || scene?.imageSize || imageParams.sizeDefault || globalImageSize;
-  const effImageQuality = (imageDraft.imageQuality as string) || scene?.imageQuality || imageParams.qualityDefault || globalImageQuality;
+  const effImageQuality = seedreamImage
+    ? undefined
+    : ((imageDraft.imageQuality as string) || scene?.imageQuality || imageParams.qualityDefault || globalImageQuality);
   const effImageN = (imageDraft.imageN as number) || scene?.imageN || imageParams.nRange?.default || globalImageN;
 
   const preset = resolveVideoPreset(globalVideoPreset);
@@ -292,6 +286,10 @@ export function PreviewPanel() {
   const refVImages = sceneRefs.filter((r) => r.type === 'image' && r.purpose === 'video'); // 视频生成参考图
   const refVideos = sceneRefs.filter((r) => r.type === 'video');
   const refAudios = sceneRefs.filter((r) => r.type === 'audio');
+  const refImageRemaining = Math.max(
+    0,
+    (imageParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount) - refImages.length,
+  );
 
   // 提交参数草稿：仅当有未保存改动时发一次 PATCH；成功清空对应草稿，失败弹错并返回 false（调用方据此决定是否继续）
   const commitParams = async (params: Record<string, unknown>, clear: () => void): Promise<boolean> => {
@@ -505,14 +503,32 @@ export function PreviewPanel() {
             {imageList.length > 0 ? (
               <div>
                 {imageList.length > 1 ? (
-                  <BounceCards
-                    images={imageList.map((u) => assetUrl(u))}
-                    containerWidth={480}
-                    containerHeight={260}
-                    enableHover
-                    transformStyles={fanTransforms(imageList.length)}
-                    onImageClick={(url) => setPreviewUrl(url)}
-                  />
+                  <div style={{ width: 'min(100%, 620px)', height: 360, margin: '8px auto 12px' }}>
+                    <DepthCarousel
+                      items={imageList.map((url, index) => ({
+                        image: assetUrl(url),
+                        alt: `分镜 ${scene.sceneNumber ?? ''} 图 ${index + 1}`,
+                      }))}
+                      cardWidth={400}
+                      cardHeight={267}
+                      radius={12}
+                      tint="#714f46"
+                      depth={170}
+                      spread={72}
+                      tilt={14}
+                      tiltDirection="right"
+                      perspective={1500}
+                      visibleCards={4}
+                      falloff={0.16}
+                      blur={4}
+                      autoplay={false}
+                      loop
+                      showControls
+                      showIndicators
+                      showIndexLabels
+                      onCardActivate={(_, item) => setPreviewUrl(item.image)}
+                    />
+                  </div>
                 ) : (
                   <ContextMenu items={[
                   { label: '预览', icon: <Eye size={13} strokeWidth={1.8} />, onClick: () => setPreviewUrl(imageList[0]) },
@@ -666,15 +682,17 @@ export function PreviewPanel() {
                 </SelectContent>
               </Select>
             </div>
-            <div style={fieldRow}>
-              <span style={fieldLabel}>质量</span>
-              <Select value={effImageQuality} onValueChange={(v) => { if (v) setImageDraft((d) => ({ ...d, imageQuality: v })); }}>
-                <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {qualityOptions.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            {qualityOptions.length > 0 && (
+              <div style={fieldRow}>
+                <span style={fieldLabel}>质量</span>
+                <Select value={effImageQuality} onValueChange={(v) => { if (v) setImageDraft((d) => ({ ...d, imageQuality: v })); }}>
+                  <SelectTrigger style={selectStyle}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {qualityOptions.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {imageParams.nRange && (
               <div style={fieldRow}>
                 <span style={fieldLabel}>生成个数</span>
@@ -703,6 +721,8 @@ export function PreviewPanel() {
                   maxSizeMB={imageParams.refImageSizeMB}
                   onUpload={(f) => uploadSceneRef(scene.id, 'image', 'image', f)}
                   onDelete={(id) => deleteSceneRef(scene.id, id)}
+                  onPickProjectOutput={() => setProjectOutputPickerOpen(true)}
+                  projectOutputDisabled={refImageRemaining === 0}
                 />
               </div>
             )}
@@ -1015,6 +1035,14 @@ export function PreviewPanel() {
       {assetPickerPurpose && (
         <AssetLibraryPanel mode="pick" purpose={assetPickerPurpose} onClose={() => { setAssetPickerPurpose(null); void loadSceneAssets(); }} />
       )}
+      <ProjectOutputImagePickerModal
+        open={projectOutputPickerOpen}
+        projectId={currentProject?.id}
+        existingUrls={refImages.map((ref) => ref.url)}
+        remaining={refImageRemaining}
+        onClose={() => setProjectOutputPickerOpen(false)}
+        onConfirm={(references) => linkSceneRefs(scene.id, references)}
+      />
 
       {/* 图片点击放大预览（灯箱，与智能体窗口行为一致） */}
       <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />

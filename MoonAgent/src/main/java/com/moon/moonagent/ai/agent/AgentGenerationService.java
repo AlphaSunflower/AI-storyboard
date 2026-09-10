@@ -85,6 +85,16 @@ public interface AgentGenerationService {
                            List<String> referenceVideos);
 
     /**
+     * 创建带多模态参考素材的视频任务，并控制是否写入通用生成记录。
+     * 分镜队列自行写 storyboard_video 记录时传 false，避免同一 taskId 重复。
+     */
+    String createVideoTaskWithRole(AgentConversation conversation, String sceneId,
+                           String prompt, String model, String resolution, String size,
+                           String aspectRatio, String duration, String negativePrompt,
+                           List<ReferenceImage> referenceImages, String generatedImageUrl,
+                           List<String> referenceVideos, boolean recordGeneration);
+
+    /**
      * 轮询视频任务。
      * 资产更新由上游 VideoGenerationService 在终态时完成，此处只转发轮询结果。
      */

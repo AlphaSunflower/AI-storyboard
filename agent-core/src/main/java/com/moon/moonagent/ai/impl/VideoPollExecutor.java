@@ -154,7 +154,6 @@ public class VideoPollExecutor {
             scene.videoUrl = videoUrl;
             scene.videoStatus = status;
             sceneBridge.updateScene(scene);
-            return;
         }
         var assets = agentAssetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getTaskId, taskId));

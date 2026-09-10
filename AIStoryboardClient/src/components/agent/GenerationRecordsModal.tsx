@@ -24,6 +24,7 @@ const GEN_TYPE_LABEL: Record<string, string> = {
   text_to_video: '文生视频',
   ref_to_video: '参考生视频',
   multi_image_to_image: '多图生图',
+  multi_image_to_multi_image: '多图生多图',
   first_frame_to_video: '首帧生视频',
   first_last_frame_to_video: '首尾帧生视频',
   storyboard_video: '分镜视频',
@@ -90,7 +91,7 @@ function refUrls(record: GenerationRecord) {
 }
 
 function isRefBased(record: GenerationRecord): boolean {
-  return ['image_to_image', 'ref_to_video', 'multi_image_to_image', 'first_frame_to_video', 'first_last_frame_to_video'].includes(record.genType ?? '');
+  return ['image_to_image', 'ref_to_video', 'multi_image_to_image', 'multi_image_to_multi_image', 'first_frame_to_video', 'first_last_frame_to_video'].includes(record.genType ?? '');
 }
 
 /** 分镜队列来源的生成记录：来自 storyboard_video_queue / storyboard_image_task，重试会二次入队，隐藏「重试」。 */

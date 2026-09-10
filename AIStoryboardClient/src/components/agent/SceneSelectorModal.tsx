@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useProjectStore } from '../../stores/projectStore';
 import type { SceneResponse } from '../../api/projects';
 import { assetUrl } from '../../config';
+import { getSceneImageUrls } from '../../lib/sceneImages';
 
 interface Props {
   open: boolean;
@@ -30,7 +31,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
   if (!open) return null;
 
   const filtered = scenes.filter((s) => {
-    if (filter === 'no-image') return !s.imageUrl;
+    if (filter === 'no-image') return getSceneImageUrls(s).length === 0;
     if (filter === 'no-video') return !s.videoUrl;
     return true;
   });
@@ -92,7 +93,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
               }}
             >
               {FILTER_LABELS[f]}
-              {f === 'no-image' && ` (${scenes.filter((s) => !s.imageUrl).length})`}
+              {f === 'no-image' && ` (${scenes.filter((s) => getSceneImageUrls(s).length === 0).length})`}
               {f === 'no-video' && ` (${scenes.filter((s) => !s.videoUrl).length})`}
             </button>
           ))}
@@ -118,7 +119,9 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
               没有符合条件的分镜
             </div>
           )}
-          {filtered.map((s) => (
+          {filtered.map((s) => {
+            const imageUrls = getSceneImageUrls(s);
+            return (
             <label
               key={s.id}
               style={{
@@ -134,11 +137,18 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
                 style={{ accentColor: 'var(--color-primary)', flexShrink: 0 }}
               />
               {/* 缩略图 */}
-              {s.imageUrl ? (
-                <img
-                  src={assetUrl(s.imageUrl)}
-                  style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--color-hairline)', flexShrink: 0 }}
-                />
+              {imageUrls.length > 0 ? (
+                <span style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
+                  <img
+                    src={assetUrl(imageUrls[0])}
+                    style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--color-hairline)' }}
+                  />
+                  {imageUrls.length > 1 && (
+                    <span style={{ position: 'absolute', right: -4, bottom: -4, minWidth: 17, height: 17, padding: '0 3px', borderRadius: 9, background: 'var(--color-primary)', color: 'white', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
+                      {imageUrls.length}
+                    </span>
+                  )}
+                </span>
               ) : (
                 <div style={{ width: 40, height: 40, borderRadius: 8, background: 'var(--color-canvas)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: 'var(--color-muted)', flexShrink: 0 }}>
                   {s.sceneNumber}
@@ -155,11 +165,11 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
               </div>
               {/* 状态标签 */}
               <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                <StatusTag ok={!!s.imageUrl} label="图" />
+                <StatusTag ok={imageUrls.length > 0} label="图" />
                 <StatusTag ok={!!s.videoUrl} label="视频" />
               </div>
             </label>
-          ))}
+          )})}
         </div>
 
         {/* 底部 */}

@@ -1,5 +1,8 @@
 package com.llmgateway.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.service.FileUploadService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.ImageEditService;
@@ -11,6 +14,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * OpenAI 兼容对外入口（静态 Key 鉴权由 StaticApiKeyFilter 完成）。
@@ -25,6 +31,7 @@ public class OpenAiCompatController {
     private final VideoGatewayService videoGatewayService;
     private final ImageEditService imageEditService;
     private final FileUploadService fileUploadService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * OpenAI 兼容 chat completions：stream=true 走 SSE 流式透传（text/event-stream），
@@ -61,10 +68,67 @@ public class OpenAiCompatController {
         }, callId);
     }
 
-    @PostMapping(value = "/images/generations", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> imageGenerations(@RequestBody String body) {
-        RouteResult result = routingService.route("/images/generations", body);
-        return ResponseEntity.status(result.status()).body(result.body());
+    @PostMapping(value = "/images/generations", produces = {
+            MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
+    public void imageGenerations(@RequestBody String body,
+                                 jakarta.servlet.http.HttpServletResponse response) throws Exception {
+        if (!isStream(body)) {
+            RouteResult result = routingService.route("/images/generations", body);
+            response.setStatus(result.status());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            response.getWriter().write(result.body());
+            return;
+        }
+
+        response.setStatus(200);
+        response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+        jakarta.servlet.ServletOutputStream out = response.getOutputStream();
+        AtomicBoolean wrote = new AtomicBoolean(false);
+        try {
+            routingService.streamChat("/images/generations", body, bytes -> {
+                try {
+                    wrote.set(true);
+                    out.write(bytes);
+                    out.flush();
+                } catch (java.io.IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } catch (Exception e) {
+            jakarta.servlet.ServletOutputStream errorOut = out;
+            if (!wrote.get() && !response.isCommitted()) {
+                response.reset();
+                response.setStatus(200);
+                response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+                response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                errorOut = response.getOutputStream();
+            }
+            errorOut.write(sseError(e.getMessage()));
+            errorOut.flush();
+        }
+    }
+
+    /** JSON body 中 stream=true 时走图片 SSE；解析失败保持同步透传的旧行为。 */
+    private boolean isStream(String body) {
+        try {
+            JsonNode node = objectMapper.readTree(body);
+            return node.path("stream").asBoolean(false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private byte[] sseError(String message) throws Exception {
+        ObjectNode error = objectMapper.createObjectNode();
+        ObjectNode payload = error.putObject("error");
+        payload.put("code", "GatewayStreamError");
+        payload.put("message", message == null || message.isBlank() ? "upstream stream failed" : message);
+        return ("data: " + objectMapper.writeValueAsString(error) + "\n\n")
+                .getBytes(StandardCharsets.UTF_8);
     }
 
     @PostMapping(value = "/images/edits", produces = MediaType.APPLICATION_JSON_VALUE)

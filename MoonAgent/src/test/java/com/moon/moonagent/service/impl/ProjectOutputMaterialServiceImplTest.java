@@ -47,17 +47,23 @@ class ProjectOutputMaterialServiceImplTest {
         AgentAsset failed = image("a-failed", "c-now", "failed", "2026-09-10T04:00:00Z",
                 "/api/files/images/failed.png", null);
         AgentAsset noUrl = image("a-no-url", "c-now", "completed", "2026-09-10T04:00:00Z", null, null);
+        AgentAsset editorImage = image("a-editor", null, "completed", "2026-09-10T05:00:00Z",
+                "/api/files/images/editor.png", null);
+        editorImage.setUserId("u1");
+        editorImage.setProjectId("p1");
         when(assetMapper.selectList(any())).thenReturn(List.of(reference, failed, oldImage,
-                currentSecond, currentFirst, noUrl));
+                currentSecond, currentFirst, noUrl, editorImage));
 
         List<ProjectOutputMaterialGroup> groups = service.list("u1", "p1", "c-now");
 
         assertThat(groups).extracting(ProjectOutputMaterialGroup::conversationId)
-                .containsExactly("c-now", "c-old");
-        assertThat(groups.getFirst().items()).extracting(item -> item.id())
+                .containsExactly("__editor__", "c-now", "c-old");
+        assertThat(groups.get(1).items()).extracting(item -> item.id())
                 .containsExactly("a-current-1", "a-current-2");
-        assertThat(groups.getFirst().items().getFirst().urls())
+        assertThat(groups.get(1).items().getFirst().urls())
                 .containsExactly("/api/files/images/p1.png");
+        assertThat(groups.getFirst().items()).extracting(item -> item.id())
+                .containsExactly("a-editor");
     }
 
     private static AgentConversation conversation(String id, String title, String updatedAt) {

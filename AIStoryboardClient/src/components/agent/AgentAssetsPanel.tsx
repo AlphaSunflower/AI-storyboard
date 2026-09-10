@@ -5,6 +5,7 @@ import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { getSceneImageUrls } from '../../lib/sceneImages';
 import { parseResultUrls } from '../../stores/generationRecordsStore';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { Folder, Images, Film, LayoutList, Sparkles, ChevronRight } from 'lucide-react';
@@ -48,8 +49,8 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
   // 当前分类下可见的素材
   const imageAssets = records.filter((a) => a.type === 'image');
   const videoAssets = records.filter((a) => a.type === 'video');
-  const imageTiles = imageAssets.reduce((n, a) => n + urlsFor(a).length, 0);
-  const videoTiles = videoAssets.reduce((n, a) => n + urlsFor(a).length, 0);
+  const imageTiles = assets?.imageTotal ?? imageAssets.reduce((n, a) => n + urlsFor(a).length, 0);
+  const videoTiles = assets?.videoTotal ?? videoAssets.reduce((n, a) => n + urlsFor(a).length, 0);
 
   // ── 弹窗入场：对话框淡入 + 上浮 ──
   useGSAP(() => {
@@ -130,7 +131,9 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
             }}
           ><Sparkles size={13} strokeWidth={1.8} /> 打开分镜编辑器</button>
         </div>
-        {scenes.map((s) => (
+        {scenes.map((s) => {
+          const imageUrls = getSceneImageUrls(s);
+          return (
           <div
             key={s.id}
             onClick={() => { onClose(); navigate('/editor'); }}
@@ -152,19 +155,22 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
                 {s.scriptContent?.trim() || '（无描述）'}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <SceneStatus label="图" ok={Boolean(s.imageUrl)} />
+                <SceneStatus label="图" ok={imageUrls.length > 0} />
                 <SceneStatus label="视频" ok={Boolean(s.videoUrl)} />
               </div>
             </div>
-            {(s.imageUrl || s.videoUrl) && (
+            {(imageUrls.length > 0 || s.videoUrl) && (
               <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                {s.imageUrl && <Thumb url={s.imageUrl} type="image" onClick={() => previewMedia(s.imageUrl, 'image')} />}
+                {imageUrls.slice(0, 2).map((url, index) => (
+                  <Thumb key={`${url}-${index}`} url={url} type="image" onClick={() => previewMedia(url, 'image')} />
+                ))}
+                {imageUrls.length > 2 && <span style={{ fontSize: 11, color: 'var(--color-muted)', alignSelf: 'center' }}>+{imageUrls.length - 2}</span>}
                 {s.videoUrl && <Thumb url={s.videoUrl} type="video" onClick={() => previewMedia(s.videoUrl, 'video')} />}
               </div>
             )}
             <ChevronRight size={15} strokeWidth={1.8} style={{ color: 'var(--color-muted)', flexShrink: 0 }} />
           </div>
-        ))}
+        )})}
       </div>
     );
   };

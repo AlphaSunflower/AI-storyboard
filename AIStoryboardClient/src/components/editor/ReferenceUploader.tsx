@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties } from 'react';
+import { FolderOpen } from 'lucide-react';
 import type { SceneReferenceAsset } from '../../api/projects';
 import { assetUrl, REFERENCE_LIMITS } from '../../config';
 
@@ -16,6 +17,8 @@ interface Props {
   maxSizeMB?: number;
   onUpload: (file: File) => void;
   onDelete: (id: string) => void;
+  onPickProjectOutput?: () => void;
+  projectOutputDisabled?: boolean;
   disabled?: boolean;
 }
 
@@ -32,7 +35,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
-export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, onDelete, disabled }: Props) {
+export function ReferenceUploader({
+  type,
+  items,
+  maxCount,
+  maxSizeMB,
+  onUpload,
+  onDelete,
+  onPickProjectOutput,
+  projectOutputDisabled,
+  disabled,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const limit = REFERENCE_LIMITS[type];
@@ -56,6 +69,8 @@ export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, 
   };
 
   const boxStyle: CSSProperties = {
+    flex: '1 1 240px',
+    minWidth: 0,
     display: 'flex',
     alignItems: 'center',
     gap: 6,
@@ -71,25 +86,46 @@ export function ReferenceUploader({ type, items, maxCount, maxSizeMB, onUpload, 
 
   return (
     <div>
-      <div
-        onClick={() => !disabled && inputRef.current?.click()}
-        onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          if (disabled) return;
-          processFiles(Array.from(e.dataTransfer.files || []));
-        }}
-        style={{ ...boxStyle, borderColor: dragOver ? 'var(--color-primary)' : 'var(--color-hairline)', background: dragOver ? 'rgba(204, 120, 92, 0.07)' : 'var(--color-canvas)' }}
-        title={disabled ? '开启「以本分镜图片为首帧」时不可用' : `拖拽或在框内选择${TYPE_LABEL[type]}`}
-      >
-        <span style={{ fontSize: 14, display: 'inline-flex', alignItems: 'center' }}>{type === 'image' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> : type === 'video' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>}</span>
-        <span>
-          {items.length > 0 ? `${items.length}/${count} 个` : `添加${TYPE_LABEL[type]}（可选）`}
-          {` · 单文件 ≤ ${sizeMB}MB`}
-          {remain > 0 ? ` · 还可添加 ${remain} 个` : ' · 已达上限'}
-        </span>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div
+          onClick={() => !disabled && inputRef.current?.click()}
+          onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (disabled) return;
+            processFiles(Array.from(e.dataTransfer.files || []));
+          }}
+          style={{ ...boxStyle, borderColor: dragOver ? 'var(--color-primary)' : 'var(--color-hairline)', background: dragOver ? 'rgba(204, 120, 92, 0.07)' : 'var(--color-canvas)' }}
+          title={disabled ? '开启「以本分镜图片为首帧」时不可用' : `拖拽或在框内选择${TYPE_LABEL[type]}`}
+        >
+          <span style={{ fontSize: 14, display: 'inline-flex', alignItems: 'center' }}>{type === 'image' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> : type === 'video' ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>}</span>
+          <span>
+            {items.length > 0 ? `${items.length}/${count} 个` : type === 'image' ? '本地上传参考图' : `添加${TYPE_LABEL[type]}（可选）`}
+            {` · 单文件 ≤ ${sizeMB}MB`}
+            {remain > 0 ? ` · 还可添加 ${remain} 个` : ' · 已达上限'}
+          </span>
+        </div>
+        {type === 'image' && onPickProjectOutput && (
+          <button
+            type="button"
+            onClick={() => { if (!disabled && !projectOutputDisabled) onPickProjectOutput(); }}
+            disabled={disabled || projectOutputDisabled}
+            style={{
+              ...boxStyle,
+              flex: '0 0 auto',
+              borderStyle: 'solid',
+              background: 'var(--color-surface-card)',
+              color: 'var(--color-primary)',
+              fontWeight: 600,
+            }}
+            title={projectOutputDisabled ? '参考图数量已达上限' : '从项目产出素材选择参考图'}
+          >
+            <FolderOpen size={14} />
+            项目产出素材
+          </button>
+        )}
       </div>
       <input ref={inputRef} type="file" accept={ACCEPT[type]} hidden multiple onChange={handleFile} disabled={disabled} />
       {items.length > 0 && (

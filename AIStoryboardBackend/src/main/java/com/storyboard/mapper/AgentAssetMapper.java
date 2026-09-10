@@ -16,13 +16,15 @@ public interface AgentAssetMapper extends BaseMapper<AgentAsset> {
     @Select("""
             SELECT aa.*
             FROM public.agent_assets aa
-            JOIN public.conversations c ON c.id = aa.conversation_id
-            JOIN public.projects p ON p.id = c.project_id
+            LEFT JOIN public.conversations c ON c.id = aa.conversation_id
+            LEFT JOIN public.projects p ON p.id = c.project_id
             WHERE aa.id = #{assetId}
-              AND p.id = #{projectId}
-              AND p.user_id = #{userId}
               AND aa.type IN ('image', 'video')
               AND aa.status = 'completed'
+              AND (
+                    (aa.project_id = #{projectId} AND aa.user_id = #{userId})
+                    OR (p.id = #{projectId} AND p.user_id = #{userId})
+                  )
             LIMIT 1
             """)
     AgentAsset findOwnedOutputRecord(@Param("userId") String userId,
