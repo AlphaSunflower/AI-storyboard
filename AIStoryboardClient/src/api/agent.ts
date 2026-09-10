@@ -156,12 +156,30 @@ export interface AgentPage<T> {
   size: number;
 }
 
+/** 项目产出素材：一次生成可包含多张图片。 */
+export interface ProjectOutputMaterialItem {
+  id: string;
+  type: 'image' | 'video';
+  urls: string[];
+  sceneId?: string | null;
+  createdAt: string;
+}
+
+/** 项目产出素材按对话分组，当前对话由后端排在第一组。 */
+export interface ProjectOutputMaterialGroup {
+  conversationId: string;
+  title: string | null;
+  updatedAt: string;
+  items: ProjectOutputMaterialItem[];
+}
+
 /** 资产选择卡片的资产项（human_input 事件 assets 字段） */
 export interface AssetOption {
   id: string;
   name: string;
   type: string; // character / prop / scene
   image?: string; // 主图路径（/api/files/...）
+  imageUrls?: string[];
   // ── 分镜审查卡片（SceneReviewCard）扩展：结构化分镜项 ──
   sceneNumber?: number;
   scriptContent?: string;
@@ -350,6 +368,11 @@ export const agentApi = {
     size?: number;
   }) =>
     client.get<{ data: GenerationRecordPage }>('/agent/generation-records', { params }),
+
+  listProjectOutputMaterials: (projectId: string, currentConversationId?: string | null) =>
+    client.get<{ data: ProjectOutputMaterialGroup[] }>(`/agent/projects/${projectId}/output-materials`, {
+      params: { currentConversationId: currentConversationId ?? undefined },
+    }),
 
   getGenerationRecord: (id: string) =>
     client.get<{ data: GenerationRecord }>(`/agent/generation-records/${id}`),

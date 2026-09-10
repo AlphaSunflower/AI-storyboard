@@ -17,6 +17,12 @@ public class SceneReferenceImage {
     private String purpose;
     // 参考角色：FIRST_FRAME / LAST_FRAME / FIRST_LAST_FRAME / FULL_REFERENCE / REFERENCE
     private String role;
+    // 来源：upload=用户直接上传 / output=项目产出素材 / scene_image=当前分镜生成图
+    private String sourceType;
+    // 来源对象 ID：产出记录 ID 或分镜 ID
+    private String sourceId;
+    // 产出素材所属会话，用于选择和查看时分组
+    private String sourceConversationId;
     private String fileName;
     private Long fileSize;
 }

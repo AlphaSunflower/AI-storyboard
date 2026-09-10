@@ -9,6 +9,9 @@ public record SceneReferenceResponse(
     String purpose,
     String url,
     String role,
+    String sourceType,
+    String sourceId,
+    String sourceConversationId,
     String fileName,
     Long fileSize
 ) {}
