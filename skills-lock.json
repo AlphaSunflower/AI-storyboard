@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "holo-card-studio": {
+      "source": "everettfish/holo-card-studio",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "7c2d02d20289e391f1f0c77a5347556cfbe7279c9f5ddc985625e9e8edf63dab"
+    }
+  }
+}

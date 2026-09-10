@@ -9,6 +9,7 @@ node_modules/
 dist/
 uploads/
 logs/
+META-INF/
 
 # IDE
 .idea/
