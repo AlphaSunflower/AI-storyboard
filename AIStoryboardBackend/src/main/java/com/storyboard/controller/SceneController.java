@@ -2,10 +2,12 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.ReorderScenesRequest;
 import com.storyboard.dto.request.SceneRequest;
+import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
 import com.storyboard.service.SceneService;
+import com.storyboard.service.SceneMaterialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +24,7 @@ import java.util.List;
 public class SceneController {
 
     private final SceneService sceneService;
+    private final SceneMaterialService sceneMaterialService;
 
     @PostMapping("/projects/{projectId}/scenes")
     public ApiResponse<SceneResponse> add(Authentication auth, @PathVariable String projectId, @RequestBody SceneRequest request) {
@@ -64,5 +67,13 @@ public class SceneController {
     public ApiResponse<Void> deleteReference(Authentication auth, @PathVariable String referenceId) {
         sceneService.deleteReference(auth.getName(), referenceId);
         return ApiResponse.ok("删除成功", null);
+    }
+
+    /** 原子保存分镜素材选择：AI 资产 + 产出/当前分镜图片引用。 */
+    @PutMapping("/scenes/{id}/materials")
+    public ApiResponse<Void> replaceMaterials(Authentication auth, @PathVariable String id,
+                                              @RequestBody SceneMaterialsUpdateRequest request) {
+        sceneMaterialService.replaceMaterials(auth.getName(), id, request);
+        return ApiResponse.ok("保存成功", null);
     }
 }

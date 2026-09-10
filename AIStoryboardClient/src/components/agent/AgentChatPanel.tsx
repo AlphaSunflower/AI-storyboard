@@ -320,7 +320,7 @@ export function AgentChatPanel() {
           scrollbarWidth: 'thin',
         }}>
           {waitingHumanInput.assets?.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined)) ? (
-            <SceneReviewCard info={waitingHumanInput} />
+            <SceneReviewCard info={waitingHumanInput} startExpanded />
           ) : (
             <HumanInputCard
               info={waitingHumanInput}

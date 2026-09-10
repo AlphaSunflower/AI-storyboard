@@ -74,6 +74,17 @@ public interface AgentGenerationService {
                            List<ReferenceImage> referenceImages, String generatedImageUrl);
 
     /**
+     * 创建带多模态参考素材的视频任务。
+     *
+     * @param referenceVideos 参考视频 URL 列表
+     */
+    String createVideoTaskWithRole(AgentConversation conversation, String sceneId,
+                           String prompt, String model, String resolution, String size,
+                           String aspectRatio, String duration, String negativePrompt,
+                           List<ReferenceImage> referenceImages, String generatedImageUrl,
+                           List<String> referenceVideos);
+
+    /**
      * 轮询视频任务。
      * 资产更新由上游 VideoGenerationService 在终态时完成，此处只转发轮询结果。
      */

@@ -46,7 +46,7 @@ public class SceneServiceImpl implements SceneService {
     /** 参考素材上限兜底（对齐 MiniMax 输入约束；网关 params 精确值由前端展示，后端硬上限防滥用） */
     private static final Map<String, int[]> REF_LIMITS = Map.of(
         "image", new int[] { 10, 30 * 1024 * 1024 },   // 数量, 单文件字节
-        "video", new int[] { 3, 50 * 1024 * 1024 },
+        "video", new int[] { 1, 50 * 1024 * 1024 },
         "audio", new int[] { 3, 15 * 1024 * 1024 });
 
     @Override
@@ -161,7 +161,8 @@ public class SceneServiceImpl implements SceneService {
         checkProjectOwnership(userId, scene.getProjectId());
         return refImageMapper.findBySceneId(sceneId).stream()
             .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
-                    r.getRole(), r.getFileName(), r.getFileSize()))
+                    r.getRole(), r.getSourceType(), r.getSourceId(), r.getSourceConversationId(),
+                    r.getFileName(), r.getFileSize()))
             .toList();
     }
 
@@ -199,12 +200,14 @@ public class SceneServiceImpl implements SceneService {
         ref.setType(t);
         ref.setPurpose(p);
         ref.setRole("REFERENCE");
+        ref.setSourceType("upload");
         ref.setImageUrl(url);
         ref.setFileName(file.getOriginalFilename());
         ref.setFileSize(file.getSize());
         ref.setSortOrder((int) existing);
         refImageMapper.insert(ref);
-        return new SceneReferenceResponse(ref.getId(), t, p, url, "REFERENCE", ref.getFileName(), ref.getFileSize());
+        return new SceneReferenceResponse(ref.getId(), t, p, url, "REFERENCE",
+                "upload", null, null, ref.getFileName(), ref.getFileSize());
     }
 
     @Override
@@ -215,19 +218,21 @@ public class SceneServiceImpl implements SceneService {
         Scene scene = sceneMapper.selectById(ref.getSceneId());
         if (scene == null) throw new BusinessException(40401, "素材所属分镜不存在");
         checkProjectOwnership(userId, scene.getProjectId());
-        // 删除对象（失败仅警告，不阻断——素材表已删，残留对象由生命周期兜底）
-        try {
-            String url = ref.getImageUrl();
-            if (url != null && url.contains("/")) {
-                String filename = url.substring(url.lastIndexOf('/') + 1);
-                switch (ref.getType() == null ? "image" : ref.getType()) {
-                    case "video" -> fileStorageService.deleteVideo(filename);
-                    case "audio" -> fileStorageService.deleteAudio(filename);
-                    default -> fileStorageService.deleteImage(filename);
+        // 仅用户直接上传的素材删除文件；产出素材/分镜图片只解除引用，不能删除原生成文件。
+        if ("upload".equals(ref.getSourceType())) {
+            try {
+                String url = ref.getImageUrl();
+                if (url != null && url.contains("/")) {
+                    String filename = url.substring(url.lastIndexOf('/') + 1);
+                    switch (ref.getType() == null ? "image" : ref.getType()) {
+                        case "video" -> fileStorageService.deleteVideo(filename);
+                        case "audio" -> fileStorageService.deleteAudio(filename);
+                        default -> fileStorageService.deleteImage(filename);
+                    }
                 }
+            } catch (Exception e) {
+                log.warn("删除参考素材对象失败: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("删除参考素材对象失败: {}", e.getMessage());
         }
         refImageMapper.deleteById(referenceId);
     }

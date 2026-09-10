@@ -8,6 +8,7 @@ import { MessageBubble } from '../components/agent/MessageBubble';
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
+import { isSceneReview } from '../components/agent/SceneReviewCard';
 import { TaskQueuePanel } from '../components/agent/TaskQueuePanel';
 import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
@@ -145,6 +146,16 @@ export function ChatPage() {
     const el = scrollRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
+
+  // 自动审查属于关键节点：即使上翻了历史消息，也把新展开的审查卡带入视口。
+  useEffect(() => {
+    if (!waitingHumanInput || !isSceneReview(waitingHumanInput)) return;
+    const id = window.requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [waitingHumanInput]);
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;

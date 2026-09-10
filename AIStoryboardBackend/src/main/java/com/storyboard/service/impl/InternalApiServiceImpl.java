@@ -157,7 +157,8 @@ public class InternalApiServiceImpl implements InternalApiService {
     public List<SceneReferenceResponse> getSceneReferences(String sceneId) {
         return sceneReferenceImageMapper.findBySceneId(sceneId).stream()
                 .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
-                        r.getRole(), r.getFileName(), r.getFileSize()))
+                        r.getRole(), r.getSourceType(), r.getSourceId(), r.getSourceConversationId(),
+                        r.getFileName(), r.getFileSize()))
                 .toList();
     }
 

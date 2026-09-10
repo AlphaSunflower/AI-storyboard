@@ -224,6 +224,16 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
                                   String prompt, String model, String resolution, String size,
                                   String aspectRatio, String duration, String negativePrompt,
                                   List<ReferenceImage> referenceImages, String generatedImageUrl) {
+        return createVideoTaskWithRole(conversation, sceneId, prompt, model, resolution, size,
+                aspectRatio, duration, negativePrompt, referenceImages, generatedImageUrl, List.of());
+    }
+
+    @Override
+    public String createVideoTaskWithRole(AgentConversation conversation, String sceneId,
+                                  String prompt, String model, String resolution, String size,
+                                  String aspectRatio, String duration, String negativePrompt,
+                                  List<ReferenceImage> referenceImages, String generatedImageUrl,
+                                  List<String> referenceVideos) {
         Integer durationInt = parseDuration(duration);
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
         String cleanPrompt = sanitize(prompt);
@@ -250,8 +260,9 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         String taskId;
         try {
             taskId = videoService.createVideoTask(
-                effectiveSceneId, cleanPrompt, cleanModel, cleanResolution, cleanSize, cleanAspectRatio,
-                durationInt, cleanNegative, null, referenceImages, cleanSource, null, null, true);
+                    effectiveSceneId, cleanPrompt, cleanModel, cleanResolution, cleanSize, cleanAspectRatio,
+                    durationInt, cleanNegative, null, referenceImages, cleanSource,
+                    referenceVideos, null, true);
         } catch (Exception e) {
             updateRecord(record, "failed", null, null, friendlyMessage(e), startMs);
             throw e;

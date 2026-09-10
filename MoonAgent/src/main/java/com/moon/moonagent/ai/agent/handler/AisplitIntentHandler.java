@@ -8,7 +8,6 @@ import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentTools;
-import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardDesignPlan;
@@ -60,6 +59,7 @@ public class AisplitIntentHandler implements IntentHandler {
     private final AgentAiConfigProperties agentConfig;
     private final AssetMatchingService assetMatchingService;
     private final StoryboardPortfolioService portfolioService;
+    private final SceneReviewCardService sceneReviewCardService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 并行 LLM 步骤专用：互不依赖的调用放虚拟线程并发，避免整条分镜链串行卡住。 */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -850,28 +850,19 @@ public class AisplitIntentHandler implements IntentHandler {
         // sceneCount > 会话开始时数量 判断是否需要刷新分镜列表——总数才正确，replace 后即新数量）
         long totalScenes = storyboardClient.getProjectScenes(
                 request.getConversation().getProjectId()).size();
-        String msg = count > 0
-                ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表"
-                : "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
-        // 4.3 自动审查（2026-08-28 改为「软提示」）：不再写库成功即强制 handoff 到 scene-review——
-        // 那样用户会无条件被抛进「分镜审查结果」卡，之后任何含"分镜"的消息又触发 review，形成死循环。
-        // 改为正常 resumeStage 收尾（发「已生成 N 个分镜」确认消息），并在 message 里提示可手动审查，
-        // 用户想查看缺图缺视频时主动说「审查分镜」即由意图识别正常路由到 scene-review。
-        String msg2 = count > 0
-                ? "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，请查看左侧分镜列表。\n\n"
-                    + "需要我帮你检查哪些分镜缺图缺视频、或批量补生成吗？"
-                : msg;
-        // 推荐动作：审查分镜（不要求用户手动输入「审查分镜」，点按钮即带 routingHint 切链）
-        java.util.List<SuggestedAction> suggestedActions = count > 0
-                ? java.util.List.of(new SuggestedAction("scene-review", "审查分镜", "intent-scene-review"))
-                : java.util.List.of();
-        request.setSuggestedActions(suggestedActions);
-        support.resumeStage(request, "正在写入分镜…", Map.of(
-                "content", msg2,
-                "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
-                "sceneCount", totalScenes,
-                "suggestedActions", suggestedActions));
-        return msg2;
+        if (count <= 0) {
+            String msg = "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求";
+            support.resumeStage(request, "正在写入分镜…", Map.of(
+                    "content", msg,
+                    "confirm", Map.of("kind", "script", "sceneCount", totalScenes, "url", "", "actions", List.of()),
+                    "sceneCount", totalScenes));
+            return msg;
+        }
+
+        // 分镜写库成功后直接打开完整审查卡；不走 handoff，避免历史版本中的审查自循环。
+        List<Scene> allScenes = storyboardClient.getProjectScenes(request.getConversation().getProjectId());
+        String msg = "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，已打开分镜审查结果。";
+        return sceneReviewCardService.openReview(request, allScenes, msg);
     }
 
     /** 不写库收尾：message + message_end（sceneCount=-1，前端不触发分镜列表刷新） */

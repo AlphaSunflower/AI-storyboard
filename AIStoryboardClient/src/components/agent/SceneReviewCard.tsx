@@ -4,10 +4,12 @@ import { useAgentStore, type HumanInputInfo } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { sceneApi } from '../../api/scenes';
-import { assetApi, type Asset } from '../../api/assets';
+import { assetApi } from '../../api/assets';
 import { VideoGenGateModal } from './VideoGenGateModal';
 import { AgentParamSelector } from './AgentParamSelector';
 import { RefineImageModal } from './RefineImageModal';
+import { SceneMaterialPickerModal } from './SceneMaterialPickerModal';
+import { SceneReferenceViewerModal } from './SceneReferenceViewerModal';
 
 const STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
@@ -27,6 +29,7 @@ interface SceneItem {
   sceneNumber?: number;
   name: string;
   image?: string;
+  imageUrls?: string[];
   videoStatus?: string;
   videoPrompt?: string;
   imagePrompt?: string;
@@ -38,14 +41,6 @@ interface SceneItem {
   videoResolution?: string;
   videoAspectRatio?: string;
   duration?: number;
-}
-
-interface RefAsset {
-  id: string;
-  name: string;
-  type: string;
-  image?: string;
-  images?: string[];
 }
 
 /** 场景参数源（SceneItem / SceneResponse 均满足） */
@@ -76,6 +71,15 @@ function sceneBuiltValueFor(s: SceneConfigLike, kind: 'image' | 'video') {
   return out;
 }
 
+function sceneImageUrlsFor(sceneId: string, scenes: Array<{ id: string; imageUrl?: string; imageUrls?: string }>, item?: SceneItem) {
+  const live = scenes.find((scene) => scene.id === sceneId);
+  const raw = live?.imageUrls ?? item?.imageUrls?.join(',') ?? '';
+  const urls = raw.split(',').map((url) => url.trim()).filter(Boolean);
+  if (urls.length > 0) return [...new Set(urls)];
+  const primary = live?.imageUrl ?? item?.image;
+  return primary ? [primary] : [];
+}
+
 export const isSceneReview = (info: HumanInputInfo) =>
   Array.isArray(info.assets) && info.assets.length > 0 &&
   info.assets.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined));
@@ -84,7 +88,7 @@ export const isSceneReview = (info: HumanInputInfo) =>
  * 分镜审查结果卡片（逐镜可编辑）：/chat Moon 智能体「展示分镜」触发的 HITL 卡片。
  *
  * <p>每行一个分镜：缩略图 + 勾选 + 图/视频提示词切换 + 折叠参数（网关模型选择）+ 上传图片 +
- * 选择指定资产 + 查看已投参考物 + 状态徽标。批量区提供「生成图片」「生成视频」「优化方案」，
+ * 上传素材 + 查看已投参考物 + 状态徽标。批量区提供「生成图片」「生成视频」「优化方案」，
  * 全部作用于勾选分镜。卡片整体限高可滚动，避免遮挡下方输入框。
  */
 export function SceneReviewCard({ info, startExpanded = false }: { info: HumanInputInfo; startExpanded?: boolean }) {
@@ -94,6 +98,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   const queue = useAgentStore((s) => s.storyboardVideoQueue);
   const cancelQueue = useAgentStore((s) => s.cancelStoryboardVideoQueue);
   const enqueueImageRefine = useAgentStore((s) => s.enqueueStoryboardImageRefine);
+  const activeConversationId = useAgentStore((s) => s.activeConversationId);
   const scenes = useProjectStore((s) => s.scenes);
 
   const items = useMemo<SceneItem[]>(
@@ -103,6 +108,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
       sceneNumber: a.sceneNumber,
       name: a.name,
       image: a.image,
+      imageUrls: a.imageUrls,
       videoStatus: a.videoStatus,
       videoPrompt: a.videoPrompt,
       imagePrompt: a.imagePrompt,
@@ -143,13 +149,9 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
       const cfg = freshestScene(i.id) ?? i;
       return [i.id, { image: sceneBuiltValueFor(cfg, 'image'), video: sceneBuiltValueFor(cfg, 'video') }];
     })));
-  // 资产选择器状态
-  const [assetPickerFor, setAssetPickerFor] = useState<string | null>(null);
-  const [assetList, setAssetList] = useState<Asset[]>([]);
-  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
-  // 参考物查看
-  const [viewFor, setViewFor] = useState<string | null>(null);
-  const [viewData, setViewData] = useState<{ images: { id: string; url: string }[]; assets: RefAsset[] }>({ images: [], assets: [] });
+  // 素材选择 / 参考物查看
+  const [materialPickerFor, setMaterialPickerFor] = useState<string | null>(null);
+  const [viewerFor, setViewerFor] = useState<string | null>(null);
   // 每镜已投参考图/关联资产数量
   const [refsSummary, setRefsSummary] = useState<Record<string, { images: number; assets: number }>>({});
   // 每个 panel(key=sceneId/kind) 当前已落库的参数签名；仅当与实际变化时保存，避免初始默认回填覆盖 scene 已存配置
@@ -163,7 +165,10 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
         const [refsRes, assetsRes] = await Promise.all([sceneApi.listReferences(s.id), assetApi.listSceneAssets(s.id)]);
         summaries[s.id] = {
           images: (refsRes.data.data ?? []).filter((r) => r.type === 'image').length,
-          assets: (assetsRes.data.data?.videoAssets ?? []).length,
+          assets: new Set([
+            ...(assetsRes.data.data?.imageAssets ?? []).map((asset) => asset.id),
+            ...(assetsRes.data.data?.videoAssets ?? []).map((asset) => asset.id),
+          ]).size,
         };
       } catch { /* 静默 */ }
     }));
@@ -304,76 +309,6 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   };
 
   // ── 资产选择器：拉取项目资产，勾选指定后关联（video 用途） ──
-  const openAssetPicker = async (s: SceneItem) => {
-    setAssetPickerFor(s.id);
-    setSelectedAssetIds(new Set());
-    try {
-      const res = await assetApi.list(projectId);
-      setAssetList(res.data.data ?? []);
-    } catch {
-      setAssetList([]);
-      flash('拉取资产库失败');
-    }
-  };
-  const confirmAssetPicker = async () => {
-    const sceneId = assetPickerFor;
-    if (!sceneId || selectedAssetIds.size === 0) { setAssetPickerFor(null); return; }
-    try {
-      await assetApi.setSceneAssets(sceneId, [], Array.from(selectedAssetIds));
-      flash('已关联所选资产');
-      setAssetPickerFor(null);
-      await refreshProject();
-      await loadRefSummaries();
-    } catch (e) {
-      flash(e instanceof Error ? e.message : '资产关联失败');
-    }
-  };
-
-  // ── 查看已投参考物：参考图（references type=image） + 关联资产 ──
-  const openView = async (s: SceneItem) => {
-    setViewFor(s.id);
-    setViewData({ images: [], assets: [] });
-    try {
-      const refs = await sceneApi.listReferences(s.id);
-      const images = (refs.data.data ?? []).filter((r) => r.type === 'image').map((r) => ({ id: r.id, url: assetUrl(r.url) }));
-      const assetsRes = await assetApi.listSceneAssets(s.id);
-      const assets = (assetsRes.data.data?.videoAssets ?? []).map((a) => ({
-        id: a.id, name: a.name, type: a.type, image: a.images?.[0]?.url ? assetUrl(a.images[0].url) : undefined,
-      }));
-      setViewData({ images, assets });
-    } catch { flash('读取参考物失败'); }
-  };
-
-  // 删除参考图：删参考素材后刷新卡片计数与数据
-  const deleteRefImage = async (refId: string) => {
-    try {
-      await sceneApi.deleteReference(refId);
-      flash('已删除参考图');
-      await refreshProject();
-      if (viewFor) await void openView(items.find((i) => i.id === viewFor) as SceneItem);
-      await loadRefSummaries();
-    } catch (e) {
-      flash(e instanceof Error ? e.message : '删除参考图失败');
-    }
-  };
-
-  // 移除关联资产：从该分镜视频用途关联列表中剔除指定资产
-  const unlinkAsset = async (assetId: string) => {
-    try {
-      const sceneId = viewFor;
-      if (!sceneId) return;
-      const res = await assetApi.listSceneAssets(sceneId);
-      const remaining = (res.data.data?.videoAssets ?? []).filter((a) => a.id !== assetId);
-      await assetApi.setSceneAssets(sceneId, [], remaining.map((a) => a.id));
-      flash('已移除资产关联');
-      await refreshProject();
-      if (sceneId) await void openView(items.find((i) => i.id === sceneId) as SceneItem);
-      await loadRefSummaries();
-    } catch (e) {
-      flash(e instanceof Error ? e.message : '移除资产失败');
-    }
-  };
-
   const submitAction = (actionId: string, ids: string[]) => {
     if (ids.length === 0) { flash('请先选择要生成的分镜'); return; }
     if (streaming) return;
@@ -513,9 +448,9 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <button type="button" onClick={() => void uploadImage(s)} style={rowActionBtn}><ImagePlus size={13} /> 上传图片</button>
-                    <button type="button" onClick={() => void openAssetPicker(s)} style={rowActionBtn}><Package size={13} /> 上传资产</button>
+                    <button type="button" onClick={() => setMaterialPickerFor(s.id)} style={rowActionBtn}><Package size={13} /> 上传素材</button>
                     <span style={{ fontSize: 12, color: 'rgb(152,158,168)' }}>参考图 {refs.images} · 资产 {refs.assets}</span>
-                    <button type="button" onClick={() => void openView(s)} style={rowActionBtn}><Eye size={13} /> 查看参考物</button>
+                    <button type="button" onClick={() => setViewerFor(s.id)} style={rowActionBtn}><Eye size={13} /> 查看参考物</button>
                     {hasImage && (
                       <button type="button" disabled={streaming} onClick={() => setRefineFor(s.id)} style={{ ...rowActionBtn, color: 'rgb(65,118,230)' }}><Sparkles size={13} /> 完善图片</button>
                     )}
@@ -571,98 +506,33 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
         </div>
       </div>
 
-      {/* 资产选择器抽屉 */}
-      {assetPickerFor && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(15,17,21,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-          onPointerDown={(e) => { if (e.target === e.currentTarget) setAssetPickerFor(null); }}>
-          <div style={{ width: '100%', maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column', background: 'white', borderRadius: 16, overflow: 'hidden' }}>
-            <header style={{ padding: '12px 16px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <strong style={{ fontSize: 14, color: 'rgb(15,17,21)' }}>选择要关联的资产</strong>
-              <button onClick={() => setAssetPickerFor(null)} style={iconBtn}><X size={16} /></button>
-            </header>
-            <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
-              {assetList.length === 0 ? (
-                <div style={{ color: 'rgb(152,158,168)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>暂无资产，请先在资源库创建</div>
-              ) : (
-                assetList.map((a) => {
-                  const sel = selectedAssetIds.has(a.id);
-                  return (
-                    <label key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 6px', cursor: 'pointer', borderRadius: 8, background: sel ? 'rgba(65,118,230,0.05)' : 'transparent' }}>
-                      <input type="checkbox" checked={sel} onChange={() => setSelectedAssetIds((prev) => { const n = new Set(prev); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n; })} style={{ accentColor: 'rgb(65,118,230)' }} />
-                      {a.images?.[0]?.url ? (
-                        <img src={assetUrl(a.images[0].url)} alt={a.name} style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      ) : (
-                        <span style={{ width: 32, height: 32, borderRadius: 6, background: 'rgba(0,0,0,0.05)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>{a.images?.length ?? 0}</span>
-                      )}
-                      <span style={{ fontSize: 13, color: 'rgb(15,17,21)' }}>{a.name}</span>
-                      <small style={{ marginLeft: 'auto', fontSize: 11, color: 'rgb(152,158,168)' }}>{a.type} · {a.images?.length ?? 0} 图</small>
-                    </label>
-                  );
-                })
-              )}
-            </div>
-            <footer style={{ padding: '12px 16px', borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setAssetPickerFor(null)} style={ghostBtn}>取消</button>
-              <button disabled={selectedAssetIds.size === 0} onClick={() => void confirmAssetPicker()} style={{ ...primaryBtn, opacity: selectedAssetIds.size === 0 ? 0.5 : 1 }}>关联所选（{selectedAssetIds.size}）</button>
-            </footer>
-          </div>
-        </div>
-      )}
+      <SceneMaterialPickerModal
+        open={Boolean(materialPickerFor)}
+        sceneId={materialPickerFor ?? ''}
+        projectId={projectId}
+        currentConversationId={activeConversationId}
+        sceneImageUrls={sceneImageUrlsFor(
+          materialPickerFor ?? '',
+          scenes,
+          items.find((value) => value.id === materialPickerFor),
+        )}
+        onClose={() => setMaterialPickerFor(null)}
+        onSaved={async () => {
+          await refreshProject();
+          await loadRefSummaries();
+          flash('素材选择已保存');
+        }}
+      />
 
-      {/* 参考物查看抽屉 */}
-      {viewFor && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(15,17,21,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-          onPointerDown={(e) => { if (e.target === e.currentTarget) setViewFor(null); }}>
-          <div style={{ width: '100%', maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column', background: 'white', borderRadius: 16, overflow: 'hidden' }}>
-            <header style={{ padding: '12px 16px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <strong style={{ fontSize: 14, color: 'rgb(15,17,21)' }}>已投参考物</strong>
-              <button onClick={() => setViewFor(null)} style={iconBtn}><X size={16} /></button>
-            </header>
-            <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
-              <div style={{ fontSize: 12, color: 'rgb(96,100,108)', marginBottom: 6 }}>
-                参考图 {viewData.images.length} 张 · 关联资产 {viewData.assets.length} 个
-              </div>
-              {viewData.images.length === 0 && viewData.assets.length === 0 ? (
-                <div style={{ color: 'rgb(152,158,168)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>尚未上传参考图或关联资产</div>
-              ) : (
-                <>
-                  {viewData.images.length > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgb(96,100,108)', marginBottom: 6 }}>参考图片</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {viewData.images.map((img, i) => (
-                          <div key={img.id} style={{ position: 'relative' }}>
-                            <img src={img.url} alt={`参考图${i + 1}`} style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(0,0,0,0.06)' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                            <button type="button" onClick={() => void deleteRefImage(img.id)} title="删除参考图"
-                              style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: 9, border: 'none', background: 'rgb(217,45,32)', color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
-                              <X size={11} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {viewData.assets.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'rgb(96,100,108)', marginBottom: 6 }}>关联资产</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {viewData.assets.map((a) => (
-                          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {a.image ? <img src={a.image} alt={a.name} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <span style={{ width: 36, height: 36, borderRadius: 6, background: 'rgba(0,0,0,0.05)' }} />}
-                            <span style={{ fontSize: 13, color: 'rgb(15,17,21)' }}>{a.name}</span>
-                            <small style={{ fontSize: 11, color: 'rgb(152,158,168)' }}>{a.type}</small>
-                            <button type="button" onClick={() => void unlinkAsset(a.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'rgb(217,45,32)', fontSize: 11, cursor: 'pointer' }}>移除</button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <SceneReferenceViewerModal
+        open={Boolean(viewerFor)}
+        sceneId={viewerFor ?? ''}
+        onClose={() => setViewerFor(null)}
+        onChanged={async () => {
+          await refreshProject();
+          await loadRefSummaries();
+        }}
+      />
 
       <VideoGenGateModal open={gateOpen} count={selectedCount} onClose={() => setGateOpen(false)}
         onConfirm={() => { setGateOpen(false); submitAction('review-video-auto', chosen.map((s) => s.id)); }} />
@@ -709,5 +579,3 @@ const statusPill = (kind?: string): React.CSSProperties => ({
 const batchBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'rgb(65,118,230)', color: 'white', fontSize: 13, cursor: 'pointer' };
 const batchBtnGhost: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)', background: 'transparent', color: 'rgb(96,100,108)', fontSize: 13, cursor: 'pointer' };
 const rowActionBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', background: 'transparent', color: 'rgb(96,100,108)', fontSize: 12, cursor: 'pointer' };
-const ghostBtn: React.CSSProperties = { padding: '9px 18px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)', background: 'transparent', color: 'rgb(96,100,108)', fontSize: 14, cursor: 'pointer' };
-const primaryBtn: React.CSSProperties = { padding: '9px 18px', borderRadius: 10, border: 'none', background: 'rgb(65,118,230)', color: 'white', fontSize: 14, cursor: 'pointer' };

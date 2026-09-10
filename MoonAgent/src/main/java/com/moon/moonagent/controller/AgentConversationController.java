@@ -8,6 +8,7 @@ import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
+import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
 import com.storyboard.common.ApiResponse;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
@@ -17,6 +18,7 @@ import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
+import com.moon.moonagent.service.ProjectOutputMaterialService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -46,6 +48,7 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final PromptOptimizeService optimizeService;
     private final GenerationRecordService generationRecordService;
+    private final ProjectOutputMaterialService projectOutputMaterialService;
     private final AgentAiConfigProperties agentConfig;
 
     /** 创建会话 */
@@ -238,6 +241,15 @@ public class AgentConversationController {
     @GetMapping("/generation-records/{id}")
     public ApiResponse<AgentAsset> getGenerationRecord(Authentication auth, @PathVariable String id) {
         return ApiResponse.ok(generationRecordService.getRecord(auth.getName(), id));
+    }
+
+    /** 当前项目产出素材：按对话分组，当前对话优先，供分镜审查素材选择器使用。 */
+    @GetMapping("/projects/{projectId}/output-materials")
+    public ApiResponse<List<ProjectOutputMaterialGroup>> projectOutputMaterials(
+            Authentication auth,
+            @PathVariable String projectId,
+            @RequestParam(required = false) String currentConversationId) {
+        return ApiResponse.ok(projectOutputMaterialService.list(auth.getName(), projectId, currentConversationId));
     }
 
     /** 重新拉取（仅视频且 taskId 非空）：重新轮询上游并更新记录 */

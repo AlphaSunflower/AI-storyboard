@@ -197,9 +197,10 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         // 先加入带 role 的图（FIRST_LAST_FRAME → 首帧/尾帧），避免被随后纯 REFERENCE 的资产/用户图
         // 按 URL 去重挤掉，否则 2 张资产图会退化成「一张 REFERENCE」，模型只读到首张。
         List<ReferenceImage> combined = new ArrayList<>();
+        List<Map<String, Object>> sceneRefs = List.of();
         try {
-            List<Map<String, Object>> sceneRefs = storyboardClient.getSceneReferences(row.getSceneId());
-            List<ReferenceImage> roleRefs = mapSceneReferenceRoles(sceneRefs);
+            sceneRefs = storyboardClient.getSceneReferences(row.getSceneId());
+            List<ReferenceImage> roleRefs = mapSceneReferenceImages(sceneRefs);
             for (ReferenceImage ref : roleRefs) {
                 boolean dup = combined.stream().anyMatch(r -> ref.url().equals(r.url()));
                 if (!dup) combined.add(ref);
@@ -219,6 +220,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             if (!dup) combined.add(ReferenceImage.ofReference(u));
         }
         refImages = combined;
+        List<String> referenceVideos = sceneReferenceVideoUrls(sceneRefs);
         // H3 约束：多模态参考素材与首帧图生视频互斥。已有参考图（含角色）时不再传 scene.imageUrl，
         // 参考图即唯一素材输入（用户行内参考图/资产图优先于场景首帧图）。
         if (!refImages.isEmpty()) {
@@ -231,7 +233,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
                     conversation, row.getSceneId(), prompt, row.getModel(), row.getResolution(),
                     row.getSize(), row.getAspectRatio(),
                     row.getDuration() == null ? null : String.valueOf(row.getDuration()),
-                    row.getNegativePrompt(), refImages, sourceImageUrl);
+                    row.getNegativePrompt(), refImages, sourceImageUrl, referenceVideos);
         } catch (Exception e) {
             failRow(row, e.getMessage() != null ? e.getMessage() : "视频任务创建失败");
             return;
@@ -438,13 +440,16 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         };
     }
 
-    /** 分镜挂载参考图 → ReferenceImage（含 role；FIRST_LAST_FRAME 按首/尾/中间拆分）。 */
-    private static List<ReferenceImage> mapSceneReferenceRoles(List<Map<String, Object>> refs) {
+    /** 分镜挂载参考图 → ReferenceImage（仅 image；FIRST_LAST_FRAME 按首/尾/中间拆分）。 */
+    static List<ReferenceImage> mapSceneReferenceImages(List<Map<String, Object>> refs) {
         if (refs == null || refs.isEmpty()) return List.of();
+        List<Map<String, Object>> images = refs.stream()
+                .filter(ref -> ref != null && isType(ref, "image"))
+                .toList();
         List<ReferenceImage> out = new ArrayList<>();
-        int n = refs.size();
+        int n = images.size();
         for (int i = 0; i < n; i++) {
-            Map<String, Object> ref = refs.get(i);
+            Map<String, Object> ref = images.get(i);
             String url = ref.get("url") == null ? "" : String.valueOf(ref.get("url"));
             if (url.isBlank()) continue;
             String role = ref.get("role") == null ? "" : String.valueOf(ref.get("role"));
@@ -459,6 +464,22 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             out.add(new ReferenceImage(url, r));
         }
         return out;
+    }
+
+    static List<String> sceneReferenceVideoUrls(List<Map<String, Object>> refs) {
+        if (refs == null || refs.isEmpty()) return List.of();
+        return refs.stream()
+                .filter(ref -> ref != null && isType(ref, "video"))
+                .map(ref -> ref.get("url") == null ? "" : String.valueOf(ref.get("url")))
+                .filter(url -> !url.isBlank())
+                .distinct()
+                .limit(1)
+                .toList();
+    }
+
+    private static boolean isType(Map<String, Object> ref, String expected) {
+        Object type = ref.get("type");
+        return type == null || type.toString().isBlank() || expected.equalsIgnoreCase(type.toString());
     }
 
     private static List<String> split(String value) {

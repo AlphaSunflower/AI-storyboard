@@ -36,6 +36,7 @@ import com.storyboard.service.FileStorageService;
 import com.storyboard.service.InternalApiService;
 import com.storyboard.service.ProjectService;
 import com.storyboard.service.SceneService;
+import com.storyboard.service.SceneMaterialService;
 import com.storyboard.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +88,8 @@ class BackendControllerSmokeTest {
     private ProjectService projectService;
     @MockitoBean
     private SceneService sceneService;
+    @MockitoBean
+    private SceneMaterialService sceneMaterialService;
     @MockitoBean
     private AssetService assetService;
     @MockitoBean
@@ -205,9 +208,11 @@ class BackendControllerSmokeTest {
         when(sceneService.addScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.updateScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.listReferences(anyString(), anyString()))
-            .thenReturn(List.of(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "REFERENCE", "x.png", 1L)));
+            .thenReturn(List.of(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png",
+                "REFERENCE", "upload", null, null, "x.png", 1L)));
         when(sceneService.uploadReference(anyString(), anyString(), anyString(), anyString(), any()))
-            .thenReturn(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png", "REFERENCE", "x.png", 1L));
+            .thenReturn(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png",
+                "REFERENCE", "upload", null, null, "x.png", 1L));
 
         mockMvc.perform(post("/api/projects/p1/scenes").with(user("u1"))
                 .contentType("application/json").content("{\"scriptContent\":\"内容\"}"))
@@ -227,6 +232,9 @@ class BackendControllerSmokeTest {
                 .param("type", "image").param("purpose", "参考").with(user("u1")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("r1"));
         mockMvc.perform(delete("/api/scenes/references/r1").with(user("u1")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(put("/api/scenes/s1/materials").with(user("u1"))
+                .contentType("application/json").content("{\"assetIds\":[\"a1\"],\"references\":[]}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200));
     }
 

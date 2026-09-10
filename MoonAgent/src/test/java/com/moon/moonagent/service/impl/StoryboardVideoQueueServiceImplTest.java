@@ -1,6 +1,8 @@
 package com.moon.moonagent.service.impl;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.video.ReferenceImage;
+import com.moon.moonagent.ai.video.ReferenceImageRole;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
@@ -169,5 +171,22 @@ class StoryboardVideoQueueServiceImplTest {
         when(queueMapper.findActiveByProject("proj-1")).thenReturn(List.of(row));
         assertEquals(1, service.listByProject("proj-1", "active").size());
         verify(queueMapper).findActiveByProject("proj-1");
+    }
+
+    @Test
+    void sceneReferences_splitImagesAndVideosByType() {
+        List<Map<String, Object>> refs = List.of(
+                Map.of("type", "image", "url", "/api/files/images/ref.png", "role", "REFERENCE"),
+                Map.of("type", "video", "url", "/api/files/videos/ref.mp4"),
+                Map.of("type", "image", "url", "/api/files/images/first.png", "role", "FIRST_FRAME"),
+                Map.of("type", "video", "url", "/api/files/videos/ignored.mp4"));
+
+        List<ReferenceImage> images = StoryboardVideoQueueServiceImpl.mapSceneReferenceImages(refs);
+        List<String> videos = StoryboardVideoQueueServiceImpl.sceneReferenceVideoUrls(refs);
+
+        assertEquals(List.of("/api/files/images/ref.png", "/api/files/images/first.png"),
+                images.stream().map(ReferenceImage::url).toList());
+        assertEquals(ReferenceImageRole.FIRST_FRAME, images.get(1).role());
+        assertEquals(List.of("/api/files/videos/ref.mp4"), videos);
     }
 }

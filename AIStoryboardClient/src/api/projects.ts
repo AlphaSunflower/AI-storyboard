@@ -20,8 +20,11 @@ export interface SceneReferenceAsset {
   purpose: 'image' | 'video';
   url: string;
   role?: string;
-  fileName: string;
-  fileSize: number;
+  sourceType?: 'upload' | 'output' | 'scene_image';
+  sourceId?: string | null;
+  sourceConversationId?: string | null;
+  fileName: string | null;
+  fileSize: number | null;
 }
 
 export interface SceneResponse {

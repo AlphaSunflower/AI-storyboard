@@ -382,6 +382,9 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
 - **卡片模型/参数选择（2026-08-12 起）**：`human_input`/`video_plan` 事件可带 `models`（网关 `/v1/models` 模型列表，含各模型 params 能力枚举+默认值）、`recommended`（LLM 方案生成时预选的参数值）、`reasons`（每参数推荐理由，≤15 字）——前端 `AgentParamSelector` 渲染模型下拉+参数联动，**默认选中 LLM 推荐值并展示理由，用户可改**；提交 `/form/submit` body 带 `params`（`{model,resolution,duration,aspectRatio,size,quality}`），经 `OrchestrationRequest.params` → handler → 生成服务透传，**取值优先级：用户提交 > LLM 推荐 > checkpoint plan 原值 > config 默认**；无 `models` 字段时前端不渲染选择器（零回归）。LLM 选参选项文本由 `AgentOrchestratorSupport.buildModelOptionsText(type)` 组装（网关不可用返回空，LLM 不选参直接出默认方案）
 - **参考图**：`POST /api/agent/upload` → 返回 `url` → 作为 `PicUrl` 随消息发送（图生图/图生视频）
+- **分镜自动审查**：分镜方案写库成功后直接创建新的 `review-action` HITL checkpoint，在当前 Moon 对话展开“分镜审查结果”并展示项目全部分镜；不通过 handoff 二次路由，避免审查链自循环
+- **分镜素材选择**：审查卡“上传素材”包含项目 AI 资产、当前项目产出素材（按对话分组，当前对话优先）和当前分镜多图；只有 AI 资产进入 `scene_assets`，产出素材/分镜图片进入 `scene_reference_images` 并分别标记 `source_type=output|scene_image`
+- **素材覆盖与生命周期**：再次保存按最终勾选完整覆盖 AI 资产和产出/分镜图片引用，用户直接上传图片不受影响；“查看参考物”按用户上传图片、上传资产、上传的产出素材分组；移除产出素材只解除引用，不删除原生成文件
 - **LLM 配置**：复用 `LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`（.env，Spring AI 网关）
 
 ## Verification Commands

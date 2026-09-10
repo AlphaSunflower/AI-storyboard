@@ -11,6 +11,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.service.StoryboardImageQueueService;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
+import com.moon.moonagent.service.ProjectOutputMaterialService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -57,6 +58,8 @@ class MoonAgentControllerSmokeTest {
     private PromptOptimizeService optimizeService;
     @MockitoBean
     private GenerationRecordService generationRecordService;
+    @MockitoBean
+    private ProjectOutputMaterialService projectOutputMaterialService;
     @MockitoBean
     private StoryboardImageQueueService imageQueueService;
     @MockitoBean
@@ -119,6 +122,7 @@ class MoonAgentControllerSmokeTest {
         when(generationRecordService.getRecord(anyString(), anyString())).thenReturn(asset());
         when(generationRecordService.refetch(anyString(), anyString())).thenReturn(asset());
         when(generationRecordService.retry(anyString(), anyString())).thenReturn(Map.of("ok", "true"));
+        when(projectOutputMaterialService.list(anyString(), anyString(), any())).thenReturn(List.of());
 
         mockMvc.perform(post("/api/agent/conversations").header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"projectId\":\"p1\",\"title\":\"会话\"}"))
@@ -158,6 +162,8 @@ class MoonAgentControllerSmokeTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("processing"));
         mockMvc.perform(get("/api/agent/generation-records?page=1&size=20").header("X-User-Id", "u1"))
             .andExpect(status().isOk());
+        mockMvc.perform(get("/api/agent/projects/p1/output-materials?currentConversationId=c1").header("X-User-Id", "u1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data").isArray());
         mockMvc.perform(get("/api/agent/generation-records/g1").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("a1"));
         mockMvc.perform(post("/api/agent/generation-records/g1/refetch").header("X-User-Id", "u1"))
