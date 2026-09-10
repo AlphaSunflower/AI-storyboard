@@ -61,6 +61,10 @@ ai:
     fallback-video-model: MiniMax-H3
     fallback-vision-model: gemini-3-flash-preview
 
+  # ── 模型路由 ──
+  gemini-image-models: gemini-3-pro-image-preview
+  video-model-aliases: '{"veo-3.1-fast":"veo-3.1-fast-generate-preview","veo-3.1":"veo-3.1-generate-preview"}'
+
   # ── 文件存储（与上游无关，纯本地路径）──
   image-upload-dir: uploads/images
   video-upload-dir: uploads/videos

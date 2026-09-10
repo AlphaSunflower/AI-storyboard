@@ -56,7 +56,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
     private final SceneReferenceImageMapper sceneReferenceImageMapper;
     private final AssetService assetService;
     private final FileStorageService fileStorageService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final ChatClient.Builder chatClientBuilder;
     private final com.storyboard.config.PromptConfig promptConfig;
     /** 懒加载：首次调用时用默认视觉模型构建（@RequiredArgsConstructor 无法承载原构造器内的构建逻辑） */

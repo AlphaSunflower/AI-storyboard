@@ -36,11 +36,11 @@ public class MinioStorage {
 
     private static final Logger log = LoggerFactory.getLogger(MinioStorage.class);
 
-    @Value("${storyboard.storage.endpoint:http://localhost:9000}") private String endpoint;
-    @Value("${storyboard.storage.access-key:minioadmin}") private String accessKey;
-    @Value("${storyboard.storage.secret-key:minioadmin123}") private String secretKey;
-    @Value("${storyboard.storage.bucket:storyboard}") private String bucket;
-    @Value("${storyboard.storage.region:us-east-1}") private String region;
+    @Value("${storyboard.storage.endpoint}") private String endpoint;
+    @Value("${storyboard.storage.access-key}") private String accessKey;
+    @Value("${storyboard.storage.secret-key}") private String secretKey;
+    @Value("${storyboard.storage.bucket}") private String bucket;
+    @Value("${storyboard.storage.region}") private String region;
 
     private S3Client s3;
 
@@ -90,6 +90,15 @@ public class MinioStorage {
             return null;
         } catch (java.io.IOException e) {
             throw new RuntimeException("读取 MinIO 对象失败: key=" + key, e);
+        }
+    }
+
+    /** 读取对象流（大文件流式消费，避免 readAllBytes 爆内存）；调用方负责关闭。不存在返回 null。 */
+    public ResponseInputStream<GetObjectResponse> getObject(String key) {
+        try {
+            return s3.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());
+        } catch (NoSuchKeyException e) {
+            return null;
         }
     }
 

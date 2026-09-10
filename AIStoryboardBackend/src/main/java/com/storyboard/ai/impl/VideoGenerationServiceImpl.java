@@ -54,7 +54,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();

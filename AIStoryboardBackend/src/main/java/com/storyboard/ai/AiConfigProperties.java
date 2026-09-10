@@ -59,18 +59,18 @@ public class AiConfigProperties {
     // ═══════════════════════════════════════════════════════════
 
     // ── 模型路由 ──
-    /** 走 Gemini 接口的生图模型列表（逗号分隔） */
+    /** 走 Gemini 接口的生图模型列表（逗号分隔）；由 application.yml 配置 */
     @Setter
     @Getter
-    private String geminiImageModels = "gemini-3-pro-image-preview";
+    private String geminiImageModels;
     /**
      * 视频模型别名映射（JSON 格式）。
      * 前端传简称 → 后端通过此映射转为 Laozhang API 实际模型名。
-     * 示例：{"veo-3.1-fast":"veo-3.1-fast-generate-preview"}
+     * 由 application.yml 配置。
      */
     @Setter
     @Getter
-    private String videoModelAliases = "{\"veo-3.1-fast\":\"veo-3.1-fast-generate-preview\",\"veo-3.1\":\"veo-3.1-generate-preview\"}";
+    private String videoModelAliases;
 
     // ═══════════════════════════════════════════════════════════
     //  文件存储路径
@@ -108,10 +108,10 @@ public class AiConfigProperties {
     @Getter
     private String audioUrlPrefix = "/api/files/audios/";
 
-    /** 本服务内部地址（资产/图片 `/api/files/**` 拉取用；参考素材本地缺失时回退构造本地址取） */
+    /** 本服务内部地址（资产/图片 `/api/files/**` 拉取用；由 application.yml 配置，Nacos 友好） */
     @Setter
     @Getter
-    private String storyboardBaseUrl = "http://localhost:8082";
+    private String storyboardBaseUrl;
 
     // ═══════════════════════════════════════════════════════════
     //  超时 / 重试配置（可外部化到 application.yml 覆盖默认值）
@@ -176,8 +176,8 @@ public class AiConfigProperties {
     @ConfigurationProperties(prefix = "ai.gateway")
     public static class Gateway {
 
-        /** 网关基础地址（chat/文生图统一入口，默认本机网关 8083） */
-        private String baseUrl = "http://localhost:8083";
+        /** 网关基础地址（chat/文生图统一入口；由 application.yml / Nacos 配置） */
+        private String baseUrl;
 
         /** 网关调用密钥（在网关 /admin 签发） */
         private String apiKey;
