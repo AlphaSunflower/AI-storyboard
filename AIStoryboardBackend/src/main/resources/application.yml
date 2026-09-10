@@ -39,7 +39,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  issuer: newworkflow-backend
+  issuer: ai-storyboard-backend
   access-token-ttl: 7200
   refresh-token-ttl: 2592000
 

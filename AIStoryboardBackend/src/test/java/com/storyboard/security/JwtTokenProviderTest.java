@@ -17,7 +17,7 @@ class JwtTokenProviderTest {
         provider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend"
+            "ai-storyboard-backend"
         );
     }
 
@@ -34,7 +34,7 @@ class JwtTokenProviderTest {
         assertEquals("access", claims.get("typ", String.class));
         assertEquals("member", claims.get("role", String.class));
         assertEquals("enabled", claims.get("status", String.class));
-        assertEquals("newworkflow-backend", claims.getIssuer());
+        assertEquals("ai-storyboard-backend", claims.getIssuer());
         assertNotNull(claims.getId());
         assertNotNull(claims.getIssuedAt());
         assertNotNull(claims.getExpiration());
@@ -72,7 +72,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider expiredProvider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend",
+            "ai-storyboard-backend",
             -1,  // access TTL = -1s (immediately expired)
             2592000
         );
@@ -87,7 +87,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider otherProvider = new JwtTokenProvider(
             "wrong-access-secret-key-at-least-256-bits!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend"
+            "ai-storyboard-backend"
         );
         assertThrows(SignatureException.class, () -> otherProvider.verifyAccessToken(token));
     }
@@ -114,7 +114,7 @@ class JwtTokenProviderTest {
         Claims claims = provider.verifyRefreshToken(token);
         assertEquals("user-123", claims.getSubject());
         assertEquals("refresh", claims.get("typ", String.class));
-        assertEquals("newworkflow-backend", claims.getIssuer());
+        assertEquals("ai-storyboard-backend", claims.getIssuer());
         assertNotNull(claims.getId());
         assertNotNull(claims.getIssuedAt());
         assertNotNull(claims.getExpiration());
@@ -128,7 +128,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider expiredProvider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend",
+            "ai-storyboard-backend",
             3600,
             -1  // refresh TTL = -1s (immediately expired)
         );
@@ -142,7 +142,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider otherProvider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "wrong-refresh-secret-key-at-least-256-bits",
-            "newworkflow-backend"
+            "ai-storyboard-backend"
         );
         assertThrows(SignatureException.class, () -> otherProvider.verifyRefreshToken(token));
     }
@@ -199,7 +199,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider customProvider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend",
+            "ai-storyboard-backend",
             60,     // 60s access TTL
             2592000
         );
@@ -214,7 +214,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider customProvider = new JwtTokenProvider(
             "test-access-secret-key-at-least-256-bits-long!!",
             "test-refresh-secret-key-at-least-256-bits-long",
-            "newworkflow-backend",
+            "ai-storyboard-backend",
             3600,
             7200    // 7200s refresh TTL
         );

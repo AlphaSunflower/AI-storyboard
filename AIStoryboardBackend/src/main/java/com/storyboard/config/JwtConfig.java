@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class JwtConfig {
     private String accessSecret;
     private String refreshSecret;
-    private String issuer = "newworkflow-backend";
+    private String issuer = "ai-storyboard-backend";
     private long accessTokenTtl = 3600;
     private long refreshTokenTtl = 2592000;
 
