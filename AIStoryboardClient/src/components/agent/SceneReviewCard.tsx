@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, ChevronDown, ChevronUp, CircleStop, Clapperboard, Eye, ImageIcon, ImagePlus, Package, Settings2, Sparkles, Wand2, X } from 'lucide-react';
 import { useAgentStore, type HumanInputInfo } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { getSceneImageUrls } from '../../lib/sceneImages';
 import { sceneApi } from '../../api/scenes';
 import { assetApi } from '../../api/assets';
 import { VideoGenGateModal } from './VideoGenGateModal';
@@ -10,6 +12,8 @@ import { AgentParamSelector } from './AgentParamSelector';
 import { RefineImageModal } from './RefineImageModal';
 import { SceneMaterialPickerModal } from './SceneMaterialPickerModal';
 import { SceneReferenceViewerModal } from './SceneReferenceViewerModal';
+import DepthCarousel from '../DepthCarousel';
+import { buildSceneImageSubmitParams } from './sceneReviewGeneration';
 
 const STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
@@ -37,6 +41,7 @@ interface SceneItem {
   imageModel?: string;
   imageSize?: string;
   imageQuality?: string;
+  imageN?: number;
   videoModel?: string;
   videoResolution?: string;
   videoAspectRatio?: string;
@@ -48,6 +53,7 @@ type SceneConfigLike = {
   imageModel?: string | null;
   imageSize?: string | null;
   imageQuality?: string | null;
+  imageN?: number | null;
   videoModel?: string | null;
   videoResolution?: string | null;
   videoAspectRatio?: string | null;
@@ -68,16 +74,59 @@ function sceneBuiltValueFor(s: SceneConfigLike, kind: 'image' | 'video') {
   if (s.imageModel) out.imageModel = s.imageModel;
   if (s.imageSize) out.imageSize = s.imageSize;
   if (s.imageQuality) out.imageQuality = s.imageQuality;
+  if (s.imageN != null) out.imageN = String(s.imageN);
   return out;
 }
 
 function sceneImageUrlsFor(sceneId: string, scenes: Array<{ id: string; imageUrl?: string; imageUrls?: string }>, item?: SceneItem) {
   const live = scenes.find((scene) => scene.id === sceneId);
-  const raw = live?.imageUrls ?? item?.imageUrls?.join(',') ?? '';
-  const urls = raw.split(',').map((url) => url.trim()).filter(Boolean);
-  if (urls.length > 0) return [...new Set(urls)];
-  const primary = live?.imageUrl ?? item?.image;
-  return primary ? [primary] : [];
+  if (live) return getSceneImageUrls(live);
+  return getSceneImageUrls(item ? { imageUrl: item.image, imageUrls: item.imageUrls } : null);
+}
+
+function SceneThumbnails({ urls, sceneNumber, onOpen }: {
+  urls: string[];
+  sceneNumber?: number;
+  onOpen?: () => void;
+}) {
+  if (!urls.length) {
+    return (
+      <span style={{ width: 46, height: 46, borderRadius: 8, background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgb(152,158,168)', fontSize: 13, flexShrink: 0 }}>
+        {String(sceneNumber ?? 0).padStart(2, '0')}
+      </span>
+    );
+  }
+  const visible = urls.slice(0, 2);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen?.();
+        }
+      }}
+      title={urls.length > 1 ? '查看全部图片' : '查看图片'}
+      style={{ width: visible.length > 1 ? 74 : 46, height: 46, display: 'flex', gap: 2, flexShrink: 0, position: 'relative', cursor: 'zoom-in' }}
+    >
+      {visible.map((url, index) => (
+        <img
+          key={`${url}-${index}`}
+          src={assetUrl(url)}
+          alt={`分镜${sceneNumber ?? ''} 图${index + 1}`}
+          style={{ width: visible.length > 1 ? 36 : 46, height: 46, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(0,0,0,0.06)' }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
+      ))}
+      {urls.length > 2 && (
+        <span style={{ position: 'absolute', right: 0, bottom: 0, padding: '1px 4px', borderRadius: 6, background: 'rgba(0,0,0,0.68)', color: 'white', fontSize: 9 }}>
+          +{urls.length - 2}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export const isSceneReview = (info: HumanInputInfo) =>
@@ -116,6 +165,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
       imageModel: a.imageModel,
       imageSize: a.imageSize,
       imageQuality: a.imageQuality,
+      imageN: a.imageN,
       videoModel: a.videoModel,
       videoResolution: a.videoResolution,
       videoAspectRatio: a.videoAspectRatio,
@@ -152,6 +202,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   // 素材选择 / 参考物查看
   const [materialPickerFor, setMaterialPickerFor] = useState<string | null>(null);
   const [viewerFor, setViewerFor] = useState<string | null>(null);
+  const [carouselFor, setCarouselFor] = useState<string | null>(null);
   // 每镜已投参考图/关联资产数量
   const [refsSummary, setRefsSummary] = useState<Record<string, { images: number; assets: number }>>({});
   // 每个 panel(key=sceneId/kind) 当前已落库的参数签名；仅当与实际变化时保存，避免初始默认回填覆盖 scene 已存配置
@@ -216,6 +267,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
     if (cfg.imageModel) p.imageModel = cfg.imageModel;
     if (cfg.imageSize) p.imageSize = cfg.imageSize;
     if (cfg.imageQuality) p.imageQuality = cfg.imageQuality;
+    if (cfg.imageN != null) p.imageN = cfg.imageN;
     return JSON.stringify(p);
   };
 
@@ -232,14 +284,21 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   }, [scenes]);
 
   const liveScene = useMemo(() => {
-    const map: Record<string, { hasImage: boolean; hasVideo: boolean; image?: string }> = {};
-    for (const s of scenes) map[s.id] = { hasImage: Boolean(s.imageUrl), hasVideo: Boolean(s.videoUrl), image: s.imageUrl };
+    const map: Record<string, { hasImage: boolean; hasVideo: boolean; image?: string; images: string[] }> = {};
+    for (const s of scenes) {
+      const images = getSceneImageUrls(s);
+      map[s.id] = { hasImage: images.length > 0, hasVideo: Boolean(s.videoUrl), image: images[0], images };
+    }
     return map;
   }, [scenes]);
 
   const chosen = items.filter((i) => checked[i.key]);
   const selectedCount = chosen.length;
   const allChecked = items.length > 0 && selectedCount === items.length;
+  const carouselScene = items.find((item) => item.id === carouselFor);
+  const carouselUrls = carouselScene
+    ? (liveScene[carouselScene.id]?.images ?? getSceneImageUrls({ imageUrl: carouselScene.image, imageUrls: carouselScene.imageUrls }))
+    : [];
 
   if (!isSceneReview(info)) return null;
 
@@ -275,6 +334,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
     } else {
       if (params[`${kind}Size`]) payload[`${kind}Size`] = params[`${kind}Size`];
       if (params[`${kind}Quality`]) payload[`${kind}Quality`] = params[`${kind}Quality`];
+      if (params.imageN) payload.imageN = Number(params.imageN);
     }
     return payload;
   };
@@ -309,10 +369,28 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   };
 
   // ── 资产选择器：拉取项目资产，勾选指定后关联（video 用途） ──
-  const submitAction = (actionId: string, ids: string[]) => {
+  const submitAction = (actionId: string, ids: string[], params: Record<string, string> = {}) => {
     if (ids.length === 0) { flash('请先选择要生成的分镜'); return; }
     if (streaming) return;
-    void submitHumanInput(actionId, undefined, {}, ids);
+    void submitHumanInput(actionId, undefined, params, ids);
+  };
+
+  const submitReviewImageGeneration = () => {
+    const ids = chosen.map((s) => s.id);
+    const defaultImageModel = info.imageModels?.find(
+      (model) => model.default === 'true' || model.default === true,
+    )?.value;
+    const sceneConfigs = Object.fromEntries(
+      items.map((item) => [item.id, freshestScene(item.id) ?? item]),
+    );
+    const rowOverrides = Object.fromEntries(
+      chosen.map((item) => [item.id, rowParams[item.id]?.image]),
+    );
+    submitAction(
+      'review-gen-image',
+      ids,
+      buildSceneImageSubmitParams(ids, sceneConfigs, rowOverrides, defaultImageModel),
+    );
   };
 
   // 暂不操作：退出当前人工介入（清 checkpoint，卡片关闭），不执行任何生成
@@ -372,13 +450,14 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
         </div>
       </div>
 
-      {/* 滚动主体 */}
-      <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
-        {feedback && (
-          <div style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(65,118,230,0.08)', color: 'rgb(65,118,230)', fontSize: 12, marginBottom: 10 }}>{feedback}</div>
-        )}
+      {feedback && (
+        <div style={{ padding: '8px 14px 0', flexShrink: 0 }}>
+          <div style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(65,118,230,0.08)', color: 'rgb(65,118,230)', fontSize: 12 }}>{feedback}</div>
+        </div>
+      )}
 
-        {/* 批量选择栏 */}
+      {/* 固定操作栏：不进入分镜列表滚动区 */}
+      <div style={{ padding: '10px 14px 8px', borderBottom: '1px solid rgba(0,0,0,0.06)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgb(96,100,108)' }}>
             <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ accentColor: 'rgb(65,118,230)' }} />
@@ -386,7 +465,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
           </label>
           <button type="button" disabled={streaming || selectedCount === 0} onClick={() => {
             const hasImgChecked = chosen.some((s) => liveScene[s.id]?.hasImage ?? Boolean(s.image));
-            if (hasImgChecked) setConfirmGenImage(true); else submitAction('review-gen-image', chosen.map((s) => s.id));
+            if (hasImgChecked) setConfirmGenImage(true); else submitReviewImageGeneration();
           }} style={{ ...batchBtn }}>
             <ImageIcon size={14} /> 生成图片{selectedCount > 0 ? ` (${selectedCount})` : ''}
           </button>
@@ -400,17 +479,20 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
             <X size={14} /> 暂不操作
           </button>
         </div>
+      </div>
 
+      {/* 分镜列表滚动区 */}
+      <div style={{ padding: '10px 14px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
         {/* 逐镜行 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {items.map((s) => {
             const live = liveScene[s.id];
-            const hasImage = live ? live.hasImage : Boolean(s.image);
+            const imageUrls = live?.images ?? getSceneImageUrls({ imageUrl: s.image, imageUrls: s.imageUrls });
+            const hasImage = imageUrls.length > 0;
             const hasVideo = live ? live.hasVideo : false;
             const status = liveStatusMap[s.id] || s.videoStatus || '';
             const active = ACTIVE_STATUS.has(status);
             const cancellable = status === 'queued' || status === 'generating' || status === 'running';
-            const thumb = live?.image || s.image;
             const prompt = prompts[s.id]?.[pane] ?? '';
             const rowExpanded = expandedRow === s.id;
           const rowModels = pane === 'video' ? info.videoModels : info.imageModels;
@@ -419,12 +501,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
           return (
               <article key={s.key} style={{ display: 'flex', gap: 10, padding: 10, borderRadius: 12, border: checked[s.key] ? '1.5px solid rgba(65,118,230,0.35)' : '1px solid rgba(0,0,0,0.06)', background: checked[s.key] ? 'rgba(65,118,230,0.03)' : 'white' }}>
                 <input type="checkbox" checked={Boolean(checked[s.key])} disabled={streaming} onChange={() => toggle(s.key)} style={{ accentColor: 'rgb(65,118,230)', marginTop: 4 }} />
-                {thumb ? (
-                  <img src={assetUrl(thumb)} alt={`分镜${s.sceneNumber ?? ''}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(0,0,0,0.06)' }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                ) : (
-                  <span style={{ width: 46, height: 46, borderRadius: 8, background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgb(152,158,168)', fontSize: 13, flexShrink: 0 }}>{String(s.sceneNumber ?? 0).padStart(2, '0')}</span>
-                )}
+                <SceneThumbnails urls={imageUrls} sceneNumber={s.sceneNumber} onOpen={() => setCarouselFor(s.id)} />
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: 13, color: 'rgb(15,17,21)' }}>{s.name}</strong>
@@ -506,6 +583,73 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
         </div>
       </div>
 
+      {carouselScene && carouselUrls.length > 0 && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 180, padding: 16,
+            background: 'rgba(15,17,21,0.72)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+          }}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setCarouselFor(null);
+          }}
+        >
+          <div style={{
+            width: 'min(920px, 96vw)', height: 'min(74vh, 680px)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            borderRadius: 16, background: '#0b0d12',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.42)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', color: 'white', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>
+                分镜 {carouselScene.sceneNumber ?? ''} · {carouselUrls.length} 张图片
+              </span>
+              <button
+                type="button"
+                onClick={() => setCarouselFor(null)}
+                aria-label="关闭图片浏览"
+                style={{
+                  width: 30, height: 30, border: 'none', borderRadius: 999,
+                  background: 'rgba(255,255,255,0.1)', color: 'white',
+                  display: 'grid', placeItems: 'center', cursor: 'pointer',
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, padding: '0 18px 18px' }}>
+              <DepthCarousel
+                key={carouselScene.id}
+                items={carouselUrls.map((url, index) => ({
+                  image: assetUrl(url),
+                  alt: `分镜 ${carouselScene.sceneNumber ?? ''} 图 ${index + 1}`,
+                }))}
+                cardWidth={480}
+                cardHeight={360}
+                radius={14}
+                tint="#000000"
+                depth={190}
+                spread={78}
+                tilt={13}
+                perspective={1500}
+                visibleCards={4}
+                falloff={0.18}
+                blur={8}
+                autoplay={false}
+                loop={carouselUrls.length > 1}
+                showControls={carouselUrls.length > 1}
+                showIndicators={carouselUrls.length > 1}
+                showIndexLabels
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       <SceneMaterialPickerModal
         open={Boolean(materialPickerFor)}
         sceneId={materialPickerFor ?? ''}
@@ -560,7 +704,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button onClick={() => setConfirmGenImage(false)} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)', background: 'transparent', color: 'rgb(96,100,108)', fontSize: 13, cursor: 'pointer' }}>取消</button>
-              <button onClick={() => { setConfirmGenImage(false); submitAction('review-gen-image', chosen.map((s) => s.id)); }}
+              <button onClick={() => { setConfirmGenImage(false); submitReviewImageGeneration(); }}
                 style={{ padding: '8px 18px', borderRadius: 10, border: 'none', background: 'rgb(65,118,230)', color: 'white', fontSize: 13, cursor: 'pointer' }}>确认生成</button>
             </div>
           </div>

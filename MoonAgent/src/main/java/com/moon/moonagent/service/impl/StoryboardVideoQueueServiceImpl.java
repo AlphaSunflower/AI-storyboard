@@ -233,7 +233,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
                     conversation, row.getSceneId(), prompt, row.getModel(), row.getResolution(),
                     row.getSize(), row.getAspectRatio(),
                     row.getDuration() == null ? null : String.valueOf(row.getDuration()),
-                    row.getNegativePrompt(), refImages, sourceImageUrl, referenceVideos);
+                    row.getNegativePrompt(), refImages, sourceImageUrl, referenceVideos, false);
         } catch (Exception e) {
             failRow(row, e.getMessage() != null ? e.getMessage() : "视频任务创建失败");
             return;

@@ -55,6 +55,20 @@
   -webkit-user-drag: none;
 }
 
+.depth-carousel__label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: rgba(20, 20, 19, 0.72);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 .depth-carousel__tint {
   position: absolute;
   inset: 0;

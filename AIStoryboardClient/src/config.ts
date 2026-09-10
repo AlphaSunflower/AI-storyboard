@@ -85,6 +85,7 @@ export interface ModelOption {
 
 export const IMAGE_MODELS = [
   { value: 'gpt-image-2', label: 'GPT Image 2' },
+  { value: 'doubao-seedream-4-0-250828', label: 'Doubao Seedream 4.0' },
   { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image' },
   { value: 'dall-e-3', label: 'DALL·E 3' },
   { value: 'sdxl', label: 'Stable Diffusion XL' },
@@ -137,6 +138,9 @@ export const DEFAULT_VIDEO_PRESET: string = VIDEO_PRESETS[2].value; // 8秒 横�
 // ═══════════════════════════════════════════════════
 
 export const IMAGE_SIZES = [
+  '1K',
+  '2K',
+  '4K',
   '1024x1024',
   '1536x1024',
   '1024x1536',
@@ -151,6 +155,11 @@ export const IMAGE_QUALITIES = ['low', 'medium', 'high', 'auto'] as const;
 
 export const DEFAULT_IMAGE_SIZE: string = '1024x1024';
 export const DEFAULT_IMAGE_QUALITY: string = 'auto';
+
+/** Seedream 4.x 使用 Ark 原生生图协议，不支持 quality。 */
+export function isSeedreamImageModel(model?: string | null): boolean {
+  return !!model && model.startsWith('doubao-seedream-');
+}
 
 // ═══════════════════════════════════════════════════
 //  Reference asset upload limits (static fallback)

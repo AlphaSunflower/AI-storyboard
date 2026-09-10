@@ -63,12 +63,16 @@ public class GatewayConfig {
     public static class Upstream {
         private long connectTimeoutMs = 30000;
         private long requestTimeoutMs = 300000;
+        /** SSE 长连接超时（图片组图可生成数分钟） */
+        private long streamTimeoutMs = 900000;
         private int retryCount = 2;
 
         public long getConnectTimeoutMs() { return connectTimeoutMs; }
         public void setConnectTimeoutMs(long connectTimeoutMs) { this.connectTimeoutMs = connectTimeoutMs; }
         public long getRequestTimeoutMs() { return requestTimeoutMs; }
         public void setRequestTimeoutMs(long requestTimeoutMs) { this.requestTimeoutMs = requestTimeoutMs; }
+        public long getStreamTimeoutMs() { return streamTimeoutMs; }
+        public void setStreamTimeoutMs(long streamTimeoutMs) { this.streamTimeoutMs = streamTimeoutMs; }
         public int getRetryCount() { return retryCount; }
         public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
     }

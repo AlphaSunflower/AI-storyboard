@@ -59,8 +59,8 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
                                                        LocalDate from, LocalDate to) {
         LambdaQueryWrapper<AgentAsset> qw = new LambdaQueryWrapper<AgentAsset>()
                 .ne(AgentAsset::getType, "reference")
-                .isNotNull(AgentAsset::getConversationId)
-                .apply("conversation_id IN (SELECT id FROM conversations WHERE user_id = {0})", userId);
+                .apply("(user_id = {0} OR conversation_id IN "
+                        + "(SELECT id FROM conversations WHERE user_id = {0}))", userId);
         if (genType != null && !genType.isBlank()) {
             qw.eq(AgentAsset::getGenType, genType);
         }
@@ -68,6 +68,8 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
             qw.in(AgentAsset::getStatus, List.of("completed", "succeeded"));
         } else if ("failed".equals(status)) {
             qw.eq(AgentAsset::getStatus, "failed");
+        } else if ("active".equals(status)) {
+            qw.in(AgentAsset::getStatus, List.of("queued", "generating", "running"));
         }
         if (from != null) {
             qw.ge(AgentAsset::getCreatedAt, from.atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime());
@@ -126,6 +128,9 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
         AgentAsset failed = getRecord(userId, id);
         if (!"failed".equals(failed.getStatus())) {
             throw new BusinessException(40001, "仅失败记录可重试");
+        }
+        if (failed.getConversationId() == null || failed.getConversationId().isBlank()) {
+            throw new BusinessException(40001, "AI 分镜生成记录请在编辑器中重试");
         }
         AgentConversation conv = conversationMapper.selectById(failed.getConversationId());
         if (conv == null) throw new BusinessException(40401, "会话不存在");
@@ -219,6 +224,7 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
     }
 
     private void assertOwnership(String userId, AgentAsset asset) {
+        if (userId != null && userId.equals(asset.getUserId())) return;
         if (asset.getConversationId() == null || asset.getConversationId().isBlank()) {
             throw new BusinessException(40401, "记录不存在");
         }

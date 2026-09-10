@@ -97,6 +97,32 @@ class GenerationRecordServiceImplTest {
         assertEquals(20, result.get("size"));
     }
 
+    @Test
+    void getRecordAllowsProjectOwnedEditorRecordWithoutConversation() {
+        AgentAsset record = asset("image", "completed");
+        record.setConversationId(null);
+        record.setUserId("user-1");
+        record.setProjectId("project-1");
+        when(assetMapper.selectById("a1")).thenReturn(record);
+
+        AgentAsset result = service.getRecord("user-1", "a1");
+
+        assertEquals("a1", result.getId());
+    }
+
+    @Test
+    void retryRejectsEditorRecordWithoutConversation() {
+        AgentAsset record = asset("video", "failed");
+        record.setConversationId(null);
+        record.setUserId("user-1");
+        record.setProjectId("project-1");
+        when(assetMapper.selectById("a1")).thenReturn(record);
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.retry("user-1", "a1"));
+
+        assertEquals(40001, ex.getCode());
+    }
+
     private AgentAsset asset(String type, String status) {
         AgentAsset record = new AgentAsset();
         record.setId("a1");

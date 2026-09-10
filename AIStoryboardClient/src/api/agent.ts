@@ -126,6 +126,8 @@ export interface AgentAsset {
 export interface GenerationRecord {
   id: string;
   conversationId: string | null;
+  userId?: string | null;
+  projectId?: string | null;
   type: 'image' | 'video' | 'reference';
   url: string | null;
   prompt: string | null;
@@ -152,6 +154,9 @@ export interface GenerationRecordPage {
 export interface AgentPage<T> {
   records: T[];
   total: number;
+  imageTotal?: number;
+  videoTotal?: number;
+  mediaTotal?: number;
   page: number;
   size: number;
 }
@@ -191,6 +196,7 @@ export interface AssetOption {
   imageModel?: string;
   imageSize?: string;
   imageQuality?: string;
+  imageN?: number;
   videoModel?: string;
   videoAspectRatio?: string;
   videoResolution?: string;

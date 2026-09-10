@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { getSceneImageUrls } from '../../lib/sceneImages';
 import { DS } from '../agent/ChatComposer';
 import { RefineImageModal } from './RefineImageModal';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
@@ -57,9 +58,7 @@ export function MobileScenePreview({ onBack }: MobileScenePreviewProps) {
   const effVideoAspect = (videoDraft.videoAspectRatio as string) || scene?.videoAspectRatio || videoParams.aspectRatioDefault || '16:9';
 
   // 多图列表
-  const imageList = scene
-    ? (scene.imageUrls ? scene.imageUrls.split(',').filter(Boolean) : (scene.imageUrl ? [scene.imageUrl] : []))
-    : [];
+  const imageList = scene ? getSceneImageUrls(scene) : [];
 
   const commitAndGenerate = async (type: 'image' | 'video') => {
     if (!scene) return;

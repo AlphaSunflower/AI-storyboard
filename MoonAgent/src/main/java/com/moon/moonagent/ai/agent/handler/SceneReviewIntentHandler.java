@@ -1,5 +1,7 @@
 package com.moon.moonagent.ai.agent.handler;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -38,6 +40,7 @@ import java.util.stream.Collectors;
 public class SceneReviewIntentHandler implements IntentHandler {
 
     private static final Logger log = LoggerFactory.getLogger(SceneReviewIntentHandler.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AgentOrchestratorSupport support;
     private final StoryboardClient storyboardClient;
@@ -181,7 +184,8 @@ public class SceneReviewIntentHandler implements IntentHandler {
             case "review-optimize":
                 return handleOptimize(request, targetScenes);
             case "review-gen-image":
-                return handleGenImage(request, targetScenes);
+                return handleGenImage(request, targetScenes,
+                        selectedIds != null && !selectedIds.isEmpty());
             case "review-gen-video":
                 // 资产询问：项目有可用资产 → 弹资产选择卡片（勾选/跳过后才生成视频）
                 return handleGenVideoWithAssetCheck(request, targetScenes, checkpoint);
@@ -416,22 +420,23 @@ public class SceneReviewIntentHandler implements IntentHandler {
         return updated;
     }
 
-    /** 生成图片：遍历缺图分镜 → 逐个生图 */
-    private String handleGenImage(OrchestrationRequest request, List<Scene> scenes) {
-        List<Scene> missingImage = scenes.stream()
-                .filter(s -> s.getImageUrl() == null || s.getImageUrl().isBlank())
-                .toList();
-
-        if (missingImage.isEmpty()) {
+    /** 生成图片：显式勾选时全部重新生成；否则只处理缺图分镜。 */
+    private String handleGenImage(OrchestrationRequest request, List<Scene> scenes,
+                                  boolean explicitSelection) {
+        List<Scene> batch = imageGenerationBatch(scenes, explicitSelection);
+        if (batch.isEmpty() && !explicitSelection) {
             support.sendMessage(request, "所有分镜已有图片，无需生成。");
             return "";
         }
-
-        // ponytail: 批量生图很慢（每个 30-60s），限 3 个防超时；超过提示分批
-        List<Scene> batch = missingImage.size() > 3 ? missingImage.subList(0, 3) : missingImage;
-        if (missingImage.size() > 3) {
-            support.sendMessage(request, "本次最多处理 3 个分镜的图片生成（共 " + missingImage.size() + " 个需要生成），其余请分批操作。");
+        if (batch.isEmpty()) {
+            support.sendMessage(request, "没有可生成图片的分镜。");
+            return "";
         }
+
+        Map<String, String> submittedParams = request.getParams() == null ? Map.of() : request.getParams();
+        Map<String, SceneImageRequestParams> requestParams =
+                parseSceneImageParams(submittedParams.get("sceneImageParams"));
+        String defaultImageModel = defaultImageModel();
 
         support.sendEvent(request, "workflow", Map.of("title", "正在生成图片…", "status", "node_started"));
         AgentConversation conv = request.getConversation();
@@ -447,16 +452,23 @@ public class SceneReviewIntentHandler implements IntentHandler {
                 List<String> refImages = mergeImageReferences(
                         storyboardClient.getSceneReferences(s.getId()),
                         assetService.buildReferenceImages(assetService.sceneAssets(s.getId(), "image")));
+                SceneImageRequestParams p = requestParams.get(s.getId());
+                String model = p == null ? null : p.model();
+                String size = p == null ? null : p.size();
+                String quality = p == null ? null : p.quality();
+                int n = p == null || p.n() == null || p.n() <= 0 ? 1 : p.n();
                 // 传 sceneId → 生成后自动更新 scenes.imageUrl（而非落 agent_assets）
-                Map<String, Object> result = generationService.generateImage(
-                        conv, s.getId(), prompt, null, null, null, 1, null, refImages, null);
+                Map<String, Object> result = generateImageWithFallback(
+                        conv, s.getId(), prompt, model, size, quality, n, refImages, defaultImageModel);
                 @SuppressWarnings("unchecked")
                 List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
                 if (!urls.isEmpty()) {
                     success++;
-                    // 图片 URL 用 markdown 格式发到对话，前端 MessageBubble 渲染为 <img>
+                    String imagesMarkdown = urls.stream()
+                            .map(url -> String.format("![分镜%d](%s)", s.getSceneNumber(), url))
+                            .collect(Collectors.joining("\n"));
                     support.sendEvent(request, "message", Map.of("content",
-                            String.format("分镜%d图片生成完成：\n![分镜%d](%s)\n", s.getSceneNumber(), s.getSceneNumber(), urls.get(0))));
+                            String.format("分镜%d图片生成完成：\n%s\n", s.getSceneNumber(), imagesMarkdown)));
                 } else {
                     support.sendEvent(request, "message", Map.of("content", String.format("分镜%d图片生成失败。\n", s.getSceneNumber())));
                 }
@@ -470,6 +482,97 @@ public class SceneReviewIntentHandler implements IntentHandler {
         support.sendMessage(request, resultMsg);
         support.sendEvent(request, "message_end", Map.of("messageId", "", "sceneCount", -1L, "content", resultMsg));
         return resultMsg;
+    }
+
+    static List<Scene> imageGenerationBatch(List<Scene> scenes, boolean explicitSelection) {
+        if (scenes == null || scenes.isEmpty()) return List.of();
+        if (explicitSelection) return scenes;
+        return scenes.stream()
+                .filter(s -> s.getImageUrl() == null || s.getImageUrl().isBlank())
+                .toList();
+    }
+
+    /** 先按分镜模型生成；失败时用网关默认生图模型重试一次，避免旧模型配额/路由问题阻断首次生成。 */
+    private Map<String, Object> generateImageWithFallback(
+            AgentConversation conversation, String sceneId, String prompt,
+            String model, String size, String quality, int n,
+            List<String> referenceImages, String defaultImageModel) {
+        try {
+            return generationService.generateImage(
+                    conversation, sceneId, prompt, model, size, quality, n, null, referenceImages, null);
+        } catch (Exception firstError) {
+            if (defaultImageModel == null || defaultImageModel.isBlank()
+                    || defaultImageModel.equals(model)
+                    || !shouldFallbackImageModel(firstError)) {
+                throw firstError;
+            }
+            log.warn("分镜{}使用模型{}失败，回退默认模型{}重试: {}",
+                    sceneId, model == null ? "(分镜配置)" : model, defaultImageModel, firstError.getMessage());
+            return generationService.generateImage(
+                    conversation, sceneId, prompt, defaultImageModel, size, quality, n,
+                    null, referenceImages, null);
+        }
+    }
+
+    /** 仅在模型路由/配额等可用性错误时回退，超时、审核拒绝等重复调用可能造成重复费用或重复产出。 */
+    static boolean shouldFallbackImageModel(Throwable error) {
+        String message = error == null || error.getMessage() == null
+                ? "" : error.getMessage().toLowerCase();
+        return message.contains("403")
+                || message.contains("404")
+                || message.contains("quota")
+                || message.contains("no route")
+                || message.contains("not found")
+                || message.contains("unsupported model")
+                || message.contains("unknown model")
+                || message.contains("model_not_found");
+    }
+
+    private String defaultImageModel() {
+        try {
+            for (Map<String, Object> model : support.buildModels("image")) {
+                if ("true".equals(String.valueOf(model.get("default")))
+                        || Boolean.TRUE.equals(model.get("default"))) {
+                    Object value = model.get("value");
+                    return value == null ? null : String.valueOf(value);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取默认生图模型失败，保留分镜原模型: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** 解析前端按分镜提交的图片参数 JSON；缺失或非法时返回空 Map。 */
+    static Map<String, SceneImageRequestParams> parseSceneImageParams(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            JsonNode root = MAPPER.readTree(json);
+            if (!root.isObject()) return Map.of();
+            Map<String, SceneImageRequestParams> result = new java.util.LinkedHashMap<>();
+            root.fields().forEachRemaining(entry -> {
+                JsonNode node = entry.getValue();
+                if (!node.isObject()) return;
+                result.put(entry.getKey(), new SceneImageRequestParams(
+                        textOrNull(node, "model"),
+                        textOrNull(node, "size"),
+                        textOrNull(node, "quality"),
+                        node.path("n").isInt() ? node.path("n").asInt() : null
+                ));
+            });
+            return result;
+        } catch (Exception e) {
+            log.warn("解析审核分镜图片参数失败，使用分镜默认配置: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : value;
+    }
+
+    record SceneImageRequestParams(String model, String size, String quality, Integer n) {
     }
 
     /**

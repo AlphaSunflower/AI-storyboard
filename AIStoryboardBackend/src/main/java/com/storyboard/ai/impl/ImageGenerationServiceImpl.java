@@ -3,8 +3,10 @@ package com.storyboard.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.AssetVO;
+import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.ScenePrompt;
+import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.AssetService;
@@ -13,6 +15,13 @@ import com.storyboard.ai.AiConfigProperties;
 import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ImageGenerationService;
 import com.storyboard.common.MultipartBuilder;
+import com.storyboard.common.generation.GenerationRecord;
+import com.storyboard.common.generation.GenerationRecordTypes;
+import com.storyboard.common.generation.GenerationRecordUpdate;
+import com.storyboard.common.generation.GenerationRecordWriter;
+import com.storyboard.common.generation.GenerationReference;
+import com.storyboard.common.image.SeedreamImageExecutor;
+import com.storyboard.common.image.SeedreamImageProtocol;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.*;
 import com.storyboard.common.BusinessException;
 
@@ -43,11 +53,15 @@ import com.storyboard.common.BusinessException;
 public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(ImageGenerationServiceImpl.class);
+    private static final Duration SEEDREAM_TIMEOUT = Duration.ofSeconds(900);
+    private static final int MAX_RECORDED_REF_URL_LENGTH = 8192;
 
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
+    private final ProjectMapper projectMapper;
     private final ScenePromptMapper scenePromptMapper;
+    private final GenerationRecordWriter generationRecordWriter;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -105,6 +119,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
         ScenePrompt scenePrompt = scene != null ? scenePromptMapper.selectById(sceneId) : null;
+        Project project = scene != null ? projectMapper.selectById(scene.getProjectId()) : null;
 
         if (prompt == null || prompt.isBlank()) {
             throw new BusinessException(40001, "图片生成 prompt 不能为空");
@@ -124,6 +139,27 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             }
         }
 
+        boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
+        // 模型选择：显式传入 > 分镜覆盖 > 网关默认（文生图/图改图共用同一默认模型）
+        String sceneModel = scenePrompt != null && scenePrompt.getImageModel() != null && !scenePrompt.getImageModel().isBlank()
+                ? scenePrompt.getImageModel() : null;
+        String effectiveModel = model != null ? model
+                : sceneModel != null ? sceneModel
+                : gatewayModelService.getDefaultImageModel();
+        // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
+        String effSize = size != null ? size
+                : (scenePrompt != null && scenePrompt.getImageSize() != null && !scenePrompt.getImageSize().isBlank()) ? scenePrompt.getImageSize() : null;
+        String effQuality = quality != null ? quality
+                : (scenePrompt != null && scenePrompt.getImageQuality() != null && !scenePrompt.getImageQuality().isBlank()) ? scenePrompt.getImageQuality() : null;
+        Integer effN = (n != null && n > 0) ? n
+                : (scenePrompt != null && scenePrompt.getImageN() != null && scenePrompt.getImageN() > 0) ? scenePrompt.getImageN() : null;
+
+        long startMs = System.currentTimeMillis();
+        String recordId = createRecord(scene, project, prompt, effectiveModel,
+                GenerationRecordTypes.STORYBOARD_IMAGE,
+                imageParams(effSize, effQuality, effN, mode, aspectRatio),
+                imageReferences(referenceImages, generatedImageUrl));
+
         if (scene != null) {
             scene.setImageStatus("generating");
             sceneMapper.updateById(scene);
@@ -131,23 +167,13 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
         try {
             List<String> localPaths = new ArrayList<>();
-            boolean hasReferenceImages = referenceImages != null && !referenceImages.isEmpty();
-            // 模型选择：显式传入 > 分镜覆盖 > 网关默认（文生图/图改图共用同一默认模型）
-            String sceneModel = scenePrompt != null && scenePrompt.getImageModel() != null && !scenePrompt.getImageModel().isBlank()
-                    ? scenePrompt.getImageModel() : null;
-            String effectiveModel = model != null ? model
-                    : sceneModel != null ? sceneModel
-                    : gatewayModelService.getDefaultImageModel();
-            // 尺寸/质量/数量：显式传入 > 分镜覆盖 > config 默认（normalizeImageSize/callOpenAIImage 内部兜底）
-            String effSize = size != null ? size
-                    : (scenePrompt != null && scenePrompt.getImageSize() != null && !scenePrompt.getImageSize().isBlank()) ? scenePrompt.getImageSize() : null;
-            String effQuality = quality != null ? quality
-                    : (scenePrompt != null && scenePrompt.getImageQuality() != null && !scenePrompt.getImageQuality().isBlank()) ? scenePrompt.getImageQuality() : null;
-            Integer effN = (n != null && n > 0) ? n
-                    : (scenePrompt != null && scenePrompt.getImageN() != null && scenePrompt.getImageN() > 0) ? scenePrompt.getImageN() : null;
+
+            if (SeedreamImageProtocol.isSeedream(effectiveModel)) {
+                localPaths.addAll(callSeedreamImage(effectiveModel, effectivePrompt, effSize, effN,
+                        referenceImages, generatedImageUrl));
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
-            if (hasReferenceImages || "edit".equals(mode)) {
+            } else if (hasReferenceImages || "edit".equals(mode)) {
                 String result = callImageEdit(effectiveModel, effectivePrompt, referenceImages, generatedImageUrl);
                 localPaths.add(fileStorageService.saveImageFromBase64(result));
 
@@ -167,14 +193,110 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 scene.setImageStatus("completed");
                 sceneMapper.updateById(scene);
             }
+            updateRecord(recordId, GenerationRecordUpdate.completed(
+                    localPaths.isEmpty() ? null : localPaths.getFirst(), localPaths,
+                    System.currentTimeMillis() - startMs));
             return localPaths;
         } catch (Exception e) {
             if (scene != null) {
                 scene.setImageStatus("failed");
                 sceneMapper.updateById(scene);
             }
+            updateRecord(recordId, GenerationRecordUpdate.failed(
+                    e.getMessage(), System.currentTimeMillis() - startMs));
             throw new BusinessException(50201, "AI 图片生成失败: " + e.getMessage(), e);
         }
+    }
+
+    private String createRecord(Scene scene, Project project, String prompt, String model,
+                                String genType, Map<String, Object> params,
+                                List<GenerationReference> references) {
+        if (scene == null || project == null) return null;
+        try {
+            return generationRecordWriter.create(new GenerationRecord(
+                    project.getUserId(), project.getId(), null, scene.getId(),
+                    GenerationRecordTypes.IMAGE, genType, prompt, model, null, null,
+                    List.of(), references, params, GenerationRecordTypes.GENERATING,
+                    null, null, OffsetDateTime.now()));
+        } catch (Exception e) {
+            log.warn("图片生成记录落库失败(不影响生成): sceneId={}, error={}", scene.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    private void updateRecord(String recordId, GenerationRecordUpdate update) {
+        if (recordId == null) return;
+        try {
+            generationRecordWriter.update(recordId, update);
+        } catch (Exception e) {
+            log.warn("图片生成记录更新失败(不影响生成): recordId={}, error={}", recordId, e.getMessage());
+        }
+    }
+
+    private static Map<String, Object> imageParams(String size, String quality, Integer n,
+                                                   String mode, String aspectRatio) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (size != null && !size.isBlank()) params.put("size", size);
+        if (quality != null && !quality.isBlank()) params.put("quality", quality);
+        if (n != null) params.put("n", n);
+        if (mode != null && !mode.isBlank()) params.put("mode", mode);
+        if (aspectRatio != null && !aspectRatio.isBlank()) params.put("aspectRatio", aspectRatio);
+        return params;
+    }
+
+    private static List<GenerationReference> imageReferences(List<String> referenceImages,
+                                                             String generatedImageUrl) {
+        List<GenerationReference> refs = new ArrayList<>();
+        if (referenceImages != null) {
+            for (String url : referenceImages) {
+                if (url == null || url.isBlank()) continue;
+                refs.add(new GenerationReference(
+                        GenerationRecordTypes.IMAGE, safeRecordUrl(url), "REFERENCE"));
+            }
+        }
+        if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+            refs.add(new GenerationReference(
+                    GenerationRecordTypes.IMAGE, safeRecordUrl(generatedImageUrl), "source"));
+        }
+        return refs;
+    }
+
+    private static String safeRecordUrl(String url) {
+        return url.length() > MAX_RECORDED_REF_URL_LENGTH ? null : url;
+    }
+
+    /** Seedream 4.x：统一走 Ark 原生 JSON + SSE，支持文生图、图生图、多图融合和组图。 */
+    private List<String> callSeedreamImage(String model, String prompt, String size, Integer n,
+                                           List<String> referenceImages, String generatedImageUrl) {
+        List<String> orderedImages = new ArrayList<>();
+        if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
+            orderedImages.add(generatedImageUrl);
+        }
+        if (referenceImages != null) {
+            referenceImages.stream()
+                    .filter(ref -> ref != null && !ref.isBlank())
+                    .forEach(orderedImages::add);
+        }
+
+        SeedreamImageExecutor.ImageStore store = new SeedreamImageExecutor.ImageStore() {
+            @Override
+            public String saveImage(String sourceUrl) {
+                return fileStorageService.saveImage(sourceUrl);
+            }
+
+            @Override
+            public String saveImageFromBase64(String base64Data) {
+                return fileStorageService.saveImageFromBase64(base64Data);
+            }
+
+            @Override
+            public byte[] readImage(String filename) {
+                return fileStorageService.readImage(filename);
+            }
+        };
+        return new SeedreamImageExecutor(store).execute(
+                new SeedreamImageExecutor.Config(config.getGatewayBaseUrl(), config.getGatewayApiKey(), SEEDREAM_TIMEOUT),
+                model, prompt, size, n, orderedImages);
     }
 
     // ═══════════════════════════════════════════════════════════

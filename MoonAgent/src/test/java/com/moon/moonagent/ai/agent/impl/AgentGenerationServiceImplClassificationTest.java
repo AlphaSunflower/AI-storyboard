@@ -14,6 +14,8 @@ class AgentGenerationServiceImplClassificationTest {
         assertEquals("image_to_image", AgentGenerationServiceImpl.classifyImageGenType(null, null, "/api/files/images/a.png"));
         assertEquals("image_to_image", AgentGenerationServiceImpl.classifyImageGenType(null, List.of("ref"), null));
         assertEquals("multi_image_to_image", AgentGenerationServiceImpl.classifyImageGenType("edit", List.of("a", "b"), null));
+        assertEquals("multi_image_to_multi_image",
+                AgentGenerationServiceImpl.classifyImageGenType("edit", List.of("a", "b"), null, 2));
         assertEquals("image_to_image", AgentGenerationServiceImpl.classifyImageGenType("edit", null, null));
     }
 

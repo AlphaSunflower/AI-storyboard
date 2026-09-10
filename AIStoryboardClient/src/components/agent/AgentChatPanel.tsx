@@ -13,13 +13,16 @@ import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentAssetsModal } from './AgentAssetsPanel';
 import { SceneSelectorModal } from './SceneSelectorModal';
+import { UploadMaterialMenu } from './UploadMaterialMenu';
+import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
+import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
 import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
 import { Folder, Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -35,6 +38,8 @@ export function AgentChatPanel() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetList, setAssetList] = useState<Asset[]>([]);
   const [assetLoading, setAssetLoading] = useState(false);
@@ -49,6 +54,7 @@ export function AgentChatPanel() {
   const nearBottomRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const projectId = useProjectStore((s) => s.currentProject?.id);
 
   // 新消息自动滚底（M9：仅当用户处于近底位置时跟随）
   useEffect(() => {
@@ -239,7 +245,7 @@ export function AgentChatPanel() {
               display: 'inline-flex', alignItems: 'center', gap: 4,
             }}
           >
-            <Folder size={13} strokeWidth={1.8} /> 产出素材{assets && assets.total > 0 ? ` (${assets.total})` : ''}
+            <Folder size={13} strokeWidth={1.8} /> 产出素材{assets && (assets.mediaTotal ?? assets.total) > 0 ? ` (${assets.mediaTotal ?? assets.total})` : ''}
           </button>
         </div>
       </div>
@@ -380,45 +386,11 @@ export function AgentChatPanel() {
                 borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
                 padding: 4, zIndex: 1000, minWidth: 140,
               }}>
-                <button
-                  onClick={() => { setMenuOpen(false); setSceneModalOpen(true); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                    color: 'var(--color-ink)', borderRadius: 8,
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M10 12h4M12 10v4"/></svg>
-                  上传分镜
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); fileRef.current?.click(); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                    color: 'var(--color-ink)', borderRadius: 8,
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                  上传图片
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); handleAssetOpen(); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none',
-                    background: 'transparent', textAlign: 'left', fontSize: 14, cursor: 'pointer',
-                    color: 'var(--color-ink)', borderRadius: 8,
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgba(38,49,72,0.06)'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-                  选择资产
-                </button>
+                <UploadMaterialMenu
+                  onClose={() => setMenuOpen(false)}
+                  onLocalImage={() => fileRef.current?.click()}
+                  onMaterialPicker={() => setMaterialPickerOpen(true)}
+                />
               </div>,
               document.body,
             )}
@@ -487,6 +459,21 @@ export function AgentChatPanel() {
         open={sceneModalOpen}
         onClose={() => setSceneModalOpen(false)}
         onConfirm={handleSceneConfirm}
+      />
+      <UploadMaterialPickerModal
+        open={materialPickerOpen}
+        onClose={() => setMaterialPickerOpen(false)}
+        onAsset={handleAssetOpen}
+        onProjectOutput={() => setOutputOpen(true)}
+        onScene={() => setSceneModalOpen(true)}
+      />
+      <ProjectOutputImagePickerModal
+        open={outputOpen}
+        projectId={projectId}
+        existingUrls={refImageUrls}
+        remaining={Math.max(0, 10 - refImageUrls.length)}
+        onClose={() => setOutputOpen(false)}
+        onConfirm={async (references) => addRefImageUrls(references.map((reference) => reference.url))}
       />
       {/* 资产库选择弹窗：多选/再次点击取消，只记录资产 id */}
       {assetOpen && createPortal(

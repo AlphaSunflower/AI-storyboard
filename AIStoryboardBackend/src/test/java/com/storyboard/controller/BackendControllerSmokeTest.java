@@ -213,6 +213,9 @@ class BackendControllerSmokeTest {
         when(sceneService.uploadReference(anyString(), anyString(), anyString(), anyString(), any()))
             .thenReturn(new SceneReferenceResponse("r1", "image", "参考", "/api/files/images/x.png",
                 "REFERENCE", "upload", null, null, "x.png", 1L));
+        when(sceneMaterialService.linkReferences(anyString(), anyString(), any()))
+            .thenReturn(List.of(new SceneReferenceResponse("r2", "image", "image", "/api/files/images/output.png",
+                "REFERENCE", "output", "out-1", "c1", null, null)));
 
         mockMvc.perform(post("/api/projects/p1/scenes").with(user("u1"))
                 .contentType("application/json").content("{\"scriptContent\":\"内容\"}"))
@@ -233,6 +236,12 @@ class BackendControllerSmokeTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("r1"));
         mockMvc.perform(delete("/api/scenes/references/r1").with(user("u1")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(post("/api/scenes/s1/references/link").with(user("u1"))
+                .contentType("application/json")
+                .content("[{\"type\":\"image\",\"purpose\":\"image\",\"url\":\"/api/files/images/output.png\","
+                    + "\"role\":\"REFERENCE\",\"sourceType\":\"output\",\"sourceId\":\"out-1\","
+                    + "\"sourceConversationId\":\"c1\"}]"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].sourceType").value("output"));
         mockMvc.perform(put("/api/scenes/s1/materials").with(user("u1"))
                 .contentType("application/json").content("{\"assetIds\":[\"a1\"],\"references\":[]}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200));

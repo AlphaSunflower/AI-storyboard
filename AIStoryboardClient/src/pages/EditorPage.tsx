@@ -41,7 +41,10 @@ export function EditorPage() {
       // 默认进入最近修改的项目（projects 已按 updated_at DESC 排序，projects[0] 即最近）；
       // 无项目时自动创建「默认项目」并进入（保证始终有项目可加分镜/与智能体沟通）
       const { projects, currentProject, createProject } = useProjectStore.getState();
-      if (!currentProject) {
+      if (currentProject) {
+        // 路由返回 /editor 时强制拉取一次，避免复用聊天生成后已经过期的 Zustand 快照
+        await loadProject(currentProject.id);
+      } else {
         // 优先恢复「最近进入」的项目（刷新/重登），再到最近修改的（projects[0]）
         const lastId = getLastOpenedProjectId();
         const target = projects.find((p) => p.id === lastId) ?? projects[0];

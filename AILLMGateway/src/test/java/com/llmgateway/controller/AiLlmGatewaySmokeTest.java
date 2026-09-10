@@ -45,12 +45,14 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = {
@@ -163,6 +165,27 @@ class AiLlmGatewaySmokeTest {
         mockMvc.perform(post("/v1/files/upload").header("Authorization", "Bearer valid")
                 .header("Content-Type", "multipart/form-data; boundary=x").content(new byte[]{1}))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void imageGenerationsStream_forwardsSseChunks() throws Exception {
+        allowApiKey();
+        String body = "{\"model\":\"doubao-seedream-4-0-250828\",\"prompt\":\"p\",\"stream\":true}";
+        doAnswer(invocation -> {
+            java.util.function.Consumer<byte[]> sink = invocation.getArgument(2);
+            sink.accept("data: {\"type\":\"image_generation.completed\"}\n\n".getBytes());
+            return null;
+        }).when(routingService).streamChat(eq("/images/generations"), eq(body), any());
+
+        mockMvc.perform(post("/v1/images/generations")
+                .header("Authorization", "Bearer valid")
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(content().contentTypeCompatibleWith("text/event-stream"))
+            .andExpect(content().string("data: {\"type\":\"image_generation.completed\"}\n\n"));
+
+        verify(routingService).streamChat(eq("/images/generations"), eq(body), any());
     }
 
     @Test

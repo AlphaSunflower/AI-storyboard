@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { agentApi, type GenerationRecord } from '../api/agent';
+export { parseResultUrls } from '../lib/generationRecordParsing';
 
 export interface GenerationFilters {
   genType: string;
@@ -151,11 +152,6 @@ export function parseJsonArray(value: string | null): { type?: string; url?: str
   } catch {
     return [];
   }
-}
-
-export function parseResultUrls(value: string | null): string[] {
-  const arr = parseJsonArray(value);
-  return arr.map((x) => (typeof x === 'string' ? x : x.url ?? '')).filter(Boolean);
 }
 
 export function parseReferenceUrls(value: string | null): { type: string; url: string | null; role?: string }[] {

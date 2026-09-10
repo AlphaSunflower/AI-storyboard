@@ -1,5 +1,6 @@
 import client from './client';
 import type { ApiResponse } from './auth';
+import type { SceneMaterialReferenceInput } from './assets';
 import type { SceneReferenceAsset, SceneResponse } from './projects';
 
 export const sceneApi = {
@@ -25,4 +26,7 @@ export const sceneApi = {
     });
   },
   deleteReference: (id: string) => client.delete(`/scenes/references/${id}`),
+  /** 追加产出/分镜图片引用，不覆盖本地上传素材或已关联资产。 */
+  linkMaterialReferences: (sceneId: string, references: SceneMaterialReferenceInput[]) =>
+    client.post<ApiResponse<SceneReferenceAsset[]>>(`/scenes/${sceneId}/references/link`, references),
 };

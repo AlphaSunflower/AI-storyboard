@@ -87,6 +87,7 @@ public class SceneReviewCardService {
             item.put("imageModel", scene.getImageModel());
             item.put("imageSize", scene.getImageSize());
             item.put("imageQuality", scene.getImageQuality());
+            item.put("imageN", scene.getImageN());
             item.put("videoModel", scene.getVideoModel());
             item.put("videoAspectRatio", scene.getVideoAspectRatio());
             item.put("videoResolution", scene.getVideoResolution());

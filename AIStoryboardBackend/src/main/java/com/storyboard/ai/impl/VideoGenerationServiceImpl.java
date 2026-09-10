@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.entity.AgentAsset;
+import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.ScenePrompt;
 import com.storyboard.mapper.AgentAssetMapper;
+import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.service.AssetService;
@@ -15,6 +17,11 @@ import com.storyboard.service.FileStorageService;
 import com.storyboard.ai.AiConfigProperties;
 import com.storyboard.ai.GatewayModelService;
 import com.storyboard.common.MultipartBuilder;
+import com.storyboard.common.generation.GenerationRecord;
+import com.storyboard.common.generation.GenerationRecordTypes;
+import com.storyboard.common.generation.GenerationRecordUpdate;
+import com.storyboard.common.generation.GenerationRecordWriter;
+import com.storyboard.common.generation.GenerationReference;
 import com.storyboard.ai.VideoGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -46,12 +53,15 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
 
     /** H3 参考图硬上限（资产参考图 + 手动参考素材合并后截断）。 */
     private static final int MAX_REFERENCE_IMAGES = 9;
+    private static final int MAX_RECORDED_REF_URL_LENGTH = 8192;
 
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
     private final SceneMapper sceneMapper;
+    private final ProjectMapper projectMapper;
     private final ScenePromptMapper scenePromptMapper;
     private final AgentAssetMapper agentAssetMapper;
+    private final GenerationRecordWriter generationRecordWriter;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -92,6 +102,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         Scene scene = sceneId != null ? sceneMapper.selectById(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
         ScenePrompt scenePrompt = scene != null ? scenePromptMapper.selectById(sceneId) : null;
+        Project project = scene != null ? projectMapper.selectById(scene.getProjectId()) : null;
 
         if (prompt == null || prompt.isBlank()) {
             throw new BusinessException(40001, "视频生成 prompt 不能为空");
@@ -117,6 +128,11 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 : (scenePrompt != null && scenePrompt.getDuration() != null && scenePrompt.getDuration() > 0)
                         ? scenePrompt.getDuration()
                         : null;
+        long startMs = System.currentTimeMillis();
+        String recordId = createRecord(scene, project, prompt, actualModel,
+                GenerationRecordTypes.STORYBOARD_VIDEO,
+                videoParams(effResolution, effSize, effAspectRatio, effDuration, negativePrompt),
+                videoReferences(referenceImages, generatedImageUrl, referenceVideos, referenceAudios));
 
         // 资产库注入：场景关联资产的文字卡 + 参考图（≤9 优先级截断）；无资产则零影响
         String effectivePrompt = prompt;
@@ -217,6 +233,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 scene.setVideoStatus("generating");
                 sceneMapper.updateById(scene);
             }
+            attachTaskId(recordId, taskId);
 
             return taskId;
         } catch (Exception e) {
@@ -224,6 +241,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 scene.setVideoStatus("failed");
                 sceneMapper.updateById(scene);
             }
+            updateRecord(recordId, GenerationRecordUpdate.failed(
+                    e.getMessage(), System.currentTimeMillis() - startMs));
             throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
     }
@@ -351,7 +370,6 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             scene.setVideoUrl(videoUrl);
             scene.setVideoStatus(status);
             sceneMapper.updateById(scene);
-            return;
         }
         var assets = agentAssetMapper.selectList(
             new LambdaQueryWrapper<AgentAsset>().eq(AgentAsset::getTaskId, taskId));
@@ -362,6 +380,89 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             asset.setError(error);
             agentAssetMapper.updateById(asset);
         }
+        GenerationRecordUpdate update = "completed".equals(status)
+                ? GenerationRecordUpdate.completed(videoUrl, videoUrl == null ? List.of() : List.of(videoUrl), null)
+                : GenerationRecordUpdate.failed(error, null);
+        updateRecordByTaskId(taskId, update);
+    }
+
+    private String createRecord(Scene scene, Project project, String prompt, String model,
+                                String genType, Map<String, Object> params,
+                                List<GenerationReference> references) {
+        if (scene == null || project == null) return null;
+        try {
+            return generationRecordWriter.create(new GenerationRecord(
+                    project.getUserId(), project.getId(), null, scene.getId(),
+                    GenerationRecordTypes.VIDEO, genType, prompt, model, null, null,
+                    List.of(), references, params, GenerationRecordTypes.QUEUED,
+                    null, null, java.time.OffsetDateTime.now()));
+        } catch (Exception e) {
+            log.warn("视频生成记录落库失败(不影响生成): sceneId={}, error={}", scene.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    private void updateRecord(String recordId, GenerationRecordUpdate update) {
+        if (recordId == null) return;
+        try {
+            generationRecordWriter.update(recordId, update);
+        } catch (Exception e) {
+            log.warn("视频生成记录更新失败(不影响生成): recordId={}, error={}", recordId, e.getMessage());
+        }
+    }
+
+    private void attachTaskId(String recordId, String taskId) {
+        if (recordId == null) return;
+        try {
+            generationRecordWriter.attachTaskId(recordId, taskId);
+        } catch (Exception e) {
+            log.warn("视频生成记录关联 taskId 失败(不影响生成): recordId={}, taskId={}, error={}",
+                    recordId, taskId, e.getMessage());
+        }
+    }
+
+    private void updateRecordByTaskId(String taskId, GenerationRecordUpdate update) {
+        try {
+            generationRecordWriter.updateByTaskId(taskId, update);
+        } catch (Exception e) {
+            log.warn("视频生成记录终态更新失败(不影响生成): taskId={}, error={}", taskId, e.getMessage());
+        }
+    }
+
+    private static Map<String, Object> videoParams(String resolution, String size, String aspectRatio,
+                                                   Integer duration, String negativePrompt) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (resolution != null && !resolution.isBlank()) params.put("resolution", resolution);
+        if (size != null && !size.isBlank()) params.put("size", size);
+        if (aspectRatio != null && !aspectRatio.isBlank()) params.put("aspectRatio", aspectRatio);
+        if (duration != null) params.put("duration", duration);
+        if (negativePrompt != null && !negativePrompt.isBlank()) params.put("negativePrompt", negativePrompt);
+        return params;
+    }
+
+    private static List<GenerationReference> videoReferences(List<String> images, String source,
+                                                             List<String> videos, List<String> audios) {
+        List<GenerationReference> refs = new ArrayList<>();
+        addReferences(refs, "image", images, "REFERENCE");
+        if (source != null && !source.isBlank()) {
+            refs.add(new GenerationReference("image", safeRecordUrl(source), "source"));
+        }
+        addReferences(refs, "video", videos, "REFERENCE");
+        addReferences(refs, "audio", audios, "REFERENCE");
+        return refs;
+    }
+
+    private static void addReferences(List<GenerationReference> target, String type,
+                                      List<String> urls, String role) {
+        if (urls == null) return;
+        for (String url : urls) {
+            if (url == null || url.isBlank()) continue;
+            target.add(new GenerationReference(type, safeRecordUrl(url), role));
+        }
+    }
+
+    private static String safeRecordUrl(String url) {
+        return url.length() > MAX_RECORDED_REF_URL_LENGTH ? null : url;
     }
 
     /** GET 网关端点（Bearer 网关 Key），非 200 或异常返回 null */
