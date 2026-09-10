@@ -50,7 +50,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private final ScenePromptMapper scenePromptMapper;
     private final FileStorageService fileStorageService;
     private final AssetService assetService;
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     /** 生图走 Spring AI ImageModel（自动装配的 OpenAiImageModel，spring.ai.openai.* 指向网关，文生图 /v1/images/generations） */
     private final ImageModel imageModel;
     /** edits 图改图仍用 HttpClient 直连（multipart octet-stream workaround，Spring AI 无对应适配） */

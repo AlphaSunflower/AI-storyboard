@@ -37,7 +37,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
 
     private final AiConfigProperties config;
 
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))  // ponytail: connect timeout 极少调，保常量
             .build();
