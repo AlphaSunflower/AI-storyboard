@@ -842,6 +842,8 @@ const FAQS = [
 export function DocsPage() {
   const navigate = useNavigate();
   const rootRef = useRef<HTMLDivElement>(null);
+  const embedded = new URLSearchParams(window.location.search).get('embedded') === '1';
+  const primaryAppPath = embedded ? '/chat/storyboards?embedded=1' : '/editor';
 
   useGSAP(
     () => {
@@ -897,7 +899,7 @@ export function DocsPage() {
 
       {/* 顶部导航 */}
       <nav className="docs-nav">
-        <a className="docs-nav__brand" href="/editor" style={{ display: 'flex', alignItems: 'center' }}>
+        <a className="docs-nav__brand" href={primaryAppPath} style={{ display: 'flex', alignItems: 'center' }}>
           <ParticleText
             text="AlphaSunflower"
             particleSize={2}
@@ -923,7 +925,7 @@ export function DocsPage() {
             baseColor="#cc785c"
             intensity={0.9}
             thickness={1.2}
-            onClick={() => navigate('/editor')}
+            onClick={() => navigate(primaryAppPath)}
           >
             进入编辑器
           </SpecularButton>
@@ -974,26 +976,28 @@ export function DocsPage() {
                 baseColor="#ffffff"
                 intensity={1}
                 thickness={1.2}
-                onClick={() => navigate('/editor')}
+                onClick={() => navigate(primaryAppPath)}
               >
                 进入编辑器
               </SpecularButton>
             </Magnet>
-            <Magnet padding={70} magnetStrength={25}>
-              <SpecularButton
-                size="lg"
-                radius={12}
-                tintOpacity={0}
-                textColor="#cc785c"
-                lineColor="#cc785c"
-                baseColor="#cc785c"
-                intensity={0.9}
-                thickness={1.2}
-                onClick={() => navigate('/chat')}
-              >
-                Moon 对话
-              </SpecularButton>
-            </Magnet>
+            {!embedded && (
+              <Magnet padding={70} magnetStrength={25}>
+                <SpecularButton
+                  size="lg"
+                  radius={12}
+                  tintOpacity={0}
+                  textColor="#cc785c"
+                  lineColor="#cc785c"
+                  baseColor="#cc785c"
+                  intensity={0.9}
+                  thickness={1.2}
+                  onClick={() => navigate('/chat')}
+                >
+                  Moon 对话
+                </SpecularButton>
+              </Magnet>
+            )}
           </div>
           <div className="docs-hero__hint">登录后即可开始 · 无需额外配置</div>
         </div>

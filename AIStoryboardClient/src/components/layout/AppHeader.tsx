@@ -181,7 +181,7 @@ export function AppHeader() {
       </div>
 
       {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
-      {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+      <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       {renameProjectOpen && currentProject && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

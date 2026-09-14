@@ -1,4 +1,5 @@
 .embedded-app-window {
+  isolation: isolate;
   position: fixed;
   top: 16px;
   right: 16px;
@@ -13,6 +14,11 @@
   background: #f7f6f2;
   box-shadow: 0 24px 70px rgba(15, 17, 21, 0.2);
   animation: embedded-app-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.embedded-app-window.is-closing {
+  pointer-events: none;
+  animation: embedded-app-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
 .embedded-app-window.is-fullscreen {
@@ -218,8 +224,29 @@
   }
 }
 
+@keyframes embedded-app-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  36% {
+    opacity: 1;
+    transform: translateY(-2px) scale(0.997);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.975);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .embedded-app-window {
-    animation: none;
+    animation-duration: 0.18s;
+  }
+
+  .embedded-app-window.is-closing {
+    animation-duration: 0.2s;
   }
 }

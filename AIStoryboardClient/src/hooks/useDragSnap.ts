@@ -8,9 +8,16 @@ import { useRef, useState } from 'react';
 export function useDragSnap(onTap: () => void) {
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [returning, setReturning] = useState(false);
   const st = useRef({ sx: 0, sy: 0, moved: false, suppress: false });
+  const returnTimer = useRef<number | null>(null);
 
   const onMouseDown = (e: React.MouseEvent) => {
+    if (returnTimer.current !== null) {
+      window.clearTimeout(returnTimer.current);
+      returnTimer.current = null;
+    }
+    setReturning(false);
     st.current = { sx: e.clientX, sy: e.clientY, moved: false, suppress: false };
     setDragging(true);
 
@@ -26,7 +33,12 @@ export function useDragSnap(onTap: () => void) {
       document.removeEventListener('mouseup', onUp);
       if (st.current.moved) {
         st.current.suppress = true;
+        setReturning(true);
         setDrag({ x: 0, y: 0 });
+        returnTimer.current = window.setTimeout(() => {
+          setReturning(false);
+          returnTimer.current = null;
+        }, 460);
         // click 事件在 mouseup 后触发，先吞掉这一下，再恢复
         setTimeout(() => { st.current.suppress = false; }, 0);
       }
@@ -43,8 +55,9 @@ export function useDragSnap(onTap: () => void) {
 
   return {
     transform: `translate(${drag.x}px, ${drag.y}px)`,
-    transition: dragging ? 'none' : 'transform 0.3s ease',
+    transition: dragging ? 'none' : 'transform 440ms cubic-bezier(0.22, 1.32, 0.36, 1)',
     dragging,
+    returning,
     onMouseDown,
     onClick,
   };

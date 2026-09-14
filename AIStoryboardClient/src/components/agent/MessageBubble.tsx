@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
@@ -225,6 +225,61 @@ function formatTime(iso?: string): string {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`;
 }
 
+/**
+ * Smooths tiny SSE chunks into a readable reveal. The target always stays the
+ * server payload, so a faster stream only shortens the catch-up duration.
+ */
+function useStreamingReveal(content: string, streaming: boolean): string {
+  const [displayed, setDisplayed] = useState(streaming ? '' : content);
+  const displayedRef = useRef(displayed);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!streaming || reduced || !content.startsWith(displayedRef.current)) {
+      displayedRef.current = content;
+      setDisplayed(content);
+      return;
+    }
+
+    const start = displayedRef.current;
+    const delta = content.length - start.length;
+    if (delta <= 0) return;
+
+    const startedAt = performance.now();
+    const duration = Math.min(620, Math.max(90, delta * 9));
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const next = content.slice(0, start.length + Math.ceil(delta * eased));
+      if (next !== displayedRef.current) {
+        displayedRef.current = next;
+        setDisplayed(next);
+      }
+      if (progress < 1) {
+        frameRef.current = window.requestAnimationFrame(tick);
+      } else {
+        frameRef.current = null;
+      }
+    };
+
+    frameRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+  }, [content, streaming]);
+
+  return streaming ? displayed : content;
+}
+
 export function MessageBubble({ role, content, streaming, variant = 'default', createdAt, metadata }: {
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
   variant?: 'default' | 'deepseek'; createdAt?: string; metadata?: AgentMessageMetadata;
@@ -235,6 +290,7 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const displayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
   // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
   const hitlMeta = metadata?.hitl;
   const isHitl = !!hitlMeta && !hitlMeta.pending && metadata?.kind !== 'video-plan';
@@ -352,7 +408,13 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               textAlign: 'left',
             }}
       >
-        {content ? (role === 'assistant' ? <MarkdownContent content={content} onImgClick={setPreviewUrl} /> : renderContent(content, setPreviewUrl)) : <span style={{ opacity: 0.6 }}>…</span>}
+        {displayContent ? (
+          <span className="chat-live-text">
+            {role === 'assistant'
+              ? <MarkdownContent content={displayContent} onImgClick={setPreviewUrl} />
+              : renderContent(displayContent, setPreviewUrl)}
+          </span>
+        ) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
         {streaming && content && (
           <span

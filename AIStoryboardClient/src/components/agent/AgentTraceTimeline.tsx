@@ -16,7 +16,15 @@ export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
         {events.map((ev, i) => {
           const ok = ['completed', 'success', 'node_completed', 'route_changed', 'node_started'].includes(ev.status);
           return (
-            <div key={ev.id || i} style={{ display: 'flex', gap: 10, position: 'relative', paddingBottom: i < events.length - 1 ? 12 : 0 }}>
+            <div
+              key={ev.id || i}
+              className="reasoning-trace-item"
+              style={{
+                '--item-index': i,
+                display: 'flex', gap: 10, position: 'relative',
+                paddingBottom: i < events.length - 1 ? 12 : 0,
+              } as React.CSSProperties}
+            >
               {i < events.length - 1 && (
                 <div style={{ position: 'absolute', left: 5, top: 16, bottom: -4, width: 1, background: 'var(--color-hairline)' }} />
               )}
