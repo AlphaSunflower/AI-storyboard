@@ -38,10 +38,18 @@ export function EditorPage() {
     const init = async () => {
       await loadProjects();
       fetchAiModels();   // 拉取网关生图/生视频模型列表（失败静默保持默认）
+      const params = new URLSearchParams(window.location.search);
+      const requestedProjectId = params.get('projectId');
+      const requestedSceneId = params.get('sceneId');
       // 默认进入最近修改的项目（projects 已按 updated_at DESC 排序，projects[0] 即最近）；
       // 无项目时自动创建「默认项目」并进入（保证始终有项目可加分镜/与智能体沟通）
       const { projects, currentProject, createProject } = useProjectStore.getState();
-      if (currentProject) {
+      const requestedProject = requestedProjectId
+        ? projects.find((project) => project.id === requestedProjectId)
+        : undefined;
+      if (requestedProject) {
+        await loadProject(requestedProject.id);
+      } else if (currentProject) {
         // 路由返回 /editor 时强制拉取一次，避免复用聊天生成后已经过期的 Zustand 快照
         await loadProject(currentProject.id);
       } else {
@@ -53,6 +61,12 @@ export function EditorPage() {
         } else {
           const p = await createProject('默认项目', 'movie', '16:9');
           await loadProject(p.id);
+        }
+      }
+      if (requestedSceneId) {
+        const scenes = useProjectStore.getState().scenes;
+        if (scenes.some((scene) => scene.id === requestedSceneId)) {
+          selectScene(requestedSceneId);
         }
       }
       checkDraft()
@@ -81,7 +95,7 @@ export function EditorPage() {
       window.history.replaceState({}, '', '/editor');
       useAuthStore.getState().checkAuth();
     }
-  }, [loadProjects, checkDraft, loadProject, createProject]);
+  }, [loadProjects, checkDraft, loadProject, createProject, fetchAiModels, selectScene]);
 
   const handleRecoverDraft = () => {
     if (draftProject) {

@@ -251,6 +251,6 @@ class MoonAgentControllerSmokeTest {
                 .contentType("application/json").content("{\"planToken\":\"pt\"}"))
             .andExpect(status().isOk());
         org.assertj.core.api.Assertions.assertThat(emitterTimeouts)
-            .containsExactly(1_200_000L, 1_200_000L, 1_200_000L);
+            .containsExactly(1_800_000L, 1_800_000L, 1_800_000L);
     }
 }

@@ -5,8 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -166,35 +172,101 @@ public final class StoryboardBatchGenerator {
      */
     public static Result generate(Plan plan, Function<String, List<Map<String, Object>>> parser,
                                   BatchCaller caller) {
+        validate(plan, parser, caller);
+
+        List<BatchResult> batches = new ArrayList<>();
+        for (Range range : plan.ranges()) {
+            batches.add(runBatch(range, parser, caller));
+        }
+        return merge(batches);
+    }
+
+    /**
+     * 多智能体并行版本：每个 Range 是一个独立 scene writer agent。
+     *
+     * <p>所有批次同时提交，结果仍按 Range 顺序合并。单个批次失败不会取消其他批次；
+     * 汇总所有失败后统一抛错，调用方可以按失败范围单独重试。
+     */
+    public static Result generateParallel(Plan plan,
+                                          Function<String, List<Map<String, Object>>> parser,
+                                          BatchCaller caller,
+                                          int maxConcurrency) {
+        validate(plan, parser, caller);
+        List<Range> ranges = plan.ranges();
+        int parallelism = Math.min(Math.max(1, maxConcurrency), ranges.size());
+        if (parallelism <= 1) return generate(plan, parser, caller);
+
+        ExecutorService executor = Executors.newFixedThreadPool(parallelism);
+        try {
+            List<CompletableFuture<BatchResult>> futures = ranges.stream()
+                    .map(range -> CompletableFuture.supplyAsync(
+                            () -> runBatch(range, parser, caller), executor))
+                    .toList();
+
+            List<BatchResult> ordered = new ArrayList<>(Collections.nCopies(ranges.size(), null));
+            Map<Range, String> failures = new LinkedHashMap<>();
+            for (int i = 0; i < futures.size(); i++) {
+                try {
+                    ordered.set(i, futures.get(i).join());
+                } catch (CompletionException e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    failures.put(ranges.get(i), cause.getMessage() == null ? cause.toString() : cause.getMessage());
+                }
+            }
+            if (!failures.isEmpty()) {
+                Map.Entry<Range, String> first = failures.entrySet().iterator().next();
+                throw new IllegalArgumentException(
+                        "并行分镜批次失败: 失败范围=" + failures.keySet()
+                                + "，首个错误=第 " + first.getKey().from() + "-" + first.getKey().to()
+                                + " 批: " + first.getValue());
+            }
+            return merge(ordered);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static void validate(Plan plan, Function<String, List<Map<String, Object>>> parser,
+                                 BatchCaller caller) {
         if (plan == null) throw new IllegalArgumentException("批次计划不能为空");
         if (parser == null || caller == null) throw new IllegalArgumentException("解析器与调用器不能为空");
+    }
 
+    private static BatchResult runBatch(Range range,
+                                        Function<String, List<Map<String, Object>>> parser,
+                                        BatchCaller caller) {
+        CallOutput output = caller.call(range);
+        if (output == null || output.content() == null || output.content().isBlank()) {
+            throw new IllegalArgumentException("第 " + range.from() + "-" + range.to() + " 批未返回内容");
+        }
+        List<Map<String, Object>> batch;
+        try {
+            batch = parser.apply(output.content());
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(
+                    "第 " + range.from() + "-" + range.to() + " 批没有有效分镜: " + e.getMessage(), e);
+        }
+        if (batch == null || batch.isEmpty()) {
+            throw new IllegalArgumentException("第 " + range.from() + "-" + range.to() + " 批没有有效分镜");
+        }
+        return new BatchResult(range, List.copyOf(batch), output.reasoning());
+    }
+
+    private static Result merge(List<BatchResult> batches) {
         List<Map<String, Object>> merged = new ArrayList<>();
         StringBuilder reasoning = new StringBuilder();
-        for (Range range : plan.ranges()) {
-            CallOutput output = caller.call(range);
-            if (output == null || output.content() == null || output.content().isBlank()) {
-                throw new IllegalArgumentException("第 " + range.from() + "-" + range.to() + " 批未返回内容");
-            }
-            List<Map<String, Object>> batch;
-            try {
-                batch = parser.apply(output.content());
-            } catch (RuntimeException e) {
-                throw new IllegalArgumentException(
-                        "第 " + range.from() + "-" + range.to() + " 批没有有效分镜: " + e.getMessage(), e);
-            }
-            if (batch == null || batch.isEmpty()) {
-                throw new IllegalArgumentException("第 " + range.from() + "-" + range.to() + " 批没有有效分镜");
-            }
-            merged.addAll(batch);
-            if (output.reasoning() != null && !output.reasoning().isBlank()) {
+        for (BatchResult batch : batches) {
+            merged.addAll(batch.scenes());
+            if (batch.reasoning() != null && !batch.reasoning().isBlank()) {
                 if (!reasoning.isEmpty()) reasoning.append("\n");
-                reasoning.append("【").append(range.from()).append("-").append(range.to()).append("】")
-                        .append(output.reasoning().trim());
+                reasoning.append("【").append(batch.range().from()).append("-").append(batch.range().to()).append("】")
+                        .append(batch.reasoning().trim());
             }
         }
         return new Result(List.copyOf(merged), reasoning.toString());
     }
+
+    private record BatchResult(Range range, List<Map<String, Object>> scenes, String reasoning) {}
 
     private static int firstPositive(JsonNode root, String... fields) {
         if (root == null || !root.isObject()) return 0;

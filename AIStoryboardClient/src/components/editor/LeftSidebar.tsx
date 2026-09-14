@@ -67,7 +67,7 @@ export function LeftSidebar() {
   // 资产生成（可选）：勾选的资产 id；先生成分镜已存在分镜时弹覆盖确认
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
-  // 侧栏内置「资产库」区块（独立于剧本输入，紧凑列表 + 打开完整面板）
+  // 侧栏内置「AI资产库」区块（独立于剧本输入，紧凑列表 + 打开完整面板）
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
@@ -360,11 +360,11 @@ export function LeftSidebar() {
         {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
 
-      {/* 资产库（独立于剧本输入，侧栏内嵌） */}
+      {/* AI资产库（独立于剧本输入，侧栏内嵌） */}
       <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
-            <Puzzle size={13} strokeWidth={1.8} /> 资产库
+            <Puzzle size={13} strokeWidth={1.8} /> AI资产库
           </span>
           <button
             onClick={() => setAssetsOpen(true)}

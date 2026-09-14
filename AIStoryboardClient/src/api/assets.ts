@@ -11,7 +11,7 @@ export interface AssetImage {
   fileName: string;
 }
 
-/** AI 资产库资产：人物/道具/场景。projectId 为 null = 用户全局资产库。 */
+/** AI资产库资产：人物/道具/场景。projectId 为 null = 用户全局AI资产库。 */
 export interface Asset {
   id: string;
   type: AssetType;

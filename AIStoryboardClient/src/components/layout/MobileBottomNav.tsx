@@ -4,7 +4,7 @@ interface MobileBottomNavProps {
   onOpenAssets: () => void;
 }
 
-/** 手机端底部 Tab 栏：聊天 | 分镜 | 资产库 */
+/** 手机端底部 Tab 栏：聊天 | 分镜 | AI资产库 */
 export function MobileBottomNav({ onOpenAssets }: MobileBottomNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -32,7 +32,7 @@ export function MobileBottomNav({ onOpenAssets }: MobileBottomNavProps) {
       <TabBtn
         active={false}
         onClick={onOpenAssets}
-        label="资产库"
+        label="AI资产库"
         icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z" /></svg>}
       />
     </div>

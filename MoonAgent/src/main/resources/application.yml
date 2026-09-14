@@ -31,7 +31,7 @@ spring:
       base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
       api-key: ${LLM_GATEWAY_API_KEY:lg-df377c8084e645ffa34e0dfce1fb3e78}
       # Spring AI 2.0 默认 60s；运行期 options 仍显式设置，避免单次覆盖时回落到默认值
-      timeout: 300s
+      timeout: 600s
       # 超时/连接失败不做 SDK 级隐式重试，避免单次 120s 超时被放大为多次串行请求
       max-retries: 0
 
@@ -73,12 +73,16 @@ ai:
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
-    plan-timeout-seconds: 300
+    plan-timeout-seconds: 600
     recommend-timeout-seconds: 20
-    material-timeout-seconds: 45
+    # 素材编排优先等待高质量模型完成，超时边界与网关保持一致
+    material-timeout-seconds: 600
+    # 骨架只做结构化规划，显式使用快模型；场景 worker 仍使用高质量模型
+    skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.5-pro}
+    max-parallel-agents: ${AGENT_MAX_PARALLEL_AGENTS:4}
     intent-timeout-seconds: 10
     # 长剧本分批生成可能持续十余分钟；该值控制 MVC SSE 连接生命周期
-    sse-timeout-seconds: 1200
+    sse-timeout-seconds: 1800
     history-context-max-chars: 10000
     history-message-max-chars: 2000
     # 自动审查链：链首意图写库成功后自动 handoff 给 scene-review 出「分镜审查」卡（暴露缺图缺视频/补图补视频）。
@@ -92,7 +96,7 @@ ai:
   video-request-timeout: 120
   video-download-timeout: 180
   video-retry-delay-ms: 15000
-  script-timeout: 300
+  script-timeout: 600
   script-max-tokens: 8192
   gateway-model-timeout: 10
   gateway-cooldown-ms: 300000

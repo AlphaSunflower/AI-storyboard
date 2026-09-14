@@ -93,7 +93,7 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
               {!loaded && <p style={{ color: 'var(--color-muted)', fontSize: 13, textAlign: 'center', padding: 32 }}>加载中…</p>}
               {loaded && assets.length === 0 && (
                 <p style={{ color: 'var(--color-muted)', fontSize: 13, textAlign: 'center', padding: 32 }}>
-                  暂无资产 —— 请先在「AI 资产库」创建人物/道具/场景
+                  暂无资产 —— 请先在「AI资产库」创建人物/道具/场景
                 </p>
               )}
               {assets.map((a) => {

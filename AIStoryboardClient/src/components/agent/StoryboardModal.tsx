@@ -10,7 +10,7 @@ export function StoryboardContent() {
       </p>
       <button
         disabled={!currentProject}
-        onClick={() => window.open(`/editor?projectId=${currentProject?.id}`, '_blank')}
+        onClick={() => window.open('/chat/storyboards', '_blank')}
         className="px-5 py-2 rounded-lg text-sm font-medium transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
         style={{ background: 'var(--color-primary)', color: '#fff' }}
       >

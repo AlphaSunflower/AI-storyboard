@@ -5,6 +5,7 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.ScriptGenerationService;
 import com.moon.moonagent.ai.AiConfigProperties;
@@ -38,6 +39,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     private final GatewayModelService gatewayModelService;
     private final AiConfigProperties config;
+    private final AgentAiConfigProperties agentConfig;
     private final StoryboardClient storyboardClient;
     private final AssetService assetService;
     private final ChatClient.Builder chatClientBuilder;
@@ -114,9 +116,9 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                     plan.totalScenes(), plan.batchSize());
         } else {
             try {
-                planCall = callLLM(model, buildPlanningSystemPrompt(),
+                planCall = callLLM(resolveSkeletonModel(), buildPlanningSystemPrompt(),
                         buildPlanningPrompt(scriptText, understanding, assetSheet),
-                        "plan", UUID.randomUUID().toString());
+                        "skeleton", UUID.randomUUID().toString());
                 plan = StoryboardBatchGenerator.parsePlan(
                         planCall.content(), scriptText,
                         StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE,
@@ -138,16 +140,16 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         final String finalSystemPrompt = systemPrompt;
         final String finalUnderstanding = understanding;
         final String finalAssetSheet = assetSheet;
-        StoryboardBatchGenerator.Result result = StoryboardBatchGenerator.generate(
+        StoryboardBatchGenerator.Result result = StoryboardBatchGenerator.generateParallel(
                 finalPlan, StoryboardJsonParser::parseScenes, range -> {
                     String callId = UUID.randomUUID().toString();
                     LlmCall batchCall = callLLM(model, finalSystemPrompt,
                             buildBatchUserPrompt(scriptText, finalUnderstanding, finalAssetSheet,
                                     range, finalPlan.totalScenes()),
-                            "scenes-" + range.from() + "-" + range.to(), callId);
+                            "agent-scenes-" + range.from() + "-" + range.to(), callId);
                     String details = batchCall.reasoning() == null ? null : batchCall.reasoning().details();
                     return new StoryboardBatchGenerator.CallOutput(batchCall.content(), details);
-                });
+                }, agentConfig.getMaxParallelAgents());
 
         String mergedReasoning = mergeReasoning(finalPlanCall, result.reasoning());
         return new GeneratedScenes(
@@ -439,6 +441,15 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 + StoryboardBatchGenerator.DEFAULT_MIN_BATCH_SIZE + " 到 "
                 + StoryboardBatchGenerator.DEFAULT_MAX_BATCH_SIZE + " 之间。"
                 + "若剧本明确写出「共N个分镜/镜头」或列出N个分镜，totalScenes 必须严格等于 N，不得自行增删。";
+    }
+
+    String resolveSkeletonModel() {
+        String model = agentConfig.getSkeletonModel();
+        if (model == null || model.isBlank()) {
+            throw new IllegalStateException(
+                    "ai.agent.skeleton-model 未配置：骨架阶段禁止回退到网关默认强模型");
+        }
+        return model.trim();
     }
 
     private String buildPlanningPrompt(String scriptText, String understanding, String assetSheet) {

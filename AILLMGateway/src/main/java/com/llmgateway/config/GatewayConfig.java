@@ -62,7 +62,7 @@ public class GatewayConfig {
     /** 上游渠道超时/重试配置 */
     public static class Upstream {
         private long connectTimeoutMs = 30000;
-        private long requestTimeoutMs = 300000;
+        private long requestTimeoutMs = 600000;
         /** SSE 长连接超时（图片组图可生成数分钟） */
         private long streamTimeoutMs = 900000;
         private int retryCount = 2;

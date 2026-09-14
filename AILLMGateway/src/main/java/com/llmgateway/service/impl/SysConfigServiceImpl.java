@@ -36,7 +36,7 @@ public class SysConfigServiceImpl implements SysConfigService {
         "gateway.upstream.request-timeout-ms", new KeySpec("上游请求超时（毫秒；SSE 流式取 max(该值,300s)）",
             v -> {
                 long l = Long.parseLong(v);
-                if (l < 1000 || l > 600000) throw new IllegalArgumentException("取值须在 [1000,600000]");
+                if (l < 1000 || l > 1800000) throw new IllegalArgumentException("取值须在 [1000,1800000]");
                 return l;
             },
             (c, v) -> c.getUpstream().setRequestTimeoutMs((Long) v)),

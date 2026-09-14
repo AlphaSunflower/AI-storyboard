@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,6 +115,55 @@ class StoryboardBatchGeneratorTest {
                 .hasMessageContaining("没有有效分镜");
 
         assertThat(calls).containsExactly(1, 6);
+    }
+
+    @Test
+    void generateParallel_startsAllBatchesConcurrently() throws Exception {
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+
+        StoryboardBatchGenerator.Result result = StoryboardBatchGenerator.generateParallel(
+                new StoryboardBatchGenerator.Plan(10, 5),
+                content -> List.of(Map.of("value", content)),
+                range -> {
+                    started.countDown();
+                    try {
+                        if (!started.await(2, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("batch did not run concurrently");
+                        }
+                        release.countDown();
+                        release.await(2, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("batch interrupted", e);
+                    }
+                    return new StoryboardBatchGenerator.CallOutput(range.from() + "-" + range.to(), null);
+                },
+                2);
+
+        assertThat(result.scenes()).extracting(s -> s.get("value"))
+                .containsExactly("1-5", "6-10");
+    }
+
+    @Test
+    void generateParallel_mergesInRangeOrderWhenCompletionReverses() {
+        StoryboardBatchGenerator.Result result = StoryboardBatchGenerator.generateParallel(
+                new StoryboardBatchGenerator.Plan(10, 5),
+                content -> List.of(Map.of("value", content)),
+                range -> {
+                    if (range.from() == 1) {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return new StoryboardBatchGenerator.CallOutput(range.from() + "-" + range.to(), null);
+                },
+                2);
+
+        assertThat(result.scenes()).extracting(s -> s.get("value"))
+                .containsExactly("1-5", "6-10");
     }
 
     @Test

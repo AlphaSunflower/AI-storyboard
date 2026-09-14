@@ -42,7 +42,7 @@ export function UploadMaterialPickerModal({
           <Option
             icon={<Package size={18} />}
             title="上传资产"
-            description="从项目资产库选择人物、道具或场景"
+            description="从项目AI资产库选择人物、道具或场景"
             onClick={() => choose(onAsset)}
           />
           <Option

@@ -58,6 +58,8 @@ export function ChatComposer() {
   const textRef = useRef('');
   textRef.current = text;
   const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
+  const [dropActive, setDropActive] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -180,6 +182,32 @@ export function ChatComposer() {
     closeUploadDrafts();
   };
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDropActive(true);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDropActive(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDropActive(false);
+    const files = Array.from(e.dataTransfer.files ?? []).filter((file) => file.type.startsWith('image/'));
+    if (files.length > 0) void uploadRefImages(files);
+  }, [uploadRefImages]);
+
   const openMenu = () => {
     const btn = menuBtnRef.current;
     if (btn) {
@@ -244,10 +272,18 @@ export function ChatComposer() {
 
   return (
     <>
-    <div style={{
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
       width: '100%', maxWidth: DS.maxContent, margin: '0 auto',
-      border: `1px solid ${focused ? 'rgba(65,118,230,0.45)' : DS.border}`, borderRadius: 22,
-      background: 'white', boxShadow: focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
+      border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`, borderRadius: 22,
+      background: dropActive ? 'rgba(65,118,230,0.035)' : 'white',
+      boxShadow: dropActive
+        ? '0 0 0 3px rgba(65,118,230,0.14), 0 0 24px rgba(65,118,230,0.20)'
+        : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
       transition: 'border-color 0.2s, box-shadow 0.2s',
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
@@ -331,7 +367,7 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={dropActive ? '松开鼠标上传图片' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={busy}
         rows={2}
         style={{
@@ -522,7 +558,7 @@ export function ChatComposer() {
             <div style={{ fontSize: 15, fontWeight: 600 }}>选择资产（可多选，再次点击取消）</div>
             <div style={{ fontSize: 12, color: DS.textCaption }}>资产图会在生成阶段按资产读取，不会加入“参考图”列表。</div>
             {assetLoading ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>加载中…</div>
-              : assetList.length === 0 ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>当前项目资产库为空，可先在「资源库」创建资产</div>
+              : assetList.length === 0 ? <div style={{ color: DS.textSecondary, fontSize: 13, padding: '12px 0' }}>当前项目AI资产库为空，可先在「AI资产库」创建资产</div>
               : <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {assetList.map((a) => (
                     <button key={a.id} onClick={() => toggleAsset(a.id)} style={{

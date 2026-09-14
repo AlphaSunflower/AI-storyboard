@@ -486,7 +486,7 @@ export function AgentChatPanel() {
             <div style={{ fontSize: 15, fontWeight: 600 }}>选择资产（可多选，再次点击取消）</div>
             <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>资产图会在生成阶段按资产读取，不会加入“参考图”列表。</div>
             {assetLoading ? <div style={{ color: 'var(--color-muted)', fontSize: 13, padding: '12px 0' }}>加载中…</div>
-              : assetList.length === 0 ? <div style={{ color: 'var(--color-muted)', fontSize: 13, padding: '12px 0' }}>当前资产库为空，可在资源库先创建资产</div>
+              : assetList.length === 0 ? <div style={{ color: 'var(--color-muted)', fontSize: 13, padding: '12px 0' }}>当前AI资产库为空，可先在「AI资产库」创建资产</div>
               : <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {assetList.map((a) => (
                     <button key={a.id} onClick={() => toggleAsset(a.id)} style={{

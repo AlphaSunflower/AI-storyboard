@@ -779,7 +779,7 @@ const SECTIONS = [
   { id: 'generate', label: '逐镜生成' },
   { id: 'image-tips', label: '图片技巧' },
   { id: 'video-tips', label: '视频技巧' },
-  { id: 'asset-library', label: '资产库' },
+  { id: 'asset-library', label: 'AI资产库' },
   { id: 'moon', label: 'Moon 智能体' },
   { id: 'faq', label: '常见问题' },
 ];
@@ -791,7 +791,7 @@ const FEATURES = [
   { title: '视频生成', desc: '文生视频 / 图生视频（参考图作首帧）', anchor: 'generate' },
   { title: 'Moon 智能体', desc: '对话式创作，计划模式 + 人工确认', anchor: 'moon' },
   { title: '图片理解', desc: '上传参考图，理解风格再生成', anchor: 'manual-script' },
-  { title: '资产库', desc: '人物 / 道具 / 场景设定，跨镜长相不漂移', anchor: 'asset-library' },
+  { title: 'AI资产库', desc: '人物 / 道具 / 场景设定，跨镜长相不漂移', anchor: 'asset-library' },
 ];
 
 const PARAMS = [
@@ -836,7 +836,7 @@ const FAQS = [
   { q: '生成图片想调整？', a: <>点「<Sparkles size={12} strokeWidth={1.8}  /> 完善图片」，输入修改诉求即可在原图基础上改。</> },
   { q: 'Moon 智能体和手动生成冲突吗？', a: 'Moon 生成分镜后，手动剧本输入会暂时禁用（避免覆盖），刷新页面可恢复。' },
   { q: '如何用参考图生图 / 生视频？', a: '图片参数区勾选「参考图生图」上传参考图；或在 Moon 上传参考图后让它图生图 / 图生视频。' },
-  { q: '同一个人物在不同分镜里长得不一样？', a: '把它建成「资产库 · 人物」资产（多图 + 文字约束），再在分镜里关联，生成时会自动注入，保证全片一致。' },
+  { q: '同一个人物在不同分镜里长得不一样？', a: '把它建成「AI资产库 · 人物」资产（多图 + 文字约束），再在分镜里关联，生成时会自动注入，保证全片一致。' },
 ];
 
 export function DocsPage() {
@@ -1114,9 +1114,9 @@ export function DocsPage() {
                   </div>
                 </Card>
 
-                {/* 卡 6：资产库 → 人物 / 道具 / 场景设定卡 */}
+                {/* 卡 6：AI资产库 → 人物 / 道具 / 场景设定卡 */}
                 <Card style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'pointer', background: 'var(--color-canvas)' }}>
-                  <CardBar title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 资产库</span> />
+                  <CardBar title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> AI资产库</span> />
                   <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: '#fff' }}>
                       <span style={{ width: 40, height: 40, borderRadius: 8, background: 'linear-gradient(135deg,#f5f0e8,#e8e0d2)', border: '1px solid var(--color-hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}><User size={18} strokeWidth={1.8} /></span>
@@ -1362,14 +1362,14 @@ export function DocsPage() {
         </div>
       </section>
 
-      {/* 资产库：跨分镜一致性约束 */}
+      {/* AI资产库：跨分镜一致性约束 */}
       <section className="docs-section docs-section--alt" id="asset-library">
         <div className="docs-container" data-reveal>
           <div className="docs-section__head">
-            <div className="docs-section__eyebrow">资产库</div>
+            <div className="docs-section__eyebrow">AI资产库</div>
             <h2 className="docs-section__title">锁定人物长相，跨镜不漂移</h2>
             <p className="docs-section__lead">
-              同一人物在不同分镜里长相漂移、道具外观忽变，是 AI 分镜最常见的穿帮。资产库把「人物 / 道具 / 场景」做成一张张「图片 + 文字约束」的卡片，
+              同一人物在不同分镜里长相漂移、道具外观忽变，是 AI 分镜最常见的穿帮。AI资产库把「人物 / 道具 / 场景」做成一张张「图片 + 文字约束」的卡片，
               生成时自动注入，用「图锁长相 + 文字锁构成」两层硬约束，保证全片一致。
             </p>
           </div>
@@ -1392,7 +1392,7 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> 资产库（点卡片进工作台、上传可回显）</span> light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Puzzle size={12} strokeWidth={1.8} /> AI资产库（点卡片进工作台、上传可回显）</span> light>
               <DemoAssetLibrary />
             </MockWindow>
           </div>
@@ -1401,8 +1401,8 @@ export function DocsPage() {
           <div className="docs-split docs-split--wide-left">
             <div className="docs-points">
               {[
-                { name: '新建资产', desc: <>顶栏「<Puzzle size={12} strokeWidth={1.8}  /> 资产库」→「＋ 新建资产」，选类型、填名称与文字约束、上传相片（可多张、可反复添加）；勾「全局」则跨项目可用。</> },
-                { name: '关联到分镜', desc: <>预览面板下方「<Puzzle size={12} strokeWidth={1.8}  /> 关联资产」，图片 / 视频两个标签分别管理；点「＋ 添加资产」打开资产库勾选（同一资产可分别用于图片、视频两种用途）。</> },
+                { name: '新建资产', desc: <>顶栏「<Puzzle size={12} strokeWidth={1.8}  /> AI资产库」→「＋ 新建资产」，选类型、填名称与文字约束、上传相片（可多张、可反复添加）；勾「全局」则跨项目可用。</> },
+                { name: '关联到分镜', desc: <>预览面板下方「<Puzzle size={12} strokeWidth={1.8}  /> 关联资产」，图片 / 视频两个标签分别管理；点「＋ 添加资产」打开AI资产库勾选（同一资产可分别用于图片、视频两种用途）。</> },
                 { name: '生成时自动注入', desc: '无需额外操作：分镜脚本、图片、视频生成时后端自动带上关联资产，保证一致。' },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
@@ -1440,14 +1440,14 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">生成图片技巧</div>
             <h2 className="docs-section__title">文生图 / 图生图，这样出好图</h2>
             <p className="docs-section__lead">
-              提示词越具体，图越稳；人物、道具反复出现时，交给资产库锁定，全片统一。
+              提示词越具体，图越稳；人物、道具反复出现时，交给AI资产库锁定，全片统一。
             </p>
           </div>
           <div className="docs-split docs-split--wide-left">
             <div className="docs-points">
               {[
                 { name: '文生图 · 要素齐全', desc: '主体 + 动作 + 环境 + 光线 + 风格 + 构图六要素写全；如「阿伟在暖木吧台前冲咖啡，晨光从左侧打入，浅景深电影感」。' },
-                { name: '文生图 · 结合资产库', desc: '把重复出现的人物 / 道具建成资产卡并关联到分镜，文字约束自动注入 imagePrompt，人不变样。' },
+                { name: '文生图 · 结合AI资产库', desc: '把重复出现的人物 / 道具建成资产卡并关联到分镜，文字约束自动注入 imagePrompt，人不变样。' },
                 { name: '图生图 · 参考图改图', desc: '勾选「参考图生图」上传参考图，再给明确诉求（如「色调调暖、背景换成雨夜」），在原图基础上改。' },
                 { name: '图生图 · 完善图片', desc: <>生成后不满意，点「<Sparkles size={12} strokeWidth={1.8}  /> 完善图片」输入修改意见，逐轮逼近想要的效果。</> },
               ].map((p, i) => (
@@ -1460,14 +1460,14 @@ export function DocsPage() {
                 </div>
               ))}
               <div className="docs-note" style={{ marginTop: 0 }}>
-                <strong>资产库要点：</strong>图片生成只注入该分镜关联的「图片」资产文字卡；资产图不注入文生图（生图模型不吃参考图），锁长相靠文字卡。
+                <strong>AI资产库要点：</strong>图片生成只注入该分镜关联的「图片」资产文字卡；资产图不注入文生图（生图模型不吃参考图），锁长相靠文字卡。
               </div>
             </div>
             <MockWindow title="图片提示词 · 好 / 坏对比" light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-error)' }}>✗ 太笼统</div>
                 <div style={{ fontSize: 11, color: 'var(--color-body)', background: 'var(--color-surface-soft)', padding: 8, borderRadius: 6, lineHeight: 1.6 }}>一个男人在咖啡店冲咖啡。</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-success)' }}>✓ 要素齐全 + 资产库</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-success)' }}>✓ 要素齐全 + AI资产库</div>
                 <div style={{ fontSize: 11, color: 'var(--color-body)', background: 'var(--color-surface-soft)', padding: 8, borderRadius: 6, lineHeight: 1.6 }}>阿伟（黑色短发、络腮胡、深绿围裙）在暖木吧台前，手持哑光黑手冲壶，晨光从左侧打入，浅景深、电影感构图。</div>
                 <div style={{ fontSize: 10, color: 'var(--color-muted)', lineHeight: 1.6 }}>人物与道具的外观来自资产卡，无需每次重写，AI 自动带上。</div>
               </div>
@@ -1483,7 +1483,7 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">生成视频技巧</div>
             <h2 className="docs-section__title">文生视频 / 多参考物生成视频</h2>
             <p className="docs-section__lead">
-              描述动作与运镜，视频更灵动；多个物件要同框且跨镜一致，就用资产库多参考物注入。
+              描述动作与运镜，视频更灵动；多个物件要同框且跨镜一致，就用AI资产库多参考物注入。
             </p>
           </div>
           <div className="docs-split docs-split--wide-left">
@@ -1503,7 +1503,7 @@ export function DocsPage() {
                 </div>
               ))}
               <div className="docs-note" style={{ marginTop: 0 }}>
-                <strong>资产库要点：</strong>视频生成注入「视频」关联资产的文字卡 + 主图参考图；与图片用途分开勾选，避免互相污染。
+                <strong>AI资产库要点：</strong>视频生成注入「视频」关联资产的文字卡 + 主图参考图；与图片用途分开勾选，避免互相污染。
               </div>
             </div>
             <MockWindow title="多参考物生成视频 · 注入示意" light>

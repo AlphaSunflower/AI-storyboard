@@ -286,7 +286,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
             {loading && <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)' }}>加载中…</p>}
             {!loading && filtered.length === 0 && (
               <p style={{ color: 'var(--color-muted-soft)', font: 'var(--text-body-sm)', gridColumn: '1 / -1', textAlign: 'center', padding: 48 }}>
-                暂无资产——先到「资产库」创建人物/道具/场景卡
+                暂无资产——先到「AI资产库」创建人物/道具/场景卡
               </p>
             )}
             {filtered.map((a) => renderCard(a, false))}
@@ -302,7 +302,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
       <div ref={panelRef} style={responsivePanelStyle} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div style={{ padding: isMobile ? '10px 12px' : '14px 20px', borderBottom: '1px solid var(--color-hairline)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 8 : 12 }}>
-          <h2 style={{ margin: 0, font: isMobile ? 'var(--text-body)' : 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>AI 资产库</h2>
+          <h2 style={{ margin: 0, font: isMobile ? 'var(--text-body)' : 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>AI资产库</h2>
           {!isMobile && typeFilterRow}
           <button style={primaryBtn} onClick={() => setCreateOpen(true)}>＋ {isMobile ? '新建' : '新建资产'}</button>
           <button style={{ ...ghostBtn, border: 'none', fontSize: 16, padding: '4px 8px' }} onClick={onClose}>✕</button>

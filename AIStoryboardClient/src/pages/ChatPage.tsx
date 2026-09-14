@@ -20,7 +20,7 @@ import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
 import { Moon } from 'lucide-react';
-import { X, Folder, FolderKanban, PanelLeftClose, ChevronDown, ChevronRight, Info, Frame, History, PenLine, LayoutGrid, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
+import { X, Folder, FolderKanban, PanelLeftClose, ChevronDown, ChevronRight, Info, Frame, History, PenLine, LayoutGrid, Layers, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useDragSnap } from '../hooks/useDragSnap';
@@ -36,7 +36,7 @@ const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boole
 
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
- * 最左图标导航（项目/资源库/左下角设置）｜会话列表（可拖宽）｜主区：
+ * 最左图标导航（项目/AI资产库/左下角设置）｜会话列表（可拖宽）｜主区：
  * 首次对话 = 名称居中 + hero 输入卡；有会话 = 头部名称 + 748px 消息列 + 底部输入卡。
  */
 export function ChatPage() {
@@ -52,7 +52,7 @@ export function ChatPage() {
     confirmResult, assets, loadAssets, conversations, activeConversationId,
     renameConversation,
   } = useAgentStore();
-  const [assetsOpen, setAssetsOpen] = useState(false);       // 资源库（rail 🧩）
+  const [assetsOpen, setAssetsOpen] = useState(false);       // AI资产库（rail 🧩）
   const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
@@ -208,8 +208,7 @@ export function ChatPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [convWidth]);
 
-  // ── 拖拽图片到智能体窗口 === 上传参考图 ──
-  // 全局阻止浏览器默认打开文件（避免拖到非目标区直接导航/下载）
+  // 全局阻止浏览器默认打开文件；实际上传仅由 ChatComposer 接收。
   useEffect(() => {
     const block = (e: DragEvent) => e.preventDefault();
     window.addEventListener('dragover', block);
@@ -219,27 +218,6 @@ export function ChatPage() {
       window.removeEventListener('drop', block);
     };
   }, []);
-  const dragDepth = useRef(0);
-  const [dropActive, setDropActive] = useState(false);
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('Files')) {
-      dragDepth.current++;
-      setDropActive(true);
-    }
-  }, []);
-  const handleDragLeave = useCallback(() => {
-    dragDepth.current--;
-    if (dragDepth.current <= 0) { dragDepth.current = 0; setDropActive(false); }
-  }, []);
-  const handleDropImage = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    dragDepth.current = 0;
-    setDropActive(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f && f.type.startsWith('image/')) {
-      useAgentStore.getState().uploadRefImage(f).catch(() => alert('图片上传失败'));
-    }
-  }, []);
 
   return (
     <>
@@ -247,17 +225,13 @@ export function ChatPage() {
     <AmbientGlow />
     {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
       <div
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDropImage}
       style={{ height: '100vh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
     >
-      {/* 拖拽图片时的提示浮层 */}
-      {dropActive && <DropHint />}
         {/* 顶部导航栏 */}
         <MobileHeader
           title={currentTitle}
           onMenuClick={() => setMobileSidebarOpen(true)}
+          onOpenStoryboards={() => navigate('/chat/storyboards')}
           onNewConversation={handleMobileNewConversation}
         />
 
@@ -398,12 +372,8 @@ export function ChatPage() {
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDropImage}
       style={{ height: '100vh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
     >
-      {dropActive && <DropHint />}
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
       {!embed && (<>
       {collapsed ? (
@@ -453,7 +423,7 @@ export function ChatPage() {
         width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
         background: DS.sidebarBg, transition: 'width 0.2s ease',
       }}>
-        {/* 会话列表（toolbar 插槽注入 项目+资源库，位于新建对话上方；flex:1 内部滚动） */}
+        {/* 会话列表（toolbar 插槽注入 项目+AI资产库，位于新建对话上方；flex:1 内部滚动） */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <AgentConversationList
             width={convWidth}
@@ -607,16 +577,33 @@ export function ChatPage() {
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
           }}>
-            {/* 右上角生成记录入口（空态 hero 也可用） */}
-            <button
-              onClick={() => setRecordsOpen(true)}
-              title="生成记录"
-              style={{
-                position: 'absolute', top: 10, right: 16, border: 'none', background: 'transparent',
-                color: DS.textSecondary, fontSize: 13, cursor: 'pointer', padding: '6px 10px',
-                borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4,
-              }}
-            ><History size={15} strokeWidth={1.8} /> 生成记录</button>
+            {/* 顶部一级入口：分镜库 + 生成记录（空态 hero 也可用） */}
+            <div style={{ position: 'absolute', top: 10, right: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+              {!embed && (
+                <button
+                  onClick={() => navigate('/chat/storyboards')}
+                  title="查看全部分镜"
+                  style={{
+                    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 13,
+                    cursor: 'pointer', padding: '6px 10px', borderRadius: 8,
+                    display: 'flex', alignItems: 'center', gap: 4,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+                ><Layers size={15} strokeWidth={1.8} /> 分镜库</button>
+              )}
+              <button
+                onClick={() => setRecordsOpen(true)}
+                title="生成记录"
+                style={{
+                  border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 13,
+                  cursor: 'pointer', padding: '6px 10px', borderRadius: 8,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+              ><History size={15} strokeWidth={1.8} /> 生成记录</button>
+            </div>
             {embed && (
               <button
                 onClick={() => setEmbedConvOpen(true)}
@@ -704,13 +691,22 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {!embed && (
+                  <button
+                    onClick={() => navigate('/chat/storyboards')}
+                    title="查看全部分镜"
+                    style={headerBtn(1, 14)}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+                  ><Layers size={16} strokeWidth={1.8} /> 分镜库</button>
+                )}
                 <button
                   onClick={() => setAssetsOpen(true)}
-                  title="资源库"
+                  title="AI资产库"
                   style={headerBtn(1, embed ? 12 : 14)}
                   onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Library size={16} strokeWidth={1.8} /> 资源库</button>
+                ><Library size={16} strokeWidth={1.8} /> AI资产库</button>
                 <button
                   onClick={() => setRecordsOpen(true)}
                   title="生成记录"
@@ -913,25 +909,6 @@ function AppLauncher({ onCanvas, onEditor, onDocs }: { onCanvas: () => void; onE
         onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
         onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
       ><FileText size={15} strokeWidth={1.8} /> 使用文档</button>
-    </div>
-  );
-}
-
-/** 拖拽图片到智能体窗口时的全屏提示浮层（pointer-events none，不拦截 drop） */
-function DropHint() {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000, pointerEvents: 'none',
-      background: 'rgba(255,255,255,0.55)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      <div style={{
-        border: `2px dashed ${DS.brand}`, borderRadius: 16, background: 'rgba(255,255,255,0.95)',
-        padding: '24px 48px', fontSize: 15, color: DS.brand, fontWeight: 500,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-      }}>
-        松开鼠标上传图片
-      </div>
     </div>
   );
 }

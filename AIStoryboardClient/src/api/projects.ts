@@ -55,6 +55,8 @@ export interface SceneResponse {
   /** 视频覆盖参数（复用既有列） */
   videoResolution: string;
   duration: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const projectApi = {

@@ -16,7 +16,7 @@ interface MobileSidebarContentProps {
 
 /**
  * 手机端 overlay 侧栏内容：
- * Moon Logo + 关闭 | 资源库 | 项目选择 | 会话列表 | 底部设置
+ * Moon Logo + 关闭 | AI资产库 | 项目选择 | 会话列表 | 底部设置
  */
 export function MobileSidebarContent({
   onSelectConversation, onClose, onOpenSettings, onOpenRecords, logout,

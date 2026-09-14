@@ -3,14 +3,53 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Download, ImagePlus } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentMessageMetadata } from '../../api/agent';
-import { hitlFromMetadata } from '../../stores/agentStore';
+import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
 import { ReasoningPanel } from './ReasoningPanel';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
+import { ContextMenu } from '../common/ContextMenu';
+
+function imageExtension(url: string, mime: string): string {
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('webp')) return 'webp';
+  if (mime.includes('gif')) return 'gif';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+  const matched = url.match(/\.(png|jpe?g|gif|webp)(?:[?#]|$)/i)?.[1];
+  return matched?.toLowerCase().replace('jpeg', 'jpg') ?? 'png';
+}
+
+async function downloadImage(url: string, alt?: string) {
+  const filenameBase = (alt?.trim() || 'chat-image')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-');
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = `${filenameBase || 'chat-image'}.${imageExtension(url, blob.type)}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filenameBase || 'chat-image'}.${imageExtension(url, '')}`;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+}
 
 /**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
@@ -19,9 +58,9 @@ import { VideoPlanCard } from './VideoPlanCard';
  * onClick 可选：点击图片放大预览（灯箱）。
  */
 function ImgWithFallback({
-  src, alt, style, onClick,
+  src, source, alt, style, onClick,
 }: {
-  src: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
+  src: string; source?: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
 }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -32,13 +71,28 @@ function ImgWithFallback({
     );
   }
   return (
-    <img
-      src={src}
-      alt={alt ?? ''}
-      style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
-      onClick={onClick}
-      onError={() => setFailed(true)}
-    />
+    <ContextMenu
+      items={[
+        {
+          label: '下载',
+          icon: <Download size={13} strokeWidth={1.8} />,
+          onClick: () => { void downloadImage(src, alt); },
+        },
+        {
+          label: '上传图片',
+          icon: <ImagePlus size={13} strokeWidth={1.8} />,
+          onClick: () => useAgentStore.getState().addRefImageUrls([source || src]),
+        },
+      ]}
+    >
+      <img
+        src={src}
+        alt={alt ?? ''}
+        style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
+        onClick={onClick}
+        onError={() => setFailed(true)}
+      />
+    </ContextMenu>
   );
 }
 
@@ -56,6 +110,7 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
         <ImgWithFallback
           key={i}
           src={assetUrl(imgMatch[2])}
+          source={imgMatch[2]}
           alt={imgMatch[1]}
           onClick={() => onImgClick(imgMatch[2])}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
@@ -84,6 +139,7 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
         <ImgWithFallback
           key={i}
           src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
+          source={raw}
           alt=""
           onClick={() => onImgClick(raw)}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
@@ -123,6 +179,7 @@ function MarkdownContent({ content, onImgClick }: { content: string; onImgClick:
             img: ({ src, alt }) => (
               <ImgWithFallback
                 src={assetUrl(src ?? '')}
+                source={src ?? ''}
                 alt={alt ?? ''}
                 onClick={() => onImgClick(src ?? '')}
                 style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
