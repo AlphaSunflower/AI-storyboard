@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Frame, Grip, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
-import { isEmbeddedAppReadyMessage } from '../../lib/embeddedAppMessages';
+import { isEmbeddedAppReadyMessage } from '../../../lib/embeddedAppMessages';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
@@ -12,9 +12,9 @@ export interface EmbeddedAppDescriptor {
 
 interface EmbeddedAppWindowProps {
   tabs: EmbeddedAppDescriptor[];
-  activeKey: string;
-  onSelectTab: (key: string) => void;
-  onCloseTab: (key: string) => void;
+  activeKey: EmbeddedAppDescriptor['key'];
+  onSelectTab: (key: EmbeddedAppDescriptor['key']) => void;
+  onCloseTab: (key: EmbeddedAppDescriptor['key']) => void;
   onCloseWindow: () => void;
   sidebarCollapsed: boolean;
   onCollapseSidebar: () => void;

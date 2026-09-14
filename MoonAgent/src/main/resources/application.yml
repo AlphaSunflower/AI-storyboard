@@ -55,6 +55,11 @@ management:
 storyboard:
   internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
   internal-secret: ${INTERNAL_SECRET:}
+  asset-client:
+    base-url: ${ASSET_SERVICE_URL:http://localhost:8085}
+    internal-token: ${INTERNAL_SECRET:${internal.secret:}}
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 30
   # MinIO 对象存储（图片/视频/音频统一存对象存储，替代本地 uploads/）
   # 默认指向本机 MinIO（本地开发）；生产在 application-prod.yml 覆盖。
   storage:

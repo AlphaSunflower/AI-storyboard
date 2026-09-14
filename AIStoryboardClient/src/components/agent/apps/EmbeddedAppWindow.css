@@ -1,3 +1,4 @@
+/* Floating host shared by canvas, editor, and docs. */
 .embedded-app-window {
   isolation: isolate;
   position: fixed;

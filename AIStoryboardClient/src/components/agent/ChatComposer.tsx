@@ -127,9 +127,23 @@ export function ChatComposer() {
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
   const [assetError, setAssetError] = useState('');
+  const [pendingGroup, setPendingGroup] = useState<import('../../api/library').AssetGroupSnapshot | null>(null);
 
   // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
   useEffect(() => { setText(''); }, [activeConversationId]);
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem('moon.pendingGroupSnapshot');
+    if (!raw) return;
+    try {
+      const snapshot = JSON.parse(raw) as import('../../api/library').AssetGroupSnapshot;
+      setPendingGroup(snapshot);
+      setText('请使用我选择的资产组设计并生成视频方案');
+      sessionStorage.removeItem('moon.pendingGroupSnapshot');
+    } catch {
+      sessionStorage.removeItem('moon.pendingGroupSnapshot');
+    }
+  }, []);
 
   // 点击"继续完善"后聚焦输入框
   useEffect(() => {
@@ -152,7 +166,16 @@ export function ChatComposer() {
     const content = text.trim();
     if (!content || busy) return;
     setText('');
-    sendMessage(content, { assetIds: pickedAssetIds });
+    const groupUrls = pendingGroup?.items.map((item) =>
+      item.objectKey.startsWith('http') ? item.objectKey : `/api/files/${item.objectKey}`) || [];
+    if (pendingGroup) sessionStorage.setItem('moon.activeGroupId', pendingGroup.groupId);
+    sendMessage(content, {
+      picUrls: groupUrls.length ? groupUrls : undefined,
+      assetIds: pickedAssetIds,
+      assetGroupIds: pendingGroup ? [pendingGroup.groupId] : undefined,
+      routingHint: pendingGroup ? 'intent-video' : undefined,
+    });
+    setPendingGroup(null);
     clearPickedAssetIds();
   };
 
@@ -304,7 +327,7 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {(refImageUrls.length > 0 || pickedAssetIds.length > 0) && (
+      {(refImageUrls.length > 0 || pickedAssetIds.length > 0 || pendingGroup) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           padding: '8px 12px', borderRadius: 12, background: DS.hover,
@@ -338,6 +361,20 @@ export function ChatComposer() {
                   border: 'none', background: 'white', color: DS.textSecondary,
                   cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '5px 6px', borderRadius: 8,
                 }}
+              >×</button>
+            </span>
+          )}
+          {pendingGroup && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '5px 8px', borderRadius: 8, background: 'white',
+              color: DS.brand, fontSize: 12,
+            }}>
+              <Package size={14} strokeWidth={2} />
+              资产组 · {pendingGroup.items.length} 项
+              <button
+                onClick={() => setPendingGroup(null)}
+                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
               >×</button>
             </span>
           )}

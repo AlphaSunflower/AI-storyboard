@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [AIStoryboardBackend, AILLMGateway]
+        module: [asset-client, asset-service, AIStoryboardBackend, MoonAgent, ApiGateway, AILLMGateway]
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +25,12 @@ jobs:
 
       - name: Install common-core
         run: mvn -B -q -f CommonCore/pom.xml install -DskipTests
+
+      - name: Install agent-core
+        run: mvn -B -q -f agent-core/pom.xml install -DskipTests
+
+      - name: Install asset-client
+        run: mvn -B -q -f asset-client/pom.xml install -DskipTests
 
       - name: Maven test
         run: mvn -B -f ${{ matrix.module }}/pom.xml test
@@ -55,3 +61,6 @@ jobs:
       - name: Build
         working-directory: AIStoryboardClient
         run: npm run build
+      - name: Test
+        working-directory: AIStoryboardClient
+        run: npm test

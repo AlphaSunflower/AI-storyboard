@@ -2,6 +2,16 @@
 
 AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScript frontend.
 
+## 当前任务优先级与项目库状态（2026-09-14）
+
+> **暂停继续开发项目库模块。** 当前最高优先级是先完成“完整画布任务”；在画布任务完成并通过验收前，不要继续扩展、重构或完善项目库/asset-service，也不要基于现有部分实现继续做新的设计决策。
+
+- 项目库模块尚未完成，也尚未验收；当前实现只能视为进行中的工作区，不能当作稳定基线。
+- 尚无“覆盖每个接口”的充足 E2E 冒烟测试。现有内容仅包括部分单元测试、Controller 测试和手工冒烟验证，不代表完整接口矩阵、权限矩阵、并发/恢复流程已覆盖。
+- 已知尚未完成或未充分验证的范围包括：全部 `/api/library/**` 与 `/api/internal/library/**` 接口、上传分块/签名、MinIO 流式 Range、异步导入/分析 worker、回收站清理竞争、项目归属服务故障降级、Moon/分镜资产组快照全链路。
+- 恢复项目库工作前，必须先重新审计当前未提交改动，建立逐接口 E2E 冒烟清单并实际执行；测试未通过时不得继续叠加功能。
+- 除非用户明确结束画布任务并重新授权，任何代理都不得把当前项目库实现当作完成状态，也不得自动继续项目库设计或实现。
+
 ## Tech Stack
 
 - **Backend**: Spring Boot 4.1.1, JDK 21, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, JDK HttpClient

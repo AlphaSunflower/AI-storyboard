@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, FolderOpen, Image as ImageIcon, LoaderCircle, Package, Video, X } from 'lucide-react';
+import { Check, FolderOpen, Image as ImageIcon, LoaderCircle, Package, Video, X, Boxes } from 'lucide-react';
 import { agentApi, type ProjectOutputMaterialGroup } from '../../api/agent';
 import { assetApi, type Asset, type SceneMaterialReferenceInput } from '../../api/assets';
 import { sceneApi } from '../../api/scenes';
 import { assetUrl } from '../../config';
 import { DS } from './ChatComposer';
+import { libraryApi, type LibraryAsset } from '../../api/library';
 
-type PickerTab = 'assets' | 'output' | 'scene';
+type PickerTab = 'assets' | 'groups' | 'output' | 'scene';
 
 interface Props {
   open: boolean;
@@ -31,6 +32,8 @@ export function SceneMaterialPickerModal({
   const [tab, setTab] = useState<PickerTab>('assets');
   const [outputKind, setOutputKind] = useState<'image' | 'video'>('image');
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [groups, setGroups] = useState<LibraryAsset[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [outputGroups, setOutputGroups] = useState<ProjectOutputMaterialGroup[]>([]);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [selectedRefs, setSelectedRefs] = useState<Map<string, SceneMaterialReferenceInput>>(new Map());
@@ -48,10 +51,12 @@ export function SceneMaterialPickerModal({
       assetApi.listSceneAssets(sceneId),
       sceneApi.listReferences(sceneId),
       agentApi.listProjectOutputMaterials(projectId, currentConversationId),
-    ]).then(([assetRes, sceneAssetRes, referenceRes, outputRes]) => {
+      libraryApi.listAssets({ scope: 'PROJECT', projectId, type: 'GROUP', page: 1, size: 100 }),
+    ]).then(([assetRes, sceneAssetRes, referenceRes, outputRes, groupRes]) => {
       if (cancelled) return;
       setAssets(assetRes.data.data ?? []);
       setOutputGroups(outputRes.data.data ?? []);
+      setGroups(groupRes.data.data.records ?? []);
 
       const linked = sceneAssetRes.data.data;
       const linkedIds = new Set<string>();
@@ -123,9 +128,33 @@ export function SceneMaterialPickerModal({
     setSaving(true);
     setError('');
     try {
+      const groupSnapshots = [];
+      const groupRefs: SceneMaterialReferenceInput[] = [];
+      for (const groupId of selectedGroupIds) {
+        const snapshot = (await libraryApi.createSnapshot(groupId, 'VIDEO')).data.data;
+        groupSnapshots.push({
+          snapshotId: snapshot.snapshotId,
+          groupId: snapshot.groupId,
+          groupVersion: snapshot.groupVersion,
+          contentHash: snapshot.contentHash,
+          target: snapshot.target,
+          items: snapshot.items as unknown as Array<Record<string, unknown>>,
+        });
+        for (const item of snapshot.items) {
+          groupRefs.push({
+            type: item.type.toLowerCase() as 'image' | 'video' | 'audio',
+            purpose: 'video',
+            url: item.contentUrl,
+            role: item.role as SceneMaterialReferenceInput['role'],
+            sourceType: 'group_snapshot',
+            sourceId: snapshot.snapshotId,
+          });
+        }
+      }
       await assetApi.setSceneMaterials(sceneId, {
         assetIds: [...selectedAssetIds],
-        references: [...selectedRefs.values()],
+        references: [...selectedRefs.values(), ...groupRefs],
+        groupSnapshots,
       });
       await onSaved();
       onClose();
@@ -136,7 +165,7 @@ export function SceneMaterialPickerModal({
     }
   };
 
-  const selectedCount = selectedAssetIds.size + selectedRefs.size;
+  const selectedCount = selectedAssetIds.size + selectedRefs.size + selectedGroupIds.size;
 
   return createPortal(
     <div style={overlay} onPointerDown={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}>
@@ -153,6 +182,7 @@ export function SceneMaterialPickerModal({
 
         <div style={tabs}>
           <TabButton active={tab === 'assets'} onClick={() => setTab('assets')} icon={<Package size={14} />} label={`项目资产 ${assets.length}`} />
+          <TabButton active={tab === 'groups'} onClick={() => setTab('groups')} icon={<Boxes size={14} />} label={`资产组 ${groups.length}`} />
           <TabButton active={tab === 'output'} onClick={() => setTab('output')} icon={<FolderOpen size={14} />} label="产出素材" />
           <TabButton active={tab === 'scene'} onClick={() => setTab('scene')} icon={<ImageIcon size={14} />} label={`当前分镜图片 ${sceneImageUrls.length}`} />
         </div>
@@ -162,6 +192,16 @@ export function SceneMaterialPickerModal({
             <div style={empty}><LoaderCircle size={18} className="is-spinning" /> 正在加载素材…</div>
           ) : tab === 'assets' ? (
             <AssetGrid assets={assets} selected={selectedAssetIds} onToggle={toggleAsset} />
+          ) : tab === 'groups' ? (
+            <GroupGrid
+              groups={groups}
+              selected={selectedGroupIds}
+              onToggle={(id) => setSelectedGroupIds((current) => {
+                const next = new Set(current);
+                if (next.has(id)) next.delete(id); else next.add(id);
+                return next;
+              })}
+            />
           ) : tab === 'output' ? (
             <>
               <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
@@ -232,6 +272,31 @@ function AssetGrid({ assets, selected, onToggle }: {
             ) : <div style={placeholder}><Package size={18} /></div>}
             <span style={tileLabel}>{asset.name}</span>
             <span style={tileMeta}>{asset.type} · {asset.images?.length ?? 0} 图</span>
+            {active && <span style={checkBadge}><Check size={12} /></span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function GroupGrid({ groups, selected, onToggle }: {
+  groups: LibraryAsset[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  if (groups.length === 0) return <div style={empty}>当前项目暂无资产组；请先到项目库创建。</div>;
+  return (
+    <div style={grid}>
+      {groups.map((group) => {
+        const active = selected.has(group.id);
+        return (
+          <button key={group.id} type="button" onClick={() => onToggle(group.id)} style={tileButton(active)}>
+            {group.coverUrl ? (
+              <img src={assetUrl(group.coverUrl)} alt={group.name} style={media} />
+            ) : <div style={placeholder}><Boxes size={18} /></div>}
+            <span style={tileLabel}>{group.name}</span>
+            <span style={tileMeta}>视频素材包 · {group.scope === 'GLOBAL' ? '全局' : '项目'}</span>
             {active && <span style={checkBadge}><Check size={12} /></span>}
           </button>
         );
@@ -321,7 +386,7 @@ function SceneImageGrid({ urls, sceneId, selected, onToggle }: {
 
 function MediaTile({ url, type, selected, label, onToggle }: {
   url: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   selected: boolean;
   label?: string;
   onToggle: () => void;
@@ -330,7 +395,9 @@ function MediaTile({ url, type, selected, label, onToggle }: {
     <button type="button" onClick={onToggle} style={tileButton(selected)}>
       {type === 'video'
         ? <video src={assetUrl(url)} muted style={media} />
-        : <img src={assetUrl(url)} alt="" style={media} />}
+        : type === 'audio'
+          ? <audio src={assetUrl(url)} controls style={media} />
+          : <img src={assetUrl(url)} alt="" style={media} />}
       {label && <span style={tileMeta}>{label}</span>}
       {selected && <span style={checkBadge}><Check size={12} /></span>}
     </button>

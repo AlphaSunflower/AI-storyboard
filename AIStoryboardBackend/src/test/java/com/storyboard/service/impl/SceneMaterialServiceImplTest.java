@@ -11,6 +11,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.service.AssetService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class SceneMaterialServiceImplTest {
     private AssetService assetService;
     private SceneReferenceImageMapper referenceMapper;
     private AgentAssetMapper agentAssetMapper;
+    private SceneMaterialGroupSnapshotMapper groupSnapshotMapper;
     private SceneMaterialServiceImpl service;
 
     @BeforeEach
@@ -44,8 +46,9 @@ class SceneMaterialServiceImplTest {
         assetService = mock(AssetService.class);
         referenceMapper = mock(SceneReferenceImageMapper.class);
         agentAssetMapper = mock(AgentAssetMapper.class);
+        groupSnapshotMapper = mock(SceneMaterialGroupSnapshotMapper.class);
         service = new SceneMaterialServiceImpl(
-                sceneMapper, projectMapper, assetService, referenceMapper, agentAssetMapper);
+                sceneMapper, projectMapper, assetService, referenceMapper, agentAssetMapper, groupSnapshotMapper);
 
         Scene scene = new Scene();
         scene.setId("s1");
@@ -84,7 +87,8 @@ class SceneMaterialServiceImplTest {
                                 "output", "out-1", "c1"),
                         new SceneMaterialReferenceRequest(
                                 "image", "image", "/api/files/images/scene-b.png", "REFERENCE",
-                                "scene_image", "s1", "c1")));
+                        "scene_image", "s1", "c1")),
+                List.of());
 
         service.replaceMaterials("u1", "s1", request);
 
@@ -116,7 +120,8 @@ class SceneMaterialServiceImplTest {
                 List.of(),
                 List.of(new SceneMaterialReferenceRequest(
                         "image", "image", "/api/files/images/foreign.png", "REFERENCE",
-                        "output", "out-foreign", "c-foreign")));
+                        "output", "out-foreign", "c-foreign")),
+                List.of());
 
         assertThrows(BusinessException.class, () -> service.replaceMaterials("u1", "s1", request));
         verify(referenceMapper, never()).deleteById(org.mockito.ArgumentMatchers.<Serializable>any());
@@ -133,7 +138,8 @@ class SceneMaterialServiceImplTest {
                                 "output", "out-a", "c1"),
                         new SceneMaterialReferenceRequest(
                                 "video", "video", "/api/files/videos/b.mp4", "REFERENCE",
-                                "output", "out-b", "c1")));
+                                "output", "out-b", "c1")),
+                List.of());
 
         BusinessException error = assertThrows(
                 BusinessException.class, () -> service.replaceMaterials("u1", "s1", request));

@@ -6,6 +6,7 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.SceneAsset;
+import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,9 @@ public interface InternalApiService {
 
     /** 查项目信息，不存在抛 40401 */
     Project getProject(String id);
+
+    /** 项目归属只读校验（asset-service 专用；不返回密码等敏感信息）。 */
+    ProjectOwnership getProjectOwnership(String id);
 
     /** 查项目分镜列表（按 sceneNumber 升序） */
     List<SceneFull> getProjectScenes(String projectId);

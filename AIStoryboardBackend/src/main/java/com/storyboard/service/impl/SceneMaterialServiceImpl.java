@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.common.BusinessException;
 import com.storyboard.dto.request.SceneMaterialReferenceRequest;
+import com.storyboard.dto.request.SceneMaterialGroupSnapshotRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Project;
@@ -15,6 +16,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.SceneMaterialService;
 import lombok.RequiredArgsConstructor;
@@ -34,8 +36,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SceneMaterialServiceImpl implements SceneMaterialService {
 
-    private static final Set<String> REFERENCE_TYPES = Set.of("image", "video");
-    private static final Set<String> REFERENCE_SOURCES = Set.of("output", "scene_image");
+    private static final Set<String> REFERENCE_TYPES = Set.of("image", "video", "audio");
+    private static final Set<String> REFERENCE_SOURCES = Set.of("output", "scene_image", "group_snapshot");
     private static final Map<String, Integer> REFERENCE_LIMITS = Map.of(
             "image", 10,
             "video", 1);
@@ -45,6 +47,7 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
     private final AssetService assetService;
     private final SceneReferenceImageMapper referenceMapper;
     private final AgentAssetMapper agentAssetMapper;
+    private final SceneMaterialGroupSnapshotMapper groupSnapshotMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -54,6 +57,8 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
         List<String> assetIds = distinct(request == null ? null : request.assetIds());
         List<SceneMaterialReferenceRequest> references = request == null || request.references() == null
                 ? List.of() : request.references();
+        List<SceneMaterialGroupSnapshotRequest> groupSnapshots = request == null || request.groupSnapshots() == null
+                ? List.of() : request.groupSnapshots();
 
         long videoReferenceCount = references.stream()
                 .filter(reference -> reference != null && "video".equals(reference.type()))
@@ -94,6 +99,21 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
             row.setSourceConversationId(reference.sourceConversationId());
             row.setSortOrder(nextOrder++);
             referenceMapper.insert(row);
+        }
+        groupSnapshotMapper.deleteBySceneId(sceneId);
+        for (SceneMaterialGroupSnapshotRequest snapshot : groupSnapshots) {
+            if (snapshot == null || snapshot.snapshotId() == null || snapshot.groupId() == null) continue;
+            try {
+                groupSnapshotMapper.insert(
+                        sceneId,
+                        snapshot.snapshotId(),
+                        snapshot.groupId(),
+                        snapshot.groupVersion() == null ? 0 : snapshot.groupVersion(),
+                        snapshot.contentHash() == null ? "" : snapshot.contentHash(),
+                        objectMapper.writeValueAsString(snapshot.items() == null ? List.of() : snapshot.items()));
+            } catch (Exception e) {
+                throw new BusinessException(40001, "资产组快照保存失败");
+            }
         }
     }
 
@@ -175,6 +195,9 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
                     || !sceneImageUrls(scene).contains(reference.url())) {
                 throw new BusinessException(40001, "分镜图片不属于当前分镜");
             }
+            return;
+        }
+        if ("group_snapshot".equals(reference.sourceType())) {
             return;
         }
 

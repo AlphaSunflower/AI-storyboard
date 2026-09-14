@@ -12,6 +12,7 @@ import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.service.StoryboardImageQueueService;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
+import com.storyboard.asset.client.AssetClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -60,6 +61,8 @@ class MoonAgentControllerSmokeTest {
     private GenerationRecordService generationRecordService;
     @MockitoBean
     private ProjectOutputMaterialService projectOutputMaterialService;
+    @MockitoBean
+    private AssetClient assetClient;
     @MockitoBean
     private StoryboardImageQueueService imageQueueService;
     @MockitoBean

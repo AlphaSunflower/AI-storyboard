@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
@@ -9,27 +10,24 @@ import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
 import { isSceneReview } from '../components/agent/SceneReviewCard';
 import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
-import { EmbeddedAppWindow, type EmbeddedAppDescriptor } from '../components/agent/EmbeddedAppWindow';
+import { ChatAppActions } from '../components/agent/apps/ChatAppActions';
+import { ChatAppsHost } from '../components/agent/apps/ChatAppsHost';
+import { useChatApps } from '../components/agent/apps/useChatApps';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
-import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
 import { Moon } from 'lucide-react';
-import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, Frame, PenLine, LayoutGrid, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
+import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, User, LogOut, ArrowDown, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePresence } from '../hooks/usePresence';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
-import {
-  buildSceneReviewPrompt,
-  isStoryboardReferenceMessage,
-} from '../lib/embeddedAppMessages';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
 import '../styles/chat-interactions.css';
@@ -45,6 +43,7 @@ const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boole
  */
 export function ChatPage() {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
   const userName = user?.displayName || '未登录';
@@ -55,15 +54,12 @@ export function ChatPage() {
     confirmResult, conversations, activeConversationId,
     renameConversation,
   } = useAgentStore();
-  const [assetsOpen, setAssetsOpen] = useState(false);       // AI资产库（rail 🧩）
+  const chatApps = useChatApps(currentProject);
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
-  const [embeddedAppTabs, setEmbeddedAppTabs] = useState<EmbeddedAppDescriptor[]>([]);
-  const [activeEmbeddedAppKey, setActiveEmbeddedAppKey] = useState<EmbeddedAppDescriptor['key'] | null>(null);
-  const [embeddedAppLayout, setEmbeddedAppLayout] = useState({ width: 420, height: 0, fullscreen: false });
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -108,117 +104,10 @@ export function ChatPage() {
     if (distanceToBottom < 220) setShowScrollDown(false);
   };
 
-  const buildCanvasTab = useCallback((): EmbeddedAppDescriptor | null => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return null;
-    let userId = '';
-    let name = '';
-    try {
-      const userInfo = JSON.parse(localStorage.getItem('user') ?? '{}') as { userId?: string; displayName?: string };
-      userId = userInfo.userId ?? '';
-      name = userInfo.displayName ?? '';
-    } catch { /* ignore */ }
-    const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:3000';
-    const params = new URLSearchParams({ token });
-    if (userId) params.set('userId', userId);
-    if (name) params.set('name', name);
-    const projectId = currentProject?.id;
-    const hash = projectId ? `#project=${encodeURIComponent(projectId)}` : '';
-    return { key: 'canvas', title: '画布', url: `${base}?${params.toString()}${hash}`, projectId };
-  }, [currentProject?.id]);
-
-  const buildEditorTab = useCallback((): EmbeddedAppDescriptor | null => {
-    if (!currentProject?.id) return null;
-    const params = new URLSearchParams({ embedded: '1', projectId: currentProject.id });
-    return {
-      key: 'editor',
-      title: currentProject.name ? `分镜编辑器 · ${currentProject.name}` : '分镜编辑器',
-      url: `/editor?${params.toString()}`,
-      projectId: currentProject.id,
-    };
-  }, [currentProject?.id, currentProject?.name]);
-
-  // 应用子窗加载对应路径；画布通过 URL 注入 ai分镜 token，避免在 iframe 内再次登录。
-  const openEmbeddedApp = (key: EmbeddedAppDescriptor['key']) => {
-    let nextTab: EmbeddedAppDescriptor | null;
-    if (key === 'canvas') nextTab = buildCanvasTab();
-    else if (key === 'editor') nextTab = buildEditorTab();
-    else nextTab = { key: 'docs', title: '使用文档', url: '/docs?embedded=1' };
-    if (!nextTab) return;
-    setEmbeddedAppTabs((tabs) => {
-      const existing = tabs.findIndex((tab) => tab.key === key);
-      if (existing < 0) return [...tabs, nextTab];
-      return tabs.map((tab) => tab.key === key ? nextTab : tab);
-    });
-    setActiveEmbeddedAppKey(key);
-  };
-
-  // 切换项目时同步已打开的项目型子网站；文档标签不受影响。
-  useEffect(() => {
-    setEmbeddedAppTabs((tabs) => {
-      if (tabs.length === 0) return tabs;
-      let changed = false;
-      const nextTabs = tabs.map((tab) => {
-        if (tab.key === 'editor') {
-          const next = buildEditorTab();
-          if (next && next.url !== tab.url) {
-            changed = true;
-            return next;
-          }
-        } else if (tab.key === 'canvas') {
-          const next = buildCanvasTab();
-          if (next && next.url !== tab.url) {
-            changed = true;
-            return next;
-          }
-        }
-        return tab;
-      });
-      return changed ? nextTabs : tabs;
-    });
-  }, [buildCanvasTab, buildEditorTab]);
-
-  const activeEmbeddedApp = embeddedAppTabs.find((tab) => tab.key === activeEmbeddedAppKey) ?? null;
-  const appWindowOpen = Boolean(activeEmbeddedApp && !embeddedAppLayout.fullscreen);
+  const appWindowOpen = chatApps.windowOpen;
   const contentRightReserve = appWindowOpen
-    ? Math.max(embeddedAppLayout.width + 32, generationCenterOpen ? 420 : 0)
+    ? Math.max(chatApps.layout.width + 32, generationCenterOpen ? 420 : 0)
     : (generationCenterOpen ? 420 : 0);
-
-  const closeEmbeddedApp = useCallback(() => {
-    setEmbeddedAppTabs([]);
-    setActiveEmbeddedAppKey(null);
-    setEmbeddedAppLayout((current) => ({ ...current, fullscreen: false }));
-  }, []);
-
-  const closeEmbeddedTab = (key: string) => {
-    const closingIndex = embeddedAppTabs.findIndex((tab) => tab.key === key);
-    if (closingIndex < 0) return;
-    const nextTabs = embeddedAppTabs.filter((tab) => tab.key !== key);
-    setEmbeddedAppTabs(nextTabs);
-    if (activeEmbeddedAppKey === key) {
-      setActiveEmbeddedAppKey(nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.key ?? null);
-    }
-    if (nextTabs.length === 0) {
-      setEmbeddedAppLayout((current) => ({ ...current, fullscreen: false }));
-    }
-  };
-
-  // 编辑器 iframe 提交分镜后，直接进入指定分镜审核并关闭应用窗口。
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || !isStoryboardReferenceMessage(event.data)) return;
-      const sourceMatches = Array.from(document.querySelectorAll('iframe'))
-        .some((frame) => frame.contentWindow === event.source);
-      if (!sourceMatches) return;
-      if (!currentProject?.id || event.data.projectId !== currentProject.id) return;
-      void useAgentStore.getState().sendMessage(
-        buildSceneReviewPrompt(event.data.scenes),
-        { routingHint: 'intent-scene-review' },
-      );
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [currentProject?.id]);
 
   // 登录守卫 + iframe 自登录（/chat?embed=1&token=&userId=&name=）：跨端口 iframe 靠 URL 注入 token
   useEffect(() => {
@@ -313,7 +202,7 @@ export function ChatPage() {
   // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
   const showMobile = isMobile && !embed;
   const sceneReviewOpen = Boolean(waitingHumanInput && isSceneReview(waitingHumanInput));
-  const sceneReviewDetached = sceneReviewOpen && !sceneReviewCollapsed && !showMobile && !embed && embeddedAppTabs.length === 0;
+  const sceneReviewDetached = sceneReviewOpen && !sceneReviewCollapsed && !showMobile && !embed && !chatApps.hasTabs;
 
   useEffect(() => {
     setSceneReviewCollapsed(false);
@@ -531,9 +420,7 @@ export function ChatPage() {
           </>
         )}
 
-        <MobileBottomNav onOpenAssets={() => setAssetsOpen(true)} />
-
-        {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
+        <MobileBottomNav onOpenAssets={() => navigate('/library')} />
         <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
@@ -571,6 +458,13 @@ export function ChatPage() {
                     {...railHover}
                   ><FolderKanban size={18} strokeWidth={1.8} /></button>
                 </div>
+                <button
+                  onClick={() => navigate('/library')}
+                  title="项目库"
+                  style={railIconBtn}
+                  className="chat-icon-button"
+                  {...railHover}
+                ><Library size={18} strokeWidth={1.8} /></button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                 <button
@@ -864,18 +758,14 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <AppSwitcher
-                  onCanvas={() => openEmbeddedApp('canvas')}
-                  onEditor={() => openEmbeddedApp('editor')}
-                  onDocs={() => openEmbeddedApp('docs')}
-                />
+                <ChatAppActions onOpen={chatApps.open} compact={embed} />
                 <button
-                  onClick={() => setAssetsOpen(true)}
-                  title="AI资产库"
+                  onClick={() => navigate('/library?type=AI_ASSET')}
+                  title="项目库"
                   style={headerBtn(1, embed ? 12 : 14)}
                   onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Library size={16} strokeWidth={1.8} /> AI资产库</button>
+                ><Library size={16} strokeWidth={1.8} /> 项目库</button>
               </div>
             </div>
 
@@ -1010,26 +900,21 @@ export function ChatPage() {
         )}
       </div>
 
-      {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
       <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
-      {!embed && !embeddedAppLayout.fullscreen && (
+      {!embed && !chatApps.layout.fullscreen && (
         <GenerationCenterPanel
           onOpenChange={setGenerationCenterOpen}
           bottom={appWindowOpen || sceneReviewDetached ? 20 : 104}
           onOpenRecords={() => setRecordsOpen(true)}
         />
       )}
-      {!embed && embeddedAppTabs.length > 0 && activeEmbeddedAppKey && (
-        <EmbeddedAppWindow
-          tabs={embeddedAppTabs}
-          activeKey={activeEmbeddedAppKey}
-          onSelectTab={(key) => setActiveEmbeddedAppKey(key as EmbeddedAppDescriptor['key'])}
-          onCloseTab={closeEmbeddedTab}
-          onCloseWindow={closeEmbeddedApp}
+      {!embed && (
+        <ChatAppsHost
+          apps={chatApps}
+          currentProjectId={currentProject?.id}
           sidebarCollapsed={collapsed}
           onCollapseSidebar={() => setCollapsed(true)}
           expandedWidthBonus={convWidth + 6}
-          onLayoutChange={setEmbeddedAppLayout}
         />
       )}
     </div>
@@ -1049,131 +934,6 @@ function headerBtn(opacity: number, fontSize = 14): React.CSSProperties {
     cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
     display: 'flex', alignItems: 'center', gap: 4,
   };
-}
-
-/**
- * 应用入口：主界面右上角与会话标题使用同一行，菜单承载画布、分镜编辑器和使用文档。
- */
-function AppSwitcher({
-  onCanvas,
-  onEditor,
-  onDocs,
-}: {
-  onCanvas: () => void;
-  onEditor: () => void;
-  onDocs: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  const items = [
-    { label: '画布', icon: <Frame size={15} strokeWidth={1.8} />, action: onCanvas },
-    { label: '分镜编辑器', icon: <PenLine size={15} strokeWidth={1.8} />, action: onEditor },
-    { label: '使用文档', icon: <FileText size={15} strokeWidth={1.8} />, action: onDocs },
-  ];
-
-  return (
-    <div ref={rootRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        title="应用"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        style={{
-          ...headerBtn(1, 14),
-          background: open ? DS.hover : 'transparent',
-          color: open ? DS.brand : DS.textSecondary,
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.background = DS.hover;
-          event.currentTarget.style.color = DS.brand;
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.background = open ? DS.hover : 'transparent';
-          event.currentTarget.style.color = open ? DS.brand : DS.textSecondary;
-        }}
-      >
-        <LayoutGrid size={16} strokeWidth={1.8} />
-        <span>应用</span>
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label="应用"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            width: 176,
-            padding: 8,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-            border: '1px solid var(--color-hairline)',
-            borderRadius: 12,
-            background: 'white',
-            boxShadow: '0 12px 32px rgba(15, 17, 21, 0.14)',
-            zIndex: 150,
-          }}
-        >
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                item.action();
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '9px 10px',
-                border: 'none',
-                borderRadius: 8,
-                background: 'transparent',
-                color: DS.ink,
-                fontSize: 13,
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = DS.hover;
-                event.currentTarget.style.color = DS.brand;
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = 'transparent';
-                event.currentTarget.style.color = DS.ink;
-              }}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 /** 收起态 rail 图标按钮 */

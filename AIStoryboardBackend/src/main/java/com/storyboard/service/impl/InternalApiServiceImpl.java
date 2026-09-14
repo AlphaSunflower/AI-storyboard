@@ -11,6 +11,7 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Asset;
 import com.storyboard.entity.Project;
+import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
 import com.storyboard.entity.ScenePrompt;
@@ -50,6 +51,13 @@ public class InternalApiServiceImpl implements InternalApiService {
         Project project = projectMapper.selectById(id);
         if (project == null) throw new BusinessException(40401, "项目不存在");
         return project;
+    }
+
+    @Override
+    public ProjectOwnership getProjectOwnership(String id) {
+        Project project = projectMapper.selectById(id);
+        if (project == null) return new ProjectOwnership(id, null, false);
+        return new ProjectOwnership(project.getId(), project.getUserId(), true);
     }
 
     @Override

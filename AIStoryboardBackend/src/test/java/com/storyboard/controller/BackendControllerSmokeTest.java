@@ -20,6 +20,7 @@ import com.storyboard.dto.response.UserStatsResponse;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
+import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.AssetImageMapper;
 import com.storyboard.mapper.AssetMapper;
@@ -28,6 +29,8 @@ import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
+import com.storyboard.mapper.SceneAssetLinkMapper;
 import com.storyboard.mapper.UserMapper;
 import com.storyboard.security.JwtTokenProvider;
 import com.storyboard.service.AssetService;
@@ -122,6 +125,10 @@ class BackendControllerSmokeTest {
     private ScenePromptMapper scenePromptMapper;
     @MockitoBean
     private SceneReferenceImageMapper sceneReferenceImageMapper;
+    @MockitoBean
+    private SceneMaterialGroupSnapshotMapper sceneMaterialGroupSnapshotMapper;
+    @MockitoBean
+    private SceneAssetLinkMapper sceneAssetLinkMapper;
     @MockitoBean
     private UserMapper userMapper;
 
@@ -381,5 +388,17 @@ class BackendControllerSmokeTest {
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/internal/scenes/by-video-task/task-123").header(AUTH, SECRET))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("s1"));
+    }
+
+    @Test
+    void projectOwnershipEndpoint_returnsReadOnlyProjectOwner() throws Exception {
+        when(internalApiService.getProjectOwnership("p1"))
+                .thenReturn(new ProjectOwnership("p1", "u1", true));
+
+        mockMvc.perform(get("/api/internal/projects/p1/ownership").header(AUTH, SECRET))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("p1"))
+                .andExpect(jsonPath("$.data.userId").value("u1"))
+                .andExpect(jsonPath("$.data.exists").value(true));
     }
 }

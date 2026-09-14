@@ -515,6 +515,7 @@ export async function streamChat(
   picUrls: string[],
   onEvent: (e: SseEvent) => void,
   assetIds?: string[],
+  assetGroupIds?: string[],
   signal?: AbortSignal,
   opts?: { routingHint?: string; cancelActiveTasks?: boolean },
 ): Promise<void> {
@@ -522,7 +523,14 @@ export async function streamChat(
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ content, picUrls: picUrls ?? [], assetIds: assetIds ?? [], routingHint: opts?.routingHint, cancelActiveTasks: opts?.cancelActiveTasks }),
+    body: JSON.stringify({
+      content,
+      picUrls: picUrls ?? [],
+      assetIds: assetIds ?? [],
+      assetGroupIds: assetGroupIds ?? [],
+      routingHint: opts?.routingHint,
+      cancelActiveTasks: opts?.cancelActiveTasks,
+    }),
     signal,
   });
   await consumeSse(res, onEvent, signal);

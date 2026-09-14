@@ -8,5 +8,6 @@ import java.util.List;
  */
 public record SceneMaterialsUpdateRequest(
         List<String> assetIds,
-        List<SceneMaterialReferenceRequest> references
+        List<SceneMaterialReferenceRequest> references,
+        List<SceneMaterialGroupSnapshotRequest> groupSnapshots
 ) {}

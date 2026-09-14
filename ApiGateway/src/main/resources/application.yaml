@@ -21,6 +21,13 @@ spring:
                 - name: Path
                   args:
                     patterns: /api/agent/**
+            # 独立资产服务
+            - id: asset-service
+              uri: lb://asset-service
+              predicates:
+                - name: Path
+                  args:
+                    patterns: /api/library/**
             # 画布服务
             - id: xiaoyue-canvas
               uri: lb://xiaoyue-canvas

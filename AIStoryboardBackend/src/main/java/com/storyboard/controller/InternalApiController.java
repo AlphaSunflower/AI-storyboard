@@ -7,6 +7,7 @@ import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.SceneAsset;
+import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 import com.storyboard.service.InternalApiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +31,12 @@ public class InternalApiController {
     @GetMapping("/projects/{id}")
     public ApiResponse<Project> getProject(@PathVariable String id) {
         return ApiResponse.ok(internalApiService.getProject(id));
+    }
+
+    /** 项目归属只读校验（asset-service 不读取 public.projects）。 */
+    @GetMapping("/projects/{id}/ownership")
+    public ApiResponse<ProjectOwnership> getProjectOwnership(@PathVariable String id) {
+        return ApiResponse.ok(internalApiService.getProjectOwnership(id));
     }
 
     /** 查项目分镜列表 */

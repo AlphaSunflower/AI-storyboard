@@ -6,7 +6,7 @@ interface MobileBottomNavProps {
   embeddedEditor?: boolean;
 }
 
-/** 手机端底部 Tab 栏：聊天 | 分镜 | AI资产库 */
+/** 手机端底部 Tab 栏：聊天 | 分镜 | 项目库 */
 export function MobileBottomNav({ onOpenAssets, embeddedEditor = false }: MobileBottomNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,7 +63,7 @@ export function MobileBottomNav({ onOpenAssets, embeddedEditor = false }: Mobile
       <TabBtn
         active={false}
         onClick={() => onOpenAssets?.()}
-        label="AI资产库"
+        label="项目库"
         icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z" /></svg>}
       />
     </div>

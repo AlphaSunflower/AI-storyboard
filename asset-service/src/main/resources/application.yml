@@ -1,0 +1,56 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: asset-service
+  profiles:
+    active: local
+  cloud:
+    compatibility-verifier:
+      enabled: false
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        enabled: true
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    default-schema: asset
+    schemas: asset
+    create-schemas: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: 32MB
+      max-request-size: 40MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+storyboard:
+  asset:
+    internal-token: ${INTERNAL_SECRET:${internal.secret:}}
+    gateway-base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
+    gateway-api-key: ${LLM_GATEWAY_API_KEY:}
+    signing-secret: ${ASSET_SIGNING_SECRET:change-me}
+  internal:
+    project-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
+    secret: ${INTERNAL_SECRET:${internal.secret:}}
+  storage:
+    endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:minioadmin123}
+    bucket: storyboard
+    region: us-east-1
+    upload-part-size-bytes: 8388608
+    upload-session-ttl-hours: 24
+    signed-url-ttl-minutes: 15
+
+jwt:
+  access-secret: ${JWT_ACCESS_SECRET:}
+  issuer: ${JWT_ISSUER:ai-storyboard-backend}

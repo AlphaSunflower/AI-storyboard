@@ -10,6 +10,9 @@ import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
 import com.storyboard.common.ApiResponse;
+import com.storyboard.asset.client.AssetClient;
+import com.storyboard.asset.client.AssetContracts;
+import com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
@@ -50,6 +53,7 @@ public class AgentConversationController {
     private final GenerationRecordService generationRecordService;
     private final ProjectOutputMaterialService projectOutputMaterialService;
     private final AgentAiConfigProperties agentConfig;
+    private final AssetClient assetClient;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -186,9 +190,25 @@ public class AgentConversationController {
             throw new BusinessException(40001, "消息内容不能为空");
         }
         SseEmitter emitter = createSseEmitter();
-        chatService.streamMessage(auth.getName(), id, request.content(), picUrls(request),
+        java.util.List<String> resolvedPicUrls = new java.util.ArrayList<>(picUrls(request));
+        if (request.assetGroupIds() != null && !request.assetGroupIds().isEmpty()) {
+            for (String groupId : request.assetGroupIds()) {
+                if (groupId == null || groupId.isBlank()) continue;
+                AssetGroupSnapshot snapshot = assetClient.getSnapshot(
+                        groupId, auth.getName(), java.util.UUID.randomUUID().toString());
+                if (snapshot == null || snapshot.items() == null) continue;
+                snapshot.items().stream()
+                        .filter(item -> "IMAGE".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedPicUrls::add);
+            }
+        }
+        String routingHint = request.assetGroupIds() != null && !request.assetGroupIds().isEmpty()
+                ? "intent-video" : request.routingHint();
+        chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
                 request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                request.routingHint(), Boolean.TRUE.equals(request.cancelActiveTasks()));
+                routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
         return emitter;
     }
 

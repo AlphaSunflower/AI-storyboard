@@ -134,6 +134,11 @@
             <artifactId>agent-core</artifactId>
             <version>0.1.0</version>
         </dependency>
+        <dependency>
+            <groupId>com.storyboard</groupId>
+            <artifactId>asset-client</artifactId>
+            <version>0.1.0</version>
+        </dependency>
 
         <!-- Actuator（健康检查，Nacos 注册需要） -->
         <dependency>

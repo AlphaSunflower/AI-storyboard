@@ -29,11 +29,11 @@ export interface SceneAssets {
   videoAssets: Asset[];
 }
 
-export type SceneMaterialSource = 'output' | 'scene_image';
+export type SceneMaterialSource = 'output' | 'scene_image' | 'group_snapshot';
 
 /** 分镜素材选择器提交的产出素材或当前分镜图片引用。 */
 export interface SceneMaterialReferenceInput {
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   purpose: 'image' | 'video';
   url: string;
   role: 'REFERENCE';
@@ -76,6 +76,17 @@ export const assetApi = {
   /** 原子覆盖分镜素材选择：AI 资产 + 产出/当前分镜图片引用。 */
   setSceneMaterials: (
     sceneId: string,
-    data: { assetIds: string[]; references: SceneMaterialReferenceInput[] },
+    data: {
+      assetIds: string[];
+      references: SceneMaterialReferenceInput[];
+      groupSnapshots?: Array<{
+        snapshotId: string;
+        groupId: string;
+        groupVersion: number;
+        contentHash: string;
+        target: string;
+        items: Array<Record<string, unknown>>;
+      }>;
+    },
   ) => client.put<ApiResponse<void>>(`/scenes/${sceneId}/materials`, data),
 };

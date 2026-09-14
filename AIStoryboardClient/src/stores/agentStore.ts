@@ -11,6 +11,7 @@ import { useProjectStore } from './projectStore';
 import { useGenerationRecordsStore } from './generationRecordsStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
+import { libraryApi } from '../api/library';
 
 /** 阶段完成/失败事件若未携带标题，不清空仍在运行的阶段提示。 */
 function resolveWorkflowHint(current: string, event: SseEvent): string {
@@ -168,7 +169,13 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string, opts?: { picUrls?: string[]; assetIds?: string[]; routingHint?: string; cancelActiveTasks?: boolean }) => Promise<void>;
+  sendMessage: (content: string, opts?: {
+    picUrls?: string[];
+    assetIds?: string[];
+    assetGroupIds?: string[];
+    routingHint?: string;
+    cancelActiveTasks?: boolean;
+  }) => Promise<void>;
   submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
@@ -483,7 +490,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, opts?: { picUrls?: string[]; assetIds?: string[]; routingHint?: string; cancelActiveTasks?: boolean }) => {
+  sendMessage: async (content, opts?: {
+    picUrls?: string[];
+    assetIds?: string[];
+    assetGroupIds?: string[];
+    routingHint?: string;
+    cancelActiveTasks?: boolean;
+  }) => {
     // 输入禁用条件：(streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan
     // 视频异步任务轮询期间（agentVideoTask 存在）允许继续发送新消息
     if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan || !content.trim()) return;
@@ -823,7 +836,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
         : assetIdsBefore.length > 0 ? assetIdsBefore
-        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), signal, opts);
+        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), opts?.assetGroupIds, signal, opts);
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -1627,6 +1640,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               };
             });
             void get().loadAssets();
+            const groupId = sessionStorage.getItem('moon.activeGroupId');
+            if (groupId && t.url) {
+              const projectId = useProjectStore.getState().currentProject?.id;
+              void libraryApi.registerGeneratedOutput({
+                producer: 'moon-agent',
+                projectId,
+                generationRecordId: t.assetId || taskId,
+                resultIndex: 0,
+                groupId,
+                resultAssetId: t.assetId,
+                resultUrl: t.url,
+                mediaType: 'VIDEO',
+              }).catch(() => undefined);
+              sessionStorage.removeItem('moon.activeGroupId');
+            }
           } else if (t.status === 'failed') {
             clearInterval(timer); videoPollTimer = null;
             set((s) => {
