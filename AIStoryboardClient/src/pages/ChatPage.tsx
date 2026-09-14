@@ -1026,6 +1026,9 @@ export function ChatPage() {
           onSelectTab={(key) => setActiveEmbeddedAppKey(key as EmbeddedAppDescriptor['key'])}
           onCloseTab={closeEmbeddedTab}
           onCloseWindow={closeEmbeddedApp}
+          sidebarCollapsed={collapsed}
+          onCollapseSidebar={() => setCollapsed(true)}
+          expandedWidthBonus={convWidth + 6}
           onLayoutChange={setEmbeddedAppLayout}
         />
       )}

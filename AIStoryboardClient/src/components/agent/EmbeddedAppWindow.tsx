@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Frame, Grip, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
+import { isEmbeddedAppReadyMessage } from '../../lib/embeddedAppMessages';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
@@ -15,6 +16,9 @@ interface EmbeddedAppWindowProps {
   onSelectTab: (key: string) => void;
   onCloseTab: (key: string) => void;
   onCloseWindow: () => void;
+  sidebarCollapsed: boolean;
+  onCollapseSidebar: () => void;
+  expandedWidthBonus: number;
   onLayoutChange: (layout: { width: number; height: number; fullscreen: boolean }) => void;
 }
 
@@ -40,6 +44,9 @@ export function EmbeddedAppWindow({
   onSelectTab,
   onCloseTab,
   onCloseWindow,
+  sidebarCollapsed,
+  onCollapseSidebar,
+  expandedWidthBonus,
   onLayoutChange,
 }: EmbeddedAppWindowProps) {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -48,6 +55,7 @@ export function EmbeddedAppWindow({
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
   const [closingWindow, setClosingWindow] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
+  const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -75,17 +83,38 @@ export function EmbeddedAppWindow({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeKey, fullscreen, onCloseTab]);
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || !isEmbeddedAppReadyMessage(event.data)) return;
+      const frame = frameRefs.current[event.data.key];
+      if (!frame || frame.contentWindow !== event.source) return;
+      const tab = tabs.find((item) => item.key === event.data.key);
+      if (tab) setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [tabs]);
+
   const startResize = (event: React.MouseEvent) => {
     event.preventDefault();
     const startX = event.clientX;
     const startY = event.clientY;
     const startWidth = width;
     const startHeight = height;
+    let allowExpandedWidth = sidebarCollapsed;
     document.body.style.cursor = 'nesw-resize';
     document.body.style.userSelect = 'none';
 
     const onMove = (moveEvent: MouseEvent) => {
-      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + startX - moveEvent.clientX)));
+      const requestedWidth = startWidth + startX - moveEvent.clientX;
+      if (!allowExpandedWidth && requestedWidth > MAX_WIDTH) {
+        allowExpandedWidth = true;
+        onCollapseSidebar();
+      }
+      const maxWidth = allowExpandedWidth
+        ? Math.max(MAX_WIDTH, Math.min(MAX_WIDTH + Math.max(0, expandedWidthBonus), window.innerWidth - 48))
+        : MAX_WIDTH;
+      setWidth(Math.min(maxWidth, Math.max(MIN_WIDTH, requestedWidth)));
       setHeight(Math.min(
         Math.max(MIN_HEIGHT, window.innerHeight - 32),
         Math.max(MIN_HEIGHT, startHeight + moveEvent.clientY - startY),
@@ -190,6 +219,7 @@ export function EmbeddedAppWindow({
                 </div>
               )}
               <iframe
+                ref={(node) => { frameRefs.current[tab.key] = node; }}
                 src={tab.url}
                 title={tab.title}
                 onLoad={() => setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }))}

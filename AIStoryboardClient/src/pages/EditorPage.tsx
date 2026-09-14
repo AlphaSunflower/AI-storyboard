@@ -21,6 +21,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
+import { EMBEDDED_APP_READY_MESSAGE } from '../lib/embeddedAppMessages';
 
 export function EditorPage() {
   const { loadProjects, checkDraft, loadProject, fetchAiModels, createProject, selectScene } = useProjectStore();
@@ -34,6 +35,22 @@ export function EditorPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!embedded) return;
+    const sendReady = () => {
+      window.parent.postMessage(
+        { type: EMBEDDED_APP_READY_MESSAGE, key: 'editor' },
+        window.location.origin,
+      );
+    };
+    const frame = window.requestAnimationFrame(() => window.setTimeout(sendReady, 0));
+    const retry = window.setTimeout(sendReady, 300);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(retry);
+    };
+  }, [embedded]);
 
   useEffect(() => {
     const init = async () => {
@@ -243,11 +260,14 @@ export function EditorPage() {
         <PreviewPanel />
       </div>
 
-      {/* 智能体窗口 */}
-      <AgentFab />
-      <MoonAgentWindow />
-      {/* 生成中心（右下角 ☾ 上方，统一查看任务与产出素材） */}
-      <GenerationCenterPanel />
+      {/* 子窗口内不展示 Moon 智能体和生成中心，避免与外部应用窗口重复。 */}
+      {!embedded && (
+        <>
+          <AgentFab />
+          <MoonAgentWindow />
+          <GenerationCenterPanel />
+        </>
+      )}
     </div>
   );
 }
