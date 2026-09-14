@@ -14,6 +14,7 @@ import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { buildSceneReviewPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
+import { usePresence } from '../../hooks/usePresence';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -119,6 +120,7 @@ export function ChatComposer() {
   const [outputOpen, setOutputOpen] = useState(false);
   const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const menuPresence = usePresence(menuOpen && !!menuPos, 180);
   // ├─「上传资产」从已有资产库选择参考图状态（assetApi.list 拉取，选中资产图片作为参考图）
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetList, setAssetList] = useState<Asset[]>([]);
@@ -395,6 +397,7 @@ export function ChatComposer() {
             ref={menuBtnRef}
             onClick={openMenu}
             title="上传"
+            className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
             style={{
@@ -405,8 +408,8 @@ export function ChatComposer() {
           >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
           <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
-          {menuOpen && menuPos && createPortal(
-            <div ref={menuRef} style={{
+          {menuPresence.mounted && menuPos && createPortal(
+            <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
               position: 'fixed', top: menuPos.top, left: menuPos.left,
               background: 'white', border: `1px solid ${DS.border}`,
               borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',

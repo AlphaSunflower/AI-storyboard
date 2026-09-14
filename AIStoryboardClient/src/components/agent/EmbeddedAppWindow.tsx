@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Frame, Grip, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
 import './EmbeddedAppWindow.css';
 
@@ -22,6 +22,7 @@ const DEFAULT_WIDTH = 420;
 const MIN_WIDTH = 360;
 const MAX_WIDTH = 760;
 const MIN_HEIGHT = 420;
+const CLOSE_ANIMATION_MS = 300;
 
 function defaultHeight() {
   return Math.max(MIN_HEIGHT, Math.min(820, window.innerHeight - 132));
@@ -45,6 +46,12 @@ export function EmbeddedAppWindow({
   const [height, setHeight] = useState(defaultHeight);
   const [fullscreen, setFullscreen] = useState(false);
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
+  const [closingWindow, setClosingWindow] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
 
   useEffect(() => {
     onLayoutChange({ width, height, fullscreen });
@@ -101,11 +108,21 @@ export function EmbeddedAppWindow({
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 
+  const closeWindowWithParticles = () => {
+    if (closingWindow) return;
+    setClosingWindow(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onCloseWindow();
+    }, CLOSE_ANIMATION_MS);
+  };
+
   return (
     <section
-      className={`embedded-app-window${fullscreen ? ' is-fullscreen' : ''}`}
+      className={`embedded-app-window${fullscreen ? ' is-fullscreen' : ''}${closingWindow ? ' is-closing' : ''}`}
       style={fullscreen ? undefined : { width, height }}
       aria-label="应用窗口"
+      aria-busy={closingWindow}
     >
       <header className="embedded-app-window__header">
         <div className="embedded-app-window__tabs" role="tablist" aria-label="应用标签页">
@@ -154,7 +171,7 @@ export function EmbeddedAppWindow({
           >
             {fullscreen ? <Minimize2 size={16} strokeWidth={1.9} /> : <Maximize2 size={16} strokeWidth={1.9} />}
           </button>
-          <button type="button" onClick={onCloseWindow} title="关闭应用窗口" aria-label="关闭应用窗口">
+          <button type="button" onClick={closeWindowWithParticles} title="关闭应用窗口" aria-label="关闭应用窗口">
             <X size={17} strokeWidth={2} />
           </button>
         </div>
@@ -196,6 +213,7 @@ export function EmbeddedAppWindow({
           <Grip size={15} strokeWidth={1.8} />
         </button>
       )}
+
     </section>
   );
 }

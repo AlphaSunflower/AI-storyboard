@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
@@ -22,6 +22,7 @@ import { Moon } from 'lucide-react';
 import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, Frame, PenLine, LayoutGrid, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { usePresence } from '../hooks/usePresence';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
@@ -31,6 +32,7 @@ import {
 } from '../lib/embeddedAppMessages';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
+import '../styles/chat-interactions.css';
 
 /** 待选人工介入卡占位消息（metadata.kind='hitl' 且 pending）：过滤掉，避免与流内卡片重复渲染 formContent。 */
 const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boolean } } }) =>
@@ -67,19 +69,43 @@ export function ChatPage() {
   const [titleDraft, setTitleDraft] = useState('');
   const titleSavingRef = useRef(false);
   const [convWidth, setConvWidth] = useState(240);
+  const [convResizing, setConvResizing] = useState(false);
   const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
   const [embed, setEmbed] = useState(false);             // iframe 紧凑模式（画布执行服务小窗）
   const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatMainRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
-  const projectBtnRef = useRef<HTMLButtonElement>(null);
+  const [sceneReviewPanelWidth, setSceneReviewPanelWidth] = useState(0);
+  const [sceneReviewCollapsed, setSceneReviewCollapsed] = useState(false);
+  const railProjectBtnRef = useRef<HTMLButtonElement>(null);
+  const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
 
   // 回到最新消息（对话上翻较多时，消息中间出现向下按钮）
   const scrollToBottom = () => {
     const el = scrollRef.current;
+    setShowScrollDown(false);
+    nearBottomRef.current = true;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
+
+  const handleThreadWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown((current) => {
+      if (e.deltaY > 1) return distanceToBottom >= 220;
+      if (e.deltaY < -1) return false;
+      return current;
+    });
+  };
+
+  const handleThreadScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    nearBottomRef.current = distanceToBottom < 80;
+    if (distanceToBottom < 220) setShowScrollDown(false);
   };
 
   const buildCanvasTab = useCallback((): EmbeddedAppDescriptor | null => {
@@ -117,7 +143,7 @@ export function ChatPage() {
     let nextTab: EmbeddedAppDescriptor | null;
     if (key === 'canvas') nextTab = buildCanvasTab();
     else if (key === 'editor') nextTab = buildEditorTab();
-    else nextTab = { key: 'docs', title: '使用文档', url: '/docs' };
+    else nextTab = { key: 'docs', title: '使用文档', url: '/docs?embedded=1' };
     if (!nextTab) return;
     setEmbeddedAppTabs((tabs) => {
       const existing = tabs.findIndex((tab) => tab.key === key);
@@ -244,7 +270,9 @@ export function ChatPage() {
   // 新消息自动滚底（近底才跟随）
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
+    if (el && nearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
 
   // 自动审查属于关键节点：即使上翻了历史消息，也把新展开的审查卡带入视口。
@@ -259,6 +287,11 @@ export function ChatPage() {
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
+  const scrollDownPresence = usePresence(showScrollDown && !isEmpty, 180);
+
+  useEffect(() => {
+    setShowScrollDown(false);
+  }, [activeConversationId]);
 
   const startTitleEdit = () => {
     if (!activeConversationId) return;
@@ -279,6 +312,38 @@ export function ChatPage() {
 
   // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
   const showMobile = isMobile && !embed;
+  const sceneReviewOpen = Boolean(waitingHumanInput && isSceneReview(waitingHumanInput));
+  const sceneReviewDetached = sceneReviewOpen && !sceneReviewCollapsed && !showMobile && !embed && embeddedAppTabs.length === 0;
+
+  useEffect(() => {
+    setSceneReviewCollapsed(false);
+  }, [waitingHumanInput?.formToken]);
+
+  // 无子窗口时审查结果像应用子窗一样从右侧弹入；子窗口出现后回到对话流。
+  useLayoutEffect(() => {
+    const main = chatMainRef.current;
+    if (!sceneReviewDetached || !main) {
+      setSceneReviewPanelWidth(0);
+      return;
+    }
+
+    const updatePanelWidth = () => {
+      const mainRect = main.getBoundingClientRect();
+      if (mainRect.width <= 0) return;
+      setSceneReviewPanelWidth(Math.min(680, Math.max(460, Math.round(mainRect.width * 0.42))));
+    };
+
+    updatePanelWidth();
+    const observer = new ResizeObserver(updatePanelWidth);
+    observer.observe(main);
+    window.addEventListener('resize', updatePanelWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updatePanelWidth);
+    };
+  }, [collapsed, convWidth, sceneReviewDetached]);
+
+  const desktopRightReserve = sceneReviewDetached ? sceneReviewPanelWidth + 48 : contentRightReserve;
 
   // 手机端：选择会话后自动关闭侧栏
   const handleMobileSelectConversation = (id: string) => {
@@ -295,12 +360,14 @@ export function ChatPage() {
   // 会话栏宽度拖拽（桌面端）
   const handleConvDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setConvResizing(true);
     const startX = e.clientX;
     const startW = convWidth;
     const onMouseMove = (ev: MouseEvent) => {
       setConvWidth(Math.min(360, Math.max(180, startW + ev.clientX - startX)));
     };
     const onMouseUp = () => {
+      setConvResizing(false);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
@@ -402,14 +469,15 @@ export function ChatPage() {
             {/* 消息列 */}
             <div
               ref={scrollRef}
-              onScroll={(e) => {
-                const el = e.target as HTMLElement;
-                nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                setShowScrollDown(!nearBottomRef.current && messages.length > 0);
-              }}
+              onScroll={handleThreadScroll}
+              onWheel={handleThreadWheel}
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
-              <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
+              <div
+                key={activeConversationId ?? 'new-conversation'}
+                className="chat-thread-stage"
+                style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}
+              >
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
@@ -466,175 +534,194 @@ export function ChatPage() {
         <MobileBottomNav onOpenAssets={() => setAssetsOpen(true)} />
 
         {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
-        {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+        <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
       style={{ height: '100vh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
     >
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
-      {!embed && (<>
-      {collapsed ? (
-        /* ── 收起态：图标 rail ── */
-        <div style={{
-          width: 48, flexShrink: 0, background: DS.sidebarBg,
-          borderRight: '1px solid var(--color-hairline)',
-          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-          alignItems: 'center', padding: '10px 0', zIndex: 50,
-        }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => setCollapsed(false)}
-              title="展开侧边栏"
-              style={railIconBtn}
-              {...railHover}
-            ><Moon size={18} strokeWidth={1.8} /></button>
-            <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
-              <button
-                ref={projectBtnRef}
-                onClick={() => setProjectOpen(!projectOpen)}
-                onMouseDown={(e) => e.stopPropagation()}
-                title={currentProject?.name ?? '选择项目'}
-                style={railIconBtn}
-                {...railHover}
-              >{/** 项目 */}<FolderKanban size={18} strokeWidth={1.8} /></button>
-              <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <button
-              onClick={() => setProfileOpen(true)}
-              title="个人信息"
-              style={railIconBtn}
-              {...railHover}
-            >{/** 个人信息 */}<User size={18} strokeWidth={1.8} /></button>
-            <button
-              onClick={logout}
-              title="退出登录"
-              style={railIconBtn}
-              {...railHover}
-            >{/** 退出登录 */}<LogOut size={18} strokeWidth={1.8} /></button>
-          </div>
-        </div>
-      ) : (
-      <div style={{
-        width: convWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
-        background: DS.sidebarBg, transition: 'width 0.2s ease',
-      }}>
-        {/* 会话列表（toolbar 插槽注入 项目+AI资产库，位于新建对话上方；flex:1 内部滚动） */}
-        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <AgentConversationList
-            width={convWidth}
-            headerRight={
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+      {!embed && (
+        <>
+          <div
+            className={`chat-sidebar-shell${collapsed ? ' is-collapsed' : ''}${convResizing ? ' is-resizing' : ''}`}
+            style={{ width: collapsed ? 48 : convWidth }}
+          >
+            <div
+              className={`chat-sidebar-rail${collapsed ? ' is-visible' : ''}`}
+              aria-hidden={!collapsed}
+              inert={!collapsed}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                 <button
-                  onClick={() => setSearchOpen(true)}
-                  title="搜索对话（全文+标题）"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
-                    color: 'var(--color-muted)', borderRadius: 8, transition: 'background 0.15s, color 0.15s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
-                ><Search size={15} strokeWidth={1.8} /></button>
-                <button
-                  onClick={() => setCollapsed(true)}
-                  title="收起侧边栏"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
-                    color: 'var(--color-muted)', borderRadius: 8, transition: 'background 0.15s, color 0.15s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
-                ><PanelLeftClose size={15} strokeWidth={1.8} /></button>
-              </div>
-            }
-            toolbar={
-              <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
-                {/* 项目选择（ghost 风格；弹层 portal 右对齐不被裁剪） */}
-                <div style={{ position: 'relative', width: '100%' }}>
+                  onClick={() => setCollapsed(false)}
+                  title="展开侧边栏"
+                  style={railIconBtn}
+                  className="chat-icon-button"
+                  {...railHover}
+                ><Moon size={18} strokeWidth={1.8} /></button>
+                <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
                   <button
-                    ref={projectBtnRef}
-                    onClick={() => setProjectOpen(!projectOpen)}
+                    ref={railProjectBtnRef}
+                    onClick={() => setProjectOpen((value) => !value)}
                     onMouseDown={(e) => e.stopPropagation()}
-                    title="项目选择"
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-                      border: 'none', borderRadius: 10, background: 'transparent',
-                      padding: '0 12px', height: 40, fontSize: 15,
-                      color: DS.ink, cursor: 'pointer',
-                    }}
-                    onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.hover; }}
-                    onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-                  >
-                    <span style={{ fontSize: 15 }}>{/** 项目 */}<FolderKanban size={15} strokeWidth={1.8} /></span>
-                    <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {currentProject?.name ?? '选择项目'}
-                    </span>
-                    <span style={{ fontSize: 10, color: DS.textCaption }}><ChevronDown size={10} strokeWidth={2.5} /></span>
-                  </button>
-                  <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} anchor={projectBtnRef} />
+                    title={currentProject?.name ?? '选择项目'}
+                    style={railIconBtn}
+                    className="chat-icon-button"
+                    {...railHover}
+                  ><FolderKanban size={18} strokeWidth={1.8} /></button>
                 </div>
               </div>
-              </>
-            }
-          />
-        </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <button
+                  onClick={() => setProfileOpen(true)}
+                  title="个人信息"
+                  style={railIconBtn}
+                  className="chat-icon-button"
+                  {...railHover}
+                ><User size={18} strokeWidth={1.8} /></button>
+                <button
+                  onClick={logout}
+                  title="退出登录"
+                  style={railIconBtn}
+                  className="chat-icon-button"
+                  {...railHover}
+                ><LogOut size={18} strokeWidth={1.8} /></button>
+              </div>
+            </div>
 
-        {/* 底部：用户资料 + 退出登录 */}
-        <div style={{
-          padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            onClick={() => setProfileOpen(true)}
-            title="个人信息"
-            style={{
-              flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
-              border: 'none', background: 'transparent', borderRadius: 10,
-              padding: '6px 10px', fontSize: 15, color: DS.ink, cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >
-            <User size={18} strokeWidth={1.8} />
-            <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
-          </button>
-          <button
-            onClick={logout}
-            title="退出登录"
-            style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(217, 45, 32, 0.08)'; e.currentTarget.style.color = '#d92d20'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
-          >
-            <LogOut size={18} strokeWidth={1.8} />
-          </button>
+            <div
+              className="chat-sidebar-panel"
+              style={{ width: convWidth }}
+              aria-hidden={collapsed}
+              inert={collapsed}
+            >
+              <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+                <AgentConversationList
+                  width={convWidth}
+                  headerRight={
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <button
+                        onClick={() => setSearchOpen((value) => !value)}
+                        title={searchOpen ? '关闭搜索' : '搜索对话（全文+标题）'}
+                        aria-expanded={searchOpen}
+                        className="chat-icon-button"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: 'var(--color-muted)', borderRadius: 8,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                      >
+                        <span className={`chat-search-morph${searchOpen ? ' is-open' : ''}`}>
+                          <Search className="chat-search-open" size={15} strokeWidth={1.8} />
+                          <X className="chat-search-close" size={15} strokeWidth={1.8} />
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setCollapsed(true)}
+                        title="收起侧边栏"
+                        aria-expanded={!collapsed}
+                        className="chat-icon-button"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: 'var(--color-muted)', borderRadius: 8,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                      >
+                        <span className="chat-icon-motion chat-icon-motion--collapse">
+                          <PanelLeftClose size={15} strokeWidth={1.8} />
+                        </span>
+                      </button>
+                    </div>
+                  }
+                  toolbar={
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
+                      <div style={{ position: 'relative', width: '100%' }}>
+                        <button
+                          ref={desktopProjectBtnRef}
+                          onClick={() => setProjectOpen((value) => !value)}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          title="项目选择"
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                            border: 'none', borderRadius: 10, background: 'transparent',
+                            padding: '0 12px', height: 40, fontSize: 15,
+                            color: DS.ink, cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <span style={{ fontSize: 15 }}><FolderKanban size={15} strokeWidth={1.8} /></span>
+                          <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {currentProject?.name ?? '选择项目'}
+                          </span>
+                          <span style={{ fontSize: 10, color: DS.textCaption }}><ChevronDown size={10} strokeWidth={2.5} /></span>
+                        </button>
+                      </div>
+                    </div>
+                  }
+                />
+              </div>
+
+              <div style={{ padding: '6px 10px', borderTop: '1px solid var(--color-hairline)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <button
+                    onClick={() => setProfileOpen(true)}
+                    title="个人信息"
+                    style={{
+                      flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+                      border: 'none', background: 'transparent', borderRadius: 10,
+                      padding: '6px 10px', fontSize: 15, color: DS.ink, cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <User size={18} strokeWidth={1.8} />
+                    <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
+                  </button>
+                  <button
+                    onClick={logout}
+                    title="退出登录"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(217, 45, 32, 0.08)'; e.currentTarget.style.color = '#d92d20'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                  >
+                    <LogOut size={18} strokeWidth={1.8} />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      )}
 
-      {/* 拖拽把手（6px 宽 + 竖线纹理提示可拖拽） */}
-      <div
-        onMouseDown={handleConvDrag}
-        style={{
-          width: 6, cursor: 'col-resize', background: 'transparent', flexShrink: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-        onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
-      >
-        <div style={{ width: 2, height: 20, borderRadius: 1, background: 'rgba(0,0,0,0.12)' }} />
-      </div>
-      {collapsed && <div style={{ width: 4, flexShrink: 0 }} />}
-      </>)}
+          {!collapsed && (
+            <div
+              onMouseDown={handleConvDrag}
+              style={{
+                width: 6, cursor: 'col-resize', background: 'transparent', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = DS.brand; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ width: 2, height: 20, borderRadius: 1, background: 'rgba(0,0,0,0.12)' }} />
+            </div>
+          )}
+
+          <ProjectDropdown
+            open={projectOpen}
+            onClose={() => setProjectOpen(false)}
+            anchor={collapsed ? railProjectBtnRef : desktopProjectBtnRef}
+          />
+        </>
+      )}
 
       {/* ── embed 紧凑模式（画布小窗 iframe）：会话切换按钮 + 会话列表 overlay ── */}
       {embed && embedConvOpen && (
@@ -670,6 +757,7 @@ export function ChatPage() {
 
       {/* ── 主对话区 ── */}
       <div
+        ref={chatMainRef}
         style={{
           flex: 1,
           minWidth: 0,
@@ -684,8 +772,8 @@ export function ChatPage() {
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 28,
             paddingLeft: 16,
-            paddingRight: !embed ? contentRightReserve + 16 : 16,
-            transition: 'padding-right 0.22s ease',
+            paddingRight: !embed ? desktopRightReserve + 16 : 16,
+            transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}>
             {embed && (
               <button
@@ -729,8 +817,8 @@ export function ChatPage() {
             <div style={{
               padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
-              paddingRight: !embed ? contentRightReserve + 16 : 12,
-              transition: 'padding-right 0.22s ease',
+              paddingRight: !embed ? desktopRightReserve + 16 : 12,
+              transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                 {embed && (
@@ -794,21 +882,23 @@ export function ChatPage() {
             {/* 消息列：748px 居中 */}
             <div
               ref={scrollRef}
-              onScroll={(e) => {
-                const el = e.target as HTMLElement;
-                nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-                setShowScrollDown(!nearBottomRef.current && messages.length > 0);
-              }}
+              onScroll={handleThreadScroll}
+              onWheel={handleThreadWheel}
               style={{
                 flex: 1,
                 minHeight: 0,
                 overflowY: 'auto',
+                overflowX: 'hidden',
                 background: 'white',
-                paddingRight: !embed ? contentRightReserve : 0,
-                transition: 'padding-right 0.22s ease',
+                paddingRight: !embed ? desktopRightReserve : 0,
+                transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
-              <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
+              <div
+                key={activeConversationId ?? 'new-conversation'}
+                className="chat-thread-stage"
+                style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}
+              >
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
@@ -839,7 +929,19 @@ export function ChatPage() {
                   </div>
                 )}
                 
-                {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
+                {waitingHumanInput && !sceneReviewDetached && (
+                  sceneReviewOpen ? (
+                    <div className="chat-scene-review-inline">
+                      <HitlPromptCard
+                        info={waitingHumanInput}
+                        sceneReviewCollapsed={sceneReviewCollapsed}
+                        onSceneReviewCollapsedChange={setSceneReviewCollapsed}
+                      />
+                    </div>
+                  ) : (
+                    <HitlPromptCard info={waitingHumanInput} />
+                  )
+                )}
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
@@ -864,41 +966,56 @@ export function ChatPage() {
             {/* 底部输入卡 */}
             <div style={{
               padding: '8px 16px 16px',
-              paddingRight: !embed ? contentRightReserve + 16 : 16,
+              paddingRight: !embed ? desktopRightReserve + 16 : 16,
               background: 'white',
-              transition: 'padding-right 0.22s ease',
+              transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
               <ChatComposer />
             </div>
           </>
         )}
-        {showScrollDown && !isEmpty && (
+        {scrollDownPresence.mounted && !isEmpty && (
           <button
             onClick={scrollToBottom}
-            title="回到最新"
-            aria-label="回到最新"
+            title="跳到最后一个消息"
+            aria-label="跳到最后一个消息"
+            className={`chat-scroll-down${scrollDownPresence.visible ? ' is-open' : ''}${scrollDownPresence.closing ? ' is-closing' : ''}`}
             style={{
               position: 'absolute', bottom: 176,
-              left: !embed && contentRightReserve ? `calc(50% - ${contentRightReserve / 2}px)` : '50%',
-              transform: 'translateX(-50%)', zIndex: 60,
+              left: !embed && desktopRightReserve
+                ? `calc(50% - ${desktopRightReserve / 2}px - 17px)`
+                : 'calc(50% - 17px)',
+              zIndex: 60,
               width: 34, height: 34, borderRadius: '50%',
               border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)',
               cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'color 0.15s, border-color 0.15s',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
           ><ArrowDown size={16} strokeWidth={2} /></button>
         )}
+        {sceneReviewDetached && waitingHumanInput && (
+          <div
+            className="chat-scene-review-panel"
+            style={{ width: sceneReviewPanelWidth || 420 }}
+          >
+            <HitlPromptCard
+              info={waitingHumanInput}
+              fillHeight
+              sceneReviewCollapsed={sceneReviewCollapsed}
+              onSceneReviewCollapsedChange={setSceneReviewCollapsed}
+            />
+          </div>
+        )}
       </div>
 
       {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
-      {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
+      <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       {!embed && !embeddedAppLayout.fullscreen && (
         <GenerationCenterPanel
           onOpenChange={setGenerationCenterOpen}
-          bottom={appWindowOpen ? 20 : 104}
+          bottom={appWindowOpen || sceneReviewDetached ? 20 : 104}
           onOpenRecords={() => setRecordsOpen(true)}
         />
       )}

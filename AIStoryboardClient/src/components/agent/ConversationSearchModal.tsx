@@ -4,6 +4,7 @@ import { Search, X } from 'lucide-react';
 import { agentApi, type AgentConversation } from '../../api/agent';
 import { useProjectStore } from '../../stores/projectStore';
 import { DS } from './ChatComposer';
+import { usePresence } from '../../hooks/usePresence';
 
 interface SearchHit {
   conv: AgentConversation;
@@ -72,6 +73,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
   const [index, setIndex] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { mounted, visible, closing } = usePresence(open, 220);
 
   // 打开：拉取会话 + 消息建索引
   useEffect(() => {
@@ -122,11 +124,12 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
       .sort((a, b) => b.ts - a.ts);
   }, [q, index]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   return createPortal(
     <div
       onClick={onClose}
+      className={`chat-modal-backdrop${visible ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
         background: 'rgba(20, 20, 19, 0.55)',
@@ -136,6 +139,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className={`chat-modal-surface${visible ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
         style={{
           width: 'min(640px, 92vw)', maxHeight: '70vh',
           background: 'white', borderRadius: 16, boxShadow: '0 24px 72px rgba(0,0,0,0.3)',
@@ -166,6 +170,16 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
               }}
             ><X size={14} strokeWidth={2} /></button>
           )}
+          <button
+            onClick={onClose}
+            title="关闭搜索"
+            aria-label="关闭搜索"
+            style={{
+              border: 'none', background: 'transparent', color: 'var(--color-muted)',
+              width: 28, height: 28, borderRadius: 8, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          ><X size={16} strokeWidth={1.8} /></button>
         </div>
 
         {/* 结果区 */}
@@ -185,12 +199,14 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
               {matches.map((h, i) => (
                 <button
                   key={`${h.conv.id}-${i}`}
+                  className="project-dropdown-item"
                   onClick={() => { onSelectConversation(h.conv.id); onClose(); }}
                   style={{
+                    '--item-index': Math.min(i, 8),
                     display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
                     border: 'none', background: 'transparent', padding: '10px 10px', borderRadius: 12,
                     transition: 'background 0.15s',
-                  }}
+                  } as React.CSSProperties}
                   onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >

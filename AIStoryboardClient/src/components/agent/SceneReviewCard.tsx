@@ -140,7 +140,19 @@ export const isSceneReview = (info: HumanInputInfo) =>
  * 上传素材 + 查看已投参考物 + 状态徽标。批量区提供「生成图片」「生成视频」「优化方案」，
  * 全部作用于勾选分镜。卡片整体限高可滚动，避免遮挡下方输入框。
  */
-export function SceneReviewCard({ info, startExpanded = false }: { info: HumanInputInfo; startExpanded?: boolean }) {
+export function SceneReviewCard({
+  info,
+  startExpanded = false,
+  fillHeight = false,
+  collapsed: collapsedProp,
+  onCollapsedChange,
+}: {
+  info: HumanInputInfo;
+  startExpanded?: boolean;
+  fillHeight?: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+}) {
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const streaming = useAgentStore((s) => s.streaming);
@@ -186,7 +198,12 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
   const [refineFor, setRefineFor] = useState<string | null>(null);
   const [confirmGenImage, setConfirmGenImage] = useState(false);
   const [pane, setPane] = useState<'image' | 'video'>('image');
-  const [collapsed, setCollapsed] = useState(!startExpanded);
+  const [internalCollapsed, setInternalCollapsed] = useState(!startExpanded);
+  const collapsed = collapsedProp ?? internalCollapsed;
+  const setReviewCollapsed = (nextCollapsed: boolean) => {
+    if (collapsedProp === undefined) setInternalCollapsed(nextCollapsed);
+    onCollapsedChange?.(nextCollapsed);
+  };
   const [feedback, setFeedback] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, Record<'image' | 'video', string>>>(() =>
     Object.fromEntries(items.map((i) => [i.id, {
@@ -421,7 +438,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
 
   if (collapsed) {
     return (
-      <button type="button" onClick={() => setCollapsed(false)}
+      <button type="button" onClick={() => setReviewCollapsed(false)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', background: '#faf9f5', cursor: 'pointer' }}>
         <span style={{ fontSize: 13, color: 'rgb(96,100,108)' }}>需要您确认 · 分镜审查结果（已勾选 {selectedCount}/{items.length}）</span>
         <ChevronUp size={16} />
@@ -431,7 +448,9 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', maxHeight: 'min(58vh, 520px)',
+      display: 'flex', flexDirection: 'column',
+      height: fillHeight ? '100%' : undefined,
+      maxHeight: fillHeight ? 'none' : 'min(58vh, 520px)',
       border: '1px solid rgba(0,0,0,0.08)', borderRadius: 16, background: 'white',
       boxShadow: '0 2px 8px rgba(15,17,21,0.06)', overflow: 'hidden',
     }}>
@@ -446,7 +465,7 @@ export function SceneReviewCard({ info, startExpanded = false }: { info: HumanIn
             style={{ ...paneBtn, background: pane === 'image' ? 'rgb(65,118,230)' : 'transparent', color: pane === 'image' ? 'white' : 'rgb(96,100,108)' }}>图片</button>
           <button type="button" onClick={() => setPane('video')}
             style={{ ...paneBtn, background: pane === 'video' ? 'rgb(65,118,230)' : 'transparent', color: pane === 'video' ? 'white' : 'rgb(96,100,108)' }}>视频</button>
-          <button type="button" onClick={() => setCollapsed(true)} style={{ ...iconBtn }} title="折叠"><ChevronDown size={16} /></button>
+          <button type="button" onClick={() => setReviewCollapsed(true)} style={{ ...iconBtn }} title="折叠"><ChevronDown size={16} /></button>
         </div>
       </div>
 

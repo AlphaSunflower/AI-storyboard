@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useProjectStore } from '../../stores/projectStore';
 import type { ProjectResponse } from '../../api/projects';
 import { MoreMenu } from '../common/MoreMenu';
+import { usePresence } from '../../hooks/usePresence';
 
 const modalOverlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.35)',
@@ -44,9 +45,11 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
   const [renameName, setRenameName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ProjectResponse | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { mounted, visible } = usePresence(open, 180);
 
   // 点击外部关闭下拉
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
       const inMenu = dropdownRef.current?.contains(t);
@@ -56,9 +59,9 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose, anchor]);
+  }, [onClose, anchor, open]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   const handleSelectProject = (id: string) => {
     loadProject(id);
@@ -120,14 +123,16 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
             暂无项目
           </p>
         ) : (
-          projects.map((p) => (
+          projects.map((p, index) => (
             <div
               key={p.id}
+              className="project-dropdown-item"
               style={{
+                '--item-index': index,
                 display: 'flex', alignItems: 'center',
                 borderBottom: '1px solid rgba(0, 0, 0, 0.04)',
                 background: currentProject?.id === p.id ? 'rgba(38, 49, 72, 0.06)' : 'white',
-              }}
+              } as React.CSSProperties}
             >
               <button
                 onClick={() => handleSelectProject(p.id)}
@@ -166,13 +171,14 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     zIndex: 2000,
     overflow: 'hidden',
   };
+  const menuClassName = `project-dropdown-menu${visible ? ' is-open' : ''}`;
 
   // anchor 传入（/chat 会话栏内）：portal 到 body + fixed 定位，弹层向右展开（按钮右缘 +8），不被左缘裁剪
   if (anchor?.current) {
     const r = anchor.current.getBoundingClientRect();
     return createPortal(
       <div ref={dropdownRef}>
-        <div style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, left: r.right + 8 }}>
+        <div className={menuClassName} style={{ ...menuStyle, position: 'fixed', top: r.bottom + 6, left: r.right + 8 }}>
           {menuContent}
         </div>
         {deleteTarget && (
@@ -196,7 +202,7 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
 
   return (
     <div ref={dropdownRef}>
-      <div style={{ ...menuStyle, position: 'absolute', top: 40, left: popupRight ? 60 : 0 }}>
+      <div className={menuClassName} style={{ ...menuStyle, position: 'absolute', top: 40, left: popupRight ? 60 : 0 }}>
         {menuContent}
       </div>
 

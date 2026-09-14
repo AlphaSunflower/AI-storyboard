@@ -4,7 +4,7 @@ import { useAgentStore } from '../../stores/agentStore';
 import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
-import { Archive, Pencil, Trash2 } from 'lucide-react';
+import { Archive, ChevronLeft, Pencil, Trash2 } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
 import { ContextMenu } from '../common/ContextMenu';
 import MoonLogo from './MoonLogo';
@@ -170,12 +170,23 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* 操作区：归档筛选 + 多选 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 14px 8px' }}>
         <button
+          className="chat-archive-toggle"
           onClick={() => setShowArchived(!showArchived)}
           style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textCaption; }}
         >
-          {showArchived ? '◀ 返回进行中' : <><Archive size={13} strokeWidth={1.8} /> 已归档</>}
+          {showArchived ? (
+            <span key="active" className="chat-archive-label">
+              <ChevronLeft size={13} strokeWidth={1.8} />
+              返回进行中
+            </span>
+          ) : (
+            <span key="archived" className="chat-archive-label">
+              <Archive size={13} strokeWidth={1.8} />
+              已归档
+            </span>
+          )}
         </button>
         {visible.length > 0 && (
           <button
@@ -201,6 +212,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
 
       {/* 会话列表（仅此区域滚动，头部/工具栏/操作区固定） */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div key={showArchived ? 'archived' : 'active'} className="conversation-list-stage">
       {/* 按时间分组的会话列表 */}
       {groups.map((g) => (
         <div key={g.label}>
@@ -219,6 +231,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                 ]}
               >
                 <div
+                  className={`conversation-item${c.id === activeConversationId ? ' is-active' : ''}`}
                   onClick={() => {
                     if (multiSelect) { toggleSelect(c.id); return; }
                     if (onSelectOverride) { onSelectOverride(c.id); return; }
@@ -301,6 +314,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           {showArchived ? '暂无已归档对话' : '暂无对话'}
         </p>
       )}
+      </div>
       </div>
 
       {/* 多选模式：底部删除栏（固定于列表下方，gsap 滑入动画） */}

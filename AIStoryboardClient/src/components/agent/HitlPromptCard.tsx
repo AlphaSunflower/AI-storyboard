@@ -8,12 +8,30 @@ import { SceneReviewCard, isSceneReview } from './SceneReviewCard';
  * 有 scene 资产 → 分镜审查卡（默认展开）；否则 → 普通确认卡（默认展开，可折叠/展开）。
  * 选中后由 MessageBubble 基于 metadata.hitl 渲染的「已选」卡接手，本组件仅负责待选态。
  */
-export function HitlPromptCard({ info }: { info: HumanInputInfo }) {
+export function HitlPromptCard({
+  info,
+  fillHeight = false,
+  sceneReviewCollapsed,
+  onSceneReviewCollapsedChange,
+}: {
+  info: HumanInputInfo;
+  fillHeight?: boolean;
+  sceneReviewCollapsed?: boolean;
+  onSceneReviewCollapsedChange?: (collapsed: boolean) => void;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const toggle = () => setCollapsed((prev) => !prev);
 
   if (isSceneReview(info)) {
-    return <SceneReviewCard info={info} startExpanded />;
+    return (
+      <SceneReviewCard
+        info={info}
+        startExpanded
+        fillHeight={fillHeight}
+        collapsed={sceneReviewCollapsed}
+        onCollapsedChange={onSceneReviewCollapsedChange}
+      />
+    );
   }
 
   return (

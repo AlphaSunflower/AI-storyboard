@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import CountUp from '../CountUp';
 import { userApi, type UserStats } from '../../api/user';
+import { usePresence } from '../../hooks/usePresence';
 
 const overlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.4)',
@@ -20,7 +22,7 @@ function errMsg(e: unknown): string {
   return (e as { response?: { data?: { message?: string } } })?.response?.data?.message || '操作失败';
 }
 
-export function PersonalInfoModal({ onClose }: { onClose: () => void }) {
+export function PersonalInfoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -28,14 +30,25 @@ export function PersonalInfoModal({ onClose }: { onClose: () => void }) {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const { mounted, visible, closing } = usePresence(open, 220);
 
   useEffect(() => {
+    if (!open) return;
     userApi.getProfile().then((r) => {
       setName(r.data.data.displayName || '');
       setEmail(r.data.data.email || '');
     }).catch(() => {});
     userApi.getStats().then((r) => setStats(r.data.data)).catch(() => {});
-  }, []);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, open]);
 
   const saveProfile = async () => {
     try {
@@ -66,12 +79,23 @@ export function PersonalInfoModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
+  if (!mounted) return null;
+
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={{ width: 480, maxHeight: '86vh', overflowY: 'auto', background: 'var(--color-canvas)', borderRadius: 'var(--rounded-lg)', padding: 22, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }} onClick={(e) => e.stopPropagation()}>
+    <div className={`chat-modal-backdrop${visible ? ' is-open' : ''}${closing ? ' is-closing' : ''}`} style={overlayStyle} onClick={onClose}>
+      <div
+        className={`chat-modal-surface chat-modal-surface--profile${visible ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
+        style={{ width: 480, maxHeight: '86vh', overflowY: 'auto', background: 'var(--color-canvas)', borderRadius: 'var(--rounded-lg)', padding: 22, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
           <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>个人信息</h2>
-          <button style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--color-muted)' }} onClick={onClose}>✕</button>
+          <button
+            style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--color-muted)', display: 'inline-flex' }}
+            onClick={onClose}
+            title="关闭"
+            aria-label="关闭"
+          ><X size={16} strokeWidth={1.8} /></button>
         </div>
 
         {/* 统计 */}

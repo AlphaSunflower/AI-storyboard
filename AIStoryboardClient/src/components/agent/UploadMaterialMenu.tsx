@@ -20,8 +20,9 @@ export function UploadMaterialMenu({
     <div>
       <button
         type="button"
+        className="chat-plus-menu__item"
         onClick={() => choose(onMaterialPicker)}
-        style={menuItem}
+        style={{ ...menuItem, '--item-index': 0 } as React.CSSProperties}
         onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
@@ -30,8 +31,9 @@ export function UploadMaterialMenu({
       </button>
       <button
         type="button"
+        className="chat-plus-menu__item"
         onClick={() => choose(onLocalImage)}
-        style={menuItem}
+        style={{ ...menuItem, '--item-index': 1 } as React.CSSProperties}
         onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >

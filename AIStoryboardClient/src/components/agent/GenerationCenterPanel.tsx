@@ -199,10 +199,10 @@ export function GenerationCenterPanel({
           event.stopPropagation();
           drag.onMouseDown(event);
         }}
-        className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}`}
+        className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}${drag.dragging ? ' is-dragging' : ''}${drag.returning ? ' is-returning' : ''}`}
         title={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
         aria-label={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
-        style={{ transform: drag.transform }}
+        style={{ transform: drag.transform, transition: drag.transition }}
       >
         <ListTodo size={20} strokeWidth={1.8} />
         <span className="generation-center__trigger-label">{isGenerating ? '生成中' : '生成中心'}</span>
