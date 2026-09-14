@@ -13,6 +13,7 @@ import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelParamsSpecNormalizer;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
 import com.llmgateway.vendor.route.ChatImageVendorAdapter;
@@ -169,6 +170,15 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 try {
                     RouteResult fwd = forward(channel, path, requestBody);
                     status = fwd.status();
+                    // 图响应归一化（openai_compatible 直传模型配了 response.sync 才处理；gemini 已由 forward 转换不再动）
+                    if (fwd.status() == 200 && path.contains("images/generations") && !"gemini".equals(channel.getType())) {
+                        ModelParams mp = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                                .eq(ModelParams::getModelName, model));
+                        com.fasterxml.jackson.databind.JsonNode ispec = mp != null ? ModelParamsSpecNormalizer.spec(mp.getParamsSchema()) : null;
+                        if (ispec != null && ispec.path("response").path("sync").isObject()) {
+                            fwd = new RouteResult(200, ModelParamsSpecNormalizer.normalizeImageSync(fwd.body(), ispec));
+                        }
+                    }
                     channelId = channel.getId();
                     String bodyStr = fwd.body();
                     if (status >= 400) {
@@ -331,6 +341,13 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             } catch (Exception e) {
                 log.warn("解析 ollama_params 失败，忽略: model={}, error={}", mp.getModelName(), e.getMessage());
             }
+        }
+
+        // self-describing spec：把 params_schema 解析后作为 spec 附到 params（供前端/Agent 通用渲染）
+        String ps = mp.getParamsSchema();
+        if (ps != null && !ps.isBlank()) {
+            JsonNode specNode = ModelParamsSpecNormalizer.spec(ps);
+            if (specNode != null) params.put("spec", specNode);
         }
         return params.isEmpty() ? null : params;
     }

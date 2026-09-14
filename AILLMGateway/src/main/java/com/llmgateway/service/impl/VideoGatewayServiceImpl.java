@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.config.GatewayConfig;
 import com.llmgateway.entity.CallLog;
 import com.llmgateway.entity.Channel;
+import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.CallLogMapper;
@@ -14,6 +15,8 @@ import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelParamsService;
+import com.llmgateway.service.ModelParamsSpecNormalizer;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
@@ -54,6 +57,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     private final KeyService keyService;
     private final CallLogService callLogService;
     private final CallLogMapper callLogMapper;
+    private final ModelParamsService modelParamsService;
     private final GatewayConfig config;
     private final VideoVendorRegistry registry;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -205,6 +209,28 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
 
         VideoVendorAdapter adapter = registry.resolve(channel.getType());
         VideoVendorResult result = adapter.parsePoll(resp.body(), taskId, channel, apiKey);
+        JsonNode spec = resolveSpecByTaskId(taskId);
+        if (spec != null && spec.path("response").path("async").isObject()) {
+            ObjectNode normalized = (ObjectNode) objectMapper.readTree(
+                    ModelParamsSpecNormalizer.normalizeVideoPoll(resp.body(), spec, taskId));
+            String mediaUrl = normalized.path("_mediaUrl").asText("");
+            normalized.remove("_mediaUrl");
+            normalized.put("vendor", result.vendor());
+            String status = normalized.path("status").asText(result.status());
+            if ("succeeded".equals(status)) {
+                callLogService.log(result.vendor(), channel.getId(), "succeeded",
+                        System.currentTimeMillis() - start, null,
+                        mediaUrl.isBlank() ? result.url() : mediaUrl, taskId);
+            } else if ("failed".equals(status)) {
+                callLogService.log(result.vendor(), channel.getId(), "failed",
+                        System.currentTimeMillis() - start,
+                        normalized.path("error").asText(result.error()), null, taskId);
+            } else {
+                callLogService.log(result.vendor(), channel.getId(), "polled",
+                        System.currentTimeMillis() - start, null, null, taskId);
+            }
+            return new VideoResult(200, normalized.toString());
+        }
         // 统一按归一状态记 call_log；succeeded 时带媒体直链（minimax 供下载端点复用）
         if ("succeeded".equals(result.status())) {
             callLogService.log(result.vendor(), channel.getId(), "succeeded",
@@ -217,6 +243,23 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
                     System.currentTimeMillis() - start, null, null, taskId);
         }
         return new VideoResult(200, toJson(result));
+    }
+
+    /** 按 taskId 找到模型配置，并解析可选的 response.async 归一化 Schema。 */
+    private JsonNode resolveSpecByTaskId(String taskId) {
+        try {
+            CallLog latest = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
+                    .eq(CallLog::getTaskId, taskId)
+                    .isNotNull(CallLog::getModel)
+                    .orderByDesc(CallLog::getCreatedAt)
+                    .last("LIMIT 1"));
+            if (latest == null || latest.getModel() == null || latest.getModel().isBlank()) return null;
+            ModelParams params = modelParamsService.getByModelName(latest.getModel());
+            return params == null ? null : ModelParamsSpecNormalizer.spec(params.getParamsSchema());
+        } catch (Exception e) {
+            log.warn("解析模型 params_schema 失败，回退适配器结果: taskId={}, error={}", taskId, e.getMessage());
+            return null;
+        }
     }
 
     /** 按 taskId 反查创建渠道：call_log「created」记录优先，无则取最近一条；返回 null 表示无法定位 */

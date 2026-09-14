@@ -48,6 +48,7 @@ public class ModelParamsController {
                 e.getMaxVideoSizeMb(), e.getMaxImageSizeMb(), e.getMaxAudioSizeMb(),
                 e.getMaxRequestBodyMb(), e.getMaxPromptChars(),
                 e.getOllamaParams(),
+                e.getParamsSchema(),
                 e.getCreatedAt(), e.getUpdatedAt());
     }
 }

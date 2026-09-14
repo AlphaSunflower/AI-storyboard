@@ -76,6 +76,15 @@ public class ModelParamsServiceImpl implements ModelParamsService {
                 .eq(ModelParams::getType, type));
     }
 
+    @Override
+    public ModelParams getByModelName(String modelName) {
+        if (modelName == null || modelName.isBlank()) return null;
+        return modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                .eq(ModelParams::getModelName, modelName.trim())
+                .orderByAsc(ModelParams::getType)
+                .last("LIMIT 1"));
+    }
+
     private String normalizeType(String type) {
         if (type == null || type.isBlank()) return "text";
         String t = type.trim().toLowerCase();
@@ -122,6 +131,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.maxRequestBodyMb() != null) entity.setMaxRequestBodyMb(req.maxRequestBodyMb());
         if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
         if (req.ollamaParams() != null) entity.setOllamaParams(req.ollamaParams());
+        if (req.paramsSchema() != null) entity.setParamsSchema(req.paramsSchema());
     }
 
     private void validateRange(Integer min, Integer max, String label) {

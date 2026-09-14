@@ -33,5 +33,6 @@ public record ModelParamsRequest(
         Integer maxTotalDuration, Integer maxTotalFiles,
         Integer maxVideoSizeMb, Integer maxImageSizeMb, Integer maxAudioSizeMb,
         Integer maxRequestBodyMb, Integer maxPromptChars,
-        String ollamaParams) {
+        String ollamaParams,
+        String paramsSchema) {
 }

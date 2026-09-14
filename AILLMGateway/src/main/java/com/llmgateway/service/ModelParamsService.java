@@ -11,4 +11,7 @@ public interface ModelParamsService {
 
     /** 按 (model_name, type) 查询（不存在返回 null，不抛错——表单编辑回显语义；同一模型可 text/vision 各一套参数） */
     ModelParams getByModelNameAndType(String modelName, String type);
+
+    /** 按 model_name 查询一条配置（用于轮询时解析 Schema；同一模型多类型时取首条）。 */
+    ModelParams getByModelName(String modelName);
 }

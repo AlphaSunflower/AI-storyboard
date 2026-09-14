@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { GatewayModelOption } from '../../api/ai';
 import { Image as ImageIcon, Video } from 'lucide-react';
 
@@ -33,6 +33,18 @@ const PARAM_META = [
 ] as const;
 
 type ParamLists = Record<string, { options: string[]; default?: string }>;
+
+interface SpecParam {
+  key: string;
+  label?: string;
+  type?: string;
+  options?: string[];
+  min?: number;
+  max?: number;
+  default?: unknown;
+  show?: boolean;
+  fields?: SpecParam[];
+}
 
 /** 小写参数键 → 驼峰（如 size → Size, aspectRatio → AspectRatio），与后端字段/SceneReviewCard.buildPayload 对齐 */
 function cap(s: string): string {
@@ -76,6 +88,87 @@ function parseParamLists(model?: GatewayModelOption): ParamLists {
     }
   }
   return out;
+}
+
+/** 解析网关 params.spec.request；无 Schema 时返回空数组并回退旧参数元信息。 */
+function parseSpec(model?: GatewayModelOption): SpecParam[] {
+  if (!model?.params) return [];
+  let params: Record<string, unknown>;
+  try {
+    params = typeof model.params === 'string'
+      ? (JSON.parse(model.params) as Record<string, unknown>)
+      : (model.params as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+  let spec = params['spec'] as Record<string, unknown> | undefined;
+  if (typeof spec === 'string') {
+    try {
+      spec = JSON.parse(spec) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+  }
+  const request = spec?.['request'];
+  return Array.isArray(request) ? (request as SpecParam[]) : [];
+}
+
+function collectSpecLeaves(params: SpecParam[], prefix: string, out = new Map<string, SpecParam>()) {
+  for (const param of params || []) {
+    const key = prefix + param.key;
+    if (param.type === 'object' && param.fields) collectSpecLeaves(param.fields, `${key}.`, out);
+    else if (param.type === 'arrayofobject' && param.fields) collectSpecLeaves(param.fields, `${key}.`, out);
+    else out.set(key, param);
+  }
+  return out;
+}
+
+function specValueAllowed(param: SpecParam, value: string) {
+  if (param.type === 'enum') return (param.options || []).map(String).includes(value);
+  if (param.type === 'bool') return value === 'true' || value === 'false';
+  if (param.type === 'range' || param.type === 'number') {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return false;
+    if (param.min !== undefined && number < param.min) return false;
+    if (param.max !== undefined && number > param.max) return false;
+  }
+  return true;
+}
+
+function specInitialValues(
+  params: SpecParam[],
+  recommended: Record<string, string>,
+  prefix: string,
+  override: Record<string, string> = {},
+  silent = false,
+): Record<string, string> {
+  const init: Record<string, string> = {};
+  const append = (items: SpecParam[], itemPrefix: string) => {
+    for (const param of items || []) {
+      const key = itemPrefix + param.key;
+      if (param.type === 'object' && param.fields) {
+        append(param.fields, `${key}.`);
+        continue;
+      }
+      if (param.type === 'arrayofobject' && param.fields) {
+        append(param.fields, `${key}.`);
+        continue;
+      }
+      const overrideValue = override[key];
+      const recommendedValue = pick(recommended, key, key);
+      const fallback = param.type === 'enum'
+        ? String(param.default ?? param.options?.[0] ?? '')
+        : param.default === undefined || param.default === null ? '' : String(param.default);
+      const value = overrideValue && specValueAllowed(param, overrideValue)
+        ? overrideValue
+        : (!silent && recommendedValue && specValueAllowed(param, recommendedValue)
+          ? recommendedValue
+          : (!silent ? fallback : ''));
+      if (value !== '') init[key] = value;
+    }
+  };
+  append(params, prefix);
+  return init;
 }
 
 /** 计算某模型的参数初始值：LLM 推荐 > 模型默认 > 首选项；override（分镜已存配置）对有效选项优先。
@@ -127,22 +220,34 @@ export function AgentParamSelector({
   })();
   const [model, setModel] = useState(initialModel);
   const current = useMemo(() => models.find((m) => m.value === model), [models, model]);
+  const spec = useMemo(() => parseSpec(current), [current]);
+  const hasSpec = spec.length > 0;
   const paramLists = useMemo(() => parseParamLists(current), [current]);
+  const specLeaves = useMemo(() => collectSpecLeaves(spec, keyPrefix), [keyPrefix, spec]);
   const [selected, setSelected] = useState<Record<string, string>>(() =>
-    initialValues(parseParamLists(models.find((m) => m.value === initialModel)), recommended, keyPrefix, initialValue, silent));
+    hasSpec
+      ? specInitialValues(spec, recommended, keyPrefix, initialValue, silent)
+      : initialValues(paramLists, recommended, keyPrefix, initialValue, silent));
 
   // 模型切换：参数重置为该模型推荐/默认值（保留 initialValue 里对新模型仍有效的覆盖）
   useEffect(() => {
     if (!models.length) return;
     setSelected((prev) => {
-      const base = initialValues(paramLists, recommended, keyPrefix, initialValue, silent);
+      const base = hasSpec
+        ? specInitialValues(spec, recommended, keyPrefix, initialValue, silent && !userChangedRef.current)
+        : initialValues(paramLists, recommended, keyPrefix, initialValue, silent && !userChangedRef.current);
       // 切换模型时保留用户在旧模型下调过的、且新模型仍支持的参数值（避免切模型后自定义参数丢失）
       for (const [k, v] of Object.entries(prev ?? {})) {
         if (!v) continue;
-        const metaKey = k.slice(keyPrefix.length);
-        const lowerKey = metaKey.charAt(0).toLowerCase() + metaKey.slice(1);
-        const opts = paramLists[lowerKey]?.options;
-        if (opts && opts.includes(v)) base[k] = v;
+        if (hasSpec) {
+          const param = specLeaves.get(k);
+          if (param && specValueAllowed(param, v)) base[k] = v;
+        } else {
+          const metaKey = k.slice(keyPrefix.length);
+          const lowerKey = metaKey.charAt(0).toLowerCase() + metaKey.slice(1);
+          const opts = paramLists[lowerKey]?.options;
+          if (opts && opts.includes(v)) base[k] = v;
+        }
       }
       return base;
     });
@@ -164,6 +269,82 @@ export function AgentParamSelector({
     padding: '4px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)',
     fontSize: 12, background: 'white', color: 'var(--color-ink)', outline: 'none',
   };
+  const labelStyle: CSSProperties = { color: 'var(--color-muted)', width: 72, flexShrink: 0 };
+
+  const setValue = (key: string, value: string) => {
+    userChangedRef.current = true;
+    setSelected((current) => ({ ...current, [key]: value }));
+  };
+
+  const renderSpecRow = (param: SpecParam, prefix: string): ReactNode => {
+    if (param.show === false) return null;
+    const key = prefix + param.key;
+    const value = selected[key] ?? '';
+    const reason = pick(reasons, key, key);
+
+    if ((param.type === 'object' || param.type === 'arrayofobject') && param.fields) {
+      return (
+        <div
+          key={key}
+          style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--color-hairline)' }}
+        >
+          <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>
+            {param.label || param.key}{param.type === 'arrayofobject' ? '（按一项填写）' : ''}
+          </span>
+          {param.fields.map((field) => renderSpecRow(field, `${key}.`))}
+        </div>
+      );
+    }
+
+    let control: ReactNode;
+    if (param.type === 'enum') {
+      control = (
+        <select value={value} onChange={(event) => setValue(key, event.target.value)} style={selectStyle}>
+          {(param.options || []).map(String).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+    } else if (param.type === 'bool') {
+      control = (
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={value === 'true'}
+            onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
+          />
+          <span>{value === 'true' ? '开' : '关'}</span>
+        </label>
+      );
+    } else if (param.type === 'array') {
+      control = (
+        <textarea
+          value={value}
+          onChange={(event) => setValue(key, event.target.value)}
+          placeholder="每行一个值，或使用逗号分隔"
+          style={{ ...selectStyle, flex: 1, minHeight: 48, fontFamily: 'var(--font-code)', resize: 'vertical' }}
+        />
+      );
+    } else {
+      control = (
+        <input
+          type={param.type === 'range' || param.type === 'number' ? 'number' : 'text'}
+          min={param.type === 'range' ? param.min : undefined}
+          max={param.type === 'range' ? param.max : undefined}
+          value={value}
+          onChange={(event) => setValue(key, event.target.value)}
+          placeholder={param.type === 'range' ? `${param.min ?? ''}~${param.max ?? ''}` : ''}
+          style={{ ...selectStyle, flex: 1, minWidth: 0 }}
+        />
+      );
+    }
+
+    return (
+      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={labelStyle}>{param.label || param.key}</span>
+        {control}
+        {reason && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{reason}</span>}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -178,23 +359,31 @@ export function AgentParamSelector({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>模型</span>
+          <span style={{ ...labelStyle, width: 64 }}>模型</span>
           <select value={model} onChange={(e) => { if (e.target.value) { userChangedRef.current = true; setModel(e.target.value); } }} style={selectStyle}>
             {models.map((m) => <option key={m.value} value={m.value}>{m.label || m.value}</option>)}
           </select>
           {pick(reasons, keyPrefix + 'Model', keyPrefix + 'model') && <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>{pick(reasons, keyPrefix + 'Model', keyPrefix + 'model')}</span>}
         </div>
-        {visibleMeta.map((meta) => (
-          <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--color-muted)', width: 64, flexShrink: 0 }}>{meta.label}</span>
-            <select value={selected[keyPrefix + cap(meta.key)] ?? ''} onChange={(e) => { if (e.target.value) { userChangedRef.current = true; setSelected((s) => ({ ...s, [keyPrefix + cap(meta.key)]: e.target.value })); } }} style={selectStyle}>
-              {paramLists[meta.key].options.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-            {pick(reasons, keyPrefix + cap(meta.key), keyPrefix + meta.key) && (
-              <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>推荐：{pick(reasons, keyPrefix + cap(meta.key), keyPrefix + meta.key)}</span>
-            )}
-          </div>
-        ))}
+        {hasSpec
+          ? spec.map((param) => renderSpecRow(param, keyPrefix))
+          : visibleMeta.map((meta) => (
+            <div key={meta.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ ...labelStyle, width: 64 }}>{meta.label}</span>
+              <select
+                value={selected[keyPrefix + cap(meta.key)] ?? ''}
+                onChange={(event) => setValue(keyPrefix + cap(meta.key), event.target.value)}
+                style={selectStyle}
+              >
+                {paramLists[meta.key].options.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              {pick(reasons, keyPrefix + cap(meta.key), keyPrefix + meta.key) && (
+                <span style={{ color: 'var(--color-primary)', fontSize: 11 }}>
+                  推荐：{pick(reasons, keyPrefix + cap(meta.key), keyPrefix + meta.key)}
+                </span>
+              )}
+            </div>
+          ))}
       </div>
     </div>
   );

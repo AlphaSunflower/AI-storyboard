@@ -862,7 +862,16 @@ function openRouteModal(route) {
     + field('参数配置', '<div class="params-grid" id="params-group">' + (paramsGroups[curType] || paramsGroups.text) + '</div>')
     + field('本地模型（Ollama）', '<div id="ollama-section" style="display:none">' + ollamaBlockHtml() + '</div>')
     + field('默认参数（JSON）', '<textarea class="input" id="r-params" rows="4" placeholder=\'{"temperature":0.7,"size":"1024x1024"}\'>'
-      + esc(route ? route.defaultParams || '' : '') + '</textarea>');
+      + esc(route ? route.defaultParams || '' : '') + '</textarea>')
+    + field('参数 Schema（JSON，可选）',
+      '<div style="display:flex;gap:6px;margin-bottom:6px">'
+      + '<button type="button" class="btn btn-sm" id="r-import-schema">从请求体 JSON 一键生成</button>'
+      + '<button type="button" class="btn btn-sm" id="r-schema-example">填入示例</button></div>'
+      + '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.8">'
+      + '枚举(画幅/尺寸/风格)→改 options：<code>"options":["1:1","4:3","16:9"]</code><br>'
+      + '范围(个数/时长/强度)→改 min 和 max：<code>"min":1,"max":8</code><br>'
+      + '是否展示→改 show：<code>"show":true</code>(显示) / <code>"show":false</code>(隐藏但带默认值)</div>'
+      + '<textarea class="input" id="r-schema" rows="12" spellcheck="false" placeholder=\'点「填入示例」得到可改的完整样例；留空=走固定列\'></textarea>');
 
   openModal(isEdit ? '编辑路由' : '新建路由', body, footerHtml('保存'));
   // 按默认渠道拉取模型列表（编辑时预填路由配置的模型名）
@@ -898,6 +907,10 @@ function openRouteModal(route) {
     loadModelParamsForEdit(route.modelName, curType);
   }
   $('#form-submit').onclick = () => submitRoute(isEdit ? route.id : null);
+  const importSchemaBtn = $('#r-import-schema');
+  if (importSchemaBtn) importSchemaBtn.onclick = importSchemaFromRequest;
+  const schemaExampleBtn = $('#r-schema-example');
+  if (schemaExampleBtn) schemaExampleBtn.onclick = fillSchemaExample;
 }
 
 /**
@@ -979,6 +992,8 @@ async function loadModelParamsForEdit(modelName, type) {
         console.warn('ollama_params 解析失败：', pe && pe.message ? pe.message : pe);
       }
     }
+    const schemaEl = $('#r-schema');
+    if (schemaEl && mp.paramsSchema) schemaEl.value = mp.paramsSchema;
     // 回显后按渠道/本地状态刷新本地模型区块显隐
     refreshOllamaBlock();
     // 其余字段（p-durations 旧输入框已由滑块替代，无对应元素自动跳过）
@@ -1109,7 +1124,66 @@ async function saveModelParams(modelName, type) {
     req.maxRequestBodyMb = num('p-maxbody');
     req.maxPromptChars = num('p-maxprompt');
   }
+  const schemaText = (function () { const el = $('#r-schema'); return el ? el.value.trim() : ''; })();
+  if (schemaText) {
+    try { JSON.parse(schemaText); } catch (e) { toast('参数 Schema 不是合法 JSON：' + (e.message || e), 'error'); return; }
+    req.paramsSchema = schemaText;
+  } else {
+    req.paramsSchema = null;
+  }
   await api('/admin/model-params', { method: 'PUT', body: JSON.stringify(req) });
+}
+
+/** 从请求体 JSON 生成参数 Schema 骨架。 */
+function _isUrlLike(v) { return typeof v === 'string' && /^(https?:\/\/|data:image)/i.test(v.trim()); }
+function _guessField(k, val) {
+  const p = { key: k, label: k };
+  if (typeof val === 'string') {
+    p.type = 'string';
+    if (_isUrlLike(val)) { p.role = 'image_upload'; p.cardinality = 'single'; }
+  } else if (typeof val === 'number') {
+    p.type = 'range'; p.min = 1; p.max = val; p.default = val;
+  } else if (typeof val === 'boolean') {
+    p.type = 'bool'; p.default = val;
+  } else if (Array.isArray(val)) {
+    if (val.length && typeof val[0] === 'object') { p.type = 'arrayofobject'; p.fields = _guessFields(val[0]); }
+    else if (val.length && _isUrlLike(val[0])) { p.type = 'array'; p.role = 'image_upload'; p.cardinality = 'multi'; }
+    else p.type = 'array';
+  } else if (val && typeof val === 'object') {
+    p.type = 'object'; p.fields = _guessFields(val);
+  }
+  return p;
+}
+function _guessFields(obj) {
+  return Object.entries(obj || {}).filter((e) => e[0] !== 'model' && e[0] !== 'prompt').map((e) => _guessField(e[0], e[1]));
+}
+function importSchemaFromRequest() {
+  const raw = prompt('粘贴完整请求体 JSON（含 model/prompt 等键值对），自动解析生成参数 Schema 骨架：');
+  if (raw === null) return;
+  let req;
+  try { req = JSON.parse(raw); } catch (e) { toast('请求体不是合法 JSON：' + (e.message || e), 'error'); return; }
+  const spec = { modes: [], promptKey: 'prompt', request: _guessFields(req) };
+  const sc = $('#r-schema');
+  if (sc) sc.value = JSON.stringify(spec, null, 2);
+  toast('已生成 Schema 骨架，请补充 enum 选项/range 范围/角色标注后保存', 'success');
+}
+
+function fillSchemaExample() {
+  const ex = '{\n'
+    + '  "modes": ["text-to-image", "image-to-image"],\n'
+    + '  "promptKey": "prompt",\n'
+    + '  "request": [\n'
+    + '    {"key": "aspect_ratio", "label": "画幅", "type": "enum", "options": ["1:1", "4:3", "16:9", "21:9"], "default": "4:3", "show": true},\n'
+    + '    {"key": "n", "label": "生成个数", "type": "range", "min": 1, "max": 4, "default": 1, "show": true},\n'
+    + '    {"key": "style", "label": "风格", "type": "object", "fields": [\n'
+    + '      {"key": "style_type", "label": "风格类型", "type": "enum", "options": ["www", "photo"], "default": "www", "show": true},\n'
+    + '      {"key": "style_weight", "label": "强度", "type": "range", "min": 1, "max": 10, "default": 5, "show": true}],\n'
+    + '    "show": true},\n'
+    + '    {"key": "prompt_optimizer", "label": "提示词优化", "type": "bool", "default": true, "show": false}\n'
+    + '  ]\n'
+    + '}';
+  const sc = $('#r-schema');
+  if (sc) sc.value = ex;
 }
 
 /** 路由页按钮委托（新建/编辑/删除/测试） */
