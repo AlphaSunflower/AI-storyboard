@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Camera,
@@ -20,6 +20,7 @@ import { assetUrl } from '../config';
 import { getSceneImageUrls } from '../lib/sceneImages';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
+import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import './StoryboardLibraryPage.css';
 
@@ -39,6 +40,8 @@ const mediaFilterLabel: Record<MediaFilter, string> = {
 
 export function StoryboardLibraryPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const embedded = new URLSearchParams(location.search).get('embedded') === '1';
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.loadProjects);
   const [query, setQuery] = useState('');
@@ -131,18 +134,24 @@ export function StoryboardLibraryPage() {
     setMediaFilter('all');
   };
 
-  const openEditor = (projectId: string, sceneId: string) => {
-    navigate(`/editor?projectId=${encodeURIComponent(projectId)}&sceneId=${encodeURIComponent(sceneId)}`);
+  const openEditor = (projectId?: string, sceneId?: string) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (sceneId) params.set('sceneId', sceneId);
+    if (embedded) params.set('embedded', '1');
+    navigate(`/editor?${params.toString()}`);
   };
 
   return (
     <div className="sb-page">
       <header className="sb-header">
         <div className="sb-header-inner">
-          <button className="sb-back" onClick={() => navigate('/chat')} title="返回对话">
-            <ArrowLeft size={18} strokeWidth={1.8} />
-            <span>返回对话</span>
-          </button>
+          {!embedded && (
+            <button className="sb-back" onClick={() => navigate('/chat')} title="返回对话">
+              <ArrowLeft size={18} strokeWidth={1.8} />
+              <span>返回对话</span>
+            </button>
+          )}
           <div className="sb-title-wrap">
             <span className="sb-title-icon"><Clapperboard size={20} strokeWidth={1.8} /></span>
             <div>
@@ -166,17 +175,19 @@ export function StoryboardLibraryPage() {
             >
               <RefreshCw size={17} strokeWidth={1.8} className={loading ? 'sb-spin' : undefined} />
             </button>
-            <button
-              className="sb-primary"
-              onClick={() => {
-                const first = allEntries[0];
-                if (first) openEditor(first.project.id, first.scene.id);
-                else navigate('/editor');
-              }}
-            >
-              <FolderOpen size={16} strokeWidth={1.8} />
-              打开编辑器
-            </button>
+            {!embedded && (
+              <button
+                className="sb-primary"
+                onClick={() => {
+                  const first = allEntries[0];
+                  if (first) openEditor(first.project.id, first.scene.id);
+                  else openEditor();
+                }}
+              >
+                <FolderOpen size={16} strokeWidth={1.8} />
+                打开编辑器
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -261,7 +272,9 @@ export function StoryboardLibraryPage() {
               <p>{allEntries.length === 0 ? '在对话中生成分镜后，它们会汇集到这里。' : '尝试更换关键词或筛选条件。'}</p>
               <div className="sb-empty-actions">
                 <button className="sb-secondary" onClick={resetFilters}>清除筛选</button>
-                <button className="sb-primary" onClick={() => navigate('/chat')}>返回对话</button>
+                {!embedded && (
+                  <button className="sb-primary" onClick={() => navigate('/chat')}>返回对话</button>
+                )}
               </div>
             </div>
           )}
@@ -275,7 +288,7 @@ export function StoryboardLibraryPage() {
                 </div>
                 <div className="sb-project-meta">
                   <span>{entries.length} 个分镜</span>
-                  <button onClick={() => navigate(`/editor?projectId=${encodeURIComponent(project.id)}`)}>
+                  <button onClick={() => openEditor(project.id)}>
                     打开项目
                     <ExternalLink size={13} strokeWidth={1.9} />
                   </button>
@@ -304,6 +317,7 @@ export function StoryboardLibraryPage() {
           onOpenEditor={() => openEditor(selectedEntry.project.id, selectedEntry.scene.id)}
         />
       )}
+      {embedded && <MobileBottomNav embeddedEditor />}
     </div>
   );
 }

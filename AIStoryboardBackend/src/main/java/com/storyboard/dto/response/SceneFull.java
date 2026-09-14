@@ -9,6 +9,7 @@ import java.time.OffsetDateTime;
 public record SceneFull(
     String id,
     String projectId,
+    String conversationId,
     Integer sceneNumber,
     String scriptContent,
     String imagePrompt,

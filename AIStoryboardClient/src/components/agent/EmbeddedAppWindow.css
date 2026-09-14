@@ -1,0 +1,225 @@
+.embedded-app-window {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 180;
+  min-width: 360px;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 14px;
+  background: #f7f6f2;
+  box-shadow: 0 24px 70px rgba(15, 17, 21, 0.2);
+  animation: embedded-app-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.embedded-app-window.is-fullscreen {
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.embedded-app-window__header {
+  flex-shrink: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px 5px 6px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.embedded-app-window__tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.embedded-app-window__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.embedded-app-window__tab {
+  min-width: 94px;
+  max-width: 150px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.embedded-app-window__tab.is-active {
+  border-color: var(--color-hairline);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  box-shadow: 0 1px 4px rgba(15, 17, 21, 0.06);
+}
+
+.embedded-app-window__tab > button:first-child {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.embedded-app-window__tab > button:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embedded-app-window__tab-close {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.embedded-app-window__tab-close:hover {
+  background: rgba(217, 45, 32, 0.08);
+  color: rgb(217, 45, 32);
+}
+
+.embedded-app-window__actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.embedded-app-window__actions button {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.embedded-app-window__actions button:hover {
+  background: var(--color-surface-soft);
+  color: var(--color-primary);
+}
+
+.embedded-app-window__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  background: #ebe9e3;
+}
+
+.embedded-app-window__frame {
+  position: absolute;
+  inset: 8px;
+  display: none;
+  overflow: hidden;
+  border-radius: 9px;
+  background: white;
+}
+
+.embedded-app-window__frame.is-active {
+  display: block;
+}
+
+.embedded-app-window.is-fullscreen .embedded-app-window__frame {
+  inset: 0;
+  border-radius: 0;
+}
+
+.embedded-app-window__frame iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: white;
+}
+
+.embedded-app-window__loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(247, 246, 242, 0.94);
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.embedded-app-window__resize {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-muted);
+  cursor: nesw-resize;
+  box-shadow: 0 2px 8px rgba(15, 17, 21, 0.12);
+}
+
+@keyframes embedded-app-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .embedded-app-window {
+    animation: none;
+  }
+}

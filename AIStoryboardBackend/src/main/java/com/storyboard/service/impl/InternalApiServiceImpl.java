@@ -65,6 +65,7 @@ public class InternalApiServiceImpl implements InternalApiService {
         for (SceneFull s : scenes) {
             Scene scene = new Scene();
             scene.setProjectId(s.projectId());
+            scene.setConversationId(s.conversationId());
             scene.setSceneNumber(s.sceneNumber());
             scene.setImageUrl(s.imageUrl());
             scene.setVideoUrl(s.videoUrl());
@@ -174,6 +175,7 @@ public class InternalApiServiceImpl implements InternalApiService {
         Scene scene = new Scene();
         scene.setId(sceneId);
         if (s.projectId() != null) scene.setProjectId(s.projectId());
+        if (s.conversationId() != null) scene.setConversationId(s.conversationId());
         if (s.imageUrl() != null) scene.setImageUrl(s.imageUrl());
         if (s.videoUrl() != null) scene.setVideoUrl(s.videoUrl());
         if (s.imageStatus() != null) scene.setImageStatus(s.imageStatus());
@@ -264,7 +266,7 @@ public class InternalApiServiceImpl implements InternalApiService {
 
     private SceneFull toFull(Scene s, ScenePrompt p) {
         return new SceneFull(
-            s.getId(), s.getProjectId(), s.getSceneNumber(),
+            s.getId(), s.getProjectId(), s.getConversationId(), s.getSceneNumber(),
             p != null ? p.getScriptContent() : null,
             p != null ? p.getImagePrompt() : null,
             p != null ? p.getVideoPrompt() : null,

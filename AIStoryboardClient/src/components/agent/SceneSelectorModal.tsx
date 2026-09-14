@@ -190,7 +190,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
               opacity: selected.size === 0 ? 0.5 : 1,
             }}
           >
-            发送给 Moon 智能体（{selected.size}）
+            进入分镜审核（{selected.size}）
           </button>
         </div>
       </div>

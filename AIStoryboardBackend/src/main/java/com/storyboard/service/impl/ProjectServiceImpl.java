@@ -110,7 +110,7 @@ public class ProjectServiceImpl implements ProjectService {
         List<SceneResponse> sceneResponses = scenes.stream().map(s -> {
             ScenePrompt p = prompts.get(s.getId());
             return new SceneResponse(
-            s.getId(), s.getProjectId(), s.getSceneNumber(),
+            s.getId(), s.getProjectId(), s.getConversationId(), s.getSceneNumber(),
             p != null ? p.getScriptContent() : null,
             p != null ? p.getImagePrompt() : null,
             p != null ? p.getVideoPrompt() : null,

@@ -11,18 +11,17 @@ import { HumanInputCard } from './HumanInputCard';
 import { SceneReviewCard } from './SceneReviewCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
-import { AgentAssetsModal } from './AgentAssetsPanel';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
 import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
 import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
-import { Folder, Paperclip } from 'lucide-react';
+import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, assets, loadAssets, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -32,8 +31,6 @@ export function AgentChatPanel() {
   // 镜像 text 供回调读取（避免 useCallback 闭包陈旧）
   const textRef = useRef('');
   textRef.current = text;
-  // 产出素材弹窗（文件夹图标入口，素材不再常驻底部）
-  const [assetsOpen, setAssetsOpen] = useState(false);
   // "+" 菜单状态
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
@@ -232,22 +229,6 @@ export function AgentChatPanel() {
         >
           {currentTitle}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* 文件夹图标：查看当前对话的产出素材（弹窗） */}
-          <button
-            onClick={() => { setAssetsOpen(true); void loadAssets(); }}
-            disabled={!activeConversationId}
-            title="查看当前对话的产出素材"
-            style={{
-              border: 'none', background: 'none', color: 'var(--color-muted)',
-              fontSize: 14, cursor: activeConversationId ? 'pointer' : 'not-allowed',
-              padding: '4px 8px', borderRadius: 6, opacity: activeConversationId ? 1 : 0.4,
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            <Folder size={13} strokeWidth={1.8} /> 产出素材{assets && (assets.mediaTotal ?? assets.total) > 0 ? ` (${assets.mediaTotal ?? assets.total})` : ''}
-          </button>
-        </div>
       </div>
 
       {/* 消息流 */}
@@ -452,8 +433,6 @@ export function AgentChatPanel() {
         </div>
       </div>
 
-      {/* 产出素材弹窗（文件夹图标入口） */}
-      <AgentAssetsModal open={assetsOpen} onClose={() => setAssetsOpen(false)} />
       {/* 分镜选择弹窗 */}
       <SceneSelectorModal
         open={sceneModalOpen}

@@ -1,14 +1,45 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import { LayoutList } from 'lucide-react';
 
 interface MobileBottomNavProps {
-  onOpenAssets: () => void;
+  onOpenAssets?: () => void;
+  embeddedEditor?: boolean;
 }
 
 /** 手机端底部 Tab 栏：聊天 | 分镜 | AI资产库 */
-export function MobileBottomNav({ onOpenAssets }: MobileBottomNavProps) {
+export function MobileBottomNav({ onOpenAssets, embeddedEditor = false }: MobileBottomNavProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
+  const embeddedParams = new URLSearchParams(location.search);
+  embeddedParams.set('embedded', '1');
+  const embeddedQuery = embeddedParams.toString();
+  const embeddedEditorPath = `/editor?${embeddedQuery}`;
+  const embeddedLibraryPath = `/chat/storyboards?${embeddedQuery}`;
+
+  if (embeddedEditor) {
+    return (
+      <div style={{
+        height: 56, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-around',
+        borderTop: '1px solid var(--color-hairline)',
+        background: 'white',
+      }}>
+        <TabBtn
+          active={location.pathname === '/editor'}
+          onClick={() => navigate(embeddedEditorPath)}
+          label="分镜"
+          icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" /><line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" /><line x1="2" y1="12" x2="22" y2="12" /></svg>}
+        />
+        <TabBtn
+          active={location.pathname === '/chat/storyboards'}
+          onClick={() => navigate(embeddedLibraryPath)}
+          label="分镜库"
+          icon={<LayoutList size={20} strokeWidth={1.8} />}
+        />
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -31,7 +62,7 @@ export function MobileBottomNav({ onOpenAssets }: MobileBottomNavProps) {
       />
       <TabBtn
         active={false}
-        onClick={onOpenAssets}
+        onClick={() => onOpenAssets?.()}
         label="AI资产库"
         icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7l2 3h9v13H3z" /></svg>}
       />

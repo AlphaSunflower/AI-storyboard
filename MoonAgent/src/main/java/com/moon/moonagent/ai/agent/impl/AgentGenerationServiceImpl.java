@@ -56,6 +56,11 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
 
     /** 覆盖写分镜：先清空现有再按 1..N 连续编号批量写入（HTTP 两步调用，非事务） */
     public int replaceScript(String projectId, List<AgentSceneItem> scenes) {
+        return replaceScript(projectId, null, scenes);
+    }
+
+    @Override
+    public int replaceScript(String projectId, String conversationId, List<AgentSceneItem> scenes) {
         storyboardClient.deleteProjectScenes(projectId);
         if (scenes == null || scenes.isEmpty()) return 0;
         List<AgentSceneItem> normalized = new ArrayList<>(scenes.size());
@@ -65,16 +70,22 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
                     item.videoPrompt(), item.negativePrompt(), item.cameraMovement(),
                     item.shotType(), item.soundDesign(), item.duration()));
         }
-        return writeScript(projectId, normalized);
+        return writeScript(projectId, conversationId, normalized);
     }
 
     /** 批量写分镜（HTTP 批量插入） */
     public int writeScript(String projectId, List<AgentSceneItem> scenes) {
+        return writeScript(projectId, null, scenes);
+    }
+
+    @Override
+    public int writeScript(String projectId, String conversationId, List<AgentSceneItem> scenes) {
         if (scenes == null || scenes.isEmpty()) return 0;
         List<Scene> batch = new ArrayList<>();
         for (var item : scenes) {
             Scene scene = new Scene();
             scene.setProjectId(projectId);
+            scene.setConversationId(conversationId);
             scene.setSceneNumber(item.sceneNumber());
             scene.setScriptContent(item.scriptContent());
             scene.setImagePrompt(item.imagePrompt());
@@ -98,6 +109,11 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
      */
     @Override
     public int updateScenesByNumber(String projectId, List<AgentSceneItem> scenes) {
+        return updateScenesByNumber(projectId, null, scenes);
+    }
+
+    @Override
+    public int updateScenesByNumber(String projectId, String conversationId, List<AgentSceneItem> scenes) {
         if (scenes == null || scenes.isEmpty()) return 0;
         Map<Integer, Scene> byNumber = new HashMap<>();
         for (Scene s : storyboardClient.getProjectScenes(projectId)) {
@@ -107,6 +123,7 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         for (var item : scenes) {
             Scene newScene = new Scene();
             newScene.setProjectId(projectId);
+            newScene.setConversationId(conversationId);
             newScene.setSceneNumber(item.sceneNumber());
             newScene.setScriptContent(item.scriptContent());
             newScene.setImagePrompt(item.imagePrompt());

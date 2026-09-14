@@ -20,8 +20,14 @@ public interface AgentGenerationService {
     /** 批量写分镜（宽松 items 直接透传）；批量插入需保证原子性 */
     int writeScript(String projectId, List<AgentSceneItem> scenes);
 
+    /** 批量写分镜并记录来源对话。 */
+    int writeScript(String projectId, String conversationId, List<AgentSceneItem> scenes);
+
     /** 覆盖写分镜：同一事务内先清空项目现有分镜再批量写入（避免中途失败丢失现有分镜） */
     int replaceScript(String projectId, List<AgentSceneItem> scenes);
+
+    /** 覆盖写分镜并记录来源对话。 */
+    int replaceScript(String projectId, String conversationId, List<AgentSceneItem> scenes);
 
     /**
      * 只替换指定 scene_number 的分镜（部分替换）：更新这些编号的现有分镜（保留 id 与素材关联），
@@ -31,6 +37,9 @@ public interface AgentGenerationService {
      * @return 被更新/插入的分镜数
      */
     int updateScenesByNumber(String projectId, List<AgentSceneItem> scenes);
+
+    /** 部分替换并记录来源对话。 */
+    int updateScenesByNumber(String projectId, String conversationId, List<AgentSceneItem> scenes);
 
     /**
      * 生图并落库（支持 quality/n 多张）。

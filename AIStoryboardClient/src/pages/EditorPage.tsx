@@ -8,7 +8,7 @@ import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { ToastContainer } from '../components/common/Toast';
 import { AgentFab } from '../components/agent/AgentFab';
 import { MoonAgentWindow } from '../components/agent/MoonAgentWindow';
-import { TaskFab } from '../components/common/TaskFab';
+import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
 import { MobileSceneList } from '../components/editor/MobileSceneList';
 import { MobileScenePreview } from '../components/editor/MobileScenePreview';
@@ -25,6 +25,7 @@ import type { ProjectResponse } from '../api/projects';
 export function EditorPage() {
   const { loadProjects, checkDraft, loadProject, fetchAiModels, createProject, selectScene } = useProjectStore();
   const isMobile = useIsMobile();
+  const embedded = new URLSearchParams(window.location.search).get('embedded') === '1';
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [draftProject, setDraftProject] = useState<ProjectResponse | null>(null);
   const [middleWidth, setMiddleWidth] = useState(380);
@@ -134,17 +135,27 @@ export function EditorPage() {
     return (
       <div className="page-in" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden', animation: 'page-in 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}>
         <AmbientGlow />
-        <MobileEditorHeader onMenuClick={() => setSidebarOpen(true)} onScript={() => setScriptOpen(true)} />
+        <MobileEditorHeader
+          showMenu={!embedded}
+          onMenuClick={() => setSidebarOpen(true)}
+          onScript={() => setScriptOpen(true)}
+        />
 
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {mobileView === 'list' ? (
-            <MobileSceneList onSelectScene={(id) => { selectScene(id); setMobileView('preview'); }} />
+            <MobileSceneList
+              embedded={embedded}
+              onSelectScene={(id) => { selectScene(id); setMobileView('preview'); }}
+            />
           ) : (
             <MobileScenePreview onBack={() => setMobileView('list')} />
           )}
         </div>
 
-        <MobileBottomNav onOpenAssets={() => setAssetsOpen(true)} />
+        <MobileBottomNav
+          embeddedEditor={embedded}
+          onOpenAssets={() => setAssetsOpen(true)}
+        />
 
         {/* 侧栏 overlay（复用 /chat） */}
         {sidebarOpen && (
@@ -235,8 +246,8 @@ export function EditorPage() {
       {/* 智能体窗口 */}
       <AgentFab />
       <MoonAgentWindow />
-      {/* 任务中心悬浮球（右下角 ☾ 上方，聚合进行中的生成任务） */}
-      <TaskFab />
+      {/* 生成中心（右下角 ☾ 上方，统一查看任务与产出素材） */}
+      <GenerationCenterPanel />
     </div>
   );
 }

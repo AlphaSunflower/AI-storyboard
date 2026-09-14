@@ -202,7 +202,7 @@ class BackendControllerSmokeTest {
 
     @Test
     void sceneEndpoints_requireAuth_andReturnContract() throws Exception {
-        SceneResponse scene = new SceneResponse("s1", "p1", 1, "内容", "图", "视频", null, null,
+        SceneResponse scene = new SceneResponse("s1", "p1", null, 1, "内容", "图", "视频", null, null,
             null, null, null, null, null, null, null, null, null, null, null, null, null, null,
             null, null, null, null, null);
         when(sceneService.addScene(anyString(), anyString(), any())).thenReturn(scene);
@@ -343,7 +343,7 @@ class BackendControllerSmokeTest {
 
         Project project = new Project();
         project.setId("p1");
-        SceneFull scene = new SceneFull("s1", "p1", 1, null, null, null, null, null,
+        SceneFull scene = new SceneFull("s1", "p1", null, 1, null, null, null, null, null,
             null, null, null, null, null, null, null, null, null, null, null, null,
             null, null, null, null, null, null, null, null);
         SceneAsset sceneAsset = new SceneAsset();

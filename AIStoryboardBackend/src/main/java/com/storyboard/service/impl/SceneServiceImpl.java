@@ -247,7 +247,7 @@ public class SceneServiceImpl implements SceneService {
 
     private SceneResponse toResponse(Scene s, ScenePrompt p) {
         return new SceneResponse(
-            s.getId(), s.getProjectId(), s.getSceneNumber(),
+            s.getId(), s.getProjectId(), s.getConversationId(), s.getSceneNumber(),
             p != null ? p.getScriptContent() : null,
             p != null ? p.getImagePrompt() : null,
             p != null ? p.getVideoPrompt() : null,

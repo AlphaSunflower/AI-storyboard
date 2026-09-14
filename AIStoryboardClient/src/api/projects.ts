@@ -30,6 +30,7 @@ export interface SceneReferenceAsset {
 export interface SceneResponse {
   id: string;
   projectId: string;
+  conversationId?: string | null;
   sceneNumber: number;
   scriptContent: string;
   imagePrompt: string;

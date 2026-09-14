@@ -13,6 +13,7 @@ import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
+import { buildSceneReviewPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -60,6 +61,7 @@ export function ChatComposer() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const [dropActive, setDropActive] = useState(false);
+  const [dragKind, setDragKind] = useState<'file' | 'scene' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -183,30 +185,47 @@ export function ChatComposer() {
   };
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
+    const hasFiles = e.dataTransfer.types.includes('Files');
+    const hasScenes = e.dataTransfer.types.includes(SCENE_DRAG_MIME);
+    if (!hasFiles && !hasScenes) return;
     e.preventDefault();
     dragDepthRef.current += 1;
     setDropActive(true);
+    setDragKind(hasScenes ? 'scene' : 'file');
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
+    if (!e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   const handleDragLeave = useCallback(() => {
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setDropActive(false);
+    if (dragDepthRef.current === 0) {
+      setDropActive(false);
+      setDragKind(null);
+    }
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     dragDepthRef.current = 0;
     setDropActive(false);
+    setDragKind(null);
+    const scenePayload = e.dataTransfer.getData(SCENE_DRAG_MIME) || e.dataTransfer.getData('text/plain');
+    if (scenePayload) {
+      try {
+        const references = JSON.parse(scenePayload) as EmbeddedSceneReference[];
+        if (Array.isArray(references) && references.length > 0) {
+          sendMessage(buildSceneReviewPrompt(references), { routingHint: 'intent-scene-review' });
+          return;
+        }
+      } catch { /* 无效拖拽数据按普通文件拖拽处理 */ }
+    }
     const files = Array.from(e.dataTransfer.files ?? []).filter((file) => file.type.startsWith('image/'));
     if (files.length > 0) void uploadRefImages(files);
-  }, [uploadRefImages]);
+  }, [sendMessage, uploadRefImages]);
 
   const openMenu = () => {
     const btn = menuBtnRef.current;
@@ -218,13 +237,8 @@ export function ChatComposer() {
   };
 
   const handleSceneConfirm = (selected: SceneResponse[]) => {
-    const summary = selected.map((s) => {
-      const desc = s.scriptContent?.slice(0, 60) || '无描述';
-      const img = s.imageUrl ? '[已有图]' : '[未生图]';
-      const vid = s.videoUrl ? '[已有视频]' : '[未生视频]';
-      return `分镜${s.sceneNumber}（${img}${vid}）：${desc}`;
-    }).join('\n');
-    sendMessage(`请分析以下分镜并给出优化和生成建议：\n${summary}`);
+    const sceneRefs = selected.map((scene) => `分镜${scene.sceneNumber}`).join('、');
+    sendMessage(`请审查 ${sceneRefs}`, { routingHint: 'intent-scene-review' });
     setSceneModalOpen(false);
   };
 
@@ -367,7 +381,7 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={dropActive ? '松开鼠标上传图片' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : '松开鼠标上传图片') : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={busy}
         rows={2}
         style={{
@@ -435,7 +449,8 @@ export function ChatComposer() {
               style={{
                 height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
                 background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-                cursor: busy || !text.trim() ? 'not-allowed' : 'pointer', opacity: busy || !text.trim() ? 0.45 : 1,
+                cursor: busy || !text.trim() ? 'not-allowed' : 'pointer',
+                opacity: busy || !text.trim() ? 0.45 : 1,
                 transition: 'background 0.15s',
               }}
               onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}

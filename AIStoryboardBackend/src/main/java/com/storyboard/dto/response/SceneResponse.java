@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 public record SceneResponse(
     String id,
     String projectId,
+    String conversationId,
     Integer sceneNumber,
     String scriptContent,
     String imagePrompt,

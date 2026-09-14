@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
@@ -9,8 +8,8 @@ import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
 import { isSceneReview } from '../components/agent/SceneReviewCard';
-import { TaskQueuePanel } from '../components/agent/TaskQueuePanel';
-import { AgentAssetsModal } from '../components/agent/AgentAssetsPanel';
+import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
+import { EmbeddedAppWindow, type EmbeddedAppDescriptor } from '../components/agent/EmbeddedAppWindow';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
@@ -20,13 +19,16 @@ import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
 import { Moon } from 'lucide-react';
-import { X, Folder, FolderKanban, PanelLeftClose, ChevronDown, ChevronRight, Info, Frame, History, PenLine, LayoutGrid, Layers, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
+import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, Frame, PenLine, LayoutGrid, User, LogOut, ArrowDown, FileText, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { useDragSnap } from '../hooks/useDragSnap';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
+import {
+  buildSceneReviewPrompt,
+  isStoryboardReferenceMessage,
+} from '../lib/embeddedAppMessages';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
 
@@ -40,7 +42,6 @@ const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boole
  * 首次对话 = 名称居中 + hero 输入卡；有会话 = 头部名称 + 748px 消息列 + 底部输入卡。
  */
 export function ChatPage() {
-  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
@@ -49,15 +50,18 @@ export function ChatPage() {
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
-    confirmResult, assets, loadAssets, conversations, activeConversationId,
+    confirmResult, conversations, activeConversationId,
     renameConversation,
   } = useAgentStore();
   const [assetsOpen, setAssetsOpen] = useState(false);       // AI资产库（rail 🧩）
-  const [assetsModalOpen, setAssetsModalOpen] = useState(false); // 产出素材（会话头部 📁）
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
+  const [embeddedAppTabs, setEmbeddedAppTabs] = useState<EmbeddedAppDescriptor[]>([]);
+  const [activeEmbeddedAppKey, setActiveEmbeddedAppKey] = useState<EmbeddedAppDescriptor['key'] | null>(null);
+  const [embeddedAppLayout, setEmbeddedAppLayout] = useState({ width: 420, height: 0, fullscreen: false });
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -78,21 +82,117 @@ export function ChatPage() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
-  // 进入画布：携带 ai分镜 access token（与画布同 JWT secret）+ userId/name 跳转 Morrow（无需再登录）
-  const openCanvas = () => {
+  const buildCanvasTab = useCallback((): EmbeddedAppDescriptor | null => {
     const token = localStorage.getItem('accessToken');
-    if (!token) return;
-    let userId = ''; let name = '';
-    try { const u = JSON.parse(localStorage.getItem('user') ?? '{}') as { userId?: string; displayName?: string }; userId = u.userId ?? ''; name = u.displayName ?? ''; } catch { /* ignore */ }
+    if (!token) return null;
+    let userId = '';
+    let name = '';
+    try {
+      const userInfo = JSON.parse(localStorage.getItem('user') ?? '{}') as { userId?: string; displayName?: string };
+      userId = userInfo.userId ?? '';
+      name = userInfo.displayName ?? '';
+    } catch { /* ignore */ }
     const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:3000';
     const params = new URLSearchParams({ token });
     if (userId) params.set('userId', userId);
     if (name) params.set('name', name);
-    // 携带当前项目 id → 画布落到位（画布 App 读 #project= hash 自动打开该项目，供用户选画布）
     const projectId = currentProject?.id;
     const hash = projectId ? `#project=${encodeURIComponent(projectId)}` : '';
-    window.open(`${base}?${params.toString()}${hash}`, '_blank');
+    return { key: 'canvas', title: '画布', url: `${base}?${params.toString()}${hash}`, projectId };
+  }, [currentProject?.id]);
+
+  const buildEditorTab = useCallback((): EmbeddedAppDescriptor | null => {
+    if (!currentProject?.id) return null;
+    const params = new URLSearchParams({ embedded: '1', projectId: currentProject.id });
+    return {
+      key: 'editor',
+      title: currentProject.name ? `分镜编辑器 · ${currentProject.name}` : '分镜编辑器',
+      url: `/editor?${params.toString()}`,
+      projectId: currentProject.id,
+    };
+  }, [currentProject?.id, currentProject?.name]);
+
+  // 应用子窗加载对应路径；画布通过 URL 注入 ai分镜 token，避免在 iframe 内再次登录。
+  const openEmbeddedApp = (key: EmbeddedAppDescriptor['key']) => {
+    let nextTab: EmbeddedAppDescriptor | null;
+    if (key === 'canvas') nextTab = buildCanvasTab();
+    else if (key === 'editor') nextTab = buildEditorTab();
+    else nextTab = { key: 'docs', title: '使用文档', url: '/docs' };
+    if (!nextTab) return;
+    setEmbeddedAppTabs((tabs) => {
+      const existing = tabs.findIndex((tab) => tab.key === key);
+      if (existing < 0) return [...tabs, nextTab];
+      return tabs.map((tab) => tab.key === key ? nextTab : tab);
+    });
+    setActiveEmbeddedAppKey(key);
   };
+
+  // 切换项目时同步已打开的项目型子网站；文档标签不受影响。
+  useEffect(() => {
+    setEmbeddedAppTabs((tabs) => {
+      if (tabs.length === 0) return tabs;
+      let changed = false;
+      const nextTabs = tabs.map((tab) => {
+        if (tab.key === 'editor') {
+          const next = buildEditorTab();
+          if (next && next.url !== tab.url) {
+            changed = true;
+            return next;
+          }
+        } else if (tab.key === 'canvas') {
+          const next = buildCanvasTab();
+          if (next && next.url !== tab.url) {
+            changed = true;
+            return next;
+          }
+        }
+        return tab;
+      });
+      return changed ? nextTabs : tabs;
+    });
+  }, [buildCanvasTab, buildEditorTab]);
+
+  const activeEmbeddedApp = embeddedAppTabs.find((tab) => tab.key === activeEmbeddedAppKey) ?? null;
+  const appWindowOpen = Boolean(activeEmbeddedApp && !embeddedAppLayout.fullscreen);
+  const contentRightReserve = appWindowOpen
+    ? Math.max(embeddedAppLayout.width + 32, generationCenterOpen ? 420 : 0)
+    : (generationCenterOpen ? 420 : 0);
+
+  const closeEmbeddedApp = useCallback(() => {
+    setEmbeddedAppTabs([]);
+    setActiveEmbeddedAppKey(null);
+    setEmbeddedAppLayout((current) => ({ ...current, fullscreen: false }));
+  }, []);
+
+  const closeEmbeddedTab = (key: string) => {
+    const closingIndex = embeddedAppTabs.findIndex((tab) => tab.key === key);
+    if (closingIndex < 0) return;
+    const nextTabs = embeddedAppTabs.filter((tab) => tab.key !== key);
+    setEmbeddedAppTabs(nextTabs);
+    if (activeEmbeddedAppKey === key) {
+      setActiveEmbeddedAppKey(nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.key ?? null);
+    }
+    if (nextTabs.length === 0) {
+      setEmbeddedAppLayout((current) => ({ ...current, fullscreen: false }));
+    }
+  };
+
+  // 编辑器 iframe 提交分镜后，直接进入指定分镜审核并关闭应用窗口。
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || !isStoryboardReferenceMessage(event.data)) return;
+      const sourceMatches = Array.from(document.querySelectorAll('iframe'))
+        .some((frame) => frame.contentWindow === event.source);
+      if (!sourceMatches) return;
+      if (!currentProject?.id || event.data.projectId !== currentProject.id) return;
+      void useAgentStore.getState().sendMessage(
+        buildSceneReviewPrompt(event.data.scenes),
+        { routingHint: 'intent-scene-review' },
+      );
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [currentProject?.id]);
 
   // 登录守卫 + iframe 自登录（/chat?embed=1&token=&userId=&name=）：跨端口 iframe 靠 URL 注入 token
   useEffect(() => {
@@ -231,7 +331,6 @@ export function ChatPage() {
         <MobileHeader
           title={currentTitle}
           onMenuClick={() => setMobileSidebarOpen(true)}
-          onOpenStoryboards={() => navigate('/chat/storyboards')}
           onNewConversation={handleMobileNewConversation}
         />
 
@@ -368,7 +467,6 @@ export function ChatPage() {
 
         {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
         {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
-        <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
@@ -486,11 +584,11 @@ export function ChatPage() {
           />
         </div>
 
-        {/* 底部：用户资料 + 退出登录（替代原设置菜单） */}
+        {/* 底部：用户资料 + 退出登录 */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 4,
           padding: '6px 10px', borderTop: '1px solid var(--color-hairline)',
         }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button
             onClick={() => setProfileOpen(true)}
             title="个人信息"
@@ -517,6 +615,7 @@ export function ChatPage() {
           >
             <LogOut size={18} strokeWidth={1.8} />
           </button>
+          </div>
         </div>
       </div>
       )}
@@ -570,40 +669,24 @@ export function ChatPage() {
       )}
 
       {/* ── 主对话区 ── */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+        }}
+      >
         {isEmpty ? (
           /* 首次对话 hero：名称居中 + 输入卡居中（DeepSeek harness 空态） */
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 28, padding: '0 16px',
+            alignItems: 'center', justifyContent: 'center', gap: 28,
+            paddingLeft: 16,
+            paddingRight: !embed ? contentRightReserve + 16 : 16,
+            transition: 'padding-right 0.22s ease',
           }}>
-            {/* 顶部一级入口：分镜库 + 生成记录（空态 hero 也可用） */}
-            <div style={{ position: 'absolute', top: 10, right: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
-              {!embed && (
-                <button
-                  onClick={() => navigate('/chat/storyboards')}
-                  title="查看全部分镜"
-                  style={{
-                    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 13,
-                    cursor: 'pointer', padding: '6px 10px', borderRadius: 8,
-                    display: 'flex', alignItems: 'center', gap: 4,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Layers size={15} strokeWidth={1.8} /> 分镜库</button>
-              )}
-              <button
-                onClick={() => setRecordsOpen(true)}
-                title="生成记录"
-                style={{
-                  border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 13,
-                  cursor: 'pointer', padding: '6px 10px', borderRadius: 8,
-                  display: 'flex', alignItems: 'center', gap: 4,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-              ><History size={15} strokeWidth={1.8} /> 生成记录</button>
-            </div>
             {embed && (
               <button
                 onClick={() => setEmbedConvOpen(true)}
@@ -646,6 +729,8 @@ export function ChatPage() {
             <div style={{
               padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+              paddingRight: !embed ? contentRightReserve + 16 : 12,
+              transition: 'padding-right 0.22s ease',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                 {embed && (
@@ -691,15 +776,11 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {!embed && (
-                  <button
-                    onClick={() => navigate('/chat/storyboards')}
-                    title="查看全部分镜"
-                    style={headerBtn(1, 14)}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                  ><Layers size={16} strokeWidth={1.8} /> 分镜库</button>
-                )}
+                <AppSwitcher
+                  onCanvas={() => openEmbeddedApp('canvas')}
+                  onEditor={() => openEmbeddedApp('editor')}
+                  onDocs={() => openEmbeddedApp('docs')}
+                />
                 <button
                   onClick={() => setAssetsOpen(true)}
                   title="AI资产库"
@@ -707,20 +788,6 @@ export function ChatPage() {
                   onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
                 ><Library size={16} strokeWidth={1.8} /> AI资产库</button>
-                <button
-                  onClick={() => setRecordsOpen(true)}
-                  title="生成记录"
-                  style={headerBtn(1, embed ? 12 : 14)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><History size={16} strokeWidth={1.8} /> 生成记录</button>
-                <button
-                  onClick={() => { setAssetsModalOpen(true); void loadAssets(); }}
-                  disabled={!activeConversationId}
-                  style={headerBtn(activeConversationId ? 1 : 0.4, embed ? 12 : 14)}
-                  onMouseEnter={(e) => { if (activeConversationId) { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; } }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Folder size={16} strokeWidth={1.8} /> 产出素材{assets && (assets.mediaTotal ?? assets.total) > 0 ? ` (${assets.mediaTotal ?? assets.total})` : ''}</button>
               </div>
             </div>
 
@@ -732,7 +799,14 @@ export function ChatPage() {
                 nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
                 setShowScrollDown(!nearBottomRef.current && messages.length > 0);
               }}
-              style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                background: 'white',
+                paddingRight: !embed ? contentRightReserve : 0,
+                transition: 'padding-right 0.22s ease',
+              }}
             >
               <div style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}>
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
@@ -788,7 +862,12 @@ export function ChatPage() {
             </div>
 
             {/* 底部输入卡 */}
-            <div style={{ padding: '8px 16px 16px', background: 'white' }}>
+            <div style={{
+              padding: '8px 16px 16px',
+              paddingRight: !embed ? contentRightReserve + 16 : 16,
+              background: 'white',
+              transition: 'padding-right 0.22s ease',
+            }}>
               <ChatComposer />
             </div>
           </>
@@ -799,7 +878,9 @@ export function ChatPage() {
             title="回到最新"
             aria-label="回到最新"
             style={{
-              position: 'absolute', bottom: 176, left: '50%', transform: 'translateX(-50%)', zIndex: 60,
+              position: 'absolute', bottom: 176,
+              left: !embed && contentRightReserve ? `calc(50% - ${contentRightReserve / 2}px)` : '50%',
+              transform: 'translateX(-50%)', zIndex: 60,
               width: 34, height: 34, borderRadius: '50%',
               border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)',
               cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
@@ -814,9 +895,23 @@ export function ChatPage() {
 
       {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
       {profileOpen && <PersonalInfoModal onClose={() => setProfileOpen(false)} />}
-      <AgentAssetsModal open={assetsModalOpen} onClose={() => setAssetsModalOpen(false)} />
-      {!embed && <AppLauncher onCanvas={openCanvas} onEditor={() => navigate('/editor')} onDocs={() => navigate('/docs')} />}
-      {!embed && <TaskQueuePanel />}
+      {!embed && !embeddedAppLayout.fullscreen && (
+        <GenerationCenterPanel
+          onOpenChange={setGenerationCenterOpen}
+          bottom={appWindowOpen ? 20 : 104}
+          onOpenRecords={() => setRecordsOpen(true)}
+        />
+      )}
+      {!embed && embeddedAppTabs.length > 0 && activeEmbeddedAppKey && (
+        <EmbeddedAppWindow
+          tabs={embeddedAppTabs}
+          activeKey={activeEmbeddedAppKey}
+          onSelectTab={(key) => setActiveEmbeddedAppKey(key as EmbeddedAppDescriptor['key'])}
+          onCloseTab={closeEmbeddedTab}
+          onCloseWindow={closeEmbeddedApp}
+          onLayoutChange={setEmbeddedAppLayout}
+        />
+      )}
     </div>
     <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
     <ConversationSearchModal
@@ -836,79 +931,127 @@ function headerBtn(opacity: number, fontSize = 14): React.CSSProperties {
   };
 }
 
-/** /chat 右上角悬浮「应用」窗口：画布 + 分镜编辑器 + 使用文档（替代原头部按钮与设置菜单入口） */
-function AppLauncher({ onCanvas, onEditor, onDocs }: { onCanvas: () => void; onEditor: () => void; onDocs: () => void }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const drag = useDragSnap(() => setCollapsed(false));
-  const btnBase: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-    padding: '9px 12px', border: '1px solid var(--color-hairline)', borderRadius: 10,
-    background: 'var(--color-canvas)', color: 'var(--color-ink)', fontSize: 13, fontWeight: 500,
-    cursor: 'pointer', textAlign: 'left', transition: 'border-color 0.15s, background 0.15s, color 0.15s',
-  };
-  // 收起态：应用 方形按钮（与任务列表一致）
-  if (collapsed) {
-    return (
-      <button
-        onClick={drag.onClick}
-        onMouseDown={(e) => { e.stopPropagation(); drag.onMouseDown(e); }}
-        title="应用"
-        style={{
-          position: 'fixed', top: 68, right: 16, zIndex: 120,
-          width: 76, height: 76, boxSizing: 'border-box',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
-          border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)',
-          fontSize: 12, fontWeight: 500, cursor: 'pointer', borderRadius: 16, boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
-          transform: drag.transform,
-          transition: drag.dragging ? 'none' : 'border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.3s ease',
-          touchAction: 'none',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 8px 26px rgba(0,0,0,0.16)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-ink)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.12)'; }}
-      >
-        <LayoutGrid size={20} strokeWidth={1.8} />
-        <span style={{ lineHeight: 1 }}>应用</span>
-      </button>
-    );
-  }
+/**
+ * 应用入口：主界面右上角与会话标题使用同一行，菜单承载画布、分镜编辑器和使用文档。
+ */
+function AppSwitcher({
+  onCanvas,
+  onEditor,
+  onDocs,
+}: {
+  onCanvas: () => void;
+  onEditor: () => void;
+  onDocs: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const items = [
+    { label: '画布', icon: <Frame size={15} strokeWidth={1.8} />, action: onCanvas },
+    { label: '分镜编辑器', icon: <PenLine size={15} strokeWidth={1.8} />, action: onEditor },
+    { label: '使用文档', icon: <FileText size={15} strokeWidth={1.8} />, action: onDocs },
+  ];
+
   return (
-    <div style={{
-      position: 'fixed', top: 68, right: 16, zIndex: 120,
-      width: 176, background: 'white', border: '1px solid var(--color-hairline)',
-      borderRadius: 14, boxShadow: '0 12px 36px rgba(0,0,0,0.14)', padding: 12,
-      display: 'flex', flexDirection: 'column', gap: 8,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: 'var(--color-ink)', marginBottom: 2 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><LayoutGrid size={14} strokeWidth={1.8} /> 应用</span>
-        <button
-          onClick={() => setCollapsed(true)}
-          title="收起应用"
-          style={{ border: 'none', background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: 6, display: 'inline-flex', alignItems: 'center' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.background = DS.hover; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.background = 'transparent'; }}
-        ><ChevronRight size={16} strokeWidth={2} /></button>
-      </div>
+    <div ref={rootRef} style={{ position: 'relative' }}>
       <button
-        onClick={onCanvas}
-        title="进入画布"
-        style={btnBase}
-        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
-        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
-      ><Frame size={15} strokeWidth={1.8} /> 画布</button>
-      <button
-        onClick={onEditor}
-        title="打开分镜编辑器"
-        style={btnBase}
-        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
-        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
-      ><PenLine size={15} strokeWidth={1.8} /> 分镜编辑器</button>
-      <button
-        onClick={onDocs}
-        title="使用文档"
-        style={btnBase}
-        onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-primary)'; el.style.color = 'var(--color-primary)'; }}
-        onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = 'var(--color-hairline)'; el.style.color = 'var(--color-ink)'; }}
-      ><FileText size={15} strokeWidth={1.8} /> 使用文档</button>
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        title="应用"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          ...headerBtn(1, 14),
+          background: open ? DS.hover : 'transparent',
+          color: open ? DS.brand : DS.textSecondary,
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.background = DS.hover;
+          event.currentTarget.style.color = DS.brand;
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.background = open ? DS.hover : 'transparent';
+          event.currentTarget.style.color = open ? DS.brand : DS.textSecondary;
+        }}
+      >
+        <LayoutGrid size={16} strokeWidth={1.8} />
+        <span>应用</span>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="应用"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 0,
+            width: 176,
+            padding: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            border: '1px solid var(--color-hairline)',
+            borderRadius: 12,
+            background: 'white',
+            boxShadow: '0 12px 32px rgba(15, 17, 21, 0.14)',
+            zIndex: 150,
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                item.action();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '9px 10px',
+                border: 'none',
+                borderRadius: 8,
+                background: 'transparent',
+                color: DS.ink,
+                fontSize: 13,
+                textAlign: 'left',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = DS.hover;
+                event.currentTarget.style.color = DS.brand;
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = 'transparent';
+                event.currentTarget.style.color = DS.ink;
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

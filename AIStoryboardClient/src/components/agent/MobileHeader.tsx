@@ -1,10 +1,8 @@
 import { DS } from './ChatComposer';
-import { Layers } from 'lucide-react';
 
 interface MobileHeaderProps {
   title: string;
   onMenuClick: () => void;
-  onOpenStoryboards: () => void;
   onNewConversation: () => void;
 }
 
@@ -12,7 +10,7 @@ interface MobileHeaderProps {
  * 手机端顶部导航栏（仿 DeepSeek 移动端）：
  * 左侧 ☰ 汉堡菜单 | 中间会话标题 | 右侧 ＋ 新建对话
  */
-export function MobileHeader({ title, onMenuClick, onOpenStoryboards, onNewConversation }: MobileHeaderProps) {
+export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHeaderProps) {
   return (
     <div style={{
       height: 56, flexShrink: 0,
@@ -46,19 +44,8 @@ export function MobileHeader({ title, onMenuClick, onOpenStoryboards, onNewConve
         {title}
       </span>
 
-      {/* 右：分镜库 + 新建对话 */}
+      {/* 右：新建对话 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-        <button
-          onClick={onOpenStoryboards}
-          title="查看全部分镜"
-          style={{
-            width: 40, height: 40, border: 'none', background: 'transparent',
-            borderRadius: 10, cursor: 'pointer', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', color: DS.ink,
-          }}
-        >
-          <Layers size={19} strokeWidth={1.8} />
-        </button>
         <button
           onClick={onNewConversation}
           title="新建对话"

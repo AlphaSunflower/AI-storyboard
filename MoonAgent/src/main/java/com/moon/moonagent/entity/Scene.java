@@ -11,6 +11,7 @@ public class Scene {
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
     private String projectId;
+    private String conversationId;
     private Integer sceneNumber;
     private String scriptContent;
     private String imagePrompt;

@@ -5,9 +5,9 @@ import com.moon.moonagent.dto.response.AssetVO;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.PlanField;
-import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.ai.agent.AssetMatchingService;
 import com.moon.moonagent.ai.agent.SceneAssetMatch;
 import com.moon.moonagent.ai.agent.storyboard.StoryboardDesignPlan;
@@ -54,7 +54,7 @@ public class AisplitIntentHandler implements IntentHandler {
 
     private final AgentOrchestratorSupport support;
     private final ScriptGenerationService scriptGenerationService;
-    private final AgentTools agentTools;
+    private final AgentGenerationService generationService;
     private final StoryboardClient storyboardClient;
     private final AgentAiConfigProperties agentConfig;
     private final AssetMatchingService assetMatchingService;
@@ -814,11 +814,14 @@ public class AisplitIntentHandler implements IntentHandler {
         boolean partialReplace = isPartialSubset(items, request.getConversation().getProjectId());
         Map<String, Object> writeResult;
         if ("replace".equals(chosen) && partialReplace) {
-            writeResult = safeUpdateScenesByNumber(request.getConversation().getProjectId(), items);
+            writeResult = safeUpdateScenesByNumber(
+                    request.getConversation().getProjectId(), request.getConversation().getId(), items);
         } else {
             writeResult = "replace".equals(chosen)
-                    ? safeReplaceScenes(request.getConversation().getProjectId(), items)
-                    : safeWriteScenes(request.getConversation().getProjectId(), items);
+                    ? safeReplaceScenes(
+                            request.getConversation().getProjectId(), request.getConversation().getId(), items)
+                    : safeWriteScenes(
+                            request.getConversation().getProjectId(), request.getConversation().getId(), items);
         }
         int count = writeResult.getOrDefault("count", 0) instanceof Number n ? n.intValue() : 0;
         // 写库成功：不满意调整计数清零（新一轮生成起点）+ 用户确认的整套推荐参数应用到全部分镜
@@ -1304,17 +1307,26 @@ public class AisplitIntentHandler implements IntentHandler {
     }
 
     /** 包装 AgentTools：捕获异常转 error Map（保持 handler 错误处理语义） */
-    private Map<String, Object> safeWriteScenes(String projectId, List<AgentSceneItem> scenes) {
-        try { return agentTools.writeScenes(projectId, scenes); }
+    private Map<String, Object> safeWriteScenes(String projectId, String conversationId, List<AgentSceneItem> scenes) {
+        try {
+            int count = generationService.writeScript(projectId, conversationId, scenes);
+            return Map.of("ok", true, "count", count);
+        }
         catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
     }
-    private Map<String, Object> safeReplaceScenes(String projectId, List<AgentSceneItem> scenes) {
-        try { return agentTools.replaceScenes(projectId, scenes); }
+    private Map<String, Object> safeReplaceScenes(String projectId, String conversationId, List<AgentSceneItem> scenes) {
+        try {
+            int count = generationService.replaceScript(projectId, conversationId, scenes);
+            return Map.of("ok", true, "count", count);
+        }
         catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
     }
     /** 包装 AgentTools.replaceSpecificScenes：部分替换（只更新指定编号，保留其他分镜） */
-    private Map<String, Object> safeUpdateScenesByNumber(String projectId, List<AgentSceneItem> scenes) {
-        try { return agentTools.replaceSpecificScenes(projectId, scenes); }
+    private Map<String, Object> safeUpdateScenesByNumber(String projectId, String conversationId, List<AgentSceneItem> scenes) {
+        try {
+            int count = generationService.updateScenesByNumber(projectId, conversationId, scenes);
+            return Map.of("ok", true, "count", count);
+        }
         catch (IllegalArgumentException e) { return Map.of("ok", false, "message", e.getMessage()); }
     }
 

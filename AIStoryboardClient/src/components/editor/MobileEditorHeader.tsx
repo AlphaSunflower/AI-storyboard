@@ -4,10 +4,11 @@ import { useProjectStore } from '../../stores/projectStore';
 interface MobileEditorHeaderProps {
   onMenuClick: () => void;
   onScript: () => void;
+  showMenu?: boolean;
 }
 
 /** 手机端编辑器顶栏：☰ 菜单 | 项目名 | 📝 剧本 */
-export function MobileEditorHeader({ onMenuClick, onScript }: MobileEditorHeaderProps) {
+export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true }: MobileEditorHeaderProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
 
   return (
@@ -18,21 +19,23 @@ export function MobileEditorHeader({ onMenuClick, onScript }: MobileEditorHeader
       borderBottom: `1px solid ${DS.border}`,
       background: 'white',
     }}>
-      {/* 左：☰ */}
-      <button
-        onClick={onMenuClick}
-        title="菜单"
-        style={{
-          width: 40, height: 40, border: 'none', background: 'transparent',
-          borderRadius: 10, cursor: 'pointer', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M17.2027 4.90034V6.43655H2.79724V4.90034H17.2027Z" fill="currentColor" />
-          <path d="M10.9603 13.0634V14.5996H2.79724V13.0634H10.9603Z" fill="currentColor" />
-        </svg>
-      </button>
+      {/* 左：☰ 菜单（应用子窗内隐藏，保留等宽占位维持标题居中） */}
+      {showMenu ? (
+        <button
+          onClick={onMenuClick}
+          title="菜单"
+          style={{
+            width: 40, height: 40, border: 'none', background: 'transparent',
+            borderRadius: 10, cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17.2027 4.90034V6.43655H2.79724V4.90034H17.2027Z" fill="currentColor" />
+            <path d="M10.9603 13.0634V14.5996H2.79724V13.0634H10.9603Z" fill="currentColor" />
+          </svg>
+        </button>
+      ) : <span aria-hidden="true" style={{ width: 40, height: 40, flexShrink: 0 }} />}
 
       {/* 中：项目名 */}
       <span style={{

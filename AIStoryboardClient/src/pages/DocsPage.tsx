@@ -1633,7 +1633,7 @@ export function DocsPage() {
                 <strong>参考图：</strong>输入框左侧 <Paperclip size={12} strokeWidth={1.8}  /> 上传图片 → 图生图 / 图生视频（以参考图为首帧）。
                 分镜写库后会自动展开“分镜审查结果”；行内「上传素材」可选择项目 AI 资产、当前项目产出素材和当前分镜生成图片，
                 产出素材按对话分组，再次打开可编辑并覆盖本镜选择。
-                生成结果在抽屉顶部「<Folder size={12} strokeWidth={1.8}  /> 产出素材」统一查看、下载、删除。
+                生成结果在右下角「生成中心」统一查看、预览和删除。
               </div>
             </div>
             <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体 · 对话示意（试试确认 / 再改 / 发送）</span>>

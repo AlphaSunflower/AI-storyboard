@@ -54,7 +54,7 @@ export function UploadMaterialPickerModal({
           <Option
             icon={<Clapperboard size={18} />}
             title="上传分镜"
-            description="从当前项目选择分镜并提交分析"
+            description="从当前项目选择分镜并直接进入审核"
             onClick={() => choose(onScene)}
           />
         </div>
