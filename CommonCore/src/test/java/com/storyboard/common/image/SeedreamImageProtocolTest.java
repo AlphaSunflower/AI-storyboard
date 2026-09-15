@@ -54,7 +54,7 @@ class SeedreamImageProtocolTest {
     }
 
     @Test
-    void infersGroupCountFromPromptWhenExplicitCountIsOne() {
+    void explicitCountOneWinsOverPromptCount() {
         JsonNode body = SeedreamImageProtocol.buildRequest(
                 "doubao-seedream-4-0-250828",
                 "生成四张同一角色的不同表情",
@@ -62,9 +62,23 @@ class SeedreamImageProtocolTest {
                 null,
                 1);
 
-        assertEquals("auto", body.path("sequential_image_generation").asText());
-        assertEquals(4, body.path("sequential_image_generation_options").path("max_images").asInt());
+        assertEquals("disabled", body.path("sequential_image_generation").asText());
+        assertFalse(body.has("sequential_image_generation_options"));
         assertFalse(body.has("image"));
+    }
+
+    @Test
+    void autoModeLetsTheModelChooseTheImageCount() {
+        JsonNode body = SeedreamImageProtocol.buildRequest(
+                "doubao-seedream-4-0-250828",
+                "根据参考图设计一组空间效果图",
+                List.of("https://example.com/a.png"),
+                "1K",
+                0);
+
+        assertEquals("auto", body.path("sequential_image_generation").asText());
+        assertFalse(body.has("sequential_image_generation_options"));
+        assertEquals("根据参考图设计一组空间效果图", body.path("prompt").asText());
     }
 
     @Test
@@ -92,6 +106,20 @@ class SeedreamImageProtocolTest {
 
         assertTrue(body.path("prompt").asText().contains("构图、视角或场景细节上必须有明显差异"));
         assertEquals(2, body.path("sequential_image_generation_options").path("max_images").asInt());
+    }
+
+    @Test
+    void disablesSequentialGenerationWhenRequestedCountIsOne() {
+        JsonNode body = SeedreamImageProtocol.buildRequest(
+                "doubao-seedream-4-0-250828",
+                "将这些图合为一个四宫格",
+                List.of("https://example.com/a.png", "https://example.com/b.png"),
+                "1K",
+                1);
+
+        assertEquals("disabled", body.path("sequential_image_generation").asText());
+        assertFalse(body.has("sequential_image_generation_options"));
+        assertEquals(2, body.path("image").size());
     }
 
     @Test

@@ -94,6 +94,21 @@ describe('canvas transactions', () => {
     expect(useCanvasStore.getState().edges).toHaveLength(1);
   });
 
+  it('selects all nodes and batch deletes them as one undoable transaction', () => {
+    useCanvasStore.getState().addNode('text', { x: 0, y: 0 });
+    useCanvasStore.getState().addNode('image', { x: 300, y: 0 });
+    useCanvasStore.getState().addNode('note', { x: 600, y: 0 });
+
+    expect(useCanvasStore.getState().selectAll()).toBe(3);
+    expect(useCanvasStore.getState().nodes.filter((node) => node.selected)).toHaveLength(3);
+
+    useCanvasStore.getState().deleteSelected();
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
+
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(3);
+  });
+
   // 验证 acceptTypes 边校验：源节点声明了可接类型，目标不匹配时应拒绝连线
   it('rejects connections that violate acceptTypes', () => {
     useCanvasStore.getState().addNode('script', { x: 0, y: 0 });
@@ -120,19 +135,54 @@ describe('canvas transactions', () => {
     expect(useCanvasStore.getState().edges).toHaveLength(0);
   });
 
-  // onConnect（connect）也走连通性校验：图片只能连生成图片/生视频
+  // onConnect（connect）也走连通性校验：图片只能连图生图/图生视频/首尾帧生视频
   it('enforces acceptTypes on the connect(onConnect) path too', () => {
     useCanvasStore.getState().addNode('image', { x: 0, y: 0 });
     useCanvasStore.getState().addNode('script', { x: 300, y: 0 });
     const imageId = useCanvasStore.getState().nodes[0].id;
     const scriptId = useCanvasStore.getState().nodes[1].id;
-    // image 不能连 script（图片白名单只有 imageGen/videoGen）
+    // image 不能连 script
     useCanvasStore.getState().connect({ source: imageId, target: scriptId, sourceHandle: 'right', targetHandle: 'left' });
     expect(useCanvasStore.getState().edges).toHaveLength(0);
-    // 图片 → 生视频 应被放行
-    useCanvasStore.getState().addNode('videoGen', { x: 600, y: 0 });
-    const videoGenId = useCanvasStore.getState().nodes[2].id;
-    useCanvasStore.getState().connect({ source: imageId, target: videoGenId, sourceHandle: 'right', targetHandle: 'left' });
+    // 图片 → 图生视频 应被放行
+    useCanvasStore.getState().addNode('imageToVideo', { x: 600, y: 0 });
+    const imageToVideoId = useCanvasStore.getState().nodes[2].id;
+    useCanvasStore.getState().connect({ source: imageId, target: imageToVideoId, sourceHandle: 'right', targetHandle: 'left' });
     expect(useCanvasStore.getState().edges).toHaveLength(1);
+  });
+
+  it('adds images to an ordered multi-image input with sequential portOrder', () => {
+    useCanvasStore.getState().addNode('image', { x: 0, y: 0 });
+    const sourceId = useCanvasStore.getState().nodes[0].id;
+    const batchId = useCanvasStore.getState().createConnectedNode(
+      sourceId,
+      'batchImageRefine',
+      { x: 600, y: 0 },
+      'image',
+    );
+
+    expect(batchId).not.toBeNull();
+    expect(useCanvasStore.getState().edges).toHaveLength(1);
+    expect(useCanvasStore.getState().edges[0]).toMatchObject({
+      target: batchId,
+      targetHandle: 'images',
+      data: { portOrder: 0 },
+    });
+
+    const secondImageId = useCanvasStore.getState().createNodeBefore(
+      batchId!,
+      'image',
+      { x: 300, y: 0 },
+      'images',
+    );
+
+    expect(secondImageId).not.toBeNull();
+    expect(useCanvasStore.getState().edges).toHaveLength(2);
+    expect(useCanvasStore.getState().edges[1]).toMatchObject({
+      source: secondImageId,
+      target: batchId,
+      targetHandle: 'images',
+      data: { portOrder: 1 },
+    });
   });
 });

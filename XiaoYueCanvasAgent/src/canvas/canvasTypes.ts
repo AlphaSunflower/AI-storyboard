@@ -48,4 +48,8 @@ export interface CanvasNodeSummary {
   assetId?: string;
   status: string;
   derivedFrom?: string;
+  generationRecordIds?: string[];
+  generationStatus?: string;
+  materializationStatus?: string;
+  resultNodeIds?: string[];
 }

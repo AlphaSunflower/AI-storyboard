@@ -48,7 +48,7 @@ public class SeedreamImageExecutor {
         if (config == null || config.gatewayBaseUrl() == null || config.gatewayBaseUrl().isBlank()) {
             throw new IllegalArgumentException("网关地址未配置");
         }
-        int count = requestedCount != null && requestedCount > 0 ? requestedCount : 1;
+        int count = requestedCount != null ? Math.max(0, requestedCount) : 1;
         List<String> normalizedInputs = normalizeInputs(orderedInputImages);
         SeedreamImageProtocol.validateLimits(normalizedInputs.size(), count);
 

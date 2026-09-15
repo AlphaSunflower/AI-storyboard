@@ -5,10 +5,10 @@ import { useCanvasStore } from '../../store/canvasStore';
 import { useMediaStore } from '../../store/mediaStore';
 import { useStoryboardVideoStore } from '../../store/storyboardVideoStore';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
-import { createImageAsset, createVideoAsset } from '../../utils/mediaPipeline';
-import { saveAsset } from '../../services/projectStorage';
 import { cancelStoryboardVideo, enqueueStoryboardVideo } from '../../services/storyboardVideo';
 import { VideoPlanGateModal } from '../VideoPlanGateModal';
+import { useNodeTextDraft } from '../../hooks/useNodeTextDraft';
+import { createPersistedCanvasAsset } from '../../services/canvasMedia';
 
 const ASPECTS = ['16:9', '9:16', '1:1', '4:3'] as const;
 const RESOLUTIONS = ['720p', '1080p'] as const;
@@ -34,6 +34,66 @@ function StoryboardThumb({ frame, index }: { frame: StoryboardFrame; index: numb
   if (videoUrl) return <video src={videoUrl} controls preload="metadata" />;
   if (frame.img || frame.imageUrl) return <img src={frame.img || frame.imageUrl} alt={`镜头${index + 1}`} />;
   return <span className="storyboard-row__ph">{String(index + 1).padStart(2, '0')}</span>;
+}
+
+function StoryboardPromptEditor({
+  nodeId,
+  index,
+  value,
+  onCommit,
+}: {
+  nodeId: string;
+  index: number;
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const draft = useNodeTextDraft({
+    nodeId: `${nodeId}:storyboard-frame:${index}`,
+    value,
+    onChange: onCommit,
+  });
+  return (
+    <textarea
+      className="storyboard-row__prompt"
+      value={draft.value}
+      placeholder="分镜描述 / 视频提示词…"
+      onChange={(event) => draft.setValue(event.target.value)}
+      onFocus={draft.onFocus}
+      onBlur={draft.onBlur}
+      onCompositionStart={draft.onCompositionStart}
+      onCompositionEnd={draft.onCompositionEnd}
+      rows={2}
+    />
+  );
+}
+
+function StoryboardModelEditor({
+  nodeId,
+  index,
+  value,
+  onCommit,
+}: {
+  nodeId: string;
+  index: number;
+  value: string;
+  onCommit: (value: string) => void;
+}) {
+  const draft = useNodeTextDraft({
+    nodeId: `${nodeId}:storyboard-model:${index}`,
+    value,
+    onChange: onCommit,
+  });
+  return (
+    <input
+      value={draft.value}
+      placeholder="默认"
+      onChange={(event) => draft.setValue(event.target.value)}
+      onFocus={draft.onFocus}
+      onBlur={draft.onBlur}
+      onCompositionStart={draft.onCompositionStart}
+      onCompositionEnd={draft.onCompositionEnd}
+    />
+  );
 }
 
 export const StoryboardEditorView = memo(function StoryboardEditorView({ node, updateNode }: {
@@ -70,11 +130,10 @@ export const StoryboardEditorView = memo(function StoryboardEditorView({ node, u
   const toggleAll = () => updateNode(id, { frames: frames.map((frame) => ({ ...frame, checked: !allChecked })) });
 
   const attachFile = async (index: number, file: File, kind: 'image' | 'asset') => {
-    const asset: PersistedAsset = file.type.startsWith('video/') ? await createVideoAsset(file) : await createImageAsset(file);
+    const asset: PersistedAsset = await createPersistedCanvasAsset(file, id);
     const { projectId, canvasId } = useCanvasStore.getState();
     if (asset.projectId === undefined) asset.projectId = projectId ?? undefined;
     if (asset.canvasId === undefined) asset.canvasId = canvasId ?? undefined;
-    await saveAsset(asset);
     upsertAsset(asset);
     if (kind === 'image') {
       const preview = URL.createObjectURL(file);
@@ -152,8 +211,12 @@ export const StoryboardEditorView = memo(function StoryboardEditorView({ node, u
                     {frame.videoStatus === 'failed' && <span className="storyboard-badge is-failed">生成失败</span>}
                     {active && <span className="storyboard-badge is-active">{frame.videoStatus === 'running' ? '生成中' : frame.videoStatus === 'cancelling' ? '取消中' : '排队中'}</span>}
                   </div>
-                  <textarea className="storyboard-row__prompt" value={promptValue} placeholder="分镜描述 / 视频提示词…"
-                    onChange={(event) => updateFrame(index, { prompt: event.target.value })} rows={2} />
+                  <StoryboardPromptEditor
+                    nodeId={id}
+                    index={index}
+                    value={promptValue}
+                    onCommit={(value) => updateFrame(index, { prompt: value })}
+                  />
                   <div className="storyboard-row__meta">
                     <button className="storyboard-row__cfg" title="修改配置" onClick={() => setExpandedConfig(configOpen ? null : index)}>
                       <Settings2 size={13} /> <span>{configSummary(config)}</span>
@@ -170,7 +233,7 @@ export const StoryboardEditorView = memo(function StoryboardEditorView({ node, u
                   </div>
                   {configOpen && (
                     <div className="storyboard-row__config">
-                      <label><span>模型</span><input value={config.model ?? ''} placeholder="默认" onChange={(e) => updateFrame(index, { config: { ...config, model: e.target.value } })} /></label>
+                      <label><span>模型</span><StoryboardModelEditor nodeId={id} index={index} value={config.model ?? ''} onCommit={(value) => updateFrame(index, { config: { ...config, model: value } })} /></label>
                       <label><span>比例</span>
                         <select value={config.aspectRatio ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, aspectRatio: e.target.value } })}>
                           <option value="">默认</option>{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}

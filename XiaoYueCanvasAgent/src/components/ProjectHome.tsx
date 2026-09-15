@@ -34,8 +34,8 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
   const [tab, setTab] = useState<'canvas' | 'assets'>('canvas');
 
   return (
-    <main style={{ minHeight: '100vh', padding: '40px 48px', boxSizing: 'border-box', maxWidth: 1180, margin: '0 auto' }}>
-      <header style={{ display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 32 }}>
+    <main className="project-home" style={{ minHeight: '100vh', padding: '40px 48px', boxSizing: 'border-box', maxWidth: 1180, margin: '0 auto' }}>
+      <header className="project-home__header" style={{ display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 32 }}>
         <button onClick={onBack} style={iconButton} aria-label="返回主页"><ArrowLeft size={18} /></button>
         <div style={{ flex: 1 }}>
           <small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>MORROW / PROJECT</small>
@@ -46,7 +46,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
           )}
           <p style={{ opacity: 0.55, margin: 0 }}>{canvases.length} 个画布 · 项目、原图与每个派生版本保存在本地</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="project-home__actions" style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setRenamingProject(true)} style={ghostButton} aria-label="重命名项目"><Pencil size={15} /> 重命名</button>
           <button onClick={onExportProject} style={ghostButton}><FileOutput size={15} /> 导出</button>
           {confirmDeleteProject ? (
@@ -60,7 +60,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
         </div>
       </header>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <div className="project-home__tabs" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         <button onClick={() => setTab('canvas')} style={tab === 'canvas' ? tabActive : tabInactive}>画布</button>
         <button onClick={() => setTab('assets')} style={tab === 'assets' ? tabActive : tabInactive}>资产库</button>
       </div>
@@ -73,7 +73,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
           </header>
 
           {canvases.length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+            <div className="project-home__grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
               {canvases.map((canvas) => (
                 <article key={canvas.id} style={card}>
                   <button onClick={() => onOpenCanvas(canvas.id)} style={{ ...cardOpen, textAlign: 'left' }}>

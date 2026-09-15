@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NODE_CATEGORIES, NODE_DEFS, listMenuNodes, type NodeCategory } from '../../domain/nodeRegistry';
+import { listNodeDefinitions, type NodeCategory } from '../../canvas/graphContracts';
 
 /**
  * 分组节点菜单：按 NODE_DEFS 的分类（基础/文本/媒体/编排）折叠展示所有节点。
@@ -7,14 +7,16 @@ import { NODE_CATEGORIES, NODE_DEFS, listMenuNodes, type NodeCategory } from '..
  */
 export function GroupedNodeMenu({ onAdd }: { onAdd: (kind: string) => void }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const grouped = NODE_CATEGORIES.map((cat) => ({ cat, items: listMenuNodes().filter((d) => d.category === cat) })).filter((g) => g.items.length);
+  const definitions = listNodeDefinitions();
+  const categories = [...new Set(definitions.map((definition) => definition.category))] as NodeCategory[];
+  const grouped = categories.map((cat) => ({ cat, items: definitions.filter((d) => d.category === cat) })).filter((g) => g.items.length);
   return (
     <div className="grouped-node-menu">
       {grouped.map(({ cat, items }) => (
         <section key={cat}>
           <button className="group-cat" onClick={() => setCollapsed((c) => ({ ...c, [cat]: !c[cat] }))}>{cat}</button>
           {!collapsed[cat] && items.map((def) => (
-            <button key={def.type} className="group-item" onClick={() => onAdd(def.type)}>{def.menuLabel}</button>
+            <button key={def.kind} className="group-item" onClick={() => onAdd(def.kind)}>{def.title}</button>
           ))}
         </section>
       ))}

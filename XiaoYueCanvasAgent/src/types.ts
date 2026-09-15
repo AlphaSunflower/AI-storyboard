@@ -1,6 +1,26 @@
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
-export type NodeKind = 'text' | 'image' | 'video' | 'videoGen' | 'script' | 'note' | 'prompt' | 'sequence' | 'storyboard' | 'storyboardGen' | 'imageGen';
+export type NodeKind =
+  | 'text'
+  | 'image'
+  | 'video'
+  | 'videoGen'
+  | 'script'
+  | 'note'
+  | 'prompt'
+  | 'sequence'
+  | 'storyboard'
+  | 'storyboardGen'
+  | 'imageGen'
+  | 'storyboardPlanner'
+  | 'shot'
+  | 'textToImage'
+  | 'imageToImage'
+  | 'batchImageRefine'
+  | 'textToVideo'
+  | 'imageToVideo'
+  | 'firstLastFrameToVideo'
+  | 'referenceToVideo';
 export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -147,6 +167,7 @@ export interface MediaNodeData extends Record<string, unknown> {
   operation?: ImageOperation;
   annotation?: AnnotationDocument;
   videoPrompt?: string;
+  videoMode?: string;
   videoReferences?: string[];
   videoParams?: VideoGenerationParams;
   playlist?: VideoClip[];
@@ -159,10 +180,24 @@ export interface MediaNodeData extends Record<string, unknown> {
   children?: string[];
   // ── 分镜（storyboard）字段──
   frames?: StoryboardFrame[];
+  shotId?: string;
+  shotKey?: string;
+  shotOrdinal?: number;
+  imagePrompt?: string;
+  negativePrompt?: string;
+  sceneDescription?: string;
+  shotType?: string;
+  cameraMovement?: string;
+  durationSeconds?: number;
+  referenceHints?: string[];
+  referenceAssetIds?: string[];
+  useReferenceImages?: boolean;
+  shots?: import('./canvas/storyboardPlan').StoryboardShotPlan[];
   // ── 分镜生成（storyboardGen）字段──
   rows?: number;
   cols?: number;
   styleType?: '2d-anime' | '3d-cg' | 'live-action';
+  imagePreset?: string;
   model?: string;
   isGenerating?: boolean;
 }
@@ -192,11 +227,12 @@ export type AssetMetadata = Omit<PersistedAsset, 'originalBlob' | 'thumbnailBlob
 // Runtime media URLs are acquired only while a media surface is visible.
 export type MediaAsset = PersistedAsset;
 
-export type CanvasNode = Node<MediaNodeData, 'media' | 'video'>;
+export type CanvasNode = Node<MediaNodeData, 'media' | 'video' | import('./canvas/graphContracts').CanvasNodeKind>;
 
 // 边携带简略的操作标签，用于在连线上展示因果链的"操作短名"。
 export type CanvasEdgeData = {
   operation?: ImageOperation['type'];
+  portOrder?: number;
 };
 
 export type CanvasEdge = Edge<CanvasEdgeData>;
@@ -204,7 +240,35 @@ export type CanvasEdge = Edge<CanvasEdgeData>;
 export interface GraphSnapshot {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  generationRecords?: import('./canvas/graphContracts').GenerationRecord[];
+  migrationReport?: import('./canvas/graphContracts').MigrationReport;
 }
+
+export type {
+  AutomationPhase,
+  AutomationState,
+  CanvasEdgeV2,
+  CanvasGraphV2,
+  CanvasJobRequest,
+  CanvasNodeKind,
+  CanvasNodeV2,
+  ConnectionMode,
+  ConnectionValidation,
+  ConnectionValidationCode,
+  GenerationRecord,
+  GenerationQueueStatus,
+  GenerationSource,
+  GenerationStatus,
+  MaterializationStatus,
+  MigrationReport,
+  NodeAction,
+  NodeCategory,
+  NodeDefinition,
+  NodePort,
+  NodeRunContext,
+  PortMedia,
+  ResultPolicy,
+} from './canvas/graphContracts';
 
 export interface ProjectDocumentV1 {
   schemaVersion: 1;
@@ -238,6 +302,8 @@ export interface CanvasDocumentV1 {
   viewport: Viewport;
   /** 后端持久化版本（乐观锁 baseRevision）；加载后回写、保存时携带 */
   revision?: number;
+  generationRecords?: import('./canvas/graphContracts').GenerationRecord[];
+  migrationReport?: import('./canvas/graphContracts').MigrationReport;
   createdAt: number;
   updatedAt: number;
 }
@@ -323,6 +389,14 @@ export interface JobAssetDescriptor {
   downloadUrl?: string;
 }
 
+export interface JobSnapshot {
+  jobId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  progress?: number;
+  error?: string;
+  assets?: JobAssetDescriptor[];
+}
+
 export type JobEvent = ({ jobId: string; eventId?: string } & (
   | { type: 'job.queued' }
   | { type: 'job.started' }
@@ -330,6 +404,7 @@ export type JobEvent = ({ jobId: string; eventId?: string } & (
   | { type: 'agent.message'; message: string; messageId?: string; delta?: boolean }
   | { type: 'agent.tool_call'; toolCall: AgentToolCall }
   | { type: 'agent.tool_result'; toolResult: AgentToolResult }
+  | { type: 'storyboard.created'; shots: import('./canvas/storyboardPlan').StoryboardShotPlan[]; planVersion: number }
   | { type: 'asset.created'; asset: JobAssetDescriptor }
   | { type: 'job.completed' }
   | { type: 'job.failed'; message: string }
@@ -339,6 +414,7 @@ export type JobEvent = ({ jobId: string; eventId?: string } & (
 export interface JobAdapter {
   getStatus(): Promise<JobAdapterStatus>;
   getCapabilities(): Promise<CapabilityDescriptor[]>;
+  getJob?(jobId: string): Promise<JobSnapshot>;
   submit(request: JobRequest): Promise<{ jobId: string }>;
   subscribe(jobId: string, listener: (event: JobEvent) => void): () => void;
   cancel(jobId: string): Promise<void>;

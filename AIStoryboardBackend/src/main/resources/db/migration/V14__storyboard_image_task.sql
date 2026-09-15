@@ -1,6 +1,6 @@
 -- V14__storyboard_image_task.sql
--- 分镜「完善图片」队列（/chat Moon 智能体「分镜审查卡片 → 完善图片 → 串行执行」）。
--- 一条记录 = 一个分镜的一次图改图（mode=edit）任务；状态机 queued → running → completed/failed/cancelled。
+-- 分镜图片队列（/chat Moon 智能体：分镜写库自动配图 + 审查卡完善图片）。
+-- 一条记录 = 一个分镜的一次生图/图改图任务（mode=generate/edit）；状态机 queued → running → completed/failed/cancelled。
 -- 终态图片 URL/状态由 ImageGenerationServiceImpl 按 sceneId 回写 scenes 表，本表只跟踪队列进度与取消。
 
 CREATE TABLE IF NOT EXISTS storyboard_image_task (

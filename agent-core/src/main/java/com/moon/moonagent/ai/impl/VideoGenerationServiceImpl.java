@@ -263,50 +263,63 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         }
     }
 
-    private String resolveReferenceUrl(String urlPath, String type) {
+    String resolveReferenceUrl(String urlPath, String type) {
         if (urlPath == null || urlPath.isBlank()) return null;
-        if (urlPath.startsWith("data:") || urlPath.startsWith("http") || urlPath.startsWith("mm_file://")) {
-            return urlPath;
-        }
+        if (urlPath.startsWith("mm_file://")) return urlPath;
+        if (urlPath.startsWith("data:")) return resolveDataUri(urlPath);
         String filename = extractFilename(urlPath);
-        // 主后端相对路径（/api/files/...）：取主后端绝对 URL → 下载字节 → 网关 /v1/files/upload 换 mm_file://。
-        // 资产/图片 URL 是主后端相对路径，本机 uploads 未必有对应文件（此前回退本地文件找不到 → 丢图 → t2va）；
-        // 统一经网关文件上传换 mm_file://，免除对本地共享盘的依赖，也避免 base64 膨胀爆 64MB 请求体（2026-08-27 方案 2）。
-        if (urlPath.startsWith("/api/files/")) {
-            String abs = getRefBaseUrl() + urlPath;
-            byte[] bytes = downloadBytes(abs);
+        byte[] bytes;
+        if (urlPath.startsWith("http://") || urlPath.startsWith("https://")) {
+            bytes = downloadBytes(urlPath);
+        } else if (urlPath.startsWith("/api/files/")) {
+            bytes = downloadBytes(getRefBaseUrl() + urlPath);
             if (bytes == null) {
-                log.warn("[参考图] /api/files/** 下载失败 -> 丢图(该素材将不进请求体): {}", abs);
-                return null;
+                throw new BusinessException(50201, "参考素材下载失败: " + urlPath);
             }
-            log.info("[参考图] /api/files/** 下载成功: {} ({} 字节)", abs, bytes.length);
-            // v2 契约 image_url.url 支持 data URI：≤10MB 直接内联（免上传、不撞 purpose 报错，2026-08-27）
-            if (bytes.length <= 10 * 1024 * 1024) {
-                String dataUri = "data:" + FileStorageService.contentType(filename) + ";base64,"
-                        + Base64.getEncoder().encodeToString(bytes);
-                log.info("[参考图] 小文件≤10MB 转 data URI 内联: {} ({} 字节)", filename, bytes.length);
-                return dataUri;
+        } else {
+            bytes = switch (type) {
+                case "video" -> fileStorageService.readVideo(filename);
+                case "audio" -> fileStorageService.readAudio(filename);
+                default -> fileStorageService.readImage(filename);
+            };
+            if (bytes == null) {
+                throw new BusinessException(50201, "参考素材对象不存在: " + filename);
             }
-            // 大文件>10MB：经网关 /v1/files/upload 换 mm_file://（避免 base64 膨胀爆 64MB 请求体）
-            String mm = uploadReferenceToGateway(filename, bytes);
-            log.info("[参考图] 大文件>10MB 经网关上传换 mm_file://: {} -> {}", filename, mm);
-            return mm;
         }
-        // 其余相对对象路径：≤10MB 转 data URI，>10MB 经网关上传换 mm_file://
-        byte[] fileBytes = switch (type) {
-            case "video" -> fileStorageService.readVideo(filename);
-            case "audio" -> fileStorageService.readAudio(filename);
-            default -> fileStorageService.readImage(filename);
+        if (bytes == null) throw new BusinessException(50201, "参考素材下载失败: " + urlPath);
+        String mm = uploadReferenceToGateway(filename, bytes);
+        log.info("[参考图] 上传网关换 mm_file://: {} ({} 字节) -> {}", filename, bytes.length, mm);
+        return mm;
+    }
+
+    /** data URI 只允许作为兼容输入；进入视频请求前必须换成 mm_file://。 */
+    private String resolveDataUri(String dataUri) {
+        int comma = dataUri.indexOf(',');
+        int semicolon = dataUri.indexOf(';');
+        if (comma < 0 || semicolon < 0 || semicolon > comma
+                || !dataUri.substring(semicolon + 1, comma).contains("base64")) {
+            throw new BusinessException(40001, "参考素材 data URI 格式无效");
+        }
+        String mime = dataUri.substring(5, semicolon);
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(dataUri.substring(comma + 1));
+        } catch (IllegalArgumentException error) {
+            throw new BusinessException(40001, "参考素材 base64 无效", error);
+        }
+        String extension = switch (mime.toLowerCase()) {
+            case "image/jpeg" -> "jpg";
+            case "image/webp" -> "webp";
+            case "image/gif" -> "gif";
+            case "video/mp4" -> "mp4";
+            case "video/quicktime" -> "mov";
+            case "audio/mpeg" -> "mp3";
+            case "audio/wav" -> "wav";
+            default -> mime.startsWith("video/") ? "mp4"
+                    : mime.startsWith("audio/") ? "mp3" : "png";
         };
-        if (fileBytes == null) {
-            log.warn("参考素材对象不存在: {}", filename);
-            return null;
-        }
-        if (fileBytes.length <= 10 * 1024 * 1024) {
-            String mime = FileStorageService.contentType(filename);
-            return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(fileBytes);
-        }
-        return uploadReferenceToGateway(filename, fileBytes);
+        String filename = "reference-" + UUID.randomUUID() + "." + extension;
+        return uploadReferenceToGateway(filename, bytes);
     }
 
     /** 参考素材拉取基准地址（agent-core = 主后端 storyboard.internal-url） */
@@ -315,7 +328,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     }
 
     /** 下载远端字节（参考素材经主后端 `/api/files/**` 拉取）；失败返回 null */
-    private byte[] downloadBytes(String url) {
+    byte[] downloadBytes(String url) {
         try {
             HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
                     .timeout(Duration.ofSeconds(60)).GET().build();
@@ -330,7 +343,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     }
 
     /** 参考素材经网关 `/v1/files/upload` 换 mm_file://（octet-stream 发 multipart 字节流，网关重建 boundary） */
-    private String uploadReferenceToGateway(String filename, byte[] bytes) {
+    String uploadReferenceToGateway(String filename, byte[] bytes) {
         try {
             MultipartBuilder mp = new MultipartBuilder()
                     .file("file", filename, FileStorageService.contentType(filename), bytes);

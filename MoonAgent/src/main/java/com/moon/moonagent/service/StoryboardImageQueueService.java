@@ -6,7 +6,7 @@ import com.moon.moonagent.entity.StoryboardImageTask;
 import java.util.List;
 
 /**
- * 分镜「完善图片」队列服务：批量入队（串行执行）→ 查询整队 → 取消。
+ * 分镜图片队列服务：完善已有图片/自动生成分镜图片，批量入队（串行执行）→ 查询整队 → 取消。
  */
 public interface StoryboardImageQueueService {
 

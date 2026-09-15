@@ -21,11 +21,13 @@ public class CanvasGraphServiceImpl implements CanvasGraphService {
     private final CanvasGraphMapper canvasGraphMapper;
     private final MorrowCanvasService canvasService;
 
-    /** 空图：{nodes:[], edges:[], viewport:{x:0,y:0,zoom:1}} */
+    /** 空图：CanvasGraphV2 {schemaVersion, nodes, edges, viewport, generationRecords}。 */
     private static final Map<String, Object> EMPTY_GRAPH = Map.of(
+            "schemaVersion", 2,
             "nodes", List.of(),
             "edges", List.of(),
-            "viewport", Map.of("x", 0, "y", 0, "zoom", 1));
+            "viewport", Map.of("x", 0, "y", 0, "zoom", 1),
+            "generationRecords", List.of());
 
     @Override
     public CanvasGraphResponse load(String userId, String canvasId) {
@@ -80,9 +82,11 @@ public class CanvasGraphServiceImpl implements CanvasGraphService {
     private Map<String, Object> parseGraph(String json) {
         Map<String, Object> map = new java.util.HashMap<>(JsonUtil.parse(json));
         // 补齐缺省键，保证三键结构稳定
+        map.putIfAbsent("schemaVersion", 2);
         map.putIfAbsent("nodes", List.of());
         map.putIfAbsent("edges", List.of());
         map.putIfAbsent("viewport", Map.of("x", 0, "y", 0, "zoom", 1));
+        map.putIfAbsent("generationRecords", List.of());
         return map;
     }
 }

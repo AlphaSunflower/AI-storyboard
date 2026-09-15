@@ -5,6 +5,7 @@ import { submitStoryboardGeneration } from '../../services/jobRunner';
 import { useCanvasStore } from '../../store/canvasStore';
 import { buildReferenceImagePool, type ReferenceImagePoolResult } from '../../canvas/referenceImagePool';
 import { RichPromptInput } from '../RichPromptInput';
+import { useNodeTextDraft } from '../../hooks/useNodeTextDraft';
 
 type Frames = Array<{ img?: string; label?: string; description?: string; imageUrl?: string; duration?: number }>;
 const STYLE_LABELS: Record<string, string> = { '2d-anime': '2D动漫', '3d-cg': '3D国漫', 'live-action': '真人实拍' };
@@ -16,9 +17,13 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
   updateNode: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
 }) {
   const { id, data } = node;
-  const [draftText, setDraftText] = useState('');
   const [generating, setGenerating] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const draftText = useNodeTextDraft({
+    nodeId: `${id}:storyboard-gen`,
+    value: String(data.scriptText ?? data.prompt ?? ''),
+    onChange: (value) => updateNode(id, { scriptText: value, prompt: value }),
+  });
   const frames = (data.frames as Frames | undefined) ?? [];
   const rows = data.rows ?? 2;
   const cols = data.cols ?? 3;
@@ -37,7 +42,7 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
   };
 
   const submit = () => {
-    const text = draftText.trim();
+    const text = draftText.value.trim();
     if (!text) { setFeedback('请先输入剧本或画面提示词'); window.setTimeout(() => setFeedback(null), 2200); return; }
     setGenerating(true);
     void submitStoryboardGeneration(text, id, (msg) => setFeedback(msg), { rows, cols, styleType })
@@ -49,8 +54,12 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
   return (
     <div className="storyboard-gen-view" data-generated={frames.length ? 'true' : 'false'}>
       <textarea className="text-node-editor nodrag nowheel" aria-label="分镜生成输入"
-        value={draftText} placeholder="在此粘贴剧本或画面提示词…"
-        onChange={(e) => setDraftText(e.target.value)} />
+        value={draftText.value} placeholder="在此粘贴剧本或画面提示词…"
+        onChange={(event) => draftText.setValue(event.target.value)}
+        onFocus={draftText.onFocus}
+        onBlur={draftText.onBlur}
+        onCompositionStart={draftText.onCompositionStart}
+        onCompositionEnd={draftText.onCompositionEnd} />
       <div className="storyboard-gen-config nodrag nowheel">
         <label className="storyboard-gen-field"><span>行</span>
           <input type="number" min={1} max={6} value={rows} onChange={(e) => updateNode(id, { rows: Number(e.target.value) || 1 })} />
@@ -80,9 +89,6 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(238,240,223,.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                     </svg>
-                  )}
-                  {desc.trim() && !imgSrc && (
-                    <button className="storyboard-frame__retry nodrag" title="重试生成这一帧" onClick={() => { updateNode(id, { isGenerating: true }); window.setTimeout(() => updateNode(id, { isGenerating: false }), 1500); }}>↻</button>
                   )}
                 </div>
                 <figcaption className="storyboard-frame__cap">

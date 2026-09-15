@@ -6,7 +6,7 @@ import lombok.Data;
 import java.time.OffsetDateTime;
 
 /**
- * 分镜「完善图片」队列条目（/chat Moon 智能体）。
+ * 分镜图片队列条目（/chat Moon 智能体）。
  *
  * <p>一条记录 = 一个分镜的一次图改图任务。状态机：
  * queued → running → completed / failed / cancelled。
@@ -27,7 +27,7 @@ public class StoryboardImageTask {
     private String size;
     private String quality;
     private Integer n;
-    /** 生成模式：完善图片固定为 "edit"（图改图）。 */
+    /** 生成模式：edit=完善已有图片，generate=自动生成分镜图片。 */
     private String mode;
     /** 当前分镜已生成图片 URL（编辑源图），可为空（为空则后端读 scene.imageUrl）。 */
     private String sourceImageUrl;

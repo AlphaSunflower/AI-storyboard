@@ -5,9 +5,12 @@ import { useMediaStore } from '../store/mediaStore';
 import { useAgentStore } from '../store/agentStore';
 import { useStoryboardVideoStore, type StoryboardVideoTask } from '../store/storyboardVideoStore';
 import { createVideoAsset } from '../utils/mediaPipeline';
-import { saveAsset } from './projectStorage';
+import { putGenerationQueueItem, saveAsset } from './projectStorage';
 import { createId } from '../utils/id';
 import type { JobAssetDescriptor, PersistedAsset, StoryboardFrame } from '../types';
+import type { GenerationRecord } from '../canvas/graphContracts';
+import { buildGenerationSources } from '../canvas/generationRecords';
+import { linkGeneratedCanvasAssets } from './canvasAssets';
 
 /** 全局串行锁：同一时刻只跑一个分镜视频任务（一个分镜一个分镜生成）。 */
 let processing = false;
@@ -21,6 +24,39 @@ const updateFrameInNode = (nodeId: string, frameIndex: number, patch: Partial<St
   canvas.updateNode(nodeId, { frames });
 };
 
+const updateGenerationRecord = (task: StoryboardVideoTask, patch: Partial<GenerationRecord>) => {
+  const current = useCanvasStore.getState().generationRecords.find((record) => record.id === task.generationRecordId);
+  if (!current) return;
+  useCanvasStore.getState().updateGenerationRecord({ ...current, ...patch });
+};
+
+const persistTaskQueue = (
+  projectId: string,
+  task: StoryboardVideoTask,
+  status: 'pending_submit' | 'running' | 'terminal' | 'interrupted',
+  jobId?: string,
+  error?: string,
+) => {
+  void putGenerationQueueItem({
+    id: task.generationRecordId,
+    projectId,
+    canvasId: useCanvasStore.getState().canvasId ?? '',
+    producerNodeId: task.nodeId,
+    generationRecordId: task.generationRecordId,
+    requestSnapshot: {
+      capabilityId: 'video.generate',
+      sourceAssetIds: task.sourceAssetIds,
+      params: { prompt: task.prompt, ...(task.config ?? {}) },
+    },
+    status,
+    jobId,
+    attempt: 1,
+    error,
+    createdAt: task.createdAt,
+    updatedAt: Date.now(),
+  });
+};
+
 const markFrameStatus = (task: StoryboardVideoTask, status: StoryboardVideoTask['status'], extra: Partial<StoryboardFrame> = {}) => {
   updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: status, ...extra });
   useStoryboardVideoStore.getState().update(task.queueId, { status });
@@ -28,11 +64,20 @@ const markFrameStatus = (task: StoryboardVideoTask, status: StoryboardVideoTask[
 
 /** 把后端生成结果下载并落地为该帧的视频。 */
 const materializeVideoForFrame = async (task: StoryboardVideoTask, asset: JobAssetDescriptor, jobId: string) => {
-  const file = await jobAdapter.fetchAsset(asset);
-  const mediaAsset: PersistedAsset = await createVideoAsset(file);
+  const currentCanvasId = useCanvasStore.getState().canvasId;
+  if (!currentCanvasId) throw new Error('画布尚未保存，无法映射视频资产');
+  const [persisted] = await linkGeneratedCanvasAssets(
+    currentCanvasId, task.nodeId, asset.id);
+  if (!persisted) throw new Error('视频生成结果未建立画布资产映射');
+  const file = await jobAdapter.fetchAsset({
+    ...asset,
+    id: persisted.id,
+    mimeType: persisted.mimeType,
+  });
+  const mediaAsset: PersistedAsset = await createVideoAsset(file, persisted.id);
   mediaAsset.operation = {
     type: 'remote',
-    params: { jobId, remoteAssetId: asset.id, capabilityId: 'video.generate' },
+    params: { jobId, remoteAssetId: persisted.id, capabilityId: 'video.generate' },
   };
   const { projectId, canvasId } = useCanvasStore.getState();
   if (mediaAsset.projectId === undefined) mediaAsset.projectId = projectId ?? undefined;
@@ -42,6 +87,14 @@ const materializeVideoForFrame = async (task: StoryboardVideoTask, asset: JobAss
   updateFrameInNode(task.nodeId, task.frameIndex, {
     videoAssetId: mediaAsset.id,
     videoStatus: 'completed',
+  });
+  updateGenerationRecord(task, {
+    materializationStatus: 'completed',
+    materializedAssetIds: [...new Set([
+      ...(useCanvasStore.getState().generationRecords.find((record) => record.id === task.generationRecordId)?.materializedAssetIds ?? []),
+      mediaAsset.id,
+    ])],
+    completedAt: Date.now(),
   });
 };
 
@@ -54,12 +107,26 @@ const runSingleTask = async (projectId: string, task: StoryboardVideoTask): Prom
   if (!capability?.available) {
     store.update(task.queueId, { status: 'failed', error: capability?.unavailableReason ?? '未配置视频执行服务' });
     updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'failed' });
+    updateGenerationRecord(task, {
+      status: 'failed',
+      queueStatus: 'interrupted',
+      materializationStatus: 'failed',
+      error: capability?.unavailableReason ?? '未配置视频执行服务',
+      completedAt: Date.now(),
+    });
+    persistTaskQueue(projectId, task, 'interrupted', undefined, capability?.unavailableReason ?? '未配置视频执行服务');
     return true;
   }
 
   // 排队中被取消（还没拿到 jobId）的任务直接跳过，避免仍去提交
   const live = useStoryboardVideoStore.getState().tasks[task.queueId];
   if (live && live.status !== 'queued') return true;
+  const liveRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === task.generationRecordId);
+  if (liveRecord?.status === 'cancelled') {
+    store.update(task.queueId, { status: 'cancelled' });
+    updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'cancelled', videoJobId: undefined });
+    return true;
+  }
 
   const refUris = await collectReferenceDataUris(task.sourceAssetIds);
   const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
@@ -75,8 +142,9 @@ const runSingleTask = async (projectId: string, task: StoryboardVideoTask): Prom
       params: {
         prompt: task.prompt,
         ...(task.config ?? {}),
-        ...(refUris.images.length ? { referenceImages: refUris.images } : {}),
-        ...(refUris.videos.length ? { referenceVideos: refUris.videos } : {}),
+        ...(refUris.images.length || refUris.videos.length
+          ? { referenceAssetIds: [...refUris.images, ...refUris.videos] }
+          : {}),
       },
     });
     jobId = res.jobId;
@@ -84,12 +152,22 @@ const runSingleTask = async (projectId: string, task: StoryboardVideoTask): Prom
     const message = error instanceof Error ? error.message : '任务提交失败';
     store.update(task.queueId, { status: 'failed', error: message });
     updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'failed' });
+    updateGenerationRecord(task, {
+      status: 'failed',
+      queueStatus: 'interrupted',
+      materializationStatus: 'failed',
+      error: message,
+      completedAt: Date.now(),
+    });
+    persistTaskQueue(projectId, task, 'interrupted', undefined, message);
     return true;
   }
 
   const currentTask = { ...task, jobId };
   store.update(task.queueId, { status: 'running', jobId });
   updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'running', videoJobId: jobId });
+  updateGenerationRecord(task, { jobId, status: 'running', queueStatus: 'running' });
+  persistTaskQueue(projectId, task, 'running', jobId);
 
   return await new Promise<boolean>((resolve) => {
     let resolved = false;
@@ -98,29 +176,54 @@ const runSingleTask = async (projectId: string, task: StoryboardVideoTask): Prom
         const raw = Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress));
         store.update(currentTask.queueId, { status: 'running', progress: raw });
         updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'running' });
+        updateGenerationRecord(task, { status: 'running', queueStatus: 'running', progress: raw });
       } else if (event.type === 'asset.created') {
         void materializeVideoForFrame(currentTask, event.asset, jobId as string)
           .then(() => store.update(currentTask.queueId, { status: 'running', progress: 0.95 }))
           .catch((error) => {
             store.update(currentTask.queueId, { status: 'failed', error: error instanceof Error ? error.message : '结果落地失败' });
             updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'failed' });
+            updateGenerationRecord(task, {
+              status: 'failed',
+              queueStatus: 'interrupted',
+              materializationStatus: 'failed',
+              materializationError: error instanceof Error ? error.message : '结果落地失败',
+              completedAt: Date.now(),
+            });
           });
       } else if (event.type === 'job.completed' && !resolved) {
         resolved = true;
         store.update(currentTask.queueId, { status: 'completed', progress: 1 });
         updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'completed' });
+        updateGenerationRecord(task, { status: 'completed', queueStatus: 'terminal', progress: 1, completedAt: Date.now() });
+        persistTaskQueue(projectId, task, 'terminal', jobId);
         unsubscribe();
         resolve(true);
       } else if (event.type === 'job.failed' && !resolved) {
         resolved = true;
         store.update(currentTask.queueId, { status: 'failed', error: event.message });
         updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'failed' });
+        updateGenerationRecord(task, {
+          status: 'failed',
+          queueStatus: 'interrupted',
+          error: event.message,
+          completedAt: Date.now(),
+        });
+        persistTaskQueue(projectId, task, 'interrupted', jobId, event.message);
         unsubscribe();
         resolve(true);
       } else if (event.type === 'job.cancelled' && !resolved) {
         resolved = true;
         store.update(currentTask.queueId, { status: 'cancelled' });
         updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'cancelled' });
+        updateGenerationRecord(task, {
+          status: 'cancelled',
+          queueStatus: 'cancelled',
+          materializationStatus: 'failed',
+          materializationError: '任务已取消',
+          completedAt: Date.now(),
+        });
+        persistTaskQueue(projectId, task, 'terminal', jobId);
         unsubscribe();
         resolve(true);
       }
@@ -157,17 +260,49 @@ export const enqueueStoryboardVideo = async (nodeId: string, frames: StoryboardF
 
   for (const { frame, index } of checked) {
     const prompt = frame.prompt?.trim() || frame.description?.trim() || `分镜${index + 1}`;
+    const generationRecordId = `generation-${createId()}`;
+    const sourceAssetIds = [...(frame.assetIds ?? []), ...(frame.imageAssetId ? [frame.imageAssetId] : [])];
     const task: StoryboardVideoTask = {
       queueId: createId(),
+      generationRecordId,
       nodeId,
       frameIndex: index,
       status: 'queued',
       progress: 0,
       prompt,
       config: frame.config ?? {},
-      sourceAssetIds: [...(frame.assetIds ?? []), ...(frame.imageAssetId ? [frame.imageAssetId] : [])],
+      sourceAssetIds,
       createdAt: Date.now(),
     };
+    const roleByAssetId = Object.fromEntries([
+      ...(frame.assetIds ?? []).map((assetId) => [assetId, 'REFERENCE']),
+      ...(frame.imageAssetId ? [[frame.imageAssetId, 'FIRST_FRAME']] : []),
+    ]);
+    const record: GenerationRecord = {
+      id: generationRecordId,
+      producerNodeId: nodeId,
+      actionId: 'generateVideo',
+      attempt: 1,
+      status: 'queued',
+      progress: 0,
+      queueStatus: 'pending_submit',
+      materializationStatus: 'pending',
+      materializedAssetIds: [],
+      resultNodeIds: [],
+      sources: buildGenerationSources({
+        sourceAssetIds,
+        roleByAssetId,
+        nodes: useCanvasStore.getState().nodes,
+        fallbackRole: 'REFERENCE',
+      }),
+      prompt,
+      effectivePrompt: prompt,
+      params: { ...(frame.config ?? {}), actionId: 'generateVideo' },
+      model: frame.config?.model,
+      startedAt: task.createdAt,
+    };
+    useCanvasStore.getState().appendGenerationRecord(record);
+    persistTaskQueue(projectId, task, 'pending_submit');
     store.enqueue(task);
     // 入队即置分镜状态；取消勾选（避免重复点击）
     updateFrameInNode(nodeId, index, { videoStatus: 'queued', videoJobId: undefined, checked: false });
@@ -185,11 +320,27 @@ export const cancelStoryboardVideo = async (queueId: string) => {
   if (!task.jobId) {
     store.update(queueId, { status: 'cancelled' });
     updateFrameInNode(task.nodeId, task.frameIndex, { videoStatus: 'cancelled', videoJobId: undefined });
+    updateGenerationRecord(task, {
+      status: 'cancelled',
+      queueStatus: 'cancelled',
+      materializationStatus: 'failed',
+      materializationError: '任务已取消',
+      completedAt: Date.now(),
+    });
+    persistTaskQueue(useCanvasStore.getState().projectId ?? 'local-project', task, 'terminal');
     return;
   }
   store.update(queueId, { status: 'cancelling' });
   try {
     await jobAdapter.cancel(task.jobId);
+    updateGenerationRecord(task, {
+      status: 'cancelled',
+      queueStatus: 'cancelled',
+      materializationStatus: 'failed',
+      materializationError: '任务已取消',
+      completedAt: Date.now(),
+    });
+    persistTaskQueue(useCanvasStore.getState().projectId ?? 'local-project', task, 'terminal', task.jobId);
     // 状态由 job.cancelled SSE 事件最终落地
   } catch (error) {
     // 取消失败：恢复原状，提示用户

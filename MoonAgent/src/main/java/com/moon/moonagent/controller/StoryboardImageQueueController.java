@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 分镜「完善图片」队列端点（/chat Moon 智能体）。
+ * 分镜图片队列端点（/chat Moon 智能体）。
  *
  * <p>对外暴露：批量入队（POST）、查询整队（GET）、取消单条（DELETE）。
  * 鉴权由 Gateway 统一验签后透传（与 StoryboardVideoQueueController 同语义）。
@@ -27,7 +27,7 @@ public class StoryboardImageQueueController {
     private final StoryboardImageQueueService queueService;
     private final StoryboardClient storyboardClient;
 
-    /** 批量入队勾选分镜的图改图任务。 */
+    /** 批量入队分镜图片任务（完善已有图或自动生成新图）。 */
     @PostMapping
     public ApiResponse<List<StoryboardImageTask>> enqueue(
             Authentication auth, @RequestBody StoryboardImageEnqueueRequest request) {

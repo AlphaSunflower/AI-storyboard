@@ -1,11 +1,12 @@
 package com.moon.xiaoyuecanvas.controller;
 
-import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.xiaoyuecanvas.dto.request.JobRequest;
 import com.moon.xiaoyuecanvas.dto.response.CapabilityDescriptor;
 import com.moon.xiaoyuecanvas.dto.response.JobSubmitResponse;
+import com.moon.xiaoyuecanvas.entity.CanvasAsset;
+import com.moon.xiaoyuecanvas.service.CanvasAssetService;
 import com.moon.xiaoyuecanvas.service.DesignJobService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.storyboard.common.BusinessException;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
@@ -26,7 +28,7 @@ import java.util.Map;
  *   <li>GET  /health                → {label}</li>
  *   <li>GET  /capabilities          → 远程能力数组</li>
  *   <li>POST /jobs                  → {jobId}</li>
- *   <li>GET  /jobs/{jobId}/events   → SSE（queued/started/progress/agent.message/asset.created/completed/failed/cancelled）</li>
+ *   <li>GET  /jobs/{jobId}/events   → SSE（queued/started/progress/agent.message/asset.created/storyboard.created/completed/failed/cancelled）</li>
  *   <li>POST /jobs/{jobId}/cancel   → 取消</li>
  *   <li>GET  /assets/{assetId}      → 素材文件（同源）</li>
  * </ul>
@@ -37,6 +39,7 @@ import java.util.Map;
 public class DesignAgentJobController {
 
     private final DesignJobService designJobService;
+    private final CanvasAssetService canvasAssetService;
     private final FileStorageService fileStorageService;
 
     @GetMapping("/health")
@@ -57,8 +60,16 @@ public class DesignAgentJobController {
 
     @GetMapping("/jobs/{jobId}/events")
     public SseEmitter events(@RequestAttribute("userId") String userId,
-                             @PathVariable String jobId) {
-        return designJobService.subscribeAndRun(userId, jobId);
+                             @PathVariable String jobId,
+                             @RequestParam(value = "afterSeq", required = false) Long afterSeq,
+                             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
+        return designJobService.subscribeAndRun(userId, jobId, afterSeq, lastEventId);
+    }
+
+    @GetMapping("/jobs/{jobId}")
+    public Map<String, Object> status(@RequestAttribute("userId") String userId,
+                                      @PathVariable String jobId) {
+        return designJobService.status(userId, jobId);
     }
 
     @PostMapping("/jobs/{jobId}/cancel")
@@ -103,17 +114,44 @@ public class DesignAgentJobController {
     @GetMapping("/assets/{assetId}")
     public ResponseEntity<ByteArrayResource> asset(@RequestAttribute("userId") String userId,
                                                     @PathVariable String assetId) {
-        AgentAsset asset = designJobService.getOwnedAsset(userId, assetId);
-        String url = asset.getUrl();
-        if (url == null) throw new BusinessException(40401, "素材无文件");
-        String filename = url.substring(url.lastIndexOf('/') + 1);
-        byte[] data = "video".equals(asset.getType())
-                ? fileStorageService.readVideo(filename)
-                : fileStorageService.readImage(filename);
+        CanvasAsset asset = canvasAssetService.getOwned(userId, assetId);
+        String filename = asset.getObjectUrl().substring(asset.getObjectUrl().lastIndexOf('/') + 1);
+        byte[] data = switch (asset.getType()) {
+            case "video" -> fileStorageService.readVideo(filename);
+            case "audio" -> fileStorageService.readAudio(filename);
+            default -> fileStorageService.readImage(filename);
+        };
         if (data == null) throw new BusinessException(40401, "素材文件不存在");
-        String mime = "video".equals(asset.getType()) ? "video/mp4" : MediaType.IMAGE_PNG_VALUE;
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(mime))
+                .contentType(MediaType.parseMediaType(asset.getMimeType()))
                 .body(new ByteArrayResource(data));
+    }
+
+    @PostMapping(value = "/assets/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public CanvasAsset uploadAsset(@RequestAttribute("userId") String userId,
+                                   @RequestParam String canvasId,
+                                   @RequestParam(required = false) String producerNodeId,
+                                   @RequestParam(defaultValue = "image") String type,
+                                   @RequestParam MultipartFile file) {
+        return canvasAssetService.upload(userId, canvasId, producerNodeId, type, file);
+    }
+
+    @PostMapping("/assets/link-generation")
+    public List<CanvasAsset> linkGeneratedAssets(@RequestAttribute("userId") String userId,
+                                                 @RequestBody Map<String, String> body) {
+        String canvasId = body.get("canvasId");
+        String generationRecordId = body.get("generationRecordId");
+        if (canvasId == null || canvasId.isBlank()
+                || generationRecordId == null || generationRecordId.isBlank()) {
+            throw new BusinessException(40001, "canvasId 和 generationRecordId 不能为空");
+        }
+        return canvasAssetService.linkGeneration(
+                userId, canvasId, body.get("producerNodeId"), generationRecordId);
+    }
+
+    @GetMapping("/canvases/{canvasId}/assets")
+    public List<CanvasAsset> listCanvasAssets(@RequestAttribute("userId") String userId,
+                                              @PathVariable String canvasId) {
+        return canvasAssetService.list(userId, canvasId);
     }
 }

@@ -1,9 +1,9 @@
 import type { CanvasDocumentV1, CanvasEdge, CanvasNode, PersistedAsset, ProjectDocumentV1, ProjectDocumentV2 } from '../types';
-import { getAssetsWithAncestors, listProjects, loadCanvas, loadProject, projectAssetIds, saveImportedProject } from './projectStorage';
+import { canvasAssetIds, getAssetsWithAncestors, listProjects, loadCanvas, loadProject, saveImportedProject } from './projectStorage';
 import { unzipInWorker, zipInWorker } from '../utils/archiveWorkerClient';
 import { createId } from '../utils/id';
 
-const PACKAGE_VERSION = 2;
+const PACKAGE_VERSION = 3;
 const MAX_PACKAGE_BYTES = 256 * 1024 * 1024;
 const MAX_FILES = 1000;
 const textEncoder = new TextEncoder();
@@ -31,7 +31,7 @@ interface PackageAssetManifest {
 }
 
 interface PackageManifest {
-  packageVersion: 2;
+  packageVersion: number;
   project: ProjectDocumentV2;
   canvases: CanvasDocumentV1[];
   assets: PackageAssetManifest[];
@@ -48,7 +48,7 @@ export async function exportProjectPackage(projectId: string) {
   const project = await loadProject(projectId);
   if (!project) throw new Error('项目不存在');
   const canvases = (await Promise.all(project.canvases.map(loadCanvas))).filter((canvas): canvas is CanvasDocumentV1 => Boolean(canvas));
-  const assetIds = new Set(canvases.flatMap((canvas) => [...projectAssetIds(canvas.nodes)]));
+  const assetIds = new Set(canvases.flatMap((canvas) => [...canvasAssetIds(canvas)]));
   const assets = await getAssetsWithAncestors(assetIds);
   const files: Record<string, Uint8Array> = {};
   const assetManifests: PackageAssetManifest[] = [];
@@ -132,7 +132,12 @@ export async function importProjectPackage(file: File) {
   const allowedMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime']);
   const assetIds = new Set(manifest.assets.map((asset) => asset.id));
   const nodeIds = new Set(allNodes.map((node) => node.id));
-  if (nodeIds.size !== allNodes.length || allNodes.some((node) => !['image', 'video', 'text'].includes(node.data.kind))) throw new Error('项目包包含无效节点');
+  const supportedNodeKinds = new Set([
+    'text', 'image', 'video', 'videoGen', 'script', 'note', 'prompt', 'sequence', 'storyboard', 'storyboardGen', 'imageGen',
+    'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine',
+    'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo',
+  ]);
+  if (nodeIds.size !== allNodes.length || allNodes.some((node) => !supportedNodeKinds.has(node.data.kind))) throw new Error('项目包包含无效节点');
   if (allEdges.some((edge) => !nodeIds.has(edge.source) || !nodeIds.has(edge.target))) throw new Error('项目包包含无效连线');
   if (allNodes.some((node) => node.data.assetId && !assetIds.has(node.data.assetId))) throw new Error('项目图引用了缺失素材');
 
@@ -194,6 +199,17 @@ export async function importProjectPackage(file: File) {
     source: nodeIdMap.get(edge.source)!,
     target: nodeIdMap.get(edge.target)!,
   });
+  const remapGenerationRecords = (records: CanvasDocumentV1['generationRecords'] = []) => records.map((record) => ({
+    ...record,
+    producerNodeId: nodeIdMap.get(record.producerNodeId) ?? record.producerNodeId,
+    resultNodeIds: record.resultNodeIds.map((id) => nodeIdMap.get(id) ?? id),
+    materializedAssetIds: record.materializedAssetIds.map((id) => assetIdMap.get(id) ?? id),
+    sources: record.sources.map((source) => ({
+      ...source,
+      nodeId: nodeIdMap.get(source.nodeId) ?? source.nodeId,
+      assetId: assetIdMap.get(source.assetId) ?? source.assetId,
+    })),
+  }));
 
   const now = Date.now();
   const titles = new Set((await listProjects()).map((item) => item.title));
@@ -210,6 +226,8 @@ export async function importProjectPackage(file: File) {
     nodes: canvas.nodes.map(remapNode),
     edges: canvas.edges.map(remapEdge),
     viewport: canvas.viewport,
+    generationRecords: remapGenerationRecords(canvas.generationRecords),
+    migrationReport: canvas.migrationReport,
     createdAt: now,
     updatedAt: now,
   }));

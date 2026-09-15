@@ -57,6 +57,7 @@ export const ReferenceStrip = memo(function ReferenceStrip({
   if (!entries.length) return null;
   return (
     <div className="reference-strip nodrag" role="list" aria-label="参考图">
+      <span className="reference-strip__hint">点击图片加入提示词</span>
       {entries.map((entry) => (
         <StripItem
           key={`ref-${entry.number}`}

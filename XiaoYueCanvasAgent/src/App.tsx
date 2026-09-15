@@ -15,6 +15,8 @@ import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
 import { LoginScreen } from './components/LoginScreen';
 import { clearToken, getJobToken, tokenExpired } from './services/jobAuth';
+import { recoverGenerationJobs } from './canvas/generationRuntime';
+import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
 
 type SideView = 'agent' | 'inspector';
 type View = 'home' | 'projectHome' | 'canvas';
@@ -33,6 +35,7 @@ export default function App() {
   const [view, setView] = useState<View>('home');
   // 登录门控：无画布 token（未从 /chat 跳转带 token，也未本地登录）→ 先显示登录页
   const [authed, setAuthed] = useState(() => !!getJobToken());
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [project, setProject] = useState<ProjectDocumentV2 | null>(null);
@@ -101,7 +104,10 @@ export default function App() {
     finally { setProjectsLoading(false); }
   }, []);
 
-  useEffect(() => { void refreshProjects(); }, [refreshProjects]);
+  useEffect(() => {
+    if (!authed) return;
+    void refreshProjects();
+  }, [authed, refreshProjects]);
   // token 过期 → 清 token 回登录页（authed 门控重新为 false）
   useEffect(() => {
     const check = () => { if (tokenExpired()) { clearToken(); setAuthed(false); } };
@@ -109,6 +115,26 @@ export default function App() {
     const timer = window.setInterval(check, 30_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const rejectAuth = (event: Event) => {
+      const status = (event as CustomEvent<{ status?: number }>).detail?.status;
+      setAuthMessage(status === 403 ? '当前账号无权访问该画布，请使用正确账号重新登录。' : '登录已失效，请重新登录。');
+      clearToken();
+      setAuthed(false);
+    };
+    addEventListener('morrow:auth-rejected', rejectAuth);
+    return () => removeEventListener('morrow:auth-rejected', rejectAuth);
+  }, []);
+  useEffect(() => {
+    if (!authed || view !== 'canvas' || !canvas?.id) return;
+    const reconcile = () => {
+      void hydrateReferencedCanvasAssets(canvas.id).catch(() => undefined);
+      void recoverGenerationJobs().catch(() => undefined);
+    };
+    reconcile();
+    const timer = window.setInterval(reconcile, 15_000);
+    return () => window.clearInterval(timer);
+  }, [authed, canvas?.id, view]);
   useEffect(() => { canvasRef.current = canvas; }, [canvas]);
   useEffect(() => {
     if (view === 'canvas' && project) return startCanvasBridge(project.id);
@@ -130,6 +156,7 @@ export default function App() {
       ...current,
       nodes: graph.nodes.map((node) => node.selected ? { ...node, selected: false } : node),
       edges: graph.edges,
+      generationRecords: graph.generationRecords,
       viewport: viewportRef.current ?? current.viewport,
       updatedAt: Date.now(),
     };
@@ -334,7 +361,7 @@ export default function App() {
     notify('项目已从本地删除');
   }, [clearAssets, notify, project, refreshProjects]);
 
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
+  if (!authed) return <LoginScreen message={authMessage} onLogin={() => { setAuthMessage(null); setAuthed(true); }} />;
 
   if (view === 'home') {
     return <><HomePage projects={projects} loading={projectsLoading} onCreate={() => void newProject().catch((error) => notify(error.message))} onOpen={(id) => void openProjectHome(id).catch((error) => notify(error.message))} onDelete={(id) => void removeProject(id).catch((error) => notify(error.message))} onImport={(file) => void importPackage(file).catch((error) => notify(error instanceof Error ? error.message : '项目包导入失败'))} />{notice && <div className="canvas-status-toast app-status-toast" role="status">{notice}</div>}</>;

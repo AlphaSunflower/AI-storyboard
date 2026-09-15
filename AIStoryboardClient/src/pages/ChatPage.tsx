@@ -758,7 +758,7 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <ChatAppActions onOpen={chatApps.open} compact={embed} />
+                {!embed && <ChatAppActions onOpen={chatApps.open} />}
                 <button
                   onClick={() => navigate('/library?type=AI_ASSET')}
                   title="项目库"

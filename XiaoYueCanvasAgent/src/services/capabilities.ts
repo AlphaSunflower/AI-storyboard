@@ -5,6 +5,7 @@ import type {
   JobAssetDescriptor,
   JobEvent,
   JobRequest,
+  JobSnapshot,
 } from '../types';
 import { getJobToken } from './jobAuth';
 
@@ -109,13 +110,21 @@ export class HttpJobAdapter implements JobAdapter {
     return { jobId: body.jobId };
   }
 
+  async getJob(jobId: string): Promise<JobSnapshot> {
+    const response = await withTimeout(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    return await response.json() as JobSnapshot;
+  }
+
   subscribe(jobId: string, listener: (event: JobEvent) => void) {
     // EventSource 无法带 Authorization 头——token 放查询参数（后端 events 路径放行 access_token）
     const token = getJobToken();
     const base = `${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/events`;
     const url = token ? `${base}?access_token=${encodeURIComponent(token)}` : base;
     const source = new EventSource(url);
-    const eventTypes: JobEvent['type'][] = ['job.queued', 'job.started', 'job.progress', 'agent.message', 'asset.created', 'job.completed', 'job.failed', 'job.cancelled'];
+    const eventTypes: JobEvent['type'][] = ['job.queued', 'job.started', 'job.progress', 'agent.message', 'storyboard.created', 'asset.created', 'job.completed', 'job.failed', 'job.cancelled'];
     const listeners = eventTypes.map((type) => {
       const handler = (event: MessageEvent<string>) => {
         const parsed = normalizeEvent(event.data, jobId, type, event.lastEventId);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useCanvasStore, canConnectNodes } from '../store/canvasStore';
-import { NODE_DEFS, listMenuNodes, getNodeDefByType } from '../domain/nodeRegistry';
+import { useCanvasStore, canConnectFromPort, canConnectToPort } from '../store/canvasStore';
+import { listNodeDefinitions, getNodeDefinition } from '../canvas/graphContracts';
 
 /**
  * 「连接即创建」菜单：监听 CanvasWorkspace 拖线松手未落到节点时 dispatch 的
@@ -20,6 +20,7 @@ type MenuState = {
   sourceNodeId: string;
   sourceNodeType: string;
   handleType: 'source' | 'target';
+  handleId: string;
 };
 
 export function ConnectionNodeMenu() {
@@ -32,11 +33,21 @@ export function ConnectionNodeMenu() {
     // 刚打开菜单时，document 的 click 捕获也会先触发并立刻关闭它；用 justOpened 跳过这一次。
     let justOpened = false;
     const onConnectEnd = (e: CustomEvent) => {
-      const { didConnect, clientX, clientY, flowX, flowY, sourceNodeId, sourceNodeType, handleType } = e.detail;
+      const { didConnect, clientX, clientY, flowX, flowY, sourceNodeId, sourceNodeType, handleType, handleId } = e.detail;
       if (didConnect) return;
-      const sourceDef = getNodeDefByType(sourceNodeType);
+      const sourceDef = getNodeDefinition(sourceNodeType);
       if (!sourceDef) return;
-      setMenu({ visible: true, x: clientX, y: clientY, flowX: flowX ?? clientX, flowY: flowY ?? clientY, sourceNodeId, sourceNodeType, handleType: handleType ?? 'source' });
+      setMenu({
+        visible: true,
+        x: clientX,
+        y: clientY,
+        flowX: flowX ?? clientX,
+        flowY: flowY ?? clientY,
+        sourceNodeId,
+        sourceNodeType,
+        handleType: handleType ?? 'source',
+        handleId: handleId ?? '',
+      });
     };
     const onClick = (e: MouseEvent) => {
       if (justOpened) { justOpened = false; return; }
@@ -57,14 +68,16 @@ export function ConnectionNodeMenu() {
   if (menu.handleType === 'target') {
     // 目标侧（往 target 拖）：列出「能连入此目标」的节点类型，作为上游可选。
     const targetKind = menu.sourceNodeType as any;
-    const options = listMenuNodes().filter((d) => canConnectNodes(d.type as any, targetKind));
+    const handleId = menu.handleId || getNodeDefinition(targetKind)?.inputs[0]?.id || '';
+    const options = listNodeDefinitions().filter((d) =>
+      canConnectToPort(targetKind, handleId, d.kind as any));
     return (
       <div ref={menuRef} className="connection-node-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
         <header>选择上游节点类型</header>
         {options.length === 0 && <p className="connection-node-menu__empty">当前目标节点不接受任何上游连接</p>}
         {options.map((def) => (
-          <button key={def.type} onClick={() => { createNodeBefore(menu.sourceNodeId, def.type as any, { x: menu.flowX, y: menu.flowY }); setMenu(null); }}>
-            <span>{def.menuLabel}</span>
+          <button key={def.kind} onClick={() => { createNodeBefore(menu.sourceNodeId, def.kind as any, { x: menu.flowX, y: menu.flowY }, handleId); setMenu(null); }}>
+            <span>{def.title}</span>
           </button>
         ))}
       </div>
@@ -72,15 +85,16 @@ export function ConnectionNodeMenu() {
   }
   // 源侧（从 source 拖）：列出「源节点允许连到」的节点类型，作为下游可选。
   const sourceType = menu.sourceNodeType as any;
-  const sourceDef = (NODE_DEFS as Record<string, any>)[sourceType];
-  const options = (sourceDef?.connectivity?.acceptTypes ?? []).map((t: string) => NODE_DEFS[t]).filter(Boolean) as Array<{ type: string; menuLabel: string }>;
+  const handleId = menu.handleId || getNodeDefinition(sourceType)?.outputs[0]?.id || '';
+  const options = listNodeDefinitions().filter((def) =>
+    canConnectFromPort(sourceType, handleId, def.kind));
   return (
     <div ref={menuRef} className="connection-node-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
       <header>选择下游节点类型</header>
       {options.length === 0 && <p className="connection-node-menu__empty">当前节点不能连接任何下游节点</p>}
       {options.map((def) => (
-        <button key={def.type} onClick={() => { createConnectedNode(menu.sourceNodeId, def.type as any, { x: menu.flowX, y: menu.flowY }); setMenu(null); }}>
-          <span>{def.menuLabel}</span>
+        <button key={def.kind} onClick={() => { createConnectedNode(menu.sourceNodeId, def.kind as any, { x: menu.flowX, y: menu.flowY }, handleId); setMenu(null); }}>
+          <span>{def.title}</span>
         </button>
       ))}
     </div>

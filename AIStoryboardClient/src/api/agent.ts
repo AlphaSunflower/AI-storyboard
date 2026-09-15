@@ -334,6 +334,7 @@ export interface StoryboardImageEnqueueItem {
   n?: number;
   sourceImageUrl?: string;
   refImageUrls?: string[];
+  mode?: 'edit' | 'generate';
 }
 
 // ── 会话 ──────────────────────────────────────────────

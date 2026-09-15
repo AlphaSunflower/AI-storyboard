@@ -50,7 +50,8 @@ ai:
   # ── 超时/重试（默认值对齐 agent-core 行为）──
   image-request-timeout: 310
   image-edit-timeout: 180
-  video-request-timeout: 120
+  # 必须晚于网关上游请求超时（默认 600s）：避免上游已受理、画布先超时导致 taskId 丢失。
+  video-request-timeout: 660
   video-download-timeout: 180
   video-retry-delay-ms: 15000
   gateway-model-timeout: 10

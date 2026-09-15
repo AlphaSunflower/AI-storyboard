@@ -5,6 +5,7 @@ import type { StoryboardVideoConfig, StoryboardVideoStatus } from '../types';
 export interface StoryboardVideoTask {
   /** 客户端唯一键，同时作为 clientRequestId（幂等键）。 */
   queueId: string;
+  generationRecordId: string;
   nodeId: string;
   frameIndex: number;
   jobId?: string;

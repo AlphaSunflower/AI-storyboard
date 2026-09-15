@@ -5,8 +5,7 @@ import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
 
 export type CanvasContextTarget =
   | { type: 'pane'; clientX: number; clientY: number; flowPosition: { x: number; y: number } }
-  | { type: 'node'; node: CanvasNode; clientX: number; clientY: number; flowPosition: { x: number; y: number } }
-  | { type: 'edge'; edgeId: string; clientX: number; clientY: number; flowPosition: { x: number; y: number } };
+  | { type: 'node'; node: CanvasNode; clientX: number; clientY: number; flowPosition: { x: number; y: number } };
 
 interface MenuItemProps {
   children: ReactNode;
@@ -19,11 +18,32 @@ interface MenuItemProps {
 
 function MenuItem({ children, shortcut, disabled, title, onSelect, submenu }: MenuItemProps) {
   const [open, setOpen] = useState(false);
-  return <div className={`canvas-menu-item-wrap ${open ? 'is-open' : ''}`} onPointerEnter={() => submenu && setOpen(true)} onPointerLeave={() => setOpen(false)}>
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  };
+  const openSubmenu = () => {
+    cancelClose();
+    if (submenu) setOpen(true);
+  };
+  const scheduleClose = () => {
+    if (!submenu) return;
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setOpen(false);
+    }, 140);
+  };
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
+  return <div className={`canvas-menu-item-wrap ${open ? 'is-open' : ''}`} onPointerEnter={openSubmenu} onPointerLeave={scheduleClose}>
     <button role="menuitem" className="canvas-menu-item" disabled={disabled} title={title} onClick={() => { if (!disabled && !submenu) onSelect?.(); }}>
       <span>{children}</span>{shortcut && <kbd>{shortcut}</kbd>}{submenu && <ChevronRight size={14} />}
     </button>
-    {submenu && open && <div className="canvas-context-submenu" role="menu">{submenu}</div>}
+    {submenu && open && <div className="canvas-context-submenu" role="menu" onPointerEnter={openSubmenu} onPointerLeave={scheduleClose}>{submenu}</div>}
   </div>;
 }
 
@@ -74,15 +94,16 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
   useEffect(() => {
     const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) onClose(); };
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const closeOnWheel = (event: WheelEvent) => { if (!menuRef.current?.contains(event.target as Node)) onClose(); };
     addEventListener('pointerdown', close, true);
     addEventListener('keydown', closeOnEscape);
     addEventListener('blur', onClose);
-    addEventListener('wheel', onClose, { passive: true });
+    addEventListener('wheel', closeOnWheel, { passive: true });
     return () => {
       removeEventListener('pointerdown', close, true);
       removeEventListener('keydown', closeOnEscape);
       removeEventListener('blur', onClose);
-      removeEventListener('wheel', onClose);
+      removeEventListener('wheel', closeOnWheel);
     };
   }, [onClose]);
 
@@ -115,7 +136,7 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       <MenuItem disabled={!props.canPaste} shortcut="Ctrl V" onSelect={run(props.onPaste)}>粘贴</MenuItem>
       <MenuItem onSelect={run(props.onDuplicate)}>副本</MenuItem>
       <Separator />
-      <MenuItem shortcut="Backspace / Del" onSelect={run(props.onDelete)}>删除</MenuItem>
+      <MenuItem shortcut="Ctrl D / Del" onSelect={run(props.onDelete)}>删除</MenuItem>
       {target.node.data.kind === 'image' && <>
         <Separator />
         <MenuItem disabled={!props.hasImageAsset} title={props.hasImageAsset ? undefined : '请先上传真实图片'} onSelect={run(props.onCopyImage)}>复制到剪贴板</MenuItem>

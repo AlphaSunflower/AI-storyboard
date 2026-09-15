@@ -56,7 +56,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('morrow-creative-canvas-v1', 3);
+      const request = indexedDB.open('morrow-creative-canvas-v1', 4);
       request.onsuccess = () => {
         const db = request.result;
         const stores = Array.from(db.objectStoreNames);

@@ -15,20 +15,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 分镜「完善图片」队列实现。
+ * 分镜图片队列实现。
  *
  * <p>串行执行：{@code processing} 单飞锁保证同一时刻只推进一个 queued 任务；
- * 完善图片为同步图改图（mode=edit），终态由 {@code ImageGenerationServiceImpl} 按 sceneId 回写 scenes.imageUrl。
+ * 支持编辑已有图片（mode=edit）和自动生成分镜图片（mode=generate），
+ * 终态由 {@code ImageGenerationServiceImpl} 按 sceneId 回写 scenes.imageUrl。
  */
 @Service
 @RequiredArgsConstructor
@@ -62,13 +60,14 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
             row.setSize(item.size());
             row.setQuality(item.quality());
             row.setN(item.n() != null && item.n() > 0 ? item.n() : 1);
-            row.setMode("edit");
+            row.setMode(normalizeMode(item.mode()));
             row.setSourceImageUrl(item.sourceImageUrl());
             row.setRefImageUrls(join(item.refImageUrls()));
             row.setProgress(0);
             queueMapper.insert(row);
             created.add(row);
-            log.info("[分镜完善图片队列] 入队: queueId={}, sceneId={}, prompt={}", row.getId(), row.getSceneId(), row.getPrompt());
+            log.info("[分镜图片队列] 入队: queueId={}, sceneId={}, mode={}, prompt={}",
+                    row.getId(), row.getSceneId(), row.getMode(), row.getPrompt());
         }
         process();
         return created;
@@ -119,7 +118,7 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
         }
     }
 
-    /** 运行单条队列任务：置 running → 图改图（同步） → 终态回写由 imageService 处理。 */
+    /** 运行单条队列任务：置 running → 生图/图改图（同步） → 终态回写由 imageService 处理。 */
     private void runOne(StoryboardImageTask row) {
         row.setStatus("running");
         row.setStartedAt(OffsetDateTime.now());
@@ -132,9 +131,10 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
             return;
         }
 
-        // 源图：显式传入 > scene.imageUrl
+        String mode = normalizeMode(row.getMode());
+        // edit 模式源图：显式传入 > scene.imageUrl；generate 模式不使用源图。
         String sourceImageUrl = row.getSourceImageUrl();
-        if (sourceImageUrl == null || sourceImageUrl.isBlank()) {
+        if ("edit".equals(mode) && (sourceImageUrl == null || sourceImageUrl.isBlank())) {
             try {
                 Scene scene = storyboardClient.getScene(row.getSceneId());
                 if (scene != null) sourceImageUrl = scene.getImageUrl();
@@ -163,7 +163,8 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
         try {
             Map<String, Object> result = generationService.generateImage(
                     conversation, row.getSceneId(), prompt, row.getModel(), row.getSize(),
-                    row.getQuality(), row.getN(), "edit", refImages, sourceImageUrl);
+                    row.getQuality(), row.getN(), mode, refImages,
+                    "edit".equals(mode) ? sourceImageUrl : null);
             @SuppressWarnings("unchecked")
             List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
             if (urls.isEmpty()) {
@@ -184,7 +185,6 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
         live.setFinishedAt(OffsetDateTime.now());
         live.setError(null);
         queueMapper.updateById(live);
-        recordImageGeneration(live, status, null);
     }
 
     private void failRow(StoryboardImageTask row, String error) {
@@ -194,44 +194,6 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
         live.setError(error);
         live.setFinishedAt(OffsetDateTime.now());
         queueMapper.updateById(live);
-        recordImageGeneration(live, "failed", error);
-    }
-
-    /** 终态后写一条 agent_assets 生成记录，供「生成记录」展示（best-effort，失败仅记日志）。 */
-    private void recordImageGeneration(StoryboardImageTask row, String status, String error) {
-        if (row.getConversationId() == null || row.getConversationId().isBlank()) return;
-        AgentConversation conversation = conversationMapper.selectById(row.getConversationId());
-        if (conversation == null) return;
-        Scene scene = null;
-        try {
-            scene = storyboardClient.getScene(row.getSceneId());
-        } catch (Exception e) {
-            log.warn("[分镜完善图片队列] 生成记录读取分镜失败: sceneId={}, error={}", row.getSceneId(), e.getMessage());
-        }
-        String url = null;
-        List<String> resultUrls = new ArrayList<>();
-        if (scene != null) {
-            if (scene.getImageUrls() != null && !scene.getImageUrls().isBlank()) {
-                resultUrls.addAll(Arrays.stream(scene.getImageUrls().split(","))
-                        .map(String::trim).filter(s -> !s.isBlank()).toList());
-            }
-            if (scene.getImageUrl() != null && !scene.getImageUrl().isBlank()) {
-                url = scene.getImageUrl();
-                if (resultUrls.isEmpty()) resultUrls.add(scene.getImageUrl());
-            }
-        }
-        Map<String, Object> params = new LinkedHashMap<>();
-        if (row.getModel() != null && !row.getModel().isBlank()) params.put("model", row.getModel());
-        if (row.getSize() != null && !row.getSize().isBlank()) params.put("size", row.getSize());
-        if (row.getQuality() != null && !row.getQuality().isBlank()) params.put("quality", row.getQuality());
-        if (row.getN() != null) params.put("n", row.getN());
-        params.put("mode", "edit");
-        Long durationMs = null;
-        if (row.getStartedAt() != null && row.getFinishedAt() != null) {
-            durationMs = Duration.between(row.getStartedAt(), row.getFinishedAt()).toMillis();
-        }
-        generationService.recordStoryboardGeneration(conversation, row.getSceneId(), "image", "storyboard_image",
-                row.getPrompt(), row.getModel(), row.getTaskId(), url, resultUrls, status, error, durationMs, params);
     }
 
     private static String join(List<String> values) {
@@ -243,5 +205,9 @@ public class StoryboardImageQueueServiceImpl implements StoryboardImageQueueServ
         if (value == null || value.isBlank()) return List.of();
         return java.util.Arrays.stream(value.split(","))
                 .map(String::trim).filter(v -> !v.isBlank()).toList();
+    }
+
+    static String normalizeMode(String mode) {
+        return "generate".equalsIgnoreCase(mode) ? "generate" : "edit";
     }
 }

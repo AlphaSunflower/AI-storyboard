@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   findReferenceTokens,
+  findReferencePickerAtCursor,
   insertReferenceToken,
   buildReferenceToken,
   removeReferenceTokenByNumber,
@@ -39,17 +40,6 @@ export interface RichPromptInputProps {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────
-
-function truncateFilename(name: string, maxLen = 10): string {
-  if (name.length <= maxLen) return name;
-  const dot = name.lastIndexOf('.');
-  if (dot > 0 && dot > name.length - 8) {
-    const ext = name.slice(dot);
-    const keep = maxLen - ext.length - 1;
-    if (keep > 3) return name.slice(0, keep) + '…' + ext;
-  }
-  return name.slice(0, maxLen - 1) + '…';
-}
 
 function escapeHTML(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -252,8 +242,9 @@ export const RichPromptInput = memo(function RichPromptInput({
       const entry = pool.getByNumber(token.imageNumber);
       if (entry) {
         const raw = entry.sourceNodeName || `图${token.imageNumber}`;
-        const label = escapeHTML(truncateFilename(raw));
-        html += `<span contenteditable="false" data-token="${escapeHTML(token.text)}" data-image-number="${token.imageNumber}" data-media-type="${token.mediaType || 'image'}" class="rt-chip nodrag" style="display:inline-flex;align-items:center;gap:4px;background:rgba(215,255,84,0.16);border:1px solid rgba(215,255,84,0.35);border-radius:6px;padding:1px 6px 1px 8px;font-size:12px;line-height:20px;color:var(--acid);font-weight:500;white-space:nowrap;vertical-align:middle;user-select:none;margin:0 1px">${label}<span data-chip-delete style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;font-size:10px;color:var(--acid);cursor:pointer;margin-left:2px;opacity:0.7">×</span></span>`;
+        const label = `#${token.imageNumber}`;
+        const compactToken = buildReferenceToken(token.imageNumber);
+        html += `<span contenteditable="false" data-token="${compactToken}" data-image-number="${token.imageNumber}" data-media-type="${token.mediaType || 'image'}" title="${escapeHTML(raw)}" class="rt-chip nodrag" style="display:inline-flex;align-items:center;gap:4px;max-width:54px;min-width:38px;justify-content:center;overflow:hidden;box-sizing:border-box;background:rgba(215,255,84,0.16);border:1px solid rgba(215,255,84,0.35);border-radius:6px;padding:1px 6px 1px 8px;font-size:12px;line-height:20px;color:var(--acid);font-weight:500;white-space:nowrap;vertical-align:middle;user-select:none;margin:0 1px">${label}<span data-chip-delete style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:0 0 14px;border-radius:50%;font-size:10px;color:var(--acid);cursor:pointer;margin-left:2px;opacity:0.7">×</span></span>`;
       } else {
         html += `<span style="background:rgba(234,88,12,0.15);border:1px solid rgba(234,88,12,0.3);border-radius:4px;padding:0 4px;color:var(--text-muted);text-decoration:line-through;font-size:12px">${escapeHTML(token.text)}</span>`;
       }
@@ -327,17 +318,12 @@ export const RichPromptInput = memo(function RichPromptInput({
   // 裸 @ 检测 → 弹出 picker
   useEffect(() => {
     const pos = cursorPosRef.current;
-    let found: number | null = null;
-    for (let i = pos - 1; i >= Math.max(0, pos - 50); i--) {
-      const ch = value[i];
-      if (ch === '@') { found = i; break; }
-      if (ch === ' ' || ch === '\n' || ch === '\t') break;
-    }
+    const found = findReferencePickerAtCursor(value, pos, pool.count);
     if (found !== null && !showPicker) { atPositionRef.current = found; openPicker(); }
     else if (found === null && showPicker) { setShowPicker(false); atPositionRef.current = null; }
     else if (found !== null && showPicker) { atPositionRef.current = found; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, showPicker]);
+  }, [value, showPicker, pool.count]);
 
   const openPicker = useCallback(() => {
     const container = containerRef.current;
@@ -356,8 +342,7 @@ export const RichPromptInput = memo(function RichPromptInput({
       if (last > 0) restoreCursorOffset(el, last);
     }
     const current = readDOMValue();
-    const entry = pool.getByNumber(num);
-    const marker = buildReferenceToken(num, entry?.sourceNodeName);
+    const marker = buildReferenceToken(num);
     const tokens = findReferenceTokens(current, pool.count);
     const existing = tokens.find((t) => t.imageNumber === num);
     if (existing) {
@@ -379,8 +364,7 @@ export const RichPromptInput = memo(function RichPromptInput({
   const handlePickerSelect = useCallback((num: number) => {
     setShowPicker(false);
     const current = readDOMValue();
-    const entry = pool.getByNumber(num);
-    const marker = buildReferenceToken(num, entry?.sourceNodeName);
+    const marker = buildReferenceToken(num);
     if (atPositionRef.current !== null) {
       const atPos = atPositionRef.current;
       let end = atPos + 1;

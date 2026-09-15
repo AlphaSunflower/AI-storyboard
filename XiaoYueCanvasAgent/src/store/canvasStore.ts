@@ -9,12 +9,25 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 import { NODE_PRESETS } from '../data/presets';
-import { NODE_DEFS } from '../domain/nodeRegistry';
 import type { CanvasDocumentV1, CanvasEdge, CanvasNode, GraphSnapshot, MediaKind } from '../types';
 import { createId } from '../utils/id';
+import {
+  getNodeDefinition,
+  isCanvasNodeKind,
+  validateEdge,
+  type CanvasGraphV2,
+  type GenerationRecord,
+  type NodePort,
+} from '../canvas/graphContracts';
+import { reconcileStoryboardShots, type StoryboardShotPlan } from '../canvas/storyboardPlan';
+import { relabelGeneratedResultNodes } from '../canvas/generationResultLabel';
 
 // Canvas updates are immutable, so history can share untouched graph objects.
-const graphSnapshot = (nodes: CanvasNode[], edges: CanvasEdge[]): GraphSnapshot => ({ nodes, edges });
+const graphSnapshot = (nodes: CanvasNode[], edges: CanvasEdge[], generationRecords: GenerationRecord[]): GraphSnapshot => ({
+  nodes,
+  edges,
+  generationRecords,
+});
 const clearSelection = (nodes: CanvasNode[]) => nodes.map((node) => node.selected ? { ...node, selected: false } : node);
 const indexDerivedAssets = (nodes: CanvasNode[]) => {
   const index: Record<string, string[]> = {};
@@ -31,6 +44,21 @@ const makeNode = (
   overrides: Partial<CanvasNode['data']> = {},
   size?: { width: number; height: number },
 ): CanvasNode => {
+  const modern = getNodeDefinition(kind);
+  if (modern) {
+    return {
+      id: `${kind}-${createId()}`,
+      type: modern.kind,
+      position,
+      width: size?.width ?? modern.defaultSize.width,
+      height: size?.height ?? modern.defaultSize.height,
+      data: {
+        ...modern.createDefaultData(),
+        ...overrides,
+        kind: modern.kind,
+      },
+    };
+  }
   const preset = NODE_PRESETS.find((item) => item.kind === kind) ?? NODE_PRESETS[0];
   // 生成类节点参考尺寸（对齐参考 ImageEditNode 520×400），text/video 保持；其余 250×250
   const defaultSize = kind === 'text' ? { width: 380, height: 280 }
@@ -40,7 +68,7 @@ const makeNode = (
     : { width: 250, height: 250 };
   return {
     id: `${kind}-${createId()}`,
-    type: kind === 'video' ? 'video' : 'media',
+    type: isCanvasNodeKind(kind) ? kind : 'media',
     position,
     width: size?.width ?? defaultSize.width,
     height: size?.height ?? defaultSize.height,
@@ -71,6 +99,15 @@ interface CanvasState {
   canvasId: string | null;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  generationRecords: GenerationRecord[];
+  materializeResultNode: (request: {
+    resultNodeId: string;
+    producerNodeId: string;
+    assetId: string;
+    kind: 'image' | 'video';
+    label: string;
+    size: { width: number; height: number };
+  }) => string;
   past: GraphSnapshot[];
   future: GraphSnapshot[];
   selectedNodeId: string | null;
@@ -107,31 +144,83 @@ interface CanvasState {
   resizeNodes: (sizes: Array<{ nodeId: string; size: { width: number; height: number } }>) => number;
   createEdge: (connection: Connection) => string | null;
   // 创建节点并自动连线（新节点连到 sourceId 的右边）
-  createConnectedNode: (sourceId: string, kind: MediaKind, position: XYPosition) => string | null;
+  createConnectedNode: (sourceId: string, kind: MediaKind, position: XYPosition, sourceHandle?: string) => string | null;
   // 创建节点并自动连线（新节点排在 targetId 的左边，作为其前置）
-  createNodeBefore: (targetId: string, kind: MediaKind, position: XYPosition) => string | null;
+  createNodeBefore: (targetId: string, kind: MediaKind, position: XYPosition, targetHandle?: string) => string | null;
   deleteEdge: (edgeId: string) => void;
   selectNode: (nodeId: string | null, preserveSelection?: boolean) => void;
+  selectAll: () => number;
   undo: () => void;
   redo: () => void;
   loadTemplate: (templateId: string) => void;
   clearCanvas: () => void;
+  appendGenerationRecord: (record: GenerationRecord) => void;
+  updateGenerationRecord: (record: GenerationRecord) => void;
+  applyStoryboardPlan: (producerNodeId: string, plans: StoryboardShotPlan[]) => {
+    created: string[];
+    updated: string[];
+    stale: string[];
+  };
 }
 
 const MAX_HISTORY = 40;
 
-/**
- * 连通性校验（唯一入口）：判断 sourceKind 作为源能否连到 targetKind。
- * 语义 = 源节点的 connect.acceptTypes 白名单：
- *  - 非空：仅当白名单包含目标 kind 才放行；
- *  - 空数组：该源「不允许连出任何目标」（终端/注释/容器节点）。
- * 所有连线路径（connect / createEdge / createConnectedNode / createNodeBefore）都走这里，防漏网。
- * 未知 kind 放行（向后兼容旧画布数据）。
- */
+const asGraphV2 = (state: Pick<CanvasState, 'nodes' | 'edges' | 'generationRecords'>): CanvasGraphV2 => ({
+  schemaVersion: 2,
+  nodes: state.nodes as CanvasGraphV2['nodes'],
+  edges: state.edges as CanvasGraphV2['edges'],
+  viewport: { x: 0, y: 0, zoom: 1 },
+  generationRecords: state.generationRecords,
+});
+
+const compatibleTargetPort = (sourceKind: MediaKind, targetKind: MediaKind): NodePort | undefined => {
+  const sourceDef = getNodeDefinition(sourceKind);
+  const targetDef = getNodeDefinition(targetKind);
+  const output = sourceDef?.outputs[0];
+  if (!output) return undefined;
+  return targetDef?.inputs.find((port) => port.media === output.media && port.acceptsKinds.includes(sourceKind as never));
+};
+
 const canConnect = (sourceKind: MediaKind, targetKind: MediaKind): boolean => {
-  const def = NODE_DEFS[sourceKind];
-  if (!def) return true;
-  return def.connectivity.acceptTypes.includes(targetKind);
+  const sourceDef = getNodeDefinition(sourceKind);
+  const targetPort = compatibleTargetPort(sourceKind, targetKind);
+  return Boolean(sourceDef?.outputs[0] && targetPort);
+};
+
+export const canConnectFromPort = (sourceKind: MediaKind, sourceHandle: string, targetKind: MediaKind): boolean => {
+  const sourcePort = getNodeDefinition(sourceKind)?.outputs.find((port) => port.id === sourceHandle);
+  if (!sourcePort) return false;
+  return Boolean(getNodeDefinition(targetKind)?.inputs.some((port) =>
+    port.media === sourcePort.media && port.acceptsKinds.includes(sourceKind as never)));
+};
+
+export const canConnectToPort = (targetKind: MediaKind, targetHandle: string, sourceKind: MediaKind): boolean => {
+  const targetPort = getNodeDefinition(targetKind)?.inputs.find((port) => port.id === targetHandle);
+  if (!targetPort) return false;
+  return Boolean(getNodeDefinition(sourceKind)?.outputs.some((port) =>
+    port.media === targetPort.media
+    && targetPort.acceptsKinds.includes(sourceKind as never)));
+};
+
+const normalizeHandle = (
+  handle: string | null | undefined,
+  side: 'source' | 'target',
+  sourceKind: MediaKind,
+  targetKind: MediaKind,
+) => {
+  if (handle && handle !== 'right' && handle !== 'left') return handle;
+  if (side === 'source') return getNodeDefinition(sourceKind)?.outputs[0]?.id;
+  return compatibleTargetPort(sourceKind, targetKind)?.id;
+};
+
+const nextPortOrder = (edges: CanvasEdge[], targetId: string, targetHandle: string): number => {
+  const used = new Set(edges
+    .filter((edge) => edge.target === targetId && edge.targetHandle === targetHandle)
+    .map((edge) => (edge.data as { portOrder?: number } | undefined)?.portOrder)
+    .filter((order): order is number => Number.isInteger(order)));
+  let order = 0;
+  while (used.has(order)) order += 1;
+  return order;
 };
 
 /** 导出给连线菜单（ConnectionNodeMenu）用：判断源能否连到目标，口径与 store 一致。 */
@@ -170,30 +259,39 @@ const cloneSelection = (nodes: CanvasNode[], edges: CanvasEdge[], offset: XYPosi
 };
 
 export const useCanvasStore = create<CanvasState>((set, get) => {
-  const commit = (recipe: (state: CanvasState) => Pick<CanvasState, 'nodes' | 'edges'>) => {
+  const commit = (recipe: (state: CanvasState) => Pick<CanvasState, 'nodes' | 'edges'> & Partial<Pick<CanvasState, 'generationRecords'>>) => {
     const current = get();
     const next = recipe(current);
     set({
       ...next,
       derivedAssetIdsBySource: indexDerivedAssets(next.nodes),
-      past: [...current.past, graphSnapshot(current.nodes, current.edges)].slice(-MAX_HISTORY),
+      past: [...current.past, graphSnapshot(current.nodes, current.edges, current.generationRecords)].slice(-MAX_HISTORY),
       future: [],
       revision: current.revision + 1,
     });
   };
 
   return {
-    projectId: null, canvasId: null, nodes: [], edges: [], past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
+    projectId: null, canvasId: null, nodes: [], edges: [], generationRecords: [], past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
     clipboard: null, clipboardPasteCount: 0, revision: 0, derivedAssetIdsBySource: {},
 
-    loadProjectGraph: (canvas) => set({
+    loadProjectGraph: (canvas) => {
+      const generationRecords = structuredClone((canvas as CanvasDocumentV1 & { generationRecords?: GenerationRecord[] }).generationRecords ?? []);
+      const nodes = relabelGeneratedResultNodes(
+        structuredClone(canvas.nodes).map((node) => ({ ...node, selected: false })),
+        generationRecords,
+      );
+      set({
       projectId: canvas.projectId,
       canvasId: canvas.id,
-      nodes: structuredClone(canvas.nodes).map((node) => ({ ...node, selected: false })),
-      edges: structuredClone(canvas.edges), past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
+      nodes,
+      edges: structuredClone(canvas.edges),
+      generationRecords,
+      past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
       clipboard: null, clipboardPasteCount: 0, revision: 0,
-      derivedAssetIdsBySource: indexDerivedAssets(canvas.nodes),
-    }),
+      derivedAssetIdsBySource: indexDerivedAssets(nodes),
+    });
+    },
 
     onNodesChange: (changes) => {
       const permanent = changes.some((change) => change.type === 'remove');
@@ -207,7 +305,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
     beginNodeDrag: () => {
       const state = get();
-      if (!state.dragStartSnapshot) set({ dragStartSnapshot: graphSnapshot(state.nodes, state.edges) });
+      if (!state.dragStartSnapshot) set({ dragStartSnapshot: graphSnapshot(state.nodes, state.edges, state.generationRecords) });
     },
     endNodeDrag: () => {
       const state = get(); const snapshot = state.dragStartSnapshot;
@@ -220,24 +318,40 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
     connect: (connection) => {
       const state = get();
-      if (!connection.source || !connection.target || connection.source === connection.target) return;
-      if (state.edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.sourceHandle === connection.sourceHandle && edge.targetHandle === connection.targetHandle)) return;
+      if (!connection.source || !connection.target) return;
       const sourceNode = state.nodes.find((node) => node.id === connection.source);
       const targetNode = state.nodes.find((node) => node.id === connection.target);
       if (!sourceNode || !targetNode) return;
-      if (!canConnect(sourceNode.data.kind, targetNode.data.kind)) return;
-      commit((state) => ({ nodes: state.nodes, edges: addEdge({ ...connection, type: 'canvas' }, state.edges) }));
+      const sourceHandle = normalizeHandle(connection.sourceHandle, 'source', sourceNode.data.kind, targetNode.data.kind);
+      const targetHandle = normalizeHandle(connection.targetHandle, 'target', sourceNode.data.kind, targetNode.data.kind);
+      if (!sourceHandle || !targetHandle) return;
+      const targetPort = getNodeDefinition(targetNode.data.kind)?.inputs.find((port) => port.id === targetHandle);
+      const data = targetPort?.ordered
+        ? { ...(connection as Connection & { data?: Record<string, unknown> }).data, portOrder: nextPortOrder(state.edges, targetNode.id, targetHandle) }
+        : (connection as Connection & { data?: Record<string, unknown> }).data;
+      const proposed = {
+        id: `edge-${createId()}`,
+        source: connection.source,
+        sourceHandle,
+        target: connection.target,
+        targetHandle,
+        type: 'canvas',
+        data,
+      };
+      if (!validateEdge(asGraphV2(state), proposed, 'user').ok) return;
+      const edge = proposed as CanvasEdge;
+      commit((state) => ({ nodes: state.nodes, edges: addEdge(edge, state.edges), generationRecords: state.generationRecords }));
     },
     addNode: (kind, position = { x: 300, y: 200 }, overrides = {}) => {
       const node = { ...makeNode(kind, position, overrides), selected: true };
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: state.edges }));
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: state.edges, generationRecords: state.generationRecords }));
       set({ selectedNodeId: node.id });
       return node.id;
     },
     createNodes: (items) => {
       if (!items.length) return [];
       const created = items.map((item, index) => ({ ...makeNode(item.kind, item.position, item.overrides, item.size), selected: index === items.length - 1 }));
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges }));
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges, generationRecords: state.generationRecords }));
       set({ selectedNodeId: created.at(-1)?.id ?? null });
       return created.map((node) => node.id);
     },
@@ -246,7 +360,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         assetId: item.assetId, label: item.label, mediaLoadState: 'ready', status: 'success',
         operation: item.operation ?? { type: 'import', params: {} },
       }, item.size), selected: index === items.length - 1 }));
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges }));
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges, generationRecords: state.generationRecords }));
       set({ selectedNodeId: created.at(-1)?.id ?? null });
       return created.map((node) => node.id);
     },
@@ -257,7 +371,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           model: 'Seedance 2.0 Mini', mode: '全能参考', aspectRatio: '16:9', resolution: '1080p', durationSeconds: 12, variations: 1,
         },
       }, item.size), selected: index === items.length - 1 }));
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges }));
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: state.edges, generationRecords: state.generationRecords }));
       set({ selectedNodeId: created.at(-1)?.id ?? null });
       return created.map((node) => node.id);
     },
@@ -422,38 +536,84 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
     createEdge: (connection) => {
       const state = get();
-      if (!connection.source || !connection.target || connection.source === connection.target) return null;
-      if (!state.nodes.some((node) => node.id === connection.source) || !state.nodes.some((node) => node.id === connection.target)) return null;
-      if (state.edges.some((edge) => edge.source === connection.source && edge.target === connection.target && edge.sourceHandle === connection.sourceHandle && edge.targetHandle === connection.targetHandle)) return null;
-      // 连通性校验（统一走 canConnect：源白名单，空数组=该源不允许连出任何目标）
+      if (!connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return null;
       const sourceNode = state.nodes.find((node) => node.id === connection.source);
       const targetNode = state.nodes.find((node) => node.id === connection.target);
-      if (!sourceNode || !targetNode || !canConnect(sourceNode.data.kind, targetNode.data.kind)) return null;
-      const edge = { ...connection, id: `edge-${createId()}`, type: 'canvas' } as CanvasEdge;
-      commit((current) => ({ nodes: current.nodes, edges: [...current.edges, edge] }));
+      if (!sourceNode || !targetNode) return null;
+      const sourceHandle = normalizeHandle(connection.sourceHandle, 'source', sourceNode.data.kind, targetNode.data.kind);
+      const targetHandle = normalizeHandle(connection.targetHandle, 'target', sourceNode.data.kind, targetNode.data.kind);
+      if (!sourceHandle || !targetHandle) return null;
+      const targetPort = getNodeDefinition(targetNode.data.kind)?.inputs.find((port) => port.id === targetHandle);
+      const proposed = {
+        ...connection,
+        id: `edge-${createId()}`,
+        sourceHandle,
+        targetHandle,
+        type: 'canvas',
+        data: targetPort?.ordered
+          ? { ...(connection as Connection & { data?: Record<string, unknown> }).data, portOrder: nextPortOrder(state.edges, targetNode.id, targetHandle) }
+          : (connection as Connection & { data?: Record<string, unknown> }).data,
+      };
+      if (!validateEdge(asGraphV2(state), proposed, 'user').ok) return null;
+      const edge = proposed as CanvasEdge;
+      commit((current) => ({ nodes: current.nodes, edges: [...current.edges, edge], generationRecords: current.generationRecords }));
       return edge.id;
     },
     // 创建节点并自动连线（新节点连到 sourceId 的右边）
-    createConnectedNode: (sourceId, kind, position) => {
+    createConnectedNode: (sourceId, kind, position, sourceHandle) => {
       const source = get().nodes.find((n) => n.id === sourceId);
       if (!source) return null;
-      // 连通性校验：源节点必须允许连到目标 kind
-      if (!canConnect(source.data.kind, kind)) return null;
+      const sourcePort = sourceHandle
+        ? getNodeDefinition(source.data.kind)?.outputs.find((port) => port.id === sourceHandle)
+        : getNodeDefinition(source.data.kind)?.outputs[0];
+      const targetPort = sourcePort
+        ? getNodeDefinition(kind)?.inputs.find((port) =>
+          port.media === sourcePort.media && port.acceptsKinds.includes(source.data.kind as never))
+        : undefined;
+      if (!sourcePort || !targetPort) return null;
       const node = { ...makeNode(kind, position), selected: true };
-      const edge = { id: `edge-${createId()}`, source: sourceId, sourceHandle: 'right', target: node.id, targetHandle: 'left', type: 'canvas' };
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));
+      const edge = {
+        id: `edge-${createId()}`,
+        source: sourceId,
+        sourceHandle: sourcePort.id,
+        target: node.id,
+        targetHandle: targetPort.id,
+        type: 'canvas',
+        data: targetPort.ordered
+          ? { portOrder: nextPortOrder(get().edges, node.id, targetPort.id) }
+          : undefined,
+      };
+      if (!validateEdge(asGraphV2({ ...get(), nodes: [...get().nodes, node] }), edge, 'user').ok) return null;
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge], generationRecords: state.generationRecords }));
       set({ selectedNodeId: node.id });
       return node.id;
     },
     // 创建节点并自动连线（新节点排在 targetId 的左边，作为其前置）
-    createNodeBefore: (targetId, kind, position) => {
+    createNodeBefore: (targetId, kind, position, targetHandle) => {
       const target = get().nodes.find((n) => n.id === targetId);
       if (!target) return null;
-      // 连通性校验：新建的源节点 kind 必须允许连到目标节点
-      if (!canConnect(kind, target.data.kind)) return null;
+      const targetPort = targetHandle
+        ? getNodeDefinition(target.data.kind)?.inputs.find((port) => port.id === targetHandle)
+        : compatibleTargetPort(kind, target.data.kind);
+      const sourcePort = targetPort
+        ? getNodeDefinition(kind)?.outputs.find((port) =>
+          port.media === targetPort.media && targetPort.acceptsKinds.includes(kind as never))
+        : undefined;
+      if (!sourcePort || !targetPort) return null;
       const node = { ...makeNode(kind, position), selected: true };
-      const edge = { id: `edge-${createId()}`, source: node.id, sourceHandle: 'right', target: targetId, targetHandle: 'left', type: 'canvas' };
-      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge] }));
+      const edge = {
+        id: `edge-${createId()}`,
+        source: node.id,
+        sourceHandle: sourcePort.id,
+        target: targetId,
+        targetHandle: targetPort.id,
+        type: 'canvas',
+        data: targetPort.ordered
+          ? { portOrder: nextPortOrder(get().edges, targetId, targetPort.id) }
+          : undefined,
+      };
+      if (!validateEdge(asGraphV2({ ...get(), nodes: [...get().nodes, node] }), edge, 'user').ok) return null;
+      commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge], generationRecords: state.generationRecords }));
       set({ selectedNodeId: node.id });
       return node.id;
     },
@@ -468,13 +628,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         : state.nodes.map((node) => Boolean(node.selected) === (node.id === nodeId) ? node : { ...node, selected: node.id === nodeId }),
       edges: preserveSelection ? state.edges : state.edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
     })),
+    selectAll: () => {
+      const state = get();
+      set({
+        selectedNodeId: state.nodes.at(-1)?.id ?? null,
+        nodes: state.nodes.map((node) => node.selected ? node : { ...node, selected: true }),
+        edges: state.edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
+      });
+      return state.nodes.length;
+    },
     undo: () => {
       const state = get(); const previous = state.past.at(-1); if (!previous) return;
-      set({ nodes: previous.nodes, edges: previous.edges, past: state.past.slice(0, -1), future: [graphSnapshot(state.nodes, state.edges), ...state.future].slice(0, MAX_HISTORY), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(previous.nodes) });
+      set({ nodes: previous.nodes, edges: previous.edges, generationRecords: previous.generationRecords ?? [], past: state.past.slice(0, -1), future: [graphSnapshot(state.nodes, state.edges, state.generationRecords), ...state.future].slice(0, MAX_HISTORY), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(previous.nodes) });
     },
     redo: () => {
       const state = get(); const next = state.future[0]; if (!next) return;
-      set({ nodes: next.nodes, edges: next.edges, past: [...state.past, graphSnapshot(state.nodes, state.edges)].slice(-MAX_HISTORY), future: state.future.slice(1), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(next.nodes) });
+      set({ nodes: next.nodes, edges: next.edges, generationRecords: next.generationRecords ?? [], past: [...state.past, graphSnapshot(state.nodes, state.edges, state.generationRecords)].slice(-MAX_HISTORY), future: state.future.slice(1), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(next.nodes) });
     },
     loadTemplate: (templateId) => {
       const x = 180 + get().nodes.length * 18;
@@ -487,5 +656,147 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       commit((state) => ({ nodes: [...state.nodes, ...nodes], edges: [...state.edges, ...edges] }));
     },
     clearCanvas: () => commit(() => ({ nodes: [], edges: [] })),
+    appendGenerationRecord: (record) => commit((state) => ({
+      nodes: state.nodes,
+      edges: state.edges,
+      generationRecords: [...state.generationRecords.filter((item) => item.id !== record.id), record],
+    })),
+    updateGenerationRecord: (record) => commit((state) => ({
+      nodes: state.nodes,
+      edges: state.edges,
+      generationRecords: state.generationRecords.map((item) => item.id === record.id ? record : item),
+    })),
+    materializeResultNode: (request) => {
+      const state = get();
+      if (state.nodes.some((node) => node.id === request.resultNodeId)) return request.resultNodeId;
+      const producer = state.nodes.find((node) => node.id === request.producerNodeId);
+      const existingResults = state.nodes.filter((node) =>
+        node.id.startsWith('result:') && node.data.derivedFrom === producer?.id);
+      const columns = 3;
+      const resultIndex = existingResults.length;
+      const stepX = request.size.width + 32;
+      const stepY = request.size.height + 32;
+      const result = {
+        id: request.resultNodeId,
+        type: request.kind,
+        position: {
+          x: producer
+            ? producer.position.x + (producer.width ?? 250) + 160 + (resultIndex % columns) * stepX
+            : 300 + resultIndex * stepX,
+          y: (producer?.position.y ?? 200) + Math.floor(resultIndex / columns) * stepY,
+        },
+        width: request.size.width,
+        height: request.size.height,
+        data: {
+          kind: request.kind,
+          label: request.label,
+          prompt: '',
+          status: 'success' as const,
+          accent: request.kind === 'video' ? '#8f9cff' : '#ff775f',
+          assetId: request.assetId,
+          mediaLoadState: 'ready' as const,
+          derivedFrom: producer?.id,
+          operation: { type: 'remote' as const, params: {} },
+        },
+      } satisfies CanvasNode;
+      const sourcePort = getNodeDefinition(producer?.data.kind)?.outputs.find((candidate) => candidate.media === request.kind);
+      const targetPort = getNodeDefinition(request.kind)?.inputs.find((candidate) => candidate.id === 'origin');
+      const proposedEdge = producer && sourcePort && targetPort ? {
+        id: `edge-result-${request.resultNodeId}`,
+        source: producer.id,
+        sourceHandle: sourcePort.id,
+        target: result.id,
+        targetHandle: targetPort.id,
+        type: 'canvas',
+      } : null;
+      const nextGraph = asGraphV2({ ...state, nodes: [...state.nodes, result] });
+      const validEdge = proposedEdge && validateEdge(nextGraph, proposedEdge, 'pipeline').ok ? proposedEdge as CanvasEdge : null;
+      commit((current) => ({
+        nodes: [...clearSelection(current.nodes), result],
+        edges: validEdge ? [...current.edges, validEdge] : current.edges,
+        generationRecords: current.generationRecords,
+      }));
+      set({ selectedNodeId: result.id });
+      return result.id;
+    },
+    applyStoryboardPlan: (producerNodeId, plans) => {
+      const state = get();
+      const scopedShotIds = new Set(state.edges
+        .filter((edge) => edge.source === producerNodeId && edge.targetHandle === 'origin')
+        .map((edge) => edge.target));
+      const existingShots = state.nodes.filter((node) =>
+        node.data.kind === 'shot' && scopedShotIds.has(node.id)) as CanvasGraphV2['nodes'];
+      const reconciledRaw = reconcileStoryboardShots(existingShots, plans);
+      const idRemap = new Map(reconciledRaw.created.map((node) => [node.id, `${producerNodeId}:${node.id}`]));
+      const reconciled = {
+        ...reconciledRaw,
+        shots: reconciledRaw.shots.map((node) => idRemap.has(node.id) ? { ...node, id: idRemap.get(node.id)! } : node),
+        created: reconciledRaw.created.map((node) => ({ ...node, id: idRemap.get(node.id)! })),
+      };
+      const shotById = new Map(reconciled.shots.map((node) => [node.id, node]));
+      const nextNodes = state.nodes.map((node) => shotById.get(node.id) ?? node);
+      const knownShotIds = new Set(nextNodes.map((node) => node.id));
+      for (const shot of reconciled.shots) {
+        if (!knownShotIds.has(shot.id)) nextNodes.push(shot);
+      }
+      const createdEdges = reconciled.created.flatMap((shot) => {
+        const proposed = {
+          id: `edge-${producerNodeId}-${shot.id}`,
+          source: producerNodeId,
+          sourceHandle: 'shots',
+          target: shot.id,
+          targetHandle: 'origin',
+          type: 'canvas',
+        };
+        return validateEdge(asGraphV2({ ...state, nodes: nextNodes as CanvasNode[] }), proposed, 'pipeline').ok
+          ? [proposed as CanvasEdge]
+          : [];
+      });
+      const existingReferenceEdges = new Set(state.edges
+        .filter((edge) => edge.targetHandle === 'reference')
+        .map((edge) => `${edge.source}:${edge.target}`));
+      const createdReferenceEdges: CanvasEdge[] = [];
+      const referenceEdgesForValidation = [...state.edges, ...createdEdges];
+      for (const shot of [...reconciled.created, ...reconciled.updated]) {
+        const referenceAssetIds = Array.isArray(shot.data.referenceAssetIds) ? shot.data.referenceAssetIds : [];
+        for (const assetId of referenceAssetIds) {
+          const source = nextNodes.find((node) => node.data.assetId === assetId);
+          if (!source || existingReferenceEdges.has(`${source.id}:${shot.id}`)) continue;
+          const usedOrders = new Set(referenceEdgesForValidation
+            .filter((edge) => edge.target === shot.id && edge.targetHandle === 'reference')
+            .map((edge) => (edge.data as { portOrder?: number } | undefined)?.portOrder)
+            .filter((order): order is number => Number.isInteger(order)));
+          let order = 0;
+          while (usedOrders.has(order)) order += 1;
+          const proposed = {
+            id: `edge-ref-${source.id}-${shot.id}`,
+            source: source.id,
+            sourceHandle: 'image',
+            target: shot.id,
+            targetHandle: 'reference',
+            type: 'canvas',
+            data: { portOrder: order },
+          };
+          if (!validateEdge(asGraphV2({
+            ...state,
+            nodes: nextNodes as CanvasNode[],
+            edges: referenceEdgesForValidation,
+          }), proposed, 'pipeline').ok) continue;
+          existingReferenceEdges.add(`${source.id}:${shot.id}`);
+          createdReferenceEdges.push(proposed as CanvasEdge);
+          referenceEdgesForValidation.push(proposed as CanvasEdge);
+        }
+      }
+      commit((current) => ({
+        nodes: nextNodes as CanvasNode[],
+        edges: [...current.edges, ...createdEdges, ...createdReferenceEdges],
+        generationRecords: current.generationRecords,
+      }));
+      return {
+        created: reconciled.created.map((node) => node.id),
+        updated: reconciled.updated.map((node) => node.id),
+        stale: reconciled.stale.map((node) => node.id),
+      };
+    },
   };
 });

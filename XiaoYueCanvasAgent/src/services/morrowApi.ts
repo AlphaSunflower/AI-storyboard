@@ -6,7 +6,9 @@ const baseUrl = '/api/canvas';
 /** 带 JWT 的后端 API 调用（非 SSE）。 */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers ?? {});
-  if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const token = getJobToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   return fetch(`${baseUrl}${path}`, { ...init, headers });
@@ -16,6 +18,11 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, init);
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      window.dispatchEvent(new CustomEvent('morrow:auth-rejected', {
+        detail: { status: response.status, path },
+      }));
+    }
     let message = `HTTP ${response.status}`;
     try {
       const body = await response.json();

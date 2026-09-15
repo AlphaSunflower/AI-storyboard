@@ -4,6 +4,7 @@ import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.dto.request.StoryboardImageEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardImageEnqueueRequest;
+import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.StoryboardImageTask;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.StoryboardImageTaskMapper;
@@ -19,8 +20,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +65,57 @@ class StoryboardImageQueueServiceImplTest {
         assertEquals("把色调调暖", rows.get(0).getPrompt());
         assertEquals("edit", rows.get(0).getMode());
         verify(queueMapper, times(1)).insert(any(StoryboardImageTask.class));
+    }
+
+    @Test
+    void enqueue_generateMode_keepsGenerateMode() {
+        StoryboardImageEnqueueRequest request = new StoryboardImageEnqueueRequest(
+                "conv-1", "proj-1",
+                List.of(new StoryboardImageEnqueueItem(
+                        "scene-1", "生成分镜画面", null, null, null, 1,
+                        null, List.of(), "generate")));
+
+        List<StoryboardImageTask> rows = service.enqueue(request);
+
+        assertEquals(1, rows.size());
+        assertEquals("generate", rows.getFirst().getMode());
+        assertEquals("queued", rows.getFirst().getStatus());
+    }
+
+    @Test
+    void enqueue_generateMode_runsWithoutSourceImage() {
+        StoryboardImageTask row = new StoryboardImageTask();
+        row.setId("queue-1");
+        row.setSceneId("scene-1");
+        row.setConversationId("conv-1");
+        row.setStatus("queued");
+        row.setPrompt("生成分镜画面");
+        row.setMode("generate");
+        row.setN(1);
+
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conv-1");
+
+        when(queueMapper.findNextQueued()).thenReturn(row, null);
+        when(queueMapper.selectById("queue-1")).thenReturn(row);
+        when(conversationMapper.selectById("conv-1")).thenReturn(conversation);
+        when(generationService.generateImage(
+                conversation, "scene-1", "生成分镜画面", null, null, null, 1,
+                "generate", List.of(), null))
+                .thenReturn(java.util.Map.of("imageUrls", List.of("/api/files/generated.png")));
+
+        service.enqueue(new StoryboardImageEnqueueRequest(
+                "conv-1", "proj-1",
+                List.of(new StoryboardImageEnqueueItem(
+                        "scene-1", "生成分镜画面", null, null, null, 1,
+                        null, List.of(), "generate"))));
+
+        verify(generationService, timeout(3000)).generateImage(
+                conversation, "scene-1", "生成分镜画面", null, null, null, 1,
+                "generate", List.of(), null);
+        verify(generationService, after(1000).never()).recordStoryboardGeneration(
+                any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test

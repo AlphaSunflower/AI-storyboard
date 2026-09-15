@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { NodeToolbar, Position } from '@xyflow/react';
 import {
   ArrowUp, Brush, ChevronDown, Eraser, ImagePlus, Redo2, RectangleHorizontal, RotateCcw,
   Undo2, Upload, X,
@@ -17,8 +18,6 @@ type MaskTool = 'brush' | 'rectangle' | 'eraser';
 interface RedrawEditorProps {
   asset: MediaAsset;
   node: CanvasNode;
-  panelStyle: CSSProperties;
-  toolbarStyle: CSSProperties;
   onClose: () => void;
   onFeedback: (message: string) => void;
 }
@@ -185,7 +184,7 @@ function CanvasReferenceOption({ node, onSelect }: { node: CanvasNode; onSelect:
   return <button className="redraw-canvas-reference" onClick={onSelect}>{url ? <img src={url} alt="" /> : <ImagePlus size={15} />}<span>{node.data.label}</span><small>{metadata ? `${metadata.width}×${metadata.height}` : '画布图片'}</small></button>;
 }
 
-export function RedrawEditor({ asset, node, panelStyle, toolbarStyle, onClose, onFeedback }: RedrawEditorProps) {
+export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorProps) {
   const canvasNodes = useCanvasStore((state) => state.nodes);
   const [tool, setTool] = useState<MaskTool>('brush');
   const [brushWidth, setBrushWidth] = useState(30);
@@ -282,14 +281,14 @@ export function RedrawEditor({ asset, node, panelStyle, toolbarStyle, onClose, o
   return <div className="redraw-editor" onPointerDown={(event) => event.stopPropagation()}>
     <RedrawMaskOverlay marks={marks} tool={tool} width={brushWidth} imageWidth={asset.width} imageHeight={asset.height} onGestureStart={remember} onCommit={setMarks} />
 
-    <div className="redraw-toolstrip nodrag nowheel" style={toolbarStyle}>
+    <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={12} className="redraw-toolstrip nodrag nowheel">
       <button title="退出重绘" className="is-close" onClick={onClose}><X size={18} /></button><i />
       <div className="redraw-tool-group"><button title="画笔" className={tool === 'brush' ? 'is-active' : ''} onClick={() => setTool('brush')}><Brush size={17} /></button><button title="框选" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')}><RectangleHorizontal size={17} /></button><button title="橡皮擦" className={tool === 'eraser' ? 'is-active' : ''} onClick={() => setTool('eraser')}><Eraser size={17} /></button></div><i />
       <label className="redraw-width" title={`线宽 ${brushWidth}`}><span style={{ height: Math.max(2, brushWidth / 9) }} /><input aria-label="蒙版画笔大小" type="range" min="1" max="100" value={brushWidth} onChange={(event) => setBrushWidth(Number(event.target.value))} /></label><i />
       <button title="撤销" disabled={!past.length} onClick={undo}><Undo2 size={17} /></button><button title="重做" disabled={!future.length} onClick={redo}><Redo2 size={17} /></button>
-    </div>
+    </NodeToolbar>
 
-    <div className="redraw-prompt-panel nodrag nowheel" style={panelStyle} onKeyDown={(event) => event.stopPropagation()}>
+    <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="redraw-prompt-panel nodrag nowheel" onKeyDown={(event) => event.stopPropagation()}>
       <textarea aria-label="重绘要求" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述你想改变什么..." />
       <div className="redraw-prompt-footer">
         <div className="redraw-reference-control">
@@ -305,8 +304,8 @@ export function RedrawEditor({ asset, node, panelStyle, toolbarStyle, onClose, o
           <button className="redraw-submit" title="生成重绘结果" disabled={submitting || !prompt.trim()} onClick={() => void submit()}>{submitting ? <RotateCcw className="is-spinning" size={17} /> : <ArrowUp size={17} />}</button>
         </div>
       </div>
-    </div>
+    </NodeToolbar>
 
-    {canvasPickerOpen && <div className="redraw-canvas-picker nodrag nowheel" role="dialog" aria-label="从画布选择参考图" style={panelStyle}><header><div><strong>从画布选择参考图</strong><small>参考图只参与本次重绘请求</small></div><button onClick={() => setCanvasPickerOpen(false)}><X size={16} /></button></header><div>{eligibleCanvasNodes.length ? eligibleCanvasNodes.map((candidate) => <CanvasReferenceOption key={candidate.id} node={candidate} onSelect={() => { setReference({ type: 'asset', assetId: candidate.data.assetId!, label: candidate.data.label }); setCanvasPickerOpen(false); }} />) : <p>画布上没有其他可用图片</p>}</div></div>}
+    {canvasPickerOpen && <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={190} className="redraw-canvas-picker nodrag nowheel" role="dialog" aria-label="从画布选择参考图"><header><div><strong>从画布选择参考图</strong><small>参考图只参与本次重绘请求</small></div><button onClick={() => setCanvasPickerOpen(false)}><X size={16} /></button></header><div>{eligibleCanvasNodes.length ? eligibleCanvasNodes.map((candidate) => <CanvasReferenceOption key={candidate.id} node={candidate} onSelect={() => { setReference({ type: 'asset', assetId: candidate.data.assetId!, label: candidate.data.label }); setCanvasPickerOpen(false); }} />) : <p>画布上没有其他可用图片</p>}</div></NodeToolbar>}
   </div>;
 }

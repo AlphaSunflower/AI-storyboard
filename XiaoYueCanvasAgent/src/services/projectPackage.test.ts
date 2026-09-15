@@ -1,4 +1,4 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { exportProjectPackage, importProjectPackage } from './projectPackage';
 import { clearLocalData, createCanvas, createProject, getAsset, loadCanvas, saveAsset, saveCanvas } from './projectStorage';
@@ -20,6 +20,21 @@ describe('.morrow packages', () => {
     const project = await createProject('Portable');
     const canvas = await createCanvas(project.id, '画布 1');
     canvas.nodes = [{ id: 'image-1', type: 'media', position: { x: 4, y: 5 }, data: { kind: 'image', label: 'sample', prompt: '', status: 'success', accent: '#fff', assetId: source.id } }];
+    canvas.generationRecords = [{
+      id: 'generation-1',
+      producerNodeId: 'producer-1',
+      actionId: 'generate',
+      attempt: 1,
+      status: 'completed',
+      materializationStatus: 'completed',
+      materializedAssetIds: [source.id],
+      resultNodeIds: ['image-1'],
+      sources: [{ nodeId: 'source-node-1', assetId: source.id, role: 'source', order: 0 }],
+      prompt: 'sample',
+      effectivePrompt: 'sample',
+      params: {},
+      startedAt: 1,
+    }];
     await saveCanvas(canvas);
     const bundle = await exportProjectPackage(project.id);
     const entries = unzipSync(new Uint8Array(await bundle.arrayBuffer()));
@@ -30,6 +45,9 @@ describe('.morrow packages', () => {
     const restored = await importProjectPackage(new File([bundle], 'portable.morrow', { type: 'application/x-morrow-project' }));
     const loadedCanvas = await loadCanvas(restored.canvases[0].id);
     expect(loadedCanvas?.nodes).toHaveLength(1);
+    expect(loadedCanvas?.generationRecords).toHaveLength(1);
+    expect(loadedCanvas?.generationRecords?.[0].resultNodeIds[0]).toBe(loadedCanvas.nodes[0].id);
+    expect(loadedCanvas?.generationRecords?.[0].materializedAssetIds[0]).toBe(loadedCanvas.nodes[0].data.assetId);
     const restoredAsset = await getAsset(loadedCanvas!.nodes[0].data.assetId!);
     expect(new Uint8Array(await restoredAsset!.originalBlob.arrayBuffer())).toEqual(png);
   });
@@ -50,5 +68,37 @@ describe('.morrow packages', () => {
     const originalPath = Object.keys(entries).find((path) => path.endsWith('/original'))!; entries[originalPath][8] ^= 0xff;
     const { zipSync } = await import('fflate'); const damaged = new File([zipSync(entries) as Uint8Array<ArrayBuffer>], 'broken.morrow');
     await expect(importProjectPackage(damaged)).rejects.toThrow('校验失败');
+  });
+
+  it('imports legacy v1 and v2 manifests into v3 canvas documents', async () => {
+    await clearLocalData();
+    const project = await createProject('Legacy');
+    const canvas = await createCanvas(project.id, '旧画布');
+    canvas.nodes = [{ id: 'text-1', type: 'text', position: { x: 0, y: 0 }, data: { kind: 'text', label: '文字', prompt: 'hi', status: 'idle', accent: '#fff' } }];
+    await saveCanvas(canvas);
+    const bundle = await exportProjectPackage(project.id);
+    const entries = unzipSync(new Uint8Array(await bundle.arrayBuffer()));
+    const manifest = JSON.parse(strFromU8(entries['manifest.json'])) as {
+      packageVersion: number;
+      project: Record<string, unknown>;
+      canvases?: unknown[];
+    };
+
+    manifest.packageVersion = 1;
+    manifest.project = {
+      schemaVersion: 1,
+      id: project.id,
+      title: 'Legacy',
+      nodes: canvas.nodes,
+      edges: canvas.edges,
+      viewport: canvas.viewport,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    delete manifest.canvases;
+    entries['manifest.json'] = new TextEncoder().encode(JSON.stringify(manifest));
+    const imported = await importProjectPackage(new File([zipSync(entries)], 'legacy-v1.morrow'));
+    expect(imported.canvases).toHaveLength(1);
+    expect(imported.canvases[0].nodes[0].data.kind).toBe('text');
   });
 });

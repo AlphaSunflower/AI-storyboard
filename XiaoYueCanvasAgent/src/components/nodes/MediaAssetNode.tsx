@@ -1,17 +1,17 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useStore } from '@xyflow/react';
-import { Image as ImageIcon, Sparkles, Upload } from 'lucide-react';
+import { Image as ImageIcon, Upload } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useMediaStore } from '../../store/mediaStore';
-import { getAsset, getAssetVariant, saveAsset } from '../../services/projectStorage';
+import { getAsset, getAssetVariant } from '../../services/projectStorage';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { useViewportVisibility } from '../../hooks/useViewportVisibility';
 import type { CanvasNode } from '../../types';
-import { createImageAsset, disposeRuntimeAsset, getMediaNodeSize } from '../../utils/mediaPipeline';
+import { getMediaNodeSize } from '../../utils/mediaPipeline';
 import { ImageNodeTools } from '../ImageNodeTools';
-import { GeneratePanel } from '../GeneratePanel';
+import { createPersistedCanvasAsset } from '../../services/canvasMedia';
 
-// media（image 媒体承载）节点 body：懒加载管线(visibility/objectUrl/lazy 变体) + 媒体帧/空态显示 + 上传/生图 + 图片编辑工具。
+// media（image 媒体承载）节点 body：懒加载管线(visibility/objectUrl/lazy 变体) + 媒体帧/空态显示 + 上传与图片编辑工具。
 // 媒体渲染与编辑工具整体自持（不再依赖 MediaNode 顶层 state），MediaNode 只负责 chrome。
 function MediaAssetNodeComponent({ id, data, selected, node }: {
   id: string;
@@ -32,7 +32,6 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
     ? (selected || quality === 'preview' ? asset.previewBlob : asset.thumbnailBlob)
     : lazyVariant?.key === `${data.assetId}:${desiredVariant}` ? lazyVariant.blob : undefined;
   const mediaUrl = useObjectUrl(mediaBlob, visibility.visible);
-  const [generating, setGenerating] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -66,13 +65,11 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
           <div className="media-asset-frame"><img key={mediaUrl} src={mediaUrl} alt={metadata.name} loading="eager" decoding="async" draggable={false} width={metadata.width} height={metadata.height} /><span className="media-quality-badge">{selected ? 'PREVIEW' : quality.toUpperCase()}</span></div>
         )
       ) : (
-        <div className="empty-image-node" onClick={() => setGenerating((open) => !open)}><ImageIcon size={28} /><strong>空图片节点</strong><span>点击生图，或上传文件创建图片资产</span></div>
+        <div className="empty-image-node"><ImageIcon size={28} /><strong>空图片节点</strong><span>上传本地图片，或连接生成节点获取结果</span></div>
       )}
       {selected && !metadata && <>
-        <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); let created: Awaited<ReturnType<typeof createImageAsset>> | null = null; void createImageAsset(file).then(async (nextAsset) => { created = nextAsset; await saveAsset(nextAsset); upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => { if (created) disposeRuntimeAsset(created); setUploadError(error instanceof Error ? error.message : '图片导入失败'); }); }} />
+        <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => setUploadError(error instanceof Error ? error.message : '图片导入失败')); }} />
         <button className="node-upload nodrag" onClick={() => fileInput.current?.click()}><Upload size={16} /> 上传图片</button>
-        <button className="node-upload node-upload--generate nodrag" onClick={() => setGenerating((open) => !open)}><Sparkles size={16} /> 生图</button>
-        {generating && <GeneratePanel node={node} onClose={() => setGenerating(false)} />}
         {uploadError && <div className="node-upload-error nodrag">{uploadError}</div>}
       </>}
       {selected && asset && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} /> : <div className="empty-node-note nodrag nowheel" style={{ '--inverse-zoom': 1 / zoom } as React.CSSProperties}>上传真实图片后可使用本地编辑工具</div>)}

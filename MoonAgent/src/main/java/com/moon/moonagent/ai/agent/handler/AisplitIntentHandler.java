@@ -18,6 +18,7 @@ import com.moon.moonagent.ai.agent.storyboard.StoryboardScenePlan;
 import com.moon.moonagent.ai.agent.storyboard.SceneDurationPlanner;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.ScriptGenerationService;
+import com.moon.moonagent.service.StoryboardAutoImageService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,7 @@ public class AisplitIntentHandler implements IntentHandler {
     private final AssetMatchingService assetMatchingService;
     private final StoryboardPortfolioService portfolioService;
     private final SceneReviewCardService sceneReviewCardService;
+    private final StoryboardAutoImageService storyboardAutoImageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 并行 LLM 步骤专用：互不依赖的调用放虚拟线程并发，避免整条分镜链串行卡住。 */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -864,6 +866,21 @@ public class AisplitIntentHandler implements IntentHandler {
 
         // 分镜写库成功后直接打开完整审查卡；不走 handoff，避免历史版本中的审查自循环。
         List<Scene> allScenes = storyboardClient.getProjectScenes(request.getConversation().getProjectId());
+        if (count > 0) {
+            try {
+                List<Integer> writtenSceneNumbers = resolvePlanSceneMap(items, allScenes).values().stream()
+                        .map(Scene::getSceneNumber)
+                        .distinct()
+                        .toList();
+                storyboardAutoImageService.enqueueMissingMaterialImages(
+                        request.getConversation().getId(),
+                        request.getConversation().getProjectId(),
+                        writtenSceneNumbers);
+            } catch (Exception e) {
+                // 自动配图属于增强步骤，入队失败不能阻断分镜审查。
+                log.warn("分镜自动配图入队失败，跳过: {}", e.getMessage());
+            }
+        }
         String msg = "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，已打开分镜审查结果。";
         return sceneReviewCardService.openReview(request, allScenes, msg);
     }

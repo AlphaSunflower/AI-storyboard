@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { buildReferenceImagePool } from './referenceImagePool';
 import type { CanvasEdge, CanvasNode } from '../types';
-import { buildReferenceToken, collectReferencedImageNumbers, findReferenceTokens, insertReferenceToken, removeReferenceTokenByNumber, stripReferenceMarkers } from './referenceTokenEditing';
+import {
+  buildReferenceToken,
+  collectReferencedImageNumbers,
+  findReferencePickerAtCursor,
+  findReferenceTokens,
+  insertReferenceToken,
+  removeReferenceTokenByNumber,
+  stripReferenceMarkers,
+} from './referenceTokenEditing';
 
 const node = (id: string, kind: CanvasNode['data']['kind'], assetId?: string, x = 0): CanvasNode => ({
   id, type: 'media', position: { x, y: 0 }, width: 250, height: 250,
@@ -80,5 +88,12 @@ describe('referenceTokenEditing', () => {
 
   it('strips markers to AI-readable labels', () => {
     expect(stripReferenceMarkers('参考 @图1 和 @image#2:cat.png 生成')).toBe('参考 [参考图1] 和 [参考图2] 生成');
+  });
+
+  it('does not open the picker when the cursor is inside an existing reference token', () => {
+    expect(findReferencePickerAtCursor('@image#1', 9, 1)).toBeNull();
+    expect(findReferencePickerAtCursor('@image#1 ', 9, 1)).toBeNull();
+    expect(findReferencePickerAtCursor('@', 1, 1)).toBe(0);
+    expect(findReferencePickerAtCursor('参考 @im', 6, 1)).toBe(3);
   });
 });

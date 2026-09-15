@@ -58,7 +58,7 @@ export function AssetDrawer({ projectId, onClose }: AssetDrawerProps) {
   useEffect(() => { void reload(); }, [reload]);
 
   return (
-    <aside style={drawer} aria-label="资产库抽屉">
+    <aside className="asset-drawer-panel" style={drawer} aria-label="资产库抽屉">
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Layers size={16} /><strong style={{ fontSize: 14 }}>资产库</strong></div>
         <button onClick={onClose} aria-label="关闭资产库" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 4 }}><X size={16} /></button>
@@ -67,7 +67,7 @@ export function AssetDrawer({ projectId, onClose }: AssetDrawerProps) {
       {loading ? (
         <div style={{ padding: 24, textAlign: 'center', opacity: 0.55, fontSize: 13 }}>正在读取素材…</div>
       ) : assets.length ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 10 }}>
+        <div className="asset-drawer-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 10 }}>
           {assets.map((asset) => <DrawerAssetCard key={asset.id} asset={asset} />)}
         </div>
       ) : (

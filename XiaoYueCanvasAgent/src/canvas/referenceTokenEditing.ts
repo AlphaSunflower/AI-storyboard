@@ -84,6 +84,20 @@ export function collectReferencedImageNumbers(text: string, maxCount?: number): 
   return [...new Set(tokens.filter((t) => t.mediaType !== 'audio').map((t) => t.imageNumber))].sort((a, b) => a - b);
 }
 
+/** 光标位于完整参考 token 内时不弹 picker；仅裸 @ 或未完成 token 返回其起始位置。 */
+export function findReferencePickerAtCursor(text: string, cursorPos: number, maxCount: number = 99): number | null {
+  const pos = Math.max(0, Math.min(cursorPos, text.length));
+  const tokens = findReferenceTokens(text, maxCount);
+  for (let index = pos - 1; index >= 0; index--) {
+    const ch = text[index];
+    if (ch === ' ' || ch === '\n' || ch === '\t') break;
+    if (ch !== '@') continue;
+    const completed = tokens.some((token) => token.start === index && pos <= token.end);
+    return completed ? null : index;
+  }
+  return null;
+}
+
 /** 构建一个 @图N token（新格式带引用的文件名）。 */
 export function buildReferenceToken(imageNumber: number, filename?: string): string {
   return filename && filename.trim() ? `@image#${imageNumber}:${filename.trim()}` : `@image#${imageNumber}`;

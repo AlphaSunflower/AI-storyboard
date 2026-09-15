@@ -7,6 +7,7 @@ public final class GenerationRecordTypes {
 
     public static final String IMAGE = "image";
     public static final String VIDEO = "video";
+    public static final String STORYBOARD_PLAN = "storyboard_plan";
     public static final String STORYBOARD_IMAGE = "storyboard_image";
     public static final String STORYBOARD_VIDEO = "storyboard_video";
 

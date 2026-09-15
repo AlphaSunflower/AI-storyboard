@@ -46,6 +46,15 @@ export interface ReferenceImagePoolResult {
   isValidNumber: (n: number) => boolean;
 }
 
+export const EMPTY_REFERENCE_IMAGE_POOL: ReferenceImagePoolResult = {
+  entries: [],
+  count: 0,
+  getByNumber: () => undefined,
+  getByAssetId: () => undefined,
+  assetIds: [],
+  isValidNumber: () => false,
+};
+
 /** 是否允许被当作参考图来源的节点 kind（image/video 带真实资产；生成器节点本身无 assetId 不参与）。 */
 const REFERENCE_SOURCE_KINDS: ReadonlySet<MediaKind> = new Set<MediaKind>(['image', 'video']);
 

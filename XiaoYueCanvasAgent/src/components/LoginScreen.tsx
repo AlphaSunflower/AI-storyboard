@@ -3,7 +3,7 @@ import { setJobToken } from '../services/jobAuth';
 
 // 画布登录页（Email + Password，走网关 /api/auth/login，复用同一批用户数据）
 // 深墨绿 + 荧光绿工作台质感：主强调色统一为 --acid（与画布一致），不再混用珊瑚红 --clay。
-export function LoginScreen({ onLogin }: { onLogin: () => void }) {
+export function LoginScreen({ onLogin, message }: { onLogin: () => void; message?: string | null }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,6 +44,7 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         </span>
         <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">欢迎回来</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">登录后继续你的创作（同一账号数据）</p>
+        {message && <p className="mt-3 rounded-lg border border-[rgba(255,118,95,.24)] bg-[rgba(255,118,95,.08)] px-3 py-2 text-[12px] text-[#ffab9d]" role="alert">{message}</p>}
         <form onSubmit={submit} className="mt-6">
           <label className="text-[13px] text-muted-foreground">邮箱</label>
           <input type="email" value={email} required autoFocus onChange={(e) => setEmail(e.target.value)} className={`mt-1.5 ${inputClass}`} placeholder="you@example.com" />

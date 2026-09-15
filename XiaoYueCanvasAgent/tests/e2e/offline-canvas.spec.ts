@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('morrow-creative-canvas-v1', 3);
+      const request = indexedDB.open('morrow-creative-canvas-v1', 4);
       request.onsuccess = () => {
         const db = request.result;
         const stores = [...db.objectStoreNames];
@@ -170,7 +170,7 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
       height: 160,
       data: { kind: 'image', label: `性能节点 ${index + 1}`, prompt: '', status: 'idle', accent: '#d7ff54' },
     }));
-    const request = indexedDB.open('morrow-creative-canvas-v1', 3);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       request.onupgradeneeded = () => {
         const next = request.result;
@@ -200,7 +200,7 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
   await expect(page.locator('.project-copy small')).toHaveText('已保存到本地');
   await page.waitForTimeout(700);
   const readProjectUpdatedAt = async () => page.evaluate(async (id) => {
-    const request = indexedDB.open('morrow-creative-canvas-v1', 3);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
     const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     const record = await new Promise<{ updatedAt: number }>((resolve, reject) => {
       const get = db.transaction('projects').objectStore('projects').get(id);

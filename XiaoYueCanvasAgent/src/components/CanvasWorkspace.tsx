@@ -1,14 +1,16 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
-  Background, BackgroundVariant, ConnectionLineType, Panel, ReactFlow, ReactFlowProvider,
-  useReactFlow, useStore, useStoreApi, type Connection, type Viewport,
+  Background, BackgroundVariant, ConnectionLineType, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider,
+  useReactFlow, useStoreApi, type Connection, type Viewport,
 } from '@xyflow/react';
-import { Check, ChevronDown, CircleHelp, Download, FileArchive, FolderOpen, Grid2X2, Layers, LayoutList, Map, MessageCircle, MousePointer2, Plus, Scissors, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, CircleHelp, Download, FileArchive, FolderOpen, Grid2X2, History, Layers, LayoutList, Map, MessageCircle, Plus, Search, Trash2 } from 'lucide-react';
 import { getAsset, saveAsset, saveAssets, saveAssetToLibrary } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import type { CanvasNode, CanvasSummary, MediaAsset, MediaKind, PersistedAsset, ProjectSummary, SaveStatus } from '../types';
-import { createImageAsset, createVideoAsset, disposeRuntimeAsset, getMediaNodeSize, getVideoNodeSize, processWithConcurrency } from '../utils/mediaPipeline';
+import { disposeRuntimeAsset, getMediaNodeSize, getVideoNodeSize, processWithConcurrency } from '../utils/mediaPipeline';
 import { createId } from '../utils/id';
 import { mediaQualityForZoom } from '../utils/canvasPerformance';
 import { refreshMediaBudget, setMediaBudgetQuality } from '../utils/mediaBudget';
@@ -18,192 +20,31 @@ import { ConnectionNodeMenu } from './ConnectionNodeMenu';
 import { AssetDrawer, ASSET_DRAG_MIME } from './AssetDrawer';
 import { MediaNode } from './MediaNode';
 import { VideoNode } from './VideoNode';
-import { ScriptNode } from './nodes/ScriptNode';
-import { StoryboardNode } from './nodes/StoryboardNode';
 import { NodeLibrary } from './NodeLibrary';
+import { GenerationRecordsPanel } from './GenerationRecordsPanel';
 import { TemplatePanel } from './TemplatePanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
+import { CanvasUiProvider } from '../canvas/CanvasUiContext';
+import { createPersistedCanvasAsset } from '../services/canvasMedia';
 
-const nodeTypes = { media: MediaNode, video: VideoNode, script: ScriptNode, storyboard: StoryboardNode, storyboardGen: MediaNode };
+const nodeTypes = {
+  media: MediaNode,
+  video: VideoNode,
+  image: MediaNode,
+  text: MediaNode,
+  script: MediaNode,
+  note: MediaNode,
+  storyboardPlanner: MediaNode,
+  shot: MediaNode,
+  textToImage: MediaNode,
+  imageToImage: MediaNode,
+  batchImageRefine: MediaNode,
+  textToVideo: MediaNode,
+  imageToVideo: MediaNode,
+  firstLastFrameToVideo: MediaNode,
+  referenceToVideo: MediaNode,
+};
 const edgeTypes = { canvas: CanvasEdge };
-
-type StableMiniMapProps = { nodes: CanvasNode[]; initialViewport: Viewport; isMoving: boolean };
-
-type MiniMapRect = { x: number; y: number; width: number; height: number };
-type MiniMapBounds = MiniMapRect;
-
-const fitMiniMapBounds = (rects: MiniMapRect[], aspect: number): MiniMapBounds => {
-  const source = rects.length ? rects : [{ x: 0, y: 0, width: 1, height: 1 }];
-  const minX = Math.min(...source.map((rect) => rect.x));
-  const minY = Math.min(...source.map((rect) => rect.y));
-  const maxX = Math.max(...source.map((rect) => rect.x + Math.max(1, rect.width)));
-  const maxY = Math.max(...source.map((rect) => rect.y + Math.max(1, rect.height)));
-  const span = Math.max(maxX - minX, maxY - minY, 1);
-  const padding = Math.max(120, span * .14);
-  const paddedWidth = Math.max(1, maxX - minX + padding * 2);
-  const paddedHeight = Math.max(1, maxY - minY + padding * 2);
-  const width = Math.max(paddedWidth, paddedHeight * aspect);
-  const height = Math.max(paddedHeight, width / aspect);
-  return { x: (minX + maxX) / 2 - width / 2, y: (minY + maxY) / 2 - height / 2, width, height };
-};
-
-const expandMiniMapBounds = (current: MiniMapBounds, incoming: MiniMapRect, aspect: number): MiniMapBounds => {
-  const marginX = Math.max(40, incoming.width * .06);
-  const marginY = Math.max(40, incoming.height * .06);
-  const minX = Math.min(current.x, incoming.x - marginX);
-  const minY = Math.min(current.y, incoming.y - marginY);
-  const maxX = Math.max(current.x + current.width, incoming.x + incoming.width + marginX);
-  const maxY = Math.max(current.y + current.height, incoming.y + incoming.height + marginY);
-  const rawWidth = Math.max(1, maxX - minX);
-  const rawHeight = Math.max(1, maxY - minY);
-  const width = Math.max(rawWidth, rawHeight * aspect);
-  const height = Math.max(rawHeight, width / aspect);
-  return { x: (minX + maxX) / 2 - width / 2, y: (minY + maxY) / 2 - height / 2, width, height };
-};
-
-const rectContains = (outer: MiniMapRect, inner: MiniMapRect) => {
-  const marginX = outer.width * .015;
-  const marginY = outer.height * .015;
-  return inner.x >= outer.x + marginX
-    && inner.y >= outer.y + marginY
-    && inner.x + inner.width <= outer.x + outer.width - marginX
-    && inner.y + inner.height <= outer.y + outer.height - marginY;
-};
-
-const miniMapNodeRect = (node: CanvasNode): MiniMapRect => ({
-  x: node.position.x,
-  y: node.position.y,
-  width: node.width ?? node.measured?.width ?? (node.data.kind === 'video' ? 420 : node.data.kind === 'text' ? 380 : 250),
-  height: node.height ?? node.measured?.height ?? (node.data.kind === 'video' ? 236 : node.data.kind === 'text' ? 280 : 250),
-});
-
-const MiniMapNodes = memo(function MiniMapNodes({ nodes }: { nodes: CanvasNode[] }) {
-  return <>{nodes.filter((node) => !node.hidden).map((node) => {
-    const rect = miniMapNodeRect(node);
-    return <rect key={node.id} className="react-flow__minimap-node" x={rect.x} y={rect.y} width={rect.width} height={rect.height} rx={4} />;
-  })}</>;
-});
-
-function MiniMapViewport() {
-  const flowStore = useStoreApi();
-  const rectRef = useRef<SVGRectElement>(null);
-  const initial = flowStore.getState();
-  const initialViewport = {
-    x: -initial.transform[0] / initial.transform[2],
-    y: -initial.transform[1] / initial.transform[2],
-    width: initial.width / initial.transform[2],
-    height: initial.height / initial.transform[2],
-  };
-  useEffect(() => {
-    const update = (state: ReturnType<typeof flowStore.getState>) => {
-      const rect = rectRef.current;
-      if (!rect) return;
-      const zoom = state.transform[2];
-      rect.setAttribute('x', String(-state.transform[0] / zoom));
-      rect.setAttribute('y', String(-state.transform[1] / zoom));
-      rect.setAttribute('width', String(state.width / zoom));
-      rect.setAttribute('height', String(state.height / zoom));
-    };
-    const unsubscribe = flowStore.subscribe(update);
-    update(flowStore.getState());
-    return () => {
-      unsubscribe();
-    };
-  }, [flowStore]);
-  return <rect ref={rectRef} className="canvas-minimap-viewport" x={initialViewport.x} y={initialViewport.y} width={initialViewport.width} height={initialViewport.height} />;
-}
-
-function StableMiniMap({ nodes, initialViewport, isMoving }: StableMiniMapProps) {
-  const flowWidth = useStore((state) => state.width);
-  const flowHeight = useStore((state) => state.height);
-  const flowStore = useStoreApi();
-  const { setCenter } = useReactFlow();
-  const draggingRef = useRef(false);
-  const frameRef = useRef<number | null>(null);
-  const pendingPointRef = useRef<{ x: number; y: number } | null>(null);
-  const mapWidth = 184;
-  const mapHeight = 126;
-  const mapAspect = mapWidth / mapHeight;
-  // `initialViewport` is a project snapshot. App updates it after every saved
-  // pan/zoom, so reading it directly here would make the map's coordinate
-  // system follow the live camera and cause the frame to jump or resize.
-  const openingViewportRef = useRef<Viewport>(initialViewport);
-  const boundsRef = useRef<MiniMapBounds | null>(null);
-  const baseKeyRef = useRef('');
-  const graphKeyRef = useRef('');
-  const nodeRects = useMemo(() => nodes.filter((node) => !node.hidden).map(miniMapNodeRect), [nodes]);
-  const openingViewport = useMemo(() => {
-    const zoom = Math.max(.05, openingViewportRef.current.zoom);
-    return {
-      x: -openingViewportRef.current.x / zoom,
-      y: -openingViewportRef.current.y / zoom,
-      width: Math.max(1, flowWidth) / zoom,
-      height: Math.max(1, flowHeight) / zoom,
-    };
-  }, [flowHeight, flowWidth]);
-  const baseKey = useMemo(() => `${nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}:${node.width ?? node.measured?.width ?? ''}:${node.height ?? node.measured?.height ?? ''}:${node.hidden ? 1 : 0}`).join('|')}|${Math.round(flowWidth)}|${Math.round(flowHeight)}`, [flowHeight, flowWidth, nodes]);
-  // Only a structural node-set or canvas-size change may reset the range.
-  // Position and delayed measurement changes are merged monotonically below,
-  // otherwise virtualized nodes can make the map shrink after a pan.
-  const graphKey = useMemo(() => `${nodes.map((node) => `${node.id}:${node.hidden ? 1 : 0}`).join('|')}|${Math.round(flowWidth)}|${Math.round(flowHeight)}`, [flowHeight, flowWidth, nodes]);
-  const baseBounds = useMemo(() => fitMiniMapBounds([...nodeRects, openingViewport], mapAspect), [mapAspect, nodeRects, openingViewport]);
-  // Read the latest camera only when the stable parent needs to decide whether
-  // to expand its world bounds. The high-frequency frame itself lives in
-  // MiniMapViewport and subscribes directly to React Flow's transform store.
-  const stableTransform = flowStore.getState().transform;
-  const stableViewport = { x: -stableTransform[0] / stableTransform[2], y: -stableTransform[1] / stableTransform[2], width: flowWidth / stableTransform[2], height: flowHeight / stableTransform[2] };
-  const worldBounds = useMemo(() => {
-    let next = boundsRef.current;
-    if (!next || graphKeyRef.current !== graphKey) {
-      next = baseBounds;
-    } else if (baseKeyRef.current !== baseKey) {
-      // React Flow may fill measured dimensions a few frames after mount.
-      // Merge that new base range without shrinking the established map.
-      next = expandMiniMapBounds(next, baseBounds, mapAspect);
-    }
-    baseKeyRef.current = baseKey;
-    graphKeyRef.current = graphKey;
-    // Expand only when the live camera reaches the edge. This keeps the map
-    // stable during normal panning while still handling zoom-out and travel
-    // beyond the original node cluster.
-    if (flowWidth > 0 && flowHeight > 0 && !isMoving && !rectContains(next, stableViewport)) {
-      next = expandMiniMapBounds(next, {
-        x: stableViewport.x,
-        y: stableViewport.y,
-        width: Math.max(1, stableViewport.width),
-        height: Math.max(1, stableViewport.height),
-      }, mapAspect);
-    }
-    boundsRef.current = next;
-    return next;
-  }, [baseBounds, baseKey, flowHeight, flowWidth, graphKey, isMoving, mapAspect, stableViewport.x, stableViewport.y, stableViewport.width, stableViewport.height]);
-  useEffect(() => () => {
-    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-  }, []);
-  const navigateTo = (element: SVGSVGElement, clientX: number, clientY: number) => {
-    const rect = element.getBoundingClientRect();
-    pendingPointRef.current = {
-      x: worldBounds.x + ((clientX - rect.left) / rect.width) * worldBounds.width,
-      y: worldBounds.y + ((clientY - rect.top) / rect.height) * worldBounds.height,
-    };
-    if (frameRef.current !== null) return;
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = null;
-      const point = pendingPointRef.current;
-      if (point) setCenter(point.x, point.y, { zoom: flowStore.getState().transform[2], duration: 0 });
-    });
-  };
-  return <Panel position="bottom-left" className="canvas-minimap" aria-label="画布导航小地图">
-    <svg className="canvas-minimap-svg" width={mapWidth} height={mapHeight} viewBox={`${worldBounds.x} ${worldBounds.y} ${worldBounds.width} ${worldBounds.height}`} role="img" aria-label="画布导航小地图"
-      onPointerDown={(event) => { event.preventDefault(); draggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); navigateTo(event.currentTarget, event.clientX, event.clientY); }}
-      onPointerMove={(event) => { if (draggingRef.current) navigateTo(event.currentTarget, event.clientX, event.clientY); }}
-      onPointerUp={(event) => { draggingRef.current = false; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-      onPointerCancel={() => { draggingRef.current = false; }}>
-      <MiniMapNodes nodes={nodes} />
-      <MiniMapViewport />
-    </svg>
-  </Panel>;
-}
 
 const downloadBlob = (blob: Blob, name: string) => {
   const url = URL.createObjectURL(blob);
@@ -260,7 +101,7 @@ const saveLabel: Record<SaveStatus, string> = { idle: '本地项目', saving: '�
 
 function CanvasInner(props: CanvasWorkspaceProps) {
   const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify } = props;
-  const [panel, setPanel] = useState<'nodes' | 'templates' | null>(null);
+  const [panel, setPanel] = useState<'nodes' | 'templates' | 'history' | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -282,8 +123,11 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const mediaQualityRef = useRef(useMediaStore.getState().quality);
   const mobileFitDoneRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const zoom = useStore((state) => Math.round(state.transform[2] * 100));
   const nodes = useCanvasStore((state) => state.nodes);
+  const flowNodes = useMemo(
+    () => nodes.map((node) => node.dragHandle === '.node-drag-handle' ? node : { ...node, dragHandle: '.node-drag-handle' }),
+    [nodes],
+  );
   const edges = useCanvasStore((state) => state.edges);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
@@ -291,6 +135,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const endNodeDrag = useCanvasStore((state) => state.endNodeDrag);
   const connect = useCanvasStore((state) => state.connect);
   const selectNode = useCanvasStore((state) => state.selectNode);
+  const selectAll = useCanvasStore((state) => state.selectAll);
   const addNode = useCanvasStore((state) => state.addNode);
   const addImportedImages = useCanvasStore((state) => state.addImportedImages);
   const addImportedVideos = useCanvasStore((state) => state.addImportedVideos);
@@ -299,19 +144,30 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const copySelected = useCanvasStore((state) => state.copySelected);
   const pasteClipboard = useCanvasStore((state) => state.pasteClipboard);
   const deleteSelected = useCanvasStore((state) => state.deleteSelected);
-  const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const duplicateSelected = useCanvasStore((state) => state.duplicateSelected);
   const canPaste = useCanvasStore((state) => Boolean(state.clipboard?.nodes.length));
   const canUndo = useCanvasStore((state) => state.past.length > 0);
   const canRedo = useCanvasStore((state) => state.future.length > 0);
-  const { fitView, screenToFlowPosition, zoomTo } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
   // 「连接即创建」：跟踪连接生命周期，拖线松手未落到节点时（didConnect 为 false）
   // dispatch 'connection-end'，由 ConnectionNodeMenu 弹出「选择节点类型」菜单。
-  const connectRef = useRef<{ nodeId: string; nodeType: string | undefined; handleType: 'source' | 'target' | null; didConnect: boolean } | null>(null);
+  const connectRef = useRef<{
+    nodeId: string;
+    nodeType: string | undefined;
+    handleType: 'source' | 'target' | null;
+    handleId: string;
+    didConnect: boolean;
+  } | null>(null);
   const handleConnectStart = useCallback((_event: any, params: any) => {
     if (!params?.nodeId) return;
     const node = useCanvasStore.getState().nodes.find((n) => n.id === params.nodeId);
-    connectRef.current = { nodeId: params.nodeId, nodeType: node?.data.kind, handleType: params.handleType ?? null, didConnect: false };
+    connectRef.current = {
+      nodeId: params.nodeId,
+      nodeType: node?.data.kind,
+      handleType: params.handleType ?? null,
+      handleId: params.handleId ?? '',
+      didConnect: false,
+    };
   }, []);
   const handleConnect = useCallback((connection: Connection) => {
     if (connectRef.current) connectRef.current.didConnect = true;
@@ -323,7 +179,18 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     const clientX = 'clientX' in event ? event.clientX : 0;
     const clientY = 'clientY' in event ? event.clientY : 0;
     const flow = screenToFlowPosition({ x: clientX, y: clientY });
-    window.dispatchEvent(new CustomEvent('connection-end', { detail: { clientX, clientY, flowX: flow.x, flowY: flow.y, sourceNodeId: ref.nodeId, sourceNodeType: ref.nodeType, handleType: ref.handleType ?? 'source' } }));
+    window.dispatchEvent(new CustomEvent('connection-end', {
+      detail: {
+        clientX,
+        clientY,
+        flowX: flow.x,
+        flowY: flow.y,
+        sourceNodeId: ref.nodeId,
+        sourceNodeType: ref.nodeType,
+        handleType: ref.handleType ?? 'source',
+        handleId: ref.handleId,
+      },
+    }));
     connectRef.current = null;
   }, [screenToFlowPosition]);
   const flowStore = useStoreApi();
@@ -437,12 +304,12 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     if (!files.length) return;
     const state = flowStore.getState(); const center = anchor ?? screenToFlowPosition({ x: state.width / 2, y: state.height / 2 });
     const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(files.length))));
-    const completed: Array<{ asset: MediaAsset; index: number }> = [];
+    const completed: Array<{ asset: PersistedAsset; index: number }> = [];
     const errors: string[] = [];
     setIsImporting(true); notify(`正在处理 ${files.length} 张图片`);
     await processWithConcurrency(files, 2, async (file, index) => {
-      let asset: MediaAsset | null = null;
-      try { asset = file.type.startsWith('video/') ? await createVideoAsset(file) : await createImageAsset(file); completed.push({ asset, index }); }
+      let asset: PersistedAsset | null = null;
+      try { asset = await createPersistedCanvasAsset(file, ''); completed.push({ asset, index }); }
       catch (error) { if (asset) disposeRuntimeAsset(asset); errors.push(`${file.name}: ${error instanceof Error ? error.message : '处理失败'}`); }
     });
     completed.sort((a, b) => a.index - b.index);
@@ -495,14 +362,28 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         closeContextMenu();
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        const count = selectAll();
+        if (count) notify(`已全选 ${count} 个节点`);
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelected(); }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelected(); }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelected(); }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); deleteSelected(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        const count = copySelected();
+        if (count) notify(`已复制 ${count} 个节点`);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
+        event.preventDefault();
+        const created = pasteClipboard();
+        if (created.length) notify(`已粘贴 ${created.length} 个节点`);
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
     };
     addEventListener('keydown', onKeyDown, true); return () => removeEventListener('keydown', onKeyDown, true);
-  }, [closeContextMenu, contextTarget, copySelected, deleteSelected, duplicateSelected, pasteClipboard, redo, undo]);
+  }, [closeContextMenu, contextTarget, copySelected, deleteSelected, notify, pasteClipboard, redo, selectAll, undo]);
 
   useEffect(() => {
     if (!workspaceMenuOpen && !projectSwitcherOpen) return;
@@ -517,19 +398,6 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     if (!renameDialogOpen) setRenameDraft(projectTitle);
   }, [projectTitle, renameDialogOpen]);
 
-  useEffect(() => {
-    if (contextTarget?.type !== 'edge') return;
-    const closeEdgeAction = (event: PointerEvent) => {
-      if (!(event.target as Element).closest('.canvas-edge-context-action')) closeContextMenu();
-    };
-    addEventListener('pointerdown', closeEdgeAction, true);
-    addEventListener('wheel', closeContextMenu, { passive: true });
-    return () => {
-      removeEventListener('pointerdown', closeEdgeAction, true);
-      removeEventListener('wheel', closeContextMenu);
-    };
-  }, [closeContextMenu, contextTarget]);
-
   const defaultEdgeOptions = useMemo(() => ({ type: 'canvas' }), []);
 
   return (
@@ -539,12 +407,14 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       onDragLeave={() => { dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setIsFileDragActive(false); }}
       onDrop={(event) => { event.preventDefault(); dragDepthRef.current = 0; setIsFileDragActive(false); const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME); if (assetId) { void addAssetAt(assetId, screenToFlowPosition({ x: event.clientX, y: event.clientY })); return; } if (event.dataTransfer.files.length) void importMedia(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
       <input ref={fileInputRef} className="canvas-file-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={(event) => { if (event.target.files) void importMedia(event.target.files); event.target.value = ''; }} />
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={handleConnect} onConnectStart={handleConnectStart} onConnectEnd={handleConnectEnd}
+      <CanvasUiProvider openInspector={onOpenInspector}>
+      <ReactFlow nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={handleConnect} onConnectStart={handleConnectStart} onConnectEnd={handleConnectEnd}
         onNodeDragStart={beginNodeDrag} onNodeDragStop={endNodeDrag}
         onNodeClick={(event, node) => { closeContextMenu(); selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey); }} onPaneClick={(event) => { closeContextMenu(); selectNode(null); if (event.detail === 2) { const point = screenToFlowPosition({ x: event.clientX, y: event.clientY }); addNode('text', { x: point.x - 190, y: point.y - 140 }); } }}
+        onNodeDoubleClick={(_event, node) => { selectNode(node.id); onOpenInspector(); }}
         onPaneContextMenu={(event) => { event.preventDefault(); setContextTarget({ type: 'pane', clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
         onNodeContextMenu={(event, node) => { event.preventDefault(); if (!node.selected) selectNode(node.id); setContextTarget({ type: 'node', node, clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
-        onEdgeContextMenu={(event, edge) => { event.preventDefault(); setContextTarget({ type: 'edge', edgeId: edge.id, clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
+        onEdgeContextMenu={(event, edge) => { event.preventDefault(); selectNode(null); onEdgesChange([{ id: edge.id, type: 'select', selected: true }]); }}
         defaultEdgeOptions={defaultEdgeOptions} connectionLineType={ConnectionLineType.Bezier} minZoom={.18} maxZoom={2.4} defaultViewport={initialViewport}
         deleteKeyCode={null} colorMode="dark" proOptions={{ hideAttribution: true }}
         onMoveStart={() => { closeContextMenu(); setIsViewportMoving(true); }}
@@ -552,9 +422,37 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onMoveEnd={(_, viewport) => { setIsViewportMoving(false); scheduleMediaViewport(viewport); onViewportChange(viewport); }}
         onlyRenderVisibleElements={nodes.length > 320}>
         {showGrid && <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="rgba(255,255,255,.10)" />}
-        {showMinimap && <StableMiniMap key={projectId} nodes={nodes} initialViewport={initialViewport} isMoving={isViewportMoving} />}
+        {showMinimap && <MiniMap
+          className="canvas-minimap"
+          position="bottom-right"
+          pannable
+          zoomable
+          nodeBorderRadius={5}
+          nodeStrokeWidth={1.25}
+          nodeColor={(node) => node.selected ? '#d7ff54' : 'rgba(215,255,84,.34)'}
+          nodeStrokeColor={(node) => node.selected ? '#f3ffc5' : 'rgba(226,233,216,.42)'}
+          bgColor="rgba(20,37,31,.96)"
+          maskColor="rgba(4,12,9,.7)"
+          maskStrokeColor="rgba(215,255,84,.9)"
+          maskStrokeWidth={1.25}
+          ariaLabel="画布导航小地图"
+        />}
         <Panel className={`canvas-project-bar ${workspaceMenuOpen || projectSwitcherOpen ? 'is-menu-open' : ''}`} position="top-left">
-          <button className="workspace-menu-trigger" aria-label="本地工作区菜单" aria-expanded={workspaceMenuOpen} onClick={() => { setWorkspaceMenuOpen((open) => !open); setProjectSwitcherOpen(false); setCanvasSwitcherOpen(false); }}><ChevronDown size={16} /></button>
+          <DropdownMenu.Root open={workspaceMenuOpen} onOpenChange={(open) => { setWorkspaceMenuOpen(open); if (open) { setProjectSwitcherOpen(false); setCanvasSwitcherOpen(false); } }}>
+            <DropdownMenu.Trigger asChild><button className="workspace-menu-trigger" aria-label="本地工作区菜单"><ChevronDown size={16} /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="workspace-menu" aria-label="本地工作区菜单" align="start" sideOffset={8}>
+                <DropdownMenu.Item asChild><button onClick={() => { closeProjectMenus(); onOpenHome(); }}><FolderOpen size={15} /><span>返回项目中心</span></button></DropdownMenu.Item>
+                <DropdownMenu.Separator className="project-menu-divider" />
+                <DropdownMenu.Label className="project-menu-section-label">项目</DropdownMenu.Label>
+                <DropdownMenu.Item asChild><button onClick={() => { closeProjectMenus(); setRenameDraft(projectTitle); setRenameDialogOpen(true); }}><span>重命名</span></button></DropdownMenu.Item>
+                <DropdownMenu.Item asChild><button onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /><span>新建项目</span></button></DropdownMenu.Item>
+                <DropdownMenu.Item disabled={isExporting} asChild><button disabled={isExporting} onClick={() => { closeProjectMenus(); onExportProject(); }}><FileArchive size={15} /><span>{isExporting ? '导出中…' : '导出项目包'}</span><kbd>.morrow</kbd></button></DropdownMenu.Item>
+                <DropdownMenu.Separator className="project-menu-divider" />
+                <DropdownMenu.Item asChild><button className="project-menu-danger" onClick={() => { closeProjectMenus(); setDeleteDialogOpen(true); }}><Trash2 size={15} /><span>删除项目</span></button></DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
           <i className="project-bar-divider" />
           <button className="project-switcher-trigger canvas-switcher-trigger" aria-label="切换画布" aria-expanded={canvasSwitcherOpen} onClick={() => { setCanvasSwitcherOpen((open) => !open); setProjectSwitcherOpen(false); setWorkspaceMenuOpen(false); }}><Layers size={13} /><span>{canvasTitle || '画布'}</span><ChevronDown size={13} /></button>
           {canvasSwitcherOpen && <div className="project-switcher canvas-switcher" role="listbox" aria-label="切换画布">
@@ -568,16 +466,6 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           <span className={`project-save-indicator is-${saveStatus}`} role="status" aria-label={saveLabel[saveStatus]} title={saveLabel[saveStatus]}><Check size={14} /></span>
           <button className="project-inline-export" disabled={isExporting} onClick={onExportProject} aria-label="导出项目" title={isExporting ? '导出中…' : '导出项目'}><FileArchive size={15} /></button>
           <div className="project-copy project-compat-layer"><input aria-label="画布名称" value={projectTitle} onChange={(event) => onProjectTitleChange(event.target.value)} /><small className={saveStatus === 'error' ? 'is-error' : ''}>{saveLabel[saveStatus]}</small></div>
-          {workspaceMenuOpen && <div className="workspace-menu" role="menu" aria-label="本地工作区菜单">
-            <button role="menuitem" onClick={() => { closeProjectMenus(); onOpenHome(); }}><FolderOpen size={15} /><span>返回项目中心</span></button>
-            <div className="project-menu-divider" />
-            <div className="project-menu-section-label">项目</div>
-            <button role="menuitem" onClick={() => { closeProjectMenus(); setRenameDraft(projectTitle); setRenameDialogOpen(true); }}><span>重命名</span></button>
-            <button role="menuitem" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /><span>新建项目</span></button>
-            <button role="menuitem" disabled={isExporting} onClick={() => { closeProjectMenus(); onExportProject(); }}><FileArchive size={15} /><span>{isExporting ? '导出中…' : '导出项目包'}</span><kbd>.morrow</kbd></button>
-            <div className="project-menu-divider" />
-            <button className="project-menu-danger" role="menuitem" onClick={() => { closeProjectMenus(); setDeleteDialogOpen(true); }}><Trash2 size={15} /><span>删除项目</span></button>
-          </div>}
           {projectSwitcherOpen && <div className="project-switcher" role="dialog" aria-label="搜索和切换项目">
             <label className="project-switcher-search"><Search size={15} /><input autoFocus aria-label="搜索项目" placeholder="搜索项目" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') closeProjectMenus(); }} /></label>
             <div className="project-switcher-list" role="tree" aria-label="本地项目">
@@ -586,25 +474,54 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /> 新建项目</button>
           </div>}
         </Panel>
-        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button><button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button></div></Panel>
-        <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel /></Panel>
-        <Panel className="canvas-view-bar" position="bottom-left"><button className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap(!showMinimap)} aria-label="小地图"><Map size={18} /></button><button className={showGrid ? 'is-active' : ''} onClick={() => setShowGrid(!showGrid)} aria-label="网格"><Grid2X2 size={18} /></button><button onClick={() => fitView({ padding: .22, duration: 300 })} aria-label="适应视图"><MousePointer2 size={18} /></button><input aria-label="画布缩放" type="range" min="18" max="240" value={zoom} onChange={(event) => void zoomTo(Number(event.target.value) / 100)} /><span>{zoom}%</span><i /><button onClick={() => notify('双击空白处创建文字节点；拖入图片可直接导入')} aria-label="帮助"><CircleHelp size={19} /></button></Panel>
+        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button><button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button></div></Panel>
+        <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel onOpenRecords={() => setPanel('history')} /></Panel>
+        <Controls
+          className="canvas-controls canvas-view-bar"
+          position="bottom-left"
+          orientation="horizontal"
+          showZoom
+          showFitView
+          showInteractive
+          fitViewOptions={{ padding: .22, duration: 300 }}
+          aria-label="画布控制"
+        >
+          <ControlButton className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap((value) => !value)} aria-label="小地图" title="小地图"><Map size={16} /></ControlButton>
+          <ControlButton className={showGrid ? 'is-active' : ''} onClick={() => setShowGrid((value) => !value)} aria-label="网格" title="网格"><Grid2X2 size={16} /></ControlButton>
+          <ControlButton onClick={() => notify('双击空白处创建文字节点；拖入图片可直接导入')} aria-label="帮助" title="帮助"><CircleHelp size={17} /></ControlButton>
+        </Controls>
         {notice && <Panel className="canvas-status-toast" position="bottom-center">{notice}</Panel>}
         {!nodes.length && <Panel className="canvas-empty-hint" position="top-left"><div><strong>空画布</strong><span>从真实素材或文字开始</span></div><section><button onClick={() => fileInputRef.current?.click()}>导入图片 / 视频</button><button onClick={() => addNode('text')}>创建文字</button><button onClick={() => addNode('image')}>创建图片占位</button><button onClick={() => addNode('video')}>创建视频占位</button></section></Panel>}
       </ReactFlow>
+      </CanvasUiProvider>
       {assetDrawerOpen && <AssetDrawer projectId={projectId} onClose={() => setAssetDrawerOpen(false)} />}
       {panel === 'nodes' && <NodeLibrary onClose={() => setPanel(null)} onImport={() => fileInputRef.current?.click()} />}
       {panel === 'templates' && <TemplatePanel onClose={() => setPanel(null)} />}
-      {renameDialogOpen && <div className="project-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setRenameDialogOpen(false); }}><form className="project-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-project-title" onSubmit={(event) => { event.preventDefault(); const title = renameDraft.trim(); if (!title) return; onProjectTitleChange(title); setRenameDialogOpen(false); }}><h2 id="rename-project-title">重命名项目</h2><p>请输入项目的新名称</p><input autoFocus aria-label="项目的新名称" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setRenameDialogOpen(false); }} /><footer><button type="button" onClick={() => setRenameDialogOpen(false)}>取消</button><button type="submit" disabled={!renameDraft.trim()}>确认</button></footer></form></div>}
-      {deleteDialogOpen && <div className="project-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setDeleteDialogOpen(false); }}><div className="project-dialog project-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title"><h2 id="delete-project-title">删除当前项目？</h2><p>项目、画布结构及仅由该项目引用的素材将从本地删除。此操作无法撤销。</p><footer><button type="button" onClick={() => setDeleteDialogOpen(false)}>取消</button><button className="is-danger" type="button" onClick={() => { setDeleteDialogOpen(false); onDeleteProject(); }}>确认删除</button></footer></div></div>}
-      {contextTarget?.type === 'edge' && <button
-        className="canvas-edge-context-action"
-        style={{ left: contextTarget.clientX, top: contextTarget.clientY }}
-        title="剪断连接"
-        aria-label="剪断连接"
-        onClick={() => { deleteEdge(contextTarget.edgeId); closeContextMenu(); }}
-      ><Scissors size={18} /></button>}
-      {contextTarget && contextTarget.type !== 'edge' && <CanvasContextMenu
+      {panel === 'history' && <GenerationRecordsPanel onClose={() => setPanel(null)} />}
+      <Dialog.Root open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="project-dialog-backdrop" />
+          <Dialog.Content asChild>
+            <form className="project-dialog" onSubmit={(event) => { event.preventDefault(); const title = renameDraft.trim(); if (!title) return; onProjectTitleChange(title); setRenameDialogOpen(false); }}>
+              <Dialog.Title>重命名项目</Dialog.Title>
+              <Dialog.Description className="project-dialog-description">请输入项目的新名称</Dialog.Description>
+              <input autoFocus aria-label="项目的新名称" value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} />
+              <footer><Dialog.Close asChild><button type="button">取消</button></Dialog.Close><button type="submit" disabled={!renameDraft.trim()}>确认</button></footer>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="project-dialog-backdrop" />
+          <Dialog.Content className="project-dialog project-delete-dialog">
+            <Dialog.Title>删除当前项目？</Dialog.Title>
+            <Dialog.Description className="project-dialog-description">项目、画布结构及仅由该项目引用的素材将从本地删除。此操作无法撤销。</Dialog.Description>
+            <footer><Dialog.Close asChild><button type="button">取消</button></Dialog.Close><button className="is-danger" type="button" onClick={() => { setDeleteDialogOpen(false); onDeleteProject(); }}>确认删除</button></footer>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      {contextTarget && <CanvasContextMenu
         target={contextTarget}
         canPaste={canPaste}
         canUndo={canUndo}

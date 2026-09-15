@@ -3,10 +3,12 @@ import type { AssetMetadata, CanvasDocumentV1, CanvasEdge, CanvasNode, CanvasSum
 import type { Viewport } from '@xyflow/react';
 import { createId } from '../utils/id';
 import { apiJson } from './morrowApi';
+import { migrateCanvasGraphV1ToV2 } from '../canvas/graphMigration';
+import type { GenerationQueueItem } from '../canvas/generationQueue';
 
 // Use a new versioned namespace instead of attempting to migrate the former demo prototype.
 export const DB_NAME = 'morrow-creative-canvas-v1';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 type AssetVariant = 'original' | 'thumbnail' | 'preview';
 interface PersistedAssetVariant { assetId: string; variant: AssetVariant; blob: Blob }
@@ -25,6 +27,7 @@ const database = openDB(DB_NAME, DB_VERSION, {
     if (!db.objectStoreNames.contains('assetMeta')) db.createObjectStore('assetMeta', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('assetVariants')) db.createObjectStore('assetVariants', { keyPath: ['assetId', 'variant'] });
     if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('generationQueue')) db.createObjectStore('generationQueue', { keyPath: 'id' });
 
     // v2 -> v3 迁移：把旧项目（v1，含图）拆成 project(v2) + 独立 canvas，并回填资产来源信息。
     if (oldVersion >= 1 && oldVersion < 3) {
@@ -234,15 +237,18 @@ export async function deleteProject(projectId: string) {
 export async function createCanvas(projectId: string, title = '画布'): Promise<CanvasDocumentV1> {
   const meta = await apiJson<{ id: string; projectId: string; title: string }>(`/projects/${encodeURIComponent(projectId)}/canvases`, { method: 'POST', body: JSON.stringify({ title }) });
   const now = nowMs();
-  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, revision: 0, createdAt: now, updatedAt: now };
+  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], revision: 0, createdAt: now, updatedAt: now };
   await (await database).put('canvases', canvas); // 本地缓存（可离线读）
   return canvas;
 }
 
 interface CanvasGraphPayload {
+  schemaVersion: 2;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   viewport: Viewport;
+  generationRecords?: CanvasDocumentV1['generationRecords'];
+  migrationReport?: CanvasDocumentV1['migrationReport'];
 }
 
 interface CanvasGraphDto {
@@ -253,7 +259,14 @@ interface CanvasGraphDto {
 
 /** 提取图载荷：nodes/edges/viewport（去 schemaVersion/id 等元数据）。 */
 function graphPayloadOf(canvas: CanvasDocumentV1): CanvasGraphPayload {
-  return { nodes: canvas.nodes, edges: canvas.edges, viewport: canvas.viewport };
+  return {
+    schemaVersion: 2,
+    nodes: canvas.nodes,
+    edges: canvas.edges,
+    viewport: canvas.viewport,
+    generationRecords: canvas.generationRecords ?? [],
+    migrationReport: canvas.migrationReport,
+  };
 }
 
 /** 用后端图载荷回填 CanvasDocumentV1（保留本地元数据，覆写图 + revision）。 */
@@ -263,8 +276,33 @@ function applyGraph(canvas: CanvasDocumentV1, dto: CanvasGraphDto): CanvasDocume
     nodes: dto.graph?.nodes ?? [],
     edges: dto.graph?.edges ?? [],
     viewport: dto.graph?.viewport ?? canvas.viewport,
+    generationRecords: dto.graph?.generationRecords ?? canvas.generationRecords ?? [],
+    migrationReport: dto.graph?.migrationReport ?? canvas.migrationReport,
     revision: dto.revision ?? canvas.revision ?? 0,
     updatedAt: nowMs(),
+  };
+}
+
+function normalizeCanvasGraph(canvas: CanvasDocumentV1): CanvasDocumentV1 {
+  const legacyKinds = new Set(['prompt', 'sequence', 'imageGen', 'videoGen', 'storyboard', 'storyboardGen']);
+  const needsMigration = canvas.nodes.some((node) =>
+    node.type !== node.data.kind
+    || legacyKinds.has(String(node.data.kind)))
+    || canvas.edges.some((edge) => !edge.sourceHandle || !edge.targetHandle || edge.sourceHandle === 'right' || edge.targetHandle === 'left');
+  if (!needsMigration) return { ...canvas, generationRecords: canvas.generationRecords ?? [] };
+  const migrated = migrateCanvasGraphV1ToV2({
+    schemaVersion: canvas.schemaVersion,
+    nodes: canvas.nodes as Parameters<typeof migrateCanvasGraphV1ToV2>[0]['nodes'],
+    edges: canvas.edges as Parameters<typeof migrateCanvasGraphV1ToV2>[0]['edges'],
+    viewport: canvas.viewport,
+    generationRecords: canvas.generationRecords,
+  });
+  return {
+    ...canvas,
+    nodes: migrated.nodes as CanvasNode[],
+    edges: migrated.edges as CanvasEdge[],
+    generationRecords: migrated.generationRecords,
+    migrationReport: migrated.migrationReport,
   };
 }
 
@@ -291,18 +329,18 @@ export async function loadCanvas(canvasId: string): Promise<CanvasDocumentV1 | u
     const backendHasContent = (dto.graph?.nodes?.length ?? 0) > 0 || (dto.graph?.edges?.length ?? 0) > 0;
     const localHasContent = (local?.nodes?.length ?? 0) > 0 || (local?.edges?.length ?? 0) > 0;
     // 后端为空但本地有内容（迁移/离线缓存）→ 信任本地，防后端空图覆盖勿丢数据
-    if (!backendHasContent && localHasContent) return local;
+    if (!backendHasContent && localHasContent) return local ? normalizeCanvasGraph(local) : undefined;
     if (!local && !backendHasContent) return undefined;
-    return applyGraph(local ?? emptyCanvas(canvasId), dto);
+    return normalizeCanvasGraph(applyGraph(local ?? emptyCanvas(canvasId), dto));
   } catch {
     // 后端不可达/无鉴权 → 降级本地缓存
-    return local;
+    return local ? normalizeCanvasGraph(local) : undefined;
   }
 }
 
 function emptyCanvas(canvasId: string): CanvasDocumentV1 {
   const now = nowMs();
-  return { schemaVersion: 1, id: canvasId, projectId: '', title: '画布', nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, revision: 0, createdAt: now, updatedAt: now };
+  return { schemaVersion: 1, id: canvasId, projectId: '', title: '画布', nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], revision: 0, createdAt: now, updatedAt: now };
 }
 
 export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {
@@ -313,7 +351,7 @@ export async function listCanvases(projectId: string): Promise<CanvasSummary[]> 
     const doc = await db.get('canvases', m.id) as CanvasDocumentV1 | undefined;
     return {
       id: m.id, projectId, title: m.title, createdAt: now, updatedAt: now,
-      nodeCount: doc?.nodes.length ?? 0, assetCount: new Set((doc?.nodes ?? []).flatMap((n) => (n.data.assetId ? [n.data.assetId] : []))).size,
+      nodeCount: doc?.nodes.length ?? 0, assetCount: doc ? canvasAssetIds(doc).size : 0,
     } satisfies CanvasSummary;
   }));
   return summaries.sort((a, b) => a.createdAt - b.createdAt);
@@ -356,7 +394,7 @@ export async function collectAssetGarbage(protectedAssetIds: Iterable<string> = 
     db.getAllKeys('assets') as Promise<IDBValidKey[]>,
   ]);
   const referenced = new Set(protectedAssetIds);
-  canvases.forEach((canvas) => projectAssetIds(canvas.nodes).forEach((id) => referenced.add(id)));
+  canvases.forEach((canvas) => canvasAssetIds(canvas).forEach((id) => referenced.add(id)));
   entries.forEach((entry) => referenced.add(entry.assetId));
 
   // Only referenced lineage records are read, so GC never materializes every asset Blob.
@@ -425,9 +463,22 @@ export async function getSetting<T>(key: string) {
   return (await database).get('settings', key) as Promise<T | undefined>;
 }
 
+export async function putGenerationQueueItem(item: GenerationQueueItem) {
+  await (await database).put('generationQueue', item);
+}
+
+export async function deleteGenerationQueueItem(id: string) {
+  await (await database).delete('generationQueue', id);
+}
+
+export async function listGenerationQueueItems(projectId?: string) {
+  const items = await (await database).getAll('generationQueue') as GenerationQueueItem[];
+  return projectId ? items.filter((item) => item.projectId === projectId) : items;
+}
+
 export async function clearLocalData() {
   const db = await database;
-  const transaction = db.transaction(['projects', 'canvases', 'assets', 'assetMeta', 'assetVariants', 'libraryEntries', 'settings'], 'readwrite');
+  const transaction = db.transaction(['projects', 'canvases', 'assets', 'assetMeta', 'assetVariants', 'libraryEntries', 'settings', 'generationQueue'], 'readwrite');
   const done = transaction.done;
   await Promise.all([
     transaction.objectStore('projects').clear(),
@@ -437,12 +488,22 @@ export async function clearLocalData() {
     transaction.objectStore('assetVariants').clear(),
     transaction.objectStore('libraryEntries').clear(),
     transaction.objectStore('settings').clear(),
+    transaction.objectStore('generationQueue').clear(),
   ]);
   await done;
 }
 
 export function projectAssetIds(nodes: CanvasNode[]) {
   return new Set(nodes.flatMap((node) => node.data.assetId ? [node.data.assetId] : []));
+}
+
+export function canvasAssetIds(canvas: CanvasDocumentV1) {
+  const ids = projectAssetIds(canvas.nodes);
+  for (const record of canvas.generationRecords ?? []) {
+    record.materializedAssetIds.forEach((id) => ids.add(id));
+    record.sources.forEach((source) => { if (source.assetId) ids.add(source.assetId); });
+  }
+  return ids;
 }
 
 export function cloneProjectGraph(nodes: CanvasNode[], edges: CanvasEdge[]) {

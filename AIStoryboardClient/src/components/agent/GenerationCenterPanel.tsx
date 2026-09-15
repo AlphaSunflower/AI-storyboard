@@ -11,6 +11,7 @@ import {
   AgentAssetBrowser,
 } from './AgentAssetsPanel';
 import { getAgentAssetCounts, type AssetsTab } from './assetBrowserModel';
+import { partitionImageQueueTasks } from './generationCenterImageTasks';
 import './GenerationCenterPanel.css';
 
 type GenerationCenterTab = 'active' | AssetsTab;
@@ -67,6 +68,7 @@ export function GenerationCenterPanel({
 
   const activeVideo = queue.filter((task) => ACTIVE_STATUSES.has(task.status));
   const activeImage = imageQueue.filter((task) => ACTIVE_STATUSES.has(task.status));
+  const activeImageTasks = partitionImageQueueTasks(activeImage);
   const activeImageSceneIds = new Set(activeImage.map((task) => task.sceneId));
   const activeRecordImage = activeGenerations.filter((record) =>
     record.type === 'image' && (!record.sceneId || !activeImageSceneIds.has(record.sceneId)));
@@ -263,8 +265,10 @@ export function GenerationCenterPanel({
                     progress: null,
                     error: record.error,
                   }, '视频', scenes, undefined, record.sceneId ? undefined : '智能体视频生成中'))}
-                  {activeImage.length > 0 && <SectionLabel>完善图片</SectionLabel>}
-                  {activeImage.map((task) => renderRow(task, '图片', scenes, cancelImage))}
+                  {activeImageTasks.refine.length > 0 && <SectionLabel>完善图片</SectionLabel>}
+                  {activeImageTasks.refine.map((task) => renderRow(task, '图片', scenes, cancelImage))}
+                  {activeImageTasks.auto.length > 0 && <SectionLabel>自动生成图片</SectionLabel>}
+                  {activeImageTasks.auto.map((task) => renderRow(task, '图片', scenes, cancelImage))}
                   {activeGenerationImage.length > 0 && <SectionLabel>生成图片</SectionLabel>}
                   {activeRecordImage.map((record) => renderRow({
                     id: record.id,

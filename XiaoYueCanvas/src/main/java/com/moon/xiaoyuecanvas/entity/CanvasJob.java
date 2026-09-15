@@ -49,7 +49,7 @@ public class CanvasJob {
     /** 参数（JSON TEXT：prompt/model/resolution/duration/size/quality 等） */
     private String params;
 
-    /** queued / running / completed / failed / cancelled */
+    /** queued / running / interrupted / completed / failed / cancelled */
     private String status;
 
     /** 进度（0-100） */
@@ -60,6 +60,42 @@ public class CanvasJob {
 
     /** 结果素材 id（→ agent_assets.id） */
     private String resultAssetId;
+
+    /** 执行尝试次数（claim 时递增）。 */
+    private Integer attempt;
+
+    /** 取消请求时间；一旦写入，晚到的完成结果不得覆盖 cancelled。 */
+    private OffsetDateTime cancelRequestedAt;
+
+    /** 首次开始执行时间。 */
+    private OffsetDateTime startedAt;
+
+    /** 终态完成时间。 */
+    private OffsetDateTime completedAt;
+
+    /** 最近一次 lease 心跳时间。 */
+    private OffsetDateTime heartbeatAt;
+
+    /** 当前执行租约所有者（实例/线程唯一值）。 */
+    private String leaseOwner;
+
+    /** 当前执行租约过期时间。 */
+    private OffsetDateTime leaseExpiresAt;
+
+    /** 状态 CAS 版本号，每次状态迁移递增。 */
+    private Long stateVersion;
+
+    /** 已追加的最大事件序号。 */
+    private Long lastEventSeq;
+
+    /** 本次作业的全部结果素材 id（JSON TEXT，保持 resultAssetId 兼容）。 */
+    private String resultAssetIds;
+
+    /** 上游视频任务 id；服务重启后可据此恢复轮询。 */
+    private String providerTaskId;
+
+    /** 并行批次 id（params.canvas.batchId 的列化副本，便于恢复查询）。 */
+    private String batchId;
 
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;

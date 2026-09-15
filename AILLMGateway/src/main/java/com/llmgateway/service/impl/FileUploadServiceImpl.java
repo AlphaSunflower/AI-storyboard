@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -42,7 +43,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         // 调用方以 octet-stream 发送 multipart 字节流（@RequestBody byte[] 收 multipart 会被 Spring 解析器
         // 消费 body → 500，图改图 edits 同款 workaround）；转发前须从 body 提取 boundary 重建上游 multipart
         // Content-Type——否则上游按 octet-stream 解析收不到文件 part。
-        String upstreamContentType = buildMultipartContentType(bodyBytes);
+        String boundary = extractBoundary(bodyBytes);
+        String upstreamContentType = "multipart/form-data; boundary=" + boundary;
+        byte[] upstreamBody = withPurposeField(bodyBytes, boundary);
         // 文件上传固定走 minimax 渠道（mm_file:// 生态；Laozhang 无对应机制）
         List<Channel> minimaxChannels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                 .eq(Channel::getType, "minimax")
@@ -58,12 +61,11 @@ public class FileUploadServiceImpl implements FileUploadService {
                 : channel.getBaseUrl();
 
         Exception lastErr = null;
-        // 必带 purpose：MiniMax 缺 purpose 时返回 HTTP 200 + base_resp:2013 "invalid file purpose"（不是 HTTP 400），
-        // 故首个请求即带 purpose=video_generation（参考图/视频用于视频生成），不再发无 purpose 请求（2026-08-27 修复）
-        String suffix = "/v1/files/upload?purpose=video_generation";
+        // MiniMax 要求 purpose 是 multipart 表单字段，不是 query 参数。
+        String suffix = "/v1/files/upload";
         try {
             HttpResponse<String> resp = upstreamClient.postMultipart(
-                    base, suffix, apiKey, upstreamContentType, bodyBytes, UPLOAD_TIMEOUT_MS);
+                    base, suffix, apiKey, upstreamContentType, upstreamBody, UPLOAD_TIMEOUT_MS);
             String body = resp.body();
             if (resp.statusCode() != 200) {
                 String err = upstreamClient.extractError(body);
@@ -93,8 +95,8 @@ public class FileUploadServiceImpl implements FileUploadService {
                 + (lastErr == null ? "unknown" : lastErr.getMessage()));
     }
 
-    /** 从 multipart 字节流提取 boundary，重建上游 multipart Content-Type（与 ImageEditServiceImpl 同款 workaround）。 */
-    private String buildMultipartContentType(byte[] body) {
+    /** 从 multipart 字节流提取 boundary。 */
+    private String extractBoundary(byte[] body) {
         // 前两字节必须是 "--"（multipart 规范），否则无 boundary 可提取
         if (body.length < 2 || body[0] != '-' || body[1] != '-') {
             throw new BusinessException(40001, "multipart body 必须以 boundary 开头");
@@ -102,10 +104,36 @@ public class FileUploadServiceImpl implements FileUploadService {
         for (int i = 2; i < body.length - 1; i++) {
             if (body[i] == '\r' && body[i + 1] == '\n') {
                 // 跳过前导 "--"，取纯 boundary（Content-Type boundary 参数不含 --）
-                String boundary = new String(body, 2, i - 2, StandardCharsets.ISO_8859_1);
-                return "multipart/form-data; boundary=" + boundary;
+                return new String(body, 2, i - 2, StandardCharsets.ISO_8859_1);
             }
         }
         throw new BusinessException(40001, "multipart body 缺少 boundary 结束符");
+    }
+
+    /** 在 closing boundary 前注入 purpose 表单字段。 */
+    private byte[] withPurposeField(byte[] body, String boundary) {
+        byte[] closing = ("--" + boundary + "--").getBytes(StandardCharsets.ISO_8859_1);
+        int pos = lastIndexOf(body, closing);
+        if (pos < 0) throw new BusinessException(40001, "multipart body 缺少 closing boundary");
+        byte[] part = ("--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"purpose\"\r\n\r\n"
+                + "video_generation_input\r\n")
+                .getBytes(StandardCharsets.ISO_8859_1);
+        ByteArrayOutputStream out = new ByteArrayOutputStream(body.length + part.length);
+        out.write(body, 0, pos);
+        out.write(part, 0, part.length);
+        out.write(body, pos, body.length - pos);
+        return out.toByteArray();
+    }
+
+    private static int lastIndexOf(byte[] source, byte[] target) {
+        outer:
+        for (int i = source.length - target.length; i >= 0; i--) {
+            for (int j = 0; j < target.length; j++) {
+                if (source[i + j] != target[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
     }
 }

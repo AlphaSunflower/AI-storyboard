@@ -27,29 +27,29 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
   const fileInput = useRef<HTMLInputElement>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   return (
-    <main className="min-h-dvh overflow-auto px-6 py-10 md:px-14"
+    <main className="canvas-home min-h-dvh overflow-auto px-6 py-10 md:px-14"
       style={{ background: 'radial-gradient(circle at 82% 8%, rgba(215,255,84,0.10), transparent 30%), radial-gradient(circle at 16% 90%, rgba(28,50,42,0.9), transparent 40%), var(--canvas)' }}>
       <input ref={fileInput} className="canvas-file-input" type="file" accept=".morrow,application/x-morrow-project,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = ''; }} />
 
-      <header className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-8 border-b border-[var(--border-dark)] pb-8">
+      <header className="canvas-home__hero mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-8 border-b border-[var(--border-dark)] pb-8">
         <div>
           <small className={eyebrow}>MORROW / LOCAL CREATIVE WORKBENCH</small>
           <h1 className="mt-4 max-w-xl text-4xl font-bold tracking-tight text-foreground md:text-5xl leading-[1.05]">设计发生在你的设备上<span className="text-acid">。</span></h1>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground">项目、原图与每个派生版本保存在本地。没有演示素材，没有伪造任务，也不会把文件上传到未知服务。</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="canvas-home__actions flex flex-wrap items-center gap-3">
           <button className="flex h-11 items-center gap-2 rounded-xl bg-acid px-5 font-semibold text-ink transition hover:brightness-105" onClick={onCreate}><Plus size={17} /> 新建项目</button>
           <button className="flex h-11 items-center gap-2 rounded-xl border border-[var(--border-dark)] px-5 text-foreground transition hover:border-acid hover:text-acid" onClick={() => fileInput.current?.click()}><FileArchive size={17} /> 导入 .morrow</button>
         </div>
       </header>
 
-      <section className="mx-auto max-w-6xl py-10">
+      <section className="canvas-home__projects mx-auto max-w-6xl py-10">
         <header className="flex items-end justify-between mb-4">
           <div><small className={eyebrow}>LOCAL PROJECTS</small><h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">最近项目</h2></div>
           <span className="font-mono text-xs text-muted-foreground">{projects.length} 个项目</span>
         </header>
         {loading ? <div className="grid place-items-center rounded-2xl border border-dashed border-[var(--border-dark)] py-16 text-muted-foreground">正在读取本地项目…</div> : projects.length ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{projects.map((project) => (
+          <div className="canvas-home__grid grid grid-cols-1 gap-4 sm:grid-cols-2">{projects.map((project) => (
             <article key={project.id} className="group flex items-center gap-4 rounded-2xl border border-[var(--border-dark)] bg-card p-4 transition hover:border-[var(--acid)] hover:shadow-[0_0_24px_rgba(215,255,84,0.08)]">
               <button className="flex flex-1 items-center gap-4 rounded-xl text-left" onClick={() => onOpen(project.id)}>
                 <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[rgba(215,255,84,0.12)] text-acid"><Image size={24} /><i className="absolute bottom-1 right-1.5 font-mono text-[9px] not-italic text-acid/80">{project.assetCount}</i></span>

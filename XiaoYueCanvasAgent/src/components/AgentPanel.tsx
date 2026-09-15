@@ -4,15 +4,16 @@ import {
   LoaderCircle, Paperclip, RefreshCw, Send, Trash2,
 } from 'lucide-react';
 import { jobAdapter } from '../services/capabilities';
-import { saveAsset } from '../services/projectStorage';
 import { useAgentStore, type AgentJobState, type ConversationSummary } from '../store/agentStore';
 import { useCanvasStore } from '../store/canvasStore';
-import { useMediaStore } from '../store/mediaStore';
-import type { JobAdapter, JobEvent, PersistedAsset, ProjectDocumentV2 } from '../types';
+import type { JobAdapter, JobEvent, ProjectDocumentV2 } from '../types';
 import { createId } from '../utils/id';
-import { createImageAsset, createVideoAsset, getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 import { executeToolCall, getTool, shouldDryRun } from '../canvas/toolRegistry';
 import type { AgentToolCall, AgentToolResult } from '../types';
+import { materializeJobAsset } from '../canvas/generationRuntime';
+import type { GenerationRecord } from '../canvas/graphContracts';
+import { buildGenerationSources } from '../canvas/generationRecords';
+import { putGenerationQueueItem } from '../services/projectStorage';
 
 const terminalStatuses = new Set<AgentJobState['status']>(['completed', 'failed', 'cancelled']);
 
@@ -25,15 +26,6 @@ const messageTime = (createdAt: number) => new Intl.DateTimeFormat('zh-CN', {
 const jobStatusLabel: Record<AgentJobState['status'], string> = {
   submitting: '正在提交', queued: '等待执行', running: '正在执行', receiving: '正在接收', cancelling: '正在取消',
   completed: '已完成', failed: '执行失败', cancelled: '已取消',
-};
-
-const outputPosition = () => {
-  const nodes = useCanvasStore.getState().nodes;
-  if (!nodes.length) return { x: 300, y: 200 };
-  return {
-    x: Math.max(...nodes.map((node) => node.position.x + (node.width ?? node.measured?.width ?? 250))) + 150,
-    y: Math.min(...nodes.map((node) => node.position.y)),
-  };
 };
 
 export function AgentPanel({ project, adapter = jobAdapter }: { project: ProjectDocumentV2; adapter?: JobAdapter }) {
@@ -52,14 +44,18 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
   const conversationLists = useAgentStore((state) => state.conversationLists);
   const loadConversations = useAgentStore((state) => state.loadConversations);
   const selectConversation = useAgentStore((state) => state.selectConversation);
-  const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [convDropdownOpen, setConvDropdownOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
   const threadEndRef = useRef<HTMLDivElement>(null);
   const subscriptionsRef = useRef(new Map<string, () => void>());
-  const jobContextRef = useRef(new Map<string, { prompt: string; sourceNodeId?: string; capabilityId: string }>());
+  const jobContextRef = useRef(new Map<string, {
+    prompt: string;
+    sourceNodeId?: string;
+    sourceAssetIds: string[];
+    capabilityId: string;
+  }>());
   const seenEventIdsRef = useRef(new Set<string>());
   const seenAssetIdsRef = useRef(new Set<string>());
   const assetQueuesRef = useRef(new Map<string, Promise<void>>());
@@ -106,6 +102,40 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
     subscriptionsRef.current.delete(jobId);
   }, []);
 
+  const updateJobRecord = useCallback((jobId: string, patch: Partial<GenerationRecord>) => {
+    const recordId = `agent-${jobId}`;
+    const current = useCanvasStore.getState().generationRecords.find((record) => record.id === recordId);
+    if (current) useCanvasStore.getState().updateGenerationRecord({ ...current, ...patch });
+  }, []);
+
+  const persistJobQueue = useCallback((
+    jobId: string,
+    status: 'pending_submit' | 'running' | 'terminal' | 'interrupted',
+    error?: string,
+  ) => {
+    const context = jobContextRef.current.get(jobId);
+    if (!context) return;
+    const now = Date.now();
+    void putGenerationQueueItem({
+      id: `agent-${jobId}`,
+      projectId: project.id,
+      canvasId: useCanvasStore.getState().canvasId ?? '',
+      producerNodeId: context.sourceNodeId ?? '',
+      generationRecordId: `agent-${jobId}`,
+      requestSnapshot: {
+        capabilityId: context.capabilityId,
+        sourceAssetIds: context.sourceAssetIds,
+        params: { prompt: context.prompt },
+      },
+      status,
+      jobId,
+      attempt: 1,
+      error,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }, [project.id]);
+
   const sendToolResult = useCallback(async (jobId: string, toolResult: AgentToolResult) => {
     if (!adapter.sendToolResult) throw new Error('执行服务未提供工具结果回传接口');
     await adapter.sendToolResult(jobId, toolResult);
@@ -143,30 +173,37 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
     seenAssetIdsRef.current.add(dedupeKey);
     const job = jobContextRef.current.get(event.jobId);
     const sourceNode = job?.sourceNodeId ? useCanvasStore.getState().nodes.find((node) => node.id === job.sourceNodeId) : undefined;
-    const sourceAssetId = sourceNode?.data.assetId;
     try {
-      const file = await adapter.fetchAsset(event.asset);
-      const operation = { type: 'remote' as const, params: { jobId: event.jobId, remoteAssetId: event.asset.id, capabilityId: job?.capabilityId ?? 'agent.request' } };
-      const asset: PersistedAsset = file.type.startsWith('video/')
-        ? await createVideoAsset(file)
-        : await createImageAsset(file, undefined, { derivedFrom: sourceAssetId, operation });
-      asset.operation = operation;
-      asset.derivedFrom = sourceAssetId;
-      const { projectId, canvasId } = useCanvasStore.getState();
-      if (asset.projectId === undefined) asset.projectId = projectId ?? undefined;
-      if (asset.canvasId === undefined) asset.canvasId = canvasId ?? undefined;
-      await saveAsset(asset);
-      upsertAsset(asset);
-      const label = file.name.replace(/\.[^.]+$/, '') || 'Agent 结果';
-      const size = asset.kind === 'video' ? getVideoNodeSize(asset.width, asset.height) : getMediaNodeSize(asset.width, asset.height);
-      if (sourceNode) {
-        useCanvasStore.getState().createDerivedNodes(sourceNode.id, [{ data: { kind: asset.kind, assetId: asset.id, label, operation, mediaLoadState: 'ready', status: 'success' }, size }]);
-      } else {
-        const item = { assetId: asset.id, label, position: outputPosition(), size, operation };
-        if (asset.kind === 'video') useCanvasStore.getState().addImportedVideos([item]);
-        else useCanvasStore.getState().addImportedImages([item]);
+      const recordId = `agent-${event.jobId}`;
+      const existing = useCanvasStore.getState().generationRecords.find((record) => record.id === recordId);
+      const record: GenerationRecord = existing ?? {
+        id: recordId,
+        producerNodeId: sourceNode?.id ?? '',
+        actionId: 'agent.request',
+        attempt: 1,
+        jobId: event.jobId,
+        status: 'completed',
+        materializationStatus: 'pending',
+        materializedAssetIds: [],
+        resultNodeIds: [],
+        sources: sourceNode?.data.assetId ? [{ nodeId: sourceNode.id, assetId: sourceNode.data.assetId, role: 'source', order: 0 }] : [],
+        prompt: job?.prompt ?? '',
+        effectivePrompt: job?.prompt ?? '',
+        params: { capabilityId: job?.capabilityId ?? 'agent.request' },
+        startedAt: Date.now() - 1,
+      };
+      if (!existing) useCanvasStore.getState().appendGenerationRecord(record);
+      const settlement = await materializeJobAsset(record, {
+        assetId: event.asset.id,
+        name: event.asset.name,
+        mimeType: event.asset.mimeType,
+        downloadUrl: event.asset.downloadUrl,
+      }, event.jobId);
+      if (settlement.created) {
+        appendMessage(project.id, { role: 'status', text: '真实结果已写入画布', detail: event.asset.name, jobId: event.jobId });
+      } else if (settlement.record.materializationError) {
+        throw new Error(settlement.record.materializationError);
       }
-      appendMessage(project.id, { role: 'status', text: '真实结果已写入画布', detail: file.name, jobId: event.jobId });
     } catch (error) {
       seenAssetIdsRef.current.delete(dedupeKey);
       appendMessage(project.id, {
@@ -174,20 +211,27 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
         detail: error instanceof Error ? error.message : '无法下载或处理执行服务返回的素材', jobId: event.jobId,
       });
     }
-  }, [adapter, appendMessage, project.id, upsertAsset]);
+  }, [appendMessage, project.id]);
 
   const handleJobEvent = useCallback((event: JobEvent) => {
     if (event.eventId) {
       if (seenEventIdsRef.current.has(event.eventId)) return;
       seenEventIdsRef.current.add(event.eventId);
     }
-    if (event.type === 'job.queued') updateJob(project.id, event.jobId, { status: 'queued' });
-    else if (event.type === 'job.started') updateJob(project.id, event.jobId, { status: 'running' });
+    if (event.type === 'job.queued') {
+      updateJob(project.id, event.jobId, { status: 'queued' });
+      updateJobRecord(event.jobId, { status: 'queued', queueStatus: 'queued' });
+    } else if (event.type === 'job.started') {
+      updateJob(project.id, event.jobId, { status: 'running' });
+      updateJobRecord(event.jobId, { status: 'running', queueStatus: 'running' });
+    }
     else if (event.type === 'job.progress') {
       const progress = Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress));
       updateJob(project.id, event.jobId, { status: 'running', progress });
+      updateJobRecord(event.jobId, { status: 'running', queueStatus: 'running', progress });
     } else if (event.type === 'agent.message') {
       updateJob(project.id, event.jobId, { status: 'receiving' });
+      updateJobRecord(event.jobId, { status: 'running', queueStatus: 'running' });
       if (event.delta) appendAgentDelta(project.id, event.jobId, event.message, event.messageId ?? 'default');
       else appendMessage(project.id, { role: 'agent', text: event.message, jobId: event.jobId, serverMessageId: event.messageId });
     } else if (event.type === 'agent.tool_call') {
@@ -206,17 +250,39 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
       assetQueuesRef.current.set(event.jobId, queued);
     } else if (event.type === 'job.completed') {
       updateJob(project.id, event.jobId, { status: 'completed', progress: 1 });
+      const recordId = `agent-${event.jobId}`;
+      const current = useCanvasStore.getState().generationRecords.find((record) => record.id === recordId);
+      updateJobRecord(event.jobId, {
+        status: 'completed',
+        queueStatus: 'terminal',
+        progress: 1,
+        materializationStatus: current?.materializationStatus === 'materializing'
+          ? 'materializing'
+          : current?.materializedAssetIds.length ? current.materializationStatus : 'completed',
+        completedAt: Date.now(),
+      });
+      persistJobQueue(event.jobId, 'terminal');
       finishSubscription(event.jobId);
     } else if (event.type === 'job.failed') {
       updateJob(project.id, event.jobId, { status: 'failed' });
       appendMessage(project.id, { role: 'error', text: '执行请求失败', detail: event.message, jobId: event.jobId });
+      updateJobRecord(event.jobId, { status: 'failed', queueStatus: 'interrupted', error: event.message, completedAt: Date.now() });
+      persistJobQueue(event.jobId, 'interrupted', event.message);
       finishSubscription(event.jobId);
     } else if (event.type === 'job.cancelled') {
       updateJob(project.id, event.jobId, { status: 'cancelled' });
       appendMessage(project.id, { role: 'status', text: '请求已取消', jobId: event.jobId });
+      updateJobRecord(event.jobId, {
+        status: 'cancelled',
+        queueStatus: 'cancelled',
+        materializationStatus: 'failed',
+        materializationError: '任务已取消',
+        completedAt: Date.now(),
+      });
+      persistJobQueue(event.jobId, 'terminal');
       finishSubscription(event.jobId);
     }
-  }, [appendAgentDelta, appendMessage, applyToolCall, finishSubscription, materializeAsset, project.id, updateJob]);
+  }, [appendAgentDelta, appendMessage, applyToolCall, finishSubscription, materializeAsset, persistJobQueue, project.id, updateJob, updateJobRecord]);
 
   const submitPrompt = useCallback(async (prompt: string, sourceNodeId = selectedNodeId ?? undefined) => {
     const text = prompt.trim();
@@ -236,7 +302,32 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
         params: { prompt: text },
       });
       const job: AgentJobState = { id: jobId, prompt: text, sourceNodeId, capabilityId, status: 'queued', progress: 0, createdAt: Date.now() };
-      jobContextRef.current.set(jobId, { prompt: text, sourceNodeId, capabilityId });
+      const sourceAssetIds = selected?.data.assetId ? [selected.data.assetId] : [];
+      jobContextRef.current.set(jobId, { prompt: text, sourceNodeId, sourceAssetIds, capabilityId });
+      useCanvasStore.getState().appendGenerationRecord({
+        id: `agent-${jobId}`,
+        producerNodeId: sourceNodeId ?? '',
+        actionId: 'agent.request',
+        attempt: 1,
+        jobId,
+        status: 'running',
+        progress: 0,
+        queueStatus: 'running',
+        materializationStatus: 'pending',
+        materializedAssetIds: [],
+        resultNodeIds: [],
+        sources: buildGenerationSources({
+          sourceAssetIds,
+          sourceNodeIds: sourceNodeId ? [sourceNodeId] : [],
+          nodes: canvas.nodes,
+          fallbackRole: 'source',
+        }),
+        prompt: text,
+        effectivePrompt: text,
+        params: { capabilityId },
+        startedAt: Date.now(),
+      });
+      persistJobQueue(jobId, 'running');
       putJob(project.id, job);
       subscriptionsRef.current.set(jobId, adapter.subscribe(jobId, handleJobEvent));
     } catch (error) {
@@ -249,7 +340,7 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
     } finally {
       setIsSubmitting(false);
     }
-  }, [adapter, appendMessage, handleJobEvent, isSubmitting, project.id, putJob, selectedNodeId, setDraft]);
+  }, [adapter, appendMessage, handleJobEvent, isSubmitting, persistJobQueue, project.id, putJob, selectedNodeId, setDraft]);
 
   const submitRequest = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

@@ -1,5 +1,7 @@
 import { memo } from 'react';
-import { EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, EdgeText, EdgeToolbar, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { Scissors } from 'lucide-react';
+import { useCanvasStore } from '../store/canvasStore';
 import { operationLabel } from '../canvas/operationLabels';
 import type { CanvasEdge as CanvasEdgeType } from '../types';
 
@@ -16,9 +18,11 @@ function CanvasEdgeComponent({
   targetX,
   targetY,
   targetPosition,
+  markerEnd,
   selected,
   data,
 }: EdgeProps<CanvasEdgeType>) {
+  const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -61,20 +65,19 @@ function CanvasEdgeComponent({
         </filter>
       </defs>
 
-      {/* 宽透明命中区 */}
-      <path d={path} fill="none" stroke="transparent" strokeWidth={20} style={{ cursor: 'pointer' }} />
+      <BaseEdge
+        path={path}
+        markerEnd={markerEnd ?? `url(#${arrowId})`}
+        interactionWidth={20}
+        className={`canvas-edge__line ${isSelected ? 'is-selected' : ''}`}
+        style={{ stroke: lineColor, strokeWidth: isSelected ? 4.5 : 3.4, strokeLinecap: 'round', opacity: isSelected ? 1 : .92, filter: `drop-shadow(0 0 10px ${shadowColor})` }}
+      />
 
       {/* halo 底层 */}
       <path d={path} fill="none" stroke={shadowColor} strokeWidth={isSelected ? 12 : 9} strokeLinecap="round" opacity={isSelected ? 0.55 : 0.42} filter={`url(#${haloId})`} style={{ pointerEvents: 'none' }} />
 
-      {/* 主边线（发光 + 可选选中态，React Flow 交互命中由上方透明宽 path 承担） */}
-      <path className={`canvas-edge ${isSelected ? 'is-selected' : ''}`} d={path} fill="none" stroke={lineColor} strokeWidth={isSelected ? 4.5 : 3.4} strokeLinecap="round" opacity={isSelected ? 1 : 0.92} style={{ pointerEvents: 'none', transition: 'stroke 0.3s ease, stroke-width 0.3s ease, opacity 0.3s ease', filter: `drop-shadow(0 0 10px ${shadowColor})` }} />
-
       {/* 白色流动虚线 */}
       <path d={path} fill="none" stroke="rgba(255,255,255,0.42)" strokeWidth={isSelected ? 1.5 : 1} strokeLinecap="round" strokeDasharray="10 12" opacity={isSelected ? 0.85 : 0.5} style={{ pointerEvents: 'none' }} />
-
-      {/* 箭头（不受虚线影响） */}
-      <path d={path} fill="none" stroke="none" markerEnd={`url(#${arrowId})`} style={{ pointerEvents: 'none' }} />
 
       {/* 流动光点 1 */}
       <circle r="4.2" fill={lineColor} filter={`url(#${glowId})`} opacity="0.95" style={{ pointerEvents: 'none' }}>
@@ -86,26 +89,22 @@ function CanvasEdgeComponent({
       </circle>
 
       {label && (
-        <EdgeLabelRenderer>
-          <div
-            className="canvas-edge__label nodrag"
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              fontSize: 11,
-              lineHeight: 1,
-              padding: '3px 7px',
-              borderRadius: 5,
-              background: 'rgba(30, 32, 38, 0.85)',
-              color: '#e6e3da',
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {label}
-          </div>
-        </EdgeLabelRenderer>
+        <EdgeText
+          x={labelX}
+          y={labelY}
+          label={label}
+          labelStyle={{ fill: '#e6e3da', fontSize: 11 }}
+          labelShowBg
+          labelBgStyle={{ fill: 'rgba(30,32,38,.85)' }}
+          labelBgPadding={[6, 4]}
+          labelBgBorderRadius={5}
+        />
       )}
+      <EdgeToolbar edgeId={id} x={labelX} y={labelY - 22} isVisible={isSelected} alignX="center" alignY="bottom" className="canvas-edge-toolbar nodrag">
+        <button title="剪断连接" aria-label="剪断连接" onClick={(event) => { event.stopPropagation(); deleteEdge(id); }}>
+          <Scissors size={15} />
+        </button>
+      </EdgeToolbar>
     </>
   );
 }

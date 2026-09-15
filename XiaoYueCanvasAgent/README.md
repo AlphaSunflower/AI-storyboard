@@ -158,8 +158,10 @@ Playwright + Edge：
 
 | 操作 | 快捷键 |
 | --- | --- |
-| 删除选中节点 | `Delete` / `Backspace` |
-| 复制选中节点 | `Ctrl/Cmd + D` |
+| 全选节点 | `Ctrl/Cmd + A` |
+| 删除选中节点 | `Ctrl/Cmd + D` / `Delete` / `Backspace` |
+| 复制选中节点 | `Ctrl/Cmd + C` |
+| 粘贴节点 | `Ctrl/Cmd + V` |
 | 撤销 | `Ctrl/Cmd + Z` |
 | 重做 | `Ctrl/Cmd + Shift + Z` |
 | 添加文字节点 | 双击画布空白处 |

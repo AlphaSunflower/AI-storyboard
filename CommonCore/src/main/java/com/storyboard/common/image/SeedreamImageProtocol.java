@@ -55,18 +55,19 @@ public final class SeedreamImageProtocol {
     /**
      * 构建方舟 {@code /images/generations} 请求。
      *
-     * <p>n&gt;1 时显式限制组图张数；n&lt;=1 时保留 auto，由提示词语义决定是否生成组图。</p>
+     * <p>n&gt;1 时显式限制组图张数；n=1 时禁用组图；n=0 时交给模型自动决定张数。</p>
      */
     public static ObjectNode buildRequest(String model, String prompt, List<String> images,
                                           String size, Integer n) {
-        int requestedCount = resolveRequestedCount(prompt, n);
+        boolean autoCount = n != null && n == 0;
+        int requestedCount = autoCount ? 0 : resolveRequestedCount(prompt, n);
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model", model);
-        body.put("prompt", withGroupInstruction(prompt, requestedCount));
+        body.put("prompt", autoCount ? prompt : withGroupInstruction(prompt, requestedCount));
         body.put("size", normalizeSize(size));
-        body.put("sequential_image_generation", "auto");
+        body.put("sequential_image_generation", autoCount || requestedCount > 1 ? "auto" : "disabled");
 
-        if (requestedCount > 1) {
+        if (!autoCount && requestedCount > 1) {
             body.putObject("sequential_image_generation_options").put("max_images", requestedCount);
         }
 
@@ -85,9 +86,9 @@ public final class SeedreamImageProtocol {
         return body;
     }
 
-    /** 显式 n>1 优先；否则从“两张/4张/十五张”等提示词中推断组图数量。 */
+    /** 显式 n 优先且不再从提示词推断；未传 n 时才从提示词推断组图数量。 */
     public static int resolveRequestedCount(String prompt, Integer n) {
-        if (n != null && n > 1) return Math.min(n, MAX_TOTAL_IMAGES);
+        if (n != null) return Math.min(Math.max(n, 1), MAX_TOTAL_IMAGES);
         int inferred = inferCount(prompt);
         return inferred > 1 ? inferred : 1;
     }
