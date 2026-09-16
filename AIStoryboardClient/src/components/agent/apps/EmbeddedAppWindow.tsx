@@ -8,6 +8,14 @@ export interface EmbeddedAppDescriptor {
   title: string;
   url: string;
   projectId?: string;
+  canvasMode?: CanvasModeOptions;
+}
+
+export interface CanvasModeOptions {
+  conversationId: string;
+  projectId: string;
+  parentOrigin: string;
+  canvasId?: string;
 }
 
 interface EmbeddedAppWindowProps {
@@ -56,6 +64,7 @@ export function EmbeddedAppWindow({
   const [closingWindow, setClosingWindow] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+  const canvasLocked = tabs.some((tab) => tab.key === 'canvas' && tab.canvasMode);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -76,12 +85,13 @@ export function EmbeddedAppWindow({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (activeKey === 'canvas' && tabs.some((tab) => tab.key === 'canvas' && tab.canvasMode)) return;
       if (fullscreen) setFullscreen(false);
       else if (activeKey) onCloseTab(activeKey);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeKey, fullscreen, onCloseTab]);
+  }, [activeKey, fullscreen, onCloseTab, tabs]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -169,15 +179,17 @@ export function EmbeddedAppWindow({
                   {appIcon(tab.key)}
                   <span>{tab.title}</span>
                 </button>
-                <button
-                  type="button"
-                  className="embedded-app-window__tab-close"
-                  onClick={() => onCloseTab(tab.key)}
-                  title={`关闭${tab.title}`}
-                  aria-label={`关闭${tab.title}`}
-                >
-                  <X size={12} strokeWidth={2.2} />
-                </button>
+                {!(tab.key === 'canvas' && tab.canvasMode) && (
+                  <button
+                    type="button"
+                    className="embedded-app-window__tab-close"
+                    onClick={() => onCloseTab(tab.key)}
+                    title={`关闭${tab.title}`}
+                    aria-label={`关闭${tab.title}`}
+                  >
+                    <X size={12} strokeWidth={2.2} />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -200,7 +212,13 @@ export function EmbeddedAppWindow({
           >
             {fullscreen ? <Minimize2 size={16} strokeWidth={1.9} /> : <Maximize2 size={16} strokeWidth={1.9} />}
           </button>
-          <button type="button" onClick={closeWindowWithParticles} title="关闭应用窗口" aria-label="关闭应用窗口">
+          <button
+            type="button"
+            disabled={canvasLocked}
+            onClick={closeWindowWithParticles}
+            title={canvasLocked ? '请先离开画布编辑模式' : '关闭应用窗口'}
+            aria-label={canvasLocked ? '先离开画布编辑模式' : '关闭应用窗口'}
+          >
             <X size={17} strokeWidth={2} />
           </button>
         </div>
@@ -221,6 +239,7 @@ export function EmbeddedAppWindow({
               <iframe
                 ref={(node) => { frameRefs.current[tab.key] = node; }}
                 src={tab.url}
+                data-app-key={tab.key}
                 title={tab.title}
                 onLoad={() => setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }))}
                 allow="clipboard-read; clipboard-write; camera; microphone; fullscreen"

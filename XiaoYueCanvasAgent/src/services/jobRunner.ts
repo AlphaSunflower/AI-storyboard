@@ -10,7 +10,13 @@ import { materializeJobAsset } from '../canvas/generationRuntime';
 import { getNodeDefinition, validateRunnable, type CanvasGraphV2, type GenerationRecord } from '../canvas/graphContracts';
 import { acquireGenerationSlot, withGlobalSchedulerLock } from '../canvas/generationQueue';
 import { buildGenerationSources } from '../canvas/generationRecords';
+import {
+  resolveResultSlots,
+  validateResultSlotOwnership,
+  type ResultSlotBinding,
+} from '../canvas/resultSlots';
 import { resolveStoryboardReferenceAssetIds, type StoryboardReferenceCatalogItem } from '../canvas/storyboardReferences';
+import { requestAutoLayout } from '../canvas/layout/autoLayout';
 import {
   linkGeneratedCanvasAssets,
   listCanvasAssets,
@@ -24,6 +30,26 @@ const eventNumber = (eventId?: string) => {
 };
 
 const terminalStatuses = new Set<GenerationRecord['status']>(['completed', 'failed', 'cancelled', 'interrupted']);
+
+const markUnfilledResultSlots = (
+  record: GenerationRecord,
+  phase: 'blocked' | 'failed',
+  error: string,
+) => {
+  const filled = new Set(Object.values(record.resultBindings ?? {}));
+  for (const slot of record.resultSlots ?? []) {
+    if (filled.has(slot.nodeId)) continue;
+    const node = useCanvasStore.getState().nodes.find((candidate) => candidate.id === slot.nodeId);
+    if (!node || node.data.assetId) continue;
+    useCanvasStore.getState().updateNode(slot.nodeId, {
+      automation: {
+        ...(typeof node.data.automation === 'object' && node.data.automation ? node.data.automation : {}),
+        phase,
+        error,
+      },
+    });
+  }
+};
 
 export async function cancelCanvasGeneration(recordId: string) {
   const record = useCanvasStore.getState().generationRecords.find((item) => item.id === recordId);
@@ -83,6 +109,7 @@ export const remapReferenceRoleAssetIds = (
 export const collectReferenceDataUris = async (
   sourceAssetIds: string[],
   onEntry?: (entry: ReferenceDataUriEntry) => void,
+  signal?: AbortSignal,
 ) => {
   const images: string[] = [];
   const videos: string[] = [];
@@ -116,6 +143,7 @@ export const collectReferenceDataUris = async (
   };
 
   for (const aid of sourceAssetIds) {
+    signal?.throwIfAborted();
     const asset = useMediaStore.getState().assets[aid] ?? await getAsset(aid).catch(() => undefined);
     if (!asset) continue;
     if (!useMediaStore.getState().assets[aid]) useMediaStore.getState().upsertAsset(asset);
@@ -173,7 +201,14 @@ const materializeLegacyGeneration = async (event: Extract<JobEvent, { type: 'ass
 };
 
 // 生图/生视频/分镜的通用提交（capability 由调用方指定，params 透传生成参数 + 参考图源资产）。
-interface GenSubmitOpts {
+export interface GenerationTerminalOutcome {
+  status: 'succeeded' | 'failed' | 'cancelled';
+  jobId: string;
+  recordId?: string;
+  error?: string;
+}
+
+export interface GenSubmitOpts {
   sourceAssetIds?: string[];
   params?: Record<string, unknown>;
   capabilityId?: string;
@@ -181,12 +216,16 @@ interface GenSubmitOpts {
   itemId?: string;
   sourceNodeIds?: string[];
   skipSlot?: boolean;
+  resultSlots?: ResultSlotBinding[];
+  onTerminal?: (outcome: GenerationTerminalOutcome) => void;
+  signal?: AbortSignal;
 }
 const submitGen = async (text: string, targetNodeId: string, onFeedback: (message: string) => void, capabilityId: string, opts: GenSubmitOpts = {}) => {
+  opts.signal?.throwIfAborted();
   const trimmed = text.trim();
   const canvas = useCanvasStore.getState();
   const projectId = canvas.projectId ?? 'local-project';
-  const capabilities = await jobAdapter.getCapabilities();
+  const capabilities = await jobAdapter.getCapabilities(opts.signal);
   const capability = capabilities.find((item) => item.id === capabilityId);
   if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置对应执行服务');
 
@@ -195,6 +234,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   //（后端 agent_assets 表无前端资产 id，sourceAssetIds selectById 查不到 → 图生图/图生视频参考图会丢失）
   const sourceAssetIds = opts.sourceAssetIds ?? [];
   const targetNode = canvas.nodes.find((node) => node.id === targetNodeId);
+  let resultSlots: ResultSlotBinding[] = [];
   const actionId = String(opts.params?.actionId ?? (capabilityId === 'video.generate' ? 'generateVideo' : 'generate'));
   const action = getNodeDefinition(targetNode?.data.kind)?.actions.find((item) => item.id === actionId);
   const effectiveCapabilityId = opts.capabilityId ?? action?.capabilityId ?? capabilityId;
@@ -210,6 +250,9 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
     };
     const runnable = validateRunnable(graph, targetNodeId, actionId);
     if (!runnable.ok) throw new Error(runnable.message ?? '节点输入不完整，暂时不能运行');
+    resultSlots = opts.resultSlots ?? resolveResultSlots(graph, targetNodeId);
+    const slotConflict = validateResultSlotOwnership(graph, targetNodeId, resultSlots);
+    if (!slotConflict.ok) throw new Error(slotConflict.message ?? '结果槽配置冲突');
   }
   const isMaterializedResult = Boolean(
     getNodeDefinition(targetNode?.data.kind)?.actions.some((action) =>
@@ -240,6 +283,8 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
     materializationStatus: 'pending',
     materializedAssetIds: [],
     resultNodeIds: [],
+    resultSlots,
+    resultBindings: {},
     sources,
     prompt: trimmed,
     effectivePrompt: trimmed,
@@ -250,7 +295,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   if (isMaterializedResult) useCanvasStore.getState().appendGenerationRecord(generationRecord);
   const queueId = generationRecord.id;
   const refUris = sourceAssetIds.length
-    ? await collectReferenceDataUris(sourceAssetIds)
+    ? await collectReferenceDataUris(sourceAssetIds, undefined, opts.signal)
     : { images: [], videos: [], assetIdMap: {} };
   const remappedReferenceRoles = Array.isArray(opts.params?.referenceRoles)
     ? remapReferenceRoleAssetIds(opts.params.referenceRoles, refUris.assetIdMap)
@@ -304,7 +349,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       sourceAssetIds,
       context: { projectId, nodeIds: canvas.nodes.map((node) => node.id), selectedNodeId: targetNodeId },
       params: mergedParams,
-    }));
+    }, opts.signal));
   } catch (error) {
     releaseExecutionSlot();
     const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id);
@@ -322,6 +367,14 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   }
 
   useAgentStore.getState().putJob(projectId, { id: jobId, prompt: trimmed.slice(0, 24), sourceNodeId: targetNodeId, capabilityId: effectiveCapabilityId, status: 'queued', progress: 0, createdAt: Date.now() });
+  const notifyTerminal = (status: GenerationTerminalOutcome['status'], error?: string) => {
+    opts.onTerminal?.({
+      status,
+      jobId,
+      recordId: useCanvasStore.getState().generationRecords.find((record) => record.jobId === jobId)?.id ?? generationRecord.id,
+      error,
+    });
+  };
   if (isMaterializedResult) {
     useCanvasStore.getState().updateGenerationRecord({
       ...generationRecord,
@@ -399,6 +452,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       onFeedback(event.message);
       if (isMaterializedResult) {
         const currentRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
+        markUnfilledResultSlots(currentRecord, 'failed', event.message);
         useCanvasStore.getState().updateGenerationRecord({
           ...currentRecord,
           status: event.message.includes('中断') ? 'interrupted' : 'failed',
@@ -410,6 +464,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       }
       releaseExecutionSlot();
       persistQueue('interrupted', jobId, event.message);
+      notifyTerminal('failed', event.message);
     } else if (event.type === 'job.completed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
       // 兜底清生成态：正常由 asset.created 清，但 materializeGeneration 慢/挂起时 job.completed 可能先到，
@@ -417,6 +472,10 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
       if (isMaterializedResult) {
         const currentRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
+        void assetQueue.finally(() => {
+          const latest = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? currentRecord;
+          markUnfilledResultSlots(latest, 'blocked', '生成结果数量不足，结果槽未填充');
+        });
         useCanvasStore.getState().updateGenerationRecord({
           ...currentRecord,
           status: 'completed',
@@ -428,9 +487,11 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       }
       releaseExecutionSlot();
       persistQueue('terminal', jobId);
+      notifyTerminal('succeeded');
     } else if (event.type === 'job.cancelled') {
       if (isMaterializedResult) {
         const currentRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
+        markUnfilledResultSlots(currentRecord, 'failed', '任务已取消');
         useCanvasStore.getState().updateGenerationRecord({
           ...currentRecord,
           status: 'cancelled',
@@ -443,6 +504,7 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       }
       releaseExecutionSlot();
       persistQueue('terminal', jobId);
+      notifyTerminal('cancelled', '任务已取消');
     }
   });
   // 取消/解绑：subscribe 返回的 unsubscribe 在提交后不再需要 ref（当前无取消入口）。
@@ -470,17 +532,30 @@ export const submitBatchImageRefine = async (
 ) => {
   if (!requests.length) throw new Error('没有可处理的图片');
   const batchId = `batch-${createId()}`;
-  const execute = async (request: typeof requests[number]) => submitImageGeneration(
+  const state = useCanvasStore.getState();
+  const graph: CanvasGraphV2 = {
+    schemaVersion: 2,
+    nodes: state.nodes as CanvasGraphV2['nodes'],
+    edges: state.edges as CanvasGraphV2['edges'],
+    viewport: { x: 0, y: 0, zoom: 1 },
+    generationRecords: state.generationRecords,
+    executions: state.executions,
+  };
+  const resultSlots = resolveResultSlots(graph, producerNodeId);
+  const execute = async (request: typeof requests[number], index: number) => submitImageGeneration(
     request.effectivePrompt,
     producerNodeId,
     onFeedback,
-    batchRefineOptions(request, batchId, nodeParams),
+    {
+      ...batchRefineOptions(request, batchId, nodeParams),
+      resultSlots: resultSlots[index] ? [resultSlots[index]] : [],
+    },
   );
   return withGlobalSchedulerLock(async () => {
     const results: string[] = [];
     for (let index = 0; index < requests.length; index += 2) {
       const chunk = requests.slice(index, index + 2);
-      const submitted = await Promise.all(chunk.map(execute));
+    const submitted = await Promise.all(chunk.map((request, offset) => execute(request, index + offset)));
       results.push(...submitted);
     }
     return { batchId, jobIds: results };
@@ -511,13 +586,13 @@ export const submitScriptDrafting = async (
   scriptText: string,
   targetNodeId: string,
   onFeedback: (message: string) => void,
-  opts: Pick<GenSubmitOpts, 'sourceAssetIds' | 'sourceNodeIds'> = {},
+  opts: Pick<GenSubmitOpts, 'sourceAssetIds' | 'sourceNodeIds' | 'onTerminal' | 'signal'> = {},
 ) => {
   const text = scriptText.trim();
   if (!text) throw new Error('剧本内容为空，请先输入剧本');
   const canvas = useCanvasStore.getState();
   const projectId = canvas.projectId ?? 'local-project';
-  const capabilities = await jobAdapter.getCapabilities();
+  const capabilities = await jobAdapter.getCapabilities(opts.signal);
   const capability = capabilities.find((item) => item.id === 'storyboard.plan');
   if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置分镜规划执行服务');
 
@@ -526,7 +601,7 @@ export const submitScriptDrafting = async (
   const sourceNodeIds = opts.sourceNodeIds ?? [];
   const collectedReferences: ReferenceDataUriEntry[] = [];
   const refUris = sourceAssetIds.length
-    ? await collectReferenceDataUris(sourceAssetIds, (entry) => collectedReferences.push(entry))
+    ? await collectReferenceDataUris(sourceAssetIds, (entry) => collectedReferences.push(entry), opts.signal)
     : { images: [], videos: [] };
   const referenceUrls = collectedReferences
     .filter((entry) => entry.kind === 'image')
@@ -605,7 +680,7 @@ export const submitScriptDrafting = async (
         ...(referenceUrls.length ? { referenceImages: referenceUrls } : {}),
         referenceCatalog,
       },
-    }));
+    }, opts.signal));
   } catch (error) {
     const message = error instanceof Error ? error.message : '分镜规划提交失败';
     useCanvasStore.getState().updateGenerationRecord({
@@ -648,6 +723,7 @@ export const submitScriptDrafting = async (
       });
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
       persistQueue('interrupted', jobId, event.message);
+      opts.onTerminal?.({ status: 'failed', jobId, recordId: generationRecord.id, error: event.message });
     } else if (event.type === 'job.completed') {
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
       const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
@@ -661,6 +737,7 @@ export const submitScriptDrafting = async (
       });
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
       persistQueue('terminal', jobId);
+      opts.onTerminal?.({ status: 'succeeded', jobId, recordId: generationRecord.id });
     } else if (event.type === 'job.progress') {
       const progress = Math.max(0, Math.min(1, event.progress > 1 ? event.progress / 100 : event.progress));
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'running', progress });
@@ -681,6 +758,7 @@ export const submitScriptDrafting = async (
           ...shot,
           referenceAssetIds: resolveStoryboardReferenceAssetIds(shot.referenceHints ?? [], referenceCatalog),
         })));
+        void requestAutoLayout([plannerId]);
       }
       const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
       useCanvasStore.getState().updateGenerationRecord({
@@ -702,6 +780,7 @@ export const submitScriptDrafting = async (
       });
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
       persistQueue('terminal', jobId);
+      opts.onTerminal?.({ status: 'cancelled', jobId, recordId: generationRecord.id, error: '任务已取消' });
     }
   });
 

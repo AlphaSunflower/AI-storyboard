@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
-import { Clapperboard, Copy, FileText, GripVertical, Image as ImageIcon, LayoutGrid, Layers, MessageSquare, PanelRightOpen, Sparkles, Trash2, Type, Wand2 } from 'lucide-react';
+import { Clapperboard, FileText, GripVertical, Image as ImageIcon, LayoutGrid, Layers, MessageSquare, PanelRightOpen, Sparkles, Type, Wand2 } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { CanvasNode } from '../types';
 import { buildReferenceImagePool } from '../canvas/referenceImagePool';
@@ -44,8 +44,6 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
   const updateNode = useCanvasStore((state) => state.updateNode);
   const addNode = useCanvasStore((state) => state.addNode);
   const nodes = useCanvasStore((state) => state.nodes);
-  const duplicateSelected = useCanvasStore((state) => state.duplicateSelected);
-  const deleteSelected = useCanvasStore((state) => state.deleteSelected);
   const updateNodeGeometry = useCanvasStore((state) => state.updateNodeGeometry);
   const edges = useCanvasStore((state) => state.edges);
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
@@ -102,12 +100,6 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
 
   return (
     <article className={`media-node media-node--${data.kind} ${selected ? 'is-selected' : ''}`}>
-      {selected && (
-        <NodeToolbar nodeId={id} isVisible position={Position.Top} align="center" offset={12} className="node-selected-toolbar nodrag">
-          <button aria-label="复制节点" onClick={(e) => { e.stopPropagation(); duplicateSelected(); }}><Copy size={13} /></button>
-          <button aria-label="删除节点" className="is-danger" onClick={(e) => { e.stopPropagation(); deleteSelected(); }}><Trash2 size={13} /></button>
-        </NodeToolbar>
-      )}
       <div className="node-card">
         <div className="node-card__header node-drag-handle">
           <GripVertical className="node-drag-grip" size={14} />

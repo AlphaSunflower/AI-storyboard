@@ -14,6 +14,8 @@ public class AgentConversation {
     private String projectId;
     private String title;
     private String status;
+    /** 画布编辑模式 JSON（CanvasSessionContext）；空=未锁定画布链路。 */
+    private String canvasContext;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

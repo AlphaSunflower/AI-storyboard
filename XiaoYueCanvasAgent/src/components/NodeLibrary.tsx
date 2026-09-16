@@ -7,6 +7,7 @@ import { useMediaStore } from '../store/mediaStore';
 import type { PersistedAsset } from '../types';
 import { getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
 import { listNodeDefinitions, type CanvasNodeKind, type NodeCategory } from '../canvas/graphContracts';
+import { persistExistingCanvasAsset } from '../services/canvasMedia';
 
 const icons = {
   text: Type,
@@ -43,11 +44,18 @@ export function NodeLibrary({ onClose, onImport }: { onClose: () => void; onImpo
   useEffect(() => { void listLibraryAssets().then(setLibraryAssets); }, []);
   // 把新节点落到「当前视口中心」而非硬编码 (280,220)——跟随用户视线。
   const addPosition = () => screenToFlowPosition({ x: flowWidth / 2, y: flowHeight / 2 });
-  const insertLibraryAsset = (record: PersistedAsset) => {
-    const asset = hydrateAsset(record); upsertAsset(asset);
-    const item = { assetId: asset.id, label: asset.name.replace(/\.[^.]+$/, ''), position: addPosition(), size: asset.kind === 'video' ? getVideoNodeSize(asset.width, asset.height) : getMediaNodeSize(asset.width, asset.height) };
-    if (asset.kind === 'video') addImportedVideos([item]); else addImportedImages([item]);
-    onClose();
+  const insertLibraryAsset = async (record: PersistedAsset) => {
+    try {
+      const asset = await persistExistingCanvasAsset(hydrateAsset(record), '');
+      upsertAsset(asset);
+      const item = { assetId: asset.id, label: asset.name.replace(/\.[^.]+$/, ''), position: addPosition(), size: asset.kind === 'video' ? getVideoNodeSize(asset.width, asset.height) : getMediaNodeSize(asset.width, asset.height) };
+      if (asset.kind === 'video') addImportedVideos([item]); else addImportedImages([item]);
+      onClose();
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent('morrow:notice', {
+        detail: error instanceof Error ? error.message : '素材写入 MinIO 失败',
+      }));
+    }
   };
   const definitions = listNodeDefinitions();
   const categories = [...new Set(definitions.map((definition) => definition.category))] as NodeCategory[];
@@ -89,7 +97,7 @@ export function NodeLibrary({ onClose, onImport }: { onClose: () => void; onImpo
           <section className="library-assets">
             <header><Library size={14} /><strong>本地素材库</strong><span>{libraryAssets.length}</span></header>
             {libraryAssets.map((record) => (
-              <button key={record.id} onClick={() => insertLibraryAsset(record)}>
+              <button key={record.id} onClick={() => void insertLibraryAsset(record)}>
                 <LibraryThumbnail asset={record} /><span><strong>{record.name}</strong><small>{record.width} × {record.height}</small></span><b>+</b>
               </button>
             ))}

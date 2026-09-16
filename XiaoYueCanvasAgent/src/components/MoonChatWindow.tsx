@@ -1,4 +1,5 @@
 import { getJobToken, getJobUserId } from '../services/jobAuth';
+import { useCanvasStore } from '../store/canvasStore';
 
 /**
  * 画布「执行服务」面板内嵌 Moon 对话小窗：iframe 复用 AIStoryboardClient 现成的 /chat 页。
@@ -9,11 +10,18 @@ import { getJobToken, getJobUserId } from '../services/jobAuth';
 export function MoonChatWindow() {
   const token = getJobToken();
   const userId = getJobUserId();
+  const projectId = useCanvasStore((state) => state.projectId);
+  const canvasId = useCanvasStore((state) => state.canvasId);
   if (!token) {
     return <div className="moon-chat-frame">加载 Moon 智能体…（请先登录）</div>;
   }
   const base = (import.meta.env.VITE_MOON_CHAT_URL as string | undefined)?.trim().replace(/\/$/, '') || 'http://localhost:5173';
   const params = new URLSearchParams({ embed: '1' });
+  if (projectId && canvasId) {
+    params.set('surface', 'canvas-edit');
+    params.set('projectId', projectId);
+    params.set('canvasId', canvasId);
+  }
   params.set('token', token);
   if (userId) params.set('userId', userId);
   // 尝试从 JWT payload 取展示名（可选；缺省由 /chat 侧从 token 兜底）

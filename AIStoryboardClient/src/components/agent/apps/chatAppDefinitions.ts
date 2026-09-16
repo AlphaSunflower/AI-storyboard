@@ -1,17 +1,31 @@
-import type { EmbeddedAppDescriptor } from './EmbeddedAppWindow';
+import type { CanvasModeOptions, EmbeddedAppDescriptor } from './EmbeddedAppWindow';
 
 export interface ChatAppProject {
   id?: string;
   name?: string;
 }
 
+export interface ChatAppOpenOptions {
+  canvasMode?: CanvasModeOptions;
+}
+
 export const CHAT_APP_KEYS = ['canvas', 'editor', 'docs'] as const;
 
 export type ChatAppKey = typeof CHAT_APP_KEYS[number];
 
+export function canvasIdFromUrl(url: string): string | undefined {
+  try {
+    const match = new URL(url).hash.match(/(?:^#|&)canvas=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildChatAppDescriptor(
   key: ChatAppKey,
   currentProject: ChatAppProject | null,
+  options: ChatAppOpenOptions = {},
 ): EmbeddedAppDescriptor | null {
   if (key === 'docs') {
     return { key, title: '使用文档', url: '/docs?embedded=1' };
@@ -48,13 +62,24 @@ export function buildChatAppDescriptor(
   const params = new URLSearchParams({ token });
   if (userId) params.set('userId', userId);
   if (name) params.set('name', name);
-  const projectId = currentProject?.id;
-  const hash = projectId ? `#project=${encodeURIComponent(projectId)}` : '';
+  const canvasMode = options.canvasMode;
+  const projectId = canvasMode?.projectId ?? currentProject?.id;
+  if (canvasMode) {
+    params.set('embedded', '1');
+    params.set('canvasMode', '1');
+    params.set('conversationId', canvasMode.conversationId);
+    params.set('parentOrigin', canvasMode.parentOrigin);
+    params.set('projectId', canvasMode.projectId);
+  }
+  const hash = projectId
+    ? `#project=${encodeURIComponent(projectId)}${canvasMode?.canvasId ? `&canvas=${encodeURIComponent(canvasMode.canvasId)}` : ''}`
+    : '';
 
   return {
     key,
     title: '画布',
     url: `${base}?${params.toString()}${hash}`,
     projectId,
+    ...(canvasMode ? { canvasMode } : {}),
   };
 }

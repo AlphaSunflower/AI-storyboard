@@ -12,6 +12,7 @@ interface MobileSidebarContentProps {
   onOpenSettings: () => void;
   onOpenRecords?: () => void;
   logout: () => void;
+  canvasLocked?: boolean;
 }
 
 /**
@@ -19,7 +20,7 @@ interface MobileSidebarContentProps {
  * Moon Logo + 关闭 | AI资产库 | 项目选择 | 会话列表 | 底部设置
  */
 export function MobileSidebarContent({
-  onSelectConversation, onClose, onOpenSettings, onOpenRecords, logout,
+  onSelectConversation, onClose, onOpenSettings, onOpenRecords, logout, canvasLocked = false,
 }: MobileSidebarContentProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const userName = useAuthStore((s) => s.user?.displayName || '未登录');
@@ -65,13 +66,16 @@ export function MobileSidebarContent({
 
         <div style={{ position: 'relative', width: '100%' }}>
           <button
-            onClick={() => setProjectOpen(!projectOpen)}
+            onClick={() => { if (!canvasLocked) setProjectOpen(!projectOpen); }}
             onMouseDown={(e) => e.stopPropagation()}
+            disabled={canvasLocked}
+            title={canvasLocked ? '请先离开画布编辑模式' : undefined}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 6,
               border: 'none', borderRadius: 10, background: 'transparent',
               padding: '0 12px', height: 40, fontSize: 15,
-              color: DS.ink, cursor: 'pointer',
+              color: DS.ink, cursor: canvasLocked ? 'not-allowed' : 'pointer',
+              opacity: canvasLocked ? 0.5 : 1,
             }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M8 4v16M16 4v16" /></svg>

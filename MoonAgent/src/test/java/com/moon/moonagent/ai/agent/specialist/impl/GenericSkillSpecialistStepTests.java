@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -28,6 +29,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -49,6 +51,7 @@ class GenericSkillSpecialistStepTests {
     private ChatClient.ChatClientRequestSpec spec;
     private ChatClient.CallResponseSpec callSpec;
     private AgentOrchestratorSupport support;
+    private SkillExpander skillExpander;
     private GenericSkillSpecialist specialist;
 
     @BeforeEach
@@ -58,6 +61,7 @@ class GenericSkillSpecialistStepTests {
         spec = mock(ChatClient.ChatClientRequestSpec.class);
         callSpec = mock(ChatClient.CallResponseSpec.class);
         support = mock(AgentOrchestratorSupport.class);
+        skillExpander = mock(SkillExpander.class);
 
         GatewayModelService gateway = mock(GatewayModelService.class);
         when(gateway.getDefaultTextModel()).thenReturn("model");
@@ -65,8 +69,9 @@ class GenericSkillSpecialistStepTests {
 
         specialist = new GenericSkillSpecialist(
                 builder, gateway,
-                mock(AgentMessageMapper.class), mock(FileStorageService.class),
-                mock(SkillExpander.class), mock(SkillManager.class), support);
+                mock(AgentMessageMapper.class), mock(com.moon.moonagent.mapper.AgentAssetMapper.class),
+                mock(FileStorageService.class),
+                skillExpander, mock(SkillManager.class), support);
 
         when(builder.defaultAdvisors(any(Advisor[].class))).thenReturn(builder);
         when(builder.build()).thenReturn(client);
@@ -74,6 +79,8 @@ class GenericSkillSpecialistStepTests {
         when(spec.options(any())).thenReturn(spec);
         when(spec.system(any(String.class))).thenReturn(spec);
         when(spec.user(any(String.class))).thenReturn(spec);
+        when(spec.messages(any(Message[].class))).thenReturn(spec);
+        when(spec.tools(any(Object[].class))).thenReturn(spec);
         when(spec.call()).thenReturn(callSpec);
         when(support.runHITLStage(any(), any(), any())).thenAnswer(inv ->
                 ((AgentOrchestratorSupport.StagePlan) inv.getArgument(2)).planText());
@@ -116,6 +123,38 @@ class GenericSkillSpecialistStepTests {
         verify(support, never()).runHITLStage(any(), any(), any());
     }
 
+    @Test
+    void canvasBindingDoesNotCountAsUserConfirmation() {
+        stubChatResponse("{\"needClarify\":true,\"message\":\"确认创建节点\","
+                + "\"options\":[{\"id\":\"yes\",\"title\":\"确认\"},{\"id\":\"no\",\"title\":\"取消\"}]}");
+        AgentSkill skill = testSkill();
+        String cpPlan = buildPlan("clarify_style", List.of(), List.of());
+
+        specialist.execute(ctx(skill, "创建一个画布节点", "", "canvas-bound", "canvas-bind", cpPlan));
+
+        verify(support).runHITLStage(any(), any(), any());
+    }
+
+    @Test
+    void humanInputToolResultPausesAsClickableCard() {
+        when(skillExpander.hasTool("moon_request_human_input")).thenReturn(true);
+        when(skillExpander.toolCallbacks(anyList())).thenReturn(new org.springframework.ai.tool.ToolCallback[0]);
+        stubChatResponse("""
+                {"moonHumanInput":true,"prompt":"请选择画布","allowCustom":false,
+                 "options":[{"id":"human-option-1","title":"项目一 / 画布一","value":{"canvasId":"canvas-1"}}]}
+                """);
+        AgentSkill skill = toolSkill();
+        String result = specialist.execute(ctx(skill, "请选择画布", "", "", "", "")).message();
+
+        assertEquals("请选择画布", result);
+        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> cap =
+                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), any(), cap.capture());
+        assertEquals("skill-human-input", cap.getValue().action());
+        assertEquals("human-option-1", cap.getValue().actions().getFirst().get("id"));
+        assertEquals("项目一 / 画布一", cap.getValue().actions().getFirst().get("title"));
+    }
+
     private void stubChatResponse(String raw) {
         AssistantMessage message = mock(AssistantMessage.class);
         when(message.getText()).thenReturn(raw);
@@ -142,6 +181,19 @@ class GenericSkillSpecialistStepTests {
                 "clarify_style", "请用户选择风格。",
                 "clarify_actor", "请用户提供角色。",
                 "confirm_plan", "确认方案。"));
+    }
+
+    private AgentSkill toolSkill() {
+        Map<String, Object> fm = new HashMap<>();
+        fm.put("name", "canvas-test");
+        fm.put("description", "测试画布选择");
+        fm.put("label", "画布选择");
+        fm.put("model_role", "text");
+        fm.put("tools", List.of());
+        fm.put("triggers", List.of("画布"));
+        fm.put("priority", 8);
+        fm.put("menu_order", 5);
+        return AgentSkill.of("canvas-test", fm, Map.of());
     }
 
     private SpecialistContext ctx(AgentSkill skill, String user, String custom, String action,

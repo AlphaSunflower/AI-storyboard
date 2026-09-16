@@ -41,7 +41,7 @@ const createPort = (overrides: Partial<GenerationMaterializerPort> = {}): Genera
   createAsset: vi.fn().mockImplementation(async (file: File) => image(file.name.replace(/\.[^.]+$/, ''))),
   saveAsset: vi.fn().mockResolvedValue(undefined),
   upsertAsset: vi.fn(),
-  attachResultNode: vi.fn().mockImplementation((resultNodeId) => resultNodeId),
+  attachResultNode: vi.fn().mockImplementation((resultNodeId, _asset, _record, targetNodeId) => targetNodeId ?? resultNodeId),
   updateRecord: vi.fn(),
   ...overrides,
 });
@@ -125,5 +125,91 @@ describe('materializeGenerationResult', () => {
     expect(settlement.created).toBe(false);
     expect(port.attachResultNode).not.toHaveBeenCalled();
     expect(settlement.record.materializationStatus).toBe('failed');
+  });
+
+  it('fills ordered compatible result slots', async () => {
+    const port = createPort();
+    const source = record({
+      resultSlots: [
+        { nodeId: 'slot-a', kind: 'image', order: 0, edgeId: 'edge-a' },
+        { nodeId: 'slot-b', kind: 'image', order: 1, edgeId: 'edge-b' },
+      ],
+    });
+
+    const first = await materializeGenerationResult(
+      port,
+      source,
+      { assetId: 'remote-1', name: 'one.png', mimeType: 'image/png' },
+      'job-1',
+    );
+    const second = await materializeGenerationResult(
+      port,
+      first.record,
+      { assetId: 'remote-2', name: 'two.png', mimeType: 'image/png' },
+      'job-1',
+    );
+
+    expect(port.attachResultNode).toHaveBeenNthCalledWith(
+      1,
+      'result:record-1:remote-1',
+      expect.anything(),
+      expect.anything(),
+      'slot-a',
+    );
+    expect(port.attachResultNode).toHaveBeenNthCalledWith(
+      2,
+      'result:record-1:remote-2',
+      expect.anything(),
+      expect.anything(),
+      'slot-b',
+    );
+  });
+
+  it('creates a normal result node when all compatible slots are filled', async () => {
+    const port = createPort();
+    const source = record({
+      resultSlots: [{ nodeId: 'slot-a', kind: 'image', order: 0, edgeId: 'edge-a' }],
+    });
+
+    const first = await materializeGenerationResult(
+      port,
+      source,
+      { assetId: 'remote-1', name: 'one.png', mimeType: 'image/png' },
+      'job-1',
+    );
+    await materializeGenerationResult(
+      port,
+      first.record,
+      { assetId: 'remote-2', name: 'two.png', mimeType: 'image/png' },
+      'job-1',
+    );
+
+    expect(port.attachResultNode).toHaveBeenNthCalledWith(
+      2,
+      'result:record-1:remote-2',
+      expect.anything(),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('does not fill an image result into a video slot', async () => {
+    const port = createPort();
+    const settlement = await materializeGenerationResult(
+      port,
+      record({
+        resultSlots: [{ nodeId: 'video-slot', kind: 'video', order: 0, edgeId: 'edge-v' }],
+      }),
+      { assetId: 'remote-1', name: 'one.png', mimeType: 'image/png' },
+      'job-1',
+    );
+
+    expect(settlement.resultNodeId).toBe('result:record-1:remote-1');
+    expect(port.attachResultNode).toHaveBeenCalledWith(
+      'result:record-1:remote-1',
+      expect.anything(),
+      expect.anything(),
+      undefined,
+    );
   });
 });

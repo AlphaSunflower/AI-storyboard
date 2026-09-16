@@ -30,8 +30,8 @@ spring:
     openai:
       base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
       api-key: ${LLM_GATEWAY_API_KEY:lg-df377c8084e645ffa34e0dfce1fb3e78}
-      # Spring AI 2.0 默认 60s；运行期 options 仍显式设置，避免单次覆盖时回落到默认值
-      timeout: 600s
+      # Spring AI 2.0 默认 60s；画布技能会在单次请求内执行长工具循环
+      timeout: 3600s
       # 超时/连接失败不做 SDK 级隐式重试，避免单次 120s 超时被放大为多次串行请求
       max-retries: 0
 
@@ -78,16 +78,16 @@ ai:
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
-    plan-timeout-seconds: 600
-    recommend-timeout-seconds: 20
+    plan-timeout-seconds: 1800
+    recommend-timeout-seconds: 120
     # 素材编排优先等待高质量模型完成，超时边界与网关保持一致
-    material-timeout-seconds: 600
+    material-timeout-seconds: 1800
     # 骨架只做结构化规划，显式使用快模型；场景 worker 仍使用高质量模型
     skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.5-pro}
     max-parallel-agents: ${AGENT_MAX_PARALLEL_AGENTS:4}
-    intent-timeout-seconds: 10
+    intent-timeout-seconds: 60
     # 长剧本分批生成可能持续十余分钟；该值控制 MVC SSE 连接生命周期
-    sse-timeout-seconds: 1800
+    sse-timeout-seconds: 14400
     history-context-max-chars: 10000
     history-message-max-chars: 2000
     # 自动审查链：链首意图写库成功后自动 handoff 给 scene-review 出「分镜审查」卡（暴露缺图缺视频/补图补视频）。
@@ -96,14 +96,14 @@ ai:
       - aisplit
 
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
-  image-request-timeout: 310
-  image-edit-timeout: 180
-  video-request-timeout: 120
-  video-download-timeout: 180
+  image-request-timeout: 900
+  image-edit-timeout: 900
+  video-request-timeout: 900
+  video-download-timeout: 900
   video-retry-delay-ms: 15000
-  script-timeout: 600
+  script-timeout: 1800
   script-max-tokens: 8192
-  gateway-model-timeout: 10
+  gateway-model-timeout: 30
   gateway-cooldown-ms: 300000
 
 # ── MCP Server（暴露 agent 工具给外部 MCP 客户端）──
@@ -115,7 +115,11 @@ spring.ai.mcp.server.protocol: STREAMABLE
 # ── MCP Client（接入外部 MCP 服务器）──
 spring.ai.mcp.client.enabled: true
 spring.ai.mcp.client.type: SYNC
+spring.ai.mcp.client.initialized: false
 spring.ai.mcp.client.toolcallback.enabled: true
+# Canvas MCP Server（Morrow Bridge，仅本机 loopback）
+spring.ai.mcp.client.streamable-http.connections.canvas.url: ${MORROW_BRIDGE_URL:http://127.0.0.1:8787}
+spring.ai.mcp.client.streamable-http.connections.canvas.endpoint: /mcp
 
 # 提示词文件目录（文件系统路径，支持热刷新）
 prompts:

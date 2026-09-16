@@ -66,7 +66,11 @@ export function installFetchMock() {
     }
     // 画布重命名 / 元数据 PATCH
     if (/\/canvases\/[^/]+$/.test(url) && method === 'PATCH') {
-      return jsonResponse({ ok: true });
+      const id = url.match(/\/canvases\/([^/]+)$/)?.[1] ?? '';
+      const patch = JSON.parse(String(init?.body ?? '{}'));
+      const canvas = canvases.get(id);
+      if (canvas && typeof patch.title === 'string') canvas.title = patch.title;
+      return jsonResponse({ ok: true, ...(canvas ?? {}) });
     }
     // 单独画布 GET
     if (/\/canvases\/[^/]+$/.test(url) && method === 'GET') {

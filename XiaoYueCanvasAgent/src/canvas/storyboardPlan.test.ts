@@ -63,6 +63,16 @@ describe('reconcileStoryboardShots', () => {
     expect(result.shots.find((shot) => shot.data.shotId === 'shot-b')?.id).toBe('node-b');
   });
 
+  it('stacks newly generated shots vertically before canvas layout takes over', () => {
+    const result = reconcileStoryboardShots([], [
+      plan('shot-a', 1, 'A'),
+      plan('shot-b', 2, 'B'),
+    ]);
+    const created = [...result.created].sort((left, right) => left.data.shotOrdinal - right.data.shotOrdinal);
+    expect(created[0].position.x).toBe(created[1].position.x);
+    expect(created[1].position.y).toBeGreaterThan(created[0].position.y);
+  });
+
   it('derives deterministic fallback identity from segment and content fingerprint', () => {
     const value = plan('', 1, '一扇门打开');
     const result = reconcileStoryboardShots([], [{ ...value, shotId: undefined }]);

@@ -5,7 +5,9 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.stereotype.Component;
 
@@ -33,22 +35,34 @@ public class SkillExpander {
 
     private final AgentTools agentTools;
     private final SkillManager skillManager;
+    private final ObjectProvider<ToolCallbackProvider> toolCallbackProviders;
 
     /** 工具名 → ToolCallback（启动时由 AgentTools 扫描生成） */
     private volatile Map<String, ToolCallback> toolByName = Map.of();
 
     @PostConstruct
     void init() {
-        ToolCallback[] callbacks = MethodToolCallbackProvider.builder()
+        ToolCallback[] localCallbacks = MethodToolCallbackProvider.builder()
                 .toolObjects(agentTools)
                 .build()
                 .getToolCallbacks();
         Map<String, ToolCallback> map = new HashMap<>();
-        for (ToolCallback callback : callbacks) {
+        for (ToolCallback callback : localCallbacks) {
             String name = callback.getToolDefinition().name();
             map.put(name, callback);
-            log.info("[SkillExpander] 发现工具: {}", name);
+            log.info("[SkillExpander] 发现本地工具: {}", name);
         }
+        toolCallbackProviders.orderedStream().forEach(provider -> {
+            try {
+                for (ToolCallback callback : provider.getToolCallbacks()) {
+                    String name = callback.getToolDefinition().name();
+                    ToolCallback previous = map.putIfAbsent(name, callback);
+                    if (previous == null) log.info("[SkillExpander] 发现 MCP 工具: {}", name);
+                }
+            } catch (Exception e) {
+                log.warn("[SkillExpander] MCP 工具提供器不可用: {}", e.getMessage());
+            }
+        });
         toolByName = map;
 
         // 校验：技能声明的工具必须能解析到真实回调（缺失仅警告，避免运行期空工具集）
@@ -68,6 +82,22 @@ public class SkillExpander {
     /** 全部可用工具名 */
     public Set<String> allToolNames() {
         return toolByName.keySet();
+    }
+
+    public boolean hasTool(String name) {
+        return name != null && toolByName.containsKey(name);
+    }
+
+    /** MCP Client 延迟连接成功后，把新发现的远程工具合并进技能工具表。 */
+    public synchronized void registerRemoteCallbacks(ToolCallback[] callbacks) {
+        if (callbacks == null || callbacks.length == 0) return;
+        Map<String, ToolCallback> merged = new HashMap<>(toolByName);
+        for (ToolCallback callback : callbacks) {
+            String name = callback.getToolDefinition().name();
+            ToolCallback previous = merged.putIfAbsent(name, callback);
+            if (previous == null) log.info("[SkillExpander] 延迟发现 MCP 工具: {}", name);
+        }
+        toolByName = Map.copyOf(merged);
     }
 
     /**

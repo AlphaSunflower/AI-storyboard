@@ -16,10 +16,16 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
 /** 解析后端 JSON 负载（{code,message,data} 约定 → 直接返回 data；非约定则原样）。 */
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestToken = getJobToken();
   const response = await apiFetch(path, init);
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    // 只有 401 代表凭证失效；403 是业务权限拒绝，不应清 token 并退出登录。
+    if (response.status === 401) {
       window.dispatchEvent(new CustomEvent('morrow:auth-rejected', {
+        detail: { status: response.status, path, token: requestToken },
+      }));
+    } else if (response.status === 403) {
+      window.dispatchEvent(new CustomEvent('morrow:permission-denied', {
         detail: { status: response.status, path },
       }));
     }

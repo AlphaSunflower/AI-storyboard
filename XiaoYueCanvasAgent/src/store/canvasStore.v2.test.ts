@@ -27,7 +27,7 @@ describe('CanvasGraphV2 store bridge', () => {
     expect(node?.data.kind).toBe('textToImage');
   });
 
-  it('stores generation records in graph snapshots', () => {
+  it('keeps generation record updates out of undo history', () => {
     useCanvasStore.getState().appendGenerationRecord({
       id: 'record-1',
       producerNodeId: 'node-1',
@@ -45,8 +45,19 @@ describe('CanvasGraphV2 store bridge', () => {
     });
 
     expect(useCanvasStore.getState().generationRecords).toHaveLength(1);
+    useCanvasStore.getState().updateGenerationRecord({
+      ...useCanvasStore.getState().generationRecords[0],
+      status: 'completed',
+      materializationStatus: 'completed',
+    });
     useCanvasStore.getState().undo();
-    expect(useCanvasStore.getState().generationRecords).toHaveLength(0);
+    expect(useCanvasStore.getState().generationRecords).toEqual([
+      expect.objectContaining({
+        id: 'record-1',
+        status: 'completed',
+        materializationStatus: 'completed',
+      }),
+    ]);
   });
 
   it('rejects edges without concrete handles', () => {
@@ -83,7 +94,7 @@ describe('CanvasGraphV2 store bridge', () => {
     expect(useCanvasStore.getState().edges).toHaveLength(1);
   });
 
-  it('lays out multiple result nodes from one producer without overlap', () => {
+  it('stacks multiple result nodes from one producer without overlap', () => {
     const producerId = useCanvasStore.getState().addNode('batchImageRefine', { x: 0, y: 0 });
     const size = { width: 320, height: 240 };
 
@@ -107,8 +118,8 @@ describe('CanvasGraphV2 store bridge', () => {
     const second = useCanvasStore.getState().nodes.find((node) => node.id === secondId)!;
 
     expect(first.position).not.toEqual(second.position);
-    expect(Math.abs(first.position.x - second.position.x)).toBeGreaterThanOrEqual(size.width);
-    expect(Math.abs(first.position.y - second.position.y)).toBeLessThan(size.height);
+    expect(first.position.x).toBe(second.position.x);
+    expect(second.position.y - first.position.y).toBeGreaterThanOrEqual(size.height);
   });
 
   it('applies a storyboard plan without duplicating shots on rerun', () => {

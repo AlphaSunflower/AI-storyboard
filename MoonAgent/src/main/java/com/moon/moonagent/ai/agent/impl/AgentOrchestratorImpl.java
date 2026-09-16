@@ -6,6 +6,7 @@ import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.ai.agent.AgentOrchestrator;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import lombok.RequiredArgsConstructor;
@@ -62,10 +63,19 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Override
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, null, emitter);
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
+                                   java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
+                                   CanvasSessionContext canvasContext, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
         request.setRoutingHint(routingHint);
+        request.setCanvasContext(canvasContext);
         try {
-            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, emitter);
+            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint,
+                    cancelActiveTasks, canvasContext, emitter);
             log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成", conversation.getId(), result.hitlPaused());
             return result;
         } catch (AgentInterruptException e) {
@@ -79,12 +89,21 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
 
     @Override
     public AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return resumeTurn(conversation, formToken, action, customText, params, assetIds, routingHint, null, emitter);
+    }
+
+    @Override
+    public AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action,
+                                      String customText, Map<String, String> params,
+                                      java.util.List<String> assetIds, String routingHint,
+                                      CanvasSessionContext canvasContext, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
         request.setParams(params == null ? Map.of() : params);
         request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
         request.setAction(action == null ? "" : action);
         request.setCustomText(customText == null ? "" : customText);
         request.setRoutingHint(routingHint);
+        request.setCanvasContext(canvasContext);
         try {
             AgentCheckpoint cp = checkpointMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
@@ -126,7 +145,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             }
 
             AgentTurnResult result = planGraph.resumeTurn(conversation, cp, action, customText, params,
-                    request.getAssetIds(), routingHint, emitter);
+                    request.getAssetIds(), routingHint, canvasContext, emitter);
             log.info("AgentOrchestrator(PlanGraph).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
                     conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
             return result;

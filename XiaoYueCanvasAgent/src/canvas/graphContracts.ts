@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import type { ResultSlotBinding } from './resultSlots';
 import type { XYPosition, Viewport } from '@xyflow/react';
 import type { MediaNodeData, NodeStatus } from '../types';
 
@@ -30,6 +31,19 @@ export type NodeCategory = '输入' | '分镜' | '图像生成' | '视频生成'
 export type PortMedia = 'text' | 'script' | 'storyboard' | 'shot' | 'image' | 'video';
 export type ConnectionMode = 'user' | 'agent' | 'pipeline' | 'migration';
 export type ResultPolicy = 'media-nodes' | 'inline-data' | 'none';
+export type MediaFlowRole =
+  | 'input'
+  | 'producer'
+  | 'mediaPlaceholder'
+  | 'storyboardPlaceholder'
+  | 'processor'
+  | 'utility';
+
+export interface MediaPlaceholderContract {
+  media: 'image' | 'video';
+  inputPort: 'origin';
+  outputPort: 'image' | 'video';
+}
 
 export interface NodePort {
   id: string;
@@ -82,6 +96,15 @@ export interface NodeDefinition {
   renderer: ComponentType<unknown>;
 }
 
+export interface MissingNodeInput {
+  portId: string;
+  label: string;
+  media: PortMedia;
+  required: boolean;
+  min: number;
+  bound: number;
+}
+
 export interface CanvasNodeV2 {
   id: string;
   type: CanvasNodeKind;
@@ -106,6 +129,8 @@ export interface CanvasEdgeV2 {
   data?: {
     portOrder?: number;
     operation?: string;
+    resultSlot?: boolean;
+    resultSlotOrder?: number;
     migrationStatus?: 'migration_invalid';
     migrationError?: string;
   };
@@ -145,6 +170,8 @@ export interface GenerationRecord {
   materializationStatus: MaterializationStatus;
   materializedAssetIds: string[];
   resultNodeIds: string[];
+  resultSlots?: ResultSlotBinding[];
+  resultBindings?: Record<string, string>;
   materializationError?: string;
   sources: GenerationSource[];
   prompt: string;
@@ -170,15 +197,50 @@ export interface CanvasGraphV2 {
   viewport: Viewport;
   generationRecords: GenerationRecord[];
   migrationReport?: MigrationReport;
+  executions?: CanvasExecution[];
 }
 
-export type AutomationPhase = 'idle' | 'ready' | 'queued' | 'running' | 'paused' | 'failed' | 'stale' | 'done';
+export type AutomationPhase = 'idle' | 'ready' | 'queued' | 'running' | 'paused' | 'failed' | 'blocked' | 'stale' | 'done';
 
 export interface AutomationState {
   phase: AutomationPhase;
   configFingerprint?: string;
   runFingerprint?: string;
   paused?: boolean;
+  error?: string;
+}
+
+export type ExecutionStatus =
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'blocked'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface ExecutionNodeState {
+  nodeId: string;
+  actionId: string;
+  status: ExecutionStatus;
+  jobId?: string;
+  generationRecordId?: string;
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface CanvasExecution {
+  id: string;
+  projectId: string;
+  canvasId: string;
+  nodeIds: string[];
+  status: ExecutionStatus;
+  maxParallel: number;
+  nodes: ExecutionNodeState[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type ConnectionValidationCode =
@@ -373,6 +435,29 @@ export function getNodeDefinition(kind: string | undefined): NodeDefinition | un
   return CANVAS_NODE_DEFINITIONS[normalized as CanvasNodeKind];
 }
 
+export function getNodeFlowRole(kind: string | undefined): MediaFlowRole | undefined {
+  const normalized = getNodeDefinition(kind)?.kind;
+  if (!normalized) return undefined;
+  if (normalized === 'text' || normalized === 'script') return 'input';
+  if (normalized === 'image' || normalized === 'video') return 'mediaPlaceholder';
+  if (normalized === 'shot') return 'storyboardPlaceholder';
+  if (normalized === 'note') return 'utility';
+  if (normalized === 'storyboardPlanner') return 'producer';
+  if (getNodeDefinition(normalized)?.actions.some((item) => item.automation.startable)) return 'producer';
+  return 'processor';
+}
+
+export function getMediaPlaceholderContract(kind: string | undefined): MediaPlaceholderContract | undefined {
+  const normalized = getNodeDefinition(kind)?.kind;
+  if (normalized === 'image') {
+    return { media: 'image', inputPort: 'origin', outputPort: 'image' };
+  }
+  if (normalized === 'video') {
+    return { media: 'video', inputPort: 'origin', outputPort: 'video' };
+  }
+  return undefined;
+}
+
 export function listNodeDefinitions(): NodeDefinition[] {
   return Object.values(CANVAS_NODE_DEFINITIONS);
 }
@@ -500,6 +585,51 @@ export function validateRunnable(
     }
   }
   return { ok: true };
+}
+
+export function getMissingRequiredInputs(
+  graph: CanvasGraphV2,
+  nodeId: string,
+): MissingNodeInput[] {
+  const node = graph.nodes.find((item) => item.id === nodeId);
+  const definition = getNodeDefinition(node?.data.kind);
+  if (!definition) return [];
+  const edges = activeEdges(graph);
+  const imageToImage = node?.data.kind === 'imageToImage';
+  const missing: MissingNodeInput[] = [];
+
+  if (imageToImage) {
+    const imageInputs = edges.filter((edge) =>
+      edge.target === nodeId && (edge.targetHandle === 'source' || edge.targetHandle === 'reference'));
+    if (!imageInputs.length) {
+      const source = definition.inputs.find((input) => input.id === 'source');
+      if (source) {
+        missing.push({
+          portId: source.id,
+          label: source.label,
+          media: source.media,
+          required: source.required,
+          min: source.min,
+          bound: 0,
+        });
+      }
+    }
+  }
+
+  for (const input of definition.inputs) {
+    if (imageToImage && input.id === 'source') continue;
+    const bound = edges.filter((edge) => edge.target === nodeId && edge.targetHandle === input.id).length;
+    if (bound >= input.min) continue;
+    missing.push({
+      portId: input.id,
+      label: input.label,
+      media: input.media,
+      required: input.required,
+      min: input.min,
+      bound,
+    });
+  }
+  return missing;
 }
 
 export function getInputBindings(

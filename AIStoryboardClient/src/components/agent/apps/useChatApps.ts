@@ -3,6 +3,7 @@ import type { EmbeddedAppDescriptor } from './EmbeddedAppWindow';
 import {
   buildChatAppDescriptor,
   type ChatAppKey,
+  type ChatAppOpenOptions,
   type ChatAppProject,
 } from './chatAppDefinitions';
 
@@ -21,8 +22,8 @@ export function useChatApps(currentProject: ChatAppProject | null) {
     fullscreen: false,
   });
 
-  const open = useCallback((key: ChatAppKey) => {
-    const nextTab = buildChatAppDescriptor(key, currentProject);
+  const open = useCallback((key: ChatAppKey, options: ChatAppOpenOptions = {}) => {
+    const nextTab = buildChatAppDescriptor(key, currentProject, options);
     if (!nextTab) return;
     setTabs((currentTabs) => {
       const existingIndex = currentTabs.findIndex((tab) => tab.key === key);
@@ -37,7 +38,7 @@ export function useChatApps(currentProject: ChatAppProject | null) {
       if (currentTabs.length === 0) return currentTabs;
       let changed = false;
       const nextTabs = currentTabs.map((tab) => {
-        const next = buildChatAppDescriptor(tab.key, currentProject);
+        const next = buildChatAppDescriptor(tab.key, currentProject, { canvasMode: tab.canvasMode });
         if (next && next.url !== tab.url) {
           changed = true;
           return next;
@@ -52,6 +53,34 @@ export function useChatApps(currentProject: ChatAppProject | null) {
     setTabs([]);
     setActiveKey(null);
     setLayout((current) => ({ ...current, fullscreen: false }));
+  }, []);
+
+  const releaseCanvasMode = useCallback(() => {
+    setTabs((currentTabs) => currentTabs.map((tab) => {
+      if (tab.key !== 'canvas' || !tab.canvasMode) return tab;
+      const { canvasMode: _canvasMode, ...ordinaryTab } = tab;
+      try {
+        const url = new URL(tab.url);
+        url.searchParams.delete('canvasMode');
+        url.searchParams.delete('conversationId');
+        url.searchParams.delete('parentOrigin');
+        const projectId = tab.canvasMode.projectId;
+        const canvasId = tab.canvasMode.canvasId;
+        url.hash = canvasId
+          ? `#project=${encodeURIComponent(projectId)}&canvas=${encodeURIComponent(canvasId)}`
+          : `#project=${encodeURIComponent(projectId)}`;
+        return { ...ordinaryTab, url: url.toString() };
+      } catch {
+        return ordinaryTab;
+      }
+    }));
+  }, []);
+
+  const bindCanvasMode = useCallback((canvasId: string) => {
+    setTabs((currentTabs) => currentTabs.map((tab) => {
+      if (tab.key !== 'canvas' || !tab.canvasMode || !canvasId) return tab;
+      return { ...tab, canvasMode: { ...tab.canvasMode, canvasId } };
+    }));
   }, []);
 
   const close = useCallback((key: ChatAppKey) => {
@@ -84,6 +113,8 @@ export function useChatApps(currentProject: ChatAppProject | null) {
     open,
     close,
     closeAll,
+    releaseCanvasMode,
+    bindCanvasMode,
     select,
     setLayout,
   };

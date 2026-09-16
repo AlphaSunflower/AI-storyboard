@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Configuration;
  * 时 okhttp 抛 {@code InterruptedIOException: timeout} → {@code Socket closed} → {@code Stream failed}，
  * 流被掐断 → 聚合文本截断 → BeanOutputConverter 解析失败（Unexpected end-of-input）。
  * 必须显式设 {@link Timeout#read()}（socket 读超时），用 {@code builder.timeout(Timeout)} 而非 {@code timeout(Duration)}。
- * 全局 300s 覆盖最坏情况（gpt-image-2 实测峰值 ~107s，网关 300s）。
+ * 画布长任务需要允许模型在工具循环中长时间停顿，显式放宽读写与整个请求的总超时。
  */
 @Configuration
 public class OpenAiHttpConfig {
@@ -25,10 +25,10 @@ public class OpenAiHttpConfig {
     @Bean
     OpenAiHttpClientBuilderCustomizer openAiTimeoutCustomizer() {
         return builder -> builder.timeout(Timeout.builder()
-                .connect(Duration.ofSeconds(30))    // 连接建立
-                .read(Duration.ofSeconds(300))      // socket 读超时——流式逐 chunk 关键
-                .write(Duration.ofSeconds(120))     // 请求体发送
-                .request(Duration.ofSeconds(300))   // 整个 call 总超时
+                .connect(Duration.ofSeconds(60))    // 连接建立
+                .read(Duration.ofHours(1))          // socket 读超时——流式逐 chunk 关键
+                .write(Duration.ofMinutes(5))       // 请求体发送
+                .request(Duration.ofHours(1))       // 单次模型请求总超时
                 .build());
     }
 }

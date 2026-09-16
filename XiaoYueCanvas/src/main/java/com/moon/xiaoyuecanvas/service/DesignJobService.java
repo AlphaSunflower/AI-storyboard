@@ -66,9 +66,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public class DesignJobService {
 
     private static final Logger log = LoggerFactory.getLogger(DesignJobService.class);
-    private static final Duration LEASE_DURATION = Duration.ofMinutes(30);
+    private static final Duration LEASE_DURATION = Duration.ofHours(2);
     private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
-    private static final long VIDEO_POLL_TIMEOUT_MS = 15 * 60 * 1000L;
+    private static final long VIDEO_POLL_TIMEOUT_MS = 60 * 60 * 1000L;
 
     private final CanvasJobMapper canvasJobMapper;
     private final CanvasJobRepository canvasJobRepository;
@@ -591,7 +591,7 @@ public class DesignJobService {
             long pollStartMs = System.currentTimeMillis();
             while (true) {
                 if (System.currentTimeMillis() - pollStartMs > VIDEO_POLL_TIMEOUT_MS) {
-                    throw new BusinessException(50201, "视频生成超时（超过15分钟未完成），请重试");
+                    throw new BusinessException(50201, "视频生成超时（超过60分钟未完成），请重试");
                 }
                 Map<String, String> poll = videoGenerationService.pollVideoTask(taskId);
                 String status = poll.getOrDefault("status", "processing");

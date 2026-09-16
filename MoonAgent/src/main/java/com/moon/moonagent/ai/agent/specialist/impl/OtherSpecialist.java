@@ -78,7 +78,11 @@ public class OtherSpecialist implements SpecialistAgent {
             }
 
             OffsetDateTime start = OffsetDateTime.now();
+            String model = gatewayModelService.getDefaultTextModel();
             ChatResponse response = getClient().prompt()
+                    .options(OpenAiChatOptions.builder()
+                            .model(model)
+                            .timeout(Duration.ofSeconds(60)))
                     .system("你是 Moon 智能体，一个专业的分镜创作助手。用中文回答，简洁友好。")
                     .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrls()))
                     .call()
@@ -104,9 +108,9 @@ public class OtherSpecialist implements SpecialistAgent {
                                     "details", reasonDelta,
                                     "summary", summarize(reasonDelta),
                                     "durationMs", durationMs,
-                                    "source", gatewayModelService.getDefaultTextModel()))));
+                                    "source", model))));
                 }
-                reasoning = new AgentReasoningSnapshot(summarize(reasonDelta), reasonDelta, durationMs, gatewayModelService.getDefaultTextModel());
+                reasoning = new AgentReasoningSnapshot(summarize(reasonDelta), reasonDelta, durationMs, model);
             } else {
                 // 无 reasoning：记录 trace 摘要
                 String trace = "模型未返回可见推理过程，已生成回答（" + (answer == null ? "0" : answer.length()) + " 字符）。";
@@ -171,10 +175,8 @@ public class OtherSpecialist implements SpecialistAgent {
         if (chatClient == null) {
             synchronized (this) {
                 if (chatClient == null) {
-                    String model = gatewayModelService.getDefaultTextModel();
                     chatClient = chatClientBuilder
                             .defaultOptions(OpenAiChatOptions.builder()
-                                    .model(model)
                                     .timeout(Duration.ofSeconds(60)))
                             .build();
                 }

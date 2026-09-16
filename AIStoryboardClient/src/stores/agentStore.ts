@@ -12,6 +12,18 @@ import { useGenerationRecordsStore } from './generationRecordsStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 import { libraryApi } from '../api/library';
+import {
+  buildCanvasRequestContext,
+  clearCanvasEditContext,
+  filterCanvasReferenceUrls,
+  mediaUrlKey,
+  normalizeCanvasEditContext,
+  persistCanvasEditContext,
+  withoutCanvasMediaRef,
+  type AgentMediaRef,
+  type CanvasBinding,
+  type CanvasEditContext,
+} from '../lib/canvasEditMode';
 
 /** 阶段完成/失败事件若未携带标题，不清空仍在运行的阶段提示。 */
 function resolveWorkflowHint(current: string, event: SseEvent): string {
@@ -97,6 +109,23 @@ export interface VideoPlanInfo {
 }
 
 interface AgentState {
+  // 画布编辑模式：同一画布窗口的所有消息和 HITL 续流持续携带，直到用户显式离开。
+  canvasEditContext: CanvasEditContext | null;
+  canvasBinding: CanvasBinding | null;
+  canvasBindingStatus: string;
+  canvasExitPending: boolean;
+  setCanvasEditContext: (context: CanvasEditContext | null) => void;
+  startCanvasBinding: (binding: CanvasBinding) => void;
+  setCanvasBindingStatus: (status: string) => void;
+  cancelCanvasBinding: () => void;
+  resumeCanvasBinding: (context: CanvasEditContext) => Promise<void>;
+  addCanvasMediaRefs: (refs: AgentMediaRef[]) => void;
+  removeCanvasMediaRef: (url?: string) => void;
+  moveCanvasMediaRef: (url: string, direction: -1 | 1) => void;
+  restoreCanvasMode: (conversationId: string) => Promise<void>;
+  leaveCanvasEditMode: () => void;
+  exitCanvasModeNow: () => void;
+
   // 窗口
   windowOpen: boolean;
   setWindowOpen: (v: boolean) => void;
@@ -176,7 +205,13 @@ interface AgentState {
     routingHint?: string;
     cancelActiveTasks?: boolean;
   }) => Promise<void>;
-  submitHumanInput: (actionId: string, customText?: string, params?: Record<string, string>, assetIds?: string[]) => Promise<void>;
+  submitHumanInput: (
+    actionId: string,
+    customText?: string,
+    params?: Record<string, string>,
+    assetIds?: string[],
+    opts?: { hiddenCard?: boolean; formToken?: string; canvasContext?: CanvasEditContext },
+  ) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
   /** 会话级视频方案确认卡片（发起时存；切回恢复；提交/跳过清） */
@@ -254,6 +289,111 @@ function refreshStoryboardQueues() {
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
+  canvasEditContext: null,
+  canvasBinding: null,
+  canvasBindingStatus: '',
+  canvasExitPending: false,
+  setCanvasEditContext: (context) => {
+    const normalized = normalizeCanvasEditContext(context);
+    if (normalized) persistCanvasEditContext(normalized);
+    else clearCanvasEditContext();
+    set({ canvasEditContext: normalized });
+  },
+  startCanvasBinding: (binding) => set({
+    canvasBinding: binding,
+    canvasBindingStatus: '正在准备画布…',
+  }),
+  setCanvasBindingStatus: (status) => set({ canvasBindingStatus: status }),
+  cancelCanvasBinding: () => {
+    const binding = get().canvasBinding;
+    const conversationId = binding?.conversationId ?? get().activeConversationId;
+    if (conversationId) {
+      void agentApi.skipPendingCheckpoint(conversationId).catch(() => undefined);
+    }
+    set({ canvasBinding: null, canvasBindingStatus: '' });
+  },
+  resumeCanvasBinding: async (context) => {
+    const binding = get().canvasBinding;
+    if (!binding) return;
+    while (get().streaming) {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    if (get().canvasBinding?.formToken !== binding.formToken) return;
+    if (binding.conversationId && binding.conversationId !== get().activeConversationId) {
+      await get().selectConversation(binding.conversationId);
+    }
+    get().setCanvasEditContext(context);
+    set({ canvasBinding: null, canvasBindingStatus: '' });
+    await get().submitHumanInput('canvas-bound', '', undefined, binding.assetIds, {
+      hiddenCard: true,
+      formToken: binding.formToken,
+      canvasContext: context,
+    });
+  },
+  addCanvasMediaRefs: (refs) => set((state) => {
+    if (!state.canvasEditContext) return state;
+    const mediaRefs = buildCanvasRequestContext(state.canvasEditContext, { mediaRefs: refs })?.mediaRefs ?? [];
+    const next = { ...state.canvasEditContext, mediaRefs };
+    persistCanvasEditContext(next);
+    return {
+      canvasEditContext: next,
+      refImageUrls: filterCanvasReferenceUrls(state.refImageUrls, next),
+    };
+  }),
+  removeCanvasMediaRef: (url) => set((state) => {
+    if (!state.canvasEditContext || !url) return state;
+    const next = withoutCanvasMediaRef(state.canvasEditContext, url);
+    persistCanvasEditContext(next);
+    return {
+      canvasEditContext: next,
+      refImageUrls: state.refImageUrls.filter((item) => mediaUrlKey(item) !== mediaUrlKey(url)),
+    };
+  }),
+  moveCanvasMediaRef: (url, direction) => set((state) => {
+    if (!state.canvasEditContext) return state;
+    const key = mediaUrlKey(url);
+    const refs = [...state.canvasEditContext.mediaRefs];
+    const index = refs.findIndex((ref) => mediaUrlKey(ref.url) === key);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= refs.length) return state;
+    [refs[index], refs[target]] = [refs[target], refs[index]];
+    const next = { ...state.canvasEditContext, mediaRefs: refs };
+    persistCanvasEditContext(next);
+    return { canvasEditContext: next };
+  }),
+  restoreCanvasMode: async (conversationId) => {
+    try {
+      const detail = await agentApi.getConversation(conversationId);
+      const context = detail.data.data.conversation.canvasContext;
+      if (context?.mode === 'canvas-edit') {
+        const normalized = normalizeCanvasEditContext(context);
+        if (normalized) persistCanvasEditContext(normalized);
+        set({ canvasEditContext: normalized, canvasExitPending: false });
+      } else {
+        clearCanvasEditContext();
+        set({ canvasEditContext: null, canvasExitPending: false });
+      }
+    } catch {
+      // 拉取失败时先退出本地画布态，避免把上一会话的画布目标带到当前会话。
+      clearCanvasEditContext();
+      set({ canvasEditContext: null, canvasExitPending: false });
+    }
+  },
+  leaveCanvasEditMode: () => {
+    if (!get().canvasEditContext) return;
+    if (get().streaming || get().waitingHumanInput || get().waitingVideoPlan) {
+      set({ canvasExitPending: true });
+      return;
+    }
+    get().exitCanvasModeNow();
+  },
+  exitCanvasModeNow: () => {
+    const id = get().activeConversationId;
+    if (id) void agentApi.exitCanvasMode(id).catch(() => undefined);
+    clearCanvasEditContext();
+    set({ canvasEditContext: null, canvasExitPending: false, canvasBinding: null, canvasBindingStatus: '' });
+  },
+
   windowOpen: false,
   setWindowOpen: (v) => set({ windowOpen: v }),
 
@@ -276,8 +416,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 新建对话：仅重置本地为空白草稿，不落库、不进列表——避免反复点「新对话」堆积空会话。
   // 真正建会话在 sendMessage 首次发送时由 createConversation 完成。
   newConversation: () => {
+    clearCanvasEditContext();
     set({
       activeConversationId: null,
+      canvasEditContext: null,
+      canvasBinding: null,
+      canvasBindingStatus: '',
+      canvasExitPending: false,
       messages: [],
       streaming: false,
       waitingHumanInput: null,
@@ -328,6 +473,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const active = s.activeConversationId === id ? null : s.activeConversationId;
       const isActive = s.activeConversationId === id;
       const gview = active ? g[active] : undefined;
+      if (isActive) clearCanvasEditContext();
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
         activeConversationId: active,
@@ -339,6 +485,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingVideoPlan: isActive ? null : s.waitingVideoPlan,
         hitlVideoPlan: h,
         confirmResult: isActive ? null : s.confirmResult,
+        ...(isActive ? {
+          canvasEditContext: null,
+          canvasBinding: null,
+          canvasBindingStatus: '',
+          canvasExitPending: false,
+        } : {}),
       };
     });
   },
@@ -370,6 +522,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       };
     });
     const res = await agentApi.listMessages(id);
+    await get().restoreCanvasMode(id);
     const g = get().generating[id];
     const base = res.data.data ?? [];
     set({ messages: g?.assistantId
@@ -383,7 +536,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 页面刷新恢复：检查是否有待处理的 HITL checkpoint，恢复 waitingHumanInput
     try {
       const cpRes = await agentApi.getPendingCheckpoint(id);
-      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo>) | null;
+      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
+        kind?: string;
+      }) | null;
+      const cpKind = (cp as { kind?: string } | null)?.kind;
+      if (cpKind === 'canvas-bind' && cp?.formToken) {
+        get().startCanvasBinding({
+          conversationId: id,
+          projectId: cp.projectId,
+          requestedIntent: cp.requestedIntent,
+          formToken: cp.formToken,
+          expirationTime: String(cp.expirationTime ?? ''),
+          picUrls: cp.picUrls,
+          assetIds: cp.assetIds,
+        });
+        return;
+      }
       if (cp && cp.formToken && cp.actions && cp.actions.length > 0) {
         if (cp.kind === 'video-plan' || cp.hitlType === 'generate_video') {
           const videoInfo: VideoPlanInfo = {
@@ -436,7 +604,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   uploadRefImage: async (file, purpose?, kind?) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined, purpose, kind);
     const url = res.data.data.url;
-    set((s) => ({ refImageUrls: [...s.refImageUrls, url] }));
+    const mediaKind: AgentMediaRef['kind'] = file.type.startsWith('video/')
+      ? 'video'
+      : file.type.startsWith('audio/') ? 'audio'
+      : file.type.startsWith('image/') ? 'image' : 'file';
+    const absoluteUrl = (() => {
+      try { return new URL(url, window.location.origin).toString(); } catch { return url; }
+    })();
+    if (mediaKind === 'image' && !get().canvasEditContext) {
+      set((s) => ({ refImageUrls: [...s.refImageUrls, url] }));
+    }
+    get().addCanvasMediaRefs([{
+      kind: mediaKind,
+      url: absoluteUrl,
+      name: file.name,
+      mimeType: file.type || undefined,
+      source: 'upload',
+    }]);
     // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）。
     // 首会话（未选会话，cid 为空）也 push——后端 upload 未归属，但此时可见；首条消息发出去后
     // 后端 streamMessage 会把该 url 的未归属资产认领到新会话（见 AgentChatServiceImpl）。
@@ -499,7 +683,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   }) => {
     // 输入禁用条件：(streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan
     // 视频异步任务轮询期间（agentVideoTask 存在）允许继续发送新消息
-    if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan || !content.trim()) return;
+    if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan
+      || get().canvasBinding || get().canvasExitPending || !content.trim()) return;
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）。
     // 若视频异步任务仍轮询，先停止旧轮询并告知后端取消在途任务（cancelActiveTasks: true）。
     if (get().agentVideoTask) {
@@ -516,6 +701,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const refBefore = get().refImageUrls.map((u) => u);
     // 同样的坑：createConversation → selectConversation 会清空 pickedAssetIds，必须先快照
     const assetIdsBefore = get().pickedAssetIds.map((id) => id);
+    const requestPicUrls = (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
+      : (get().pendingPicUrls.length > 0) ? get().pendingPicUrls
+      : refBefore;
+    const requestAssetIds = opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
+      : assetIdsBefore.length > 0 ? assetIdsBefore
+      : get().pickedAssetIds;
+    const canvasContext = buildCanvasRequestContext(get().canvasEditContext, {
+      picUrls: requestPicUrls,
+      assetIds: requestAssetIds,
+      mediaRefs: get().canvasEditContext?.mediaRefs,
+    });
     let id = get().activeConversationId;
     // 未选对话但已选项目：自动新建对话并选中，避免用户消息被吞
     if (!id) {
@@ -653,12 +849,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
+    let receivedCanvasModeRequired = false;
 
     try {
-      await streamChat(id, content,
-        (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
-          : (pendingPic && pendingPic.length > 0) ? pendingPic
-          : refBefore, (e: SseEvent) => {
+      await streamChat(id, content, requestPicUrls, (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
@@ -697,6 +891,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               };
             });
             break;
+          case 'canvas_mode_required':
+            receivedCanvasModeRequired = true;
+            if (get().activeConversationId === snapshotId && e.formToken && e.projectId && e.conversationId) {
+              get().startCanvasBinding({
+                conversationId: e.conversationId,
+                projectId: e.projectId,
+                requestedIntent: e.requestedIntent,
+                formToken: e.formToken,
+                expirationTime: String(e.expirationTime ?? ''),
+                picUrls: e.picUrls,
+                assetIds: e.assetIds,
+              });
+              set((s) => {
+                const g = { ...s.generating };
+                delete g[snapshotId];
+                return {
+                  messages: s.messages.filter((m) => m.id !== assistantId),
+                  generating: g,
+                  workflowHint: '',
+                };
+              });
+            }
+            break;
           case 'human_input':
             // 跨会话守卫：已切换会话则忽略旧流事件
             if (get().activeConversationId !== snapshotId) break;
@@ -710,7 +927,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   taskId: e.taskId ?? '',
                   formContent: e.formContent ?? '',
                   actions: e.actions ?? [],
-                  expirationTime: e.expirationTime ?? 0,
+                  expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
                   models: e.models,
                   imageModels: e.imageModels,
                   videoModels: e.videoModels,
@@ -834,9 +1051,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, (opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
-        : assetIdsBefore.length > 0 ? assetIdsBefore
-        : get().pickedAssetIds.length > 0 ? get().pickedAssetIds : []), opts?.assetGroupIds, signal, opts);
+      }, requestAssetIds, opts?.assetGroupIds, signal, { ...opts, canvasContext });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -861,7 +1076,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           ...(isThisStream ? { pendingAssistantId: null } : {}),
           messages: stillSameConversation
           ? s.messages.map((m) =>
-              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
+              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired
                 ? { ...m, content: failedText }
                 : m,
             )
@@ -869,7 +1084,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         };
       });
       // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
-      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
+      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired && !manualStop) {
         void get().recoverPendingCheckpoint(snapshotId);
       }
     }
@@ -877,8 +1092,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // if (get().activeConversationId === snapshotId) set({ refImageUrls: [] });
   },
 
-  submitHumanInput: async (actionId, customText = '', params, assetIds) => {
-    const info = get().waitingHumanInput;
+  submitHumanInput: async (actionId, customText = '', params, assetIds, opts) => {
+    const info: HumanInputInfo | null = opts?.formToken
+      ? {
+          formToken: opts.formToken,
+          taskId: '',
+          formContent: '',
+          actions: [],
+          expirationTime: 0,
+        }
+      : get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
     const reviewProjectId = actionId === 'review-gen-image'
@@ -909,6 +1132,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       },
     };
     set((s) => {
+      if (opts?.hiddenCard) {
+        return {
+          streaming: true,
+          generating: { ...s.generating, [id]: { hint: '' } },
+          waitingHumanInput: null,
+          streamError: null,
+        };
+      }
       const hasCard = s.messages.some((m) => m.id === cardId && m.metadata?.kind === 'hitl');
       const newCard: AgentMessage = {
         id: cardId,
@@ -1091,7 +1322,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   taskId: e.taskId ?? '',
                   formContent: e.formContent ?? '',
                   actions: e.actions ?? [],
-                  expirationTime: e.expirationTime ?? 0,
+                  expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
                   models: e.models,
                   imageModels: e.imageModels,
                   videoModels: e.videoModels,
@@ -1215,7 +1446,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, customText, params, assetIds, signal);
+      }, customText, params, assetIds, signal, {
+        canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
+          picUrls: get().refImageUrls,
+          assetIds: assetIds ?? get().pickedAssetIds,
+        }),
+      });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -1453,7 +1689,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   workflowHint: '',
                   waitingHumanInput: {
                     formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
-                    actions: e.actions ?? [], expirationTime: e.expirationTime ?? 0,
+                    actions: e.actions ?? [],
+                    expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
                     models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
                     recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
                     messageId: cardId,
@@ -1546,7 +1783,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               if (get().activeConversationId === snapshotId) set({ streamError: e.message ?? '对话出错，请重试' });
               break;
           }
-        }, customText, params, undefined, signal);
+        }, customText, params, undefined, signal, {
+          canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
+            picUrls: get().refImageUrls,
+            assetIds: get().pickedAssetIds,
+          }),
+        });
       } catch (err) {
         if (!manualStop && get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       } finally {
@@ -1721,7 +1963,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, '', params, undefined, signal);
+      }, '', params, undefined, signal, {
+        canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
+          picUrls: get().refImageUrls,
+          assetIds: get().pickedAssetIds,
+        }),
+      });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -1792,7 +2039,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!conversationId) return;
     try {
       const cpRes = await agentApi.getPendingCheckpoint(conversationId);
-      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo>) | null;
+      const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
+        kind?: string;
+      }) | null;
+      const cpKind = (cp as { kind?: string } | null)?.kind;
+      if (cpKind === 'canvas-bind' && cp?.formToken) {
+        get().startCanvasBinding({
+          conversationId,
+          projectId: cp.projectId,
+          requestedIntent: cp.requestedIntent,
+          formToken: cp.formToken,
+          expirationTime: String(cp.expirationTime ?? ''),
+          picUrls: cp.picUrls,
+          assetIds: cp.assetIds,
+        });
+        return;
+      }
       if (!cp || !cp.formToken || !cp.actions || cp.actions.length === 0) return;
       const isActive = get().activeConversationId === conversationId;
       if (cp.kind === 'video-plan' || cp.hitlType === 'generate_video') {
@@ -1920,8 +2182,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   resetChatState: () => {
     if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
     videoPollToken += 1;
+    clearCanvasEditContext();
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
-       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [], pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [] });
+       waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
+       pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
+       canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false });
   },
 
   activeModal: null,

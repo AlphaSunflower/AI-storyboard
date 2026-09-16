@@ -22,6 +22,8 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
   const zoom = useStore((state) => state.transform[2]);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const clearAssetError = useMediaStore((state) => state.clearAssetError);
+  const assetError = useMediaStore((state) => data.assetId ? state.assetErrors[data.assetId] : undefined);
   const quality = useMediaStore((state) => state.quality);
   const metadata = useMediaStore((state) => data.assetId ? state.metadata[data.assetId] : undefined);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
@@ -36,13 +38,14 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!data.assetId || asset || !metadata || !visibility.visible || !selected) return;
+    if (!data.assetId || asset || !visibility.visible) return;
     let cancelled = false;
+    clearAssetError(data.assetId);
     void getAsset(data.assetId).then((loaded) => {
       if (!cancelled && loaded) upsertAsset(loaded);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [asset, data.assetId, metadata, selected, upsertAsset, visibility.visible]);
+  }, [asset, clearAssetError, data.assetId, upsertAsset, visibility.visible]);
 
   useEffect(() => {
     if (!data.assetId || asset || !metadata || !visibility.visible || selected || quality === 'placeholder') return;
@@ -58,15 +61,19 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
     if (!visibility.visible) setLazyVariant(null);
   }, [visibility.visible]);
 
+  const content = !data.assetId
+    ? <div className="empty-image-node"><ImageIcon size={28} /><strong>空图片节点</strong><span>上传本地图片，或连接生成节点获取结果</span></div>
+    : assetError
+      ? <div className="empty-image-node"><ImageIcon size={28} /><strong>资产文件缺失</strong><span>{assetError}</span></div>
+      : !metadata
+        ? <div className="media-placeholder"><span>图片加载中…</span></div>
+        : !mediaUrl
+          ? <div className="media-placeholder"><ImageIcon size={22} /><span>{metadata.name}</span></div>
+          : <div className="media-asset-frame"><img key={mediaUrl} src={mediaUrl} alt={metadata.name} loading="eager" decoding="async" draggable={false} width={metadata.width} height={metadata.height} /><span className="media-quality-badge">{selected ? 'PREVIEW' : quality.toUpperCase()}</span></div>;
+
   return (
     <div ref={visibility.ref} className="media-node-view">
-      {metadata ? (
-        !mediaUrl ? <div className="media-placeholder"><ImageIcon size={22} /><span>{metadata.name}</span></div> : (
-          <div className="media-asset-frame"><img key={mediaUrl} src={mediaUrl} alt={metadata.name} loading="eager" decoding="async" draggable={false} width={metadata.width} height={metadata.height} /><span className="media-quality-badge">{selected ? 'PREVIEW' : quality.toUpperCase()}</span></div>
-        )
-      ) : (
-        <div className="empty-image-node"><ImageIcon size={28} /><strong>空图片节点</strong><span>上传本地图片，或连接生成节点获取结果</span></div>
-      )}
+      {content}
       {selected && !metadata && <>
         <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => setUploadError(error instanceof Error ? error.message : '图片导入失败')); }} />
         <button className="node-upload nodrag" onClick={() => fileInput.current?.click()}><Upload size={16} /> 上传图片</button>

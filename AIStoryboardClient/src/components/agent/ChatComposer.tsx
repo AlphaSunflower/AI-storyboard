@@ -8,12 +8,13 @@ import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
 import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
 import { sttStream } from '../../api/agent';
 import { Paperclip } from 'lucide-react';
-import { Image as ImageIcon, PlusCircle, Package } from 'lucide-react';
+import { Image as ImageIcon, PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { buildSceneReviewPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
+import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
@@ -43,13 +44,20 @@ export function ChatComposer() {
     refImageUrls, uploadRefImages, sendMessage, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
-    addRefImageUrls,
+    addRefImageUrls, setRefImageUrls,
     pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
+    canvasEditContext,
+    canvasBinding,
+    canvasBindingStatus,
+    canvasExitPending,
+    removeCanvasMediaRef,
+    moveCanvasMediaRef,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  const [canvasMediaOpen, setCanvasMediaOpen] = useState(false);
   const [uploadDrafts, setUploadDrafts] = useState<Array<{
     file: File;
     preview: string;
@@ -145,6 +153,12 @@ export function ChatComposer() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!canvasEditContext) return;
+    const filtered = filterCanvasReferenceUrls(refImageUrls, canvasEditContext);
+    if (filtered.length !== refImageUrls.length) setRefImageUrls(filtered);
+  }, [canvasEditContext, refImageUrls, setRefImageUrls]);
+
   // 点击"继续完善"后聚焦输入框
   useEffect(() => {
     if (pendingPicUrls.length > 0) inputRef.current?.focus();
@@ -160,7 +174,8 @@ export function ChatComposer() {
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const busy = (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan;
+  const busy = (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan
+    || !!canvasBinding || canvasExitPending;
 
   const handleSend = () => {
     const content = text.trim();
@@ -312,6 +327,7 @@ export function ChatComposer() {
   return (
     <>
     <div
+      className="chat-composer-card"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -327,7 +343,7 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {(refImageUrls.length > 0 || pickedAssetIds.length > 0 || pendingGroup) && (
+      {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0 || pendingGroup) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           padding: '8px 12px', borderRadius: 12, background: DS.hover,
@@ -378,6 +394,16 @@ export function ChatComposer() {
               >×</button>
             </span>
           )}
+          {(canvasEditContext?.mediaRefs.length ?? 0) > 0 && (
+            <button onClick={() => setCanvasMediaOpen(true)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '5px 10px', borderRadius: 8, background: 'rgba(65,118,230,0.08)',
+              color: DS.brand, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+            }}>
+              <Paperclip size={13} strokeWidth={2} />
+              画布媒体 {canvasEditContext?.mediaRefs.length} 项
+            </button>
+          )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <button
               onClick={() => fileRef.current?.click()}
@@ -386,7 +412,7 @@ export function ChatComposer() {
                 background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
-            ><ImageIcon size={12} strokeWidth={2} /> 加图</button>
+            ><ImageIcon size={12} strokeWidth={2} /> 加素材</button>
             <button
               onClick={handleAssetOpen}
               style={{
@@ -409,6 +435,21 @@ export function ChatComposer() {
           <button onClick={() => cancelRefine()} style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer', fontSize: 14 }}>✕ 取消</button>
         </div>
       )}
+      {(canvasBinding || canvasExitPending) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+          borderRadius: 12, background: 'rgba(65,118,230,0.07)',
+          color: DS.brand, fontSize: 13,
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%', background: DS.brand,
+            flexShrink: 0,
+          }} />
+          {canvasExitPending
+            ? '本轮结束后将离开画布编辑模式'
+            : (canvasBindingStatus || '正在准备画布…')}
+        </div>
+      )}
       <textarea
         ref={inputRef}
         value={text}
@@ -420,7 +461,7 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : '松开鼠标上传图片') : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={busy}
         rows={2}
         style={{
@@ -443,7 +484,7 @@ export function ChatComposer() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
-          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />
+          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
           {menuPresence.mounted && menuPos && createPortal(
             <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
@@ -557,6 +598,97 @@ export function ChatComposer() {
         document.body
       )}
 
+      {canvasMediaOpen && canvasEditContext && createPortal(
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1320 }}
+          onClick={() => setCanvasMediaOpen(false)}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 620, maxWidth: '92vw', maxHeight: '82vh', background: 'white', borderRadius: 16,
+              padding: 18, boxShadow: '0 10px 36px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 16, fontWeight: 600, color: DS.ink }}>画布媒体 · {canvasEditContext.mediaRefs.length} 项</span>
+              <button
+                onClick={() => setCanvasMediaOpen(false)}
+                aria-label="关闭"
+                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer', padding: 4, display: 'grid', placeItems: 'center' }}
+              ><X size={17} strokeWidth={2} /></button>
+            </div>
+            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, minHeight: 120 }}>
+              {canvasEditContext.mediaRefs.length === 0 && (
+                <div style={{ padding: '36px 12px', textAlign: 'center', color: DS.textCaption, fontSize: 13 }}>
+                  暂无画布媒体
+                </div>
+              )}
+              {canvasEditContext.mediaRefs.map((ref, index) => (
+                <div
+                  key={`${ref.kind}:${ref.assetId ?? ref.url ?? index}`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: 10, borderRadius: 12,
+                    border: `1px solid ${DS.border}`, background: DS.hover,
+                  }}
+                >
+                  {ref.kind === 'video' ? (
+                    <video src={ref.url} muted playsInline style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', background: '#111', flexShrink: 0 }} />
+                  ) : ref.kind === 'image' ? (
+                    <img src={ref.url} alt={ref.name ?? `画布媒体 ${index + 1}`} style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <span style={{ width: 64, height: 64, borderRadius: 10, flexShrink: 0, background: 'white', display: 'grid', placeItems: 'center', color: DS.textSecondary }}>
+                      <Paperclip size={20} strokeWidth={1.8} />
+                    </span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {ref.name ?? `${ref.kind} ${index + 1}`}
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 11, color: DS.textCaption }}>
+                      {ref.kind === 'image' ? '图片' : ref.kind === 'video' ? '视频' : ref.kind === 'audio' ? '音频' : '文件'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button
+                      onClick={() => moveCanvasMediaRef(ref.url ?? '', -1)}
+                      disabled={index === 0}
+                      aria-label="上移"
+                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'white', color: DS.textSecondary, cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? 0.35 : 1 }}
+                    ><ChevronUp size={15} /></button>
+                    <button
+                      onClick={() => moveCanvasMediaRef(ref.url ?? '', 1)}
+                      disabled={index === canvasEditContext.mediaRefs.length - 1}
+                      aria-label="下移"
+                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'white', color: DS.textSecondary, cursor: index === canvasEditContext.mediaRefs.length - 1 ? 'not-allowed' : 'pointer', opacity: index === canvasEditContext.mediaRefs.length - 1 ? 0.35 : 1 }}
+                    ><ChevronDown size={15} /></button>
+                    <button
+                      onClick={() => removeCanvasMediaRef(ref.url)}
+                      aria-label="移除"
+                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'rgba(217,45,32,0.08)', color: 'rgb(190,45,35)', cursor: 'pointer' }}
+                    ><Trash2 size={15} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${DS.border}`, paddingTop: 12 }}>
+              <button
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10,
+                  border: 'none', background: DS.brand, color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              ><Plus size={15} strokeWidth={2.2} /> 重新加入图片或视频</button>
+              <button
+                onClick={() => setCanvasMediaOpen(false)}
+                style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.textSecondary, fontSize: 13, cursor: 'pointer' }}
+              >完成</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {/* 上传素材前填写用途/类型 */}
       {uploadDrafts.length > 0 && createPortal(
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}
@@ -572,7 +704,15 @@ export function ChatComposer() {
             <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {uploadDrafts.map((d, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', borderRadius: 12, background: DS.hover, border: `1px solid ${DS.border}` }}>
-                  <img src={d.preview} alt={`素材${i + 1}`} style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  {d.file.type.startsWith('video/') ? (
+                    <video src={d.preview} muted style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  ) : d.file.type.startsWith('image/') ? (
+                    <img src={d.preview} alt={`素材${i + 1}`} style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  ) : (
+                    <span style={{ width: 54, height: 54, borderRadius: 10, flexShrink: 0, background: DS.hover, color: DS.textSecondary, display: 'grid', placeItems: 'center' }}>
+                      <Paperclip size={18} strokeWidth={1.8} />
+                    </span>
+                  )}
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <input
                       value={d.purpose}
@@ -595,7 +735,7 @@ export function ChatComposer() {
               <button onClick={handleUploadConfirm} style={{
                 padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
                 fontSize: 14, cursor: 'pointer',
-              }}>上传 {uploadDrafts.length} 张</button>
+              }}>上传 {uploadDrafts.length} 项</button>
             </div>
           </div>
         </div>,

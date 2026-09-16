@@ -14,7 +14,12 @@ export interface GenerationMaterializerPort {
   createAsset: (file: File, persistedId?: string) => Promise<PersistedAsset>;
   saveAsset: (asset: PersistedAsset) => Promise<void>;
   upsertAsset: (asset: PersistedAsset) => void;
-  attachResultNode: (resultNodeId: string, asset: PersistedAsset, record: GenerationRecord) => string;
+  attachResultNode: (
+    resultNodeId: string,
+    asset: PersistedAsset,
+    record: GenerationRecord,
+    targetNodeId?: string,
+  ) => string;
   updateRecord: (record: GenerationRecord) => void;
   getRecord?: (recordId: string) => GenerationRecord | undefined;
 }
@@ -29,6 +34,11 @@ export interface MaterializationSettlement {
 const canMaterialize = (record: GenerationRecord) =>
   record.status !== 'cancelled' && record.status !== 'interrupted';
 
+const mediaKindOf = (event: MaterializerAssetEvent): 'image' | 'video' =>
+  event.mimeType?.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(event.name)
+    ? 'video'
+    : 'image';
+
 export async function materializeGenerationResult(
   port: GenerationMaterializerPort,
   record: GenerationRecord,
@@ -36,8 +46,12 @@ export async function materializeGenerationResult(
   jobId: string,
 ): Promise<MaterializationSettlement> {
   const resultNodeId = `result:${record.id}:${event.assetId}`;
-  if (record.resultNodeIds.includes(resultNodeId) && record.materializationStatus === 'completed') {
-    return { created: false, record, resultNodeId };
+  const boundNodeId = record.resultBindings?.[resultNodeId];
+  if (
+    (boundNodeId || record.resultNodeIds.includes(resultNodeId))
+    && record.materializationStatus === 'completed'
+  ) {
+    return { created: false, record, resultNodeId: boundNodeId ?? resultNodeId };
   }
 
   if (!canMaterialize(record)) {
@@ -75,12 +89,17 @@ export async function materializeGenerationResult(
       return { created: false, record: ignored, asset };
     }
     port.upsertAsset(asset);
-    const actualNodeId = port.attachResultNode(resultNodeId, asset, latest);
+    const usedSlots = new Set(Object.values(latest.resultBindings ?? {}));
+    const slot = (latest.resultSlots ?? [])
+      .filter((candidate) => candidate.kind === mediaKindOf(event) && !usedSlots.has(candidate.nodeId))
+      .sort((left, right) => left.order - right.order)[0];
+    const actualNodeId = port.attachResultNode(resultNodeId, asset, latest, slot?.nodeId);
     const completed: GenerationRecord = {
       ...latest,
       materializationStatus: 'completed',
       materializedAssetIds: [...new Set([...latest.materializedAssetIds, asset.id])],
       resultNodeIds: [...new Set([...latest.resultNodeIds, actualNodeId])],
+      resultBindings: { ...(latest.resultBindings ?? {}), [resultNodeId]: actualNodeId },
       materializationError: undefined,
       completedAt: materializing.completedAt ?? Date.now(),
     };

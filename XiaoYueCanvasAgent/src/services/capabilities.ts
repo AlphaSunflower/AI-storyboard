@@ -36,11 +36,14 @@ export const CAPABILITIES = [...LOCAL_CAPABILITIES, ...REMOTE_CAPABILITIES];
 
 // dev 靠 vite proxy 转发 /api/canvas → localhost:9090；生产靠网关同域
 const endpoint = '/api/canvas';
-const requestTimeoutMs = 15_000;
+const requestTimeoutMs = 120_000;
 
-const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, externalSignal?: AbortSignal) => {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), requestTimeoutMs);
+  const onAbort = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener('abort', onAbort, { once: true });
   const headers = new Headers(init.headers as HeadersInit | undefined);
   const token = getJobToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -48,6 +51,7 @@ const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}) => 
     return await fetch(input, { credentials: 'omit', ...init, headers, signal: controller.signal });
   } finally {
     window.clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onAbort);
   }
 };
 
@@ -90,20 +94,20 @@ export class HttpJobAdapter implements JobAdapter {
     }
   }
 
-  async getCapabilities() {
-    const response = await withTimeout(`${this.baseUrl}/capabilities`, { headers: { Accept: 'application/json' } });
+  async getCapabilities(signal?: AbortSignal) {
+    const response = await withTimeout(`${this.baseUrl}/capabilities`, { headers: { Accept: 'application/json' } }, signal);
     if (!response.ok) throw new Error(await errorMessage(response));
     const remote = await response.json() as CapabilityDescriptor[];
     if (!Array.isArray(remote)) throw new Error('执行服务能力响应无效');
     return [...LOCAL_CAPABILITIES, ...remote.map((item) => ({ ...item, category: 'remote' as const }))];
   }
 
-  async submit(request: JobRequest) {
+  async submit(request: JobRequest, signal?: AbortSignal) {
     const response = await withTimeout(`${this.baseUrl}/jobs`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
-    });
+    }, signal);
     if (!response.ok) throw new Error(await errorMessage(response));
     const body = await response.json() as { jobId?: string };
     if (!body.jobId) throw new Error('执行服务没有返回任务 ID');

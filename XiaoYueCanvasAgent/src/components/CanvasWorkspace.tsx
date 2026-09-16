@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
-  Background, BackgroundVariant, ConnectionLineType, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider,
-  useReactFlow, useStoreApi, type Connection, type Viewport,
+  Background, BackgroundVariant, ConnectionLineType, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode,
+  useReactFlow, useStore, useStoreApi, type Connection, type Viewport,
 } from '@xyflow/react';
-import { Check, ChevronDown, CircleHelp, Download, FileArchive, FolderOpen, Grid2X2, History, Layers, LayoutList, Map, MessageCircle, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, CircleHelp, Copy, Download, FileArchive, FolderOpen, Grid2X2, History, Layers, LayoutList, LoaderCircle, Map, MessageCircle, Network, Plus, Scissors, Search, Trash2 } from 'lucide-react';
 import { getAsset, saveAsset, saveAssets, saveAssetToLibrary } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
@@ -25,7 +25,8 @@ import { GenerationRecordsPanel } from './GenerationRecordsPanel';
 import { TemplatePanel } from './TemplatePanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
 import { CanvasUiProvider } from '../canvas/CanvasUiContext';
-import { createPersistedCanvasAsset } from '../services/canvasMedia';
+import { createPersistedCanvasAsset, persistExistingCanvasAsset } from '../services/canvasMedia';
+import { canvasCommandService } from '../canvas/canvasCommandService';
 
 const nodeTypes = {
   media: MediaNode,
@@ -73,6 +74,42 @@ const imageBlobForClipboard = async (blob: Blob) => {
   }
 };
 
+function CanvasSelectionToolbar({ nodes, onCopy, onCut, onDelete }: {
+  nodes: CanvasNode[];
+  onCopy: () => void;
+  onCut: () => void;
+  onDelete: () => void;
+}) {
+  const transform = useStore((state) => state.transform);
+  if (nodes.length < 2) return null;
+
+  const bounds = nodes.reduce((result, node) => {
+    const width = node.width ?? node.measured?.width ?? 0;
+    const height = node.height ?? node.measured?.height ?? 0;
+    return {
+      minX: Math.min(result.minX, node.position.x),
+      minY: Math.min(result.minY, node.position.y),
+      maxX: Math.max(result.maxX, node.position.x + width),
+      maxY: Math.max(result.maxY, node.position.y + height),
+    };
+  }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const [viewportX, viewportY, zoom] = transform;
+  const style = {
+    left: bounds.minX * zoom + viewportX,
+    top: bounds.minY * zoom + viewportY,
+    width: Math.max(1, (bounds.maxX - bounds.minX) * zoom),
+    height: Math.max(1, (bounds.maxY - bounds.minY) * zoom),
+  };
+
+  return <div className="canvas-selection-toolbar" style={style}>
+    <div className="canvas-selection-actions nodrag nopan" role="toolbar" aria-label="多选节点操作" onPointerDown={(event) => event.stopPropagation()}>
+      <button onClick={onCopy} aria-label="复制" title="复制 Ctrl+C"><Copy size={14} /></button>
+      <button onClick={onCut} aria-label="剪切" title="剪切 Ctrl+X"><Scissors size={14} /></button>
+      <button className="is-danger" onClick={onDelete} aria-label="删除" title="删除 Ctrl+D"><Trash2 size={14} /></button>
+    </div>
+  </div>;
+}
+
 interface CanvasWorkspaceProps {
   projectId: string;
   projectTitle: string;
@@ -95,12 +132,14 @@ interface CanvasWorkspaceProps {
   onExportProject: () => void;
   isExporting: boolean;
   onNotify?: (message: string) => void;
+  canvasModeLocked?: boolean;
+  canvasInteractionLocked?: boolean;
 }
 
 const saveLabel: Record<SaveStatus, string> = { idle: '本地项目', saving: '保存中…', saved: '已保存到本地', error: '保存失败' };
 
 function CanvasInner(props: CanvasWorkspaceProps) {
-  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify } = props;
+  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false } = props;
   const [panel, setPanel] = useState<'nodes' | 'templates' | 'history' | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
@@ -116,6 +155,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [isFileDragActive, setIsFileDragActive] = useState(false);
   const [isViewportMoving, setIsViewportMoving] = useState(false);
+  const [isLayingOut, setIsLayingOut] = useState(false);
   const [contextTarget, setContextTarget] = useState<CanvasContextTarget | null>(null);
   const dragDepthRef = useRef(0);
   const viewportFrameRef = useRef<number | null>(null);
@@ -128,6 +168,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     () => nodes.map((node) => node.dragHandle === '.node-drag-handle' ? node : { ...node, dragHandle: '.node-drag-handle' }),
     [nodes],
   );
+  const selectedNodes = useMemo(() => nodes.filter((node) => node.selected), [nodes]);
   const edges = useCanvasStore((state) => state.edges);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
@@ -201,6 +242,43 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     setNotice(message); onNotify?.(message);
     window.setTimeout(() => setNotice(null), 1800);
   }, [onNotify]);
+  const copySelection = useCallback(() => {
+    const count = copySelected();
+    if (count) notify(`已复制 ${count} 个节点`);
+    return count;
+  }, [copySelected, notify]);
+  const cutSelection = useCallback(() => {
+    const count = copySelected();
+    if (!count) return 0;
+    deleteSelected();
+    notify(`已剪切 ${count} 个节点`);
+    return count;
+  }, [copySelected, deleteSelected, notify]);
+  const runLayout = useCallback(async (nodeIds?: string[], connectedComponent = false) => {
+    if (isLayingOut) return;
+    setIsLayingOut(true);
+    try {
+      const context = { projectId, source: 'user' as const };
+      const result = connectedComponent && nodeIds?.length
+        ? await canvasCommandService.layoutConnectedComponent(context, { nodeIds })
+        : await canvasCommandService.layoutDag(context, nodeIds?.length ? { nodeIds, direction: 'right' } : { direction: 'right' });
+      if (!result.ok) {
+        notify(result.error?.message ?? '整理编排失败');
+        return;
+      }
+      const count = result.changes?.movedNodeIds?.length ?? 0;
+      notify(count ? `已整理 ${count} 个节点` : '当前编排已是最优状态');
+    } catch (error) {
+      notify(error instanceof Error ? `整理编排失败：${error.message}` : '整理编排失败');
+    } finally {
+      setIsLayingOut(false);
+    }
+  }, [isLayingOut, notify, projectId]);
+  const runCurrentLayout = useCallback(() => {
+    if (selectedNodes.length > 1) return runLayout(selectedNodes.map((node) => node.id));
+    if (selectedNodes.length === 1) return runLayout([selectedNodes[0].id], true);
+    return runLayout();
+  }, [runLayout, selectedNodes]);
   const visibleProjects = useMemo(() => projects.map((project) => project.id === projectId ? { ...project, title: projectTitle } : project), [projectId, projectTitle, projects]);
   const filteredProjects = useMemo(() => {
     const query = projectSearch.trim().toLocaleLowerCase();
@@ -340,18 +418,24 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   }, [addImportedImages, addImportedVideos, canvasId, flowStore, notify, projectId, scheduleMediaViewport, screenToFlowPosition, upsertAssets]);
 
   const addAssetAt = useCallback(async (assetId: string, position: { x: number; y: number }) => {
-    const asset = await getAsset(assetId);
-    if (!asset) return;
-    const item = {
-      assetId: asset.id,
-      label: asset.name.replace(/\.[^.]+$/, ''),
-      size: asset.kind === 'video' ? getVideoNodeSize(asset.width, asset.height) : getMediaNodeSize(asset.width, asset.height),
-      position,
-      kind: asset.kind,
-    };
-    if (asset.kind === 'image') addImportedImages([item]);
-    else addImportedVideos([item]);
-  }, [addImportedImages, addImportedVideos]);
+    try {
+      const asset = await getAsset(assetId);
+      if (!asset) return;
+      const persisted = await persistExistingCanvasAsset(asset, '');
+      const item = {
+        assetId: persisted.id,
+        label: persisted.name.replace(/\.[^.]+$/, ''),
+        size: persisted.kind === 'video' ? getVideoNodeSize(persisted.width, persisted.height) : getMediaNodeSize(persisted.width, persisted.height),
+        position,
+        kind: persisted.kind,
+      };
+      upsertAssets([persisted]);
+      if (persisted.kind === 'image') addImportedImages([item]);
+      else addImportedVideos([item]);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '素材写入 MinIO 失败');
+    }
+  }, [addImportedImages, addImportedVideos, notify, upsertAssets]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -370,10 +454,13 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelected(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); deleteSelected(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        cutSelection();
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
         event.preventDefault();
-        const count = copySelected();
-        if (count) notify(`已复制 ${count} 个节点`);
+        copySelection();
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
         event.preventDefault();
@@ -383,7 +470,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
     };
     addEventListener('keydown', onKeyDown, true); return () => removeEventListener('keydown', onKeyDown, true);
-  }, [closeContextMenu, contextTarget, copySelected, deleteSelected, notify, pasteClipboard, redo, selectAll, undo]);
+  }, [closeContextMenu, contextTarget, copySelection, cutSelection, deleteSelected, notify, pasteClipboard, redo, selectAll, undo]);
 
   useEffect(() => {
     if (!workspaceMenuOpen && !projectSwitcherOpen) return;
@@ -401,7 +488,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const defaultEdgeOptions = useMemo(() => ({ type: 'canvas' }), []);
 
   return (
-    <main className={`canvas-workspace ${isImporting ? 'is-importing-media' : ''} ${isFileDragActive ? 'is-file-drag-active' : ''} ${isViewportMoving ? 'is-viewport-moving' : ''}`}
+    <main className={`canvas-workspace ${isImporting ? 'is-importing-media' : ''} ${isFileDragActive ? 'is-file-drag-active' : ''} ${isViewportMoving ? 'is-viewport-moving' : ''} ${selectedNodes.length > 1 ? 'has-multi-selection' : ''}`}
       onDragEnter={(event) => { if (event.dataTransfer.types.includes('Files')) { dragDepthRef.current += 1; setIsFileDragActive(true); } }}
       onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
       onDragLeave={() => { dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setIsFileDragActive(false); }}
@@ -413,15 +500,30 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onNodeClick={(event, node) => { closeContextMenu(); selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey); }} onPaneClick={(event) => { closeContextMenu(); selectNode(null); if (event.detail === 2) { const point = screenToFlowPosition({ x: event.clientX, y: event.clientY }); addNode('text', { x: point.x - 190, y: point.y - 140 }); } }}
         onNodeDoubleClick={(_event, node) => { selectNode(node.id); onOpenInspector(); }}
         onPaneContextMenu={(event) => { event.preventDefault(); setContextTarget({ type: 'pane', clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
-        onNodeContextMenu={(event, node) => { event.preventDefault(); if (!node.selected) selectNode(node.id); setContextTarget({ type: 'node', node, clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
+        onNodeContextMenu={(event, node) => {
+          event.preventDefault();
+          const flowPosition = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+          if (node.selected && selectedNodes.length > 1) {
+            setContextTarget({ type: 'selection', count: selectedNodes.length, clientX: event.clientX, clientY: event.clientY, flowPosition });
+            return;
+          }
+          if (!node.selected) selectNode(node.id);
+          setContextTarget({ type: 'node', node, clientX: event.clientX, clientY: event.clientY, flowPosition });
+        }}
+        onSelectionContextMenu={(event, selection) => {
+          event.preventDefault();
+          setContextTarget({ type: 'selection', count: selection.length, clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) });
+        }}
         onEdgeContextMenu={(event, edge) => { event.preventDefault(); selectNode(null); onEdgesChange([{ id: edge.id, type: 'select', selected: true }]); }}
         defaultEdgeOptions={defaultEdgeOptions} connectionLineType={ConnectionLineType.Bezier} minZoom={.18} maxZoom={2.4} defaultViewport={initialViewport}
         deleteKeyCode={null} colorMode="dark" proOptions={{ hideAttribution: true }}
+        panOnDrag={[1]} selectionOnDrag selectionMode={SelectionMode.Partial}
         onMoveStart={() => { closeContextMenu(); setIsViewportMoving(true); }}
         onMove={(_, viewport) => scheduleMediaViewport(viewport)}
         onMoveEnd={(_, viewport) => { setIsViewportMoving(false); scheduleMediaViewport(viewport); onViewportChange(viewport); }}
         onlyRenderVisibleElements={nodes.length > 320}>
         {showGrid && <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="rgba(255,255,255,.10)" />}
+        <CanvasSelectionToolbar nodes={selectedNodes} onCopy={copySelection} onCut={cutSelection} onDelete={deleteSelected} />
         {showMinimap && <MiniMap
           className="canvas-minimap"
           position="bottom-right"
@@ -438,7 +540,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           ariaLabel="画布导航小地图"
         />}
         <Panel className={`canvas-project-bar ${workspaceMenuOpen || projectSwitcherOpen ? 'is-menu-open' : ''}`} position="top-left">
-          <DropdownMenu.Root open={workspaceMenuOpen} onOpenChange={(open) => { setWorkspaceMenuOpen(open); if (open) { setProjectSwitcherOpen(false); setCanvasSwitcherOpen(false); } }}>
+          {!canvasModeLocked && <DropdownMenu.Root open={workspaceMenuOpen} onOpenChange={(open) => { setWorkspaceMenuOpen(open); if (open) { setProjectSwitcherOpen(false); setCanvasSwitcherOpen(false); } }}>
             <DropdownMenu.Trigger asChild><button className="workspace-menu-trigger" aria-label="本地工作区菜单"><ChevronDown size={16} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="workspace-menu" aria-label="本地工作区菜单" align="start" sideOffset={8}>
@@ -452,21 +554,21 @@ function CanvasInner(props: CanvasWorkspaceProps) {
                 <DropdownMenu.Item asChild><button className="project-menu-danger" onClick={() => { closeProjectMenus(); setDeleteDialogOpen(true); }}><Trash2 size={15} /><span>删除项目</span></button></DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-          <i className="project-bar-divider" />
-          <button className="project-switcher-trigger canvas-switcher-trigger" aria-label="切换画布" aria-expanded={canvasSwitcherOpen} onClick={() => { setCanvasSwitcherOpen((open) => !open); setProjectSwitcherOpen(false); setWorkspaceMenuOpen(false); }}><Layers size={13} /><span>{canvasTitle || '画布'}</span><ChevronDown size={13} /></button>
-          {canvasSwitcherOpen && <div className="project-switcher canvas-switcher" role="listbox" aria-label="切换画布">
+          </DropdownMenu.Root>}
+          {!canvasInteractionLocked && <i className="project-bar-divider" />}
+          {!canvasInteractionLocked && <button className="project-switcher-trigger canvas-switcher-trigger" aria-label="切换画布" aria-expanded={canvasSwitcherOpen} onClick={() => { setCanvasSwitcherOpen((open) => !open); setProjectSwitcherOpen(false); setWorkspaceMenuOpen(false); }}><Layers size={13} /><span>{canvasTitle || '画布'}</span><ChevronDown size={13} /></button>}
+          {!canvasInteractionLocked && canvasSwitcherOpen && <div className="project-switcher canvas-switcher" role="listbox" aria-label="切换画布">
             <div className="project-switcher-list" role="listbox">
               {canvases.map((item) => <button role="option" aria-selected={item.id === canvasId} className={item.id === canvasId ? 'is-current' : ''} key={item.id} onClick={() => { closeProjectMenus(); if (item.id !== canvasId) onSwitchCanvas(item.id); }}><span className="project-switcher-copy"><strong>{item.title}</strong><small>{item.nodeCount} 个节点 · {item.assetCount} 项素材</small></span>{item.id === canvasId && <Check size={15} />}</button>)}
             </div>
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onNewCanvas(); }}><Plus size={15} /> 新建画布</button>
           </div>}
-          <i className="project-bar-divider" />
-          <button className="project-switcher-trigger" aria-label="搜索和切换项目" aria-expanded={projectSwitcherOpen} onClick={() => { setProjectSwitcherOpen((open) => !open); setWorkspaceMenuOpen(false); setCanvasSwitcherOpen(false); setProjectSearch(''); }}><span>{projectTitle || 'Untitled'}</span><ChevronDown size={14} /></button>
+          {!canvasModeLocked && <i className="project-bar-divider" />}
+          {!canvasModeLocked && <button className="project-switcher-trigger" aria-label="搜索和切换项目" aria-expanded={projectSwitcherOpen} onClick={() => { setProjectSwitcherOpen((open) => !open); setWorkspaceMenuOpen(false); setCanvasSwitcherOpen(false); setProjectSearch(''); }}><span>{projectTitle || 'Untitled'}</span><ChevronDown size={14} /></button>}
           <span className={`project-save-indicator is-${saveStatus}`} role="status" aria-label={saveLabel[saveStatus]} title={saveLabel[saveStatus]}><Check size={14} /></span>
-          <button className="project-inline-export" disabled={isExporting} onClick={onExportProject} aria-label="导出项目" title={isExporting ? '导出中…' : '导出项目'}><FileArchive size={15} /></button>
-          <div className="project-copy project-compat-layer"><input aria-label="画布名称" value={projectTitle} onChange={(event) => onProjectTitleChange(event.target.value)} /><small className={saveStatus === 'error' ? 'is-error' : ''}>{saveLabel[saveStatus]}</small></div>
-          {projectSwitcherOpen && <div className="project-switcher" role="dialog" aria-label="搜索和切换项目">
+          {!canvasModeLocked && <button className="project-inline-export" disabled={isExporting} onClick={onExportProject} aria-label="导出项目" title={isExporting ? '导出中…' : '导出项目'}><FileArchive size={15} /></button>}
+          <div className="project-copy project-compat-layer"><input aria-label="画布名称" value={projectTitle} disabled={canvasModeLocked} onChange={(event) => onProjectTitleChange(event.target.value)} /><small className={saveStatus === 'error' ? 'is-error' : ''}>{saveLabel[saveStatus]}</small></div>
+          {!canvasModeLocked && projectSwitcherOpen && <div className="project-switcher" role="dialog" aria-label="搜索和切换项目">
             <label className="project-switcher-search"><Search size={15} /><input autoFocus aria-label="搜索项目" placeholder="搜索项目" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') closeProjectMenus(); }} /></label>
             <div className="project-switcher-list" role="tree" aria-label="本地项目">
               {filteredProjects.length ? filteredProjects.map((project) => <button role="treeitem" aria-selected={project.id === projectId} className={project.id === projectId ? 'is-current' : ''} key={project.id} onClick={() => { closeProjectMenus(); if (project.id !== projectId) onSwitchProject(project.id); }}><span className="project-switcher-thumb">{project.assetCount}</span><span className="project-switcher-copy"><strong>{project.title || 'Untitled'}</strong><small>{project.nodeCount} 个节点 · {new Date(project.updatedAt).toLocaleDateString('zh-CN')}</small></span>{project.id === projectId && <Check size={15} />}</button>) : <p>没有匹配的本地项目</p>}
@@ -474,7 +576,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /> 新建项目</button>
           </div>}
         </Panel>
-        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button><button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button></div></Panel>
+        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
         <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel onOpenRecords={() => setPanel('history')} /></Panel>
         <Controls
           className="canvas-controls canvas-view-bar"
@@ -488,6 +590,16 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         >
           <ControlButton className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap((value) => !value)} aria-label="小地图" title="小地图"><Map size={16} /></ControlButton>
           <ControlButton className={showGrid ? 'is-active' : ''} onClick={() => setShowGrid((value) => !value)} aria-label="网格" title="网格"><Grid2X2 size={16} /></ControlButton>
+          <ControlButton
+            className={isLayingOut ? 'is-active' : ''}
+            disabled={isLayingOut}
+            onClick={() => void runCurrentLayout()}
+            aria-label="整理编排"
+            aria-busy={isLayingOut}
+            title={selectedNodes.length > 1 ? '整理所选节点' : selectedNodes.length === 1 ? '整理当前连通编排' : '整理整张画布'}
+          >
+            {isLayingOut ? <LoaderCircle className="is-spinning" size={16} /> : <Network size={16} />}
+          </ControlButton>
           <ControlButton onClick={() => notify('双击空白处创建文字节点；拖入图片可直接导入')} aria-label="帮助" title="帮助"><CircleHelp size={17} /></ControlButton>
         </Controls>
         {notice && <Panel className="canvas-status-toast" position="bottom-center">{notice}</Panel>}
@@ -537,7 +649,13 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onAddNode={(kind) => addNode(kind as MediaKind, contextTarget.flowPosition)}
         onUndo={undo}
         onRedo={redo}
-        onCopy={() => { const count = copySelected(); if (count) notify(`已复制 ${count} 个节点`); }}
+        onCopy={copySelection}
+        onCut={cutSelection}
+        onLayout={() => {
+          if (contextTarget.type === 'selection') void runLayout(selectedNodes.map((node) => node.id));
+          else if (contextTarget.type === 'node') void runLayout([contextTarget.node.id], true);
+          else void runLayout();
+        }}
         onPaste={() => { const created = pasteClipboard(contextTarget.flowPosition); if (created.length) notify(`已粘贴 ${created.length} 个节点`); }}
         onDuplicate={() => { const created = duplicateSelected(); if (created.length) notify(`已创建 ${created.length} 个副本`); }}
         onDelete={deleteSelected}

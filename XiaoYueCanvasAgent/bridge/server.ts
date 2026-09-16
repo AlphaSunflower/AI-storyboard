@@ -1,103 +1,53 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { BRIDGE_PROTOCOL_VERSION, BRIDGE_COMMAND_TIMEOUT_MS, BRIDGE_DEFAULT_PORT } from '../src/canvas/bridgeProtocol.ts';
-import type { BridgeHealth, BridgeRegisterPayload, BridgeResultPayload, CanvasBridgeResponse } from '../src/canvas/bridgeProtocol.ts';
-
-// 常驻 Bridge 进程：浏览器打开项目后注册当前标签页，CLI/MCP 通过 HTTP
-// 提交命令，Bridge 把命令转发给对应标签页，浏览器执行命令层后回传结果。
-// 只监听 127.0.0.1，不做任何鉴权（纯内网本地开发场景）。
-
-interface PendingCommand {
-  requestId: string;
-  method: string;
-  params: Record<string, unknown>;
-  dryRun?: boolean;
-  expectedRevision?: number;
-  finish: (response: CanvasBridgeResponse) => void;
-}
-
-interface TabState {
-  tabId: string;
-  projectId: string;
-  lastSeen: number;
-}
-
-const tabs = new Map<string, TabState>();
-const projectTab = new Map<string, string>();
-const pendingByTab = new Map<string, PendingCommand[]>();
-const pendingById = new Map<string, PendingCommand>();
-
-const port = Number(process.env.MORROW_BRIDGE_PORT ?? BRIDGE_DEFAULT_PORT);
+import { BRIDGE_DEFAULT_PORT } from '../src/canvas/bridgeProtocol.ts';
+import type { BridgeRegisterPayload, BridgeResultPayload } from '../src/canvas/bridgeProtocol.ts';
+import { CanvasBridgeCore } from './canvasBridgeCore.ts';
+import { attachMcpEndpoint } from './mcpServer.ts';
 
 const readJson = (req: IncomingMessage): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
   let raw = '';
   req.setEncoding('utf8');
   req.on('data', (chunk: string) => {
     raw += chunk;
-    if (raw.length > 1_000_000) { reject(new Error('请求体过大')); req.destroy(); }
+    if (raw.length > 1_000_000) {
+      reject(new Error('请求体过大'));
+      req.destroy();
+    }
   });
   req.on('end', () => {
-    if (!raw) { resolve({}); return; }
-    try { resolve(JSON.parse(raw) as Record<string, unknown>); } catch { reject(new Error('请求体不是合法 JSON')); }
+    if (!raw) {
+      resolve({});
+      return;
+    }
+    try {
+      resolve(JSON.parse(raw) as Record<string, unknown>);
+    } catch {
+      reject(new Error('请求体不是合法 JSON'));
+    }
   });
   req.on('error', reject);
 });
 
 const sendJson = (res: ServerResponse, status: number, body: unknown) => {
+  if (res.headersSent) return;
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version',
   });
   res.end(JSON.stringify(body));
 };
 
-const resolveTab = (projectId: unknown): string | { code: string; message: string } => {
-  if (typeof projectId === 'string' && projectId) {
-    const tabId = projectTab.get(projectId);
-    if (!tabId) return { code: 'PROJECT_NOT_OPEN', message: '目标项目当前未在浏览器中打开' };
-    return tabId;
-  }
-  const entries = [...projectTab.entries()];
-  if (entries.length === 0) return { code: 'PROJECT_NOT_OPEN', message: '没有打开的项目' };
-  if (entries.length > 1) return { code: 'AMBIGUOUS_PROJECT', message: '多个项目打开，请用 --project 指定' };
-  return entries[0][1];
-};
+const port = Number(process.env.MORROW_BRIDGE_PORT ?? BRIDGE_DEFAULT_PORT);
+const core = new CanvasBridgeCore();
 
-const dispatchCommand = (tabId: string, method: unknown, params: unknown, dryRun: unknown, expectedRevision: unknown): Promise<CanvasBridgeResponse> => {
-  const requestId = randomUUID();
-  return new Promise((resolve) => {
-    const state: { settled: boolean; timer?: ReturnType<typeof setTimeout> } = { settled: false };
-    const finish = (response: CanvasBridgeResponse) => {
-      if (state.settled) return;
-      state.settled = true;
-      if (state.timer !== undefined) clearTimeout(state.timer);
-      pendingById.delete(requestId);
-      resolve(response);
-    };
-    const command: PendingCommand = {
-      requestId,
-      method: typeof method === 'string' ? method : '',
-      params: (params && typeof params === 'object' && !Array.isArray(params) ? params : {}) as Record<string, unknown>,
-      dryRun: dryRun === true,
-      expectedRevision: typeof expectedRevision === 'number' ? expectedRevision : undefined,
-      finish,
-    };
-    pendingById.set(requestId, command);
-    const queue = pendingByTab.get(tabId) ?? [];
-    queue.push(command);
-    pendingByTab.set(tabId, queue);
-    state.timer = setTimeout(() => finish({ version: 1, id: requestId, ok: false, error: { code: 'BRIDGE_TIMEOUT', message: '浏览器未在超时时间内响应命令' } }), BRIDGE_COMMAND_TIMEOUT_MS);
-  });
-};
-
-const server = createServer(async (req, res) => {
+export const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version',
     });
     res.end();
     return;
@@ -107,57 +57,60 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
 
   try {
+    if (path === '/mcp') {
+      await attachMcpEndpoint(core, req, res);
+      return;
+    }
+
     if (req.method === 'GET' && path === '/health') {
-      const projects: BridgeHealth['projects'] = [...projectTab.keys()].map((projectId) => ({
-        projectId,
-        lastSeen: tabs.get(projectTab.get(projectId) ?? '')?.lastSeen ?? 0,
-      }));
-      sendJson(res, 200, { ok: true, version: BRIDGE_PROTOCOL_VERSION, projects });
+      sendJson(res, 200, core.health());
       return;
     }
 
     if (req.method === 'GET' && path === '/projects') {
-      sendJson(res, 200, [...projectTab.keys()]);
+      sendJson(res, 200, core.projects());
       return;
     }
 
     if (req.method === 'POST' && path === '/register') {
       const body = (await readJson(req)) as unknown as BridgeRegisterPayload;
-      if (!body.tabId || !body.projectId) { sendJson(res, 400, { ok: false, error: { code: 'INVALID_ARGUMENTS', message: '缺少 tabId 或 projectId' } }); return; }
-      tabs.set(body.tabId, { tabId: body.tabId, projectId: body.projectId, lastSeen: Date.now() });
-      projectTab.set(body.projectId, body.tabId);
+      const result = core.register(body);
+      sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/unregister') {
+      const body = await readJson(req);
+      if (typeof body.tabId === 'string') core.unregister(body.tabId);
       sendJson(res, 200, { ok: true });
       return;
     }
 
     if (req.method === 'GET' && path === '/poll') {
-      const tabId = url.searchParams.get('tabId') ?? '';
-      const tab = tabs.get(tabId);
-      if (tab) tab.lastSeen = Date.now();
-      const queue = pendingByTab.get(tabId) ?? [];
-      const command = queue.shift();
-      if (command) pendingByTab.set(tabId, queue);
-      else pendingByTab.delete(tabId);
-      sendJson(res, 200, command ? { command: { requestId: command.requestId, method: command.method, params: command.params, dryRun: command.dryRun, expectedRevision: command.expectedRevision } } : {});
+      sendJson(res, 200, core.poll(url.searchParams.get('tabId') ?? ''));
       return;
     }
 
     if (req.method === 'POST' && path === '/result') {
       const body = (await readJson(req)) as unknown as BridgeResultPayload;
-      const pending = body.requestId ? pendingById.get(body.requestId) : undefined;
-      if (pending) pending.finish(body.response);
+      core.result(body);
       sendJson(res, 200, { ok: true });
       return;
     }
 
     if (req.method === 'POST' && path === '/command') {
       const body = await readJson(req);
-      const tabId = resolveTab(body.projectId);
-      if (typeof tabId !== 'string') {
-        sendJson(res, 200, { version: 1, id: '', ok: false, error: tabId });
-        return;
-      }
-      const response = await dispatchCommand(tabId, body.method, body.params, body.dryRun, body.expectedRevision);
+      const response = await core.command({
+        source: body.source === 'mcp' || body.source === 'agent' || body.source === 'cli' ? body.source : 'cli',
+        projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
+        canvasId: typeof body.canvasId === 'string' ? body.canvasId : undefined,
+        method: typeof body.method === 'string' ? body.method : '',
+        params: body.params && typeof body.params === 'object' && !Array.isArray(body.params)
+          ? body.params as Record<string, unknown>
+          : {},
+        dryRun: body.dryRun === true,
+        expectedRevision: typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined,
+      });
       sendJson(res, 200, response);
       return;
     }
@@ -170,4 +123,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`[morrow-bridge] listening on http://127.0.0.1:${port}`);
+  console.log(`[morrow-bridge] MCP endpoint: http://127.0.0.1:${port}/mcp`);
 });

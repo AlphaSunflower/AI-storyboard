@@ -3,17 +3,23 @@ package com.moon.moonagent.ai.agent.skill;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.AgentTools;
 import com.moon.moonagent.mapper.AgentConversationMapper;
+import com.moon.moonagent.ai.agent.human.HumanInputRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * SkillExpander 单元测试 —— 声明即扩展的工具桥：
@@ -36,7 +42,32 @@ class SkillExpanderTests {
                 mock(AgentGenerationService.class),
                 mock(AgentConversationMapper.class));
 
-        skillExpander = new SkillExpander(agentTools, skillManager);
+        ToolCallbackProvider canvasProvider = mock(ToolCallbackProvider.class);
+        ToolCallback[] canvasCallbacks = List.of(
+                "canvas_get_context", "canvas_list_node_types", "canvas_get_state",
+                "canvas_list_nodes", "canvas_get_node", "canvas_list_edges", "canvas_get_selection",
+                "canvas_create_node", "canvas_create_nodes", "canvas_import_media",
+                "canvas_create_canvas", "canvas_rename_canvas",
+                "canvas_create_result_slots", "canvas_mark_result_slots",
+                "canvas_get_node_model_config", "canvas_set_node_model_config",
+                "canvas_update_node", "canvas_create_edge",
+                "canvas_move_nodes", "canvas_layout_graph", "canvas_execute_node", "canvas_execute_graph",
+                "canvas_get_execution", "canvas_cancel_execution", "canvas_delete_nodes", "canvas_delete_edges")
+                .stream()
+                .map(name -> {
+                    ToolDefinition definition = mock(ToolDefinition.class);
+                    when(definition.name()).thenReturn(name);
+                    ToolCallback callback = mock(ToolCallback.class);
+                    when(callback.getToolDefinition()).thenReturn(definition);
+                    return callback;
+                })
+                .toArray(ToolCallback[]::new);
+        when(canvasProvider.getToolCallbacks()).thenReturn(canvasCallbacks);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ToolCallbackProvider> providers = mock(ObjectProvider.class);
+        when(providers.orderedStream()).thenReturn(Stream.of(canvasProvider));
+
+        skillExpander = new SkillExpander(agentTools, skillManager, providers);
         skillExpander.init(); // 包内可见，手动触发索引
     }
 
@@ -49,6 +80,7 @@ class SkillExpanderTests {
         assertTrue(names.contains("refineImage"), "应索引到 refineImage");
         assertTrue(names.contains("generateVideo"), "应索引到 generateVideo");
         assertTrue(names.contains("testEcho"), "应索引到新增的 testEcho");
+        assertTrue(names.contains("moon_request_human_input"), "应索引到人工介入工具");
     }
 
     @Test
@@ -73,13 +105,38 @@ class SkillExpanderTests {
 
     @Test
     void everySkillDeclaredToolResolves() {
-        // 每个技能的 tools 声明都应能解析出回调（声明即扩展：缺了会在启动时告警，这里应可解析）
+        // 非 Canvas 工具必须全部可解析；Canvas MCP 是可选进程，允许未启动或版本落后。
         for (AgentSkill skill : skillManager.all()) {
             if (skill.tools() == null || skill.tools().isEmpty()) continue;
-            ToolCallback[] callbacks = skillExpander.toolCallbacks(skill.tools());
-            assertEquals(skill.tools().size(), callbacks.length,
-                    "技能 " + skill.name() + " 声明的工具应全部可解析");
+            java.util.List<String> missing = skill.tools().stream()
+                    .filter(tool -> !skillExpander.hasTool(tool))
+                    .toList();
+            assertTrue(missing.isEmpty() || missing.stream().allMatch(tool -> tool.startsWith("canvas_")),
+                    "技能 " + skill.name() + " 存在不可解析的非 Canvas 工具：" + missing);
         }
+    }
+
+    @Test
+    void humanInputToolIsReturnDirectAndExposesHiddenValue() {
+        ToolCallback[] callbacks = skillExpander.toolCallbacks(List.of("moon_request_human_input"));
+        assertEquals(1, callbacks.length);
+        assertTrue(callbacks[0].getToolMetadata().returnDirect());
+        assertTrue(callbacks[0].getToolDefinition().inputSchema().contains("\"options\""));
+        assertTrue(callbacks[0].getToolDefinition().description().contains("严禁在回复中向用户展示 ID"));
+    }
+
+    @Test
+    void humanInputToolReturnsMachineReadableSelectionRequest() {
+        ToolCallback callback = skillExpander.toolCallbacks(List.of("moon_request_human_input"))[0];
+        String result = callback.call("""
+                {"prompt":"请选择画布","allowCustom":false,
+                 "options":[{"title":"项目一 / 画布一","value":{"projectId":"project-1","canvasId":"canvas-1"}}]}
+                """);
+
+        HumanInputRequest request = HumanInputRequest.parse(result).orElseThrow();
+        assertEquals("请选择画布", request.prompt());
+        assertEquals("human-option-1", request.options().getFirst().get("id"));
+        assertEquals("项目一 / 画布一", request.options().getFirst().get("title"));
     }
 
     @Test
@@ -88,6 +145,21 @@ class SkillExpanderTests {
         assertTrue(skill.isPresent(), "test 技能应被 SkillLoader 加载");
         assertFalse(skill.get().flow().isEmpty(), "test 技能应声明 flow 多步澄清流程");
         assertEquals("clarify_style", skill.get().flow().getFirst(), "flow 首步应为 clarify_style");
+    }
+
+    @Test
+    void canvasSkillsDescribeMediaRelayAndAutomaticRepair() {
+        String design = skillManager.get("canvas-design").orElseThrow().systemPrompt();
+        String run = skillManager.get("canvas-run").orElseThrow().systemPrompt();
+
+        assertTrue(design.contains("结果槽"));
+        assertTrue(design.contains("中间占位"));
+        assertTrue(design.contains("输出口"));
+        assertTrue(design.contains("canvas_get_node_model_config"));
+        assertTrue(design.contains("canvas_set_node_model_config"));
+        assertTrue(run.contains("执行前"));
+        assertTrue(run.contains("自动补齐"));
+        assertTrue(run.contains("canvas_set_node_model_config"));
     }
 
     @Test
