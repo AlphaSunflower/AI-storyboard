@@ -31,6 +31,9 @@ spring:
       # 统一走 LLM 网关 8083（Spring AI 自动拼 /chat/completions、/images/generations 等）
       base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
       api-key: ${LLM_GATEWAY_API_KEY:}
+      # 画布长任务允许模型在单次请求内运行长时间工具循环
+      timeout: 3600s
+      max-retries: 0
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -48,13 +51,13 @@ ai:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
   # ── 超时/重试（默认值对齐 agent-core 行为）──
-  image-request-timeout: 310
-  image-edit-timeout: 180
+  image-request-timeout: 900
+  image-edit-timeout: 900
   # 必须晚于网关上游请求超时（默认 600s）：避免上游已受理、画布先超时导致 taskId 丢失。
-  video-request-timeout: 660
-  video-download-timeout: 180
+  video-request-timeout: 1200
+  video-download-timeout: 900
   video-retry-delay-ms: 15000
-  gateway-model-timeout: 10
+  gateway-model-timeout: 30
   gateway-cooldown-ms: 300000
 
 # 跨域：dev 靠 vite proxy，生产走网关统一 CORS

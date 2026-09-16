@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { getJobToken } from './services/jobAuth';
@@ -56,5 +56,18 @@ describe('App authentication flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     expect(await screen.findByText('最近项目 A')).toBeTruthy();
+  });
+
+  it('ignores a late 401 from an old token after a new login', async () => {
+    localStorage.setItem('morrow_job_token', 'old-token');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('最近项目 A')).toBeTruthy());
+
+    localStorage.setItem('morrow_job_token', 'new-token');
+    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: 'old-token' } }));
+    expect(screen.getByText('最近项目 A')).toBeTruthy();
+
+    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: 'new-token' } }));
+    expect(await screen.findByPlaceholderText('you@example.com')).toBeTruthy();
   });
 });

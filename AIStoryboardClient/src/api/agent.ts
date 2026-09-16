@@ -1,6 +1,7 @@
 import client from './client';
 import { BACKEND_URL } from '../config';
 import type { GatewayModelOption } from './ai';
+import type { CanvasEditContext } from '../lib/canvasEditMode';
 
 export interface AgentConversation {
   id: string;
@@ -8,6 +9,7 @@ export interface AgentConversation {
   projectId: string;
   title: string;
   status: 'active' | 'archived';
+  canvasContext?: CanvasEditContext | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,7 +207,7 @@ export interface AssetOption {
 }
 
 export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace';
+  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace' | 'canvas_mode_required';
   content?: string;
   /** workflow 阶段稳定标识（如 intent_recognize / generate_storyboard） */
   stage?: string;
@@ -215,7 +217,7 @@ export interface SseEvent {
   taskId?: string;
   formContent?: string;
   actions?: { id: string; title: string }[];
-  expirationTime?: number;
+  expirationTime?: number | string;
   // 卡片模型/参数选项（后端下发网关模型列表，含各模型参数能力；无配置时缺失）
   models?: GatewayModelOption[];
   // aisplit 分镜确认卡片：图片/视频两组模型列表（分区参数选择器用）
@@ -253,6 +255,10 @@ export interface SseEvent {
   // /messages/stream 请求可选参数（后端可能透传/回显）
   routingHint?: string;
   cancelActiveTasks?: boolean;
+  conversationId?: string;
+  projectId?: string;
+  requestedIntent?: string;
+  picUrls?: string[];
   code?: string;
   message?: string;
 }
@@ -342,6 +348,11 @@ export interface StoryboardImageEnqueueItem {
 export const agentApi = {
   listConversations: (projectId: string) =>
     client.get<{ data: AgentConversation[] }>('/agent/conversations', { params: { projectId } }),
+
+  getConversation: (conversationId: string) =>
+    client.get<{ data: { conversation: AgentConversation; messages: AgentMessage[] } }>(
+      `/agent/conversations/${conversationId}`,
+    ),
 
   createConversation: (projectId: string, title?: string) =>
     client.post<{ data: AgentConversation }>('/agent/conversations', { projectId, title }),
@@ -435,6 +446,9 @@ export const agentApi = {
   skipPendingCheckpoint: (conversationId: string) =>
     client.post<{ data: null }>(`/agent/conversations/${conversationId}/checkpoint/skip`),
 
+  exitCanvasMode: (conversationId: string) =>
+    client.post<{ data: null }>(`/agent/conversations/${conversationId}/canvas-mode/exit`),
+
   // 打断当前会话的生成（「停止生成」按钮触发）：后端置位会话级 interrupt 标志 → 编排协作式取消
   interrupt: (conversationId: string) =>
     client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
@@ -518,7 +532,7 @@ export async function streamChat(
   assetIds?: string[],
   assetGroupIds?: string[],
   signal?: AbortSignal,
-  opts?: { routingHint?: string; cancelActiveTasks?: boolean },
+  opts?: { routingHint?: string; cancelActiveTasks?: boolean; canvasContext?: CanvasEditContext },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
@@ -531,6 +545,7 @@ export async function streamChat(
       assetGroupIds: assetGroupIds ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
+      canvasContext: opts?.canvasContext,
     }),
     signal,
   });
@@ -548,12 +563,21 @@ export async function submitForm(
   params?: Record<string, string>,
   assetIds?: string[],
   signal?: AbortSignal,
+  opts?: { canvasContext?: CanvasEditContext },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ formToken, taskId, action, content: customText ?? '', params: params ?? {}, assetIds: assetIds ?? [] }),
+    body: JSON.stringify({
+      formToken,
+      taskId,
+      action,
+      content: customText ?? '',
+      params: params ?? {},
+      assetIds: assetIds ?? [],
+      canvasContext: opts?.canvasContext,
+    }),
     signal,
   });
   await consumeSse(res, onEvent, signal);

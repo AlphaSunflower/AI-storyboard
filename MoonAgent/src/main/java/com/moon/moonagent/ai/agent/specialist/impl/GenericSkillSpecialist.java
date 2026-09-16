@@ -4,7 +4,16 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
+import com.moon.moonagent.ai.agent.canvas.CanvasActivationRequiredException;
+import com.moon.moonagent.ai.agent.canvas.CanvasContextToolCallback;
+import com.moon.moonagent.ai.agent.canvas.CanvasContextPromptBuilder;
+import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
+import com.moon.moonagent.ai.agent.canvas.CanvasToolGuardCallback;
+import com.moon.moonagent.ai.agent.canvas.CanvasToolProgressCallback;
+import com.moon.moonagent.ai.agent.human.HumanInputRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
@@ -14,6 +23,8 @@ import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
 import com.moon.moonagent.entity.AgentMessage;
+import com.moon.moonagent.entity.AgentAsset;
+import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +48,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 通用技能执行器 —— 无 handler 能力的通用 LLM 工具循环。
@@ -59,7 +71,7 @@ public class GenericSkillSpecialist implements SpecialistAgent {
 
     private static final Logger log = LoggerFactory.getLogger(GenericSkillSpecialist.class);
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration TIMEOUT = Duration.ofHours(1);
     /** 动态 HITL 卡片：hitl 清单为 [{id: "dynamic", title: ...}] 时，选项由 LLM 随机生成 */
     private static final String DYNAMIC_HITL_ID = "dynamic";
     /** LLM 随机生成的选项数（第 5 项固定为「测试成功」） */
@@ -69,12 +81,15 @@ public class GenericSkillSpecialist implements SpecialistAgent {
     private static final String SUCCESS_LABEL = "测试成功";
     /** 通用技能多步澄清的卡 action 前缀：skill-step:<stepId> */
     private static final String STEP_ACTION_PREFIX = "skill-step:";
+    private static final String HUMAN_INPUT_ACTION = "skill-human-input";
+    private static final String HUMAN_INPUT_TOOL = "moon_request_human_input";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final AgentMessageMapper messageMapper;
+    private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
     private final SkillExpander skillExpander;
     private final SkillManager skillManager;
@@ -94,7 +109,12 @@ public class GenericSkillSpecialist implements SpecialistAgent {
             return SpecialistResult.done("抱歉，这个能力暂时不可用。");
         }
         OrchestrationRequest request = toRequest(context, skill);
-        boolean resume = context.action() != null && !context.action().isBlank();
+        if (HUMAN_INPUT_ACTION.equals(context.cpAction())) {
+            return finish(context, request, SpecialistResult.done(
+                    executeTools(context, skill, request, false, humanInputContinuation(context))));
+        }
+        boolean resume = context.action() != null && !context.action().isBlank()
+                && !CanvasModeIntentPolicy.BOUND_ACTION.equals(context.action());
         try {
             if (isMultiStep(skill)) {
                 // 多步澄清（flow 声明）：run 进入第 1 步；resume 恢复第 N 步继续推进
@@ -114,7 +134,21 @@ public class GenericSkillSpecialist implements SpecialistAgent {
             if (!skill.hitlManifest().isEmpty() && !resume) {
                 return finish(context, request, SpecialistResult.done(confirmAndPause(context, skill, request)));
             }
-            return finish(context, request, SpecialistResult.done(executeTools(context, skill, request, resume)));
+            return finish(context, request, SpecialistResult.done(executeTools(context, skill, request, resume, "")));
+        } catch (CanvasActivationRequiredException e) {
+            HumanInputRequest humanInput = HumanInputRequest.fromToolCall(
+                    "新画布「" + e.canvasTitle() + "」已创建，但画布界面尚未完成切换。"
+                            + "请在画布界面切换到该画布，确认连接成功后继续。",
+                    List.of(Map.of(
+                            "title", "已切换到新画布，继续执行",
+                            "value", "continue"
+                    )),
+                    false
+            );
+            return finish(context, request, SpecialistResult.done(
+                    pauseForHumanInput(context, skill, request, humanInput)));
+        } catch (AgentInterruptException e) {
+            throw e;
         } catch (Exception e) {
             log.error("GenericSkillSpecialist({}) 执行失败: {}", skill.intentType(), e.getMessage(), e);
             return finish(context, request, SpecialistResult.done(support.sendFriendlyError(request, e.getMessage(), "处理出了点问题，请稍后重试。")));
@@ -444,7 +478,7 @@ public class GenericSkillSpecialist implements SpecialistAgent {
 
     /** 工具循环执行（resume 时在系统提示词追加「已确认，请执行」语义）。 */
     private String executeTools(SpecialistContext context, AgentSkill skill, OrchestrationRequest request,
-                                boolean resume) {
+                                boolean resume, String extraSystemPrompt) {
         String systemPrompt = skill.systemPrompt();
         if (systemPrompt == null || systemPrompt.isBlank()) {
             systemPrompt = "你是 Moon 智能体的技能执行器，用可用的工具完成用户需求，并给出简洁的中文结果。";
@@ -453,11 +487,74 @@ public class GenericSkillSpecialist implements SpecialistAgent {
             systemPrompt = systemPrompt
                     + "\n\n用户已确认上述操作。请继续执行，调用所需工具完成该需求，并给出结果。";
         }
+        if (extraSystemPrompt != null && !extraSystemPrompt.isBlank()) {
+            systemPrompt = systemPrompt + "\n\n" + extraSystemPrompt;
+        }
+        systemPrompt = systemPrompt
+                + "\n\n## 人工介入\n"
+                + "如果目标不明确、需要用户在多个名称中选择，或继续执行前必须由用户确认，"
+                + "请调用 `" + HUMAN_INPUT_TOOL + "`。options 的 title 只放项目名称、画布名称等人类可读名称；"
+                + "value 放内部 ID 或参数。不得在回复中展示 projectId、canvasId、nodeId 等原始 ID，也不得要求用户输入 ID。";
+        if (skill.intentType().startsWith("intent-canvas-")) {
+            String canvasPrompt = CanvasContextPromptBuilder.build(context.canvasContext(), persistentReferenceUrls(context));
+            if (!canvasPrompt.isBlank()) systemPrompt = systemPrompt + "\n\n" + canvasPrompt;
+        }
 
         String model = isVision(skill) ? gatewayModelService.getDefaultVisionModel()
                 : gatewayModelService.getDefaultTextModel();
         ChatClient client = getClient();
-        ToolCallback[] tools = skillExpander.toolCallbacks(skill.tools());
+        List<String> missingTools = skill.tools() == null ? List.of() : skill.tools().stream()
+                .filter(tool -> tool != null && !tool.isBlank() && !skillExpander.allToolNames().contains(tool))
+                .toList();
+        if (!missingTools.isEmpty()) {
+            String message = missingTools.stream().allMatch(tool -> tool.startsWith("canvas_"))
+                    ? "画布 MCP 未连接，请先启动 Morrow Bridge 并打开目标画布。"
+                    : "当前技能依赖的工具未就绪：" + String.join(", ", missingTools);
+            return support.sendFriendlyError(request, message, message);
+        }
+        List<String> toolNames = new ArrayList<>(skill.tools() == null ? List.of() : skill.tools());
+        if (skillExpander.hasTool(HUMAN_INPUT_TOOL) && !toolNames.contains(HUMAN_INPUT_TOOL)) {
+            toolNames.add(HUMAN_INPUT_TOOL);
+        }
+        ToolCallback[] tools = skillExpander.toolCallbacks(toolNames);
+        boolean canvasMode = skill.intentType().startsWith("intent-canvas-")
+                && context.canvasContext() != null && context.canvasContext().isCanvasEditMode();
+        AtomicReference<String> activeCanvasId = new AtomicReference<>(
+                canvasMode ? context.canvasContext().canvasId() : null);
+        if (canvasMode) {
+            tools = java.util.Arrays.stream(tools)
+                    .map(tool -> (ToolCallback) new CanvasContextToolCallback(
+                            tool, context.canvasContext(), activeCanvasId))
+                    .toArray(ToolCallback[]::new);
+        }
+        if (skill.intentType().startsWith("intent-canvas-")) {
+            support.sendWorkflowEvent(request, "canvas_tool", "正在分析画布任务…", "node_started");
+            tools = java.util.Arrays.stream(tools)
+                    .map(tool -> (ToolCallback) new CanvasToolProgressCallback(
+                            tool,
+                            message -> support.sendWorkflowEvent(request, "canvas_tool", message, "node_started")))
+                    .toArray(ToolCallback[]::new);
+            String conversationId = context.conversation().getId();
+            CanvasToolGuardCallback.GuardBudget guardBudget = CanvasToolGuardCallback.newBudget();
+            tools = java.util.Arrays.stream(tools)
+                    .map(tool -> (ToolCallback) new CanvasToolGuardCallback(
+                            tool,
+                            () -> support.isInterrupted(conversationId),
+                            guardBudget))
+                    .toArray(ToolCallback[]::new);
+        }
+        if (canvasMode) {
+            java.util.Arrays.stream(tools)
+                    .filter(tool -> "canvas_get_context".equals(tool.getToolDefinition().name()))
+                    .findFirst()
+                    .ifPresent(tool -> {
+                        try {
+                            tool.call("{}");
+                        } catch (Exception e) {
+                            log.debug("画布上下文预检未完成，交由模型工具循环处理: {}", e.getMessage());
+                        }
+                    });
+        }
 
         String text = buildHistoryText(context) + "\n\n用户: " + context.userMessage();
         UserMessage userMessage = buildUserMessage(text, context.picUrls(), isVision(skill));
@@ -473,6 +570,10 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         AssistantMessage output = response != null && response.getResult() != null
                 ? response.getResult().getOutput() : null;
         String answer = output == null ? "" : (output.getText() == null ? "" : output.getText());
+        java.util.Optional<HumanInputRequest> humanInput = HumanInputRequest.parse(answer);
+        if (humanInput.isPresent()) {
+            return pauseForHumanInput(context, skill, request, humanInput.get());
+        }
         publishReasoning(context, request, output, model, started);
         String content = answer == null ? "" : answer;
         support.sendMessage(request, content);
@@ -481,8 +582,85 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         return content;
     }
 
+    private String pauseForHumanInput(SpecialistContext context, AgentSkill skill, OrchestrationRequest request,
+                                      HumanInputRequest humanInput) {
+        List<Map<String, Object>> actions = new ArrayList<>();
+        for (Map<String, Object> option : humanInput.options()) {
+            Object id = option.get("id");
+            Object title = option.get("title");
+            if (id == null || title == null) continue;
+            actions.add(Map.of("id", String.valueOf(id), "title", String.valueOf(title)));
+        }
+        if (humanInput.allowCustom()) {
+            actions.add(Map.of("id", "custom", "title", "自定义输入"));
+        }
+        if (actions.isEmpty()) {
+            return support.sendFriendlyError(request, "人工选择项为空", "需要您选择的内容暂时不可用，请换个说法。");
+        }
+        Map<String, Object> planItem = new LinkedHashMap<>();
+        planItem.put("intent", skill.intentType());
+        planItem.put("skill", skill.name());
+        planItem.put("content", context.userMessage() == null ? "" : context.userMessage());
+        planItem.put("prompt", humanInput.prompt());
+        planItem.put("options", humanInput.options());
+        planItem.put("allowCustom", humanInput.allowCustom());
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                humanInput.prompt(),
+                HUMAN_INPUT_ACTION,
+                List.of(planItem),
+                "human_input",
+                actions));
+    }
+
+    private String humanInputContinuation(SpecialistContext context) {
+        String plan = context.cpPlan() == null ? "" : context.cpPlan();
+        String selectedId = context.action() == null ? "" : context.action();
+        List<Map<String, Object>> options = support.planListField(plan, "options");
+        Map<String, Object> selected = options.stream()
+                .filter(option -> selectedId.equals(String.valueOf(option.get("id"))))
+                .findFirst()
+                .orElseGet(LinkedHashMap::new);
+        Object value = "custom".equals(selectedId)
+                ? context.customText()
+                : selected.get("value");
+        String label = "custom".equals(selectedId)
+                ? context.customText()
+                : String.valueOf(selected.getOrDefault("title", selectedId));
+        String prompt = support.planField(plan, "prompt");
+        try {
+            return "人工介入已完成。问题：" + prompt
+                    + "\n用户选择：" + (label == null ? "" : label)
+                    + "\n该选项的内部 value=" + objectMapper.writeValueAsString(value)
+                    + "\n请使用 value 中的内部参数继续完成原任务，不要再次请求同一选择，也不得把内部 ID 展示给用户。";
+        } catch (Exception e) {
+            return "人工介入已完成。用户选择：" + label
+                    + "。内部 value=" + value
+                    + "。请继续完成原任务，不要再次请求同一选择。";
+        }
+    }
+
     private boolean isVision(AgentSkill skill) {
         return "vision".equalsIgnoreCase(skill.modelRole());
+    }
+
+    private List<String> persistentReferenceUrls(SpecialistContext context) {
+        List<String> urls = new ArrayList<>();
+        if (context.picUrls() != null) urls.addAll(context.picUrls());
+        try {
+            List<AgentAsset> refs = agentAssetMapper.selectList(
+                    new LambdaQueryWrapper<AgentAsset>()
+                            .eq(AgentAsset::getConversationId, context.conversation().getId())
+                            .eq(AgentAsset::getType, "reference")
+                            .isNotNull(AgentAsset::getUrl)
+                            .orderByDesc(AgentAsset::getCreatedAt)
+                            .last("LIMIT 20"));
+            refs.stream().map(AgentAsset::getUrl).filter(url -> url != null && !url.isBlank()).forEach(urls::add);
+        } catch (Exception e) {
+            log.warn("读取会话持久媒体失败: conversationId={}, error={}", context.conversation().getId(), e.getMessage());
+        }
+        CanvasSessionContext canvasContext = context.canvasContext();
+        if (canvasContext != null) urls.removeIf(canvasContext::isMediaExcluded);
+        return urls.stream().distinct().toList();
     }
 
     /** 手动拼历史（对齐 OtherSpecialist：最近 20 条，时间升序） */
@@ -536,6 +714,7 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         request.setParams(context.params() == null ? Map.of() : context.params());
         request.setAssetIds(context.assetIds() == null ? java.util.List.of() : context.assetIds());
         request.setTrace(context.trace());
+        request.setCanvasContext(context.canvasContext());
         return request;
     }
 

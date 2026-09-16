@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.ai.agent.human.HumanInputRequest;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -154,6 +155,20 @@ public class AgentTools {
             log.error("AgentTools.generateVideo 失败: {}", e.getMessage(), e);
             throw new IllegalArgumentException("视频生成失败：" + e.getMessage());
         }
+    }
+
+    @Tool(
+            name = "moon_request_human_input",
+            description = "请求用户点击选择。用于目标不明确、需要候选人确认或存在危险操作时。"
+                    + "options 每项必须包含 title 和 value；value 是系统内部参数，严禁在回复中向用户展示 ID。",
+            returnDirect = true)
+    public Map<String, Object> requestHumanInput(
+            @ToolParam(description = "给用户看的简短问题") String prompt,
+            @ToolParam(description = "可点击选项：{title:显示名称, value:内部参数, id:可选来源ID}") List<Map<String, Object>> options,
+            @ToolParam(description = "是否允许自定义输入，默认 false") Boolean allowCustom) {
+        HumanInputRequest request = HumanInputRequest.fromToolCall(prompt, options, allowCustom);
+        log.info("AgentTools.requestHumanInput: options={} allowCustom={}", request.options().size(), request.allowCustom());
+        return request.toToolResult();
     }
 
     /**

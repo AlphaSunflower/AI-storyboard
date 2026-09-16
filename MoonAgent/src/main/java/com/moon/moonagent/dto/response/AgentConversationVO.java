@@ -1,5 +1,7 @@
 package com.moon.moonagent.dto.response;
 
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
+
 import java.time.OffsetDateTime;
 
 /**
@@ -12,6 +14,7 @@ public record AgentConversationVO(
     String projectId,
     String title,
     String status,
+    CanvasSessionContext canvasContext,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt
 ) {}

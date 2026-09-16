@@ -18,6 +18,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
@@ -97,6 +98,13 @@ public class AgentConversationController {
         return ApiResponse.ok("已跳过当前确认", null);
     }
 
+    /** 离开画布编辑模式：清除会话级画布锁，后续消息恢复全局意图识别。 */
+    @PostMapping("/conversations/{id}/canvas-mode/exit")
+    public ApiResponse<Void> exitCanvasMode(Authentication auth, @PathVariable String id) {
+        chatService.exitCanvasMode(auth.getName(), id);
+        return ApiResponse.ok("已离开画布编辑模式", null);
+    }
+
     /** 删除会话（级联删消息/资产） */
     @DeleteMapping("/conversations/{id}")
     public ApiResponse<Void> deleteConversation(Authentication auth, @PathVariable String id) {
@@ -137,7 +145,7 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.listAssets(id, page, size));
     }
 
-    /** 上传图片（参考图）：存 uploads/images/ → 返回 URL → 落库 agent_assets(type=reference) */
+    /** 上传参考素材（图片/视频/音频）：存对应 MinIO 目录 → 返回 URL → 落库 agent_assets(type=reference) */
     @PostMapping("/upload")
     public ApiResponse<Map<String, String>> uploadImage(
               Authentication auth,
@@ -145,11 +153,6 @@ public class AgentConversationController {
               @RequestParam(required = false) String conversationId,
               @RequestParam(required = false) String purpose,
               @RequestParam(required = false) String kind) {
-        // 参数校验（文件类型）：Controller 职责
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new BusinessException(40001, "仅支持上传图片文件");
-        }
         String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file, purpose, kind);
         return ApiResponse.ok(Map.of("url", url));
     }
@@ -206,9 +209,15 @@ public class AgentConversationController {
         }
         String routingHint = request.assetGroupIds() != null && !request.assetGroupIds().isEmpty()
                 ? "intent-video" : request.routingHint();
-        chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
+        if (request.canvasContext() == null) {
+            chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                    request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                    routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
+        } else {
+            chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                    request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                    routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext());
+        }
         return emitter;
     }
 
@@ -218,11 +227,19 @@ public class AgentConversationController {
                                  @RequestBody AgentFormSubmitRequest request) {
         chatService.getOwnedConversation(auth.getName(), id);
         SseEmitter emitter = createSseEmitter();
-        chatService.submitFormAndResume(auth.getName(), id,
-            request.formToken(), request.taskId(), request.action(), request.content(),
-            request.params() == null ? java.util.Map.of() : request.params(),
-            request.assetIds() == null ? java.util.List.of() : request.assetIds(),
-            request.routingHint(), emitter);
+        if (request.canvasContext() == null) {
+            chatService.submitFormAndResume(auth.getName(), id,
+                request.formToken(), request.taskId(), request.action(), request.content(),
+                request.params() == null ? java.util.Map.of() : request.params(),
+                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
+                request.routingHint(), emitter);
+        } else {
+            chatService.submitFormAndResume(auth.getName(), id,
+                request.formToken(), request.taskId(), request.action(), request.content(),
+                request.params() == null ? java.util.Map.of() : request.params(),
+                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
+                request.routingHint(), request.canvasContext(), emitter);
+        }
         return emitter;
     }
 
@@ -301,8 +318,16 @@ public class AgentConversationController {
 
     /** 会话实体 → VO 映射 */
     private static AgentConversationVO toVO(AgentConversation c) {
+        CanvasSessionContext canvasContext = null;
+        if (c.getCanvasContext() != null && !c.getCanvasContext().isBlank()) {
+            try {
+                canvasContext = CanvasSessionContext.fromJson(c.getCanvasContext());
+            } catch (Exception e) {
+                log.warn("解析会话画布上下文失败: conversationId={}", c.getId());
+            }
+        }
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
-                c.getStatus(), c.getCreatedAt(), c.getUpdatedAt());
+                c.getStatus(), canvasContext, c.getCreatedAt(), c.getUpdatedAt());
     }
 
     /** 消息实体 → VO 映射 */

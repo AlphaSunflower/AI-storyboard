@@ -28,9 +28,20 @@ import { usePresence } from '../hooks/usePresence';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
+import {
+  buildCanvasRequestContext,
+  loadCanvasEditContext,
+  parseCanvasEditContext,
+  rebindCanvasEditContext,
+  resolveCanvasModePhase,
+} from '../lib/canvasEditMode';
+import type { CanvasModeReadyMessage, CanvasModeStatusMessage } from '../lib/embeddedAppMessages';
+import { canvasIdFromUrl } from '../components/agent/apps/chatAppDefinitions';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
+import { Frame } from 'lucide-react';
 import '../styles/chat-interactions.css';
+import '../styles/canvas-tech-chat.css';
 
 /** 待选人工介入卡占位消息（metadata.kind='hitl' 且 pending）：过滤掉，避免与流内卡片重复渲染 formContent。 */
 const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boolean } } }) =>
@@ -48,6 +59,14 @@ export function ChatPage() {
   const user = useAuthStore((s) => s.user);
   const userName = user?.displayName || '未登录';
   const currentProject = useProjectStore((s) => s.currentProject);
+  const canvasEditContext = useAgentStore((s) => s.canvasEditContext);
+  const canvasBinding = useAgentStore((s) => s.canvasBinding);
+  const canvasExitPending = useAgentStore((s) => s.canvasExitPending);
+  const resumeCanvasBinding = useAgentStore((s) => s.resumeCanvasBinding);
+  const exitCanvasModeNow = useAgentStore((s) => s.exitCanvasModeNow);
+  const cancelCanvasBinding = useAgentStore((s) => s.cancelCanvasBinding);
+  const leaveCanvasEditMode = useAgentStore((s) => s.leaveCanvasEditMode);
+  const setCanvasBindingStatus = useAgentStore((s) => s.setCanvasBindingStatus);
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
@@ -78,6 +97,7 @@ export function ChatPage() {
   const [sceneReviewCollapsed, setSceneReviewCollapsed] = useState(false);
   const railProjectBtnRef = useRef<HTMLButtonElement>(null);
   const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
+  const requestedCanvasContextRef = useRef(parseCanvasEditContext(window.location.search));
 
   // 回到最新消息（对话上翻较多时，消息中间出现向下按钮）
   const scrollToBottom = () => {
@@ -105,6 +125,91 @@ export function ChatPage() {
   };
 
   const appWindowOpen = chatApps.windowOpen;
+  const {
+    open: openChatApp,
+    tabs: chatAppTabs,
+    bindCanvasMode,
+    releaseCanvasMode,
+  } = chatApps;
+  const canvasPhase = resolveCanvasModePhase(canvasEditContext, canvasBinding, canvasExitPending);
+  const canvasTechActive = canvasPhase !== 'natural';
+  const handleCanvasModeStatus = useCallback((message: CanvasModeStatusMessage) => {
+    if (message.conversationId !== useAgentStore.getState().activeConversationId) return;
+    if (message.state === 'bridge-connecting') setCanvasBindingStatus('正在连接画布服务…');
+    else if (message.state === 'bridge-error') setCanvasBindingStatus(message.message || '画布服务未就绪，正在重试…');
+    else setCanvasBindingStatus('请选择要编辑的画布');
+  }, [setCanvasBindingStatus]);
+  const handleCanvasModeReady = useCallback((message: CanvasModeReadyMessage) => {
+    const binding = useAgentStore.getState().canvasBinding;
+    const currentContext = useAgentStore.getState().canvasEditContext;
+    const rebound = rebindCanvasEditContext(currentContext, message.projectId, message.canvasId);
+    if (rebound) useAgentStore.getState().setCanvasEditContext(rebound);
+    bindCanvasMode(message.canvasId);
+    if (!binding || message.conversationId !== binding.conversationId || message.projectId !== binding.projectId) return;
+    const base = {
+      mode: 'canvas-edit' as const,
+      projectId: message.projectId,
+      canvasId: message.canvasId,
+      mediaRefs: [],
+    };
+    const context = buildCanvasRequestContext(base, {
+      picUrls: binding.picUrls,
+      assetIds: binding.assetIds,
+    }) ?? base;
+    void resumeCanvasBinding(context);
+  }, [bindCanvasMode, resumeCanvasBinding]);
+  const handleCancelCanvasBinding = useCallback(() => {
+    cancelCanvasBinding();
+    releaseCanvasMode();
+  }, [cancelCanvasBinding, releaseCanvasMode]);
+
+  useEffect(() => {
+    if (!canvasBinding?.conversationId || !canvasBinding.projectId) return;
+    const existing = chatAppTabs.find((tab) => tab.key === 'canvas');
+    if (existing?.canvasMode?.conversationId === canvasBinding.conversationId
+      && existing.projectId === canvasBinding.projectId) return;
+    openChatApp('canvas', {
+      canvasMode: {
+        conversationId: canvasBinding.conversationId,
+        projectId: canvasBinding.projectId,
+        canvasId: existing?.projectId === canvasBinding.projectId ? canvasIdFromUrl(existing.url) : undefined,
+        parentOrigin: window.location.origin,
+      },
+    });
+  }, [canvasBinding, openChatApp, chatAppTabs]);
+
+  useEffect(() => {
+    if (!canvasEditContext || canvasBinding) return;
+    const existing = chatAppTabs.find((tab) => tab.key === 'canvas');
+    const matches = existing?.canvasMode?.conversationId === activeConversationId
+      && existing.canvasMode.projectId === canvasEditContext.projectId
+      && existing.canvasMode.canvasId === canvasEditContext.canvasId;
+    if (matches) return;
+    openChatApp('canvas', {
+      canvasMode: {
+        conversationId: activeConversationId ?? '',
+        projectId: canvasEditContext.projectId,
+        canvasId: canvasEditContext.canvasId,
+        parentOrigin: window.location.origin,
+      },
+    });
+  }, [activeConversationId, canvasBinding, canvasEditContext, openChatApp, chatAppTabs]);
+
+  useEffect(() => {
+    if (!canvasExitPending || streaming || waitingHumanInput || waitingVideoPlan) return;
+    exitCanvasModeNow();
+    releaseCanvasMode();
+  }, [canvasExitPending, releaseCanvasMode, exitCanvasModeNow, streaming, waitingHumanInput, waitingVideoPlan]);
+
+  useEffect(() => {
+    if (canvasPhase !== 'natural' && projectOpen) setProjectOpen(false);
+  }, [canvasPhase, projectOpen]);
+
+  useEffect(() => {
+    if (canvasPhase !== 'natural') return;
+    const canvasTab = chatAppTabs.find((tab) => tab.key === 'canvas');
+    if (canvasTab?.canvasMode) releaseCanvasMode();
+  }, [canvasPhase, releaseCanvasMode, chatAppTabs]);
   const contentRightReserve = appWindowOpen
     ? Math.max(chatApps.layout.width + 32, generationCenterOpen ? 420 : 0)
     : (generationCenterOpen ? 420 : 0);
@@ -114,6 +219,13 @@ export function ChatPage() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     if (params.get('embed') === '1') setEmbed(true);
+    const requestedCanvasContext = requestedCanvasContextRef.current;
+    if (requestedCanvasContext) {
+      useAgentStore.getState().setCanvasEditContext(requestedCanvasContext);
+    } else if (window.self !== window.top) {
+      const persisted = loadCanvasEditContext();
+      if (persisted) useAgentStore.getState().setCanvasEditContext(persisted);
+    }
     if (token) {
       const refresh = params.get('refresh');
       const userId = params.get('userId');
@@ -132,14 +244,18 @@ export function ChatPage() {
     if (loadedRef.current) return;
     loadedRef.current = true;
     const st = useProjectStore.getState();
-    if (st.currentProject) return;
+    const targetProjectId = requestedCanvasContextRef.current?.projectId;
+    if (st.currentProject?.id && (!targetProjectId || st.currentProject.id === targetProjectId)) return;
     st.loadProjects()
       .then(() => {
         const list = useProjectStore.getState().projects;
+        if (targetProjectId && list.some((project) => project.id === targetProjectId)) {
+          return useProjectStore.getState().loadProject(targetProjectId);
+        }
         if (list.length > 0) {
           const lastId = getLastOpenedProjectId();
           const target = list.find((p) => p.id === lastId) ?? list[0];
-          useProjectStore.getState().loadProject(target.id);
+          return useProjectStore.getState().loadProject(target.id);
         }
       })
       .catch(() => { /* 静默 */ });
@@ -155,6 +271,11 @@ export function ChatPage() {
     useAgentStore.getState().refetchStoryboardVideoQueue(projectId).catch(() => { /* 静默 */ });
     useAgentStore.getState().refetchStoryboardImageQueue(projectId).catch(() => { /* 静默 */ });
   }, [projectId]);
+
+  useEffect(() => {
+    if (!embed || !activeConversationId || canvasEditContext) return;
+    void useAgentStore.getState().restoreCanvasMode(activeConversationId);
+  }, [embed, activeConversationId, canvasEditContext]);
 
   // 新消息自动滚底（近底才跟随）
   useEffect(() => {
@@ -236,6 +357,7 @@ export function ChatPage() {
 
   // 手机端：选择会话后自动关闭侧栏
   const handleMobileSelectConversation = (id: string) => {
+    if (canvasBinding || canvasExitPending) return;
     useAgentStore.getState().selectConversation(id);
     setMobileSidebarOpen(false);
   };
@@ -278,11 +400,14 @@ export function ChatPage() {
   return (
     <>
     {/* 页面氛围光晕（fixed 覆盖手机/桌面两分支，pointer-events none） */}
-    <AmbientGlow />
+    {!canvasTechActive && <AmbientGlow />}
     {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
       <div
+      className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
+      data-canvas-mode={canvasTechActive ? 'true' : undefined}
       style={{ height: '100vh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
     >
+        <CanvasTechAtmosphere active={canvasTechActive} />
         {/* 顶部导航栏 */}
         <MobileHeader
           title={currentTitle}
@@ -311,13 +436,14 @@ export function ChatPage() {
               }}
             >
               {/* 侧栏内嵌会话列表（禁用宽度拖拽和收起按钮） */}
-              <MobileSidebarContent
-                onSelectConversation={handleMobileSelectConversation}
-                onClose={() => setMobileSidebarOpen(false)}
-                onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
-                onOpenRecords={() => { setRecordsOpen(true); setMobileSidebarOpen(false); }}
-                logout={logout}
-              />
+          <MobileSidebarContent
+            onSelectConversation={handleMobileSelectConversation}
+            onClose={() => setMobileSidebarOpen(false)}
+            onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
+            onOpenRecords={() => { setRecordsOpen(true); setMobileSidebarOpen(false); }}
+            logout={logout}
+            canvasLocked={canvasPhase !== 'natural'}
+          />
             </div>
             <style>{`@keyframes mobileSlideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }`}</style>
           </div>
@@ -360,6 +486,7 @@ export function ChatPage() {
               ref={scrollRef}
               onScroll={handleThreadScroll}
               onWheel={handleThreadWheel}
+              className="chat-thread-scroll"
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
               <div
@@ -414,7 +541,7 @@ export function ChatPage() {
             </div>
 
             {/* 底部输入卡 */}
-            <div style={{ padding: '8px 12px 12px 12px', background: 'white' }}>
+            <div className="chat-composer-dock" style={{ padding: '8px 12px 12px 12px', background: 'white' }}>
               <ChatComposer />
             </div>
           </>
@@ -425,8 +552,11 @@ export function ChatPage() {
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
+      className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
+      data-canvas-mode={canvasTechActive ? 'true' : undefined}
       style={{ height: '100vh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
     >
+      <CanvasTechAtmosphere active={canvasTechActive} />
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
       {!embed && (
         <>
@@ -450,10 +580,10 @@ export function ChatPage() {
                 <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
                   <button
                     ref={railProjectBtnRef}
-                    onClick={() => setProjectOpen((value) => !value)}
+                    onClick={() => { if (canvasPhase === 'natural') setProjectOpen((value) => !value); }}
                     onMouseDown={(e) => e.stopPropagation()}
-                    title={currentProject?.name ?? '选择项目'}
-                    style={railIconBtn}
+                    title={canvasPhase === 'natural' ? (currentProject?.name ?? '选择项目') : '请先离开画布编辑模式'}
+                    style={{ ...railIconBtn, opacity: canvasPhase === 'natural' ? 1 : 0.45, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed' }}
                     className="chat-icon-button"
                     {...railHover}
                   ><FolderKanban size={18} strokeWidth={1.8} /></button>
@@ -493,6 +623,10 @@ export function ChatPage() {
               <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
                 <AgentConversationList
                   width={convWidth}
+                  onSelectOverride={(id) => {
+                    if (canvasBinding || canvasExitPending) return;
+                    void useAgentStore.getState().selectConversation(id);
+                  }}
                   headerRight={
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                       <button
@@ -537,14 +671,15 @@ export function ChatPage() {
                       <div style={{ position: 'relative', width: '100%' }}>
                         <button
                           ref={desktopProjectBtnRef}
-                          onClick={() => setProjectOpen((value) => !value)}
+                          onClick={() => { if (canvasPhase === 'natural') setProjectOpen((value) => !value); }}
                           onMouseDown={(e) => e.stopPropagation()}
-                          title="项目选择"
+                          title={canvasPhase === 'natural' ? '项目选择' : '请先离开画布编辑模式'}
                           style={{
                             width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                             border: 'none', borderRadius: 10, background: 'transparent',
                             padding: '0 12px', height: 40, fontSize: 15,
-                            color: DS.ink, cursor: 'pointer',
+                            color: DS.ink, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed',
+                            opacity: canvasPhase === 'natural' ? 1 : 0.5,
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -643,7 +778,11 @@ export function ChatPage() {
                       ><PanelLeftClose size={14} strokeWidth={2} /> 收起</button>
                     </div>
                   }
-                  onSelectOverride={(id) => { useAgentStore.getState().selectConversation(id); setEmbedConvOpen(false); }}
+                  onSelectOverride={(id) => {
+                    if (canvasBinding || canvasExitPending) return;
+                    useAgentStore.getState().selectConversation(id);
+                    setEmbedConvOpen(false);
+                  }}
                 />
               </div>
             </div>
@@ -675,6 +814,11 @@ export function ChatPage() {
                 title="会话"
                 style={{ position: 'absolute', top: 8, left: 8, border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3 }}
               ><Moon size={12} strokeWidth={1.8} /> 会话</button>
+            )}
+            {embed && canvasEditContext && (
+              <div style={{ position: 'absolute', top: 8, right: 8 }}>
+                <CanvasModeExitButton />
+              </div>
             )}
             <LiveOrb
               variant="webgl"
@@ -758,7 +902,15 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {!embed && <ChatAppActions onOpen={chatApps.open} />}
+                {embed && canvasEditContext && <CanvasModeExitButton />}
+                {!embed && (
+                  <ChatAppActions
+                    onOpen={chatApps.open}
+                    canvasPhase={canvasPhase}
+                    onExitCanvas={leaveCanvasEditMode}
+                    onCancelCanvas={handleCancelCanvasBinding}
+                  />
+                )}
                 <button
                   onClick={() => navigate('/library?type=AI_ASSET')}
                   title="项目库"
@@ -774,6 +926,7 @@ export function ChatPage() {
               ref={scrollRef}
               onScroll={handleThreadScroll}
               onWheel={handleThreadWheel}
+              className="chat-thread-scroll"
               style={{
                 flex: 1,
                 minHeight: 0,
@@ -854,7 +1007,7 @@ export function ChatPage() {
             </div>
 
             {/* 底部输入卡 */}
-            <div style={{
+            <div className="chat-composer-dock" style={{
               padding: '8px 16px 16px',
               paddingRight: !embed ? desktopRightReserve + 16 : 16,
               background: 'white',
@@ -915,6 +1068,9 @@ export function ChatPage() {
           sidebarCollapsed={collapsed}
           onCollapseSidebar={() => setCollapsed(true)}
           expandedWidthBonus={convWidth + 6}
+          onCanvasModeStatus={handleCanvasModeStatus}
+          onCanvasModeReady={handleCanvasModeReady}
+          canvasInteractionLocked={canvasPhase === 'exit_pending' || streaming}
         />
       )}
     </div>
@@ -925,6 +1081,43 @@ export function ChatPage() {
       onSelectConversation={(id) => { void useAgentStore.getState().selectConversation(id); }}
     />
     </>
+  );
+}
+
+function CanvasModeExitButton() {
+  const leaveCanvasEditMode = useAgentStore((s) => s.leaveCanvasEditMode);
+  const canvasExitPending = useAgentStore((s) => s.canvasExitPending);
+  return (
+    <button
+      type="button"
+      className="chat-canvas-exit-button"
+      onClick={leaveCanvasEditMode}
+      disabled={canvasExitPending}
+      title={canvasExitPending ? '本轮结束后离开' : '离开画布编辑模式'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        border: '1px solid rgba(65,118,230,0.25)', background: 'rgba(65,118,230,0.08)',
+        color: DS.brand, borderRadius: 8, padding: '5px 9px', fontSize: 12,
+        fontWeight: 600, cursor: canvasExitPending ? 'not-allowed' : 'pointer',
+        whiteSpace: 'nowrap', opacity: canvasExitPending ? 0.55 : 1,
+      }}
+    >
+      <Frame size={13} strokeWidth={2} />
+      {canvasExitPending ? '本轮结束后离开' : '离开画布编辑模式'}
+    </button>
+  );
+}
+
+function CanvasTechAtmosphere({ active }: { active: boolean }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`chat-canvas-tech-atmosphere${active ? ' is-active' : ''}`}
+    >
+      <span className="chat-canvas-tech-atmosphere__grid" />
+      <span className="chat-canvas-tech-atmosphere__beam" />
+      <span className="chat-canvas-tech-atmosphere__line" />
+    </div>
   );
 }
 

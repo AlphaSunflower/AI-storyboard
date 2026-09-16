@@ -156,6 +156,156 @@ describe('recoverGenerationJobs', () => {
     ]);
   });
 
+  it('ignores queue items that belong to another canvas', async () => {
+    await putGenerationQueueItem({
+      ...queueItem(),
+      id: 'record-other',
+      projectId: 'project-2',
+      canvasId: 'canvas-2',
+      producerNodeId: 'node-other',
+      generationRecordId: 'record-other',
+      status: 'terminal',
+    });
+    useCanvasStore.setState({ generationRecords: [] });
+    mocks.getJob.mockResolvedValue({
+      jobId: 'job-1',
+      status: 'completed',
+      progress: 1,
+    });
+
+    await recoverGenerationJobs();
+
+    expect(mocks.getJob).not.toHaveBeenCalled();
+    expect(useCanvasStore.getState().generationRecords).toEqual([]);
+  });
+
+  it('clears stale materializing state for a completed snapshot without assets', async () => {
+    await putGenerationQueueItem(queueItem());
+    useCanvasStore.setState({
+      generationRecords: [{
+        ...record(),
+        status: 'completed',
+        queueStatus: 'terminal',
+        progress: 1,
+        materializationStatus: 'materializing',
+      }],
+    });
+    mocks.getJob.mockResolvedValue({
+      jobId: 'job-1',
+      status: 'completed',
+      progress: 1,
+    });
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      status: 'completed',
+      queueStatus: 'terminal',
+      materializationStatus: 'completed',
+    });
+  });
+
+  it('preserves capability metadata when rebuilding a missing record', async () => {
+    await putGenerationQueueItem({
+      ...queueItem(),
+      requestSnapshot: {
+        capabilityId: 'image.generate',
+        sourceAssetIds: [],
+        params: { prompt: 'castle', model: 'image-model' },
+      },
+      status: 'terminal',
+    });
+    useCanvasStore.setState({ generationRecords: [] });
+    mocks.getJob.mockResolvedValue({
+      jobId: 'job-1',
+      status: 'completed',
+      progress: 1,
+    });
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      id: 'record-1',
+      actionId: 'generateImage',
+      model: 'image-model',
+      params: expect.objectContaining({ capabilityId: 'image.generate' }),
+      status: 'completed',
+    });
+  });
+
+  it('settles an active record when its local queue item is missing', async () => {
+    useCanvasStore.setState({ generationRecords: [record()] });
+    mocks.getJob.mockResolvedValue({
+      jobId: 'job-1',
+      status: 'completed',
+      progress: 1,
+    });
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      status: 'completed',
+      queueStatus: 'terminal',
+      materializationStatus: 'completed',
+    });
+  });
+
+  it('settles result landing when the produced asset is already attached', async () => {
+    useCanvasStore.setState({
+      generationRecords: [{
+        ...record(),
+        status: 'completed',
+        queueStatus: 'terminal',
+        materializationStatus: 'materializing',
+        materializedAssetIds: ['asset-1'],
+      }],
+    });
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      status: 'completed',
+      queueStatus: 'terminal',
+      materializationStatus: 'completed',
+      materializationError: undefined,
+    });
+  });
+
+  it('settles a terminal queue item even when the job snapshot is unavailable', async () => {
+    await putGenerationQueueItem({ ...queueItem(), status: 'terminal' });
+    mocks.getJob.mockRejectedValue(new Error('offline'));
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      status: 'completed',
+      queueStatus: 'terminal',
+      materializationStatus: 'completed',
+    });
+  });
+
+  it('clears result landing for a completed terminal queue item without a snapshot', async () => {
+    await putGenerationQueueItem({ ...queueItem(), status: 'terminal' });
+    useCanvasStore.setState({
+      generationRecords: [{
+        ...record(),
+        status: 'completed',
+        queueStatus: 'terminal',
+        progress: 1,
+        materializationStatus: 'materializing',
+      }],
+    });
+    mocks.getJob.mockRejectedValue(new Error('offline'));
+
+    await recoverGenerationJobs();
+
+    expect(useCanvasStore.getState().generationRecords[0]).toMatchObject({
+      status: 'completed',
+      queueStatus: 'terminal',
+      materializationStatus: 'completed',
+    });
+  });
+
   it('retries result materialization for a completed terminal queue item', async () => {
     await putGenerationQueueItem({ ...queueItem(), status: 'terminal' });
     useCanvasStore.setState({
@@ -188,5 +338,78 @@ describe('recoverGenerationJobs', () => {
       status: 'completed',
       materializationStatus: 'completed',
     });
+  });
+
+  it('rebuilds a missing record without duplicating an already hydrated result slot', async () => {
+    await putGenerationQueueItem({ ...queueItem(), status: 'terminal' });
+    useCanvasStore.setState({
+      nodes: [
+        node(),
+        {
+          id: 'slot-1',
+          type: 'video',
+          position: { x: 400, y: 0 },
+          data: {
+            kind: 'video',
+            label: '结果输出',
+            prompt: '',
+            status: 'success',
+            accent: '#fff',
+            assetId: 'asset-1',
+            mediaLoadState: 'ready',
+          },
+        },
+      ],
+      edges: [{
+        id: 'edge-1',
+        source: 'node-1',
+        sourceHandle: 'video',
+        target: 'slot-1',
+        targetHandle: 'origin',
+        type: 'canvas',
+        data: { resultSlot: true, resultSlotOrder: 0 },
+      }],
+      generationRecords: [],
+    });
+    mocks.getJob.mockResolvedValue({
+      jobId: 'job-1',
+      status: 'completed',
+      progress: 1,
+      assets: [{ id: 'asset-1', name: 'video.mp4', mimeType: 'video/mp4' }],
+    });
+    mocks.materializeGenerationResult.mockImplementation(async (_port, current: GenerationRecord) => ({
+      created: true,
+      record: {
+        ...current,
+        status: 'completed',
+        materializationStatus: 'completed',
+        completedAt: 2,
+      },
+      resultNodeId: 'node-1',
+    }));
+    mocks.linkGeneratedCanvasAssets.mockResolvedValue([
+      { id: 'asset-1', type: 'video', mimeType: 'video/mp4', url: '/api/files/videos/video.mp4' },
+    ]);
+
+    await recoverGenerationJobs();
+
+    expect(mocks.materializeGenerationResult).toHaveBeenCalledTimes(1);
+    expect(useCanvasStore.getState().generationRecords).toEqual([
+      expect.objectContaining({
+        id: 'record-1',
+        producerNodeId: 'node-1',
+        jobId: 'job-1',
+        status: 'completed',
+        queueStatus: 'terminal',
+        materializationStatus: 'completed',
+        resultSlots: [
+          expect.objectContaining({
+            nodeId: 'slot-1',
+            kind: 'video',
+            order: 0,
+          }),
+        ],
+      }),
+    ]);
   });
 });

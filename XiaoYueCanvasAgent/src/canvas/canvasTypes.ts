@@ -10,6 +10,7 @@ export interface CanvasCommandContext {
   expectedRevision?: number;
   dryRun?: boolean;
   approvalToken?: string;
+  signal?: AbortSignal;
 }
 
 export interface CanvasChangeSummary {
@@ -31,7 +32,7 @@ export interface CanvasCommandError {
 
 export interface CanvasCommandResult<T = unknown> {
   ok: boolean;
-  status: 'preview' | 'applied' | 'failed' | 'rejected';
+  status: 'preview' | 'applied' | 'accepted' | 'failed' | 'rejected';
   transactionId?: string;
   revision?: number;
   result?: T;
@@ -52,4 +53,47 @@ export interface CanvasNodeSummary {
   generationStatus?: string;
   materializationStatus?: string;
   resultNodeIds?: string[];
+  placeholder?: {
+    media: 'image' | 'video';
+    state: 'empty' | 'filled';
+    resultSlot: boolean;
+    producerNodeId?: string;
+    order?: number;
+    edgeId?: string;
+  };
+  missingInputs?: Array<{
+    portId: string;
+    label: string;
+    media: string;
+    required: boolean;
+    min: number;
+    bound: number;
+  }>;
+  ports?: {
+    inputs: Array<{
+      id: string;
+      label: string;
+      media: string;
+      acceptsKinds: string[];
+      role: string;
+      min: number;
+      max: number;
+      required: boolean;
+      ordered: boolean;
+    }>;
+    outputs: Array<{
+      id: string;
+      label: string;
+      media: string;
+      role: string;
+    }>;
+  };
+  actions?: Array<{
+    id: string;
+    label: string;
+    capabilityId: string;
+    resultPolicy: string;
+    startable: boolean;
+  }>;
+  runnable?: Record<string, boolean>;
 }

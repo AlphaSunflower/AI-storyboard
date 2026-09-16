@@ -14,6 +14,7 @@
 
 ```bash
 psql -U postgres -d llm_gateway -f AILLMGateway/src/main/resources/db/migration/V8__sys_config.sql
+psql -U postgres -d llm_gateway -f AILLMGateway/src/main/resources/db/migration/V15__extend_canvas_timeouts.sql
 ```
 
 ## 配置项一览
@@ -21,7 +22,7 @@ psql -U postgres -d llm_gateway -f AILLMGateway/src/main/resources/db/migration/
 | key | 类型 | 初始值 | 校验范围 | 备注 |
 |-----|------|--------|----------|------|
 | gateway.upstream.connect-timeout-ms | long | 30000 | [1000,300000] | HttpClient 连接超时（构造时固化） |
-| gateway.upstream.request-timeout-ms | long | 120000 | [1000,600000] | 每请求超时（SSE 取 max(值,300s)） |
+| gateway.upstream.request-timeout-ms | long | 1800000 | [1000,7200000] | 每请求超时（SSE 取 max(值,300s)） |
 | gateway.upstream.retry-count | int | 2 | [0,10] | 429/5xx 重试次数 |
 
 ## 接口

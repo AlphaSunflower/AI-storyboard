@@ -100,7 +100,7 @@ export function reconcileStoryboardShots(
     const node: CanvasNodeV2 = {
       id: identity.shotId,
       type: 'shot',
-      position: { x: plan.shotOrdinal * 420, y: 0 },
+      position: { x: 1_200, y: Math.max(0, plan.shotOrdinal - 1) * 360 },
       width: 360,
       height: 300,
       data: {

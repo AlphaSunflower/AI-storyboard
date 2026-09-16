@@ -16,7 +16,9 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
@@ -369,7 +371,11 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (conversationId != null && !conversationId.isBlank()) {
             getOwnedConversation(userId, conversationId);
         }
-        String url = fileStorageService.saveUploadedImage(file);
+        String mediaType = referenceMediaType(file.getContentType());
+        if (mediaType.isBlank()) {
+            throw new com.storyboard.common.BusinessException(40001, "仅支持上传图片、视频或音频文件");
+        }
+        String url = fileStorageService.saveUploadedReference(mediaType, file);
 
         // 落库 agent_assets（type=reference）
         AgentAsset asset = new AgentAsset();
@@ -377,7 +383,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         asset.setType("reference");
         asset.setUrl(url);
         asset.setPurpose(purpose == null || purpose.isBlank() ? null : purpose.trim());
-        asset.setKind((kind == null || kind.isBlank()) ? "reference" : kind.trim());
+        asset.setKind((kind == null || kind.isBlank()) ? mediaType : kind.trim());
         asset.setStatus("completed");
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
@@ -392,6 +398,47 @@ public class AgentChatServiceImpl implements AgentChatService {
             messageMapper.insert(refMsg);
         }
         return url;
+    }
+
+    private CanvasSessionContext resolveCanvasContext(AgentConversation conversation,
+                                                      CanvasSessionContext incoming) {
+        if (incoming != null && incoming.isCanvasEditMode()) {
+            try {
+                String encoded = incoming.toJson();
+                if (!encoded.equals(conversation.getCanvasContext())) {
+                    conversation.setCanvasContext(encoded);
+                    conversationMapper.updateById(conversation);
+                }
+            } catch (Exception e) {
+                log.warn("保存会话画布上下文失败: conversationId={}, error={}", conversation.getId(), e.getMessage());
+            }
+            return incoming;
+        }
+        String stored = conversation.getCanvasContext();
+        if (stored == null || stored.isBlank()) return null;
+        try {
+            CanvasSessionContext context = CanvasSessionContext.fromJson(stored);
+            return context.isCanvasEditMode() ? context : null;
+        } catch (Exception e) {
+            log.warn("恢复会话画布上下文失败: conversationId={}, error={}", conversation.getId(), e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public void exitCanvasMode(String userId, String conversationId) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        conversation.setCanvasContext(null);
+        conversationMapper.updateById(conversation);
+        log.info("已离开画布编辑模式: conversationId={}", conversationId);
+    }
+
+    static String referenceMediaType(String contentType) {
+        if (contentType == null) return "";
+        if (contentType.startsWith("image/")) return "image";
+        if (contentType.startsWith("video/") || contentType.contains("quicktime")) return "video";
+        if (contentType.startsWith("audio/")) return "audio";
+        return "";
     }
 
     /**
@@ -471,12 +518,21 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint, boolean cancelActiveTasks) {
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, routingHint,
+                cancelActiveTasks, null);
+    }
+
+    @Override
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
+                              java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
+                              boolean cancelActiveTasks, CanvasSessionContext canvasContext) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
             return;
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
         log.info("[Agent 消息接收] conversationId={}, picUrls={}, assetIds={}",
                 conversationId,
                 picUrls == null ? List.of() : picUrls,
@@ -532,7 +588,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, emitter);
+                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint,
+                        cancelActiveTasks, effectiveCanvasContext, emitter);
                 // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）；
                 // HITL 暂停已由 runHITLStage 落库 assistant 消息，不重复插入，仅补全 trace/reasoning 到该行 metadata
                 if (turn != null) {
@@ -849,7 +906,17 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 校验 form_token 归属/未过期 → 一次性消费（status pending→used）→ orchestrator.resume 恢复对应 step。
      */
     public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        submitFormAndResume(userId, conversationId, formToken, taskId, action, customText, params, assetIds,
+                routingHint, null, emitter);
+    }
+
+    @Override
+    public void submitFormAndResume(String userId, String conversationId, String formToken, String taskId,
+                                    String action, String customText, Map<String, String> params,
+                                    java.util.List<String> assetIds, String routingHint,
+                                    CanvasSessionContext canvasContext, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
         if (!conversationLock.tryAcquire(conversationId)) {
             sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
@@ -877,7 +944,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 // checkpoint 校验 + 消费 + 恢复执行（校验失败/过期/重放在 orchestrator.resumeTurn 内处理）；
                 // resume 返回本轮最后一条 message（如生成图片的 ![...](url)），落库 assistant 消息，
                 // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
-                AgentTurnResult turn = orchestrator.resumeTurn(conversation, formToken, action, customText, params, assetIds, routingHint, emitter);
+                AgentTurnResult turn = orchestrator.resumeTurn(conversation, formToken, action, customText, params,
+                        assetIds, routingHint, effectiveCanvasContext, emitter);
                 if (turn != null) {
                     if (turn.hitlPaused()) {
                         // 再次 HITL 暂停：runHITLStage 已落库新 assistant 消息，不重复插入
@@ -967,6 +1035,24 @@ public class AgentChatServiceImpl implements AgentChatService {
             result.put("taskId", "");
             result.put("expirationTime", cp.getExpirationTime().toEpochSecond());
             result.put("hitlType", cp.getAction() == null ? "" : cp.getAction());
+            if (CanvasModeIntentPolicy.BIND_ACTION.equals(cp.getAction())) {
+                AgentConversation conversation = conversationMapper.selectById(conversationId);
+                result.put("kind", CanvasModeIntentPolicy.BIND_ACTION);
+                result.put("projectId", conversation == null ? "" : conversation.getProjectId());
+                result.put("requestedIntent", orchestratorSupport.planField(cp.getPlan(), "intent"));
+                List<String> picUrls = orchestratorSupport.planPicUrls(cp.getPlan());
+                if (!picUrls.isEmpty()) result.put("picUrls", picUrls);
+                List<String> assetIds = new java.util.ArrayList<>();
+                var items = plan.path("items");
+                if (items.isArray() && !items.isEmpty() && items.get(0).path("assetIds").isArray()) {
+                    for (JsonNode assetId : items.get(0).path("assetIds")) {
+                        if (assetId.isTextual() && !assetId.asText().isBlank()) {
+                            assetIds.add(assetId.asText());
+                        }
+                    }
+                }
+                if (!assetIds.isEmpty()) result.put("assetIds", assetIds);
+            }
             if ("generate_video".equals(cp.getAction())) {
                 result.put("kind", "video-plan");
                 result.put("message", orchestratorSupport.planField(cp.getPlan(), "message"));

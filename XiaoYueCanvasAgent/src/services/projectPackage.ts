@@ -47,7 +47,8 @@ const sha256 = async (bytes: Uint8Array) => {
 export async function exportProjectPackage(projectId: string) {
   const project = await loadProject(projectId);
   if (!project) throw new Error('项目不存在');
-  const canvases = (await Promise.all(project.canvases.map(loadCanvas))).filter((canvas): canvas is CanvasDocumentV1 => Boolean(canvas));
+  const canvases = (await Promise.all(project.canvases.map((canvasId) => loadCanvas(canvasId, projectId))))
+    .filter((canvas): canvas is CanvasDocumentV1 => Boolean(canvas));
   const assetIds = new Set(canvases.flatMap((canvas) => [...canvasAssetIds(canvas)]));
   const assets = await getAssetsWithAncestors(assetIds);
   const files: Record<string, Uint8Array> = {};
@@ -218,19 +219,32 @@ export async function importProjectPackage(file: File) {
   while (titles.has(title)) title = `${titleBase} ${suffix++}`;
 
   const projectId = createId();
-  const canvases: CanvasDocumentV1[] = sourceCanvases.map((canvas, index) => ({
-    schemaVersion: 1,
-    id: createId(),
-    projectId,
-    title: canvas.title || (index === 0 ? '默认画布' : `画布 ${index + 1}`),
-    nodes: canvas.nodes.map(remapNode),
-    edges: canvas.edges.map(remapEdge),
-    viewport: canvas.viewport,
-    generationRecords: remapGenerationRecords(canvas.generationRecords),
-    migrationReport: canvas.migrationReport,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  const canvases: CanvasDocumentV1[] = sourceCanvases.map((canvas, index) => {
+    const canvasId = createId();
+    return {
+      schemaVersion: 1,
+      id: canvasId,
+      projectId,
+      title: canvas.title || (index === 0 ? '默认画布' : `画布 ${index + 1}`),
+      nodes: canvas.nodes.map(remapNode),
+      edges: canvas.edges.map(remapEdge),
+      viewport: canvas.viewport,
+      generationRecords: remapGenerationRecords(canvas.generationRecords),
+      executions: (canvas.executions ?? []).map((execution) => ({
+        ...execution,
+        projectId,
+        canvasId,
+        nodeIds: execution.nodeIds.map((id) => nodeIdMap.get(id) ?? id),
+        nodes: execution.nodes.map((node) => ({
+          ...node,
+          nodeId: nodeIdMap.get(node.nodeId) ?? node.nodeId,
+        })),
+      })),
+      migrationReport: canvas.migrationReport,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
   const project: ProjectDocumentV2 = {
     schemaVersion: 2,
     id: projectId,

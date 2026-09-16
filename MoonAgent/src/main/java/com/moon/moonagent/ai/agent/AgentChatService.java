@@ -112,6 +112,13 @@ public interface AgentChatService {
     void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint, boolean cancelActiveTasks);
 
     /**
+     * 流式发送消息（画布编辑模式）：canvasContext 在同一画布会话的每轮消息和 HITL 续流中持续携带。
+     */
+    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
+                       java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
+                       boolean cancelActiveTasks, CanvasSessionContext canvasContext);
+
+    /**
      * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
      * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 → 执行视频生成。
      */
@@ -123,6 +130,13 @@ public interface AgentChatService {
      * @param params 卡片参数选择器提交的生成参数（model/resolution/duration 等；空=未选择）
      */
     void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
+
+    /**
+     * HITL 表单提交并续流（画布编辑模式）：上下文随确认卡一路传递。
+     */
+    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action,
+                             String customText, Map<String, String> params, java.util.List<String> assetIds,
+                             String routingHint, CanvasSessionContext canvasContext, SseEmitter emitter);
 
     /**
      * 视频异步任务状态查询（前端轮询）：按 taskId 查 agent_assets 行（归属校验，未归属/无权 40401）。
@@ -144,6 +158,9 @@ public interface AgentChatService {
      * 归属校验与 {@link #getPendingCheckpoint} 一致。
      */
     void skipPendingCheckpoints(String userId, String conversationId);
+
+    /** 清除会话级画布编辑模式；之后消息恢复全局意图识别。 */
+    void exitCanvasMode(String userId, String conversationId);
 
     /**
      * 打断当前会话的生成（「停止生成」按钮）：校验归属 → 置位会话级 interrupt 标志。

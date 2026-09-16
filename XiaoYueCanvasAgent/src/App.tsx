@@ -3,6 +3,14 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Maximize2, MessageCircle, SlidersHorizontal } from 'lucide-react';
 import type { Viewport } from '@xyflow/react';
 import { startCanvasBridge } from './canvas/bridgeClient';
+import {
+  buildCanvasModeReadyMessage,
+  buildCanvasModeStatusMessage,
+  isCanvasModeControlMessage,
+  parseCanvasEmbeddedMode,
+  postCanvasModeMessage,
+  type CanvasEmbeddedMode,
+} from './canvas/canvasEmbeddedMode';
 import { MoonChatWindow } from './components/MoonChatWindow';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
 import { HomePage } from './components/HomePage';
@@ -16,6 +24,7 @@ import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary
 import { LoginScreen } from './components/LoginScreen';
 import { clearToken, getJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
+import { recoverGraphExecutions } from './canvas/graphExecutionService';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
 
 type SideView = 'agent' | 'inspector';
@@ -35,6 +44,8 @@ export default function App() {
   const [view, setView] = useState<View>('home');
   // 登录门控：无画布 token（未从 /chat 跳转带 token，也未本地登录）→ 先显示登录页
   const [authed, setAuthed] = useState(() => !!getJobToken());
+  const embeddedModeRef = useRef<CanvasEmbeddedMode | null>(parseCanvasEmbeddedMode(window.location.search));
+  const embeddedMode = embeddedModeRef.current;
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -46,6 +57,7 @@ export default function App() {
   const [sideOpen, setSideOpen] = useState(true);
   const [panelWidth, setPanelWidth] = useState(400); // 执行服务面板宽度（可拖拽）
   const [notice, setNotice] = useState<string | null>(null);
+  const [canvasInteractionLocked, setCanvasInteractionLocked] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const canvasRef = useRef<CanvasDocumentV1 | null>(null);
@@ -117,8 +129,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     const rejectAuth = (event: Event) => {
-      const status = (event as CustomEvent<{ status?: number }>).detail?.status;
-      setAuthMessage(status === 403 ? '当前账号无权访问该画布，请使用正确账号重新登录。' : '登录已失效，请重新登录。');
+      const rejectedToken = (event as CustomEvent<{ token?: string | null }>).detail?.token;
+      if (rejectedToken && rejectedToken !== getJobToken()) return;
+      setAuthMessage('登录已失效，请重新登录。');
       clearToken();
       setAuthed(false);
     };
@@ -130,6 +143,7 @@ export default function App() {
     const reconcile = () => {
       void hydrateReferencedCanvasAssets(canvas.id).catch(() => undefined);
       void recoverGenerationJobs().catch(() => undefined);
+      recoverGraphExecutions();
     };
     reconcile();
     const timer = window.setInterval(reconcile, 15_000);
@@ -137,9 +151,51 @@ export default function App() {
   }, [authed, canvas?.id, view]);
   useEffect(() => { canvasRef.current = canvas; }, [canvas]);
   useEffect(() => {
-    if (view === 'canvas' && project) return startCanvasBridge(project.id);
+    if (view === 'canvas' && project && canvas?.id) {
+      return startCanvasBridge(project.id, canvas.id, (status) => {
+        if (status.state === 'ready') {
+          window.dispatchEvent(new CustomEvent('morrow:canvas-bridge-ready', {
+            detail: { projectId: project.id, canvasId: canvas.id },
+          }));
+        }
+        if (!embeddedMode) return;
+        if (status.state === 'ready') {
+          postCanvasModeMessage(
+            embeddedMode,
+            buildCanvasModeReadyMessage(embeddedMode, canvas.id, canvas.title),
+          );
+        } else {
+          postCanvasModeMessage(
+            embeddedMode,
+            buildCanvasModeStatusMessage(
+              embeddedMode,
+              status.state === 'connecting' ? 'bridge-connecting' : 'bridge-error',
+              status.message,
+            ),
+          );
+        }
+      }, { projectTitle: project.title, canvasTitle: canvas.title });
+    }
     return undefined;
-  }, [view, project?.id]);
+  }, [embeddedMode, view, project?.id, canvas?.id, canvas?.title]);
+  useEffect(() => {
+    if (!embeddedMode || view !== 'projectHome' || project?.id !== embeddedMode.projectId) return;
+    postCanvasModeMessage(
+      embeddedMode,
+      buildCanvasModeStatusMessage(embeddedMode, 'selecting', '请选择要编辑的画布'),
+    );
+  }, [embeddedMode, project?.id, view]);
+  useEffect(() => {
+    if (!embeddedMode) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== embeddedMode.parentOrigin || !isCanvasModeControlMessage(event.data)) return;
+      if (event.data.conversationId !== embeddedMode.conversationId
+        || event.data.projectId !== embeddedMode.projectId) return;
+      setCanvasInteractionLocked(event.data.locked);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [embeddedMode]);
   useEffect(() => {
     const mobile = window.matchMedia('(max-width: 1180px)');
     const syncSidePanel = (event: MediaQueryListEvent | MediaQueryList) => { if (event.matches) setSideOpen(false); };
@@ -157,6 +213,7 @@ export default function App() {
       nodes: graph.nodes.map((node) => node.selected ? { ...node, selected: false } : node),
       edges: graph.edges,
       generationRecords: graph.generationRecords,
+      executions: graph.executions,
       viewport: viewportRef.current ?? current.viewport,
       updatedAt: Date.now(),
     };
@@ -196,15 +253,17 @@ export default function App() {
     if (!nextProject) throw new Error('项目不存在');
     setProject(nextProject);
     setCanvas(null);
-    setCanvases(await listCanvases(projectId));
+    const summaries = await listCanvases(projectId);
+    setCanvases(summaries);
     setView('projectHome');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(projectId)}`);
+    return summaries;
   }, []);
 
   const openCanvas = useCallback(async (projectId: string, canvasId: string) => {
     const nextProject = await loadProject(projectId);
     if (!nextProject) throw new Error('项目不存在');
-    const nextCanvas = await loadCanvas(canvasId);
+    const nextCanvas = await loadCanvas(canvasId, projectId);
     if (!nextCanvas) throw new Error('画布不存在');
     const assets = await getAssetMetadatas(projectAssetIds(nextCanvas.nodes));
     clearAssets();
@@ -215,20 +274,11 @@ export default function App() {
     setCanvas(nextCanvas);
     setCanvases(await listCanvases(projectId));
     setSaveStatus('saved');
-    setSideView('agent');
-    setSideOpen(window.innerWidth > 1180);
+    setSideView(embeddedMode ? 'inspector' : 'agent');
+    setSideOpen(embeddedMode ? false : window.innerWidth > 1180);
     setView('canvas');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(projectId)}&canvas=${encodeURIComponent(canvasId)}`);
-  }, [clearAssets, hydrateMetadata, loadProjectGraph]);
-
-  useEffect(() => {
-    const match = window.location.hash.match(/^#project=([^&]+)(?:&canvas=([^&]+))?$/);
-    if (!match) return;
-    const projectId = decodeURIComponent(match[1]);
-    const canvasId = match[2] ? decodeURIComponent(match[2]) : undefined;
-    if (canvasId) void openCanvas(projectId, canvasId).catch(() => window.history.replaceState(null, '', window.location.pathname));
-    else void openProjectHome(projectId).catch(() => window.history.replaceState(null, '', window.location.pathname));
-  }, [openCanvas, openProjectHome]);
+  }, [clearAssets, embeddedMode, hydrateMetadata, loadProjectGraph]);
 
   const newProject = useCallback(async () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -238,13 +288,31 @@ export default function App() {
     await openProjectHome(created.id);
   }, [openProjectHome, persistCurrentCanvas, refreshProjects]);
 
-  const createAndOpenCanvas = useCallback(async () => {
-    if (!project) return;
-    const existing = await listCanvases(project.id);
-    const created = await createCanvas(project.id, `画布 ${existing.length + 1}`);
+  const createAndOpenCanvas = useCallback(async (targetProjectId: string) => {
+    if (!targetProjectId) return;
+    const existing = await listCanvases(targetProjectId);
+    const created = await createCanvas(targetProjectId, `画布 ${existing.length + 1}`);
     await refreshProjects();
-    await openCanvas(project.id, created.id);
-  }, [openCanvas, project, refreshProjects]);
+    await openCanvas(targetProjectId, created.id);
+  }, [openCanvas, refreshProjects]);
+
+  useEffect(() => {
+    const match = window.location.hash.match(/^#project=([^&]+)(?:&canvas=([^&]+))?$/);
+    if (!match) return;
+    const projectId = decodeURIComponent(match[1]);
+    const canvasId = match[2] ? decodeURIComponent(match[2]) : undefined;
+    if (canvasId) {
+      void openCanvas(projectId, canvasId)
+        .catch(() => window.history.replaceState(null, '', window.location.pathname));
+      return;
+    }
+    void openProjectHome(projectId)
+      .then((summaries) => {
+        if (embeddedMode && summaries.length === 0) return createAndOpenCanvas(projectId);
+        return undefined;
+      })
+      .catch(() => window.history.replaceState(null, '', window.location.pathname));
+  }, [createAndOpenCanvas, embeddedMode, openCanvas, openProjectHome]);
 
   const switchCanvas = useCallback(async (canvasId: string) => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -259,6 +327,47 @@ export default function App() {
     await saveCanvas({ ...target, title });
     if (project) setCanvases(await listCanvases(project.id));
   }, [project]);
+
+  useEffect(() => {
+    const onCanvasCreated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        projectId?: string;
+        canvasId?: string;
+        title?: string;
+        activate?: boolean;
+      }>).detail;
+      if (!detail?.projectId || !detail.canvasId || detail.projectId !== project?.id) return;
+      void listCanvases(detail.projectId).then(setCanvases).catch(() => undefined);
+      if (detail.activate) {
+        void openCanvas(detail.projectId, detail.canvasId)
+          .then(() => notify(`已新建并切换画布「${detail.title || detail.canvasId}」`))
+          .catch((error) => notify(error instanceof Error ? error.message : '切换新画布失败'));
+      } else {
+        notify(`已新建画布「${detail.title || detail.canvasId}」`);
+      }
+    };
+    const onCanvasRenamed = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        projectId?: string;
+        canvasId?: string;
+        title?: string;
+      }>).detail;
+      if (!detail?.projectId || !detail.canvasId || detail.projectId !== project?.id) return;
+      if (canvasRef.current?.id === detail.canvasId && detail.title) {
+        const next = { ...canvasRef.current, title: detail.title };
+        canvasRef.current = next;
+        setCanvas(next);
+      }
+      void listCanvases(detail.projectId).then(setCanvases).catch(() => undefined);
+      notify(`画布已重命名为「${detail.title || detail.canvasId}」`);
+    };
+    addEventListener('morrow:canvas-created', onCanvasCreated);
+    addEventListener('morrow:canvas-renamed', onCanvasRenamed);
+    return () => {
+      removeEventListener('morrow:canvas-created', onCanvasCreated);
+      removeEventListener('morrow:canvas-renamed', onCanvasRenamed);
+    };
+  }, [notify, openCanvas, project?.id]);
 
   const deleteCanvasById = useCallback(async (canvasId: string) => {
     await deleteCanvas(canvasId);
@@ -368,7 +477,7 @@ export default function App() {
   }
 
   if (view === 'projectHome' && project) {
-    return <><ProjectHome project={project} canvases={canvases} onBack={() => void returnHome()} onCreateCanvas={() => void createAndOpenCanvas().catch((error) => notify(error.message))} onOpenCanvas={(canvasId) => void openCanvas(project.id, canvasId).catch((error) => notify(error.message))} onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title)} onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error.message))} onRenameProject={(title) => void renameProject(title)} onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error.message))} onExportProject={() => void exportPackage()} onNotify={notify} />{notice && <div className="canvas-status-toast app-status-toast" role="status">{notice}</div>}</>;
+    return <><ProjectHome project={project} canvases={canvases} canvasModeLocked={!!embeddedMode} onBack={() => void returnHome()} onCreateCanvas={() => void createAndOpenCanvas(project.id).catch((error) => notify(error.message))} onOpenCanvas={(canvasId) => void openCanvas(project.id, canvasId).catch((error) => notify(error.message))} onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title)} onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error.message))} onRenameProject={(title) => void renameProject(title)} onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error.message))} onExportProject={() => void exportPackage()} onNotify={notify} />{notice && <div className="canvas-status-toast app-status-toast" role="status">{notice}</div>}</>;
   }
 
   if (!project || !canvas) return null;
@@ -383,6 +492,8 @@ export default function App() {
         canvases={canvases}
         projects={projects}
         saveStatus={saveStatus}
+        canvasModeLocked={!!embeddedMode}
+        canvasInteractionLocked={canvasInteractionLocked}
         initialViewport={canvas.viewport}
         onProjectTitleChange={(title) => { setProject((current) => { const next = current ? { ...current, title } : current; if (next) void saveProject(next); return next; }); }}
         onViewportChange={(viewport) => { viewportRef.current = viewport; }}
@@ -390,9 +501,9 @@ export default function App() {
         onCreateProject={() => void newProject().catch((error) => notify(error instanceof Error ? error.message : '新建项目失败'))}
         onSwitchProject={(projectId) => void switchProject(projectId).catch((error) => notify(error instanceof Error ? error.message : '切换项目失败'))}
         onSwitchCanvas={(canvasId) => void switchCanvas(canvasId).catch((error) => notify(error instanceof Error ? error.message : '切换画布失败'))}
-        onNewCanvas={() => void createAndOpenCanvas().catch((error) => notify(error.message))}
+        onNewCanvas={() => void createAndOpenCanvas(project.id).catch((error) => notify(error.message))}
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
-        onOpenAgent={() => { setSideView('agent'); setSideOpen(true); }}
+        onOpenAgent={() => { setSideView(embeddedMode ? 'inspector' : 'agent'); setSideOpen(true); }}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}
         onExportProject={() => void exportPackage()}
         isExporting={isExporting}
@@ -419,7 +530,7 @@ export default function App() {
           <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
-          <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>
+          {!embeddedMode && <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>}
           <div className="chat-view" hidden={sideView !== 'inspector'}><InspectorPanel /></div>
         </div>
       </aside>

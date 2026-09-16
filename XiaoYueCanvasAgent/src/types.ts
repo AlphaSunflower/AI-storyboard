@@ -233,6 +233,8 @@ export type CanvasNode = Node<MediaNodeData, 'media' | 'video' | import('./canva
 export type CanvasEdgeData = {
   operation?: ImageOperation['type'];
   portOrder?: number;
+  resultSlot?: boolean;
+  resultSlotOrder?: number;
 };
 
 export type CanvasEdge = Edge<CanvasEdgeData>;
@@ -252,9 +254,12 @@ export type {
   CanvasJobRequest,
   CanvasNodeKind,
   CanvasNodeV2,
+  CanvasExecution,
   ConnectionMode,
   ConnectionValidation,
   ConnectionValidationCode,
+  ExecutionNodeState,
+  ExecutionStatus,
   GenerationRecord,
   GenerationQueueStatus,
   GenerationSource,
@@ -303,6 +308,7 @@ export interface CanvasDocumentV1 {
   /** 后端持久化版本（乐观锁 baseRevision）；加载后回写、保存时携带 */
   revision?: number;
   generationRecords?: import('./canvas/graphContracts').GenerationRecord[];
+  executions?: import('./canvas/graphContracts').CanvasExecution[];
   migrationReport?: import('./canvas/graphContracts').MigrationReport;
   createdAt: number;
   updatedAt: number;
@@ -379,7 +385,7 @@ export interface AgentToolResult {
   error?: { code: string; message: string; details?: unknown };
   transactionId?: string;
   revision?: number;
-  status?: 'preview' | 'applied' | 'rejected' | 'failed';
+  status?: 'preview' | 'applied' | 'accepted' | 'rejected' | 'failed';
 }
 
 export interface JobAssetDescriptor {
@@ -413,9 +419,9 @@ export type JobEvent = ({ jobId: string; eventId?: string } & (
 
 export interface JobAdapter {
   getStatus(): Promise<JobAdapterStatus>;
-  getCapabilities(): Promise<CapabilityDescriptor[]>;
+  getCapabilities(signal?: AbortSignal): Promise<CapabilityDescriptor[]>;
   getJob?(jobId: string): Promise<JobSnapshot>;
-  submit(request: JobRequest): Promise<{ jobId: string }>;
+  submit(request: JobRequest, signal?: AbortSignal): Promise<{ jobId: string }>;
   subscribe(jobId: string, listener: (event: JobEvent) => void): () => void;
   cancel(jobId: string): Promise<void>;
   fetchAsset(asset: JobAssetDescriptor): Promise<File>;

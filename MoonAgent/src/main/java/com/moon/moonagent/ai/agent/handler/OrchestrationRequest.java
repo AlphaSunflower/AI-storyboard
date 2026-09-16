@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.entity.AgentConversation;
 import lombok.Getter;
@@ -138,6 +139,9 @@ public class OrchestrationRequest {
     /** 显式路由提示（前端「换个话题」等按钮；非空时意图识别绕过高置信度锁定目标链）。 */
     private String routingHint = "";
 
+    /** 画布编辑模式上下文；非空时本轮只能进入画布技能。 */
+    private CanvasSessionContext canvasContext;
+
     public String getRoutingHint() {
         return routingHint == null ? "" : routingHint;
     }
@@ -145,6 +149,15 @@ public class OrchestrationRequest {
     public void setRoutingHint(String routingHint) {
         this.routingHint = routingHint == null ? "" : routingHint;
     }
+
+    public CanvasSessionContext getCanvasContext() {
+        return canvasContext;
+    }
+
+    public void setCanvasContext(CanvasSessionContext canvasContext) {
+        this.canvasContext = canvasContext;
+    }
+
     public void setSuggestedActions(java.util.List<SuggestedAction> suggestedActions) {
         this.suggestedActions = suggestedActions == null ? java.util.List.of() : suggestedActions;
     }

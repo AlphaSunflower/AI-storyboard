@@ -34,7 +34,10 @@ const fieldInput = 'w-full rounded-lg border border-[var(--border-dark)] bg-[rgb
 
 function FrameAssetProperty({ assetId, label }: { assetId?: string; label: string }) {
   const asset = useMediaStore((state) => assetId ? state.assets[assetId] : undefined);
+  const assetError = useMediaStore((state) => assetId ? state.assetErrors[assetId] : undefined);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const markAssetError = useMediaStore((state) => state.markAssetError);
+  const clearAssetError = useMediaStore((state) => state.clearAssetError);
   const previewUrl = useObjectUrl(
     asset?.previewBlob ?? asset?.thumbnailBlob,
     Boolean(asset),
@@ -42,10 +45,14 @@ function FrameAssetProperty({ assetId, label }: { assetId?: string; label: strin
 
   useEffect(() => {
     if (!assetId || asset) return;
+    clearAssetError(assetId);
     void getAsset(assetId).then((loaded) => {
       if (loaded) upsertAsset(loaded);
-    }).catch(() => undefined);
-  }, [asset, assetId, upsertAsset]);
+      else markAssetError(assetId, '本地资产缓存已丢失，请重新上传或重新生成');
+    }).catch((error) => {
+      markAssetError(assetId, error instanceof Error ? error.message : '资产加载失败');
+    });
+  }, [asset, assetId, clearAssetError, markAssetError, upsertAsset]);
 
   return (
     <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
@@ -54,9 +61,11 @@ function FrameAssetProperty({ assetId, label }: { assetId?: string; label: strin
         {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}</small>}
       </header>
       <div className="mt-2 grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)]">
-        {previewUrl
-          ? <img src={previewUrl} alt={label} className="max-h-full max-w-full object-contain" />
-          : <ImageIcon size={22} className="text-muted-foreground" />}
+        {assetError
+          ? <span className="px-3 text-center text-[11px] text-muted-foreground">{assetError}</span>
+          : previewUrl
+            ? <img src={previewUrl} alt={label} className="max-h-full max-w-full object-contain" />
+            : <ImageIcon size={22} className="text-muted-foreground" />}
       </div>
     </section>
   );
@@ -151,7 +160,10 @@ export function InspectorPanel() {
   const nodeData = useCanvasStore((state) => state.nodes.find((item) => item.id === state.selectedNodeId)?.data);
   const assetId = nodeData?.assetId;
   const asset = useMediaStore((state) => assetId ? state.assets[assetId] : undefined);
+  const assetError = useMediaStore((state) => assetId ? state.assetErrors[assetId] : undefined);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const markAssetError = useMediaStore((state) => state.markAssetError);
+  const clearAssetError = useMediaStore((state) => state.clearAssetError);
   const previewUrl = useObjectUrl(asset?.previewBlob ?? asset?.thumbnailBlob, Boolean(asset));
   const [previewTarget, setPreviewTarget] = useState<ImagePreviewTarget | null>(null);
   const updateNode = useCanvasStore((state) => state.updateNode);
@@ -163,10 +175,14 @@ export function InspectorPanel() {
 
   useEffect(() => {
     if (!assetId || asset) return;
+    clearAssetError(assetId);
     void getAsset(assetId).then((loaded) => {
       if (loaded) upsertAsset(loaded);
-    }).catch(() => undefined);
-  }, [asset, assetId, upsertAsset]);
+      else markAssetError(assetId, '本地资产缓存已丢失，请重新上传或重新生成');
+    }).catch((error) => {
+      markAssetError(assetId, error instanceof Error ? error.message : '资产加载失败');
+    });
+  }, [asset, assetId, clearAssetError, markAssetError, upsertAsset]);
 
   useEffect(() => {
     setPreviewTarget(null);
@@ -213,10 +229,12 @@ export function InspectorPanel() {
             onClick={() => setPreviewTarget({ assetId: nodeData.assetId!, label: nodeData.label })}
             className="group relative mt-2 block w-full overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)] disabled:cursor-wait"
           >
-            {previewUrl ? (
+            {assetError ? (
+              <span className="grid aspect-[4/3] w-full place-items-center px-4 text-center text-[12px] text-muted-foreground">{assetError}</span>
+            ) : previewUrl ? (
               <img src={previewUrl} alt={nodeData.label} className="aspect-[4/3] w-full object-cover transition duration-200 group-hover:scale-[1.025]" />
             ) : (
-              <span className="grid aspect-[4/3] w-full place-items-center text-muted-foreground"><ImageIcon size={24} /></span>
+              <span className="grid aspect-[4/3] w-full place-items-center text-muted-foreground">图片加载中…</span>
             )}
             <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-[rgba(5,10,8,0.76)] text-acid opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
               <Maximize2 size={14} />

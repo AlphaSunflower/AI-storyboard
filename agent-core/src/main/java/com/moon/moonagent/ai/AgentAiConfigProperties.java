@@ -28,13 +28,13 @@ public class AgentAiConfigProperties {
      * 编排类 LLM 调用默认超时（秒）：剧本优化、方案设计、意图判定等。
      * 与分镜脚本生成 {@code ai.script-timeout} 分开，避免所有任务共用同一个超时上限。
      */
-    private int planTimeoutSeconds = 600;
+    private int planTimeoutSeconds = 1800;
 
     /** 分镜参数推荐超时（秒）：这是可降级步骤，超时后直接使用模型默认参数。 */
-    private int recommendTimeoutSeconds = 20;
+    private int recommendTimeoutSeconds = 120;
 
     /** 素材绑定/分镜方案设计超时（秒）：慢模型优先等待完整优解，超时后才进入上层回退。 */
-    private int materialTimeoutSeconds = 600;
+    private int materialTimeoutSeconds = 1800;
 
     /** 分镜剧情骨架专用快模型：显式配置，禁止回退到网关默认强模型。 */
     private String skeletonModel = "mimo-v2.5-pro";
@@ -43,13 +43,13 @@ public class AgentAiConfigProperties {
     private int maxParallelAgents = 4;
 
     /** 轻量意图判定超时（秒）：例如取消意图判断，超时按不取消处理。 */
-    private int intentTimeoutSeconds = 10;
+    private int intentTimeoutSeconds = 60;
 
     /**
      * SSE 异步连接最长存活时间（秒）：覆盖长剧本分批生成全过程。
      * 该值只控制 Spring MVC 异步请求生命周期，不替代 Spring AI 单次模型调用超时。
      */
-    private int sseTimeoutSeconds = 1800;
+    private int sseTimeoutSeconds = 14400;
 
     /**
      * 历史上下文总字符预算（软限制）：按最近消息优先保留；{@code <=0} 表示不限制。

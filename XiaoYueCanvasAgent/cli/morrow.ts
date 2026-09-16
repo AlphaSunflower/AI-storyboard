@@ -20,6 +20,7 @@ const USAGE = `morrow — 通过 Bridge 读写浏览器中打开的 Morrow 画�
 
 全局选项：
   --project <id>   目标项目；省略时使用当前唯一打开的项目
+  --canvas <id>    目标画布；同一项目多个画布时必须指定
   --json           以 JSON 输出完整响应
   --dry-run        只预览变更，不真正执行
 
@@ -64,6 +65,7 @@ const parsePosition = (value: unknown): { x: number; y: number } | undefined => 
 
 interface CommandRequest {
   projectId?: string;
+  canvasId?: string;
   method: string;
   params: Record<string, unknown>;
   dryRun?: boolean;
@@ -71,29 +73,30 @@ interface CommandRequest {
 
 function buildRequest(sub: string, o: Record<string, string | boolean>): CommandRequest | null {
   const projectId = typeof o.project === 'string' && o.project ? o.project : undefined;
+  const canvasId = typeof o.canvas === 'string' && o.canvas ? o.canvas : undefined;
   const dryRun = o['dry-run'] === true || o['dry-run'] === 'true';
   const label = typeof o.label === 'string' ? o.label : undefined;
   const position = parsePosition(o.position);
 
   switch (sub) {
     case 'summary':
-      return { projectId, method: 'canvas.get_summary', params: {}, dryRun };
+      return { projectId, canvasId, method: 'canvas.get_summary', params: {}, dryRun };
     case 'nodes list':
-      return { projectId, method: 'canvas.list_nodes', params: {}, dryRun };
+      return { projectId, canvasId, method: 'canvas.list_nodes', params: {}, dryRun };
     case 'node create_text':
-      return { projectId, method: 'canvas.node.create_text', params: { label: label ?? '文字', position }, dryRun };
+      return { projectId, canvasId, method: 'canvas.node.create_text', params: { label: label ?? '文字', position }, dryRun };
     case 'node create_image':
-      return { projectId, method: 'canvas.node.create_image_placeholder', params: { label: label ?? '图片', position }, dryRun };
+      return { projectId, canvasId, method: 'canvas.node.create_image_placeholder', params: { label: label ?? '图片', position }, dryRun };
     case 'node delete':
-      return { projectId, method: 'canvas.node.delete', params: { nodeIds: typeof o.node === 'string' && o.node ? [o.node] : [] }, dryRun };
+      return { projectId, canvasId, method: 'canvas.node.delete', params: { nodeIds: typeof o.node === 'string' && o.node ? [o.node] : [] }, dryRun };
     case 'layout dag':
-      return { projectId, method: 'canvas.layout.dag', params: { direction: typeof o.direction === 'string' ? o.direction : undefined }, dryRun };
+      return { projectId, canvasId, method: 'canvas.layout.dag', params: { direction: typeof o.direction === 'string' ? o.direction : undefined }, dryRun };
     case 'layout grid':
-      return { projectId, method: 'canvas.layout.grid', params: {}, dryRun };
+      return { projectId, canvasId, method: 'canvas.layout.grid', params: {}, dryRun };
     case 'undo':
-      return { projectId, method: 'canvas.undo', params: {}, dryRun };
+      return { projectId, canvasId, method: 'canvas.undo', params: {}, dryRun };
     case 'redo':
-      return { projectId, method: 'canvas.redo', params: {}, dryRun };
+      return { projectId, canvasId, method: 'canvas.redo', params: {}, dryRun };
     default:
       return null;
   }

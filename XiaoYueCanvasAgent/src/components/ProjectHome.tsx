@@ -15,6 +15,7 @@ interface ProjectHomeProps {
   onDeleteProject: () => void;
   onExportProject: () => void;
   onNotify?: (message: string) => void;
+  canvasModeLocked?: boolean;
 }
 
 const relativeTime = (timestamp: number) => {
@@ -26,7 +27,7 @@ const relativeTime = (timestamp: number) => {
   return new Date(timestamp).toLocaleDateString('zh-CN');
 };
 
-export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenCanvas, onRenameCanvas, onDeleteCanvas, onRenameProject, onDeleteProject, onExportProject, onNotify }: ProjectHomeProps) {
+export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenCanvas, onRenameCanvas, onDeleteCanvas, onRenameProject, onDeleteProject, onExportProject, onNotify, canvasModeLocked = false }: ProjectHomeProps) {
   const [renamingProject, setRenamingProject] = useState(false);
   const [renamingCanvasId, setRenamingCanvasId] = useState<string | null>(null);
   const [pendingDeleteCanvasId, setPendingDeleteCanvasId] = useState<string | null>(null);
@@ -36,7 +37,13 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
   return (
     <main className="project-home" style={{ minHeight: '100vh', padding: '40px 48px', boxSizing: 'border-box', maxWidth: 1180, margin: '0 auto' }}>
       <header className="project-home__header" style={{ display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 32 }}>
-        <button onClick={onBack} style={iconButton} aria-label="返回主页"><ArrowLeft size={18} /></button>
+        <button
+          onClick={onBack}
+          disabled={canvasModeLocked}
+          title={canvasModeLocked ? '请先离开画布编辑模式' : '返回主页'}
+          style={{ ...iconButton, opacity: canvasModeLocked ? 0.4 : 1, cursor: canvasModeLocked ? 'not-allowed' : 'pointer' }}
+          aria-label="返回主页"
+        ><ArrowLeft size={18} /></button>
         <div style={{ flex: 1 }}>
           <small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>MORROW / PROJECT</small>
           {renamingProject ? (
@@ -47,15 +54,15 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
           <p style={{ opacity: 0.55, margin: 0 }}>{canvases.length} 个画布 · 项目、原图与每个派生版本保存在本地</p>
         </div>
         <div className="project-home__actions" style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setRenamingProject(true)} style={ghostButton} aria-label="重命名项目"><Pencil size={15} /> 重命名</button>
-          <button onClick={onExportProject} style={ghostButton}><FileOutput size={15} /> 导出</button>
+          <button disabled={canvasModeLocked} onClick={() => setRenamingProject(true)} style={{ ...ghostButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label="重命名项目"><Pencil size={15} /> 重命名</button>
+          <button disabled={canvasModeLocked} onClick={onExportProject} style={{ ...ghostButton, opacity: canvasModeLocked ? 0.4 : 1 }}><FileOutput size={15} /> 导出</button>
           {confirmDeleteProject ? (
             <span style={{ display: 'flex', gap: 6 }}>
               <button onClick={onDeleteProject} style={dangerButton}>确认删除</button>
               <button onClick={() => setConfirmDeleteProject(false)} style={ghostButton}>取消</button>
             </span>
           ) : (
-            <button onClick={() => setConfirmDeleteProject(true)} style={dangerGhostButton} aria-label="删除项目"><Trash2 size={15} /></button>
+            <button disabled={canvasModeLocked} onClick={() => setConfirmDeleteProject(true)} style={{ ...dangerGhostButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label="删除项目"><Trash2 size={15} /></button>
           )}
         </div>
       </header>
@@ -69,7 +76,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
         <section>
           <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <div><small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>CANVASES</small><h2 style={{ margin: '2px 0 0', fontSize: 20 }}>画布</h2></div>
-            <button onClick={onCreateCanvas} style={primaryButton}><Plus size={16} /> 新建画布</button>
+            <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建画布</button>
           </header>
 
           {canvases.length ? (
@@ -86,14 +93,14 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
                     <small style={{ opacity: 0.55 }}>{relativeTime(canvas.updatedAt)} · {canvas.nodeCount} 节点 · {canvas.assetCount} 素材</small>
                   </button>
                   <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
-                    <button style={miniButton} aria-label={`重命名 ${canvas.title}`} onClick={() => setRenamingCanvasId(canvas.id)}><Pencil size={13} /></button>
+                    <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`重命名 ${canvas.title}`} onClick={() => setRenamingCanvasId(canvas.id)}><Pencil size={13} /></button>
                     {pendingDeleteCanvasId === canvas.id ? (
                       <span style={{ display: 'flex', gap: 4, fontSize: 12 }}>
                         <button style={miniDanger} onClick={() => { onDeleteCanvas(canvas.id); setPendingDeleteCanvasId(null); }}>删除</button>
                         <button style={miniButton} onClick={() => setPendingDeleteCanvasId(null)}>取消</button>
                       </span>
                     ) : (
-                      <button style={miniButton} aria-label={`删除 ${canvas.title}`} onClick={() => setPendingDeleteCanvasId(canvas.id)}><Trash2 size={13} /></button>
+                      <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`删除 ${canvas.title}`} onClick={() => setPendingDeleteCanvasId(canvas.id)}><Trash2 size={13} /></button>
                     )}
                   </div>
                 </article>
@@ -104,7 +111,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
               <FolderOpen size={30} style={{ opacity: 0.5 }} />
               <strong style={{ display: 'block', marginTop: 12 }}>还没有画布</strong>
               <p style={{ opacity: 0.55, margin: '6px 0 16px' }}>在这个项目里新建第一个画布开始创作。</p>
-              <button onClick={onCreateCanvas} style={primaryButton}><Plus size={16} /> 新建第一个画布</button>
+              <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建第一个画布</button>
             </div>
           )}
         </section>

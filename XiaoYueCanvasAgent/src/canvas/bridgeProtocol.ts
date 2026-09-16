@@ -5,7 +5,9 @@
 export const BRIDGE_PROTOCOL_VERSION = 1;
 export const BRIDGE_DEFAULT_PORT = 8787;
 export const BRIDGE_POLL_INTERVAL_MS = 1000;
-export const BRIDGE_COMMAND_TIMEOUT_MS = 10_000;
+export const BRIDGE_COMMAND_TIMEOUT_MS = 11 * 60_000;
+export const BRIDGE_BROWSER_COMMAND_TIMEOUT_MS = 10 * 60_000;
+export const BRIDGE_TAB_STALE_MS = 15 * 60_000;
 
 export type BridgeSource = 'mcp' | 'cli' | 'agent';
 
@@ -14,6 +16,8 @@ export interface CanvasBridgeRequest {
   id: string;
   // 为空时由 Bridge 解析为当前唯一打开的项目。
   projectId?: string;
+  // 指定画布时按 projectId + canvasId 精确路由。
+  canvasId?: string;
   method: string;
   params: Record<string, unknown>;
   source: BridgeSource;
@@ -29,7 +33,7 @@ export interface CanvasBridgeResponse {
   result?: unknown;
   transactionId?: string;
   revision?: number;
-  status?: 'preview' | 'applied' | 'rejected' | 'failed';
+  status?: 'preview' | 'applied' | 'accepted' | 'rejected' | 'failed';
   error?: { code: string; message: string; details?: unknown };
 }
 
@@ -37,6 +41,9 @@ export interface CanvasBridgeResponse {
 export interface BridgeRegisterPayload {
   tabId: string;
   projectId: string;
+  projectTitle?: string;
+  canvasId: string;
+  canvasTitle?: string;
   lastRevision?: number;
 }
 
@@ -46,6 +53,7 @@ export interface BridgePollResult {
     requestId: string;
     method: string;
     params: Record<string, unknown>;
+    source?: BridgeSource;
     dryRun?: boolean;
     expectedRevision?: number;
   };
@@ -60,5 +68,11 @@ export interface BridgeResultPayload {
 export interface BridgeHealth {
   ok: boolean;
   version: number;
-  projects: Array<{ projectId: string; lastSeen: number }>;
+  projects: Array<{
+    projectId: string;
+    projectTitle?: string;
+    canvasId: string;
+    canvasTitle?: string;
+    lastSeen: number;
+  }>;
 }

@@ -96,6 +96,13 @@ public class SkillConsistencyValidator {
         if (s.tools() == null || s.tools().isEmpty()) return;
         int resolved = skillExpander.toolCallbacks(s.tools()).length;
         if (resolved != s.tools().size()) {
+            Set<String> available = skillExpander.allToolNames();
+            List<String> missing = s.tools().stream().filter(tool -> !available.contains(tool)).toList();
+            boolean optionalCanvasTools = !missing.isEmpty() && missing.stream().allMatch(tool -> tool.startsWith("canvas_"));
+            if (optionalCanvasTools) {
+                log.warn("SKILL.md {} 的 Canvas MCP 工具当前不可用，将在调用时返回连接错误: {}", s.name(), missing);
+                return;
+            }
             throw fail("SKILL.md {} 声明了工具 {}，但有 {} 项无法解析（@Tool/@McpTool 缺失）",
                     s.name(), s.tools(), s.tools().size() - resolved);
         }

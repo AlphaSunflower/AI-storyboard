@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -20,6 +20,128 @@ test.beforeEach(async ({ page }) => {
   });
   await page.reload();
 });
+
+async function seedTextCanvas(page: Page) {
+  const projectId = 'canvas-selection-project';
+  const canvasId = 'canvas-selection-canvas';
+  await page.route('**/api/canvas/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/api/canvas', '');
+    if (path === `/projects/${projectId}` && request.method() === 'GET') {
+      return route.fulfill({ json: { id: projectId, title: '画布选择测试' } });
+    }
+    if (path === `/projects/${projectId}/canvases` && request.method() === 'GET') {
+      return route.fulfill({ json: [{ id: canvasId, projectId, title: '默认画布' }] });
+    }
+    if (path === `/canvases/${canvasId}/graph`) {
+      const graph = request.method() === 'PUT'
+        ? (request.postDataJSON() as { graph: unknown }).graph
+        : { schemaVersion: 2, nodes: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 } };
+      return route.fulfill({ json: { graph, revision: 1 } });
+    }
+    if (path === `/canvases/${canvasId}` && request.method() === 'PATCH') {
+      return route.fulfill({ json: { id: canvasId, projectId, title: '默认画布' } });
+    }
+    return route.fulfill({ status: 404, json: { message: `unmocked ${request.method()} ${path}` } });
+  });
+  await page.evaluate(async ({ projectId, canvasId }) => {
+    const now = Date.now();
+    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
+      if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
+      if (!db.objectStoreNames.contains('assetMeta')) db.createObjectStore('assetMeta', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('assetVariants')) db.createObjectStore('assetVariants', { keyPath: ['assetId', 'variant'] });
+      if (!db.objectStoreNames.contains('generationQueue')) db.createObjectStore('generationQueue', { keyPath: 'id' });
+    };
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
+    transaction.objectStore('projects').put({
+      schemaVersion: 2,
+      id: projectId,
+      title: '画布选择测试',
+      canvases: [canvasId],
+      createdAt: now,
+      updatedAt: now,
+    });
+    transaction.objectStore('canvases').put({
+      schemaVersion: 1,
+      id: canvasId,
+      projectId,
+      title: '默认画布',
+      nodes: [
+        {
+          id: 'selection-text-a',
+          type: 'media',
+          position: { x: 180, y: 180 },
+          width: 280,
+          height: 180,
+          data: { kind: 'text', label: '节点 A', prompt: '', status: 'idle', accent: '#d7ff54' },
+        },
+        {
+          id: 'selection-text-b',
+          type: 'textToImage',
+          position: { x: 420, y: 360 },
+          width: 360,
+          height: 300,
+          data: { kind: 'textToImage', label: '节点 B', prompt: '', status: 'idle', accent: '#8f9cff' },
+        },
+      ],
+      edges: [{
+        id: 'selection-edge-a-b',
+        source: 'selection-text-a',
+        sourceHandle: 'text',
+        target: 'selection-text-b',
+        targetHandle: 'prompt',
+        type: 'canvas',
+      }],
+      viewport: { x: 40, y: 40, zoom: 1 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  }, { projectId, canvasId });
+  await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+}
+
+async function selectAllNodesByMarquee(page: Page) {
+  const pane = page.locator('.react-flow__pane');
+  const nodes = page.locator('.react-flow__node');
+  await expect(nodes).toHaveCount(2);
+  const paneBox = await pane.boundingBox();
+  const nodeBoxes = await nodes.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }));
+  expect(paneBox).not.toBeNull();
+  expect(nodeBoxes).toHaveLength(2);
+
+  const selectionStart = {
+    x: Math.max(paneBox!.x + 8, Math.min(...nodeBoxes.map((box) => box.x)) - 28),
+    y: Math.max(paneBox!.y + 8, Math.min(...nodeBoxes.map((box) => box.y)) - 28),
+  };
+  const selectionEnd = {
+    x: Math.min(paneBox!.x + paneBox!.width - 8, Math.max(...nodeBoxes.map((box) => box.x + box.width)) + 28),
+    y: Math.min(paneBox!.y + paneBox!.height - 8, Math.max(...nodeBoxes.map((box) => box.y + box.height)) + 28),
+  };
+  await page.mouse.move(selectionStart.x, selectionStart.y);
+  await page.mouse.down({ button: 'left' });
+  await page.mouse.move(selectionEnd.x, selectionEnd.y, { steps: 8 });
+  await page.mouse.up({ button: 'left' });
+
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
+}
 
 test('starts empty and exposes only honest local execution', async ({ page }) => {
   const errors: string[] = [];
@@ -131,6 +253,136 @@ test('starts empty and exposes only honest local execution', async ({ page }) =>
   expect(errors).toEqual([]);
 });
 
+test('marquee-selects nodes and drags the selected group', async ({ page }) => {
+  await seedTextCanvas(page);
+
+  const nodes = page.locator('.react-flow__node');
+  await expect(nodes).toHaveCount(2);
+  const viewportBeforeSelection = await page.locator('.react-flow__viewport').getAttribute('style');
+  await selectAllNodesByMarquee(page);
+  expect(await page.locator('.react-flow__viewport').getAttribute('style')).toBe(viewportBeforeSelection);
+
+  const selectedNodes = page.locator('.react-flow__node.selected');
+  const beforeDrag = await selectedNodes.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y };
+  }));
+  const firstHandle = selectedNodes.first().locator('.node-drag-handle');
+  const handleBox = await firstHandle.boundingBox();
+  expect(handleBox).not.toBeNull();
+
+  await page.mouse.move(handleBox!.x + 12, handleBox!.y + handleBox!.height / 2);
+  await page.mouse.down({ button: 'left' });
+  await page.mouse.move(handleBox!.x + 112, handleBox!.y + handleBox!.height / 2 + 64, { steps: 8 });
+  await page.mouse.up({ button: 'left' });
+
+  const afterDrag = await selectedNodes.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y };
+  }));
+  expect(afterDrag).toHaveLength(2);
+  expect(afterDrag.every((box, index) => Math.abs(box.x - beforeDrag[index].x) > 70 && Math.abs(box.y - beforeDrag[index].y) > 40)).toBe(true);
+});
+
+test('uses one group toolbar and context menu for a multi-node selection', async ({ page }) => {
+  await seedTextCanvas(page);
+  await selectAllNodesByMarquee(page);
+
+  const nodes = page.locator('.react-flow__node');
+  await expect(page.locator('.react-flow__node-toolbar.node-selected-toolbar')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge.selected')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge-toolbar.canvas-edge-toolbar')).toBeHidden();
+  await expect(page.locator('.react-flow__resize-control').first()).toBeHidden();
+
+  const toolbar = page.getByRole('toolbar', { name: '多选节点操作' });
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: '复制' })).toHaveAttribute('title', '复制 Ctrl+C');
+  await expect(toolbar.getByRole('button', { name: '剪切' })).toHaveAttribute('title', '剪切 Ctrl+X');
+  await expect(toolbar.getByRole('button', { name: '删除' })).toHaveAttribute('title', '删除 Ctrl+D');
+
+  await toolbar.getByRole('button', { name: '复制' }).click();
+  await page.keyboard.press('Control+v');
+  await expect(nodes).toHaveCount(4);
+  await page.keyboard.press('Control+z');
+  await expect(nodes).toHaveCount(2);
+
+  const selectionBox = page.locator('.react-flow__nodesselection-rect');
+  await expect(selectionBox).toBeVisible();
+  await selectionBox.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: '画布右键菜单' });
+  await expect(menu.getByRole('menuitem', { name: /复制/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /剪切/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: '整理编排' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /删除/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('Control+x');
+  await expect(nodes).toHaveCount(0);
+  await page.keyboard.press('Control+v');
+  await expect(nodes).toHaveCount(2);
+  await page.keyboard.press('Control+d');
+  await expect(nodes).toHaveCount(0);
+});
+
+test('runs ELK layout from the toolbar and context menu without changing the viewport', async ({ page }) => {
+  await seedTextCanvas(page);
+  const nodes = page.locator('.react-flow__node');
+  await expect(nodes).toHaveCount(2);
+  const viewportBefore = await page.locator('.react-flow__viewport').getAttribute('style');
+  const positionsBefore = await nodes.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y) };
+  }));
+
+  await page.getByRole('button', { name: '整理编排' }).click();
+  await expect(page.locator('.canvas-status-toast').first()).toContainText(/已整理|最优/);
+  await expect.poll(async () => nodes.evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y) };
+  }))).not.toEqual(positionsBefore);
+  expect(await page.locator('.react-flow__viewport').getAttribute('style')).toBe(viewportBefore);
+
+  await nodes.first().click({ button: 'right' });
+  const nodeMenu = page.getByRole('menu', { name: '画布右键菜单' });
+  await expect(nodeMenu.getByRole('menuitem', { name: '整理编排' })).toBeVisible();
+  await nodeMenu.getByRole('menuitem', { name: '整理编排' }).click();
+
+  const pane = page.locator('.react-flow__pane');
+  const paneBox = await pane.boundingBox();
+  expect(paneBox).not.toBeNull();
+  await pane.click({ button: 'right', position: { x: paneBox!.width - 12, y: paneBox!.height - 12 } });
+  const paneMenu = page.getByRole('menu', { name: '画布右键菜单' });
+  await expect(paneMenu.getByRole('menuitem', { name: '整理编排' })).toBeVisible();
+  await paneMenu.getByRole('menuitem', { name: '整理编排' }).click();
+});
+
+test('pans the canvas with the middle mouse button', async ({ page }) => {
+  await seedTextCanvas(page);
+
+  const pane = page.locator('.react-flow__pane');
+  const paneBox = await pane.boundingBox();
+  expect(paneBox).not.toBeNull();
+  const blankPoint = await page.evaluate(({ x, y, width, height }) => {
+    for (let row = 8; row >= 1; row -= 1) {
+      for (let column = 8; column >= 1; column -= 1) {
+        const point = { x: x + width * column / 10, y: y + height * row / 10 };
+        if (document.elementFromPoint(point.x, point.y)?.classList.contains('react-flow__pane')) return point;
+      }
+    }
+    throw new Error('没有找到可用于中键平移的画布空白点');
+  }, paneBox!);
+  const viewportBefore = await page.locator('.react-flow__viewport').getAttribute('style');
+
+  await expect(pane).toHaveCSS('cursor', 'crosshair');
+  await page.mouse.move(blankPoint.x, blankPoint.y);
+  await page.mouse.down({ button: 'middle' });
+  await page.mouse.move(blankPoint.x - 110, blankPoint.y - 70, { steps: 8 });
+  await expect(pane).toHaveCSS('cursor', 'grabbing');
+  await page.mouse.up({ button: 'middle' });
+
+  expect(await page.locator('.react-flow__viewport').getAttribute('style')).not.toBe(viewportBefore);
+});
+
 test('project home lists canvases and navigates between levels', async ({ page }) => {
   // 新建项目 → 进项目菜单（空画布列表，手动建画布）
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
@@ -234,9 +486,9 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
   };
   const startedAt = Date.now();
   await page.mouse.move(panStart.x, panStart.y);
-  await page.mouse.down();
+  await page.mouse.down({ button: 'middle' });
   await page.mouse.move(panEnd.x, panEnd.y, { steps: 8 });
-  await page.mouse.up();
+  await page.mouse.up({ button: 'middle' });
   const interactionDuration = Date.now() - startedAt;
   expect(interactionDuration).toBeLessThan(1500);
   expect(await page.locator('.react-flow__node').count()).toBeLessThan(50);
@@ -281,9 +533,9 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
   const paneAfterMapBox = await paneAfterMap.boundingBox();
   expect(paneAfterMapBox).not.toBeNull();
   await page.mouse.move(paneAfterMapBox!.x + paneAfterMapBox!.width * .72, paneAfterMapBox!.y + paneAfterMapBox!.height * .72);
-  await page.mouse.down();
+  await page.mouse.down({ button: 'middle' });
   await page.mouse.move(paneAfterMapBox!.x + paneAfterMapBox!.width * .25, paneAfterMapBox!.y + paneAfterMapBox!.height * .25, { steps: 8 });
-  await page.mouse.up();
+  await page.mouse.up({ button: 'middle' });
   await page.waitForTimeout(80);
   expect(await viewportFitsMap()).toBe(true);
   const expandedViewBox = parseViewBox(await minimap.getAttribute('viewBox'));

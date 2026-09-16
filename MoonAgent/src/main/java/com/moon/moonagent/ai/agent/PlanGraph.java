@@ -12,6 +12,7 @@ import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgentRegistry;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
@@ -89,6 +90,7 @@ public class PlanGraph {
     private static final String K_ASSET_IDS = "assetIds";       // 资产选择卡片勾选
     private static final String K_SWITCH = "switch";            // 切链出口标记：重路由 intent_recognize
     private static final String K_ROUTING_HINT = "routingHint"; // 前端显式切链提示（目标 intentType，优先级最高）
+    private static final String K_CANVAS_CONTEXT = "canvasContext"; // 画布编辑模式上下文（优先级高于 routingHint）
     // Phase 3: 移交状态键
     private static final String K_HANDOFF_TARGET = "handoffTarget"; // 移交目标 intentType（null=完成）
     private static final String K_HANDOFF_STATE = "handoffState";   // 移交传递的状态
@@ -181,6 +183,7 @@ public class PlanGraph {
             m.put(K_ASSET_IDS, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_SWITCH, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_ROUTING_HINT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
+            m.put(K_CANVAS_CONTEXT, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_HANDOFF_TARGET, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             m.put(K_HANDOFF_STATE, new com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy());
             return m;
@@ -195,6 +198,25 @@ public class PlanGraph {
                     String content = state.<String>value(K_CONTENT).orElse("");
                     String routingHint = state.<String>value(K_ROUTING_HINT).orElse("");
                     AgentTraceAccumulator trace = traceByThread.get(conversation.getId());
+                    CanvasSessionContext canvasContext = state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null);
+                    // 画布编辑模式是工作区锁：优先级高于临时 routingHint，禁止流向其它意图链。
+                    if (canvasContext != null && canvasContext.isCanvasEditMode()) {
+                        String matched = content == null || content.isBlank()
+                                ? null : intentRecognitionService.ruleMatch(content);
+                        String canvasIntent = CanvasModeIntentPolicy.resolve(content, matched);
+                        log.info("PlanGraph: canvas-edit projectId={} canvasId={} → intent={}",
+                                canvasContext.projectId(), canvasContext.canvasId(), canvasIntent);
+                        support.resetClarify(conversation.getId());
+                        if (trace != null) {
+                            trace.add("route_change", "moon", "画布模式",
+                                    "锁定画布编辑模式 " + canvasIntent, "", canvasIntent, "route_changed");
+                        }
+                        return Map.of(
+                                K_INTENT, canvasIntent,
+                                K_CONFIDENCE, 1.0,
+                                K_LOW_CONFIDENCE, false,
+                                K_SWITCH, false);
+                    }
                     // 显式 routingHint（前端推荐动作/切链按钮）：绕过意图模型，直接锁定目标意图
                     if (!routingHint.isBlank()) {
                         log.info("PlanGraph: run 显式 routingHint={} → 绕过意图模型锁定意图", routingHint);
@@ -326,6 +348,45 @@ public class PlanGraph {
                 }))
                 // ---- resume 路由节点：读 checkpoint.action / 提交 action / customText → 条件边分发 ----
                 .addNode("resume_route", node_async(state -> Map.of()))
+                // ---- 画布绑定门禁：首次进入画布链时先让前端打开/选择真实画布，确认后 resume 原意图 ----
+                .addNode("canvas_bind_gate", node_async(state -> {
+                    AgentConversation conversation = state.<AgentConversation>value(K_CONVERSATION).orElseThrow();
+                    OrchestrationRequest request = stateRequest(state);
+                    String requestedIntent = state.<String>value(K_INTENT).orElse(CanvasModeIntentPolicy.DESIGN);
+                    request.setIntentType(requestedIntent);
+
+                    Map<String, Object> planItem = new java.util.LinkedHashMap<>();
+                    planItem.put("content", state.<String>value(K_CONTENT).orElse(""));
+                    planItem.put("intent", requestedIntent);
+                    List<String> picUrls = state.<List<String>>value(K_PIC_URLS).orElse(List.of());
+                    if (!picUrls.isEmpty()) planItem.put("picUrls", picUrls);
+                    List<String> assetIds = state.<List<String>>value(K_ASSET_IDS).orElse(List.of());
+                    if (!assetIds.isEmpty()) planItem.put("assetIds", assetIds);
+
+                    String formToken = support.createCheckpoint(
+                            conversation,
+                            CanvasModeIntentPolicy.BIND_ACTION,
+                            List.of(planItem),
+                            "CANVAS_BIND",
+                            "",
+                            List.of(),
+                            List.of(),
+                            Map.of(),
+                            Map.of(),
+                            List.of(),
+                            List.of(),
+                            List.of());
+                    Map<String, Object> event = new java.util.LinkedHashMap<>();
+                    event.put("conversationId", conversation.getId());
+                    event.put("projectId", conversation.getProjectId());
+                    event.put("requestedIntent", requestedIntent);
+                    event.put("formToken", formToken);
+                    event.put("expirationTime", java.time.OffsetDateTime.now().plusMinutes(30).toString());
+                    if (!picUrls.isEmpty()) event.put("picUrls", picUrls);
+                    if (!assetIds.isEmpty()) event.put("assetIds", assetIds);
+                    support.sendEvent(request, "canvas_mode_required", event);
+                    return Map.of(K_LAST_MESSAGE, "");
+                }))
                 // ---- 条件边：run 入口路由（低置信度 → 澄清卡片；否则 → handler 节点） ----
                 .addConditionalEdges("intent_recognize",
                         edge_async(state -> {
@@ -333,6 +394,10 @@ public class PlanGraph {
                                 return "intent_clarify";
                             }
                             String intent = state.<String>value(K_INTENT).orElse(IntentRecognitionService.FALLBACK_TYPE);
+                            CanvasSessionContext canvasContext = state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null);
+                            if (CanvasModeIntentPolicy.requiresBinding(intent, canvasContext)) {
+                                return "canvas_bind_gate";
+                            }
                             return routeTarget(intent);
                         }),
                         allNodeTargets())
@@ -350,6 +415,11 @@ public class PlanGraph {
                             if (!routingHint.isBlank()) {
                                 log.info("PlanGraph: resume 显式 routingHint={} currentIntent={} → rerun_selected", routingHint, intent);
                                 return "rerun_selected";
+                            }
+
+                            if (CanvasModeIntentPolicy.BIND_ACTION.equals(cpAction)) {
+                                log.info("PlanGraph: resume 画布绑定完成 → skill_manager（恢复原画布意图）");
+                                return "skill_manager";
                             }
 
                             // scene-review 操作菜单的「自定义输入」保留切链能力（用户可在审查卡直接说「生成分镜/视频」）；
@@ -423,6 +493,7 @@ public class PlanGraph {
                         Map.of("resume_route", "resume_route", "intent_recognize", "intent_recognize"))
                 .addEdge(START, "entry")
                 .addEdge("intent_clarify", END)
+                .addEdge("canvas_bind_gate", END)
                 .addEdge("switch_to_run", "intent_recognize")
                 // rerun_selected：锁定意图后走 run 路由（同 intent_recognize 的条件边，低置信度恒 false → 直达指定 handler）
                 .addConditionalEdges("rerun_selected",
@@ -472,7 +543,8 @@ public class PlanGraph {
                         state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                         state.<String>value(K_CP_ACTION).orElse(""),
                         state.<String>value(K_CP_PLAN).orElse(""),
-                        traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId())
+                        traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()),
+                        state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null)
                 );
                 SpecialistResult result = specialist.execute(ctx);
                 if (result.needsHandoff()) {
@@ -514,7 +586,8 @@ public class PlanGraph {
             boolean resume = Boolean.TRUE.equals(state.value(K_RESUME).orElse(false));
             String intent;
             String cpAction = state.<String>value(K_CP_ACTION).orElse("");
-            if (resume && cpAction != null && cpAction.startsWith("skill-")) {
+            if (resume && (CanvasModeIntentPolicy.BIND_ACTION.equals(cpAction)
+                    || (cpAction != null && cpAction.startsWith("skill-")))) {
                 intent = support.planField(state.<String>value(K_CP_PLAN).orElse(""), "intent");
             } else {
                 intent = state.<String>value(K_INTENT).orElse(IntentRecognitionService.FALLBACK_TYPE);
@@ -548,7 +621,8 @@ public class PlanGraph {
                     state.<java.util.List<String>>value(K_ASSET_IDS).orElse(java.util.List.of()),
                     state.<String>value(K_CP_ACTION).orElse(""),
                     state.<String>value(K_CP_PLAN).orElse(""),
-                    traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()));
+                    traceByThread.get(state.<AgentConversation>value(K_CONVERSATION).orElseThrow().getId()),
+                    state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null));
             SpecialistResult result;
             try {
                 result = specialist.execute(ctx);
@@ -590,6 +664,12 @@ public class PlanGraph {
     }
 
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks, null, emitter);
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
+                                   java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
+                                   CanvasSessionContext canvasContext, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, content, picUrls == null ? java.util.List.of() : picUrls, emitter));
@@ -617,6 +697,7 @@ public class PlanGraph {
             inputs.put(K_CP_PLAN, "");
             inputs.put(K_CUSTOM_TEXT, "");
             inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
+            inputs.put(K_CANVAS_CONTEXT, canvasContext);
             inputs.put(K_PARAMS, Map.of());
             inputs.put(K_HANDOFF_TARGET, "");
             inputs.put(K_HANDOFF_STATE, Map.of());
@@ -646,6 +727,13 @@ public class PlanGraph {
     public AgentTurnResult resumeTurn(AgentConversation conversation, AgentCheckpoint checkpoint,
                          String action, String customText, Map<String, String> params,
                          java.util.List<String> assetIds, String routingHint, SseEmitter emitter) {
+        return resumeTurn(conversation, checkpoint, action, customText, params, assetIds, routingHint, null, emitter);
+    }
+
+    public AgentTurnResult resumeTurn(AgentConversation conversation, AgentCheckpoint checkpoint,
+                         String action, String customText, Map<String, String> params,
+                         java.util.List<String> assetIds, String routingHint,
+                         CanvasSessionContext canvasContext, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, "", java.util.List.of(), emitter));
@@ -667,6 +755,7 @@ public class PlanGraph {
                     ? support.getSessionAssets(conversation.getId()) : assetIds;
             inputs.put(K_ASSET_IDS, resumeAssetIds);
             inputs.put(K_ROUTING_HINT, routingHint == null ? "" : routingHint);
+            inputs.put(K_CANVAS_CONTEXT, canvasContext);
             inputs.put(K_LAST_MESSAGE, "");
             Optional<OverAllState> result = compiledGraph.invoke(inputs, config);
             String lastMessage = result.flatMap(s -> s.<String>value(K_LAST_MESSAGE)).orElse("");
@@ -745,6 +834,8 @@ public class PlanGraph {
         AgentTraceAccumulator trace = traceByThread.get(conversation.getId());
         if (trace != null) request.setTrace(trace);
         request.setRoutingHint(state.<String>value(K_ROUTING_HINT).orElse(""));
+        request.setCanvasContext(state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null));
+        request.setAssetIds(state.<List<String>>value(K_ASSET_IDS).orElse(List.of()));
         requestsByThread.put(conversation.getId(), request);
         return request;
     }
@@ -753,6 +844,7 @@ public class PlanGraph {
     private Map<String, String> allNodeTargets() {
         Map<String, String> m = new HashMap<>();
         m.put("intent_clarify", "intent_clarify");
+        m.put("canvas_bind_gate", "canvas_bind_gate");
         m.put("skill_manager", "skill_manager");
         for (String node : intentToNode.values()) {
             m.put(node, node);

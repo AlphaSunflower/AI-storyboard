@@ -237,7 +237,7 @@ export async function deleteProject(projectId: string) {
 export async function createCanvas(projectId: string, title = '画布'): Promise<CanvasDocumentV1> {
   const meta = await apiJson<{ id: string; projectId: string; title: string }>(`/projects/${encodeURIComponent(projectId)}/canvases`, { method: 'POST', body: JSON.stringify({ title }) });
   const now = nowMs();
-  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], revision: 0, createdAt: now, updatedAt: now };
+  const canvas: CanvasDocumentV1 = { schemaVersion: 1, id: meta.id, projectId, title: meta.title || title, nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], executions: [], revision: 0, createdAt: now, updatedAt: now };
   await (await database).put('canvases', canvas); // 本地缓存（可离线读）
   return canvas;
 }
@@ -248,6 +248,7 @@ interface CanvasGraphPayload {
   edges: CanvasEdge[];
   viewport: Viewport;
   generationRecords?: CanvasDocumentV1['generationRecords'];
+  executions?: CanvasDocumentV1['executions'];
   migrationReport?: CanvasDocumentV1['migrationReport'];
 }
 
@@ -265,6 +266,7 @@ function graphPayloadOf(canvas: CanvasDocumentV1): CanvasGraphPayload {
     edges: canvas.edges,
     viewport: canvas.viewport,
     generationRecords: canvas.generationRecords ?? [],
+    executions: canvas.executions ?? [],
     migrationReport: canvas.migrationReport,
   };
 }
@@ -277,6 +279,7 @@ function applyGraph(canvas: CanvasDocumentV1, dto: CanvasGraphDto): CanvasDocume
     edges: dto.graph?.edges ?? [],
     viewport: dto.graph?.viewport ?? canvas.viewport,
     generationRecords: dto.graph?.generationRecords ?? canvas.generationRecords ?? [],
+    executions: dto.graph?.executions ?? canvas.executions ?? [],
     migrationReport: dto.graph?.migrationReport ?? canvas.migrationReport,
     revision: dto.revision ?? canvas.revision ?? 0,
     updatedAt: nowMs(),
@@ -289,7 +292,7 @@ function normalizeCanvasGraph(canvas: CanvasDocumentV1): CanvasDocumentV1 {
     node.type !== node.data.kind
     || legacyKinds.has(String(node.data.kind)))
     || canvas.edges.some((edge) => !edge.sourceHandle || !edge.targetHandle || edge.sourceHandle === 'right' || edge.targetHandle === 'left');
-  if (!needsMigration) return { ...canvas, generationRecords: canvas.generationRecords ?? [] };
+  if (!needsMigration) return { ...canvas, generationRecords: canvas.generationRecords ?? [], executions: canvas.executions ?? [] };
   const migrated = migrateCanvasGraphV1ToV2({
     schemaVersion: canvas.schemaVersion,
     nodes: canvas.nodes as Parameters<typeof migrateCanvasGraphV1ToV2>[0]['nodes'],
@@ -302,6 +305,7 @@ function normalizeCanvasGraph(canvas: CanvasDocumentV1): CanvasDocumentV1 {
     nodes: migrated.nodes as CanvasNode[],
     edges: migrated.edges as CanvasEdge[],
     generationRecords: migrated.generationRecords,
+    executions: canvas.executions ?? [],
     migrationReport: migrated.migrationReport,
   };
 }
@@ -321,7 +325,7 @@ export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocume
   return saved;
 }
 
-export async function loadCanvas(canvasId: string): Promise<CanvasDocumentV1 | undefined> {
+export async function loadCanvas(canvasId: string, projectId?: string): Promise<CanvasDocumentV1 | undefined> {
   const local = await (await database).get('canvases', canvasId) as CanvasDocumentV1 | undefined;
   try {
     // 后端图先读：成功则以库为准覆写本地元数据
@@ -331,16 +335,16 @@ export async function loadCanvas(canvasId: string): Promise<CanvasDocumentV1 | u
     // 后端为空但本地有内容（迁移/离线缓存）→ 信任本地，防后端空图覆盖勿丢数据
     if (!backendHasContent && localHasContent) return local ? normalizeCanvasGraph(local) : undefined;
     if (!local && !backendHasContent) return undefined;
-    return normalizeCanvasGraph(applyGraph(local ?? emptyCanvas(canvasId), dto));
+    return normalizeCanvasGraph(applyGraph(local ?? emptyCanvas(canvasId, projectId), dto));
   } catch {
     // 后端不可达/无鉴权 → 降级本地缓存
     return local ? normalizeCanvasGraph(local) : undefined;
   }
 }
 
-function emptyCanvas(canvasId: string): CanvasDocumentV1 {
+function emptyCanvas(canvasId: string, projectId = ''): CanvasDocumentV1 {
   const now = nowMs();
-  return { schemaVersion: 1, id: canvasId, projectId: '', title: '画布', nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], revision: 0, createdAt: now, updatedAt: now };
+  return { schemaVersion: 1, id: canvasId, projectId, title: '画布', nodes: [], edges: [], viewport: { x: 180, y: 90, zoom: .7 }, generationRecords: [], executions: [], revision: 0, createdAt: now, updatedAt: now };
 }
 
 export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {

@@ -9,6 +9,7 @@ export interface CanvasAssetDescriptor {
   name?: string;
   generationRecordId?: string;
   producerNodeId?: string;
+  createdAt?: string;
 }
 
 interface CanvasAssetRecord {
@@ -20,6 +21,7 @@ interface CanvasAssetRecord {
   url?: string;
   generationRecordId?: string;
   producerNodeId?: string;
+  createdAt?: string;
 }
 
 const normalizeAsset = (asset: CanvasAssetRecord): CanvasAssetDescriptor => ({
@@ -33,6 +35,7 @@ const normalizeAsset = (asset: CanvasAssetRecord): CanvasAssetDescriptor => ({
     : undefined,
   generationRecordId: asset.generationRecordId,
   producerNodeId: asset.producerNodeId,
+  createdAt: asset.createdAt,
 });
 
 export async function uploadCanvasAsset(

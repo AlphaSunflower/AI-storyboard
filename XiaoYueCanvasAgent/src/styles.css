@@ -68,6 +68,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .canvas-workspace.is-viewport-moving .media-quality-badge,.canvas-workspace.is-viewport-moving .node-floating-title { visibility: hidden; }
 .react-flow { background: radial-gradient(circle at 40% 35%,rgba(32,70,57,.35),transparent 42%),var(--canvas); }
 .react-flow__pane { cursor: default; }
+.react-flow__pane.selection { cursor: crosshair; }
+.react-flow__pane.dragging { cursor: grabbing; }
 .react-flow__node { border-radius: 10px 24px 10px 10px; }
 .react-flow__node:focus { outline: none; }
 .react-flow__selection { background: rgba(215,255,84,.06); border: 1px solid rgba(215,255,84,.42); }
@@ -2605,6 +2607,53 @@ textarea.text-node-editor::placeholder,
   color: var(--acid);
 }
 .react-flow__node-toolbar.node-selected-toolbar button.is-danger:hover {
+  background: rgba(255,118,95,.14);
+  color: #ff8e7e;
+}
+
+.canvas-workspace.has-multi-selection .react-flow__node-toolbar,
+.canvas-workspace.has-multi-selection .react-flow__edge-toolbar,
+.canvas-workspace.has-multi-selection .react-flow__resize-control {
+  display: none !important;
+}
+
+.canvas-selection-toolbar {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+}
+.canvas-selection-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(215,255,84,.22);
+  border-radius: 10px;
+  background: rgba(20,36,31,.97);
+  box-shadow: 0 12px 30px rgba(0,0,0,.42);
+  pointer-events: auto;
+  transform: translateX(-50%);
+}
+.canvas-selection-actions button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(238,240,223,.8);
+  cursor: pointer;
+}
+.canvas-selection-actions button:hover {
+  background: rgba(215,255,84,.14);
+  color: var(--acid);
+}
+.canvas-selection-actions button.is-danger:hover {
   background: rgba(255,118,95,.14);
   color: #ff8e7e;
 }

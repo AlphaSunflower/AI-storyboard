@@ -15,18 +15,19 @@ import {
   getNodeDefinition,
   isCanvasNodeKind,
   validateEdge,
+  type CanvasExecution,
   type CanvasGraphV2,
   type GenerationRecord,
   type NodePort,
 } from '../canvas/graphContracts';
 import { reconcileStoryboardShots, type StoryboardShotPlan } from '../canvas/storyboardPlan';
 import { relabelGeneratedResultNodes } from '../canvas/generationResultLabel';
+import { withResultSlotData } from '../canvas/resultSlots';
 
 // Canvas updates are immutable, so history can share untouched graph objects.
-const graphSnapshot = (nodes: CanvasNode[], edges: CanvasEdge[], generationRecords: GenerationRecord[]): GraphSnapshot => ({
+const graphSnapshot = (nodes: CanvasNode[], edges: CanvasEdge[]): GraphSnapshot => ({
   nodes,
   edges,
-  generationRecords,
 });
 const clearSelection = (nodes: CanvasNode[]) => nodes.map((node) => node.selected ? { ...node, selected: false } : node);
 const indexDerivedAssets = (nodes: CanvasNode[]) => {
@@ -100,6 +101,7 @@ interface CanvasState {
   nodes: CanvasNode[];
   edges: CanvasEdge[];
   generationRecords: GenerationRecord[];
+  executions: CanvasExecution[];
   materializeResultNode: (request: {
     resultNodeId: string;
     producerNodeId: string;
@@ -130,6 +132,7 @@ interface CanvasState {
   createDerivedNodes: (sourceId: string, outputs: DerivedOutput[], layout?: { columns?: number }) => string[];
   extendNode: (sourceId: string, kind?: MediaKind, direction?: 'left' | 'right') => void;
   updateNode: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
+  updateEdgeData: (edgeId: string, patch: Partial<CanvasEdge['data']>) => void;
   setNodePinned: (nodeId: string, pinned: boolean) => void;
   updateNodeTransient: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
   updateNodeGeometry: (nodeId: string, size: { width: number; height: number }) => void;
@@ -156,6 +159,8 @@ interface CanvasState {
   clearCanvas: () => void;
   appendGenerationRecord: (record: GenerationRecord) => void;
   updateGenerationRecord: (record: GenerationRecord) => void;
+  appendExecution: (execution: CanvasExecution) => void;
+  updateExecution: (execution: CanvasExecution) => void;
   applyStoryboardPlan: (producerNodeId: string, plans: StoryboardShotPlan[]) => {
     created: string[];
     updated: string[];
@@ -165,12 +170,13 @@ interface CanvasState {
 
 const MAX_HISTORY = 40;
 
-const asGraphV2 = (state: Pick<CanvasState, 'nodes' | 'edges' | 'generationRecords'>): CanvasGraphV2 => ({
+const asGraphV2 = (state: Pick<CanvasState, 'nodes' | 'edges' | 'generationRecords' | 'executions'>): CanvasGraphV2 => ({
   schemaVersion: 2,
   nodes: state.nodes as CanvasGraphV2['nodes'],
   edges: state.edges as CanvasGraphV2['edges'],
   viewport: { x: 0, y: 0, zoom: 1 },
   generationRecords: state.generationRecords,
+  executions: state.executions,
 });
 
 const compatibleTargetPort = (sourceKind: MediaKind, targetKind: MediaKind): NodePort | undefined => {
@@ -265,14 +271,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     set({
       ...next,
       derivedAssetIdsBySource: indexDerivedAssets(next.nodes),
-      past: [...current.past, graphSnapshot(current.nodes, current.edges, current.generationRecords)].slice(-MAX_HISTORY),
+      past: [...current.past, graphSnapshot(current.nodes, current.edges)].slice(-MAX_HISTORY),
       future: [],
       revision: current.revision + 1,
     });
   };
 
   return {
-    projectId: null, canvasId: null, nodes: [], edges: [], generationRecords: [], past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
+    projectId: null, canvasId: null, nodes: [], edges: [], generationRecords: [], executions: [], past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
     clipboard: null, clipboardPasteCount: 0, revision: 0, derivedAssetIdsBySource: {},
 
     loadProjectGraph: (canvas) => {
@@ -280,6 +286,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const nodes = relabelGeneratedResultNodes(
         structuredClone(canvas.nodes).map((node) => ({ ...node, selected: false })),
         generationRecords,
+        canvas.edges,
       );
       set({
       projectId: canvas.projectId,
@@ -287,6 +294,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       nodes,
       edges: structuredClone(canvas.edges),
       generationRecords,
+      executions: structuredClone(canvas.executions ?? []),
       past: [], future: [], selectedNodeId: null, dragStartSnapshot: null,
       clipboard: null, clipboardPasteCount: 0, revision: 0,
       derivedAssetIdsBySource: indexDerivedAssets(nodes),
@@ -305,7 +313,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
     beginNodeDrag: () => {
       const state = get();
-      if (!state.dragStartSnapshot) set({ dragStartSnapshot: graphSnapshot(state.nodes, state.edges, state.generationRecords) });
+      if (!state.dragStartSnapshot) set({ dragStartSnapshot: graphSnapshot(state.nodes, state.edges) });
     },
     endNodeDrag: () => {
       const state = get(); const snapshot = state.dragStartSnapshot;
@@ -326,9 +334,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const targetHandle = normalizeHandle(connection.targetHandle, 'target', sourceNode.data.kind, targetNode.data.kind);
       if (!sourceHandle || !targetHandle) return;
       const targetPort = getNodeDefinition(targetNode.data.kind)?.inputs.find((port) => port.id === targetHandle);
-      const data = targetPort?.ordered
+      const baseData = targetPort?.ordered
         ? { ...(connection as Connection & { data?: Record<string, unknown> }).data, portOrder: nextPortOrder(state.edges, targetNode.id, targetHandle) }
         : (connection as Connection & { data?: Record<string, unknown> }).data;
+      const data = withResultSlotData(sourceNode, targetNode, state.edges, baseData);
       const proposed = {
         id: `edge-${createId()}`,
         source: connection.source,
@@ -387,6 +396,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           mediaLoadState: 'ready',
           status: 'success',
           operation: node.data.kind === 'image' ? { type: 'import', params: {} } : undefined,
+          automation: {
+            ...(typeof node.data.automation === 'object' && node.data.automation ? node.data.automation : {}),
+            phase: 'done',
+          },
         },
       } : node),
       edges: state.edges,
@@ -422,6 +435,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       set({ selectedNodeId: node.id });
     },
     updateNode: (nodeId, patch) => commit((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node), edges: state.edges })),
+    updateEdgeData: (edgeId, patch) => commit((state) => ({
+      nodes: state.nodes,
+      edges: state.edges.map((edge) => edge.id === edgeId ? { ...edge, data: { ...(edge.data ?? {}), ...patch } } : edge),
+    })),
     setNodePinned: (nodeId, pinned) => commit((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, draggable: !pinned, data: { ...node.data, pinned } } : node), edges: state.edges })),
     updateNodeTransient: (nodeId, patch) => set((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node) })),
     updateNodeGeometry: (nodeId, size) => set((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, width: size.width, height: size.height } : node) })),
@@ -544,15 +561,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const targetHandle = normalizeHandle(connection.targetHandle, 'target', sourceNode.data.kind, targetNode.data.kind);
       if (!sourceHandle || !targetHandle) return null;
       const targetPort = getNodeDefinition(targetNode.data.kind)?.inputs.find((port) => port.id === targetHandle);
+      const baseData = targetPort?.ordered
+        ? { ...(connection as Connection & { data?: Record<string, unknown> }).data, portOrder: nextPortOrder(state.edges, targetNode.id, targetHandle) }
+        : (connection as Connection & { data?: Record<string, unknown> }).data;
       const proposed = {
         ...connection,
         id: `edge-${createId()}`,
         sourceHandle,
         targetHandle,
         type: 'canvas',
-        data: targetPort?.ordered
-          ? { ...(connection as Connection & { data?: Record<string, unknown> }).data, portOrder: nextPortOrder(state.edges, targetNode.id, targetHandle) }
-          : (connection as Connection & { data?: Record<string, unknown> }).data,
+        data: withResultSlotData(sourceNode, targetNode, state.edges, baseData),
       };
       if (!validateEdge(asGraphV2(state), proposed, 'user').ok) return null;
       const edge = proposed as CanvasEdge;
@@ -572,6 +590,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         : undefined;
       if (!sourcePort || !targetPort) return null;
       const node = { ...makeNode(kind, position), selected: true };
+      const baseData = targetPort.ordered
+        ? { portOrder: nextPortOrder(get().edges, node.id, targetPort.id) }
+        : undefined;
       const edge = {
         id: `edge-${createId()}`,
         source: sourceId,
@@ -579,9 +600,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         target: node.id,
         targetHandle: targetPort.id,
         type: 'canvas',
-        data: targetPort.ordered
-          ? { portOrder: nextPortOrder(get().edges, node.id, targetPort.id) }
-          : undefined,
+        data: withResultSlotData(source, node as CanvasNode, get().edges, baseData),
       };
       if (!validateEdge(asGraphV2({ ...get(), nodes: [...get().nodes, node] }), edge, 'user').ok) return null;
       commit((state) => ({ nodes: [...clearSelection(state.nodes), node], edges: [...state.edges, edge], generationRecords: state.generationRecords }));
@@ -639,11 +658,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     },
     undo: () => {
       const state = get(); const previous = state.past.at(-1); if (!previous) return;
-      set({ nodes: previous.nodes, edges: previous.edges, generationRecords: previous.generationRecords ?? [], past: state.past.slice(0, -1), future: [graphSnapshot(state.nodes, state.edges, state.generationRecords), ...state.future].slice(0, MAX_HISTORY), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(previous.nodes) });
+      set({ nodes: previous.nodes, edges: previous.edges, past: state.past.slice(0, -1), future: [graphSnapshot(state.nodes, state.edges), ...state.future].slice(0, MAX_HISTORY), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(previous.nodes) });
     },
     redo: () => {
       const state = get(); const next = state.future[0]; if (!next) return;
-      set({ nodes: next.nodes, edges: next.edges, generationRecords: next.generationRecords ?? [], past: [...state.past, graphSnapshot(state.nodes, state.edges, state.generationRecords)].slice(-MAX_HISTORY), future: state.future.slice(1), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(next.nodes) });
+      set({ nodes: next.nodes, edges: next.edges, past: [...state.past, graphSnapshot(state.nodes, state.edges)].slice(-MAX_HISTORY), future: state.future.slice(1), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(next.nodes) });
     },
     loadTemplate: (templateId) => {
       const x = 180 + get().nodes.length * 18;
@@ -656,15 +675,21 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       commit((state) => ({ nodes: [...state.nodes, ...nodes], edges: [...state.edges, ...edges] }));
     },
     clearCanvas: () => commit(() => ({ nodes: [], edges: [] })),
-    appendGenerationRecord: (record) => commit((state) => ({
-      nodes: state.nodes,
-      edges: state.edges,
+    appendGenerationRecord: (record) => set((state) => ({
       generationRecords: [...state.generationRecords.filter((item) => item.id !== record.id), record],
+      revision: state.revision + 1,
     })),
-    updateGenerationRecord: (record) => commit((state) => ({
-      nodes: state.nodes,
-      edges: state.edges,
+    updateGenerationRecord: (record) => set((state) => ({
       generationRecords: state.generationRecords.map((item) => item.id === record.id ? record : item),
+      revision: state.revision + 1,
+    })),
+    appendExecution: (execution) => set((state) => ({
+      executions: [...state.executions.filter((item) => item.id !== execution.id), execution].slice(-20),
+    })),
+    updateExecution: (execution) => set((state) => ({
+      executions: state.executions.some((item) => item.id === execution.id)
+        ? state.executions.map((item) => item.id === execution.id ? execution : item)
+        : [...state.executions, execution].slice(-20),
     })),
     materializeResultNode: (request) => {
       const state = get();
@@ -672,18 +697,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const producer = state.nodes.find((node) => node.id === request.producerNodeId);
       const existingResults = state.nodes.filter((node) =>
         node.id.startsWith('result:') && node.data.derivedFrom === producer?.id);
-      const columns = 3;
       const resultIndex = existingResults.length;
-      const stepX = request.size.width + 32;
       const stepY = request.size.height + 32;
       const result = {
         id: request.resultNodeId,
         type: request.kind,
         position: {
           x: producer
-            ? producer.position.x + (producer.width ?? 250) + 160 + (resultIndex % columns) * stepX
-            : 300 + resultIndex * stepX,
-          y: (producer?.position.y ?? 200) + Math.floor(resultIndex / columns) * stepY,
+            ? producer.position.x + (producer.width ?? 250) + 160
+            : 300,
+          y: (producer?.position.y ?? 200) + resultIndex * stepY,
         },
         width: request.size.width,
         height: request.size.height,

@@ -5,11 +5,14 @@ import type { AssetMetadata, MediaAsset, MediaQuality, PersistedAsset } from '..
 interface MediaState {
   assets: Record<string, MediaAsset>;
   metadata: Record<string, AssetMetadata>;
+  assetErrors: Record<string, string>;
   quality: MediaQuality;
   upsertAsset: (asset: MediaAsset) => void;
   upsertAssets: (assets: MediaAsset[]) => void;
   hydrateAssets: (assets: PersistedAsset[]) => void;
   hydrateMetadata: (assets: AssetMetadata[]) => void;
+  markAssetError: (assetId: string, message: string) => void;
+  clearAssetError: (assetId: string) => void;
   setQuality: (quality: MediaQuality) => void;
   clearAssets: () => void;
 }
@@ -30,23 +33,32 @@ const withAssetCacheLimit = (current: Record<string, MediaAsset>, incoming: Medi
 };
 
 export const useMediaStore = create<MediaState>((set, get) => ({
-  assets: {}, metadata: {}, quality: 'thumbnail',
+  assets: {}, metadata: {}, assetErrors: {}, quality: 'thumbnail',
   upsertAsset: (asset) => set((state) => {
-    return { assets: withAssetCacheLimit(state.assets, [asset]), metadata: { ...state.metadata, [asset.id]: asset } };
+    const assetErrors = { ...state.assetErrors };
+    delete assetErrors[asset.id];
+    return { assets: withAssetCacheLimit(state.assets, [asset]), metadata: { ...state.metadata, [asset.id]: asset }, assetErrors };
   }),
   upsertAssets: (assets) => {
     if (!assets.length) return;
     set((state) => {
       const next = withAssetCacheLimit(state.assets, assets);
       const metadata = { ...state.metadata };
-      assets.forEach((asset) => { metadata[asset.id] = asset; });
-      return { assets: next, metadata };
+      const assetErrors = { ...state.assetErrors };
+      assets.forEach((asset) => { metadata[asset.id] = asset; delete assetErrors[asset.id]; });
+      return { assets: next, metadata, assetErrors };
     });
   },
   hydrateAssets: (records) => {
-    set({ assets: Object.fromEntries(records.map((record) => { const asset = hydrateAsset(record); return [asset.id, asset]; })), metadata: Object.fromEntries(records.map((record) => [record.id, record])) });
+    set({ assets: Object.fromEntries(records.map((record) => { const asset = hydrateAsset(record); return [asset.id, asset]; })), metadata: Object.fromEntries(records.map((record) => [record.id, record])), assetErrors: {} });
   },
-  hydrateMetadata: (records) => set({ metadata: Object.fromEntries(records.map((record) => [record.id, record])) }),
+  hydrateMetadata: (records) => set({ metadata: Object.fromEntries(records.map((record) => [record.id, record])), assetErrors: {} }),
+  markAssetError: (assetId, message) => set((state) => ({ assetErrors: { ...state.assetErrors, [assetId]: message } })),
+  clearAssetError: (assetId) => set((state) => {
+    const assetErrors = { ...state.assetErrors };
+    delete assetErrors[assetId];
+    return { assetErrors };
+  }),
   setQuality: (quality) => { if (get().quality !== quality) set({ quality }); },
-  clearAssets: () => { assetRecency.clear(); set({ assets: {}, metadata: {} }); },
+  clearAssets: () => { assetRecency.clear(); set({ assets: {}, metadata: {}, assetErrors: {} }); },
 }));

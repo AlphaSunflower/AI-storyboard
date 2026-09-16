@@ -21,10 +21,10 @@ npm run test:e2e
 
 ## CLI 与 Bridge（本地命令入口）
 
-浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。
+浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。Bridge 同时在 `/mcp` 提供 Streamable HTTP MCP Server。
 
 ```bash
-npm run bridge   # 启动 Bridge（127.0.0.1:8787）
+npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
 npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
 ```
 
@@ -35,7 +35,7 @@ node cli/morrow.ts canvas projects                        # 列出已打开的�
 node cli/morrow.ts canvas summary --project <id>          # 画布摘要
 node cli/morrow.ts canvas nodes list --json               # 列出节点
 node cli/morrow.ts canvas node create_text --label 设计说明 --position 640,240
-node cli/morrow.ts canvas layout dag --dry-run            # 预览 DAG 布局
+node cli/morrow.ts canvas layout dag --dry-run            # 预览依赖层级布局
 node cli/morrow.ts canvas node delete --node <id>         # 删除节点
 ```
 
@@ -46,7 +46,11 @@ node cli/morrow.ts canvas node delete --node <id>         # 删除节点
 - `MORROW_BRIDGE_URL`：Bridge 地址（默认 `http://127.0.0.1:8787`）
 - `MORROW_BRIDGE_PORT`：Bridge 监听端口（默认 `8787`）
 
-协议（`src/canvas/bridgeProtocol.ts`）：浏览器打开项目后 `POST /register` 注册、`GET /poll` 拉取命令；CLI `POST /command` 提交并阻塞等待结果。未打开的项目返回 `PROJECT_NOT_OPEN`，多个项目且未指定 `--project` 时返回 `AMBIGUOUS_PROJECT`。
+协议（`src/canvas/bridgeProtocol.ts`）：浏览器打开画布后 `POST /register` 注册 `projectId + projectTitle + canvasId + canvasTitle`、`GET /poll` 拉取命令；CLI `POST /command` 提交并阻塞等待结果。未打开的项目返回 `PROJECT_NOT_OPEN`；存在多个活动画布时 `canvas_get_context` 返回 `HUMAN_INPUT_REQUIRED`，MoonAgent 使用 `moon_request_human_input` 让用户按项目名和画布名点击选择，原始 ID 只作为隐藏参数传递。
+
+MCP 工具使用 `canvas_*` 命名，覆盖节点读取、创建、更新、删除、连线、布局、单节点执行、DAG 批跑和执行状态查询。MoonAgent 通过 `spring.ai.mcp.client.streamable-http.connections.canvas` 连接该端点；Bridge 未启动时 MoonAgent 可正常启动，并在后台重试连接。
+
+模型参数通过 `canvas_get_node_model_config` 与 `canvas_set_node_model_config` 管理：读取当前模型、网关兼容模型和递归参数 Schema；写入时严格校验枚举、范围和嵌套对象。模型及模型参数禁止通过 `canvas_update_node` 绕过校验。
 
 ## 当前能力
 

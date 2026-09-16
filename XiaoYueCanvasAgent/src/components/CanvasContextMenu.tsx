@@ -5,7 +5,8 @@ import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
 
 export type CanvasContextTarget =
   | { type: 'pane'; clientX: number; clientY: number; flowPosition: { x: number; y: number } }
-  | { type: 'node'; node: CanvasNode; clientX: number; clientY: number; flowPosition: { x: number; y: number } };
+  | { type: 'node'; node: CanvasNode; clientX: number; clientY: number; flowPosition: { x: number; y: number } }
+  | { type: 'selection'; count: number; clientX: number; clientY: number; flowPosition: { x: number; y: number } };
 
 interface MenuItemProps {
   children: ReactNode;
@@ -63,6 +64,8 @@ interface CanvasContextMenuProps {
   onUndo: () => void;
   onRedo: () => void;
   onCopy: () => void;
+  onCut: () => void;
+  onLayout: () => void;
   onPaste: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -118,6 +121,8 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       <MenuItem submenu={addNodeSubmenu}>添加节点</MenuItem>
       <MenuItem disabled title="首批仅开放图片与文字节点">添加辅助工具</MenuItem>
       <Separator />
+      <MenuItem onSelect={run(props.onLayout)}>整理编排</MenuItem>
+      <Separator />
       <MenuItem disabled={!props.canUndo} shortcut="Ctrl Z" onSelect={run(props.onUndo)}>撤销</MenuItem>
       <MenuItem disabled={!props.canRedo} shortcut="Shift Ctrl Z" onSelect={run(props.onRedo)}>重做</MenuItem>
       <Separator />
@@ -136,6 +141,8 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       <MenuItem disabled={!props.canPaste} shortcut="Ctrl V" onSelect={run(props.onPaste)}>粘贴</MenuItem>
       <MenuItem onSelect={run(props.onDuplicate)}>副本</MenuItem>
       <Separator />
+      <MenuItem onSelect={run(props.onLayout)}>整理编排</MenuItem>
+      <Separator />
       <MenuItem shortcut="Ctrl D / Del" onSelect={run(props.onDelete)}>删除</MenuItem>
       {target.node.data.kind === 'image' && <>
         <Separator />
@@ -143,6 +150,15 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       </>}
       <Separator />
       <MenuItem disabled title="未配置反馈服务">反馈问题</MenuItem>
+    </>}
+
+    {target.type === 'selection' && <>
+      <MenuItem shortcut="Ctrl C" onSelect={run(props.onCopy)}>复制</MenuItem>
+      <MenuItem shortcut="Ctrl X" onSelect={run(props.onCut)}>剪切</MenuItem>
+      <Separator />
+      <MenuItem onSelect={run(props.onLayout)}>整理编排</MenuItem>
+      <Separator />
+      <MenuItem shortcut="Ctrl D / Del" onSelect={run(props.onDelete)}>删除</MenuItem>
     </>}
 
   </div>;

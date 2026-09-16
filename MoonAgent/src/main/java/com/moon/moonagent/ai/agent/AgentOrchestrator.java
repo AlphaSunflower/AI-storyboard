@@ -62,8 +62,25 @@ public interface AgentOrchestrator {
     AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks, SseEmitter emitter);
 
     /**
+     * 画布编辑模式编排入口：额外携带持续工作区与媒体引用，直到用户显式离开画布模式。
+     */
+    AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
+                            java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
+                            CanvasSessionContext canvasContext, SseEmitter emitter);
+
+    /**
      * HITL 表单提交后续流并返回完整 turn 结果（含 metadata / trace / reasoning / hitlPaused）。
      * 兼容入口：{@link #resume} 为 {@code resumeTurn(...).content()} 的薄包装。
      */
     AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
+
+    /**
+     * HITL 续流入口：画布模式上下文必须原样携带，禁止在确认过程中掉回全局意图链。
+     */
+    default AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action,
+                                       String customText, Map<String, String> params,
+                                       java.util.List<String> assetIds, String routingHint,
+                                       CanvasSessionContext canvasContext, SseEmitter emitter) {
+        return resumeTurn(conversation, formToken, action, customText, params, assetIds, routingHint, emitter);
+    }
 }

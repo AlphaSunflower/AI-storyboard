@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.specialist;
 
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
@@ -34,7 +35,9 @@ public record SpecialistContext(
         /** checkpoint plan JSON（方案载荷；缺失时 resume 读字段得空串） */
         String cpPlan,
         /** 本轮轨迹累积器（可空；null 表示无 trace） */
-        AgentTraceAccumulator trace
+        AgentTraceAccumulator trace,
+        /** 画布编辑模式上下文（可空；非空时技能只能操作指定画布） */
+        CanvasSessionContext canvasContext
 ) {
     /** 兼容旧 12 参数构造器：trace 置 null（无轨迹）。 */
     public SpecialistContext(AgentConversation conversation, String userMessage,
@@ -43,7 +46,18 @@ public record SpecialistContext(
                              String action, String customText, Map<String, String> params,
                              java.util.List<String> assetIds, String cpAction, String cpPlan) {
         this(conversation, userMessage, picUrls, emitter, previousResult, skill,
-                action, customText, params, assetIds, cpAction, cpPlan, null);
+                action, customText, params, assetIds, cpAction, cpPlan, null, null);
+    }
+
+    /** 兼容旧 13 参数构造器：canvasContext 置 null。 */
+    public SpecialistContext(AgentConversation conversation, String userMessage,
+                             java.util.List<String> picUrls, SseEmitter emitter,
+                             SpecialistResult previousResult, AgentSkill skill,
+                             String action, String customText, Map<String, String> params,
+                             java.util.List<String> assetIds, String cpAction, String cpPlan,
+                             AgentTraceAccumulator trace) {
+        this(conversation, userMessage, picUrls, emitter, previousResult, skill,
+                action, customText, params, assetIds, cpAction, cpPlan, trace, null);
     }
 
     public static SpecialistContext from(OrchestrationRequest request, AgentSkill skill) {
@@ -60,7 +74,8 @@ public record SpecialistContext(
                 request.getAssetIds(),
                 "",
                 "",
-                request.getTrace()
+                request.getTrace(),
+                request.getCanvasContext()
         );
     }
 }

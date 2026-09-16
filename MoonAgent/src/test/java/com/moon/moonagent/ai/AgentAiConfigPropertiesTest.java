@@ -7,13 +7,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentAiConfigPropertiesTest {
 
     @Test
-    void defaultPlanTimeoutIsTenMinutes() {
-        assertThat(new AgentAiConfigProperties().getPlanTimeoutSeconds()).isEqualTo(600);
+    void defaultPlanTimeoutSupportsLongCanvasTasks() {
+        assertThat(new AgentAiConfigProperties().getPlanTimeoutSeconds()).isEqualTo(1800);
     }
 
     @Test
-    void defaultSseTimeoutCoversLongBatchGeneration() {
-        assertThat(new AgentAiConfigProperties().getSseTimeoutSeconds()).isEqualTo(1800);
+    void defaultSseTimeoutCoversLongCanvasSessions() {
+        assertThat(new AgentAiConfigProperties().getSseTimeoutSeconds()).isEqualTo(14400);
     }
 
     @Test
