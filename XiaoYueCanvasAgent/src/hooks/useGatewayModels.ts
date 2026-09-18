@@ -48,6 +48,34 @@ const DEFAULT_ALIASES: Record<string, string> = {
   standard: 'medium',
 };
 
+export const LOCAL_GATEWAY_FALLBACKS: Record<'image' | 'video', GatewayModel[]> = {
+  image: [{
+    value: 'gpt-image-2',
+    label: 'GPT Image 2',
+    default: 'true',
+    params: JSON.stringify({
+      sizes: ['1K', '2K', '4K'],
+      sizeDefault: '1K',
+      n: { min: 1, max: 4, default: 1 },
+      spec: { modes: ['text-to-image', 'image-to-image'], request: [] },
+    }),
+  }],
+  video: [{
+    value: 'MiniMax-H3',
+    label: 'MiniMax H3',
+    default: 'true',
+    params: JSON.stringify({
+      resolutions: ['720P', '1080P'],
+      resolutionDefault: '1080P',
+      durations: [4, 5, 6, 8, 10],
+      spec: { modes: ['text-to-video', 'image-to-video'], request: [] },
+    }),
+  }],
+};
+
+const shouldSurfaceModelError = (message: string) =>
+  /401|403|登录|权限|unauthorized|forbidden/i.test(message);
+
 /** 把网关历史默认值映射到当前能力枚举；未知值回退到第一个选项。 */
 export function normalizeModelDefault(value: unknown, options: string[] = []): string | undefined {
   const raw = value === undefined || value === null ? '' : String(value);
@@ -123,12 +151,20 @@ export function useGatewayModels(type: 'image' | 'video') {
     setError(null);
     apiJson<GatewayModel[]>(`/models?type=${type}`)
       .then((list) => {
-        if (!cancelled) setModels(Array.isArray(list) ? list : []);
+        if (cancelled) return;
+        const resolved = Array.isArray(list) && list.length ? list : LOCAL_GATEWAY_FALLBACKS[type];
+        setModels(resolved);
+        setError(null);
       })
       .catch((caught) => {
-        if (!cancelled) {
+        if (cancelled) return;
+        const message = caught instanceof Error ? caught.message : '模型列表加载失败';
+        if (shouldSurfaceModelError(message)) {
           setModels([]);
-          setError(caught instanceof Error ? caught.message : '模型列表加载失败');
+          setError(message);
+        } else {
+          setModels(LOCAL_GATEWAY_FALLBACKS[type]);
+          setError(null);
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });

@@ -1,21 +1,72 @@
-import type { JobRequest, RedrawMaskDocument, RedrawMaskMark } from '../types';
+import type { RedrawMaskDocument, RedrawMaskMark } from '../types';
 
-export interface RedrawOutputOptions {
-  count: 1 | 2 | 3 | 4;
-  modelTier: 'normal' | 'pro';
-  resolution: '1K' | '2K' | '4K';
-}
+export const REDRAW_REGION_COLORS = [
+  '#ff5f5f',
+  '#59d8ff',
+  '#22c55e',
+  '#f59e0b',
+  '#a855f7',
+  '#06b6d4',
+  '#eab308',
+  '#ec4899',
+] as const;
 
-export type RedrawReference =
-  | { type: 'asset'; assetId: string; label: string }
-  | { type: 'file'; file: File };
+const REDRAW_COLOR_NAMES: Record<string, string> = {
+  '#ff5f5f': '红色',
+  '#59d8ff': '蓝色',
+  '#d7ff54': '黄绿色',
+  '#22c55e': '绿色',
+  '#f59e0b': '橙色',
+  '#a855f7': '紫色',
+  '#06b6d4': '青色',
+  '#eab308': '黄色',
+  '#ec4899': '粉色',
+};
 
-type RedrawJobContext = Pick<JobRequest, 'clientRequestId' | 'conversationId' | 'context'>;
+const CHINESE_NUMBERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+
+export type RedrawPaintMark = RedrawMaskMark & {
+  operation: 'paint';
+  intent: string;
+  color: string;
+  createdAt: number;
+};
 
 const markHasArea = (mark: RedrawMaskMark) => {
   if (mark.type === 'brush') return mark.points.length > 0 && mark.width > 0;
   return Math.abs(mark.end.x - mark.start.x) > 0.002 && Math.abs(mark.end.y - mark.start.y) > 0.002;
 };
+
+export function redrawRegionColor(index: number) {
+  return REDRAW_REGION_COLORS[index % REDRAW_REGION_COLORS.length];
+}
+
+export const redrawRegionColorName = (color?: string) =>
+  REDRAW_COLOR_NAMES[(color ?? '').toLowerCase()] ?? '自定义颜色';
+
+export function redrawRegionBounds(mark: RedrawPaintMark) {
+  if (mark.type === 'rectangle') {
+    return {
+      x: Math.min(mark.start.x, mark.end.x),
+      y: Math.min(mark.start.y, mark.end.y),
+      width: Math.abs(mark.end.x - mark.start.x),
+      height: Math.abs(mark.end.y - mark.start.y),
+    };
+  }
+  const padding = Math.max(0, mark.width / 2);
+  const xs = mark.points.map((point) => point.x);
+  const ys = mark.points.map((point) => point.y);
+  const left = Math.max(0, Math.min(...xs) - padding);
+  const top = Math.max(0, Math.min(...ys) - padding);
+  const right = Math.min(1, Math.max(...xs) + padding);
+  const bottom = Math.min(1, Math.max(...ys) + padding);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
 
 const drawMaskMark = (
   context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -24,9 +75,10 @@ const drawMaskMark = (
   height: number,
 ) => {
   context.save();
-  context.globalCompositeOperation = mark.operation === 'paint' ? 'source-over' : 'destination-out';
-  context.fillStyle = '#fff';
-  context.strokeStyle = '#fff';
+  // OpenAI-compatible edit masks use transparent pixels for the editable region.
+  context.globalCompositeOperation = mark.operation === 'paint' ? 'destination-out' : 'source-over';
+  context.fillStyle = '#000';
+  context.strokeStyle = '#000';
 
   if (mark.type === 'rectangle') {
     const left = Math.min(mark.start.x, mark.end.x) * width;
@@ -64,6 +116,8 @@ export async function rasterizeRedrawMask(mask: RedrawMaskDocument, width: numbe
     : new OffscreenCanvas(width, height);
   const context = canvas.getContext('2d');
   if (!context) throw new Error('浏览器无法创建重绘蒙版');
+  context.fillStyle = '#000';
+  context.fillRect(0, 0, width, height);
   mask.marks.forEach((mark) => drawMaskMark(context, mark, width, height));
 
   const validationWidth = Math.max(1, Math.min(256, width));
@@ -73,13 +127,18 @@ export async function rasterizeRedrawMask(mask: RedrawMaskDocument, width: numbe
     : new OffscreenCanvas(validationWidth, validationHeight);
   const validationContext = validationCanvas.getContext('2d');
   if (!validationContext) throw new Error('浏览器无法验证重绘蒙版');
+  validationContext.fillStyle = '#000';
+  validationContext.fillRect(0, 0, validationWidth, validationHeight);
   mask.marks.forEach((mark) => drawMaskMark(validationContext, mark, validationWidth, validationHeight));
   const pixels = validationContext.getImageData(0, 0, validationWidth, validationHeight).data;
-  let hasVisibleMask = false;
+  let hasEditableMask = false;
   for (let index = 3; index < pixels.length; index += 4) {
-    if (pixels[index] > 0) { hasVisibleMask = true; break; }
+    if (pixels[index] < 255) {
+      hasEditableMask = true;
+      break;
+    }
   }
-  if (!hasVisibleMask) throw new Error('请先在图片上绘制蒙版');
+  if (!hasEditableMask) throw new Error('请先在图片上绘制蒙版');
 
   if (canvas instanceof OffscreenCanvas) return canvas.convertToBlob({ type: 'image/png' });
   return new Promise<Blob>((resolve, reject) => {
@@ -87,43 +146,42 @@ export async function rasterizeRedrawMask(mask: RedrawMaskDocument, width: numbe
   });
 }
 
-export const hasDrawableRedrawMask = (document: RedrawMaskDocument) => {
-  // An eraser cannot create a selection without an earlier paint mark.
-  let hasSelection = false;
-  for (const mark of document.marks) {
-    if (!markHasArea(mark)) continue;
-    if (mark.operation === 'paint') hasSelection = true;
-  }
-  return hasSelection;
-};
+export const hasDrawableRedrawMask = (document: RedrawMaskDocument) =>
+  document.marks.some((mark) => mark.operation === 'paint' && markHasArea(mark));
 
-export function createRedrawJobRequest(
-  sourceAssetId: string,
-  prompt: string,
-  mask: RedrawMaskDocument,
-  output: RedrawOutputOptions,
-  reference: RedrawReference | null,
-  jobContext: RedrawJobContext,
-): JobRequest {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) throw new Error('请输入重绘要求');
-  if (!hasDrawableRedrawMask(mask)) throw new Error('请先在图片上绘制蒙版');
+export function redrawPaintMarks(document: RedrawMaskDocument): RedrawPaintMark[] {
+  return document.marks
+    .filter((mark): mark is RedrawPaintMark =>
+      mark.operation === 'paint'
+      && markHasArea(mark)
+      && typeof mark.intent === 'string'
+      && mark.intent.trim().length > 0)
+    .sort((left, right) => (left.createdAt ?? 0) - (right.createdAt ?? 0));
+}
 
+export function buildRedrawPrompt(document: RedrawMaskDocument) {
+  const regions = redrawPaintMarks(document);
+  if (!regions.length) throw new Error('请先为每个选区填写修改意图');
+  const clauses = regions.map((mark, index) => {
+    const number = CHINESE_NUMBERS[index] ?? String(index + 1);
+    const color = redrawRegionColorName(mark.color);
+    const regionType = mark.type === 'brush' ? '涂抹位置' : '框选位置';
+    const intent = mark.intent.trim().replace(/^(?:在这个位置|这个位置|此处|这里)[，,\s]*/, '');
+    if (/^(?:放|放入|添加|增加|生成|制作|放置)/.test(intent)) {
+      return `${color}${regionType}${number}${intent}`;
+    }
+    return `${color}${regionType}${number}按要求处理：${intent}`;
+  });
+  return `请处理这张图：房间内${clauses.join('；')}。不要改变其他布局，确保修改内容与整张图的风格一致。`;
+}
+
+export function validateRedrawDocument(document: RedrawMaskDocument) {
+  const painted = document.marks.filter((mark) => mark.operation === 'paint' && markHasArea(mark));
+  if (!painted.length) throw new Error('请先在图片上绘制蒙版');
+  const missingIntent = painted.find((mark) => !mark.intent?.trim());
+  if (missingIntent) throw new Error('请为每个选区填写修改意图');
   return {
-    ...jobContext,
-    capabilityId: 'image.redraw',
-    sourceAssetIds: [sourceAssetId, ...(reference?.type === 'asset' ? [reference.assetId] : [])],
-    params: {
-      mode: 'image-to-image',
-      prompt: normalizedPrompt,
-      mask,
-      count: output.count,
-      modelTier: output.modelTier,
-      resolution: output.modelTier === 'pro' ? output.resolution : '1K',
-      aspectRatio: 'source',
-      reference: reference?.type === 'file'
-        ? { type: 'file', file: reference.file, name: reference.file.name, mimeType: reference.file.type, bytes: reference.file.size }
-        : reference,
-    },
+    regions: redrawPaintMarks(document),
+    prompt: buildRedrawPrompt(document),
   };
 }

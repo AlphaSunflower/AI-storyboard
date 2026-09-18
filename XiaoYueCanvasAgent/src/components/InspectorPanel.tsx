@@ -5,13 +5,13 @@ import { useObjectUrl } from '../hooks/useObjectUrl';
 import { getAsset } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
-import type { CanvasNode, ImageOperation } from '../types';
+import type { CanvasNode, MediaOperation } from '../types';
 import { ImagePreviewOverlay, type ImagePreviewTarget } from './ImagePreviewOverlay';
 
 interface LineageStep {
   id: string;
   label: string;
-  operationType?: ImageOperation['type'];
+  operationType?: MediaOperation['type'];
 }
 
 // 递归 derivedFrom，构建从当前节点一路回溯到源头的血缘链。
@@ -165,6 +165,9 @@ export function InspectorPanel() {
   const markAssetError = useMediaStore((state) => state.markAssetError);
   const clearAssetError = useMediaStore((state) => state.clearAssetError);
   const previewUrl = useObjectUrl(asset?.previewBlob ?? asset?.thumbnailBlob, Boolean(asset));
+  // 视频节点（或挂着视频结果的节点）在属性面板直接播放原始文件
+  const isVideo = asset?.kind === 'video';
+  const videoUrl = useObjectUrl(asset?.originalBlob, isVideo);
   const [previewTarget, setPreviewTarget] = useState<ImagePreviewTarget | null>(null);
   const updateNode = useCanvasStore((state) => state.updateNode);
   const duplicate = useCanvasStore((state) => state.duplicateSelected);
@@ -216,7 +219,24 @@ export function InspectorPanel() {
       <label className="flex flex-col gap-1.5 text-[13px] text-muted-foreground">节点名称
         <input defaultValue={nodeData.label} onBlur={(event) => updateNode(selectedNodeId, { label: event.target.value })} className={`h-9 ${fieldInput}`} />
       </label>
-      {nodeData.kind === 'image' && nodeData.assetId && (
+      {(isVideo || (nodeData.kind === 'video' && nodeData.assetId)) && (
+        <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+          <header className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-[12px] text-foreground"><Video size={14} className="text-acid" />视频预览</span>
+            {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}{asset.durationSeconds ? ` · ${asset.durationSeconds.toFixed(1)}s` : ''}</small>}
+          </header>
+          <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)]">
+            {assetError ? (
+              <span className="grid aspect-video w-full place-items-center px-4 text-center text-[12px] text-muted-foreground">{assetError}</span>
+            ) : videoUrl ? (
+              <video className="aspect-video w-full" src={videoUrl} controls playsInline preload="metadata" aria-label={`视频预览：${nodeData.label}`} />
+            ) : (
+              <span className="grid aspect-video w-full place-items-center text-[12px] text-muted-foreground">视频加载中…</span>
+            )}
+          </div>
+        </section>
+      )}
+      {!isVideo && nodeData.kind === 'image' && nodeData.assetId && (
         <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
           <header className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[12px] text-foreground"><ImageIcon size={14} className="text-acid" />图片预览</span>

@@ -3,6 +3,7 @@ import { AlertTriangle, CircleStop, Clock3, History, ListTodo, LoaderCircle, X }
 import { useCanvasStore } from '../store/canvasStore';
 import { cancelCanvasGeneration } from '../services/jobRunner';
 import { generationRecordProgress, selectActiveGenerationRecords } from '../canvas/generationRecords';
+import { multiAngleLabel } from '../canvas/multiAngle';
 import type { GenerationRecord } from '../types';
 
 const STATUS_LABEL: Record<GenerationRecord['status'], string> = {
@@ -85,12 +86,15 @@ export const TaskQueuePanel = memo(function TaskQueuePanel({
               const progress = generationRecordProgress(record, nodes);
               const materializing = record.materializationStatus === 'materializing';
               const capabilityId = typeof record.params.capabilityId === 'string' ? record.params.capabilityId : '';
+              const operationLabel = multiAngleLabel(record.params.multiAngleMode)
+                ?? actionLabel[capabilityId]
+                ?? record.actionId;
               return (
                 <article key={record.id} className={`task-queue-item is-${record.status}`}>
                   <span className="task-queue-item__icon"><LoaderCircle className="is-spinning" size={14} /></span>
                   <div className="task-queue-item__body">
                     <div className="task-queue-item__title">
-                      <strong>{nodeLabel(record.producerNodeId)} · {actionLabel[capabilityId] ?? record.actionId}</strong>
+                      <strong>{nodeLabel(record.producerNodeId)} · {operationLabel}</strong>
                       <small>{materializing ? '结果落地中' : STATUS_LABEL[record.status]}</small>
                     </div>
                     <span className="task-queue-item__prompt">{record.effectivePrompt || record.prompt || '未填写提示词'}</span>

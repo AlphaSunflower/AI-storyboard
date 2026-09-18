@@ -5,7 +5,7 @@ import { useAgentStore } from '../store/agentStore';
 import { createId } from '../utils/id';
 import { getAsset, listGenerationQueueItems, putGenerationQueueItem, saveAsset } from './projectStorage';
 import { createImageAsset, createVideoAsset, getMediaNodeSize, getVideoNodeSize } from '../utils/mediaPipeline';
-import type { JobEvent, PersistedAsset } from '../types';
+import type { JobEvent, PersistedAsset, RedrawMaskDocument } from '../types';
 import { materializeJobAsset } from '../canvas/generationRuntime';
 import { getNodeDefinition, validateRunnable, type CanvasGraphV2, type GenerationRecord } from '../canvas/graphContracts';
 import { acquireGenerationSlot, withGlobalSchedulerLock } from '../canvas/generationQueue';
@@ -23,6 +23,9 @@ import {
   uploadCanvasAsset,
   type CanvasAssetDescriptor,
 } from './canvasAssets';
+import { rasterizeRedrawMask } from '../utils/redrawMask';
+import { stripReferenceMarkers } from '../canvas/referenceTokenEditing';
+import type { MultiAngleRequest } from '../canvas/multiAngle';
 
 const eventNumber = (eventId?: string) => {
   const value = Number(eventId?.split(':').at(-1));
@@ -226,7 +229,8 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   const canvas = useCanvasStore.getState();
   const projectId = canvas.projectId ?? 'local-project';
   const capabilities = await jobAdapter.getCapabilities(opts.signal);
-  const capability = capabilities.find((item) => item.id === capabilityId);
+  const initialCapabilityId = opts.capabilityId ?? capabilityId;
+  const capability = capabilities.find((item) => item.id === initialCapabilityId);
   if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置对应执行服务');
 
   const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
@@ -516,6 +520,79 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
 export const submitImageGeneration = async (prompt: string, targetNodeId: string, onFeedback: (message: string) => void, opts: GenSubmitOpts = {}) => {
   if (!prompt.trim()) throw new Error('请输入生图提示词');
   return submitGen(prompt, targetNodeId, onFeedback, 'image.generate', opts);
+};
+
+export const submitImageRedraw = async (
+  prompt: string,
+  targetNodeId: string,
+  document: RedrawMaskDocument,
+  size: { width: number; height: number },
+  onFeedback: (message: string) => void,
+  opts: GenSubmitOpts = {},
+) => {
+  if (!prompt.trim()) throw new Error('请输入重绘提示词');
+  const canvas = useCanvasStore.getState();
+  if (!canvas.canvasId) throw new Error('画布尚未保存，无法上传重绘蒙版');
+  const existingMaskAssetId = typeof opts.params?.redrawMaskAssetId === 'string'
+    ? opts.params.redrawMaskAssetId
+    : canvas.nodes.find((node) => node.id === targetNodeId)?.data.redrawMaskAssetId;
+  let maskAssetId = existingMaskAssetId;
+  if (!maskAssetId) {
+    const maskBlob = await rasterizeRedrawMask(document, size.width, size.height);
+    const descriptor = await uploadCanvasAsset(
+      canvas.canvasId,
+      targetNodeId,
+      'image',
+      maskBlob,
+      `${targetNodeId}-redraw-mask.png`,
+    );
+    maskAssetId = descriptor.id;
+  }
+  useCanvasStore.getState().updateNode(targetNodeId, {
+    redraw: structuredClone(document),
+    redrawMaskAssetId: maskAssetId,
+    status: 'queued',
+  });
+  const modelPrompt = stripReferenceMarkers(prompt)
+    .replace(/\[参考图\d+\]/g, '')
+    .trim();
+  return submitGen(modelPrompt, targetNodeId, onFeedback, 'image.redraw', {
+    ...opts,
+    capabilityId: 'image.redraw',
+    params: {
+      ...(opts.params ?? {}),
+      actionId: 'generate',
+      mode: 'image-to-image',
+      redrawMaskAssetId: maskAssetId,
+    },
+  });
+};
+
+export const submitImageMultiAngle = async (
+  prompt: string,
+  targetNodeId: string,
+  request: MultiAngleRequest,
+  onFeedback: (message: string) => void,
+  opts: GenSubmitOpts = {},
+) => {
+  if (!prompt.trim()) throw new Error('请输入多角度提示词');
+  if (!request.model.startsWith('doubao-seedream-')) {
+    throw new Error('多角度仅支持 Seedream 图片模型');
+  }
+  const expectedN = request.multiAngleMode === 'grid' ? 1 : 4;
+  if (request.size !== '2K' || request.n !== expectedN) {
+    throw new Error('多角度参数与模式不匹配');
+  }
+  return submitGen(prompt, targetNodeId, onFeedback, 'image.redraw', {
+    ...opts,
+    capabilityId: 'image.redraw',
+    params: {
+      ...(opts.params ?? {}),
+      ...request,
+      actionId: 'generate',
+      mode: 'image-to-image',
+    },
+  });
 };
 
 /** 提交生视频任务（video.generate）：透传 videoMode/首尾帧/视频参考 + model/aspectRatio/resolution。 */

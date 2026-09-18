@@ -9,7 +9,7 @@ import {
 } from '@xyflow/react';
 import { create } from 'zustand';
 import { NODE_PRESETS } from '../data/presets';
-import type { CanvasDocumentV1, CanvasEdge, CanvasNode, GraphSnapshot, MediaKind } from '../types';
+import type { CanvasDocumentV1, CanvasEdge, CanvasNode, GraphSnapshot, MediaKind, MediaOperation } from '../types';
 import { createId } from '../utils/id';
 import {
   getNodeDefinition,
@@ -87,6 +87,7 @@ const makeNode = (
 interface DerivedOutput {
   data: Partial<CanvasNode['data']>;
   size?: { width: number; height: number };
+  edgeData?: Partial<CanvasEdge['data']>;
 }
 
 interface CanvasClipboard {
@@ -128,11 +129,12 @@ interface CanvasState {
   createNodes: (items: Array<{ kind: MediaKind; position: XYPosition; overrides?: Partial<CanvasNode['data']>; size?: { width: number; height: number } }>) => string[];
   addImportedImages: (items: Array<{ assetId: string; label: string; position: XYPosition; size: { width: number; height: number }; operation?: CanvasNode['data']['operation'] }>) => string[];
   addImportedVideos: (items: Array<{ assetId: string; label: string; position: XYPosition; size: { width: number; height: number }; operation?: CanvasNode['data']['operation'] }>) => string[];
-  attachAssetToNode: (nodeId: string, item: { assetId: string; label: string; size: { width: number; height: number } }) => void;
+  attachAssetToNode: (nodeId: string, item: { assetId: string; label: string; size: { width: number; height: number }; operation?: MediaOperation }) => void;
   createDerivedNodes: (sourceId: string, outputs: DerivedOutput[], layout?: { columns?: number }) => string[];
   extendNode: (sourceId: string, kind?: MediaKind, direction?: 'left' | 'right') => void;
   updateNode: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
   updateEdgeData: (edgeId: string, patch: Partial<CanvasEdge['data']>) => void;
+  reorderOrderedInputs: (nodeId: string, handleId: string, orderedEdgeIds: string[]) => void;
   setNodePinned: (nodeId: string, pinned: boolean) => void;
   updateNodeTransient: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
   updateNodeGeometry: (nodeId: string, size: { width: number; height: number }) => void;
@@ -147,7 +149,7 @@ interface CanvasState {
   resizeNodes: (sizes: Array<{ nodeId: string; size: { width: number; height: number } }>) => number;
   createEdge: (connection: Connection) => string | null;
   // 创建节点并自动连线（新节点连到 sourceId 的右边）
-  createConnectedNode: (sourceId: string, kind: MediaKind, position: XYPosition, sourceHandle?: string) => string | null;
+  createConnectedNode: (sourceId: string, kind: MediaKind, position: XYPosition, sourceHandle?: string, overrides?: Partial<CanvasNode['data']>) => string | null;
   // 创建节点并自动连线（新节点排在 targetId 的左边，作为其前置）
   createNodeBefore: (targetId: string, kind: MediaKind, position: XYPosition, targetHandle?: string) => string | null;
   deleteEdge: (edgeId: string) => void;
@@ -227,6 +229,32 @@ const nextPortOrder = (edges: CanvasEdge[], targetId: string, targetHandle: stri
   let order = 0;
   while (used.has(order)) order += 1;
   return order;
+};
+
+const compactOrderedEdges = (
+  edges: CanvasEdge[],
+  targetId: string,
+  targetHandle: string,
+  preferredOrder: string[] = [],
+): CanvasEdge[] => {
+  const scoped = edges.filter((edge) => edge.target === targetId && edge.targetHandle === targetHandle);
+  if (!scoped.length) return edges;
+  const preferred = new Set(preferredOrder);
+  const orderedIds = [
+    ...preferredOrder.filter((edgeId) => scoped.some((edge) => edge.id === edgeId)),
+    ...scoped
+      .filter((edge) => !preferred.has(edge.id))
+      .sort((left, right) =>
+        (left.data?.portOrder ?? Number.MAX_SAFE_INTEGER) - (right.data?.portOrder ?? Number.MAX_SAFE_INTEGER))
+      .map((edge) => edge.id),
+  ];
+  const orderById = new Map(orderedIds.map((edgeId, index) => [edgeId, index]));
+  return edges.map((edge) => {
+    if (edge.target !== targetId || edge.targetHandle !== targetHandle) return edge;
+    const portOrder = orderById.get(edge.id) ?? 0;
+    if (edge.data?.portOrder === portOrder) return edge;
+    return { ...edge, data: { ...(edge.data ?? {}), portOrder } };
+  });
 };
 
 /** 导出给连线菜单（ConnectionNodeMenu）用：判断源能否连到目标，口径与 store 一致。 */
@@ -395,7 +423,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           label: item.label,
           mediaLoadState: 'ready',
           status: 'success',
-          operation: node.data.kind === 'image' ? { type: 'import', params: {} } : undefined,
+          operation: item.operation ?? (node.data.kind === 'image' ? { type: 'import', params: {} } : undefined),
           automation: {
             ...(typeof node.data.automation === 'object' && node.data.automation ? node.data.automation : {}),
             phase: 'done',
@@ -422,7 +450,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           prompt: source.data.prompt, accent: source.data.accent, derivedFrom: sourceId, status: 'success', ...output.data,
         }, output.size ?? { width: Math.min(300, sourceWidth), height: Math.min(340, sourceHeight) }), selected: index === outputs.length - 1 };
       });
-      const connections: CanvasEdge[] = created.map((node, index) => ({ id: `edge-${createId()}`, source: sourceId, sourceHandle: 'right', target: node.id, targetHandle: 'left', type: 'canvas', data: { operation: outputs[index]?.data?.operation?.type } }));
+      // 连线必须用注册表里的真实端口 id（'left'/'right' 匹配不到 Handle，边不会被渲染）
+      const portOf = (node: CanvasNode, side: 'inputs' | 'outputs') => getNodeDefinition(node.data.kind)?.[side][0]?.id ?? (side === 'outputs' ? 'right' : 'left');
+      const connections: CanvasEdge[] = created.map((node, index) => ({
+        id: `edge-${createId()}`,
+        source: sourceId,
+        sourceHandle: portOf(source, 'outputs'),
+        target: node.id,
+        targetHandle: portOf(node, 'inputs'),
+        type: 'canvas',
+        data: {
+          operation: outputs[index]?.data?.operation?.type,
+          ...(outputs[index]?.edgeData ?? {}),
+        },
+      }));
       commit((state) => ({ nodes: [...clearSelection(state.nodes), ...created], edges: [...state.edges, ...connections] }));
       set({ selectedNodeId: created.at(-1)?.id ?? sourceId });
       return created.map((node) => node.id);
@@ -438,6 +479,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     updateEdgeData: (edgeId, patch) => commit((state) => ({
       nodes: state.nodes,
       edges: state.edges.map((edge) => edge.id === edgeId ? { ...edge, data: { ...(edge.data ?? {}), ...patch } } : edge),
+    })),
+    reorderOrderedInputs: (nodeId, handleId, orderedEdgeIds) => commit((state) => ({
+      nodes: state.nodes,
+      edges: compactOrderedEdges(state.edges, nodeId, handleId, orderedEdgeIds),
     })),
     setNodePinned: (nodeId, pinned) => commit((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, draggable: !pinned, data: { ...node.data, pinned } } : node), edges: state.edges })),
     updateNodeTransient: (nodeId, patch) => set((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node) })),
@@ -578,7 +623,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return edge.id;
     },
     // 创建节点并自动连线（新节点连到 sourceId 的右边）
-    createConnectedNode: (sourceId, kind, position, sourceHandle) => {
+    createConnectedNode: (sourceId, kind, position, sourceHandle, overrides) => {
       const source = get().nodes.find((n) => n.id === sourceId);
       if (!source) return null;
       const sourcePort = sourceHandle
@@ -589,7 +634,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           port.media === sourcePort.media && port.acceptsKinds.includes(source.data.kind as never))
         : undefined;
       if (!sourcePort || !targetPort) return null;
-      const node = { ...makeNode(kind, position), selected: true };
+      const node = { ...makeNode(kind, position, overrides), selected: true };
       const baseData = targetPort.ordered
         ? { portOrder: nextPortOrder(get().edges, node.id, targetPort.id) }
         : undefined;
@@ -637,8 +682,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return node.id;
     },
     deleteEdge: (edgeId) => {
-      if (!get().edges.some((edge) => edge.id === edgeId)) return;
-      commit((state) => ({ nodes: state.nodes, edges: state.edges.filter((edge) => edge.id !== edgeId) }));
+      const removed = get().edges.find((edge) => edge.id === edgeId);
+      if (!removed) return;
+      commit((state) => ({
+        nodes: state.nodes,
+        edges: compactOrderedEdges(
+          state.edges.filter((edge) => edge.id !== edgeId),
+          removed.target,
+          removed.targetHandle ?? '',
+        ),
+      }));
     },
     selectNode: (nodeId, preserveSelection = false) => set((state) => ({
       selectedNodeId: nodeId,

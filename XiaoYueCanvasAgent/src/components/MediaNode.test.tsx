@@ -29,7 +29,7 @@ vi.mock('../hooks/useNodeTextDraft', () => ({
 }));
 
 vi.mock('./nodes/TextNotePromptNode', () => ({
-  TextNotePromptNode: () => <div>文字节点</div>,
+  TextNotePromptNode: () => <div>文字节点内容</div>,
 }));
 
 const selectedNodeProps = {
@@ -56,5 +56,39 @@ describe('MediaNode selection actions', () => {
 
     expect(screen.queryByLabelText('复制节点')).toBeNull();
     expect(screen.queryByLabelText('删除节点')).toBeNull();
+  });
+
+  it('renders only the node label when compact display is collapsed', () => {
+    render(<MediaNode {...selectedNodeProps} displayCollapsed />);
+
+    expect(screen.getByText('文字节点')).toBeTruthy();
+    expect(screen.queryByText('文字节点内容')).toBeNull();
+    expect(screen.queryByLabelText('编辑详情')).toBeNull();
+  });
+
+  it('offers a minimize action for an individually expanded compact node', () => {
+    const onMinimize = vi.fn();
+    render(<MediaNode {...selectedNodeProps} showMinimize onMinimize={onMinimize} />);
+
+    screen.getByRole('button', { name: '最小化节点' }).click();
+
+    expect(onMinimize).toHaveBeenCalledWith('text-node-1');
+  });
+
+  it('renders the video merge editor inside a video merge node', () => {
+    render(<MediaNode
+      {...selectedNodeProps}
+      id="merge-node"
+      data={{
+        kind: 'videoMerge',
+        label: '视频合并',
+        prompt: '',
+        status: 'idle',
+        accent: '#8f9cff',
+      } as CanvasNode['data']}
+    />);
+
+    expect(screen.getByText('片段顺序')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '合并视频' })).toBeTruthy();
   });
 });

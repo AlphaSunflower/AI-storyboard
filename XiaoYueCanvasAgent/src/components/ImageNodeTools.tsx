@@ -16,23 +16,103 @@ import {
   createSplitImageAssets, disposeRuntimeAsset, getMediaNodeSize,
 } from '../utils/mediaPipeline';
 import { zipInWorker } from '../utils/archiveWorkerClient';
+import {
+  cropRectFromParams, moveCropRect, resizeCropRect, scaleCropRect, type CropRect,
+} from '../canvas/cropGeometry';
 import { RedrawEditor } from './RedrawEditor';
+import { MultiAngleDialog } from './MultiAngleDialog';
 import { createId } from '../utils/id';
+import { multiAngleNodeData, type MultiAngleRequest } from '../canvas/multiAngle';
+import { submitImageMultiAngle } from '../services/jobRunner';
 
-type ImageTool = 'crop' | 'redraw' | 'annotation' | 'more' | 'pixels';
+type ImageTool = 'crop' | 'redraw' | 'multiAngle' | 'annotation' | 'more' | 'pixels';
 type AnnotationMode = 'select' | 'brush' | 'arrow' | 'rectangle' | 'text';
+type CropDrag = { mode: 'move' | 'resize'; corner: number; startX: number; startY: number; rect: CropRect };
 const EMPTY_ASSET_IDS: string[] = [];
-
+// 比例预设：值 = 像素宽高比，null = 保持原图比例
 const cropRatios: Record<string, number | null> = {
   原图比例: null, '1 : 1': 1, '4 : 3': 4 / 3, '3 : 4': 3 / 4, '16 : 9': 16 / 9, '9 : 16': 9 / 16,
 };
+const FULL_CROP: CropRect = { x: 0, y: 0, width: 1, height: 1 };
 
 function ToolRange({ label, value, min, max, step = 1, suffix = '', onChange }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (value: number) => void }) {
   return <label className="image-range"><span>{label}</span><input type="range" min={min} max={max} step={step} value={value} style={{ '--range-progress': `${((value - min) / (max - min)) * 100}%` } as React.CSSProperties} onChange={(event) => onChange(Number(event.target.value))} /><b>{Number.isInteger(value) ? value : value.toFixed(1)}{suffix}</b></label>;
 }
 
-function CropOverlay({ crop }: { crop: { x: number; y: number; width: number; height: number } }) {
-  return <div className="crop-node-overlay nodrag"><div className="crop-selection" style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` }}><i /><i /><i /><i /><span className="crop-rule crop-rule--one" /><span className="crop-rule crop-rule--two" /></div></div>;
+// 裁剪交互层：坐标系 = 图片按 contain 显示后的实际绘制矩形（.crop-image-box，容器内居中留白），
+// 框内拖动平移、拖四角缩放、滚轮等比缩放；矩形是唯一真源，参数滑块由它反推。
+function CropOverlay({ crop, imageAspect, ratio, onChange }: {
+  crop: CropRect; imageAspect: number; ratio: number | null; onChange: (next: CropRect) => void;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<CropDrag | null>(null);
+  const latest = useRef({ crop, onChange });
+  latest.current = { crop, onChange };
+  const [host, setHost] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const sync = () => setHost({ width: host.clientWidth, height: host.clientHeight });
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  // 滚轮缩放走原生监听：React 的 onWheel 在根节点是 passive，preventDefault 会失效
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const zoom = (event: WheelEvent) => {
+      event.preventDefault();
+      latest.current.onChange(scaleCropRect(latest.current.crop, event.deltaY > 0 ? 1.08 : 1 / 1.08));
+    };
+    host.addEventListener('wheel', zoom, { passive: false });
+    return () => host.removeEventListener('wheel', zoom);
+  }, []);
+
+  // 与 .media-asset-frame img 的 object-fit: contain 对齐（容器比图片宽 → 左右留白）
+  const inner = useMemo(() => {
+    if (!host.width || !host.height) return null;
+    const containerAspect = host.width / host.height;
+    return containerAspect > imageAspect
+      ? { left: (1 - imageAspect / containerAspect) / 2, top: 0, width: imageAspect / containerAspect, height: 1 }
+      : { left: 0, top: (1 - containerAspect / imageAspect) / 2, width: 1, height: containerAspect / imageAspect };
+  }, [host, imageAspect]);
+
+  // 指针位移按绘制矩形归一化，画布缩放（zoom）下依然准确
+  const normalize = (event: ReactPointerEvent<HTMLElement>) => {
+    const box = (boxRef.current ?? hostRef.current)!.getBoundingClientRect();
+    return { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height };
+  };
+  const begin = (event: ReactPointerEvent<HTMLElement>, mode: CropDrag['mode'], corner: number) => {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const start = normalize(event);
+    dragRef.current = { mode, corner, startX: start.x, startY: start.y, rect: crop };
+  };
+  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = normalize(event);
+    const dx = point.x - drag.startX;
+    const dy = point.y - drag.startY;
+    onChange(drag.mode === 'move'
+      ? moveCropRect(drag.rect, dx, dy)
+      : resizeCropRect(drag.rect, drag.corner, dx, dy, imageAspect, ratio));
+  };
+  const end = () => { dragRef.current = null; };
+
+  return <div ref={hostRef} className="crop-node-overlay nodrag nowheel" onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+    {inner && <div ref={boxRef} className="crop-image-box" style={{ left: `${inner.left * 100}%`, top: `${inner.top * 100}%`, width: `${inner.width * 100}%`, height: `${inner.height * 100}%` }}>
+      <div className="crop-selection" style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` }} onPointerDown={(event) => begin(event, 'move', 0)}>
+        {[0, 1, 2, 3].map((corner) => <i key={corner} data-corner={corner} onPointerDown={(event) => begin(event, 'resize', corner)} />)}
+        <span className="crop-rule crop-rule--one" /><span className="crop-rule crop-rule--two" />
+      </div>
+    </div>}
+  </div>;
 }
 
 const shapeBounds = (shape: AnnotationShape) => {
@@ -98,18 +178,21 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const upsertAssets = useMediaStore((state) => state.upsertAssets);
   const createDerivedNodes = useCanvasStore((state) => state.createDerivedNodes);
+  const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const splitAssetIds = useCanvasStore((state) => state.derivedAssetIdsBySource[node.id] ?? EMPTY_ASSET_IDS);
   const [activeTool, setActiveTool] = useState<ImageTool | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  const [cropRatio, setCropRatio] = useState('原图比例'); const [cropZoom, setCropZoom] = useState(1); const [cropPanX, setCropPanX] = useState(0); const [cropPanY, setCropPanY] = useState(0);
+  const [cropRatio, setCropRatio] = useState('原图比例'); const [cropRect, setCropRect] = useState<CropRect>(FULL_CROP);
   const [brightness, setBrightness] = useState(0); const [contrast, setContrast] = useState(0); const [saturation, setSaturation] = useState(0);
   const [annotationMode, setAnnotationMode] = useState<AnnotationMode>('brush'); const [annotationColor, setAnnotationColor] = useState('#d7ff54'); const [annotationWidth, setAnnotationWidth] = useState(8); const [annotationText, setAnnotationText] = useState('标注');
   const [shapes, setShapes] = useState<AnnotationShape[]>(node.data.annotation?.shapes ?? []); const [shapePast, setShapePast] = useState<AnnotationShape[][]>([]); const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [splitMatrixHover, setSplitMatrixHover] = useState({ rows: 1, columns: 1 }); const [isSplitMatrixOpen, setIsSplitMatrixOpen] = useState(false);
   const splitCloseTimerRef = useRef<number | null>(null);
+  const multiAngleNodeIdRef = useRef<string | null>(null);
   const pixelPreviewUrl = useObjectUrl(asset?.previewBlob, activeTool === 'pixels');
+  const cropUrl = useObjectUrl(asset?.previewBlob ?? asset?.originalBlob, activeTool === 'crop');
   const fullscreenUrl = useObjectUrl(asset?.originalBlob, fullscreen);
 
   const notify = (message: string) => { setFeedback(message); window.setTimeout(() => setFeedback(null), 1800); };
@@ -118,6 +201,8 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
   useEffect(() => {
     setShapes(structuredClone(node.data.annotation?.shapes ?? []));
     setShapePast([]); setSelectedShapeId(null); setActiveTool(null);
+    multiAngleNodeIdRef.current = null;
+    setCropRatio('原图比例'); setCropRect(FULL_CROP);
   }, [node.id, node.data.annotation]);
   useEffect(() => {
     if (!activeTool && !fullscreen) return;
@@ -129,12 +214,13 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
   }, [activeTool, fullscreen, selectedShapeId, shapes]);
 
   const sourceRatio = asset ? asset.width / asset.height : 1;
-  const crop = useMemo(() => {
-    const targetRatio = cropRatios[cropRatio] ?? sourceRatio; let width = 1; let height = 1;
-    if (targetRatio > sourceRatio) height = sourceRatio / targetRatio; else width = targetRatio / sourceRatio;
-    width /= cropZoom; height /= cropZoom; const travelX = 1 - width; const travelY = 1 - height;
-    return { x: travelX / 2 + cropPanX / 100 * travelX / 2, y: travelY / 2 + cropPanY / 100 * travelY / 2, width, height };
-  }, [cropPanX, cropPanY, cropRatio, cropZoom, sourceRatio]);
+  const cropRatioValue = cropRatios[cropRatio] ?? null;
+  // 裁剪矩形是唯一真源（纯手动拖拽）；比例预设只负责把裁剪框重置为该比例的最大居中框
+  const selectCropRatio = (label: string) => {
+    setCropRatio(label);
+    setCropRect(cropRectFromParams(cropRatios[label] ?? null, 1, 0, 0, sourceRatio));
+  };
+  const resetCrop = () => { setCropRatio('原图比例'); setCropRect(FULL_CROP); };
 
   const persistDerived = async (nextAsset: NonNullable<typeof asset>, label: string, annotation?: AnnotationDocument) => {
     try {
@@ -143,7 +229,20 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
       requestAnimationFrame(() => void fitView({ padding: .2, duration: 360 }));
     } catch (error) { disposeRuntimeAsset(nextAsset); throw error; }
   };
-  const applyCrop = async () => { if (!asset || isApplying) return; setIsApplying(true); try { const next = await createCroppedImageAsset(asset, crop); await persistDerived(next, `${node.data.label} · 裁剪`); setActiveTool(null); notify('已创建真实裁剪派生节点'); } catch (error) { notify(error instanceof Error ? error.message : '裁剪失败'); } finally { setIsApplying(false); } };
+  const applyCrop = async () => { if (!asset || isApplying) return; setIsApplying(true); try { const next = await createCroppedImageAsset(asset, cropRect); await persistDerived(next, `${node.data.label} · 裁剪`); setActiveTool(null); notify('已创建真实裁剪派生节点'); } catch (error) { notify(error instanceof Error ? error.message : '裁剪失败'); } finally { setIsApplying(false); } };
+  // 覆盖原图：裁剪结果直接挂回当前节点（原资产不删除，撤销/重做可回退）
+  const overwriteCrop = async () => {
+    if (!asset || isApplying) return;
+    setIsApplying(true);
+    try {
+      const next = await createCroppedImageAsset(asset, cropRect);
+      await saveAsset(next);
+      upsertAsset(next);
+      attachAssetToNode(node.id, { assetId: next.id, label: node.data.label, size: getMediaNodeSize(next.width, next.height), operation: next.operation });
+      setActiveTool(null);
+      notify('已用裁剪结果覆盖原图');
+    } catch (error) { notify(error instanceof Error ? error.message : '覆盖失败'); } finally { setIsApplying(false); }
+  };
   const applyPixels = async () => { if (!asset || isApplying) return; setIsApplying(true); try { const next = await createPixelAdjustedAsset(asset, { brightness, contrast, saturation }); await persistDerived(next, `${node.data.label} · 像素调整`); setActiveTool(null); notify('已编码新的像素版本'); } catch (error) { notify(error instanceof Error ? error.message : '像素处理失败'); } finally { setIsApplying(false); } };
   const applyAnnotation = async () => { if (!asset || !shapes.length || isApplying) return; setIsApplying(true); try { const document: AnnotationDocument = { version: 1, sourceAssetId: asset.id, shapes }; const next = await createAnnotatedImageAsset(asset, document); await persistDerived(next, `${node.data.label} · 标注`, document); setActiveTool(null); notify('已创建可编辑标注派生节点'); } catch (error) { notify(error instanceof Error ? error.message : '标注合成失败'); } finally { setIsApplying(false); } };
   const applySplit = async (rows: number, columns: number) => {
@@ -187,16 +286,47 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
   const clearSplitTimer = () => { if (splitCloseTimerRef.current !== null) { clearTimeout(splitCloseTimerRef.current); splitCloseTimerRef.current = null; } };
   const closeSplitSoon = () => { clearSplitTimer(); splitCloseTimerRef.current = window.setTimeout(() => { setIsSplitMatrixOpen(false); setSplitMatrixHover({ rows: 1, columns: 1 }); }, 160); };
 
+  const createMultiAngle = async (request: MultiAngleRequest) => {
+    if (!asset) throw new Error('多角度需要源图片');
+    const canvas = useCanvasStore.getState();
+    const nextData = multiAngleNodeData(node.data.label, request);
+    let targetNodeId = multiAngleNodeIdRef.current;
+    if (!targetNodeId) {
+      const sourceWidth = node.width ?? node.measured?.width ?? 250;
+      targetNodeId = canvas.createConnectedNode(node.id, 'imageToImage', {
+        x: node.position.x + sourceWidth + 160,
+        y: node.position.y,
+      }, undefined, nextData);
+      if (!targetNodeId) throw new Error('无法创建多角度图生图节点');
+      multiAngleNodeIdRef.current = targetNodeId;
+    } else {
+      useCanvasStore.getState().updateNode(targetNodeId, nextData);
+    }
+    await submitImageMultiAngle(
+      nextData.prompt,
+      targetNodeId,
+      request,
+      notify,
+      {
+        sourceAssetIds: [asset.id],
+        sourceNodeIds: [node.id],
+      },
+    );
+    requestAnimationFrame(() => void fitView({ padding: .2, duration: 360 }));
+    setActiveTool(null);
+  };
+
   if (!asset) return null;
   return <>
-    {activeTool === 'crop' && <CropOverlay crop={crop} />}
+
     {activeTool === 'pixels' && pixelPreviewUrl && <div className="pixel-node-preview"><img src={pixelPreviewUrl} alt="" decoding="async" style={{ filter: `brightness(${100 + brightness}%) contrast(${100 + contrast}%) saturate(${100 + saturation}%)` }} /></div>}
     {activeTool === 'annotation' && <AnnotationOverlay shapes={shapes} mode={annotationMode} color={annotationColor} width={annotationWidth} text={annotationText} selectedId={selectedShapeId} onGestureStart={rememberShapes} onShapesChange={setShapes} onSelect={setSelectedShapeId} />}
     {activeTool === 'redraw' && <RedrawEditor asset={asset} node={node} onClose={() => setActiveTool(null)} onFeedback={notify} />}
+    {activeTool === 'multiAngle' && <MultiAngleDialog sourceLabel={node.data.label} sourceName={asset.name} onClose={() => setActiveTool(null)} onConfirm={createMultiAngle} />}
 
     {activeTool !== 'redraw' && <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={12} className="image-result-toolbar nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
       <button className={activeTool === 'crop' ? 'is-active' : ''} title="裁剪" onClick={() => setActiveTool(activeTool === 'crop' ? null : 'crop')}><Crop size={19} /></button>
-      <button disabled title="多角度 · 未配置执行服务"><Rotate3D size={19} /></button>
+      <button className={activeTool === 'multiAngle' ? 'is-active' : ''} title="多角度" onClick={() => setActiveTool('multiAngle')}><Rotate3D size={19} /></button>
       <button title="重绘" onClick={() => setActiveTool('redraw')}><PenLine size={19} /></button>
       <button disabled title="重新布光 · 未配置执行服务"><Lightbulb size={19} /></button>
       <button className={activeTool === 'more' ? 'is-active' : ''} title="浏览全部" onClick={() => setActiveTool(activeTool === 'more' ? null : 'more')}><MoreHorizontal size={19} /></button><i />
@@ -206,7 +336,17 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
     </NodeToolbar>}
     {feedback && <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={52} className="image-tool-feedback" role="status">{feedback}</NodeToolbar>}
 
-    {activeTool === 'crop' && <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel image-edit-panel--crop nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}><header><div><Crop size={15} /><strong>裁剪图片</strong><small>应用后创建派生节点</small></div><button onClick={() => setActiveTool(null)}><X size={16} /></button></header><div className="crop-controls"><div className="crop-ratios">{Object.keys(cropRatios).map((ratio) => <button className={cropRatio === ratio ? 'is-active' : ''} onClick={() => setCropRatio(ratio)} key={ratio}>{ratio}</button>)}</div><ToolRange label="缩放" value={cropZoom} min={1} max={2.5} step={.05} suffix="×" onChange={setCropZoom} /><ToolRange label="水平" value={cropPanX} min={-100} max={100} suffix="%" onChange={setCropPanX} /><ToolRange label="垂直" value={cropPanY} min={-100} max={100} suffix="%" onChange={setCropPanY} /></div><footer className="image-tool-footer"><button className="image-tool-reset" onClick={() => { setCropRatio('原图比例'); setCropZoom(1); setCropPanX(0); setCropPanY(0); }}><RotateCcw size={13} /> 重置</button><span>本地处理</span><button className="image-tool-apply" disabled={isApplying} onClick={() => void applyCrop()}>{isApplying ? '处理中…' : '应用'} <ArrowUp size={14} /></button></footer></NodeToolbar>}
+    {activeTool === 'crop' && createPortal(<div className="crop-editor" role="dialog" aria-modal="true" aria-label="裁剪图片" onClick={(event) => { if (event.target === event.currentTarget) setActiveTool(null); }}>
+      <header><strong>{node.data.label}</strong><span>{asset.width} × {asset.height}</span><button type="button" aria-label="关闭裁剪" onClick={() => setActiveTool(null)}><X size={18} /></button></header>
+      <div className="crop-editor__stage">
+        {cropUrl ? <img src={cropUrl} alt={asset.name} decoding="async" draggable={false} /> : <div className="fullscreen-media-loading">正在解码原图…</div>}
+        <CropOverlay crop={cropRect} imageAspect={asset.width / asset.height} ratio={cropRatioValue} onChange={setCropRect} />
+      </div>
+      <section className="crop-editor__panel">
+        <div className="crop-controls"><div className="crop-ratios">{Object.keys(cropRatios).map((ratio) => <button className={cropRatio === ratio ? 'is-active' : ''} onClick={() => selectCropRatio(ratio)} key={ratio}>{ratio}</button>)}</div><small className="crop-hint">在图上拖动裁剪框平移，拖四角缩放，滚轮放大缩小</small></div>
+        <footer className="image-tool-footer"><button className="image-tool-reset" onClick={resetCrop}><RotateCcw size={13} /> 重置</button><span className={feedback ? 'has-feedback' : undefined}>{feedback ?? '本地处理'}</span><button className="image-tool-overwrite" disabled={isApplying} onClick={() => void overwriteCrop()}>覆盖原图</button><button className="image-tool-apply" disabled={isApplying} onClick={() => void applyCrop()}>{isApplying ? '处理中…' : '应用'} <ArrowUp size={14} /></button></footer>
+      </section>
+    </div>, document.body)}
 
     {activeTool === 'pixels' && <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel image-edit-panel--pixels nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}><header><div><SlidersHorizontal size={15} /><strong>调整像素</strong><small>预览后编码真实文件</small></div><button onClick={() => setActiveTool(null)}><X size={16} /></button></header><div className="pixel-controls"><ToolRange label="曝光" value={brightness} min={-50} max={50} onChange={setBrightness} /><ToolRange label="对比度" value={contrast} min={-50} max={50} onChange={setContrast} /><ToolRange label="饱和度" value={saturation} min={-100} max={100} onChange={setSaturation} /></div><footer className="image-tool-footer"><button className="image-tool-reset" onClick={() => { setBrightness(0); setContrast(0); setSaturation(0); }}><RotateCcw size={13} /> 重置</button><span>本地处理</span><button className="image-tool-apply" disabled={isApplying} onClick={() => void applyPixels()}>{isApplying ? '处理中…' : '应用'} <ArrowUp size={14} /></button></footer></NodeToolbar>}
 

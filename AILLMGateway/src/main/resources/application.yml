@@ -35,6 +35,10 @@ mybatis-plus:
       logic-not-delete-value: false
 
 gateway:
+  vendor:
+    doubao:
+      # 外部统一调用 /v1/images/edits；豆包 Seedream 在此转换成方舟原生图片路径
+      image-edit-path: ${DOUBAO_IMAGE_EDIT_PATH:/images/generations}
   jwt:
     issuer: llm-gateway
     access-token-ttl: 3600

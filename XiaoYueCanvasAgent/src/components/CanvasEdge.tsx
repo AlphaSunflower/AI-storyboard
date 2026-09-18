@@ -33,7 +33,8 @@ function CanvasEdgeComponent({
     curvature: 0.34,
   });
 
-  const label = operationLabel(data?.operation);
+  const label = data?.operationDetail || operationLabel(data?.operation);
+  const isCropLabel = data?.operation === 'crop';
   const isSelected = Boolean(selected);
 
   // acid 荧光绿 + 选中更亮
@@ -93,11 +94,15 @@ function CanvasEdgeComponent({
           x={labelX}
           y={labelY}
           label={label}
-          labelStyle={{ fill: '#e6e3da', fontSize: 11 }}
+          labelStyle={{
+            fill: isCropLabel ? '#f2f0e8' : '#e6e3da',
+            fontSize: isCropLabel ? 17 : 11,
+            fontWeight: isCropLabel ? 700 : 400,
+          }}
           labelShowBg
-          labelBgStyle={{ fill: 'rgba(30,32,38,.85)' }}
-          labelBgPadding={[6, 4]}
-          labelBgBorderRadius={5}
+          labelBgStyle={{ fill: isCropLabel ? 'rgba(25,27,32,.94)' : 'rgba(30,32,38,.85)' }}
+          labelBgPadding={isCropLabel ? [9, 6] : [6, 4]}
+          labelBgBorderRadius={isCropLabel ? 7 : 5}
         />
       )}
       <EdgeToolbar edgeId={id} x={labelX} y={labelY - 22} isVisible={isSelected} alignX="center" alignY="bottom" className="canvas-edge-toolbar nodrag">

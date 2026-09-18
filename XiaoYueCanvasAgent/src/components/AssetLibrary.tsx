@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Globe2, Image as ImageIcon, Plus, Video } from 'lucide-react';
 import { listGlobalAssets, listProjectAssets, listProjects, saveAssetToLibrary } from '../services/projectStorage';
 import { OPERATION_LABELS, operationLabel } from '../canvas/operationLabels';
-import type { ImageOperation, PersistedAsset } from '../types';
+import type { MediaOperation, PersistedAsset } from '../types';
 
 interface AssetLibraryProps {
   projectId: string;
@@ -22,7 +22,21 @@ const useObjectUrl = (blob: Blob | undefined) => {
 
 const shortId = (id?: string) => (id ? `${id.slice(0, 8)}…` : '—');
 
-const FILTER_TYPES: Array<'all' | ImageOperation['type']> = ['all', 'import', 'crop', 'split', 'pixels', 'annotation', 'flatten', 'remote'];
+const FILTER_TYPES: Array<'all' | MediaOperation['type']> = [
+  'all',
+  'import',
+  'crop',
+  'split',
+  'pixels',
+  'annotation',
+  'flatten',
+  'remote',
+  'videoFrame',
+  'videoFlip',
+  'videoColor',
+  'videoSpeed',
+  'videoMerge',
+];
 
 function AssetCard({ asset, inGlobal, onAdd }: { asset: PersistedAsset; inGlobal: boolean; onAdd: (id: string) => void }) {
   const thumb = useObjectUrl(asset.thumbnailBlob);
@@ -53,7 +67,7 @@ function AssetCard({ asset, inGlobal, onAdd }: { asset: PersistedAsset; inGlobal
 
 export function AssetLibrary({ projectId, onNotify }: AssetLibraryProps) {
   const [tab, setTab] = useState<'project' | 'global'>('project');
-  const [filter, setFilter] = useState<'all' | ImageOperation['type']>('all');
+  const [filter, setFilter] = useState<'all' | MediaOperation['type']>('all');
   const [projectAssets, setProjectAssets] = useState<PersistedAsset[]>([]);
   const [globalAssets, setGlobalAssets] = useState<PersistedAsset[]>([]);
   const [projectTitles, setProjectTitles] = useState<Record<string, string>>({});

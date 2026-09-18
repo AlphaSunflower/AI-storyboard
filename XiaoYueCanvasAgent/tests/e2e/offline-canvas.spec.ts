@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { showAllNodes } from './node-display';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -113,6 +114,7 @@ async function seedTextCanvas(page: Page) {
     db.close();
   }, { projectId, canvasId });
   await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+  await showAllNodes(page);
 }
 
 async function selectAllNodesByMarquee(page: Page) {
@@ -162,7 +164,7 @@ test('starts empty and exposes only honest local execution', async ({ page }) =>
   await input.setInputFiles({ name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from(png) });
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await expect(page.getByTitle('裁剪')).toBeEnabled();
-  await expect(page.getByTitle(/多角度.*未配置执行服务/)).toBeDisabled();
+  await expect(page.getByTitle('多角度', { exact: true })).toBeEnabled();
   await expect(page.getByTitle('重绘', { exact: true })).toBeEnabled();
   await expect(page.getByTitle('标注', { exact: true })).toHaveCount(0);
 
@@ -175,52 +177,55 @@ test('starts empty and exposes only honest local execution', async ({ page }) =>
   await page.keyboard.press('Escape');
 
   await page.getByTitle('重绘', { exact: true }).click();
-  await expect(page.getByRole('textbox', { name: '重绘要求' })).toBeVisible();
-  await expect(page.getByTitle('画笔')).toBeVisible();
+  await expect(page.getByTitle('选择区域')).toBeVisible();
   await expect(page.getByTitle('框选')).toBeVisible();
-  await expect(page.getByTitle('橡皮擦')).toBeVisible();
+  await expect(page.getByTitle('涂鸦')).toBeVisible();
+  await expect(page.getByTitle('橡皮擦')).toHaveCount(0);
+  await expect(page.getByText('先标记区域')).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
-  await page.getByRole('textbox', { name: '重绘要求' }).fill('将选区改成蓝色织物');
-  await page.getByTitle('生成重绘结果').click();
-  await expect(page.getByRole('status').filter({ hasText: '请先在图片上绘制蒙版' })).toBeVisible();
 
   const redrawOverlay = page.locator('.redraw-mask-overlay');
   const redrawBox = await redrawOverlay.boundingBox();
   expect(redrawBox).not.toBeNull();
-  const brushTarget = { x: redrawBox!.x + redrawBox!.width * .2, y: redrawBox!.y + redrawBox!.height * .35 };
-  await page.mouse.move(brushTarget.x, brushTarget.y);
-  await expect(redrawOverlay).toHaveCSS('cursor', /url\("data:image\/svg\+xml/);
-  await expect(page.locator('.redraw-brush-cursor')).toHaveCount(0);
+  const rectangleTarget = { x: redrawBox!.x + redrawBox!.width * .2, y: redrawBox!.y + redrawBox!.height * .35 };
+  await page.mouse.move(rectangleTarget.x, rectangleTarget.y);
+  await expect(redrawOverlay).toHaveCSS('cursor', 'crosshair');
   await page.mouse.down();
   await page.mouse.move(redrawBox!.x + redrawBox!.width * .55, redrawBox!.y + redrawBox!.height * .55, { steps: 5 });
   await page.mouse.up();
-  await expect(page.getByText('已绘制 1 处蒙版')).toBeVisible();
-  await expect(page.getByTitle('撤销')).toBeEnabled();
+  await page.getByRole('textbox', { name: '修改 1 的意图' }).fill('将选区改成蓝色织物');
+  await page.getByTitle('确认修改意图').click();
+  await expect(page.getByText('1 个区域')).toBeVisible();
   await page.getByTitle('撤销').click();
-  await expect(page.getByText('绘制蒙版以重绘')).toBeVisible();
+  await expect(page.getByText('先标记区域')).toBeVisible();
   await expect(page.getByTitle('重做')).toBeEnabled();
   await page.getByTitle('重做').click();
+  await expect(page.getByText('1 个区域')).toBeVisible();
   await page.getByTitle('框选').click();
   await page.mouse.move(redrawBox!.x + redrawBox!.width * .62, redrawBox!.y + redrawBox!.height * .18);
   await page.mouse.down();
   await page.mouse.move(redrawBox!.x + redrawBox!.width * .86, redrawBox!.y + redrawBox!.height * .42, { steps: 3 });
   await page.mouse.up();
-  await expect(page.getByText('已绘制 2 处蒙版')).toBeVisible();
-  await page.getByTitle('橡皮擦').click();
-  await page.mouse.move(redrawBox!.x + redrawBox!.width * .4, redrawBox!.y + redrawBox!.height * .4);
-  await page.mouse.down();
-  await page.mouse.move(redrawBox!.x + redrawBox!.width * .5, redrawBox!.y + redrawBox!.height * .5, { steps: 3 });
-  await page.mouse.up();
-  await expect(page.getByText('已绘制 3 处蒙版')).toBeVisible();
-  await page.getByTitle('生成数量').click();
-  await expect(page.getByTitle('生成数量')).toHaveText('×2');
-  await page.getByRole('button', { name: 'NORMAL', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'PRO', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '2K', exact: true })).toBeVisible();
-  await page.getByTitle('生成重绘结果').click();
+  await page.getByRole('textbox', { name: '修改 2 的意图' }).fill('把墙面调暖');
+  await page.getByRole('button', { name: '颜色 #59d8ff' }).click();
+  await page.getByTitle('确认修改意图').click();
+  await expect(page.getByText('2 个区域')).toBeVisible();
+  await page.getByTitle('选择区域').click();
+  const rectangle = page.locator('.redraw-region-mark').nth(1);
+  await rectangle.hover();
+  await expect(rectangle).toHaveClass(/is-hovered/);
+  await rectangle.click();
+  await expect(page.getByRole('textbox', { name: '修改 2 的意图' })).toHaveValue('把墙面调暖');
+  await page.getByTitle('关闭').click();
+
+  await page.getByTitle('执行重绘').click();
+  await expect(page.getByRole('dialog', { name: '执行重绘' })).toBeVisible();
+  await expect(page.getByText('请按编号只处理对应区域中的目标，满足编号的要求：')).toBeVisible();
+  await page.getByRole('dialog', { name: '执行重绘' }).getByRole('button', { name: '执行重绘', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: '未配置图像执行服务' })).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await expect(page.locator('.canvas-edge__line')).toHaveCount(0);
+  await page.getByRole('button', { name: '关闭执行重绘' }).click();
   await page.getByTitle('退出重绘').click();
 
   await page.getByTitle('裁剪').click();

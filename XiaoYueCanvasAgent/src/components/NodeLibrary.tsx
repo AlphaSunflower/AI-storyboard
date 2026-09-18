@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReactFlow, useStore } from '@xyflow/react';
-import { Clapperboard, FileText, Image as ImageIcon, Images, LayoutGrid, Layers, Library, MessageSquare, Sparkles, Type, Video, Wand2, X } from 'lucide-react';
+import { Clapperboard, FileText, Image as ImageIcon, Images, LayoutGrid, Layers, Library, ListVideo, MessageSquare, Sparkles, Type, Video, Wand2, X } from 'lucide-react';
 import { hydrateAsset, listLibraryAssets } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
@@ -24,6 +24,7 @@ const icons = {
   imageToVideo: Video,
   firstLastFrameToVideo: Video,
   referenceToVideo: Video,
+  videoMerge: ListVideo,
 } satisfies Record<CanvasNodeKind, typeof Type>;
 
 function LibraryThumbnail({ asset }: { asset: PersistedAsset }) {

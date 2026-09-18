@@ -71,7 +71,8 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
   await page.getByRole('button', { name: '小地图' }).click();
   await expect(page.locator('.react-flow__minimap.canvas-minimap')).toBeVisible();
 
-  await page.getByRole('button', { name: '节点库' }).click();
+  await expect(page.getByRole('button', { name: '节点库' })).toHaveCount(0);
+  await page.getByRole('button', { name: '添加节点' }).click();
   const library = page.locator('.node-library');
   const libraryBody = page.locator('.node-library-body');
   await expect(library).toBeVisible();

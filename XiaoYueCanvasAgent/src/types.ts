@@ -1,4 +1,5 @@
 import type { Edge, Node, Viewport } from '@xyflow/react';
+import type { MultiAngleRequest } from './canvas/multiAngle';
 
 export type NodeKind =
   | 'text'
@@ -20,7 +21,8 @@ export type NodeKind =
   | 'textToVideo'
   | 'imageToVideo'
   | 'firstLastFrameToVideo'
-  | 'referenceToVideo';
+  | 'referenceToVideo'
+  | 'videoMerge';
 export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -68,6 +70,14 @@ export interface ImageOperation {
   params: Record<string, string | number | boolean>;
   at?: number;
 }
+
+export interface VideoOperation {
+  type: 'videoFrame' | 'videoFlip' | 'videoColor' | 'videoSpeed' | 'videoMerge';
+  params: Record<string, string | number | boolean>;
+  at?: number;
+}
+
+export type MediaOperation = ImageOperation | VideoOperation;
 
 export interface VideoGenerationParams {
   model: string;
@@ -136,6 +146,9 @@ export interface RedrawBrushMark {
   operation: RedrawMaskOperation;
   points: Point[];
   width: number;
+  intent?: string;
+  color?: string;
+  createdAt?: number;
 }
 
 export interface RedrawRectangleMark {
@@ -144,13 +157,18 @@ export interface RedrawRectangleMark {
   operation: RedrawMaskOperation;
   start: Point;
   end: Point;
+  intent?: string;
+  color?: string;
+  createdAt?: number;
 }
 
 export type RedrawMaskMark = RedrawBrushMark | RedrawRectangleMark;
 
 export interface RedrawMaskDocument {
-  version: 1;
+  version: 2;
   sourceAssetId: string;
+  sourceWidth?: number;
+  sourceHeight?: number;
   marks: RedrawMaskMark[];
 }
 
@@ -164,8 +182,11 @@ export interface MediaNodeData extends Record<string, unknown> {
   mediaLoadState?: 'loading' | 'ready' | 'error';
   derivedFrom?: string;
   pinned?: boolean;
-  operation?: ImageOperation;
+  operation?: MediaOperation;
   annotation?: AnnotationDocument;
+  redraw?: RedrawMaskDocument;
+  redrawMaskAssetId?: string;
+  multiAngle?: MultiAngleRequest;
   videoPrompt?: string;
   videoMode?: string;
   videoReferences?: string[];
@@ -215,7 +236,7 @@ export interface PersistedAsset {
   thumbnailBlob: Blob;
   previewBlob: Blob;
   derivedFrom?: string;
-  operation?: ImageOperation;
+  operation?: MediaOperation;
   projectId?: string;
   canvasId?: string;
   libraryState: 'project' | 'global';
@@ -231,7 +252,8 @@ export type CanvasNode = Node<MediaNodeData, 'media' | 'video' | import('./canva
 
 // 边携带简略的操作标签，用于在连线上展示因果链的"操作短名"。
 export type CanvasEdgeData = {
-  operation?: ImageOperation['type'];
+  operation?: MediaOperation['type'];
+  operationDetail?: string;
   portOrder?: number;
   resultSlot?: boolean;
   resultSlotOrder?: number;

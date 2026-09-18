@@ -109,6 +109,25 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                                  String size, String quality, String aspectRatio,
                                  List<String> referenceImages,
                                  String mode, String generatedImageUrl, Integer n) {
+        return generateImagesInternal(sceneId, prompt, model, size, quality, aspectRatio,
+                referenceImages, mode, generatedImageUrl, n, null, Map.of());
+    }
+
+    @Override
+    public List<String> generateImagesWithMask(String sceneId, String prompt, String model,
+                                               String size, String quality, String aspectRatio,
+                                               List<String> referenceImages, String generatedImageUrl,
+                                               String maskImageUrl, Map<String, Object> editParams) {
+        return generateImagesInternal(sceneId, prompt, model, size, quality, aspectRatio,
+                referenceImages, "edit", generatedImageUrl, null, maskImageUrl,
+                editParams != null ? editParams : Map.of());
+    }
+
+    private List<String> generateImagesInternal(String sceneId, String prompt, String model,
+                                                String size, String quality, String aspectRatio,
+                                                List<String> referenceImages, String mode,
+                                                String generatedImageUrl, Integer n,
+                                                String maskImageUrl, Map<String, Object> editParams) {
         // sceneId 可为空：为空时不读写 scene 表（agent_assets 模式）
         SceneView scene = sceneId != null ? sceneBridge.getScene(sceneId) : null;
         if (sceneId != null && scene == null) throw new BusinessException(40401, "资源不存在: " + sceneId);
@@ -150,14 +169,28 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             Integer effN = (n != null && n > 0) ? n
                     : (scene != null && scene.imageN != null && scene.imageN > 0) ? scene.imageN : null;
 
-            if (SeedreamImageProtocol.isSeedream(effectiveModel)) {
+            // 无蒙版时 Seedream 走原生协议；带蒙版统一走网关 edits，由网关按模型适配豆包路径。
+            if (SeedreamImageProtocol.isSeedream(effectiveModel) && (maskImageUrl == null || maskImageUrl.isBlank())) {
                 localPaths.addAll(callSeedreamImage(effectiveModel, effectivePrompt, effSize, effN,
                         referenceImages, generatedImageUrl));
 
             // 有参考图或显式 edit 模式 → /v1/images/edits multipart 接口（经网关；维持单图语义）
-            } else if (hasReferenceImages || "edit".equals(mode)) {
-                String result = callImageEdit(effectiveModel, effectivePrompt, referenceImages, generatedImageUrl);
-                localPaths.add(fileStorageService.saveImageFromBase64(result));
+            } else if (hasReferenceImages || "edit".equals(mode) || (maskImageUrl != null && !maskImageUrl.isBlank())) {
+                List<String> results = callImageEdit(
+                        effectiveModel,
+                        effectivePrompt,
+                        referenceImages,
+                        generatedImageUrl,
+                        maskImageUrl,
+                        effSize,
+                        effQuality,
+                        effN,
+                        editParams);
+                for (String result : results) {
+                    localPaths.add(result.startsWith("http://") || result.startsWith("https://")
+                            ? fileStorageService.saveImage(result)
+                            : fileStorageService.saveImageFromBase64(result));
+                }
 
             // 纯文生图：/v1/images/generations JSON 接口（统一走网关，Gemini 模型由网关转原生格式；n>1 多图）
             } else {
@@ -289,11 +322,16 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
      * 1. generatedImageUrl — 当前已生成的图片路径（完善图片场景）
      * 2. referenceImages[0] — 第一张上传的参考图 base64（参考图生图场景）
      * <p>
-     * 返回 b64_json 字符串（已清洗 data URI 前缀及补齐 base64 padding）。
+     * 返回全部结果（b64_json 或 URL）。
      */
-    private String callImageEdit(String model, String prompt,
-                                  List<String> referenceImages,
-                                  String generatedImageUrl) throws Exception {
+    private List<String> callImageEdit(String model, String prompt,
+                                       List<String> referenceImages,
+                                       String generatedImageUrl,
+                                       String maskImageUrl,
+                                       String size,
+                                       String quality,
+                                       Integer n,
+                                       Map<String, Object> editParams) throws Exception {
         // 1. 确定源图字节数据
         byte[] imageBytes;
         String imageFilename;
@@ -330,13 +368,20 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         }
 
         // 2. 构建 multipart/form-data 请求体
-        MultipartBuilder mp = new MultipartBuilder()
-            .field("model", model)
-            .field("prompt", prompt)
-            .file("image", imageFilename, guessImageContentType(imageFilename), imageBytes);
+        byte[] maskBytes = null;
+        if (maskImageUrl != null && !maskImageUrl.isBlank()) {
+            maskBytes = isImagePath(maskImageUrl)
+                    ? fileStorageService.readImage(extractFilename(maskImageUrl))
+                    : decodeBase64Image(maskImageUrl);
+            if (maskBytes == null || maskBytes.length == 0) {
+                throw new BusinessException(40401, "重绘蒙版不存在或为空");
+            }
+        }
 
         // 3. 发送请求（multipart body 一次性构建；超时 180s + 重试 1 次）
-        byte[] bodyBytes = mp.build();
+        byte[] bodyBytes = buildImageEditMultipart(
+                model, prompt, imageFilename, guessImageContentType(imageFilename), imageBytes,
+                maskBytes, size, quality, n, editParams);
         HttpResponse<String> resp = sendImageWithRetry(() -> HttpRequest.newBuilder()
             .uri(URI.create(config.getGatewayBaseUrl() + "/v1/images/edits"))   // 改：走网关
             // 用 octet-stream 发送 multipart 字节流：@RequestBody byte[] 收 multipart 会被
@@ -350,18 +395,61 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             throw new BusinessException(50201, "Image Edit API returned " + resp.statusCode() + ": " + resp.body());
         }
 
-        // 4. 解析响应，提取 b64_json（需补齐 padding）
+        // 4. 解析响应，提取 b64_json 或 URL
         JsonNode root = objectMapper.readTree(resp.body());
-        JsonNode data = root.path("data").get(0);
-        String b64Json = data.path("b64_json").asText();
-        if (b64Json == null || b64Json.isEmpty()) {
-            b64Json = data.path("url").asText();
+        JsonNode data = root.path("data");
+        List<JsonNode> items = data.isArray()
+                ? new ArrayList<>()
+                : List.of(data);
+        if (data.isArray()) {
+            data.forEach(items::add);
         }
-        if (b64Json == null || b64Json.isEmpty()) {
-            throw new BusinessException(40001, "Image Edit API 返回结果为空");
+        List<String> results = new ArrayList<>();
+        for (JsonNode item : items) {
+            String value = item.path("b64_json").asText();
+            if (value == null || value.isEmpty()) value = item.path("url").asText();
+            if (value != null && !value.isEmpty()) {
+                results.add(value.startsWith("http://") || value.startsWith("https://") ? value : cleanBase64(value));
+            }
         }
+        if (results.isEmpty()) throw new BusinessException(40001, "Image Edit API 返回结果为空");
+        return results;
+    }
 
-        return cleanBase64(b64Json);
+    private static void addEditField(MultipartBuilder multipart, String key, Object value) {
+        if (key == null || key.isBlank() || value == null) return;
+        String text = String.valueOf(value);
+        if (!text.isBlank()) multipart.field(key, text);
+    }
+
+    static byte[] buildImageEditMultipart(String model, String prompt,
+                                          String imageFilename, String imageContentType, byte[] imageBytes,
+                                          byte[] maskBytes, String size, String quality, Integer n,
+                                          Map<String, Object> editParams) throws IOException {
+        MultipartBuilder multipart = new MultipartBuilder()
+                .field("model", model)
+                .field("prompt", prompt)
+                .file("image", imageFilename, imageContentType, imageBytes);
+        if (maskBytes != null && maskBytes.length > 0) {
+            multipart.file("mask", "redraw-mask.png", "image/png", maskBytes);
+        }
+        addEditField(multipart, "size", size);
+        addEditField(multipart, "quality", quality);
+        if (n != null && n > 0) addEditField(multipart, "n", n);
+        if (editParams != null) {
+            Set<String> blocked = Set.of(
+                    "model", "prompt", "image", "mask", "referenceImages", "generatedImageUrl",
+                    "redrawMaskAssetId", "actionId", "capabilityId", "aspectRatio",
+                    "referenceRoles", "canvas", "sourceRole", "referenceAssetIds", "count",
+                    "size", "quality");
+            editParams.forEach((key, value) -> {
+                if (key == null || blocked.contains(key) || value == null) return;
+                if (value instanceof String || value instanceof Number || value instanceof Boolean) {
+                    addEditField(multipart, key, value);
+                }
+            });
+        }
+        return multipart.build();
     }
 
     // ═══════════════════════════════════════════════════════════
