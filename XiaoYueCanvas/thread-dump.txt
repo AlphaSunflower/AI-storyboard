@@ -1,0 +1,1663 @@
+50760
+2026-09-15T08:53:14.007385100Z
+25.0.4.1+1-LTS
+
+#16 "Reference Handler" RUNNABLE 2026-09-15T08:53:14.007965300Z
+    at java.base/java.lang.ref.Reference.waitForReferencePendingList(Native Method)
+    at java.base/java.lang.ref.Reference.processPendingReferences(Reference.java:246)
+    at java.base/java.lang.ref.Reference$ReferenceHandler.run(Reference.java:208)
+
+#17 "Finalizer" WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@74def3df>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:137)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:215)
+    - locked <java.lang.ref.ReferenceQueue$Lock@74def3df>
+    at java.base/java.lang.ref.Finalizer$FinalizerThread.run(Finalizer.java:165)
+
+#18 "Signal Dispatcher" RUNNABLE 2026-09-15T08:53:14.008973200Z
+
+#19 "Attach Listener" RUNNABLE 2026-09-15T08:53:14.008973200Z
+    at java.base/jdk.internal.vm.ThreadSnapshot.create(Native Method)
+    at java.base/jdk.internal.vm.ThreadSnapshot.of(ThreadSnapshot.java:62)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThread(ThreadDumper.java:181)
+    at java.base/jdk.internal.vm.ThreadDumper.lambda$dumpThreads$0(ThreadDumper.java:176)
+    at java.base/java.util.stream.ReferencePipeline$2$1.accept(ReferencePipeline.java:197)
+    at java.base/java.util.Spliterators$ArraySpliterator.forEachRemaining(Spliterators.java:1024)
+    at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:570)
+    at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:560)
+    at java.base/java.util.stream.StreamSpliterators$WrappingSpliterator.forEachRemaining(StreamSpliterators.java:315)
+    at java.base/java.util.stream.Streams$ConcatSpliterator.forEachRemaining(Streams.java:734)
+    at java.base/java.util.stream.ReferencePipeline$Head.forEach(ReferencePipeline.java:803)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:176)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:172)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreadsToFile(ThreadDumper.java:133)
+    at java.base/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:73)
+
+#37 "Notification Thread" RUNNABLE 2026-09-15T08:53:14.008973200Z
+
+#38 "Common-Cleaner" TIMED_WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@19fa07cf>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)
+    - locked <java.lang.ref.ReferenceQueue$Lock@19fa07cf>
+    at java.base/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#39 "Cleaner-0" TIMED_WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@d4be0ca>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)
+    - locked <java.lang.ref.ReferenceQueue$Lock@d4be0ca>
+    at java.base/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#72 "container-0" TIMED_WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Thread.sleepNanos0(Native Method)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:509)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at org.apache.catalina.core.StandardServer.await(StandardServer.java:522)
+    at org.springframework.boot.tomcat.TomcatWebServer$1.run(TomcatWebServer.java:216)
+
+#75 "Cleaner-1" TIMED_WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@258fea92>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)
+    - locked <java.lang.ref.ReferenceQueue$Lock@258fea92>
+    at java.base/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#76 "DefaultSleeper" WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@26ccb5f7>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@26ccb5f7>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#77 "DefaultSleeper" WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@6fc11a9e>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@6fc11a9e>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#78 "HttpClient-1-SelectorManager" RUNNABLE 2026-09-15T08:53:14.008973200Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@3ddeea1c>
+    - locked <sun.nio.ch.WEPollSelectorImpl@67df4c4f>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#80 "HttpClient-2-SelectorManager" RUNNABLE 2026-09-15T08:53:14.008973200Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@247f3e4e>
+    - locked <sun.nio.ch.WEPollSelectorImpl@430dc5b5>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#81 "DefaultSleeper" WAITING 2026-09-15T08:53:14.008973200Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@94949c2>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@94949c2>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#82 "HttpClient-3-SelectorManager" RUNNABLE 2026-09-15T08:53:14.008973200Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@14e9d190>
+    - locked <sun.nio.ch.WEPollSelectorImpl@49b9000d>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#83 "HttpClient-4-SelectorManager" RUNNABLE 2026-09-15T08:53:14.008973200Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@64b444e2>
+    - locked <sun.nio.ch.WEPollSelectorImpl@277016ef>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#84 "HttpClient-5-SelectorManager" RUNNABLE 2026-09-15T08:53:14.009978500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@7dcf36c0>
+    - locked <sun.nio.ch.WEPollSelectorImpl@7cf7e81c>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#85 "HttpClient-6-SelectorManager" RUNNABLE 2026-09-15T08:53:14.009978500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@3aa23034>
+    - locked <sun.nio.ch.WEPollSelectorImpl@1d429ee1>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1338)
+
+#88 "DefaultSleeper" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@193fd2bf>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@193fd2bf>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#89 "DefaultSleeper" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@5acb6e8c>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@5acb6e8c>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#90 "DefaultSleeper" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@71c3d671>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@71c3d671>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#91 "DefaultSleeper" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.util.TaskQueue@787ffb3e>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.Object.wait(Object.java:351)
+    at java.base/java.util.TimerThread.mainLoop(Timer.java:543)
+    - locked <java.util.TaskQueue@787ffb3e>
+    at java.base/java.util.TimerThread.run(Timer.java:522)
+
+#93 "http-nio-9090-exec-1" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#94 "http-nio-9090-exec-2" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#95 "http-nio-9090-exec-3" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#96 "http-nio-9090-exec-4" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#97 "http-nio-9090-exec-5" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#98 "http-nio-9090-exec-6" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#99 "http-nio-9090-exec-7" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#100 "http-nio-9090-exec-8" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#101 "http-nio-9090-exec-9" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#102 "http-nio-9090-exec-10" WAITING 2026-09-15T08:53:14.009978500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@1f3274a4>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:132)
+    at org.apache.tomcat.util.threads.TaskQueue.take(TaskQueue.java:32)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:889)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:936)
+    at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:483)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#103 "http-nio-9090-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <sun.nio.ch.Util$2@1e8cd6c0>
+    - locked <sun.nio.ch.WEPollSelectorImpl@7193eb3e>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at org.apache.tomcat.util.net.NioEndpoint$Poller.run(NioEndpoint.java:912)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#104 "http-nio-9090-Acceptor" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.Net.accept(Native Method)
+    at java.base/sun.nio.ch.ServerSocketChannelImpl.implAccept(ServerSocketChannelImpl.java:424)
+    at java.base/sun.nio.ch.ServerSocketChannelImpl.accept(ServerSocketChannelImpl.java:391)
+    at org.apache.tomcat.util.net.NioEndpoint.serverSocketAccept(NioEndpoint.java:626)
+    at org.apache.tomcat.util.net.NioEndpoint.serverSocketAccept(NioEndpoint.java:71)
+    at org.apache.tomcat.util.net.Acceptor.run(Acceptor.java:145)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#111 "AsyncAppender-Worker-ASYNC-CONFIG" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@76b25839>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at ch.qos.logback.core.AsyncAppenderBase$Worker.run(AsyncAppenderBase.java:298)
+
+#112 "AsyncAppender-Worker-ASYNC-NAMING" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@7a29951f>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at ch.qos.logback.core.AsyncAppenderBase$Worker.run(AsyncAppenderBase.java:298)
+
+#113 "AsyncAppender-Worker-ASYNC-REMOTE" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@2eb764c>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at ch.qos.logback.core.AsyncAppenderBase$Worker.run(AsyncAppenderBase.java:298)
+
+#114 "AsyncAppender-Worker-ASYNC-AI" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@6c4fb734>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at ch.qos.logback.core.AsyncAppenderBase$Worker.run(AsyncAppenderBase.java:298)
+
+#115 "nacos.publisher-com.alibaba.nacos.common.notify.SlowEvent" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@8d84914>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.openEventHandler(DefaultPublisher.java:111)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.run(DefaultPublisher.java:95)
+
+#117 "nacos.publisher-com.alibaba.nacos.client.naming.event.InstancesChangeEvent" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3e6fa47d>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.openEventHandler(DefaultPublisher.java:111)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.run(DefaultPublisher.java:95)
+
+#119 "nacos.publisher-com.alibaba.nacos.client.naming.event.NamingFuzzyWatchNotifyEvent" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@67efecea>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.openEventHandler(DefaultPublisher.java:111)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.run(DefaultPublisher.java:95)
+
+#120 "nacos.publisher-com.alibaba.nacos.client.naming.event.NamingFuzzyWatchLoadEvent" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@76881134>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.openEventHandler(DefaultPublisher.java:111)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.run(DefaultPublisher.java:95)
+
+#126 "grpc-nio-worker-ELG-1-1" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.SelectedSelectionKeySet@3cd26618>
+    - locked <sun.nio.ch.WEPollSelectorImpl@7fdd71b3>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.SelectedSelectionKeySetSelector.select(SelectedSelectionKeySetSelector.java:62)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.select(NioEventLoop.java:891)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:526)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:998)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#130 "grpc-nio-worker-ELG-1-2" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollSelectorImpl.doSelect(WEPollSelectorImpl.java:108)
+    at java.base/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)
+    - locked <com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.SelectedSelectionKeySet@67cd5a1e>
+    - locked <sun.nio.ch.WEPollSelectorImpl@51fae662>
+    at java.base/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.SelectedSelectionKeySetSelector.select(SelectedSelectionKeySetSelector.java:62)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.select(NioEventLoop.java:891)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:526)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:998)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+    at com.alibaba.nacos.shaded.io.grpc.netty.shaded.io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#137 "nacos.publisher-com.alibaba.nacos.common.ability.AbstractAbilityControlManager$AbilityUpdateEvent" WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@7e37a8e3>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.take(ArrayBlockingQueue.java:421)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.openEventHandler(DefaultPublisher.java:111)
+    at com.alibaba.nacos.common.notify.DefaultPublisher.run(DefaultPublisher.java:95)
+
+#144 "DestroyJavaVM" RUNNABLE 2026-09-15T08:53:14.010975500Z
+
+#145 "Cleaner-2" TIMED_WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/java.lang.Object.wait0(Native Method)
+    - waiting on <java.lang.ref.ReferenceQueue$Lock@6a731e7f>
+    at java.base/java.lang.Object.wait(Object.java:389)
+    at java.base/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)
+    at java.base/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)
+    - locked <java.lang.ref.ReferenceQueue$Lock@6a731e7f>
+    at java.base/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#205 "VirtualThread-unblocker" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/java.lang.VirtualThread.takeVirtualThreadListToUnblock(Native Method)
+    at java.base/java.lang.VirtualThread.unblockVirtualThreads(VirtualThread.java:1519)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#214 "Read-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollPoller.poll(WEPollPoller.java:61)
+    at java.base/sun.nio.ch.Poller.pollerLoop(Poller.java:248)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#215 "Read-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollPoller.poll(WEPollPoller.java:61)
+    at java.base/sun.nio.ch.Poller.pollerLoop(Poller.java:248)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#216 "Read-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollPoller.poll(WEPollPoller.java:61)
+    at java.base/sun.nio.ch.Poller.pollerLoop(Poller.java:248)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#217 "Read-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollPoller.poll(WEPollPoller.java:61)
+    at java.base/sun.nio.ch.Poller.pollerLoop(Poller.java:248)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#218 "Write-Poller" RUNNABLE 2026-09-15T08:53:14.010975500Z
+    at java.base/sun.nio.ch.WEPoll.wait(Native Method)
+    at java.base/sun.nio.ch.WEPollPoller.poll(WEPollPoller.java:61)
+    at java.base/sun.nio.ch.Poller.pollerLoop(Poller.java:248)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+    at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+
+#208 "" virtual TIMED_WAITING 2026-09-15T08:53:14.010975500Z
+    at java.base/java.lang.VirtualThread.parkNanos(VirtualThread.java:787)
+    at java.base/java.lang.VirtualThread.sleepNanos(VirtualThread.java:983)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:507)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at com.moon.xiaoyuecanvas.service.DesignJobService.lambda$startHeartbeat$0(DesignJobService.java:328)
+    at java.base/java.lang.VirtualThread.run(VirtualThread.java:460)
+
+#206 "" virtual WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/java.lang.VirtualThread.park(VirtualThread.java:745)
+    - parking to wait for <java.util.concurrent.CompletableFuture$Signaller@6763a485>
+    at java.base/java.lang.System$1.parkVirtualThread(System.java:2285)
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:221)
+    at java.base/java.util.concurrent.CompletableFuture$Signaller.block(CompletableFuture.java:1885)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.CompletableFuture.waitingGet(CompletableFuture.java:1919)
+    at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2093)
+    at java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:902)
+    at java.net.http/jdk.internal.net.http.HttpClientFacade.send(HttpClientFacade.java:133)
+    at com.moon.moonagent.ai.impl.VideoGenerationServiceImpl.createVideoTask(VideoGenerationServiceImpl.java:473)
+    at com.moon.xiaoyuecanvas.service.DesignJobService.handleVideo(DesignJobService.java:543)
+    at com.moon.xiaoyuecanvas.service.DesignJobService.runJob(DesignJobService.java:295)
+    at com.moon.xiaoyuecanvas.service.DesignJobService.lambda$subscribeAndRun$3(DesignJobService.java:190)
+    at java.base/java.lang.VirtualThread.run(VirtualThread.java:460)
+
+#146 "HikariPool-1:housekeeper" TIMED_WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@4ec34c76>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#107 "com.alibaba.nacos.client.auth.ram.identify.watcher.0" TIMED_WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@63fc07ab>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#123 "com.alibaba.nacos.client.naming.grpc.redo.0" TIMED_WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@7c29a830>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#140 "com.alibaba.nacos.client.naming.fuzzy.watch.Worker.0" TIMED_WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@654a61e4>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ArrayBlockingQueue.poll(ArrayBlockingQueue.java:436)
+    at com.alibaba.nacos.client.naming.cache.NamingFuzzyWatchServiceListHolder.lambda$start$0(NamingFuzzyWatchServiceListHolder.java:116)
+    at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:545)
+    at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:309)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#124 "com.alibaba.nacos.client.remote.worker.0" WAITING 2026-09-15T08:53:14.011974300Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@31be31c7>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$0(RpcClient.java:255)
+    at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:545)
+    at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:309)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#125 "com.alibaba.nacos.client.remote.worker.1" TIMED_WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/java.lang.Thread.sleepNanos0(Native Method)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:509)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at com.alibaba.nacos.common.remote.client.RpcClient.healthCheck(RpcClient.java:446)
+    at com.alibaba.nacos.common.remote.client.RpcClient.lambda$start$1(RpcClient.java:278)
+    at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:545)
+    at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:309)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#110 "com.alibaba.nacos.client.logging.0" TIMED_WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@32fca904>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#128 "nacos-grpc-client-executor-localhost-0" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#129 "nacos-grpc-client-executor-localhost-1" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#131 "nacos-grpc-client-executor-localhost-2" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#132 "nacos-grpc-client-executor-localhost-3" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#133 "nacos-grpc-client-executor-localhost-4" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#134 "nacos-grpc-client-executor-localhost-5" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#135 "nacos-grpc-client-executor-localhost-6" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#136 "nacos-grpc-client-executor-localhost-7" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#138 "nacos-grpc-client-executor-localhost-8" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#139 "nacos-grpc-client-executor-localhost-9" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#141 "nacos-grpc-client-executor-localhost-10" WAITING 2026-09-15T08:53:14.012974200Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#142 "nacos-grpc-client-executor-localhost-11" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#148 "nacos-grpc-client-executor-localhost-12" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#149 "nacos-grpc-client-executor-localhost-13" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#150 "nacos-grpc-client-executor-localhost-14" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#151 "nacos-grpc-client-executor-localhost-15" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#152 "nacos-grpc-client-executor-localhost-16" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#153 "nacos-grpc-client-executor-localhost-17" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#154 "nacos-grpc-client-executor-localhost-18" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#155 "nacos-grpc-client-executor-localhost-19" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#156 "nacos-grpc-client-executor-localhost-20" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#157 "nacos-grpc-client-executor-localhost-21" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#158 "nacos-grpc-client-executor-localhost-22" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#159 "nacos-grpc-client-executor-localhost-23" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#160 "nacos-grpc-client-executor-localhost-24" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#161 "nacos-grpc-client-executor-localhost-25" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#162 "nacos-grpc-client-executor-localhost-26" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#163 "nacos-grpc-client-executor-localhost-27" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#164 "nacos-grpc-client-executor-localhost-28" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#165 "nacos-grpc-client-executor-localhost-29" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#166 "nacos-grpc-client-executor-localhost-30" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#167 "nacos-grpc-client-executor-localhost-31" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#168 "nacos-grpc-client-executor-localhost-32" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#169 "nacos-grpc-client-executor-localhost-33" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#170 "nacos-grpc-client-executor-localhost-34" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#171 "nacos-grpc-client-executor-localhost-35" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#172 "nacos-grpc-client-executor-localhost-36" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#173 "nacos-grpc-client-executor-localhost-37" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#174 "nacos-grpc-client-executor-localhost-38" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#175 "nacos-grpc-client-executor-localhost-39" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#176 "nacos-grpc-client-executor-localhost-40" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#177 "nacos-grpc-client-executor-localhost-41" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#178 "nacos-grpc-client-executor-localhost-42" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#179 "nacos-grpc-client-executor-localhost-43" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#180 "nacos-grpc-client-executor-localhost-44" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#181 "nacos-grpc-client-executor-localhost-45" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#182 "nacos-grpc-client-executor-localhost-46" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#184 "nacos-grpc-client-executor-localhost-47" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#185 "nacos-grpc-client-executor-localhost-48" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#189 "nacos-grpc-client-executor-localhost-49" WAITING 2026-09-15T08:53:14.013478100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#190 "nacos-grpc-client-executor-localhost-50" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#191 "nacos-grpc-client-executor-localhost-51" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#192 "nacos-grpc-client-executor-localhost-52" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#193 "nacos-grpc-client-executor-localhost-53" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#195 "nacos-grpc-client-executor-localhost-54" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#196 "nacos-grpc-client-executor-localhost-55" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#197 "nacos-grpc-client-executor-localhost-56" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#198 "nacos-grpc-client-executor-localhost-57" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#199 "nacos-grpc-client-executor-localhost-58" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#200 "nacos-grpc-client-executor-localhost-59" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#201 "nacos-grpc-client-executor-localhost-60" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#202 "nacos-grpc-client-executor-localhost-61" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#203 "nacos-grpc-client-executor-localhost-62" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#204 "nacos-grpc-client-executor-localhost-63" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@3a5ff43>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:435)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#210 "ForkJoinPool-1-delayScheduler" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    at java.base/java.util.concurrent.DelayScheduler.loop(DelayScheduler.java:253)
+    at java.base/java.util.concurrent.DelayScheduler.run(DelayScheduler.java:221)
+
+#222 "ForkJoinPool-1-worker-6" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.ForkJoinPool@35d6eb92>
+    at java.base/java.util.concurrent.ForkJoinPool.awaitWork(ForkJoinPool.java:2109)
+    at java.base/java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.java:2063)
+    at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2027)
+    at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
+
+#70 "Catalina-utility-1" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@7526c4e6>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#71 "Catalina-utility-2" WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@7526c4e6>
+    at java.base/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)
+    at java.base/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4364)
+    at java.base/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4310)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1161)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:74)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#118 "com.alibaba.nacos.naming.failover.0" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@22c5f7cf>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#122 "com.alibaba.nacos.client.naming.security.0" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/jdk.internal.misc.Unsafe.park(Native Method)
+    - parking to wait for <java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@e364b33>
+    at java.base/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)
+    at java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1166)
+    at java.base/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+
+#79 "idle-connection-reaper" TIMED_WAITING 2026-09-15T08:53:14.014480100Z
+    at java.base/java.lang.Thread.sleepNanos0(Native Method)
+    at java.base/java.lang.Thread.sleepNanos(Thread.java:509)
+    at java.base/java.lang.Thread.sleep(Thread.java:540)
+    at software.amazon.awssdk.http.apache.internal.conn.IdleConnectionReaper$ReaperTask.run(IdleConnectionReaper.java:151)
+    at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+    at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+    at java.base/java.lang.Thread.run(Thread.java:1474)
+

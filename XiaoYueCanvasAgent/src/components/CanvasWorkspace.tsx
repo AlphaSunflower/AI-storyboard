@@ -3,9 +3,9 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Background, BackgroundVariant, ConnectionLineType, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode,
-  useReactFlow, useStore, useStoreApi, type Connection, type Viewport,
+  useReactFlow, useStore, useStoreApi, type Connection, type NodeProps, type Viewport,
 } from '@xyflow/react';
-import { Check, ChevronDown, CircleHelp, Copy, Download, FileArchive, FolderOpen, Grid2X2, History, Layers, LayoutList, LoaderCircle, Map, MessageCircle, Network, Plus, Scissors, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, CircleHelp, Copy, Download, FileArchive, FolderOpen, Grid2X2, History, Layers, LayoutList, LoaderCircle, Map, Maximize2, MessageCircle, Minimize2, MoreHorizontal, Network, Pencil, Plus, Scissors, Search, Trash2 } from 'lucide-react';
 import { getAsset, saveAsset, saveAssets, saveAssetToLibrary } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
@@ -25,25 +25,42 @@ import { GenerationRecordsPanel } from './GenerationRecordsPanel';
 import { TemplatePanel } from './TemplatePanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
 import { CanvasUiProvider } from '../canvas/CanvasUiContext';
+import { CanvasNodeDisplayProvider, shouldCompactNodeKind, useCanvasNodeDisplay, type NodeDisplayMode } from '../canvas/CanvasNodeDisplayContext';
 import { createPersistedCanvasAsset, persistExistingCanvasAsset } from '../services/canvasMedia';
 import { canvasCommandService } from '../canvas/canvasCommandService';
 
+const COMPACT_NODE_WIDTH = 156;
+const COMPACT_NODE_HEIGHT = 44;
+
+function CanvasMediaNode(props: NodeProps<CanvasNode>) {
+  const { mode, expandedNodeIds, minimizeNode } = useCanvasNodeDisplay();
+  const compactable = shouldCompactNodeKind(props.data.kind);
+  const expanded = expandedNodeIds.has(props.id);
+  return <MediaNode
+    {...props}
+    displayCollapsed={mode === 'compact' && compactable && !expanded}
+    showMinimize={mode === 'compact' && compactable && expanded}
+    onMinimize={minimizeNode}
+  />;
+}
+
 const nodeTypes = {
-  media: MediaNode,
+  media: CanvasMediaNode,
   video: VideoNode,
-  image: MediaNode,
-  text: MediaNode,
-  script: MediaNode,
-  note: MediaNode,
-  storyboardPlanner: MediaNode,
-  shot: MediaNode,
-  textToImage: MediaNode,
-  imageToImage: MediaNode,
-  batchImageRefine: MediaNode,
-  textToVideo: MediaNode,
-  imageToVideo: MediaNode,
-  firstLastFrameToVideo: MediaNode,
-  referenceToVideo: MediaNode,
+  image: CanvasMediaNode,
+  text: CanvasMediaNode,
+  script: CanvasMediaNode,
+  note: CanvasMediaNode,
+  storyboardPlanner: CanvasMediaNode,
+  shot: CanvasMediaNode,
+  textToImage: CanvasMediaNode,
+  imageToImage: CanvasMediaNode,
+  batchImageRefine: CanvasMediaNode,
+  textToVideo: CanvasMediaNode,
+  imageToVideo: CanvasMediaNode,
+  firstLastFrameToVideo: CanvasMediaNode,
+  referenceToVideo: CanvasMediaNode,
+  videoMerge: CanvasMediaNode,
 };
 const edgeTypes = { canvas: CanvasEdge };
 
@@ -126,6 +143,8 @@ interface CanvasWorkspaceProps {
   onSwitchProject: (projectId: string) => void;
   onSwitchCanvas: (canvasId: string) => void;
   onNewCanvas: () => void;
+  onRenameCanvas: (canvasId: string, title: string) => void;
+  onDeleteCanvas: (canvasId: string) => void;
   onDeleteProject: () => void;
   onOpenAgent: () => void;
   onOpenInspector: () => void;
@@ -139,10 +158,12 @@ interface CanvasWorkspaceProps {
 const saveLabel: Record<SaveStatus, string> = { idle: '本地项目', saving: '保存中…', saved: '已保存到本地', error: '保存失败' };
 
 function CanvasInner(props: CanvasWorkspaceProps) {
-  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false } = props;
+  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onRenameCanvas, onDeleteCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false } = props;
   const [panel, setPanel] = useState<'nodes' | 'templates' | 'history' | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
+  const [nodeDisplayMode, setNodeDisplayMode] = useState<NodeDisplayMode>('compact');
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(() => new Set());
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const [canvasSwitcherOpen, setCanvasSwitcherOpen] = useState(false);
@@ -150,6 +171,10 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const [projectSearch, setProjectSearch] = useState('');
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState(projectTitle);
+  const [canvasRenameTarget, setCanvasRenameTarget] = useState<CanvasSummary | null>(null);
+  const [canvasRenameDraft, setCanvasRenameDraft] = useState('');
+  const [canvasDeleteTarget, setCanvasDeleteTarget] = useState<CanvasSummary | null>(null);
+  const [canvasActionMenuId, setCanvasActionMenuId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -165,8 +190,12 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nodes = useCanvasStore((state) => state.nodes);
   const flowNodes = useMemo(
-    () => nodes.map((node) => node.dragHandle === '.node-drag-handle' ? node : { ...node, dragHandle: '.node-drag-handle' }),
-    [nodes],
+    () => nodes.map((node) => {
+      const displayNode = node.dragHandle === '.node-drag-handle' ? node : { ...node, dragHandle: '.node-drag-handle' };
+      if (!shouldCompactNodeKind(node.data.kind) || nodeDisplayMode === 'expanded' || expandedNodeIds.has(node.id)) return displayNode;
+      return { ...displayNode, width: COMPACT_NODE_WIDTH, height: COMPACT_NODE_HEIGHT };
+    }),
+    [expandedNodeIds, nodeDisplayMode, nodes],
   );
   const selectedNodes = useMemo(() => nodes.filter((node) => node.selected), [nodes]);
   const edges = useCanvasStore((state) => state.edges);
@@ -242,6 +271,18 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     setNotice(message); onNotify?.(message);
     window.setTimeout(() => setNotice(null), 1800);
   }, [onNotify]);
+  const minimizeNode = useCallback((nodeId: string) => {
+    setExpandedNodeIds((current) => {
+      if (!current.has(nodeId)) return current;
+      const next = new Set(current);
+      next.delete(nodeId);
+      return next;
+    });
+  }, []);
+  const toggleNodeDisplayMode = useCallback(() => {
+    setNodeDisplayMode((mode) => mode === 'compact' ? 'expanded' : 'compact');
+    setExpandedNodeIds(new Set());
+  }, []);
   const copySelection = useCallback(() => {
     const count = copySelected();
     if (count) notify(`已复制 ${count} 个节点`);
@@ -288,6 +329,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     setWorkspaceMenuOpen(false);
     setProjectSwitcherOpen(false);
     setCanvasSwitcherOpen(false);
+    setCanvasActionMenuId(null);
   }, []);
   useEffect(() => {
     const listener = (event: Event) => notify((event as CustomEvent<string>).detail);
@@ -376,6 +418,10 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     const frame = requestAnimationFrame(() => void fitView({ padding: .24, duration: 0 }));
     return () => cancelAnimationFrame(frame);
   }, [fitView, nodes.length]);
+  useEffect(() => {
+    setNodeDisplayMode('compact');
+    setExpandedNodeIds(new Set());
+  }, [canvasId]);
 
   const importMedia = useCallback(async (fileList: FileList | File[], anchor?: { x: number; y: number }) => {
     const files = Array.from(fileList);
@@ -494,10 +540,22 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       onDragLeave={() => { dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setIsFileDragActive(false); }}
       onDrop={(event) => { event.preventDefault(); dragDepthRef.current = 0; setIsFileDragActive(false); const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME); if (assetId) { void addAssetAt(assetId, screenToFlowPosition({ x: event.clientX, y: event.clientY })); return; } if (event.dataTransfer.files.length) void importMedia(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
       <input ref={fileInputRef} className="canvas-file-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={(event) => { if (event.target.files) void importMedia(event.target.files); event.target.value = ''; }} />
+      <CanvasNodeDisplayProvider mode={nodeDisplayMode} expandedNodeIds={expandedNodeIds} minimizeNode={minimizeNode}>
       <CanvasUiProvider openInspector={onOpenInspector}>
       <ReactFlow nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={handleConnect} onConnectStart={handleConnectStart} onConnectEnd={handleConnectEnd}
         onNodeDragStart={beginNodeDrag} onNodeDragStop={endNodeDrag}
-        onNodeClick={(event, node) => { closeContextMenu(); selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey); }} onPaneClick={(event) => { closeContextMenu(); selectNode(null); if (event.detail === 2) { const point = screenToFlowPosition({ x: event.clientX, y: event.clientY }); addNode('text', { x: point.x - 190, y: point.y - 140 }); } }}
+        onNodeClick={(event, node) => {
+          closeContextMenu();
+          selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey);
+          if (nodeDisplayMode === 'compact' && shouldCompactNodeKind(node.data.kind) && !expandedNodeIds.has(node.id)) {
+            setExpandedNodeIds((current) => {
+              if (current.has(node.id)) return current;
+              const next = new Set(current);
+              next.add(node.id);
+              return next;
+            });
+          }
+        }} onPaneClick={(event) => { closeContextMenu(); selectNode(null); if (event.detail === 2) { const point = screenToFlowPosition({ x: event.clientX, y: event.clientY }); addNode('text', { x: point.x - 190, y: point.y - 140 }); } }}
         onNodeDoubleClick={(_event, node) => { selectNode(node.id); onOpenInspector(); }}
         onPaneContextMenu={(event) => { event.preventDefault(); setContextTarget({ type: 'pane', clientX: event.clientX, clientY: event.clientY, flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }) }); }}
         onNodeContextMenu={(event, node) => {
@@ -557,9 +615,54 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           </DropdownMenu.Root>}
           {!canvasInteractionLocked && <i className="project-bar-divider" />}
           {!canvasInteractionLocked && <button className="project-switcher-trigger canvas-switcher-trigger" aria-label="切换画布" aria-expanded={canvasSwitcherOpen} onClick={() => { setCanvasSwitcherOpen((open) => !open); setProjectSwitcherOpen(false); setWorkspaceMenuOpen(false); }}><Layers size={13} /><span>{canvasTitle || '画布'}</span><ChevronDown size={13} /></button>}
-          {!canvasInteractionLocked && canvasSwitcherOpen && <div className="project-switcher canvas-switcher" role="listbox" aria-label="切换画布">
+          {!canvasInteractionLocked && canvasSwitcherOpen && <div className="project-switcher canvas-switcher" role="dialog" aria-label="切换画布">
             <div className="project-switcher-list" role="listbox">
-              {canvases.map((item) => <button role="option" aria-selected={item.id === canvasId} className={item.id === canvasId ? 'is-current' : ''} key={item.id} onClick={() => { closeProjectMenus(); if (item.id !== canvasId) onSwitchCanvas(item.id); }}><span className="project-switcher-copy"><strong>{item.title}</strong><small>{item.nodeCount} 个节点 · {item.assetCount} 项素材</small></span>{item.id === canvasId && <Check size={15} />}</button>)}
+              {canvases.map((item) => {
+                const isCurrent = item.id === canvasId;
+                return <div
+                  className={`canvas-switcher-row ${isCurrent ? 'is-current' : ''}`}
+                  key={item.id}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setCanvasActionMenuId(item.id);
+                  }}
+                >
+                  <button
+                    role="option"
+                    aria-selected={isCurrent}
+                    className="canvas-switcher-select"
+                    title={item.title}
+                    onClick={() => { closeProjectMenus(); if (!isCurrent) onSwitchCanvas(item.id); }}
+                  >
+                    <span className="project-switcher-copy"><strong>{item.title}</strong><small>{item.nodeCount} 个节点 · {item.assetCount} 项素材</small></span>
+                    {isCurrent && <Check size={15} />}
+                  </button>
+                  <DropdownMenu.Root
+                    open={canvasActionMenuId === item.id}
+                    onOpenChange={(open) => setCanvasActionMenuId(open ? item.id : null)}
+                  >
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="canvas-switcher-action-trigger"
+                        aria-label={`管理画布 ${item.title}`}
+                        title="重命名或删除画布"
+                        onClick={(event) => event.stopPropagation()}
+                      ><MoreHorizontal size={16} /></button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content className="canvas-item-menu" align="end" sideOffset={6} aria-label={`画布管理 ${item.title}`}>
+                        <DropdownMenu.Item asChild>
+                          <button onClick={() => { setCanvasActionMenuId(null); closeProjectMenus(); setCanvasRenameTarget(item); setCanvasRenameDraft(item.title); }}><Pencil size={14} /><span>重命名</span></button>
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator className="project-menu-divider" />
+                        <DropdownMenu.Item asChild>
+                          <button className="canvas-menu-danger" onClick={() => { setCanvasActionMenuId(null); closeProjectMenus(); setCanvasDeleteTarget(item); }}><Trash2 size={14} /><span>删除画布</span></button>
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
+                </div>;
+              })}
             </div>
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onNewCanvas(); }}><Plus size={15} /> 新建画布</button>
           </div>}
@@ -576,7 +679,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /> 新建项目</button>
           </div>}
         </Panel>
-        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="节点库"><Search size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
+        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
         <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel onOpenRecords={() => setPanel('history')} /></Panel>
         <Controls
           className="canvas-controls canvas-view-bar"
@@ -590,6 +693,14 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         >
           <ControlButton className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap((value) => !value)} aria-label="小地图" title="小地图"><Map size={16} /></ControlButton>
           <ControlButton className={showGrid ? 'is-active' : ''} onClick={() => setShowGrid((value) => !value)} aria-label="网格" title="网格"><Grid2X2 size={16} /></ControlButton>
+          <ControlButton
+            className={nodeDisplayMode === 'compact' ? 'is-active' : ''}
+            onClick={toggleNodeDisplayMode}
+            aria-label={nodeDisplayMode === 'compact' ? '展开全部节点' : '收起全部节点'}
+            title={nodeDisplayMode === 'compact' ? '展开全部节点' : '收起全部节点'}
+          >
+            {nodeDisplayMode === 'compact' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+          </ControlButton>
           <ControlButton
             className={isLayingOut ? 'is-active' : ''}
             disabled={isLayingOut}
@@ -606,6 +717,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         {!nodes.length && <Panel className="canvas-empty-hint" position="top-left"><div><strong>空画布</strong><span>从真实素材或文字开始</span></div><section><button onClick={() => fileInputRef.current?.click()}>导入图片 / 视频</button><button onClick={() => addNode('text')}>创建文字</button><button onClick={() => addNode('image')}>创建图片占位</button><button onClick={() => addNode('video')}>创建视频占位</button></section></Panel>}
       </ReactFlow>
       </CanvasUiProvider>
+      </CanvasNodeDisplayProvider>
       {assetDrawerOpen && <AssetDrawer projectId={projectId} onClose={() => setAssetDrawerOpen(false)} />}
       {panel === 'nodes' && <NodeLibrary onClose={() => setPanel(null)} onImport={() => fileInputRef.current?.click()} />}
       {panel === 'templates' && <TemplatePanel onClose={() => setPanel(null)} />}
@@ -630,6 +742,42 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <Dialog.Title>删除当前项目？</Dialog.Title>
             <Dialog.Description className="project-dialog-description">项目、画布结构及仅由该项目引用的素材将从本地删除。此操作无法撤销。</Dialog.Description>
             <footer><Dialog.Close asChild><button type="button">取消</button></Dialog.Close><button className="is-danger" type="button" onClick={() => { setDeleteDialogOpen(false); onDeleteProject(); }}>确认删除</button></footer>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={Boolean(canvasRenameTarget)} onOpenChange={(open) => { if (!open) setCanvasRenameTarget(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="project-dialog-backdrop" />
+          <Dialog.Content asChild>
+            <form className="project-dialog" onSubmit={(event) => {
+              event.preventDefault();
+              const title = canvasRenameDraft.trim();
+              if (!title || !canvasRenameTarget) return;
+              onRenameCanvas(canvasRenameTarget.id, title);
+              setCanvasRenameTarget(null);
+            }}>
+              <Dialog.Title>重命名画布</Dialog.Title>
+              <Dialog.Description className="project-dialog-description">请输入画布的新名称</Dialog.Description>
+              <input autoFocus aria-label="画布的新名称" value={canvasRenameDraft} onChange={(event) => setCanvasRenameDraft(event.target.value)} />
+              <footer><Dialog.Close asChild><button type="button">取消</button></Dialog.Close><button type="submit" disabled={!canvasRenameDraft.trim()}>确认</button></footer>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={Boolean(canvasDeleteTarget)} onOpenChange={(open) => { if (!open) setCanvasDeleteTarget(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="project-dialog-backdrop" />
+          <Dialog.Content className="project-dialog project-delete-dialog">
+            <Dialog.Title>删除画布「{canvasDeleteTarget?.title}」？</Dialog.Title>
+            <Dialog.Description className="project-dialog-description">画布中的节点和连线将被删除。此操作无法撤销。</Dialog.Description>
+            <footer>
+              <Dialog.Close asChild><button type="button">取消</button></Dialog.Close>
+              <button className="is-danger" type="button" onClick={() => {
+                const target = canvasDeleteTarget;
+                setCanvasDeleteTarget(null);
+                if (target) onDeleteCanvas(target.id);
+              }}>确认删除</button>
+            </footer>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

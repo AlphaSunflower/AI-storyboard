@@ -16,6 +16,11 @@ export const LOCAL_CAPABILITIES: CapabilityDescriptor[] = [
   { id: 'image.annotation', label: '标注', category: 'local', available: true },
   { id: 'video.import', label: '导入视频', category: 'local', available: true },
   { id: 'video.playlist', label: '视频片段编排', category: 'local', available: true },
+  { id: 'video.frame', label: '提取视频帧', category: 'local', available: true },
+  { id: 'video.flip', label: '水平翻转', category: 'local', available: true },
+  { id: 'video.color', label: '视频调色', category: 'local', available: true },
+  { id: 'video.speed', label: '视频变速', category: 'local', available: true },
+  { id: 'video.merge', label: '视频合并', category: 'local', available: true },
 ];
 
 export const REMOTE_CAPABILITIES: CapabilityDescriptor[] = [

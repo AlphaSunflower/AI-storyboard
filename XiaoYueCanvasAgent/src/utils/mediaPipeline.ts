@@ -1,4 +1,4 @@
-import type { AnnotationDocument, AnnotationShape, ImageOperation, MediaAsset } from '../types';
+import type { AnnotationDocument, AnnotationShape, ImageOperation, MediaAsset, MediaOperation } from '../types';
 import { createId } from './id';
 
 const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -58,12 +58,12 @@ function runtimeAsset(record: MediaAsset): MediaAsset { return record; }
 // Object URLs are owned by useObjectUrl and released when media leaves the viewport.
 export function disposeRuntimeAsset(_asset: MediaAsset) {}
 
-const resultAsset = (result: WorkerImageResult, name: string, derivedFrom: string | undefined, operation: ImageOperation, originalBlob = result.blob, mimeType = result.blob.type || 'image/png') => runtimeAsset({
+const resultAsset = (result: WorkerImageResult, name: string, derivedFrom: string | undefined, operation: MediaOperation, originalBlob = result.blob, mimeType = result.blob.type || 'image/png') => runtimeAsset({
   id: createId(), kind: 'image', name, mimeType, bytes: originalBlob.size, width: result.width, height: result.height,
   originalBlob, thumbnailBlob: result.thumbnail, previewBlob: result.preview, derivedFrom, operation, libraryState: 'project', createdAt: Date.now(),
 });
 
-export async function createImageAsset(file: File, id = createId(), metadata: { derivedFrom?: string; operation?: ImageOperation; libraryState?: 'project' | 'global' } = {}) {
+export async function createImageAsset(file: File, id = createId(), metadata: { derivedFrom?: string; operation?: MediaOperation; libraryState?: 'project' | 'global' } = {}) {
   if (!SUPPORTED_IMAGE_TYPES.has(file.type)) throw new Error('仅支持 PNG、JPEG 或 WebP 图片');
   const [result] = await executeWorker({ type: 'import', source: file });
   const asset = resultAsset(result, file.name, metadata.derivedFrom, metadata.operation ?? { type: 'import', params: {} }, file, file.type);
@@ -145,7 +145,11 @@ const videoFrame = (video: HTMLVideoElement, maxDimension: number) => new Promis
   canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('视频封面编码失败')), 'image/webp', .82);
 });
 
-export async function createVideoAsset(file: File, id = createId()) {
+export async function createVideoAsset(
+  file: File,
+  id = createId(),
+  metadata: { derivedFrom?: string; operation?: MediaOperation } = {},
+) {
   if (!SUPPORTED_VIDEO_TYPES.has(file.type)) throw new Error('仅支持 MP4、WebM 或 MOV 视频');
   const url = URL.createObjectURL(file);
   const video = document.createElement('video');
@@ -182,6 +186,8 @@ export async function createVideoAsset(file: File, id = createId()) {
       originalBlob: file,
       thumbnailBlob,
       previewBlob,
+      derivedFrom: metadata.derivedFrom,
+      operation: metadata.operation,
       libraryState: 'project' as const,
       createdAt: Date.now(),
     };

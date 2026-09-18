@@ -8,12 +8,15 @@ import {
 } from './graphContracts';
 import {
   submitImageGeneration,
+  submitImageRedraw,
   submitScriptDrafting,
   submitVideoGeneration,
   type GenerationTerminalOutcome,
 } from '../services/jobRunner';
 import { jobAdapter } from '../services/capabilities';
 import { resolveResultSlots, validateResultSlotOwnership } from './resultSlots';
+import { useMediaStore } from '../store/mediaStore';
+import { getAsset } from '../services/projectStorage';
 
 export interface NodeExecutionHandle {
   jobId: string;
@@ -145,12 +148,35 @@ export async function executeNodeAction(
       onTerminal,
       signal,
     });
+  } else if (action.capabilityId === 'image.redraw' && node.data.redraw) {
+    if (!input.prompt.trim()) throw new Error('图生图需要提示词');
+    const sourceAssetId = input.sourceAssetIds[0];
+    const sourceAsset = sourceAssetId
+      ? useMediaStore.getState().assets[sourceAssetId] ?? await getAsset(sourceAssetId).catch(() => undefined)
+      : undefined;
+    if (!sourceAsset) throw new Error('图生图缺少源图片');
+    jobId = await submitImageRedraw(
+      input.prompt,
+      nodeId,
+      node.data.redraw,
+      { width: sourceAsset.width, height: sourceAsset.height },
+      () => undefined,
+      {
+        sourceAssetIds: input.sourceAssetIds,
+        sourceNodeIds: input.sourceNodeIds,
+        params: executionParams(node, action.id),
+        resultSlots,
+        onTerminal,
+        signal,
+      },
+    );
   } else if (action.capabilityId === 'image.generate' || action.capabilityId === 'image.redraw') {
     if (!input.prompt.trim()) throw new Error('生图需要提示词');
     jobId = await submitImageGeneration(input.prompt, nodeId, () => undefined, {
       sourceAssetIds: input.sourceAssetIds,
       sourceNodeIds: input.sourceNodeIds,
       params: executionParams(node, action.id),
+      capabilityId: action.capabilityId,
       resultSlots,
       onTerminal,
       signal,

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { showAllNodes } from './node-display';
 
 test('drags a shot node from its handle and opens details in the inspector', async ({ page }) => {
   const projectId = 'node-ux-project';
@@ -266,6 +267,7 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   }, { projectId, canvasId });
 
   await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+  await showAllNodes(page);
 
   const node = page.locator('.react-flow__node[data-id="shot-ux-1"]');
   await expect(node).toBeVisible();

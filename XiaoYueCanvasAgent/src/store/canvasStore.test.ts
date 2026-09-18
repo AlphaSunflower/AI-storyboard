@@ -6,9 +6,20 @@ describe('canvas transactions', () => {
 
   it('creates derived assets, nodes, and edges as one undoable action', () => {
     const sourceId = useCanvasStore.getState().addNode('image', { x: 0, y: 0 });
-    useCanvasStore.getState().createDerivedNodes(sourceId, [{ data: { assetId: 'asset-1', label: 'derived' }, size: { width: 200, height: 100 } }]);
+    useCanvasStore.getState().createDerivedNodes(sourceId, [{
+      data: { assetId: 'asset-1', label: 'derived' },
+      size: { width: 200, height: 100 },
+      edgeData: { operationDetail: '首帧' },
+    }]);
     expect(useCanvasStore.getState().nodes).toHaveLength(2);
     expect(useCanvasStore.getState().edges).toHaveLength(1);
+    // 派生边用注册表真实端口 id（left/right 匹配不到 Handle）
+    expect(useCanvasStore.getState().edges[0]).toMatchObject({
+      source: sourceId,
+      sourceHandle: 'image',
+      targetHandle: 'origin',
+      data: { operationDetail: '首帧' },
+    });
     useCanvasStore.getState().undo();
     expect(useCanvasStore.getState().nodes).toHaveLength(1);
     expect(useCanvasStore.getState().edges).toHaveLength(0);

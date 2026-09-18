@@ -19,6 +19,7 @@ import { useMediaStore } from '../store/mediaStore';
 import { useObjectUrl } from '../hooks/useObjectUrl';
 import { getAsset } from '../services/projectStorage';
 import { generationRecordProgress, generationResultAssetIds } from '../canvas/generationRecords';
+import { multiAngleLabel } from '../canvas/multiAngle';
 import type { CanvasNode, GenerationRecord } from '../types';
 import { ImagePreviewOverlay, type ImagePreviewTarget } from './ImagePreviewOverlay';
 
@@ -367,6 +368,10 @@ export function GenerationRecordsPanel({ onClose }: { onClose: () => void }) {
               const StatusIcon = meta.icon;
               const results = generationResultAssetIds(record, nodes);
               const capabilityId = typeof record.params.capabilityId === 'string' ? record.params.capabilityId : '';
+              const recordLabel = multiAngleLabel(record.params.multiAngleMode)
+                ?? ACTION_LABEL[record.actionId]
+                ?? actionLabelForCapability(capabilityId)
+                ?? record.actionId;
               const active = record.status === 'queued'
                 || record.status === 'running'
                 || record.materializationStatus === 'materializing';
@@ -381,7 +386,7 @@ export function GenerationRecordsPanel({ onClose }: { onClose: () => void }) {
                     <span className={`record-status is-${meta.tone}`}><StatusIcon size={12} className={record.status === 'running' ? 'is-spinning' : ''} />{meta.label}</span>
                     <small>{formatTime(record.startedAt)}</small>
                   </header>
-                  <strong>{ACTION_LABEL[record.actionId] ?? actionLabelForCapability(capabilityId) ?? record.actionId}</strong>
+                  <strong>{recordLabel}</strong>
                   <p>{record.effectivePrompt || record.prompt || '未记录提示词'}</p>
                   {active && (
                     <div

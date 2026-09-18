@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 图片生成服务 —— 负责调用 Laozhang API 进行生图/改图。
@@ -46,4 +47,14 @@ public interface ImageGenerationService {
                                 String size, String quality, String aspectRatio,
                                 List<String> referenceImages,
                                 String mode, String generatedImageUrl, Integer n);
+
+    /**
+     * 带蒙版的图生图入口。蒙版 PNG 中透明像素表示可编辑区域。
+     * 该方法用于画布区域化重绘，不改动现有生图/图生图调用方。
+     */
+    List<String> generateImagesWithMask(String sceneId, String prompt, String model,
+                                        String size, String quality, String aspectRatio,
+                                        List<String> referenceImages,
+                                        String generatedImageUrl, String maskImageUrl,
+                                        Map<String, Object> editParams);
 }

@@ -25,6 +25,7 @@ import com.moon.xiaoyuecanvas.mapper.CanvasJobMapper;
 import com.moon.xiaoyuecanvas.repository.CanvasJobRepository;
 import com.moon.xiaoyuecanvas.util.JsonUtil;
 import com.storyboard.common.BusinessException;
+import com.storyboard.common.image.SeedreamImageProtocol;
 import com.storyboard.common.generation.GenerationRecord;
 import com.storyboard.common.generation.GenerationRecordTypes;
 import com.storyboard.common.generation.GenerationRecordUpdate;
@@ -407,7 +408,7 @@ public class DesignJobService {
         recordAndPublish(job.getId(), "storyboard.created", eventData);
     }
 
-    private void handleImage(CanvasJob job, String owner) {
+    void handleImage(CanvasJob job, String owner) {
         Map<String, Object> params = JsonUtil.parse(job.getParams());
         String prompt = extractPrompt(job);
         String model = str(params, "model");
@@ -415,11 +416,42 @@ public class DesignJobService {
         String quality = str(params, "quality");
         String aspectRatio = str(params, "aspectRatio");
         Integer n = intVal(params, "n");
+        String redrawMaskAssetId = str(params, "redrawMaskAssetId");
+        String multiAngleMode = str(params, "multiAngleMode");
+        if (multiAngleMode != null && !multiAngleMode.isBlank()) {
+            int expectedCount = switch (multiAngleMode) {
+                case "grid" -> 1;
+                case "multi" -> 4;
+                default -> -1;
+            };
+            if (!SeedreamImageProtocol.isSeedream(model)
+                    || !"2K".equals(size)
+                    || n == null
+                    || n != expectedCount) {
+                throw new BusinessException(40001, "多角度必须使用 Seedream 模型、2K 尺寸和固定生成数量");
+            }
+        }
+        String redrawMaskImageUrl = null;
+        if (redrawMaskAssetId != null && !redrawMaskAssetId.isBlank()) {
+            CanvasAsset maskAsset = canvasAssetService.getOwned(job.getUserId(), redrawMaskAssetId);
+            if (maskAsset.getObjectUrl() == null || maskAsset.getObjectUrl().isBlank()) {
+                throw new BusinessException(40401, "重绘蒙版资产不存在");
+            }
+            redrawMaskImageUrl = toDataUriOrUrl(maskAsset.getObjectUrl());
+        }
 
         List<String> referenceImages = new ArrayList<>();
         Object refParam = params.get("referenceImages");
         if (refParam instanceof List<?> list) {
             for (Object item : list) if (item instanceof String s && !s.isBlank()) referenceImages.add(s);
+        }
+        if (referenceImages.isEmpty()) {
+            for (String assetId : stringList(params, "referenceAssetIds")) {
+                CanvasAsset asset = canvasAssetService.getOwned(job.getUserId(), assetId);
+                if ("image".equals(asset.getType()) && asset.getObjectUrl() != null && !asset.getObjectUrl().isBlank()) {
+                    referenceImages.add(asset.getObjectUrl());
+                }
+            }
         }
         if (referenceImages.isEmpty()) {
             for (String aid : JsonUtil.parseList(job.getSourceAssetIds())) {
@@ -440,8 +472,12 @@ public class DesignJobService {
                 throw new BusinessException(40901, "任务已取消或执行租约已失效");
             }
             pulse = startProgressPulse(job.getId(), owner, 5, 90);
-            List<String> paths = imageGenerationService.generateImages(
-                    null, prompt, model, size, quality, aspectRatio, referenceImages, mode, null, n);
+            List<String> paths = redrawMaskImageUrl == null
+                    ? imageGenerationService.generateImages(
+                            null, prompt, model, size, quality, aspectRatio, referenceImages, mode, null, n)
+                    : imageGenerationService.generateImagesWithMask(
+                            null, prompt, model, size, quality, aspectRatio, referenceImages, null,
+                            redrawMaskImageUrl, params);
             if (paths == null || paths.isEmpty()) {
                 throw new BusinessException(50201, "图片生成失败");
             }

@@ -74,6 +74,55 @@ describe('CanvasGraphV2 store bridge', () => {
     expect(useCanvasStore.getState().edges).toHaveLength(0);
   });
 
+  it('reorders video merge inputs atomically and compacts order after deletion', () => {
+    const first = useCanvasStore.getState().addNode('video', { x: 0, y: 0 }, { assetId: 'video-1' });
+    const second = useCanvasStore.getState().addNode('video', { x: 0, y: 300 }, { assetId: 'video-2' });
+    const third = useCanvasStore.getState().addNode('video', { x: 0, y: 600 }, { assetId: 'video-3' });
+    const merge = useCanvasStore.getState().addNode('videoMerge', { x: 600, y: 0 });
+    const firstEdge = useCanvasStore.getState().createEdge({
+      source: first,
+      sourceHandle: 'video',
+      target: merge,
+      targetHandle: 'clips',
+    })!;
+    const secondEdge = useCanvasStore.getState().createEdge({
+      source: second,
+      sourceHandle: 'video',
+      target: merge,
+      targetHandle: 'clips',
+    })!;
+    const thirdEdge = useCanvasStore.getState().createEdge({
+      source: third,
+      sourceHandle: 'video',
+      target: merge,
+      targetHandle: 'clips',
+    })!;
+
+    expect(useCanvasStore.getState().edges.map((edge) => edge.data?.portOrder)).toEqual([0, 1, 2]);
+    useCanvasStore.getState().reorderOrderedInputs(merge, 'clips', [thirdEdge, firstEdge, secondEdge]);
+    expect(useCanvasStore.getState().edges.map((edge) => edge.data?.portOrder)).toEqual([1, 2, 0]);
+
+    useCanvasStore.getState().deleteEdge(firstEdge);
+    expect(useCanvasStore.getState().edges
+      .filter((edge) => edge.target === merge)
+      .sort((left, right) => (left.data?.portOrder ?? 0) - (right.data?.portOrder ?? 0))
+      .map((edge) => edge.data?.portOrder)).toEqual([0, 1]);
+  });
+
+  it('keeps overwrite operations in undo history', () => {
+    const video = useCanvasStore.getState().addNode('video', { x: 0, y: 0 }, { assetId: 'old-video' });
+    useCanvasStore.getState().attachAssetToNode(video, {
+      assetId: 'new-video',
+      label: '翻转视频',
+      size: { width: 420, height: 236 },
+      operation: { type: 'videoFlip', params: {} },
+    });
+
+    expect(useCanvasStore.getState().nodes[0].data.assetId).toBe('new-video');
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes[0].data.assetId).toBe('old-video');
+  });
+
   it('materializes a deterministic result node only once', () => {
     const producerId = useCanvasStore.getState().addNode('textToImage', { x: 0, y: 0 });
     const request = {

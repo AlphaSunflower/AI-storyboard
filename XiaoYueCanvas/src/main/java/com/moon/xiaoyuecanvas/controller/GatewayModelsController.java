@@ -30,6 +30,21 @@ public class GatewayModelsController {
      */
     @GetMapping("/models")
     public List<Map<String, String>> models(@RequestParam(required = false) String type) {
-        return gatewayModelService.fetchModels(type);
+        List<Map<String, String>> models = gatewayModelService.fetchModels(type);
+        if (!models.isEmpty()) return models;
+
+        String fallback = switch (type == null ? "" : type) {
+            case "image" -> gatewayModelService.getDefaultImageModel();
+            case "video" -> gatewayModelService.getDefaultVideoModel();
+            case "vision" -> gatewayModelService.getDefaultVisionModel();
+            case "text" -> gatewayModelService.getDefaultTextModel();
+            default -> null;
+        };
+        if (fallback == null || fallback.isBlank()) return List.of();
+        return List.of(Map.of(
+                "value", fallback,
+                "label", fallback,
+                "default", "true"
+        ));
     }
 }

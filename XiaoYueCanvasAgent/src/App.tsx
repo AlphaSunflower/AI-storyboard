@@ -322,11 +322,20 @@ export default function App() {
   }, [openCanvas, persistCurrentCanvas, project]);
 
   const renameCanvas = useCallback(async (canvasId: string, title: string) => {
+    if (canvasRef.current?.id === canvasId) {
+      canvasRef.current = { ...canvasRef.current, title };
+      setCanvas((current) => current?.id === canvasId ? { ...current, title } : current);
+      await persistCurrentCanvas();
+      if (project) setCanvases(await listCanvases(project.id));
+      notify(`画布已重命名为「${title}」`);
+      return;
+    }
     const target = await loadCanvas(canvasId);
     if (!target) return;
     await saveCanvas({ ...target, title });
     if (project) setCanvases(await listCanvases(project.id));
-  }, [project]);
+    notify(`画布已重命名为「${title}」`);
+  }, [notify, persistCurrentCanvas, project]);
 
   useEffect(() => {
     const onCanvasCreated = (event: Event) => {
@@ -370,11 +379,26 @@ export default function App() {
   }, [notify, openCanvas, project?.id]);
 
   const deleteCanvasById = useCallback(async (canvasId: string) => {
+    const deletingCurrent = canvasRef.current?.id === canvasId;
+    if (deletingCurrent) {
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+      pendingSave.current = null;
+      await saveInFlight.current?.catch(() => null);
+    }
     await deleteCanvas(canvasId);
     await collectAssetGarbage();
-    if (project) setCanvases(await listCanvases(project.id));
+    const remaining = project ? await listCanvases(project.id) : [];
+    setCanvases(remaining);
+    if (deletingCurrent && project) {
+      if (remaining.length) {
+        await openCanvas(project.id, remaining[0].id);
+      } else {
+        await openProjectHome(project.id);
+      }
+    }
     await refreshProjects();
-  }, [project, refreshProjects]);
+    notify('画布已删除');
+  }, [notify, openCanvas, openProjectHome, project, refreshProjects]);
 
   const renameProject = useCallback(async (title: string) => {
     setProject((current) => {
@@ -502,6 +526,8 @@ export default function App() {
         onSwitchProject={(projectId) => void switchProject(projectId).catch((error) => notify(error instanceof Error ? error.message : '切换项目失败'))}
         onSwitchCanvas={(canvasId) => void switchCanvas(canvasId).catch((error) => notify(error instanceof Error ? error.message : '切换画布失败'))}
         onNewCanvas={() => void createAndOpenCanvas(project.id).catch((error) => notify(error.message))}
+        onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名画布失败'))}
+        onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error instanceof Error ? error.message : '删除画布失败'))}
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
         onOpenAgent={() => { setSideView(embeddedMode ? 'inspector' : 'agent'); setSideOpen(true); }}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}

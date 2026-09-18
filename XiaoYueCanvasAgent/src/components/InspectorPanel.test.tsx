@@ -92,4 +92,38 @@ describe('InspectorPanel image preview', () => {
     expect(screen.getByRole('img', { name: '首帧图片' })).toBeTruthy();
     expect(screen.getByRole('img', { name: '尾帧图片' })).toBeTruthy();
   });
+
+  it('plays a video asset from node properties', () => {
+    const videoAsset: MediaAsset = {
+      ...asset,
+      id: 'video-asset',
+      kind: 'video',
+      name: '镜头一.mp4',
+      mimeType: 'video/mp4',
+      durationSeconds: 3.4,
+      originalBlob: new Blob(['video'], { type: 'video/mp4' }),
+    };
+    const videoNode: CanvasNode = {
+      id: 'video-result',
+      type: 'video',
+      position: { x: 0, y: 0 },
+      data: {
+        kind: 'video',
+        label: '镜头一',
+        prompt: '',
+        status: 'success',
+        accent: '#8f9cff',
+        assetId: videoAsset.id,
+      },
+    };
+    useCanvasStore.setState({ nodes: [videoNode], selectedNodeId: videoNode.id });
+    useMediaStore.getState().upsertAsset(videoAsset);
+
+    render(<InspectorPanel />);
+
+    const player = screen.getByLabelText('视频预览：镜头一') as HTMLVideoElement;
+    expect(player.tagName).toBe('VIDEO');
+    expect(player.getAttribute('src')).toBeTruthy();
+    expect(screen.getByText('视频预览')).toBeTruthy();
+  });
 });

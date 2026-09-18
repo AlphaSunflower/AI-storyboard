@@ -71,4 +71,17 @@ describe('useGatewayModels', () => {
     expect(result.current.models).toEqual([]);
     expect(result.current.error).toBe('登录已失效');
   });
+
+  it('falls back to the configured default image model when the network is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch');
+    }));
+
+    const { result } = renderHook(() => useGatewayModels('image'));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.defaultModel).toBe('gpt-image-2');
+    expect(result.current.models).toHaveLength(1);
+    expect(result.current.error).toBeNull();
+  });
 });

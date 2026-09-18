@@ -17,7 +17,8 @@ export type CanvasNodeKind =
   | 'textToVideo'
   | 'imageToVideo'
   | 'firstLastFrameToVideo'
-  | 'referenceToVideo';
+  | 'referenceToVideo'
+  | 'videoMerge';
 
 export type LegacyNodeKind =
   | 'videoGen'
@@ -27,7 +28,7 @@ export type LegacyNodeKind =
   | 'storyboardGen'
   | 'imageGen';
 
-export type NodeCategory = '输入' | '分镜' | '图像生成' | '视频生成' | '辅助';
+export type NodeCategory = '输入' | '分镜' | '图像生成' | '视频生成' | '视频处理' | '辅助';
 export type PortMedia = 'text' | 'script' | 'storyboard' | 'shot' | 'image' | 'video';
 export type ConnectionMode = 'user' | 'agent' | 'pipeline' | 'migration';
 export type ResultPolicy = 'media-nodes' | 'inline-data' | 'none';
@@ -420,6 +421,25 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
     createDefaultData: () => ({ ...data('referenceToVideo', '参考物生视频', '#8f9cff'), videoMode: 'fullReference' }), renderer,
   }),
+  videoMerge: define({
+    kind: 'videoMerge', title: '视频合并', category: '视频处理', icon: 'list-video', defaultSize: { width: 560, height: 440 },
+    inputs: [port({
+      id: 'clips',
+      label: '视频片段',
+      media: 'video',
+      acceptsKinds: ['video', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot', 'videoMerge'],
+      role: 'source',
+      order: 0,
+      ordered: true,
+      min: 2,
+      max: 12,
+      required: true,
+    })],
+    outputs: [outputVideo()],
+    actions: [action('mergeVideo', '合并视频', 'video.merge', 'media-nodes', false)],
+    createDefaultData: () => data('videoMerge', '视频合并', '#8f9cff'),
+    renderer,
+  }),
 };
 
 export function getNodeDefinition(kind: string | undefined): NodeDefinition | undefined {
@@ -442,6 +462,7 @@ export function getNodeFlowRole(kind: string | undefined): MediaFlowRole | undef
   if (normalized === 'image' || normalized === 'video') return 'mediaPlaceholder';
   if (normalized === 'shot') return 'storyboardPlaceholder';
   if (normalized === 'note') return 'utility';
+  if (normalized === 'videoMerge') return 'producer';
   if (normalized === 'storyboardPlanner') return 'producer';
   if (getNodeDefinition(normalized)?.actions.some((item) => item.automation.startable)) return 'producer';
   return 'processor';

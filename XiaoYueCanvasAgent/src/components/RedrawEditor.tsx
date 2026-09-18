@@ -1,19 +1,35 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { NodeToolbar, Position } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { useReactFlow } from '@xyflow/react';
 import {
-  ArrowUp, Brush, ChevronDown, Eraser, ImagePlus, Redo2, RectangleHorizontal, RotateCcw,
-  Undo2, Upload, X,
+  Brush,
+  Check,
+  MousePointer2,
+  Redo2,
+  RectangleHorizontal,
+  Sparkles,
+  Trash2,
+  Undo2,
+  X,
 } from 'lucide-react';
-import { jobAdapter } from '../services/capabilities';
-import { useObjectUrl } from '../hooks/useObjectUrl';
 import { useCanvasStore } from '../store/canvasStore';
-import { useMediaStore } from '../store/mediaStore';
-import { useAgentStore } from '../store/agentStore';
 import type { CanvasNode, MediaAsset, Point, RedrawMaskDocument, RedrawMaskMark } from '../types';
-import { createRedrawJobRequest, rasterizeRedrawMask, type RedrawReference } from '../utils/redrawMask';
+import { submitImageRedraw } from '../services/jobRunner';
+import { jobAdapter } from '../services/capabilities';
+import {
+  REDRAW_REGION_COLORS,
+  buildRedrawPrompt,
+  rasterizeRedrawMask,
+  redrawPaintMarks,
+  redrawRegionColor,
+  validateRedrawDocument,
+} from '../utils/redrawMask';
 import { createId } from '../utils/id';
+import { GenFooter } from './nodes/ImageGenNode';
+import { useObjectUrl } from '../hooks/useObjectUrl';
+import { buildReferenceToken } from '../canvas/referenceTokenEditing';
 
-type MaskTool = 'brush' | 'rectangle' | 'eraser';
+type MaskTool = 'select' | 'brush' | 'rectangle';
 
 interface RedrawEditorProps {
   asset: MediaAsset;
@@ -22,24 +38,64 @@ interface RedrawEditorProps {
   onFeedback: (message: string) => void;
 }
 
-const pointFromClient = (clientX: number, clientY: number, box: DOMRect): Point => {
+const pointFromClient = (clientX: number, clientY: number, box: DOMRect): Point => ({
+  x: Math.max(0, Math.min(1, (clientX - box.left) / box.width)),
+  y: Math.max(0, Math.min(1, (clientY - box.top) / box.height)),
+});
+
+const markAnchor = (mark: RedrawMaskMark): Point => {
+  if (mark.type === 'rectangle') {
+    return {
+      x: (mark.start.x + mark.end.x) / 2,
+      y: (mark.start.y + mark.end.y) / 2,
+    };
+  }
+  const points = mark.points.length ? mark.points : [{ x: .5, y: .5 }];
   return {
-    x: Math.max(0, Math.min(1, (clientX - box.left) / box.width)),
-    y: Math.max(0, Math.min(1, (clientY - box.top) / box.height)),
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
   };
 };
 
-const createNativeBrushCursor = (diameter: number, erasing: boolean) => {
-  const visibleDiameter = Math.max(2, Math.min(100, Math.round(diameter)));
-  const size = visibleDiameter + 8;
-  const center = size / 2;
-  const radius = visibleDiameter / 2;
-  const eraseMark = erasing
-    ? `<path d="M${center - 3} ${center}h6M${center} ${center - 3}v6" stroke="white" stroke-width="1"/>`
-    : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${center}" cy="${center}" r="${radius}" fill="rgba(255,255,255,.06)" stroke="rgba(0,0,0,.72)" stroke-width="3"/><circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="white" stroke-width="1.25"/>${eraseMark}</svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${center} ${center}, crosshair`;
-};
+function ContainedRedrawStage({
+  imageAspect,
+  children,
+}: {
+  imageAspect: number;
+  children: (size: { width: number; height: number }) => React.ReactNode;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [host, setHost] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const sync = () => setHost({ width: host.clientWidth, height: host.clientHeight });
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+  const frame = useMemo(() => {
+    if (!host.width || !host.height) return null;
+    const hostAspect = host.width / host.height;
+    return hostAspect > imageAspect
+      ? {
+        left: (host.width - host.height * imageAspect) / 2,
+        top: 0,
+        width: host.height * imageAspect,
+        height: host.height,
+      }
+      : {
+        left: 0,
+        top: (host.height - host.width / imageAspect) / 2,
+        width: host.width,
+        height: host.width / imageAspect,
+      };
+  }, [host, imageAspect]);
+  return <div ref={hostRef} className="redraw-fullscreen-stage">
+    {frame && <div className="redraw-fullscreen-frame" style={frame}>{children(frame)}</div>}
+  </div>;
+}
 
 function MaskMark({ mark, imageWidth, imageHeight }: { mark: RedrawMaskMark; imageWidth: number; imageHeight: number }) {
   const color = mark.operation === 'paint' ? 'white' : 'black';
@@ -51,12 +107,76 @@ function MaskMark({ mark, imageWidth, imageHeight }: { mark: RedrawMaskMark; ima
   return <polyline points={mark.points.map((point) => `${point.x * imageWidth},${point.y * imageHeight}`).join(' ')} fill="none" stroke={color} strokeWidth={lineWidth} strokeLinecap="round" strokeLinejoin="round" />;
 }
 
-function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onCommit, onGestureStart }: {
+function RegionMark({
+  mark,
+  imageWidth,
+  imageHeight,
+  selected,
+  hovered,
+  interactive,
+  onHover,
+  onSelect,
+}: {
+  mark: RedrawMaskMark;
+  imageWidth: number;
+  imageHeight: number;
+  selected: boolean;
+  hovered: boolean;
+  interactive: boolean;
+  onHover: (id: string | null) => void;
+  onSelect: (id: string) => void;
+}) {
+  if (mark.operation !== 'paint') return null;
+  const color = mark.color || REDRAW_REGION_COLORS[0];
+  const active = selected || hovered;
+  const opacity = selected ? .42 : hovered ? .34 : .22;
+  const pointerProps = {
+    onPointerEnter: () => onHover(mark.id),
+    onPointerLeave: () => onHover(null),
+    onPointerDown: interactive ? (event: ReactPointerEvent<SVGElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onSelect(mark.id);
+    } : undefined,
+  };
+  const label = mark.intent?.trim() || '未填写修改意图';
+  const className = `redraw-region-mark${selected ? ' is-selected' : ''}${hovered ? ' is-hovered' : ''}`;
+  if (mark.type === 'rectangle') {
+    return <g {...pointerProps} className={className} data-region-id={mark.id} style={{ pointerEvents: 'all', cursor: interactive ? 'pointer' : undefined }}>
+      <title>{label}</title>
+      <rect x={Math.min(mark.start.x, mark.end.x) * imageWidth} y={Math.min(mark.start.y, mark.end.y) * imageHeight} width={Math.abs(mark.end.x - mark.start.x) * imageWidth} height={Math.abs(mark.end.y - mark.start.y) * imageHeight} fill={color} fillOpacity={opacity} stroke={color} strokeWidth={active ? 3 : 2} strokeDasharray={selected ? '7 4' : undefined} />
+    </g>;
+  }
+  const lineWidth = Math.max(2, mark.width * Math.min(imageWidth, imageHeight));
+  const points = mark.points.map((point) => `${point.x * imageWidth},${point.y * imageHeight}`).join(' ');
+  return <g {...pointerProps} className={className} data-region-id={mark.id} style={{ pointerEvents: 'stroke', cursor: interactive ? 'pointer' : undefined }}>
+    <title>{label}</title>
+    {mark.points.length === 1
+      ? <circle cx={mark.points[0].x * imageWidth} cy={mark.points[0].y * imageHeight} r={lineWidth / 2} fill={color} fillOpacity={opacity} stroke={active ? color : 'transparent'} strokeWidth={active ? 3 : 0} />
+      : <><polyline points={points} fill="none" stroke={color} strokeOpacity={opacity} strokeWidth={lineWidth} strokeLinecap="round" strokeLinejoin="round" /><polyline points={points} fill="none" stroke={color} strokeOpacity={active ? 1 : .72} strokeWidth={active ? Math.max(3, lineWidth * .5) : 2} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={selected ? '7 4' : undefined} /></>}
+  </g>;
+}
+
+function RedrawMaskOverlay({
+  marks,
+  tool,
+  width,
+  imageWidth,
+  imageHeight,
+  selectedId,
+  onHover,
+  onSelect,
+  onCommit,
+  onGestureStart,
+}: {
   marks: RedrawMaskMark[];
   tool: MaskTool;
   width: number;
   imageWidth: number;
   imageHeight: number;
+  selectedId: string | null;
+  onHover: (id: string | null) => void;
+  onSelect: (id: string) => void;
   onCommit: (marks: RedrawMaskMark[]) => void;
   onGestureStart: () => void;
 }) {
@@ -67,22 +187,24 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
   const activeDotRef = useRef<SVGCircleElement>(null);
   const activeBrushRef = useRef<SVGPolylineElement>(null);
   const activeRectangleRef = useRef<SVGRectElement>(null);
-  const nativeCursor = useMemo(() => tool === 'rectangle' ? 'crosshair' : createNativeBrushCursor(width, tool === 'eraser'), [tool, width]);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const maskId = `active-redraw-mask-${createId()}`;
+  const paintCount = marks.filter((mark) => mark.operation === 'paint').length;
+  const nextColor = redrawRegionColor(paintCount);
+  const nativeCursor = tool === 'select' ? 'default' : 'crosshair';
   marksRef.current = marks;
 
   const setVisible = (element: SVGElement | null, visible: boolean) => {
     if (element) element.style.display = visible ? '' : 'none';
   };
-
   const clearActivePreview = () => {
     setVisible(activeDotRef.current, false);
     setVisible(activeBrushRef.current, false);
     setVisible(activeRectangleRef.current, false);
   };
-
   const renderActivePreview = (mark: RedrawMaskMark) => {
     clearActivePreview();
-    const color = mark.operation === 'paint' ? 'white' : 'black';
+    const color = mark.operation === 'erase' ? '#ffffff' : nextColor;
     if (mark.type === 'rectangle') {
       const rectangle = activeRectangleRef.current;
       if (!rectangle) return;
@@ -94,7 +216,6 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
       setVisible(rectangle, true);
       return;
     }
-
     const lineWidth = mark.width * Math.min(imageWidth, imageHeight);
     if (mark.points.length === 1) {
       const dot = activeDotRef.current;
@@ -106,7 +227,6 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
       setVisible(dot, true);
       return;
     }
-
     const brush = activeBrushRef.current;
     if (!brush) return;
     brush.setAttribute('points', mark.points.map((point) => `${point.x * imageWidth},${point.y * imageHeight}`).join(' '));
@@ -116,6 +236,10 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
   };
 
   const begin = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (tool === 'select') {
+      onSelect('');
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -125,8 +249,8 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
     const id = createId();
     const normalizedWidth = Math.min(1, width / Math.max(1, Math.min(box.width, box.height)));
     const mark: RedrawMaskMark = tool === 'rectangle'
-      ? { id, type: 'rectangle', operation: 'paint', start, end: start }
-      : { id, type: 'brush', operation: tool === 'eraser' ? 'erase' : 'paint', points: [start], width: normalizedWidth };
+      ? { id, type: 'rectangle', operation: 'paint', start, end: start, color: nextColor, createdAt: Date.now() }
+      : { id, type: 'brush', operation: 'paint', points: [start], width: normalizedWidth, color: nextColor, createdAt: Date.now() };
     onGestureStart();
     activeIdRef.current = id;
     activeMarkRef.current = mark;
@@ -160,52 +284,114 @@ function RedrawMaskOverlay({ marks, tool, width, imageWidth, imageHeight, onComm
     activeMarkRef.current = null;
     clearActivePreview();
     if (!mark) return;
+    const unchangedRectangle = mark.type === 'rectangle'
+      && Math.abs(mark.end.x - mark.start.x) < .002
+      && Math.abs(mark.end.y - mark.start.y) < .002;
+    if (unchangedRectangle) return;
     marksRef.current = [...marksRef.current, mark];
     onCommit(marksRef.current);
   };
-  return <svg className={`redraw-mask-overlay nodrag redraw-mask-overlay--${tool}`} viewBox={`0 0 ${imageWidth} ${imageHeight}`} preserveAspectRatio="none" style={{ cursor: nativeCursor }} onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-    <defs><mask id="active-redraw-mask"><rect width={imageWidth} height={imageHeight} fill="black" />{marks.map((mark) => <MaskMark key={mark.id} mark={mark} imageWidth={imageWidth} imageHeight={imageHeight} />)}<circle ref={activeDotRef} cx="0" cy="0" r="0" style={{ display: 'none' }} /><polyline ref={activeBrushRef} points="" fill="none" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'none' }} /><rect ref={activeRectangleRef} x="0" y="0" width="0" height="0" fill="white" style={{ display: 'none' }} /></mask></defs>
-    <rect width={imageWidth} height={imageHeight} fill="rgba(255,255,255,.68)" mask="url(#active-redraw-mask)" />
+
+  return <svg
+    className={`redraw-mask-overlay nodrag redraw-mask-overlay--${tool}`}
+    viewBox={`0 0 ${imageWidth} ${imageHeight}`}
+    preserveAspectRatio="none"
+    style={{ cursor: nativeCursor }}
+    onPointerDown={begin}
+    onPointerMove={move}
+    onPointerUp={end}
+    onPointerCancel={end}
+  >
+    <defs>
+      <mask id={maskId}>
+        <rect width={imageWidth} height={imageHeight} fill="black" />
+        {marks.map((mark) => <MaskMark key={mark.id} mark={mark} imageWidth={imageWidth} imageHeight={imageHeight} />)}
+        <circle ref={activeDotRef} cx="0" cy="0" r="0" style={{ display: 'none' }} />
+        <polyline ref={activeBrushRef} points="" fill="none" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'none' }} />
+        <rect ref={activeRectangleRef} x="0" y="0" width="0" height="0" fill="white" style={{ display: 'none' }} />
+      </mask>
+    </defs>
+    <rect width={imageWidth} height={imageHeight} fill="rgba(255,255,255,.68)" mask={`url(#${maskId})`} />
+    <g>{marks.map((mark) => <RegionMark key={mark.id} mark={mark} imageWidth={imageWidth} imageHeight={imageHeight} selected={selectedId === mark.id} hovered={hoveredId === mark.id} interactive={tool === 'select'} onHover={(id) => { setHoveredId(id); onHover(id); }} onSelect={onSelect} />)}</g>
   </svg>;
 }
 
-function ReferencePreview({ reference, onRemove }: { reference: RedrawReference; onRemove: () => void }) {
-  const storedAsset = useMediaStore((state) => reference.type === 'asset' ? state.assets[reference.assetId] : undefined);
-  const blob = reference.type === 'file' ? reference.file : storedAsset?.thumbnailBlob;
-  const url = useObjectUrl(blob);
-  const label = reference.type === 'file' ? reference.file.name : reference.label;
-  return <div className="redraw-reference-preview" title={label}>{url ? <img src={url} alt={label} /> : <ImagePlus size={16} />}<button aria-label="移除参考图" onClick={onRemove}><X size={11} /></button></div>;
-}
-
-function CanvasReferenceOption({ node, onSelect }: { node: CanvasNode; onSelect: () => void }) {
-  const asset = useMediaStore((state) => node.data.assetId ? state.assets[node.data.assetId] : undefined);
-  const metadata = useMediaStore((state) => node.data.assetId ? state.metadata[node.data.assetId] : undefined);
-  const url = useObjectUrl(asset?.thumbnailBlob);
-  return <button className="redraw-canvas-reference" onClick={onSelect}>{url ? <img src={url} alt="" /> : <ImagePlus size={15} />}<span>{node.data.label}</span><small>{metadata ? `${metadata.width}×${metadata.height}` : '画布图片'}</small></button>;
+function RegionEditor({
+  mark,
+  index,
+  intent,
+  color,
+  onIntent,
+  onColor,
+  onConfirm,
+  onCancel,
+  onDelete,
+}: {
+  mark: RedrawMaskMark;
+  index: number;
+  intent: string;
+  color: string;
+  onIntent: (value: string) => void;
+  onColor: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onDelete: () => void;
+}) {
+  const anchor = markAnchor(mark);
+  const verticalPlacement = anchor.y < .36 ? 'is-below' : 'is-above';
+  const horizontalPlacement = anchor.x < .24 ? 'is-left' : anchor.x > .76 ? 'is-right' : '';
+  return <div className={`redraw-region-editor ${verticalPlacement} ${horizontalPlacement} nodrag nowheel`} style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+    <header><strong>修改 {index + 1}</strong><button type="button" onClick={onCancel} title="关闭"><X size={15} /></button></header>
+    <textarea autoFocus aria-label={`修改 ${index + 1} 的意图`} value={intent} placeholder="希望对这个区域做什么..." onChange={(event) => onIntent(event.target.value)} onKeyDown={(event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      } else if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        if (intent.trim()) onConfirm();
+      }
+    }} />
+    <div className="redraw-region-colors" aria-label={`修改 ${index + 1} 的颜色`}>
+      {REDRAW_REGION_COLORS.map((option) => <button key={option} type="button" className={option === color ? 'is-active' : ''} style={{ '--region-color': option } as React.CSSProperties} aria-label={`颜色 ${option}`} title={option} onClick={() => onColor(option)} />)}
+    </div>
+    <footer>
+      <button type="button" className="redraw-region-delete" onClick={onDelete}><Trash2 size={14} />删除</button>
+      <button type="button" className="redraw-region-check" disabled={!intent.trim()} onClick={onConfirm} title="确认修改意图"><Check size={15} />确认</button>
+    </footer>
+  </div>;
 }
 
 export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorProps) {
-  const canvasNodes = useCanvasStore((state) => state.nodes);
-  const [tool, setTool] = useState<MaskTool>('brush');
+  const { fitView } = useReactFlow();
+  const assetUrl = useObjectUrl(asset.originalBlob ?? asset.previewBlob);
+  const [tool, setTool] = useState<MaskTool>('rectangle');
   const [brushWidth, setBrushWidth] = useState(30);
   const [marks, setMarks] = useState<RedrawMaskMark[]>([]);
   const [past, setPast] = useState<RedrawMaskMark[][]>([]);
   const [future, setFuture] = useState<RedrawMaskMark[][]>([]);
-  const [prompt, setPrompt] = useState('');
-  const [reference, setReference] = useState<RedrawReference | null>(null);
-  const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
-  const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
-  const [modelTier, setModelTier] = useState<'normal' | 'pro'>('normal');
-  const [resolution, setResolution] = useState<'1K' | '2K' | '4K'>('2K');
-  const [count, setCount] = useState<1 | 2 | 3 | 4>(1);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingNew, setEditingNew] = useState(false);
+  const [draftIntent, setDraftIntent] = useState('');
+  const [draftColor, setDraftColor] = useState<string>(REDRAW_REGION_COLORS[0]);
+  const [executionOpen, setExecutionOpen] = useState(false);
+  const [executionData, setExecutionData] = useState<Record<string, unknown>>({});
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const launchedNodeIdRef = useRef<string | null>(null);
+  const redrawDocument: RedrawMaskDocument = {
+    version: 2,
+    sourceAssetId: asset.id,
+    sourceWidth: asset.width,
+    sourceHeight: asset.height,
+    marks,
+  };
+  const intentRegions = redrawPaintMarks(redrawDocument);
+  const editingMark = editingId ? marks.find((mark) => mark.id === editingId) ?? null : null;
 
-  const eligibleCanvasNodes = canvasNodes.filter((candidate) => candidate.id !== node.id && candidate.data.kind === 'image' && candidate.data.assetId);
-  const mask: RedrawMaskDocument = { version: 1, sourceAssetId: asset.id, marks };
-
-  const remember = () => {
-    setPast((history) => [...history, structuredClone(marks)].slice(-40));
+  const remember = (snapshot = marks) => {
+    setPast((history) => [...history, structuredClone(snapshot)].slice(-40));
     setFuture([]);
   };
   const undo = () => {
@@ -213,6 +399,8 @@ export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorP
     if (!previous) return;
     setFuture((history) => [structuredClone(marks), ...history].slice(0, 40));
     setMarks(previous);
+    setEditingId(null);
+    setSelectedId(null);
     setPast((history) => history.slice(0, -1));
   };
   const redo = () => {
@@ -220,92 +408,236 @@ export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorP
     if (!next) return;
     setPast((history) => [...history, structuredClone(marks)].slice(-40));
     setMarks(next);
+    setEditingId(null);
+    setSelectedId(null);
     setFuture((history) => history.slice(1));
   };
+  const openRegion = (mark: RedrawMaskMark, isNew = false) => {
+    setSelectedId(mark.id);
+    setEditingId(mark.id);
+    setEditingNew(isNew);
+    setDraftIntent(mark.intent ?? '');
+    setDraftColor(mark.color ?? REDRAW_REGION_COLORS[0]);
+  };
+  const closeRegion = () => {
+    if (editingNew && editingMark && !editingMark.intent?.trim()) {
+      setMarks((current) => current.filter((mark) => mark.id !== editingMark.id));
+    }
+    setEditingId(null);
+    setEditingNew(false);
+  };
+  const confirmRegion = () => {
+    if (!editingMark || !draftIntent.trim()) return;
+    if (!editingNew) remember();
+    setMarks((current) => current.map((mark) => mark.id === editingMark.id ? { ...mark, intent: draftIntent.trim(), color: draftColor } : mark));
+    setSelectedId(editingMark.id);
+    setEditingId(null);
+    setEditingNew(false);
+  };
+  const deleteRegion = () => {
+    if (!editingMark) return;
+    remember();
+    setMarks((current) => current.filter((mark) => mark.id !== editingMark.id));
+    setEditingId(null);
+    setSelectedId(null);
+    setEditingNew(false);
+  };
+  const updateExecutionData = useCallback((_: string, patch: Record<string, unknown>) => {
+    setExecutionData((current) => ({ ...current, ...patch }));
+  }, []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (executionOpen) setExecutionOpen(false);
+        else if (editingId) closeRegion();
+        else onClose();
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
-      event.preventDefault(); event.stopPropagation();
+      if (editingId) return;
+      event.preventDefault();
+      event.stopPropagation();
       if (event.shiftKey) redo(); else undo();
     };
     window.addEventListener('keydown', handleKey, true);
     return () => window.removeEventListener('keydown', handleKey, true);
-  });
+  }, [editingId, editingNew, editingMark, executionOpen, marks, past, future, onClose]);
 
-  const selectFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { onFeedback('参考图仅支持 PNG、JPEG 或 WebP'); return; }
-    if (file.size > 10 * 1024 * 1024) { onFeedback('参考图不能超过 10MB'); return; }
-    setReference({ type: 'file', file });
-    setReferenceMenuOpen(false);
+  const commitGesture = (next: RedrawMaskMark[]) => {
+    setMarks(next);
+    const created = next.at(-1);
+    if (created?.operation === 'paint') openRegion(created, true);
   };
-
-  const cycleResolution = () => setResolution((current) => current === '1K' ? '2K' : current === '2K' ? '4K' : '1K');
-  const submit = async () => {
+  const execute = async () => {
     if (submitting) return;
-    let request;
+    setExecutionError(null);
+    let prompt = '';
     try {
-      const canvas = useCanvasStore.getState();
-      const projectId = canvas.projectId ?? 'local-project';
-      request = createRedrawJobRequest(asset.id, prompt, mask, { count, modelTier, resolution }, reference, {
-        clientRequestId: createId(),
-        conversationId: useAgentStore.getState().ensureSession(projectId).conversationId,
-        context: { projectId, nodeIds: canvas.nodes.map((item) => item.id), selectedNodeId: node.id },
-      });
+      ({ prompt } = validateRedrawDocument(redrawDocument));
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : '重绘参数无效');
+      const message = error instanceof Error ? error.message : '重绘参数无效';
+      onFeedback(message);
+      setExecutionError(message);
       return;
     }
     setSubmitting(true);
     try {
-      const maskBlob = await rasterizeRedrawMask(mask, asset.width, asset.height);
       const capabilities = await jobAdapter.getCapabilities();
       const capability = capabilities.find((item) => item.id === 'image.redraw');
-      if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置图像执行服务');
-      await jobAdapter.submit({
-        ...request,
-        params: {
-          ...request.params,
-          maskImage: { blob: maskBlob, name: `${asset.id}-redraw-mask.png`, mimeType: 'image/png', bytes: maskBlob.size },
+      if (!capability?.available) {
+        throw new Error(capability?.unavailableReason ?? '未配置图像执行服务');
+      }
+      let targetNodeId = launchedNodeIdRef.current;
+      const promptWithSource = `${buildReferenceToken(1)}\n${prompt}`;
+      if (!targetNodeId) {
+        const canvas = useCanvasStore.getState();
+        const sourceWidth = node.width ?? node.measured?.width ?? 250;
+        targetNodeId = canvas.createConnectedNode(node.id, 'imageToImage', {
+          x: node.position.x + sourceWidth + 160,
+          y: node.position.y,
+        }, undefined, {
+          label: `${node.data.label} · 重绘`,
+          prompt: promptWithSource,
+          redraw: structuredClone(redrawDocument),
+          status: 'idle',
+        });
+        if (!targetNodeId) throw new Error('无法创建图生图节点，请检查图片节点输出端口');
+        launchedNodeIdRef.current = targetNodeId;
+      } else {
+        useCanvasStore.getState().updateNode(targetNodeId, {
+          prompt: promptWithSource,
+          redraw: structuredClone(redrawDocument),
+          status: 'idle',
+        });
+      }
+      useCanvasStore.getState().selectNode(node.id);
+      await submitImageRedraw(
+        promptWithSource,
+        targetNodeId,
+        redrawDocument,
+        { width: asset.width, height: asset.height },
+        (message) => setExecutionError(message),
+        {
+          sourceAssetIds: [asset.id],
+          sourceNodeIds: [node.id],
+          params: executionData,
         },
-      });
+      );
+      requestAnimationFrame(() => void fitView({ padding: .2, duration: 360 }));
+      setExecutionOpen(false);
+      onClose();
     } catch (error) {
-      onFeedback(error instanceof Error ? error.message : '未配置图像执行服务');
+      const message = error instanceof Error ? error.message : '重绘提交失败';
+      if (launchedNodeIdRef.current) {
+        useCanvasStore.getState().updateNode(launchedNodeIdRef.current, { status: 'error' });
+      }
+      setExecutionError(message);
+      onFeedback(message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  return <div className="redraw-editor" onPointerDown={(event) => event.stopPropagation()}>
-    <RedrawMaskOverlay marks={marks} tool={tool} width={brushWidth} imageWidth={asset.width} imageHeight={asset.height} onGestureStart={remember} onCommit={setMarks} />
-
-    <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={12} className="redraw-toolstrip nodrag nowheel">
-      <button title="退出重绘" className="is-close" onClick={onClose}><X size={18} /></button><i />
-      <div className="redraw-tool-group"><button title="画笔" className={tool === 'brush' ? 'is-active' : ''} onClick={() => setTool('brush')}><Brush size={17} /></button><button title="框选" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')}><RectangleHorizontal size={17} /></button><button title="橡皮擦" className={tool === 'eraser' ? 'is-active' : ''} onClick={() => setTool('eraser')}><Eraser size={17} /></button></div><i />
-      <label className="redraw-width" title={`线宽 ${brushWidth}`}><span style={{ height: Math.max(2, brushWidth / 9) }} /><input aria-label="蒙版画笔大小" type="range" min="1" max="100" value={brushWidth} onChange={(event) => setBrushWidth(Number(event.target.value))} /></label><i />
-      <button title="撤销" disabled={!past.length} onClick={undo}><Undo2 size={17} /></button><button title="重做" disabled={!future.length} onClick={redo}><Redo2 size={17} /></button>
-    </NodeToolbar>
-
-    <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="redraw-prompt-panel nodrag nowheel" onKeyDown={(event) => event.stopPropagation()}>
-      <textarea aria-label="重绘要求" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述你想改变什么..." />
-      <div className="redraw-prompt-footer">
-        <div className="redraw-reference-control">
-          <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { selectFile(event.target.files?.[0]); event.target.value = ''; }} />
-          {reference ? <ReferencePreview reference={reference} onRemove={() => setReference(null)} /> : <button title="添加参考图" onClick={() => setReferenceMenuOpen((open) => !open)}><ImagePlus size={17} /><ChevronDown size={12} /></button>}
-          {referenceMenuOpen && <div className="redraw-reference-menu"><button onClick={() => fileInputRef.current?.click()}><Upload size={15} /> 从设备上传</button><button onClick={() => { setCanvasPickerOpen(true); setReferenceMenuOpen(false); }}><ImagePlus size={15} /> 从画布选择</button></div>}
+  return <>
+    {createPortal(<div className="redraw-fullscreen-editor" onPointerDown={(event) => event.stopPropagation()}>
+      <header className="redraw-fullscreen-header">
+        <div><strong>{node.data.label}</strong><span>区域化重绘</span></div>
+        <div className="redraw-fullscreen-actions">
+          <span className="redraw-region-count">{intentRegions.length ? `${intentRegions.length} 个区域` : '先标记区域'}</span>
+          <button type="button" aria-label="退出重绘" title="退出重绘" onClick={onClose}><X size={18} /></button>
         </div>
-        <span className={marks.length ? 'has-mask' : ''}>{marks.length ? `已绘制 ${marks.length} 处蒙版` : '绘制蒙版以重绘'}</span>
-        <div className="redraw-output-options">
-          {modelTier === 'pro' && <button onClick={cycleResolution}>{resolution}</button>}
-          <button title="生成数量" onClick={() => setCount((current) => (current === 4 ? 1 : current + 1) as 1 | 2 | 3 | 4)}>×{count}</button>
-          <button className={modelTier === 'pro' ? 'is-pro' : ''} onClick={() => setModelTier((tier) => tier === 'normal' ? 'pro' : 'normal')}>{modelTier === 'pro' ? 'PRO' : 'NORMAL'}</button>
-          <button className="redraw-submit" title="生成重绘结果" disabled={submitting || !prompt.trim()} onClick={() => void submit()}>{submitting ? <RotateCcw className="is-spinning" size={17} /> : <ArrowUp size={17} />}</button>
-        </div>
+      </header>
+
+      <div className="redraw-fullscreen-toolbar nodrag nowheel">
+        <div className="redraw-tool-group">
+          <button title="选择区域" className={tool === 'select' ? 'is-active' : ''} onClick={() => setTool('select')}><MousePointer2 size={17} /></button>
+          <button title="涂鸦" className={tool === 'brush' ? 'is-active' : ''} onClick={() => setTool('brush')}><Brush size={17} /></button>
+          <button title="框选" className={tool === 'rectangle' ? 'is-active' : ''} onClick={() => setTool('rectangle')}><RectangleHorizontal size={17} /></button>
+        </div><i />
+        {tool === 'brush' && <label className="redraw-width" title={`线宽 ${brushWidth}`}><span style={{ height: Math.max(2, brushWidth / 9) }} /><input aria-label="涂鸦笔大小" type="range" min="1" max="100" value={brushWidth} onChange={(event) => setBrushWidth(Number(event.target.value))} /></label>}
+        {tool === 'brush' && <i />}
+        <button title="撤销" disabled={!past.length} onClick={undo}><Undo2 size={17} /></button>
+        <button title="重做" disabled={!future.length} onClick={redo}><Redo2 size={17} /></button><i />
+        <button className="redraw-execute" disabled={!intentRegions.length || submitting} onClick={() => {
+          setExecutionError(null);
+          setExecutionOpen(true);
+        }} title="执行重绘"><Sparkles size={15} />执行重绘</button>
       </div>
-    </NodeToolbar>
 
-    {canvasPickerOpen && <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={190} className="redraw-canvas-picker nodrag nowheel" role="dialog" aria-label="从画布选择参考图"><header><div><strong>从画布选择参考图</strong><small>参考图只参与本次重绘请求</small></div><button onClick={() => setCanvasPickerOpen(false)}><X size={16} /></button></header><div>{eligibleCanvasNodes.length ? eligibleCanvasNodes.map((candidate) => <CanvasReferenceOption key={candidate.id} node={candidate} onSelect={() => { setReference({ type: 'asset', assetId: candidate.data.assetId!, label: candidate.data.label }); setCanvasPickerOpen(false); }} />) : <p>画布上没有其他可用图片</p>}</div></NodeToolbar>}
-  </div>;
+      <ContainedRedrawStage imageAspect={asset.width / asset.height}>
+        {() => <>
+          {assetUrl
+            ? <img className="redraw-fullscreen-image" src={assetUrl} alt={asset.name} draggable={false} />
+            : <div className="fullscreen-media-loading">正在解码原图…</div>}
+          <RedrawMaskOverlay
+            marks={marks}
+            tool={tool}
+            width={brushWidth}
+            imageWidth={asset.width}
+            imageHeight={asset.height}
+            selectedId={selectedId}
+            onHover={setHoveredId}
+            onSelect={(id) => {
+              if (!id) {
+                setSelectedId(null);
+                setEditingId(null);
+                return;
+              }
+              const mark = marks.find((candidate) => candidate.id === id);
+              if (mark) openRegion(mark);
+            }}
+            onGestureStart={() => remember()}
+            onCommit={commitGesture}
+          />
+          {editingMark && <RegionEditor
+            mark={editingMark}
+            index={Math.max(0, marks.filter((mark) => mark.operation === 'paint').findIndex((mark) => mark.id === editingMark.id))}
+            intent={draftIntent}
+            color={draftColor}
+            onIntent={setDraftIntent}
+            onColor={setDraftColor}
+            onConfirm={confirmRegion}
+            onCancel={closeRegion}
+            onDelete={deleteRegion}
+          />}
+        </>}
+      </ContainedRedrawStage>
+    </div>, document.body)}
+
+    {executionOpen && createPortal(<div className="redraw-execution-dialog" role="dialog" aria-modal="true" aria-label="执行重绘" onClick={(event) => { if (event.target === event.currentTarget) setExecutionOpen(false); }}>
+      <section>
+        <header>
+          <div><strong>执行重绘</strong><span>{intentRegions.length} 个区域，单次图生图请求</span></div>
+          <button type="button" aria-label="关闭执行重绘" onClick={() => setExecutionOpen(false)}><X size={18} /></button>
+        </header>
+        <div className="redraw-execution-prompt">{buildRedrawPrompt(redrawDocument)}</div>
+        <GenFooter
+          nodeId="redraw-execution-draft"
+          kind="imageGen"
+          data={executionData}
+          updateNode={updateExecutionData}
+          useCallbacks={{ generating: submitting, onGenerate: () => void execute() }}
+          genText="执行重绘"
+          referenceCount={1}
+          modelFilter={supportsImageToImageModel}
+          hideAspectRatio
+        />
+        {executionError && <div className="redraw-execution-error" role="status">{executionError}</div>}
+      </section>
+    </div>, document.body)}
+  </>;
+}
+
+function supportsImageToImageModel(model: { params?: string }) {
+  try {
+    const params = model.params ? JSON.parse(model.params) as { spec?: { modes?: unknown[] } } : {};
+    const modes = params.spec?.modes;
+    if (!Array.isArray(modes) || !modes.length) return true;
+    return modes.map(String).includes('image-to-image');
+  } catch {
+    return true;
+  }
 }

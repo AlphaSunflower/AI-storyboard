@@ -36,7 +36,10 @@
     "nodeIds": ["node-id"],
     "selectedNodeId": "node-id"
   },
-  "params": { "prompt": "统一当前版式的视觉层级" }
+  "params": {
+    "prompt": "统一当前版式的视觉层级",
+    "redrawMaskAssetId": "canvas-asset-id"
+  }
 }
 ```
 
@@ -45,6 +48,8 @@
 ```
 
 `clientRequestId` 应作为幂等键。服务端需要把浏览器素材 ID 映射为已上传的服务端素材；正式接入时应在任务提交前增加独立素材上传接口，而不是把 Blob 塞进 JSON。
+
+`image.redraw` 的区域化重绘使用 `redrawMaskAssetId` 指向已上传的 PNG 蒙版资产。蒙版与源图尺寸一致，透明像素表示允许修改的区域，非透明像素表示保持原样。多个涂抹和框选区域会合并成一个蒙版，并按区域顺序拼接为一条提示词，单次提交一个图生图任务；编辑器中的区域颜色只用于识别，不改变蒙版语义。
 
 ### `GET /jobs/:jobId/events`
 

@@ -51,7 +51,7 @@ const nodeProps = {
 describe('VideoNode', () => {
   afterEach(cleanup);
 
-  it('keeps playback controls but removes node toolbars and editor panels', () => {
+  it('shows playback controls and the local video processing toolbar', () => {
     useMediaStore.setState({
       assets: { [videoAsset.id]: videoAsset },
       metadata: { [videoAsset.id]: videoAsset },
@@ -60,10 +60,13 @@ describe('VideoNode', () => {
     render(<VideoNode {...nodeProps} />);
 
     expect(screen.getAllByLabelText('播放').length).toBeGreaterThan(0);
-    expect(screen.queryByTitle('提取当前帧')).toBeNull();
-    expect(screen.queryByTitle('下载视频')).toBeNull();
+    expect(screen.getByTitle('提取帧')).toBeTruthy();
+    expect(screen.getByTitle('水平翻转')).toBeTruthy();
+    expect(screen.getByTitle('调色')).toBeTruthy();
+    expect(screen.getByTitle('变速')).toBeTruthy();
     expect(screen.queryByText('分镜提示词')).toBeNull();
     expect(screen.queryByText('生成参数')).toBeNull();
     expect(screen.queryByText('Playlist')).toBeNull();
   });
+
 });

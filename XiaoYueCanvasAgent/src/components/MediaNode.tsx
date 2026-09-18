@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
-import { Clapperboard, FileText, GripVertical, Image as ImageIcon, LayoutGrid, Layers, MessageSquare, PanelRightOpen, Sparkles, Type, Wand2 } from 'lucide-react';
+import { Clapperboard, FileText, GripVertical, Image as ImageIcon, LayoutGrid, Layers, Merge, MessageSquare, Minimize2, PanelRightOpen, Sparkles, Type, Wand2 } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { CanvasNode } from '../types';
 import { buildReferenceImagePool } from '../canvas/referenceImagePool';
@@ -19,6 +19,8 @@ import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
 import { getNodeDefinition } from '../canvas/graphContracts';
 import { useCanvasUi } from '../canvas/CanvasUiContext';
 import { useNodeTextDraft } from '../hooks/useNodeTextDraft';
+import { VideoMergeNode } from './VideoMergeNode';
+import { CompactNodeView } from './nodes/CompactNodeView';
 
 /** 节点标题（点击重命名）。 */
 function TitleInput({ nodeId, label, onLabel }: { nodeId: string; label: string; onLabel: (label: string) => void }) {
@@ -40,7 +42,13 @@ function TitleInput({ nodeId, label, onLabel }: { nodeId: string; label: string;
   return <span className="node-card__header-title" title="点击重命名" onClick={() => { setDraft(label); setEditing(true); }}>{label}</span>;
 }
 
-function MediaNodeComponent({ id, data, selected, width, height, positionAbsoluteX, positionAbsoluteY }: NodeProps<CanvasNode>) {
+type MediaNodeProps = NodeProps<CanvasNode> & {
+  displayCollapsed?: boolean;
+  showMinimize?: boolean;
+  onMinimize?: (nodeId: string) => void;
+};
+
+function FullMediaNodeComponent({ id, data, selected, width, height, positionAbsoluteX, positionAbsoluteY, showMinimize, onMinimize }: MediaNodeProps) {
   const updateNode = useCanvasStore((state) => state.updateNode);
   const addNode = useCanvasStore((state) => state.addNode);
   const nodes = useCanvasStore((state) => state.nodes);
@@ -61,7 +69,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
     onChange: (value) => updateNode(id, { scriptText: value }),
   });
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
-  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : data.kind === 'imageGen' ? Sparkles : ImageIcon;
+  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : data.kind === 'imageGen' ? Sparkles : data.kind === 'videoMerge' ? Merge : ImageIcon;
   const definition = getNodeDefinition(data.kind);
 
   // 参考图池：仅生成类节点（imageGen/videoGen）需要；其它节点不建池（省计算）。
@@ -108,6 +116,16 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           {(data.kind === 'imageGen' || data.kind === 'videoGen' || data.kind === 'storyboardGen' || data.kind === 'storyboardPlanner') && data.isGenerating && (
             <span className="node-card__badge-gen">生成中</span>
           )}
+          {showMinimize && (
+            <button
+              className="node-card__minimize nodrag"
+              aria-label="最小化节点"
+              title="最小化节点"
+              onClick={(event) => { event.stopPropagation(); onMinimize?.(id); }}
+            >
+              <Minimize2 size={14} />
+            </button>
+          )}
           <button
             className="node-card__inspector nodrag"
             aria-label="编辑详情"
@@ -152,6 +170,8 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           <SequenceNode id={id} data={data} updateNode={updateNode} onOpenChildMenu={() => setChildMenu(true)} />
         ) : data.kind === 'image' ? (
           <MediaAssetNode id={id} data={data} selected={selected} node={node} />
+        ) : data.kind === 'videoMerge' ? (
+          <VideoMergeNode node={node} />
         ) : (
           <div className="empty-image-node"><ImageIcon size={28} /><strong>未知节点</strong><span>该节点类型尚未实现</span></div>
         )}
@@ -186,7 +206,7 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
           }} />
         </NodeToolbar>
       )}
-      {(['imageGen', 'videoGen', 'storyboardGen', 'storyboard', 'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo'] as const).includes(data.kind as never) && (
+      {(['imageGen', 'videoGen', 'storyboardGen', 'storyboard', 'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'videoMerge'] as const).includes(data.kind as never) && (
         <NodeResizer
           nodeId={id}
           isVisible={selected}
@@ -202,6 +222,13 @@ function MediaNodeComponent({ id, data, selected, width, height, positionAbsolut
       )}
     </article>
   );
+}
+
+function MediaNodeComponent(props: MediaNodeProps) {
+  if (props.displayCollapsed) {
+    return <CompactNodeView data={props.data} selected={Boolean(props.selected)} />;
+  }
+  return <FullMediaNodeComponent {...props} />;
 }
 
 export const MediaNode = memo(MediaNodeComponent);
