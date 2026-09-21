@@ -9,6 +9,8 @@ import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
+import com.storyboard.asset.client.AssetContracts.MetadataState;
+import com.storyboard.asset.client.AssetContracts.LibraryFolderNode;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.ProjectLinkRef;
 import com.storyboard.asset.client.AssetContracts.SnapshotItem;
@@ -16,6 +18,8 @@ import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.TagRef;
 import com.storyboard.asset.domain.AssetSearchText;
 import com.storyboard.asset.domain.GroupSnapshotExpander;
+import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
+import com.storyboard.asset.dto.ImportContracts.ImportMode;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -33,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** asset schema 的唯一数据访问层。 */
 @Repository
@@ -48,9 +53,11 @@ public class LibraryRepository {
 
     public Optional<AssetSummary> findAsset(String userId, String assetId) {
         return client.sql("""
-                        SELECT * FROM asset.library_assets
-                        WHERE id = :id AND owner_user_id = :userId
-                        """)
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.id = :id AND a.owner_user_id = :userId
+                        """.formatted(metadataStateSql()))
                 .param("id", assetId).param("userId", userId)
                 .query(assetRowMapper())
                 .optional()
@@ -58,8 +65,36 @@ public class LibraryRepository {
     }
 
     public Optional<AssetSummary> findAssetInternal(String assetId) {
-        return client.sql("SELECT * FROM asset.library_assets WHERE id = :id")
+        return client.sql("""
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.id = :id
+                        """.formatted(metadataStateSql()))
                 .param("id", assetId)
+                .query(assetRowMapper())
+                .optional()
+                .map(this::hydrate);
+    }
+
+    public Optional<AssetSummary> findAssetBySource(String userId, String sourceType, String sourceId) {
+        if (sourceType == null || sourceType.isBlank() || sourceId == null || sourceId.isBlank()) {
+            return Optional.empty();
+        }
+        return client.sql("""
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.source_type = :sourceType
+                          AND a.source_id = :sourceId
+                          AND a.status = 'ACTIVE'
+                        ORDER BY a.created_at
+                        LIMIT 1
+                        """.formatted(metadataStateSql()))
+                .param("userId", userId)
+                .param("sourceType", sourceType)
+                .param("sourceId", sourceId)
                 .query(assetRowMapper())
                 .optional()
                 .map(this::hydrate);
@@ -69,6 +104,7 @@ public class LibraryRepository {
             String userId,
             AssetScope scope,
             String projectId,
+            String folderId,
             String query,
             AssetType type,
             Collection<String> tagIds,
@@ -100,6 +136,22 @@ public class LibraryRepository {
             where.append(" AND a.asset_type = :type ");
             params.addValue("type", type.name());
         }
+        if (folderId != null && !folderId.isBlank()) {
+            if ("UNFILED".equals(folderId)) {
+                where.append(" AND NOT EXISTS (SELECT 1 FROM asset.library_asset_folders af ")
+                        .append("WHERE af.asset_id = a.id AND af.owner_user_id = :userId ")
+                        .append("AND af.scope = COALESCE(:folderScope, a.scope) ")
+                        .append("AND af.owner_project_id IS NOT DISTINCT FROM ")
+                        .append("(CASE WHEN COALESCE(:folderScope, a.scope) = 'PROJECT' THEN :folderProjectId ELSE NULL END)) ");
+            } else {
+                where.append(" AND EXISTS (SELECT 1 FROM asset.library_asset_folders af ")
+                        .append("WHERE af.asset_id = a.id AND af.folder_id = :folderId ")
+                        .append("AND af.owner_user_id = :userId) ");
+                params.addValue("folderId", folderId);
+            }
+            params.addValue("folderScope", scope == null ? null : scope.name());
+            params.addValue("folderProjectId", scope == AssetScope.PROJECT ? projectId : null);
+        }
         List<String> terms = query == null ? List.of() : java.util.Arrays.stream(query.trim().split("\\s+"))
                 .filter(term -> !term.isBlank()).limit(12).toList();
         for (int i = 0; i < terms.size(); i++) {
@@ -124,12 +176,30 @@ public class LibraryRepository {
         params.addValue("limit", Math.min(100, Math.max(1, size)));
         params.addValue("offset", (Math.max(1, page) - 1L) * Math.min(100, Math.max(1, size)));
         List<AssetSummary> records = jdbc.query("""
-                        SELECT a.* FROM asset.library_assets a
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
                         WHERE %s
                         ORDER BY a.updated_at DESC
                         LIMIT :limit OFFSET :offset
-                        """.formatted(where), params, assetRowMapper()).stream().map(this::hydrate).toList();
+                        """.formatted(metadataStateSql(), where), params, assetRowMapper())
+                .stream().map(row -> hydrate(row, scope, projectId)).toList();
         return new PageResponse<>(records, total, Math.max(1, page), Math.min(100, Math.max(1, size)));
+    }
+
+    public PageResponse<AssetSummary> searchAssets(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            boolean deleted,
+            int page,
+            int size
+    ) {
+        return searchAssets(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted, page, size);
     }
 
     public String insertAsset(
@@ -165,6 +235,143 @@ public class LibraryRepository {
                 .param("searchText", searchText)
                 .query(String.class)
                 .single();
+    }
+
+    /** 迁移旧资产时保留原 ID，保证既有 scene_assets 与素材组 ID 继续有效。 */
+    public String insertAssetWithId(
+            String id,
+            String ownerUserId,
+            AssetScope scope,
+            String projectId,
+            AssetType type,
+            AiAssetKind aiKind,
+            String name,
+            String description,
+            String sourceType,
+            String sourceId
+    ) {
+        String searchText = AssetSearchText.build(name, description, null, List.of());
+        return client.sql("""
+                        INSERT INTO asset.library_assets (
+                            id, owner_user_id, scope, owner_project_id, asset_type, ai_kind,
+                            name, description, source_type, source_id, search_text
+                        ) VALUES (
+                            :id, :ownerUserId, :scope, :projectId, :assetType, :aiKind,
+                            :name, :description, :sourceType, :sourceId, :searchText
+                        )
+                        ON CONFLICT (id) DO NOTHING
+                        RETURNING id
+                        """)
+                .param("id", id)
+                .param("ownerUserId", ownerUserId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("assetType", type.name())
+                .param("aiKind", aiKind == null ? null : aiKind.name())
+                .param("name", name)
+                .param("description", description)
+                .param("sourceType", sourceType)
+                .param("sourceId", sourceId)
+                .param("searchText", searchText)
+                .query(String.class)
+                .optional()
+                .orElse(null);
+    }
+
+    public String duplicateAsset(AssetSummary source, String name, String searchText) {
+        return client.sql("""
+                        INSERT INTO asset.library_assets (
+                            owner_user_id, scope, owner_project_id, asset_type, ai_kind,
+                            name, description, ai_description, manual_override, status,
+                            source_type, source_id, cover_url, search_text
+                        ) VALUES (
+                            :ownerUserId, :scope, :projectId, :assetType, :aiKind,
+                            :name, :description, :aiDescription, :manualOverride, 'ACTIVE',
+                            :sourceType, NULL, :coverUrl, :searchText
+                        ) RETURNING id
+                        """)
+                .param("ownerUserId", source.ownerUserId())
+                .param("scope", source.scope().name())
+                .param("projectId", source.scope() == AssetScope.PROJECT ? source.ownerProjectId() : null)
+                .param("assetType", source.type().name())
+                .param("aiKind", source.aiKind() == null ? null : source.aiKind().name())
+                .param("name", name)
+                .param("description", source.description())
+                .param("aiDescription", source.aiDescription())
+                .param("manualOverride", source.manualOverride())
+                .param("sourceType", source.sourceType())
+                .param("coverUrl", source.coverUrl())
+                .param("searchText", searchText)
+                .query(String.class)
+                .single();
+    }
+
+    public void copyMediaLinks(String sourceAssetId, String targetAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_media(
+                            asset_id, blob_id, sort_order, role, is_primary, constraint_text, status
+                        )
+                        SELECT :targetAssetId, blob_id, sort_order, role, is_primary, constraint_text, status
+                        FROM asset.library_media
+                        WHERE asset_id = :sourceAssetId
+                        ON CONFLICT (asset_id, blob_id, sort_order) DO NOTHING
+                        """)
+                .param("sourceAssetId", sourceAssetId)
+                .param("targetAssetId", targetAssetId)
+                .update();
+    }
+
+    public void copyAssetTags(String sourceAssetId, String targetAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_asset_tags(asset_id, tag_id, source)
+                        SELECT :targetAssetId, tag_id, source
+                        FROM asset.library_asset_tags
+                        WHERE asset_id = :sourceAssetId
+                        ON CONFLICT (asset_id, tag_id) DO NOTHING
+                        """)
+                .param("sourceAssetId", sourceAssetId)
+                .param("targetAssetId", targetAssetId)
+                .update();
+    }
+
+    public void copyProjectLinks(String sourceAssetId, String targetAssetId, String userId) {
+        client.sql("""
+                        INSERT INTO asset.library_project_links(asset_id, project_id, added_by_user_id)
+                        SELECT :targetAssetId, project_id, :userId
+                        FROM asset.library_project_links
+                        WHERE asset_id = :sourceAssetId
+                        ON CONFLICT (asset_id, project_id) DO NOTHING
+                        """)
+                .param("sourceAssetId", sourceAssetId)
+                .param("targetAssetId", targetAssetId)
+                .param("userId", userId)
+                .update();
+    }
+
+    public void duplicateGroup(String sourceGroupId, String targetGroupId) {
+        client.sql("""
+                        INSERT INTO asset.library_groups(
+                            id, asset_id, owner_user_id, scope, owner_project_id
+                        )
+                        SELECT :targetGroupId, :targetGroupId, owner_user_id, scope, owner_project_id
+                        FROM asset.library_groups
+                        WHERE asset_id = :sourceGroupId
+                        """)
+                .param("sourceGroupId", sourceGroupId)
+                .param("targetGroupId", targetGroupId)
+                .update();
+        client.sql("""
+                        INSERT INTO asset.library_group_items(
+                            group_id, media_id, member_asset_id, sort_order, role
+                        )
+                        SELECT :targetGroupId, media_id, member_asset_id, sort_order, role
+                        FROM asset.library_group_items
+                        WHERE group_id = :sourceGroupId
+                        ON CONFLICT (group_id, media_id) DO NOTHING
+                        """)
+                .param("sourceGroupId", sourceGroupId)
+                .param("targetGroupId", targetGroupId)
+                .update();
     }
 
     public boolean updateAsset(
@@ -227,6 +434,15 @@ public class LibraryRepository {
                 .update();
     }
 
+    public void unlinkAllProjects(String assetId) {
+        client.sql("""
+                        DELETE FROM asset.library_project_links
+                        WHERE asset_id = :assetId
+                        """)
+                .param("assetId", assetId)
+                .update();
+    }
+
     public boolean trash(String userId, String assetId, long expectedVersion, OffsetDateTime purgeAfter) {
         return client.sql("""
                         UPDATE asset.library_assets
@@ -272,11 +488,50 @@ public class LibraryRepository {
 
     public boolean hasActiveReferences(String assetId) {
         Integer count = client.sql("""
-                        SELECT count(*) FROM asset.library_project_links
-                        WHERE asset_id = :assetId
+                        SELECT
+                            (SELECT count(*) FROM asset.library_project_links WHERE asset_id = :assetId)
+                          + (SELECT count(*) FROM asset.library_group_items WHERE member_asset_id = :assetId)
+                          + (SELECT count(*) FROM asset.library_group_snapshot_items WHERE asset_id = :assetId)
+                          + (SELECT count(*) FROM asset.library_group_outputs WHERE result_asset_id = :assetId)
                         """)
                 .param("assetId", assetId).query(Integer.class).single();
         return count != null && count > 0;
+    }
+
+    public boolean objectKeyHasReferences(String objectKey) {
+        Boolean referenced = client.sql("""
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM asset.library_media m
+                            JOIN asset.library_blobs b ON b.id = m.blob_id
+                            JOIN asset.library_assets a ON a.id = m.asset_id
+                            WHERE b.object_key = :objectKey
+                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM asset.library_group_items gi
+                            JOIN asset.library_media m ON m.id = gi.media_id
+                            JOIN asset.library_blobs b ON b.id = m.blob_id
+                            JOIN asset.library_groups g ON g.id = gi.group_id
+                            JOIN asset.library_assets a ON a.id = g.asset_id
+                            WHERE b.object_key = :objectKey
+                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM asset.library_group_snapshot_items si
+                            JOIN asset.library_group_snapshots s ON s.id = si.snapshot_id
+                            JOIN asset.library_groups g ON g.id = s.group_id
+                            JOIN asset.library_assets a ON a.id = g.asset_id
+                            WHERE si.object_key = :objectKey
+                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+                        )
+                        """)
+                .param("objectKey", objectKey)
+                .query(Boolean.class)
+                .single();
+        return Boolean.TRUE.equals(referenced);
     }
 
     public void markPurgeBlocked(String assetId) {
@@ -305,7 +560,15 @@ public class LibraryRepository {
                         ) VALUES (
                             :objectKey, :sha256, :mimeType, :sizeBytes, :width, :height, :duration, :mediaType
                         )
-                        ON CONFLICT (sha256) DO UPDATE SET updated_at = now()
+                        ON CONFLICT (sha256) DO UPDATE SET
+                            object_key = EXCLUDED.object_key,
+                            mime_type = EXCLUDED.mime_type,
+                            size_bytes = EXCLUDED.size_bytes,
+                            width = COALESCE(EXCLUDED.width, asset.library_blobs.width),
+                            height = COALESCE(EXCLUDED.height, asset.library_blobs.height),
+                            duration_seconds = COALESCE(EXCLUDED.duration_seconds, asset.library_blobs.duration_seconds),
+                            media_type = EXCLUDED.media_type,
+                            updated_at = now()
                         RETURNING id
                         """)
                 .param("objectKey", objectKey)
@@ -521,6 +784,15 @@ public class LibraryRepository {
                 .list();
     }
 
+    public boolean deleteTag(String userId, String tagId) {
+        return client.sql("""
+                        DELETE FROM asset.library_tags
+                        WHERE id = :tagId AND owner_user_id = :userId
+                        """)
+                .param("tagId", tagId).param("userId", userId)
+                .update() == 1;
+    }
+
     public void replaceTags(String userId, String assetId, List<String> tagIds, String source) {
         client.sql("""
                         DELETE FROM asset.library_asset_tags
@@ -552,20 +824,15 @@ public class LibraryRepository {
         if (asset == null || asset.manualOverride()) return;
         for (String name : names.stream().filter(n -> n != null && !n.isBlank()).distinct().limit(20).toList()) {
             String normalized = name.trim().toLowerCase(Locale.ROOT);
-            Integer suppressed = client.sql("""
-                            SELECT count(*) FROM asset.library_ai_tag_suppressions
-                            WHERE asset_id = :assetId AND normalized_name = :normalized
-                            """)
-                    .param("assetId", assetId).param("normalized", normalized)
-                    .query(Integer.class).single();
-            if (suppressed > 0) continue;
-            String tagId = createTag(asset.ownerUserId(), name.trim(), null);
             client.sql("""
                             INSERT INTO asset.library_asset_tags(asset_id, tag_id, source)
-                            VALUES (:assetId, :tagId, 'AI')
+                            SELECT :assetId, t.id, 'AI'
+                            FROM asset.library_tags t
+                            WHERE t.owner_user_id = :userId AND t.normalized_name = :normalized
                             ON CONFLICT (asset_id, tag_id) DO NOTHING
                             """)
-                    .param("assetId", assetId).param("tagId", tagId).update();
+                    .param("assetId", assetId).param("userId", asset.ownerUserId())
+                    .param("normalized", normalized).update();
         }
         rebuildSearchText(assetId);
     }
@@ -624,8 +891,36 @@ public class LibraryRepository {
     public void createAnalysisTask(String assetId) {
         client.sql("""
                         INSERT INTO asset.library_analysis_tasks(asset_id)
-                        VALUES (:assetId)
+                        SELECT :assetId
+                        WHERE EXISTS (
+                            SELECT 1 FROM asset.library_assets
+                            WHERE id = :assetId AND scope = 'PROJECT' AND status = 'ACTIVE'
+                        )
                         ON CONFLICT (asset_id) DO NOTHING
+                        """)
+                .param("assetId", assetId).update();
+    }
+
+    public void requeueAnalysisTask(String assetId) {
+        client.sql("""
+                        INSERT INTO asset.library_analysis_tasks(
+                            asset_id, status, attempt_count, next_retry_at
+                        )
+                        SELECT :assetId, 'PENDING', 0, now()
+                        WHERE EXISTS (
+                            SELECT 1 FROM asset.library_assets
+                            WHERE id = :assetId AND scope = 'PROJECT' AND status = 'ACTIVE'
+                        )
+                        ON CONFLICT (asset_id) DO UPDATE SET
+                            status = 'PENDING',
+                            attempt_count = 0,
+                            lease_owner = NULL,
+                            lease_until = NULL,
+                            next_retry_at = now(),
+                            error_code = NULL,
+                            error_message = NULL,
+                            updated_at = now()
+                        WHERE asset.library_analysis_tasks.status <> 'SUCCEEDED'
                         """)
                 .param("assetId", assetId).update();
     }
@@ -633,9 +928,14 @@ public class LibraryRepository {
     public List<AnalysisTask> claimAnalysisTasks(String workerId, int limit) {
         return client.sql("""
                         WITH claimed AS (
-                            SELECT id FROM asset.library_analysis_tasks
-                            WHERE status = 'PENDING' AND next_retry_at <= now()
-                            ORDER BY created_at
+                            SELECT t.id FROM asset.library_analysis_tasks t
+                            WHERE t.status = 'PENDING' AND t.next_retry_at <= now()
+                              AND EXISTS (
+                                  SELECT 1 FROM asset.library_assets a
+                                  WHERE a.id = t.asset_id
+                                    AND a.scope = 'PROJECT' AND a.status = 'ACTIVE'
+                              )
+                            ORDER BY t.created_at
                             FOR UPDATE SKIP LOCKED
                             LIMIT :limit
                         )
@@ -680,7 +980,13 @@ public class LibraryRepository {
     public void createCleanupTask(String objectKey) {
         client.sql("""
                         INSERT INTO asset.library_storage_cleanup_tasks(object_key)
-                        VALUES (:objectKey)
+                        SELECT :objectKey
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM asset.library_storage_cleanup_tasks
+                            WHERE object_key = :objectKey
+                              AND status IN ('PENDING', 'PROCESSING')
+                        )
                         """)
                 .param("objectKey", objectKey).update();
     }
@@ -815,6 +1121,8 @@ public class LibraryRepository {
             String userId,
             String projectId,
             AssetScope scope,
+            ImportMode mode,
+            String groupId,
             String manifestHash,
             String confirmationHash,
             OffsetDateTime expiresAt,
@@ -824,14 +1132,15 @@ public class LibraryRepository {
     ) {
         return client.sql("""
                         INSERT INTO asset.library_import_jobs(
-                            owner_user_id, project_id, scope, manifest_hash, confirmation_hash,
+                            owner_user_id, project_id, scope, mode, group_id, manifest_hash, confirmation_hash,
                             confirmation_expires_at, total_count, total_bytes, ignored_count
                         ) VALUES (
-                            :userId, :projectId, :scope, :manifestHash, :confirmationHash,
+                            :userId, :projectId, :scope, :mode, :groupId, :manifestHash, :confirmationHash,
                             :expiresAt, :totalCount, :totalBytes, :ignoredCount
                         ) RETURNING id
                         """)
                 .param("userId", userId).param("projectId", projectId).param("scope", scope.name())
+                .param("mode", mode.name()).param("groupId", groupId)
                 .param("manifestHash", manifestHash).param("confirmationHash", confirmationHash)
                 .param("expiresAt", expiresAt).param("totalCount", totalCount)
                 .param("totalBytes", totalBytes).param("ignoredCount", ignoredCount)
@@ -839,17 +1148,18 @@ public class LibraryRepository {
     }
 
     public void insertImportItem(String jobId, String itemKey, String relativePath, String fileName,
-                                 long sizeBytes, String mimeType) {
+                                 long sizeBytes, String mimeType, int sortOrder) {
         client.sql("""
                         INSERT INTO asset.library_import_items(
-                            job_id, item_key, relative_path, file_name, size_bytes, mime_type
+                            job_id, item_key, relative_path, file_name, size_bytes, mime_type, sort_order
                         ) VALUES (
-                            :jobId, :itemKey, :relativePath, :fileName, :sizeBytes, :mimeType
+                            :jobId, :itemKey, :relativePath, :fileName, :sizeBytes, :mimeType, :sortOrder
                         )
                         ON CONFLICT (job_id, item_key) DO NOTHING
                         """)
                 .param("jobId", jobId).param("itemKey", itemKey).param("relativePath", relativePath)
                 .param("fileName", fileName).param("sizeBytes", sizeBytes).param("mimeType", mimeType)
+                .param("sortOrder", sortOrder)
                 .update();
     }
 
@@ -861,6 +1171,29 @@ public class LibraryRepository {
                 .param("jobId", jobId).param("userId", userId)
                 .query(importJobMapper())
                 .optional();
+    }
+
+    public List<AnalysisTaskStatus> listAnalysisTaskStatuses(
+            String userId,
+            Collection<String> assetIds
+    ) {
+        List<String> normalized = assetIds == null ? List.of() : assetIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().limit(200).toList();
+        if (normalized.isEmpty()) return List.of();
+        return client.sql("""
+                        SELECT t.asset_id, t.status, t.error_message, t.updated_at
+                        FROM asset.library_analysis_tasks t
+                        JOIN asset.library_assets a ON a.id = t.asset_id
+                        WHERE a.owner_user_id = :userId AND t.asset_id IN (:assetIds)
+                        ORDER BY t.created_at
+                        """)
+                .param("userId", userId).param("assetIds", normalized)
+                .query((rs, rowNum) -> new AnalysisTaskStatus(
+                        rs.getString("asset_id"),
+                        rs.getString("status"),
+                        rs.getString("error_message"),
+                        rs.getObject("updated_at", OffsetDateTime.class)))
+                .list();
     }
 
     public ImportItem findImportItem(String jobId, String itemKey) {
@@ -911,11 +1244,13 @@ public class LibraryRepository {
     private RowMapper<ImportJob> importJobMapper() {
         return (rs, rowNum) -> new ImportJob(
                 rs.getString("id"), rs.getString("owner_user_id"), rs.getString("project_id"),
-                AssetScope.valueOf(rs.getString("scope")), rs.getString("manifest_hash"),
+                AssetScope.valueOf(rs.getString("scope")),
+                ImportMode.valueOf(rs.getString("mode")), rs.getString("group_id"), rs.getString("manifest_hash"),
                 rs.getString("confirmation_hash"), rs.getObject("confirmation_expires_at", OffsetDateTime.class),
                 rs.getString("status"), rs.getInt("total_count"), rs.getLong("total_bytes"),
                 rs.getInt("ignored_count"), rs.getInt("processed_count"),
-                rs.getInt("succeeded_count"), rs.getInt("duplicate_count"), rs.getInt("failed_count"));
+                rs.getInt("succeeded_count"), rs.getInt("duplicate_count"), rs.getInt("failed_count"),
+                rs.getObject("updated_at", OffsetDateTime.class));
     }
 
     private RowMapper<ImportItem> importItemMapper() {
@@ -923,7 +1258,8 @@ public class LibraryRepository {
                 rs.getString("id"), rs.getString("job_id"), rs.getString("item_key"),
                 rs.getString("relative_path"), rs.getString("file_name"), rs.getLong("size_bytes"),
                 rs.getString("mime_type"), rs.getString("sha256"), rs.getString("status"),
-                rs.getString("asset_id"), rs.getString("error_message"), rs.getInt("attempt_count"));
+                rs.getString("asset_id"), rs.getString("error_message"), rs.getInt("attempt_count"),
+                rs.getInt("sort_order"));
     }
 
     public Optional<String> findExistingOutput(String producer, String generationRecordId, int resultIndex) {
@@ -961,6 +1297,32 @@ public class LibraryRepository {
                         """)
                 .param("id", groupId).param("assetId", groupId).param("userId", userId)
                 .param("scope", scope.name()).param("projectId", projectId).update();
+    }
+
+    public Optional<String> findPrimaryMediaId(String assetId) {
+        return client.sql("""
+                        SELECT id FROM asset.library_media
+                        WHERE asset_id = :assetId AND status = 'ACTIVE'
+                        ORDER BY is_primary DESC, sort_order, created_at
+                        LIMIT 1
+                        """)
+                .param("assetId", assetId)
+                .query(String.class)
+                .optional();
+    }
+
+    public void linkGroupItem(String groupId, String mediaId, String memberAssetId, int sortOrder) {
+        client.sql("""
+                        INSERT INTO asset.library_group_items(
+                            group_id, media_id, member_asset_id, sort_order, role
+                        ) VALUES (
+                            :groupId, :mediaId, :memberAssetId, :sortOrder, 'REFERENCE'
+                        )
+                        ON CONFLICT (group_id, media_id) DO NOTHING
+                        """)
+                .param("groupId", groupId).param("mediaId", mediaId)
+                .param("memberAssetId", memberAssetId).param("sortOrder", sortOrder)
+                .update();
     }
 
     public Optional<GroupRow> findGroup(String userId, String groupId) {
@@ -1107,6 +1469,433 @@ public class LibraryRepository {
                 .list();
     }
 
+    public Optional<FolderRow> findFolder(String userId, String folderId) {
+        return client.sql("""
+                        SELECT id, owner_user_id, scope, owner_project_id, parent_id,
+                               name, normalized_name, sort_order, version
+                        FROM asset.library_folders
+                        WHERE id = :folderId AND owner_user_id = :userId
+                        """)
+                .param("folderId", folderId)
+                .param("userId", userId)
+                .query((rs, rowNum) -> folderRow(rs))
+                .optional();
+    }
+
+    public Optional<FolderRow> findFolderBySibling(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String parentId,
+            String normalizedName
+    ) {
+        return client.sql("""
+                        SELECT id, owner_user_id, scope, owner_project_id, parent_id,
+                               name, normalized_name, sort_order, version
+                        FROM asset.library_folders
+                        WHERE owner_user_id = :userId
+                          AND scope = :scope
+                          AND owner_project_id IS NOT DISTINCT FROM :projectId
+                          AND parent_id IS NOT DISTINCT FROM :parentId
+                          AND normalized_name = :normalizedName
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", projectId)
+                .param("parentId", parentId)
+                .param("normalizedName", normalizedName)
+                .query((rs, rowNum) -> folderRow(rs))
+                .optional();
+    }
+
+    public String insertFolder(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String parentId,
+            String name,
+            String normalizedName
+    ) {
+        return client.sql("""
+                        INSERT INTO asset.library_folders(
+                            owner_user_id, scope, owner_project_id, parent_id,
+                            name, normalized_name
+                        ) VALUES (
+                            :userId, :scope, :projectId, :parentId, :name, :normalizedName
+                        )
+                        RETURNING id
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("parentId", parentId)
+                .param("name", name)
+                .param("normalizedName", normalizedName)
+                .query(String.class)
+                .single();
+    }
+
+    public boolean renameFolder(
+            String userId,
+            String folderId,
+            String name,
+            String normalizedName,
+            long expectedVersion
+    ) {
+        return client.sql("""
+                        UPDATE asset.library_folders
+                        SET name = :name,
+                            normalized_name = :normalizedName,
+                            version = version + 1,
+                            updated_at = now()
+                        WHERE id = :folderId AND owner_user_id = :userId AND version = :expectedVersion
+                        """)
+                .param("userId", userId)
+                .param("folderId", folderId)
+                .param("name", name)
+                .param("normalizedName", normalizedName)
+                .param("expectedVersion", expectedVersion)
+                .update() == 1;
+    }
+
+    public boolean moveFolder(
+            String userId,
+            String folderId,
+            String parentId,
+            long expectedVersion
+    ) {
+        return client.sql("""
+                        UPDATE asset.library_folders
+                        SET parent_id = :parentId,
+                            version = version + 1,
+                            updated_at = now()
+                        WHERE id = :folderId
+                          AND owner_user_id = :userId
+                          AND version = :expectedVersion
+                        """)
+                .param("userId", userId)
+                .param("folderId", folderId)
+                .param("parentId", parentId)
+                .param("expectedVersion", expectedVersion)
+                .update() == 1;
+    }
+
+    public boolean deleteEmptyFolder(String userId, String folderId, long expectedVersion) {
+        return client.sql("""
+                        DELETE FROM asset.library_folders f
+                        WHERE f.id = :folderId
+                          AND f.owner_user_id = :userId
+                          AND f.version = :expectedVersion
+                          AND NOT EXISTS (
+                              SELECT 1 FROM asset.library_folders child WHERE child.parent_id = f.id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1 FROM asset.library_asset_folders item WHERE item.folder_id = f.id
+                          )
+                        """)
+                .param("userId", userId)
+                .param("folderId", folderId)
+                .param("expectedVersion", expectedVersion)
+                .update() == 1;
+    }
+
+    public List<String> listFolderTreeIds(String userId, String folderId) {
+        return client.sql("""
+                        WITH RECURSIVE folder_tree AS (
+                            SELECT id, 0 AS depth
+                            FROM asset.library_folders
+                            WHERE id = :folderId AND owner_user_id = :userId
+                            UNION ALL
+                            SELECT child.id, parent.depth + 1
+                            FROM asset.library_folders child
+                            JOIN folder_tree parent ON child.parent_id = parent.id
+                            WHERE child.owner_user_id = :userId
+                        )
+                        SELECT id
+                        FROM folder_tree
+                        ORDER BY depth DESC
+                        """)
+                .param("folderId", folderId)
+                .param("userId", userId)
+                .query(String.class)
+                .list();
+    }
+
+    public List<LibraryRepository.FolderRow> listChildFolders(String userId, String parentId) {
+        return client.sql("""
+                        SELECT id, owner_user_id, scope, owner_project_id, parent_id,
+                               name, normalized_name, sort_order, version
+                        FROM asset.library_folders
+                        WHERE owner_user_id = :userId
+                          AND parent_id = :parentId
+                        ORDER BY sort_order, name, id
+                        """)
+                .param("userId", userId)
+                .param("parentId", parentId)
+                .query((rs, rowNum) -> folderRow(rs))
+                .list();
+    }
+
+    public List<String> listDirectFolderAssetIds(String userId, String folderId) {
+        return client.sql("""
+                        SELECT af.asset_id
+                        FROM asset.library_asset_folders af
+                        JOIN asset.library_assets a ON a.id = af.asset_id
+                        WHERE af.owner_user_id = :userId
+                          AND af.folder_id = :folderId
+                          AND a.status = 'ACTIVE'
+                        ORDER BY af.created_at, af.asset_id
+                        """)
+                .param("userId", userId)
+                .param("folderId", folderId)
+                .query(String.class)
+                .list();
+    }
+
+    public void trashAssetsInFolders(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            Collection<String> folderIds
+    ) {
+        List<String> normalized = folderIds == null ? List.of() : folderIds.stream().distinct().toList();
+        if (normalized.isEmpty()) return;
+        client.sql("""
+                        UPDATE asset.library_assets a
+                        SET status = 'TRASHED',
+                            deleted_at = now(),
+                            purge_after = now() + interval '7 days',
+                            version = version + 1,
+                            updated_at = now()
+                        WHERE a.owner_user_id = :userId
+                          AND a.status = 'ACTIVE'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM asset.library_asset_folders af
+                              WHERE af.asset_id = a.id
+                                AND af.owner_user_id = :userId
+                                AND af.scope = :scope
+                                AND af.owner_project_id IS NOT DISTINCT FROM :projectId
+                                AND af.folder_id IN (:folderIds)
+                          )
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("folderIds", normalized)
+                .update();
+    }
+
+    public void deleteAssetFolderMappingsForFolders(
+            String userId,
+            Collection<String> folderIds
+    ) {
+        List<String> normalized = folderIds == null ? List.of() : folderIds.stream().distinct().toList();
+        if (normalized.isEmpty()) return;
+        client.sql("""
+                        DELETE FROM asset.library_asset_folders
+                        WHERE owner_user_id = :userId
+                          AND folder_id IN (:folderIds)
+                        """)
+                .param("userId", userId)
+                .param("folderIds", normalized)
+                .update();
+    }
+
+    public void deleteFolderRow(String userId, String folderId) {
+        client.sql("""
+                        DELETE FROM asset.library_folders
+                        WHERE id = :folderId AND owner_user_id = :userId
+                        """)
+                .param("folderId", folderId)
+                .param("userId", userId)
+                .update();
+    }
+
+    public long countFolderChildren(String folderId) {
+        Long count = client.sql("SELECT count(*) FROM asset.library_folders WHERE parent_id = :folderId")
+                .param("folderId", folderId)
+                .query(Long.class)
+                .single();
+        return count == null ? 0 : count;
+    }
+
+    public long countFolderAssets(String folderId) {
+        Long count = client.sql("SELECT count(*) FROM asset.library_asset_folders WHERE folder_id = :folderId")
+                .param("folderId", folderId)
+                .query(Long.class)
+                .single();
+        return count == null ? 0 : count;
+    }
+
+    public List<LibraryFolderNode> listFolders(
+            String userId,
+            AssetScope scope,
+            String projectId
+    ) {
+        return client.sql("""
+                        WITH RECURSIVE descendants AS (
+                            SELECT f.id AS root_id, f.id
+                            FROM asset.library_folders f
+                            WHERE f.owner_user_id = :userId
+                              AND f.scope = :scope
+                              AND f.owner_project_id IS NOT DISTINCT FROM :projectId
+                            UNION ALL
+                            SELECT d.root_id, child.id
+                            FROM descendants d
+                            JOIN asset.library_folders child ON child.parent_id = d.id
+                        )
+                        SELECT f.id, f.parent_id, f.name, f.scope, f.owner_project_id, f.version,
+                               count(DISTINCT direct.asset_id) AS direct_count,
+                               count(DISTINCT nested.asset_id) AS nested_count
+                        FROM asset.library_folders f
+                        LEFT JOIN asset.library_asset_folders direct ON direct.folder_id = f.id
+                        LEFT JOIN descendants d ON d.root_id = f.id
+                        LEFT JOIN asset.library_asset_folders nested ON nested.folder_id = d.id
+                        WHERE f.owner_user_id = :userId
+                          AND f.scope = :scope
+                          AND f.owner_project_id IS NOT DISTINCT FROM :projectId
+                        GROUP BY f.id, f.parent_id, f.name, f.scope, f.owner_project_id, f.version
+                        ORDER BY f.parent_id NULLS FIRST,
+                                 CASE WHEN f.parent_id IS NULL THEN f.name END NULLS LAST,
+                                 f.sort_order, f.name,
+                                 f.id
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .query((rs, rowNum) -> new LibraryFolderNode(
+                        rs.getString("id"),
+                        rs.getString("parent_id"),
+                        rs.getString("name"),
+                        AssetScope.valueOf(rs.getString("scope")),
+                        rs.getString("owner_project_id"),
+                        rs.getLong("direct_count"),
+                        rs.getLong("nested_count"),
+                        rs.getLong("version")
+                ))
+                .list();
+    }
+
+    public long countUnfiledAssets(String userId, AssetScope scope, String projectId) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT count(*)
+                FROM asset.library_assets a
+                WHERE a.owner_user_id = :userId
+                  AND a.status = 'ACTIVE'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM asset.library_asset_folders af
+                      WHERE af.asset_id = a.id
+                        AND af.scope = :scope
+                        AND af.owner_project_id IS NOT DISTINCT FROM :projectId
+                  )
+                """);
+        if (scope == AssetScope.PROJECT) {
+            sql.append("""
+                      AND (a.owner_project_id = :projectId OR EXISTS (
+                          SELECT 1 FROM asset.library_project_links l
+                          WHERE l.asset_id = a.id AND l.project_id = :projectId
+                      ))
+                    """);
+        } else {
+            sql.append(" AND a.scope = 'GLOBAL' ");
+        }
+        Long count = client.sql(sql.toString())
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .query(Long.class)
+                .single();
+        return count == null ? 0 : count;
+    }
+
+    public Optional<FolderLocation> findAssetFolder(
+            String userId,
+            String assetId,
+            AssetScope scope,
+            String projectId
+    ) {
+        return client.sql("""
+                        WITH RECURSIVE ancestors AS (
+                            SELECT f.id, f.parent_id, f.name, 0 AS depth
+                            FROM asset.library_asset_folders af
+                            JOIN asset.library_folders f ON f.id = af.folder_id
+                            WHERE af.asset_id = :assetId
+                              AND af.owner_user_id = :userId
+                              AND af.scope = :scope
+                              AND af.owner_project_id IS NOT DISTINCT FROM :projectId
+                            UNION ALL
+                            SELECT parent.id, parent.parent_id, parent.name, child.depth + 1
+                            FROM ancestors child
+                            JOIN asset.library_folders parent ON parent.id = child.parent_id
+                        )
+                        SELECT id, array_agg(name ORDER BY depth DESC) AS path
+                        FROM ancestors
+                        GROUP BY id
+                        """)
+                .param("userId", userId)
+                .param("assetId", assetId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .query((rs, rowNum) -> new FolderLocation(
+                        rs.getString("id"),
+                        List.of((String[]) rs.getArray("path").getArray())
+                ))
+                .optional();
+    }
+
+    public void assignAssetsToFolder(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            Collection<String> assetIds
+    ) {
+        List<String> normalized = assetIds == null ? List.of() : assetIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (normalized.isEmpty()) return;
+        client.sql("""
+                        DELETE FROM asset.library_asset_folders
+                        WHERE owner_user_id = :userId
+                          AND scope = :scope
+                          AND owner_project_id IS NOT DISTINCT FROM :projectId
+                          AND asset_id IN (:assetIds)
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("assetIds", normalized)
+                .update();
+        if (folderId == null || folderId.isBlank()) return;
+        client.sql("""
+                        INSERT INTO asset.library_asset_folders(
+                            owner_user_id, scope, owner_project_id, asset_id, folder_id
+                        )
+                        SELECT :userId, :scope, :projectId, a.id, :folderId
+                        FROM asset.library_assets a
+                        WHERE a.owner_user_id = :userId
+                          AND a.id IN (:assetIds)
+                          AND a.status = 'ACTIVE'
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("folderId", folderId)
+                .param("assetIds", normalized)
+                .update();
+    }
+
+    public void removeAssetFolderMappings(String userId, String assetId) {
+        client.sql("""
+                        DELETE FROM asset.library_asset_folders
+                        WHERE owner_user_id = :userId AND asset_id = :assetId
+                        """)
+                .param("userId", userId)
+                .param("assetId", assetId)
+                .update();
+    }
+
     public static String sha256Hex(byte[] bytes) {
         try {
             return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
@@ -1116,11 +1905,37 @@ public class LibraryRepository {
     }
 
     private AssetSummary hydrate(AssetSummary row) {
+        return hydrate(row, row.scope(), row.ownerProjectId());
+    }
+
+    private AssetSummary hydrate(AssetSummary row, AssetScope scope, String projectId) {
+        Optional<FolderLocation> folder = scope == null
+                ? Optional.empty()
+                : findAssetFolder(
+                        row.ownerUserId(), row.id(), scope,
+                        scope == AssetScope.PROJECT ? projectId : null);
         return new AssetSummary(
                 row.id(), row.ownerUserId(), row.scope(), row.ownerProjectId(), row.type(), row.aiKind(),
-                row.name(), row.description(), row.aiDescription(), row.manualOverride(), row.status(), row.coverUrl(), row.version(),
-                listTags(row.id()), listProjectLinks(row.id()), row.sourceType(), row.sourceId(),
-                row.createdAt(), row.updatedAt()
+                row.name(), row.description(), row.aiDescription(), row.manualOverride(), row.metadataState(),
+                row.status(), row.coverUrl(), row.version(),
+                listTags(row.id()), listProjectLinks(row.id()),
+                folder.map(FolderLocation::folderId).orElse(null),
+                folder.map(FolderLocation::path).orElse(List.of()),
+                row.sourceType(), row.sourceId(), row.createdAt(), row.updatedAt()
+        );
+    }
+
+    private static FolderRow folderRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new FolderRow(
+                rs.getString("id"),
+                rs.getString("owner_user_id"),
+                AssetScope.valueOf(rs.getString("scope")),
+                rs.getString("owner_project_id"),
+                rs.getString("parent_id"),
+                rs.getString("name"),
+                rs.getString("normalized_name"),
+                rs.getInt("sort_order"),
+                rs.getLong("version")
         );
     }
 
@@ -1136,6 +1951,7 @@ public class LibraryRepository {
                 rs.getString("description"),
                 rs.getString("ai_description"),
                 rs.getBoolean("manual_override"),
+                metadataState(rs.getString("metadata_state")),
                 AssetStatus.valueOf(rs.getString("status")),
                 rs.getString("cover_url"),
                 rs.getLong("version"),
@@ -1146,6 +1962,27 @@ public class LibraryRepository {
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class)
         );
+    }
+
+    private static String metadataStateSql() {
+        return """
+                CASE
+                    WHEN a.manual_override THEN 'EDITED'
+                    WHEN t.status IN ('PENDING', 'PROCESSING') THEN 'AI_GENERATING'
+                    WHEN a.ai_description IS NOT NULL AND btrim(a.ai_description) <> '' THEN 'AI_GENERATED'
+                    WHEN t.status = 'DEAD' THEN 'AI_FAILED'
+                    ELSE 'NONE'
+                END
+                """;
+    }
+
+    private static MetadataState metadataState(String value) {
+        if (value == null || value.isBlank()) return MetadataState.NONE;
+        try {
+            return MetadataState.valueOf(value);
+        } catch (IllegalArgumentException ignored) {
+            return MetadataState.NONE;
+        }
     }
 
     private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
@@ -1159,6 +1996,22 @@ public class LibraryRepository {
     }
 
     public record AnalysisTask(String id, String assetId, int attemptCount) {
+    }
+
+    public record FolderRow(
+            String id,
+            String ownerUserId,
+            AssetScope scope,
+            String ownerProjectId,
+            String parentId,
+            String name,
+            String normalizedName,
+            int sortOrder,
+            long version
+    ) {
+    }
+
+    public record FolderLocation(String folderId, List<String> path) {
     }
 
     public record BlobRow(
@@ -1220,6 +2073,8 @@ public class LibraryRepository {
             String ownerUserId,
             String projectId,
             AssetScope scope,
+            ImportMode mode,
+            String groupId,
             String manifestHash,
             String confirmationHash,
             OffsetDateTime confirmationExpiresAt,
@@ -1230,7 +2085,8 @@ public class LibraryRepository {
             int processedCount,
             int succeededCount,
             int duplicateCount,
-            int failedCount
+            int failedCount,
+            OffsetDateTime updatedAt
     ) {
     }
 
@@ -1246,7 +2102,8 @@ public class LibraryRepository {
             String status,
             String assetId,
             String errorMessage,
-            int attemptCount
+            int attemptCount,
+            int sortOrder
     ) {
     }
 

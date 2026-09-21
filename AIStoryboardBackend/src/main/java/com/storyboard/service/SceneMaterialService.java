@@ -1,7 +1,9 @@
 package com.storyboard.service;
 
 import com.storyboard.dto.request.SceneMaterialReferenceRequest;
+import com.storyboard.dto.request.SceneAssetGroupBindingRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
+import com.storyboard.dto.response.SceneAssetGroupBindingResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
 
 import java.util.List;
@@ -14,4 +16,11 @@ public interface SceneMaterialService {
     /** 追加产出/分镜图片引用，不覆盖用户上传素材与已关联资产。 */
     List<SceneReferenceResponse> linkReferences(String userId, String sceneId,
                                                 List<SceneMaterialReferenceRequest> references);
+
+    List<SceneAssetGroupBindingResponse> listAssetGroups(String userId, String sceneId);
+
+    SceneAssetGroupBindingResponse bindAssetGroup(String userId, String sceneId,
+                                                  SceneAssetGroupBindingRequest request);
+
+    void removeAssetGroup(String userId, String sceneId, String groupId, String purpose);
 }

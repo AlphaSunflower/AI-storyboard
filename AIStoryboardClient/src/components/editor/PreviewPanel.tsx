@@ -14,10 +14,12 @@ import DepthCarousel from '../DepthCarousel';
 import SpecularButton from '../SpecularButton';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { IMAGE_SIZES, IMAGE_QUALITIES, isSeedreamImageModel } from '../../config';
-import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
-import { assetApi, type Asset } from '../../api/assets';
+import { sceneApi, type SceneAssetGroupBinding } from '../../api/scenes';
+import { AssetGroupPickerModal } from '../library/AssetGroupPickerModal';
+import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
-import { Eye, Download, Sparkles } from 'lucide-react';
+import { Eye, Download, Sparkles, Library, LoaderCircle } from 'lucide-react';
+import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 
 function downloadAsset(url: string, filename: string) {
   fetch(url)
@@ -171,10 +173,12 @@ export function PreviewPanel() {
   const [useRefImage, setUseRefImage] = useState(false); // 参考图生图勾选
   const [useFirstFrame, setUseFirstFrame] = useState(false); // 以本分镜图片为首帧
   const [refineTarget, setRefineTarget] = useState<string | null>(null); // 完善图片弹窗的源图 URL（null=关闭）
-  const [sceneImageAssets, setSceneImageAssets] = useState<Asset[]>([]); // 本分镜图片关联资产
-  const [sceneVideoAssets, setSceneVideoAssets] = useState<Asset[]>([]); // 本分镜视频关联资产
+  const [sceneGroupBindings, setSceneGroupBindings] = useState<SceneAssetGroupBinding[]>([]);
   const [assetPickerPurpose, setAssetPickerPurpose] = useState<'image' | 'video' | null>(null); // 资产选择弹窗用途
-  const [projectOutputPickerOpen, setProjectOutputPickerOpen] = useState(false); // 从项目产出素材选择参考图
+  const [projectOutputPicker, setProjectOutputPicker] = useState<{ type: 'image' | 'video' | 'audio'; purpose: 'image' | 'video' } | null>(null);
+  const [projectLibraryPicker, setProjectLibraryPicker] = useState<{ type: 'image' | 'video' | 'audio'; purpose: 'image' | 'video'; remaining: number } | null>(null);
+  const [libraryImportBusy, setLibraryImportBusy] = useState(false);
+  const [libraryImportDone, setLibraryImportDone] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const mediaLoadedRef = useRef<((e: React.SyntheticEvent<Element>) => void) | null>(null);
   const animatedSrcRef = useRef<string | null>(null);
@@ -189,32 +193,41 @@ export function PreviewPanel() {
     if (selectedSceneId) fetchSceneRefs(selectedSceneId);
   }, [selectedSceneId, fetchSceneRefs]);
 
-  // 切换分镜时拉取该分镜关联资产（图片/视频分开）
+  // 切换分镜时拉取资产组绑定（图片/视频用途分开）
   const loadSceneAssets = useCallback(async () => {
-    if (!selectedSceneId) { setSceneImageAssets([]); setSceneVideoAssets([]); return; }
+    if (!selectedSceneId) { setSceneGroupBindings([]); return; }
     try {
-      const res = await assetApi.listSceneAssets(selectedSceneId);
-      const d = res.data.data;
-      setSceneImageAssets(d?.imageAssets || []);
-      setSceneVideoAssets(d?.videoAssets || []);
+      const res = await sceneApi.listAssetGroups(selectedSceneId);
+      setSceneGroupBindings(res.data.data ?? []);
     } catch {
-      setSceneImageAssets([]);
-      setSceneVideoAssets([]);
+      setSceneGroupBindings([]);
     }
   }, [selectedSceneId]);
   useEffect(() => { void loadSceneAssets(); }, [loadSceneAssets]);
 
-  const removeSceneAsset = async (assetId: string, purpose: 'image' | 'video') => {
+  const removeSceneAsset = async (groupId: string, purpose: 'image' | 'video') => {
     if (!selectedSceneId) return;
-    const imageIds = (purpose === 'image' ? sceneImageAssets.filter((a) => a.id !== assetId) : sceneImageAssets).map((a) => a.id);
-    const videoIds = (purpose === 'video' ? sceneVideoAssets.filter((a) => a.id !== assetId) : sceneVideoAssets).map((a) => a.id);
-    if (purpose === 'image') setSceneImageAssets((prev) => prev.filter((a) => a.id !== assetId));
-    else setSceneVideoAssets((prev) => prev.filter((a) => a.id !== assetId));
+    setSceneGroupBindings((prev) => prev.filter((binding) => !(binding.groupId === groupId && binding.purpose === purpose)));
     try {
-      await assetApi.setSceneAssets(selectedSceneId, imageIds, videoIds);
+      await sceneApi.removeAssetGroup(selectedSceneId, groupId, purpose);
     } catch {
       void loadSceneAssets();
     }
+  };
+
+  const bindSceneAssetGroups = async (groupIds: string[], purpose: 'image' | 'video') => {
+    if (!selectedSceneId) return;
+    const existing = new Set(
+      sceneGroupBindings.filter((binding) => binding.purpose === purpose).map((binding) => binding.groupId),
+    );
+    const next = new Set(groupIds);
+    for (const groupId of next) {
+      if (!existing.has(groupId)) await sceneApi.bindAssetGroup(selectedSceneId, { groupId, purpose });
+    }
+    for (const groupId of existing) {
+      if (!next.has(groupId)) await sceneApi.removeAssetGroup(selectedSceneId, groupId, purpose);
+    }
+    await loadSceneAssets();
   };
 
   // 稳定的 handler 引用：首帧渲染即挂上，内部转发到 contextSafe 包装的动画（layout effect 后生效）
@@ -256,7 +269,23 @@ export function PreviewPanel() {
     setSelectedDownloads(new Set());
     setImageDraft({});
     setVideoDraft({});
+    setLibraryImportDone(false);
   }, [scene?.id]);
+
+  const handleImportSceneMedia = async (items: Array<{ url: string; type: 'IMAGE' | 'VIDEO' }>) => {
+    if (!scene || !currentProject?.id || items.length === 0) return;
+    setLibraryImportBusy(true);
+    setLibraryImportDone(false);
+    const results = await Promise.allSettled(items.map((item, index) => importMediaToProjectLibrary({
+      projectId: currentProject.id,
+      producer: 'storyboard-editor',
+      url: item.url,
+      mediaType: item.type,
+      label: `分镜 ${scene.sceneNumber} ${item.type === 'VIDEO' ? '视频' : `图片 ${index + 1}`}`,
+    })));
+    setLibraryImportDone(results.every((result) => result.status === 'fulfilled'));
+    setLibraryImportBusy(false);
+  };
 
   // 生成参数（草稿 > 分镜覆盖 > 全局默认；空串/0 = 回退）
   const effImageModel = (imageDraft.imageModel as string) || scene?.imageModel || globalImageModel;
@@ -286,6 +315,8 @@ export function PreviewPanel() {
   const refVImages = sceneRefs.filter((r) => r.type === 'image' && r.purpose === 'video'); // 视频生成参考图
   const refVideos = sceneRefs.filter((r) => r.type === 'video');
   const refAudios = sceneRefs.filter((r) => r.type === 'audio');
+  const sceneImageGroups = sceneGroupBindings.filter((binding) => binding.purpose === 'image');
+  const sceneVideoGroups = sceneGroupBindings.filter((binding) => binding.purpose === 'video');
   const refImageRemaining = Math.max(
     0,
     (imageParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount) - refImages.length,
@@ -323,7 +354,11 @@ export function PreviewPanel() {
     if (!prompt.trim()) { alert('请先填写生图提示词'); return; }
     const useEdit = mode === 'edit';
     const refs: string[] | undefined = useEdit && source === 'ref'
-      ? refImages.map((r) => r.url)
+      ? [
+          ...refImages.map((r) => r.url),
+          ...sceneImageGroups.flatMap((binding) =>
+            binding.media.filter((media) => media.type === 'IMAGE').map((media) => `/api/files/${media.objectKey}`)),
+        ].filter(Boolean)
       : undefined;
     // 先保存未保存的参数草稿再生成，避免生成用到旧参数（保存失败则中止）
     if (!(await commitParams(imageDraft, () => setImageDraft({})))) return;
@@ -346,12 +381,19 @@ export function PreviewPanel() {
       if (useFirstFrame && scene.imageUrl) {
         // 以本分镜图片为首帧（i2v）：参考素材与首帧互斥
         await generateVideo(scene.id, prompt, effVideoModel, undefined, scene.imageUrl);
-      } else if (refVImages.length || refVideos.length || refAudios.length) {
+      } else if (refVImages.length || refVideos.length || refAudios.length || sceneVideoGroups.length) {
         // 多模态参考（r2va）
+        const groupImages = sceneVideoGroups.flatMap((binding) =>
+          binding.media.filter((media) => media.type === 'IMAGE').map((media) => `/api/files/${media.objectKey}`));
+        const groupVideos = sceneVideoGroups.flatMap((binding) =>
+          binding.media.filter((media) => media.type === 'VIDEO').map((media) => `/api/files/${media.objectKey}`));
+        const groupAudios = sceneVideoGroups.flatMap((binding) =>
+          binding.media.filter((media) => media.type === 'AUDIO').map((media) => `/api/files/${media.objectKey}`));
         await generateVideo(
           scene.id, prompt, effVideoModel,
-          refVImages.map((r) => r.url), undefined,
-          refVideos.map((r) => r.url), refAudios.map((r) => r.url)
+          [...refVImages.map((r) => r.url), ...groupImages].filter(Boolean), undefined,
+          [...refVideos.map((r) => r.url), ...groupVideos].filter(Boolean),
+          [...refAudios.map((r) => r.url), ...groupAudios].filter(Boolean)
         );
       } else {
         await generateVideo(scene.id, prompt, effVideoModel);
@@ -503,36 +545,51 @@ export function PreviewPanel() {
             {imageList.length > 0 ? (
               <div>
                 {imageList.length > 1 ? (
-                  <div style={{ width: 'min(100%, 620px)', height: 360, margin: '8px auto 12px' }}>
-                    <DepthCarousel
-                      items={imageList.map((url, index) => ({
-                        image: assetUrl(url),
-                        alt: `分镜 ${scene.sceneNumber ?? ''} 图 ${index + 1}`,
-                      }))}
-                      cardWidth={400}
-                      cardHeight={267}
-                      radius={12}
-                      tint="#714f46"
-                      depth={170}
-                      spread={72}
-                      tilt={14}
-                      tiltDirection="right"
-                      perspective={1500}
-                      visibleCards={4}
-                      falloff={0.16}
-                      blur={4}
-                      autoplay={false}
-                      loop
-                      showControls
-                      showIndicators
-                      showIndexLabels
-                      onCardActivate={(_, item) => setPreviewUrl(item.image)}
-                    />
-                  </div>
+                  <ContextMenu items={[{
+                    label: '导入项目库',
+                    icon: <Library size={13} strokeWidth={1.8} />,
+                    disabled: !currentProject?.id || libraryImportBusy,
+                    onClick: () => void handleImportSceneMedia(
+                      imageList.map((url) => ({ url, type: 'IMAGE' as const })),
+                    ),
+                  }]}>
+                    <div style={{ width: 'min(100%, 620px)', height: 360, margin: '8px auto 12px' }}>
+                      <DepthCarousel
+                        items={imageList.map((url, index) => ({
+                          image: assetUrl(url),
+                          alt: `分镜 ${scene.sceneNumber ?? ''} 图 ${index + 1}`,
+                        }))}
+                        cardWidth={400}
+                        cardHeight={267}
+                        radius={12}
+                        tint="#714f46"
+                        depth={170}
+                        spread={72}
+                        tilt={14}
+                        tiltDirection="right"
+                        perspective={1500}
+                        visibleCards={4}
+                        falloff={0.16}
+                        blur={4}
+                        autoplay={false}
+                        loop
+                        showControls
+                        showIndicators
+                        showIndexLabels
+                        onCardActivate={(_, item) => setPreviewUrl(item.image)}
+                      />
+                    </div>
+                  </ContextMenu>
                 ) : (
                   <ContextMenu items={[
                   { label: '预览', icon: <Eye size={13} strokeWidth={1.8} />, onClick: () => setPreviewUrl(imageList[0]) },
                   { label: '下载图片', icon: <Download size={13} strokeWidth={1.8} />, onClick: () => downloadAsset(assetUrl(imageList[0]), `scene-${scene.sceneNumber}.png`) },
+                  {
+                    label: '导入项目库',
+                    icon: <Library size={13} strokeWidth={1.8} />,
+                    disabled: !currentProject?.id || libraryImportBusy,
+                    onClick: () => void handleImportSceneMedia([{ url: imageList[0], type: 'IMAGE' }]),
+                  },
                   { label: '完善图片', icon: <Sparkles size={13} strokeWidth={1.8} />, onClick: () => setRefineTarget(imageList[0]) },
                 ]}>
                   <img
@@ -594,6 +651,22 @@ export function PreviewPanel() {
                       <Download size={12} strokeWidth={2} /> 下载选中 ({selectedDownloads.size})
                     </button>
                   )}
+                  <button
+                    onClick={() => void handleImportSceneMedia(
+                      (selectedDownloads.size > 0
+                        ? imageList.filter((url) => selectedDownloads.has(url))
+                        : imageList
+                      ).map((url) => ({ url, type: 'IMAGE' as const })),
+                    )}
+                    disabled={!currentProject?.id || libraryImportBusy}
+                    style={{ ...btnDownload, opacity: currentProject?.id ? 1 : 0.5 }}
+                    title={currentProject?.id ? '导入项目库' : '请先选择项目'}
+                  >
+                    {libraryImportBusy
+                      ? <LoaderCircle size={12} className="is-spinning" />
+                      : <Library size={12} strokeWidth={2} />}
+                    {libraryImportDone ? '已导入' : libraryImportBusy ? '导入中...' : '导入项目库'}
+                  </button>
                 </div>
               </div>
             ) : (
@@ -721,7 +794,10 @@ export function PreviewPanel() {
                   maxSizeMB={imageParams.refImageSizeMB}
                   onUpload={(f) => uploadSceneRef(scene.id, 'image', 'image', f)}
                   onDelete={(id) => deleteSceneRef(scene.id, id)}
-                  onPickProjectOutput={() => setProjectOutputPickerOpen(true)}
+                  onPickProjectLibrary={() => setProjectLibraryPicker({
+                    type: 'image', purpose: 'image', remaining: refImageRemaining,
+                  })}
+                  onPickProjectOutput={() => setProjectOutputPicker({ type: 'image', purpose: 'image' })}
                   projectOutputDisabled={refImageRemaining === 0}
                 />
               </div>
@@ -766,6 +842,12 @@ export function PreviewPanel() {
               <ContextMenu items={[
                   { label: '预览', icon: <Eye size={13} strokeWidth={1.8} />, onClick: () => { /* video 已有 controls，点击即播放 */ } },
                   { label: '下载视频', icon: <Download size={13} strokeWidth={1.8} />, onClick: () => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`) },
+                  {
+                    label: '导入项目库',
+                    icon: <Library size={13} strokeWidth={1.8} />,
+                    disabled: !currentProject?.id || libraryImportBusy,
+                    onClick: () => void handleImportSceneMedia([{ url: scene.videoUrl!, type: 'VIDEO' }]),
+                  },
                 ]}>
                 <div>
                 <video
@@ -779,6 +861,17 @@ export function PreviewPanel() {
                 />
                 <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} {...ghostHover} style={btnDownload}>
                   <Download size={12} strokeWidth={2} /> 下载视频
+                </button>
+                <button
+                  onClick={() => void handleImportSceneMedia([{ url: scene.videoUrl!, type: 'VIDEO' }])}
+                  disabled={!currentProject?.id || libraryImportBusy}
+                  style={{ ...btnDownload, opacity: currentProject?.id ? 1 : 0.5 }}
+                  title={currentProject?.id ? '导入项目库' : '请先选择项目'}
+                >
+                  {libraryImportBusy
+                    ? <LoaderCircle size={12} className="is-spinning" />
+                    : <Library size={12} strokeWidth={2} />}
+                  {libraryImportDone ? '已导入' : libraryImportBusy ? '导入中...' : '导入项目库'}
                 </button>
                 </div>
                 </ContextMenu>
@@ -901,6 +994,14 @@ export function PreviewPanel() {
                 maxSizeMB={videoParams.refImageSizeMB}
                 onUpload={(f) => uploadSceneRef(scene.id, 'image', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
+                onPickProjectLibrary={() => setProjectLibraryPicker({
+                  type: 'image',
+                  purpose: 'video',
+                  remaining: Math.max(0, (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount)
+                    - refVImages.length),
+                })}
+                onPickProjectOutput={() => setProjectOutputPicker({ type: 'image', purpose: 'video' })}
+                projectOutputDisabled={refVImages.length >= (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount)}
                 disabled={useFirstFrame}
               />
               <ReferenceUploader
@@ -910,6 +1011,14 @@ export function PreviewPanel() {
                 maxSizeMB={videoParams.refVideoSizeMB}
                 onUpload={(f) => uploadSceneRef(scene.id, 'video', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
+                onPickProjectLibrary={() => setProjectLibraryPicker({
+                  type: 'video',
+                  purpose: 'video',
+                  remaining: Math.max(0, (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount)
+                    - refVideos.length),
+                })}
+                onPickProjectOutput={() => setProjectOutputPicker({ type: 'video', purpose: 'video' })}
+                projectOutputDisabled={refVideos.length >= (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount)}
                 disabled={useFirstFrame}
               />
               <ReferenceUploader
@@ -919,6 +1028,14 @@ export function PreviewPanel() {
                 maxSizeMB={videoParams.refAudioSizeMB}
                 onUpload={(f) => uploadSceneRef(scene.id, 'audio', 'video', f)}
                 onDelete={(id) => deleteSceneRef(scene.id, id)}
+                onPickProjectLibrary={() => setProjectLibraryPicker({
+                  type: 'audio',
+                  purpose: 'video',
+                  remaining: Math.max(0, (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount)
+                    - refAudios.length),
+                })}
+                onPickProjectOutput={() => setProjectOutputPicker({ type: 'audio', purpose: 'video' })}
+                projectOutputDisabled={refAudios.length >= (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount)}
                 disabled={useFirstFrame}
               />
             </div>
@@ -983,19 +1100,21 @@ export function PreviewPanel() {
         {activeTab === 'image' && (
           <div style={{ marginTop: 10 }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片关联资产</span>
-            {sceneImageAssets.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产</div>
+            {sceneImageGroups.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联图片资产组</div>
             ) : (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                {sceneImageAssets.map((a) => (
-                  <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                    {a.images[0] ? (
-                      <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                    ) : (
-                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/><path d="M10 7h4M7 10v4M17 10v4M10 17h4"/></svg></span>
+                {sceneImageGroups.map((binding) => (
+                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                    资产组 · {binding.media.length} 项
+                    {binding.stale && (
+                      <button
+                        onClick={() => void sceneApi.bindAssetGroup(selectedSceneId!, { groupId: binding.groupId, purpose: 'image' })
+                          .then(loadSceneAssets)}
+                        style={{ border: 'none', background: 'transparent', color: 'var(--color-error)', cursor: 'pointer', fontSize: 10 }}
+                      >已更新·刷新</button>
                     )}
-                    {a.name}
-                    <button onClick={() => void removeSceneAsset(a.id, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <button onClick={() => void removeSceneAsset(binding.groupId, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">×</button>
                   </span>
                 ))}
               </div>
@@ -1009,19 +1128,21 @@ export function PreviewPanel() {
         {activeTab === 'video' && (
           <div style={{ marginTop: 10 }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频关联资产</span>
-            {sceneVideoAssets.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产</div>
+            {sceneVideoGroups.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.6, marginTop: 6 }}>未关联视频资产组</div>
             ) : (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                {sceneVideoAssets.map((a) => (
-                  <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 4px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
-                    {a.images[0] ? (
-                      <img src={assetUrl(a.images[0].url)} alt="" style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }} />
-                    ) : (
-                      <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--color-surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/><path d="M10 7h4M7 10v4M17 10v4M10 17h4"/></svg></span>
+                {sceneVideoGroups.map((binding) => (
+                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                    资产组 · {binding.media.length} 项
+                    {binding.stale && (
+                      <button
+                        onClick={() => void sceneApi.bindAssetGroup(selectedSceneId!, { groupId: binding.groupId, purpose: 'video' })
+                          .then(loadSceneAssets)}
+                        style={{ border: 'none', background: 'transparent', color: 'var(--color-error)', cursor: 'pointer', fontSize: 10 }}
+                      >已更新·刷新</button>
                     )}
-                    {a.name}
-                    <button onClick={() => void removeSceneAsset(a.id, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <button onClick={() => void removeSceneAsset(binding.groupId, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">×</button>
                   </span>
                 ))}
               </div>
@@ -1033,14 +1154,51 @@ export function PreviewPanel() {
         )}
       </div>
       {assetPickerPurpose && (
-        <AssetLibraryPanel mode="pick" purpose={assetPickerPurpose} onClose={() => { setAssetPickerPurpose(null); void loadSceneAssets(); }} />
+        <AssetGroupPickerModal
+          open
+          projectId={currentProject?.id}
+          purpose={assetPickerPurpose}
+          selectedIds={sceneGroupBindings
+            .filter((binding) => binding.purpose === assetPickerPurpose)
+            .map((binding) => binding.groupId)}
+          onClose={() => setAssetPickerPurpose(null)}
+          onConfirm={(groupIds) => bindSceneAssetGroups(groupIds, assetPickerPurpose)}
+        />
       )}
+      {projectOutputPicker && (
       <ProjectOutputImagePickerModal
-        open={projectOutputPickerOpen}
+        open
+        mediaType={projectOutputPicker.type}
         projectId={currentProject?.id}
-        existingUrls={refImages.map((ref) => ref.url)}
-        remaining={refImageRemaining}
-        onClose={() => setProjectOutputPickerOpen(false)}
+        existingUrls={
+          projectOutputPicker.type === 'image' && projectOutputPicker.purpose === 'image'
+            ? refImages.map((ref) => ref.url)
+            : projectOutputPicker.type === 'image'
+              ? refVImages.map((ref) => ref.url)
+              : projectOutputPicker.type === 'video'
+                ? refVideos.map((ref) => ref.url)
+                : refAudios.map((ref) => ref.url)
+        }
+        remaining={
+          projectOutputPicker.type === 'image' && projectOutputPicker.purpose === 'image'
+            ? refImageRemaining
+            : Math.max(0, projectOutputPicker.type === 'video'
+              ? (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount) - refVideos.length
+              : projectOutputPicker.type === 'audio'
+                ? (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount) - refAudios.length
+                : (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount) - refVImages.length)
+        }
+        onClose={() => setProjectOutputPicker(null)}
+        onConfirm={(references) => linkSceneRefs(scene.id, references)}
+      />
+      )}
+      <ProjectLibraryPickerModal
+        open={!!projectLibraryPicker}
+        projectId={currentProject?.id}
+        type={projectLibraryPicker?.type ?? 'image'}
+        purpose={projectLibraryPicker?.purpose ?? 'image'}
+        maxSelectable={projectLibraryPicker?.remaining}
+        onClose={() => setProjectLibraryPicker(null)}
         onConfirm={(references) => linkSceneRefs(scene.id, references)}
       />
 

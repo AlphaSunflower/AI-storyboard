@@ -4,6 +4,7 @@ import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.repository.LibraryRepository;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -89,10 +91,107 @@ class AssetCatalogServiceImplTest {
         verify(repository).createAnalysisTask("a1");
     }
 
+    @Test
+    void globalImageMediaRegistrationDoesNotQueueAnalysis() {
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
+        when(repository.upsertBlob(anyString(), anyString(), anyString(), anyLong(), any(), any(), any(), any()))
+                .thenReturn("b1");
+        when(repository.upsertMedia(anyString(), anyString(), anyInt(), any(), any(Boolean.class), any()))
+                .thenReturn("m1");
+        when(repository.insertAsset(
+                anyString(), any(), nullable(String.class), any(), nullable(com.storyboard.asset.client.AssetContracts.AiAssetKind.class),
+                anyString(), nullable(String.class), nullable(String.class), nullable(String.class)))
+                .thenReturn("a1");
+
+        service.registerMedia("u1", new AssetCatalogService.MediaRegistration(
+                null, AssetScope.GLOBAL, AssetType.IMAGE, "image", null, "upload", null,
+                "images/a.png", "a".repeat(64), "image/png", 10, 1, 1, null,
+                MediaType.IMAGE, MediaRole.REFERENCE, true, null, 0), "idem-global");
+
+        verify(repository, never()).createAnalysisTask(anyString());
+    }
+
+    @Test
+    void purgeUnlinksProjectsAndMarksAssetPurged() {
+        when(repository.findAsset("u1", "a1"))
+                .thenReturn(Optional.of(asset("a1", com.storyboard.asset.client.AssetContracts.AssetStatus.TRASHED)));
+        when(repository.hasActiveReferences("a1")).thenReturn(false);
+        when(repository.markPurgePending("u1", "a1")).thenReturn(true);
+
+        service.purge("u1", "a1");
+
+        verify(repository).unlinkAllProjects("a1");
+        verify(repository).markPurgePending("u1", "a1");
+        verify(repository).markPurged("a1");
+    }
+
+    @Test
+    void purgeKeepsReferencedAssetBlocked() {
+        when(repository.findAsset("u1", "a1"))
+                .thenReturn(Optional.of(asset("a1", com.storyboard.asset.client.AssetContracts.AssetStatus.TRASHED)));
+        when(repository.hasActiveReferences("a1")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.purge("u1", "a1"))
+                .isInstanceOf(com.storyboard.common.BusinessException.class);
+
+        verify(repository).markPurgeBlocked("a1");
+        verify(repository, never()).markPurgePending(anyString(), anyString());
+        verify(repository, never()).markPurged(anyString());
+    }
+
+    @Test
+    void bulkPromoteMovesProjectAssetsToGlobalAndClearsFolderMappings() {
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
+        when(repository.findAsset("u1", "a2")).thenReturn(Optional.of(asset("a2")));
+        when(repository.promote("u1", "a1", 1)).thenReturn(true);
+        when(repository.promote("u1", "a2", 1)).thenReturn(true);
+
+        var result = service.bulkPromote("u1", List.of("a1", "a2"));
+
+        assertThat(result.updatedIds()).containsExactly("a1", "a2");
+        verify(repository).removeAssetFolderMappings("u1", "a1");
+        verify(repository).removeAssetFolderMappings("u1", "a2");
+        verify(repository).unlinkAllProjects("a1");
+        verify(repository).unlinkAllProjects("a2");
+    }
+
+    @Test
+    void bulkTrashValidatesEveryAssetBeforeChangingAny() {
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
+        when(repository.findAsset("u1", "missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.bulkTrash("u1", List.of("a1", "missing")))
+                .isInstanceOf(com.storyboard.common.BusinessException.class);
+
+        verify(repository, never()).trash(anyString(), anyString(), anyLong(), any());
+    }
+
+    @Test
+    void duplicateCopiesAssetMediaTagsAndProjectLinks() {
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
+        when(repository.duplicateAsset(any(), anyString(), anyString())).thenReturn("copy1");
+
+        var result = service.duplicate("u1", new DuplicateAssetsRequest(
+                "u1", List.of("a1"), null));
+
+        assertThat(result.updatedIds()).containsExactly("copy1");
+        verify(repository).copyMediaLinks("a1", "copy1");
+        verify(repository).copyAssetTags("a1", "copy1");
+        verify(repository).copyProjectLinks("a1", "copy1", "u1");
+    }
+
     private static AssetSummary asset(String id) {
+        return asset(id, com.storyboard.asset.client.AssetContracts.AssetStatus.ACTIVE);
+    }
+
+    private static AssetSummary asset(
+            String id,
+            com.storyboard.asset.client.AssetContracts.AssetStatus status
+    ) {
         return new AssetSummary(
                 id, "u1", AssetScope.PROJECT, "p1", AssetType.IMAGE, null,
-                "demo", null, null, false, com.storyboard.asset.client.AssetContracts.AssetStatus.ACTIVE,
+                "demo", null, null, false,
+                com.storyboard.asset.client.AssetContracts.MetadataState.NONE, status,
                 null, 1, List.of(), List.of(), "upload", null,
                 OffsetDateTime.now(), OffsetDateTime.now());
     }

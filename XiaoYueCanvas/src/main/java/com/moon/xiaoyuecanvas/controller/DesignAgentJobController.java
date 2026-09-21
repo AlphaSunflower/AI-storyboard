@@ -3,10 +3,13 @@ package com.moon.xiaoyuecanvas.controller;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.xiaoyuecanvas.dto.request.JobRequest;
+import com.moon.xiaoyuecanvas.dto.request.CanvasLibraryImportRequest;
 import com.moon.xiaoyuecanvas.dto.response.CapabilityDescriptor;
 import com.moon.xiaoyuecanvas.dto.response.JobSubmitResponse;
 import com.moon.xiaoyuecanvas.entity.CanvasAsset;
+import com.moon.xiaoyuecanvas.dto.response.CanvasProjectLibraryResponse;
 import com.moon.xiaoyuecanvas.service.CanvasAssetService;
+import com.moon.xiaoyuecanvas.service.CanvasProjectLibraryService;
 import com.moon.xiaoyuecanvas.service.DesignJobService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +43,7 @@ public class DesignAgentJobController {
 
     private final DesignJobService designJobService;
     private final CanvasAssetService canvasAssetService;
+    private final CanvasProjectLibraryService canvasProjectLibraryService;
     private final FileStorageService fileStorageService;
 
     @GetMapping("/health")
@@ -153,5 +157,34 @@ public class DesignAgentJobController {
     public List<CanvasAsset> listCanvasAssets(@RequestAttribute("userId") String userId,
                                               @PathVariable String canvasId) {
         return canvasAssetService.list(userId, canvasId);
+    }
+
+    @GetMapping("/project-library")
+    public CanvasProjectLibraryResponse projectLibrary(
+            @RequestAttribute("userId") String userId,
+            @RequestParam String projectId,
+            @RequestParam(required = false) com.storyboard.asset.client.AssetContracts.AssetScope scope,
+            @RequestParam(required = false) String folderId,
+            @RequestParam(required = false) String type
+    ) {
+        return canvasProjectLibraryService.load(userId, projectId, scope, folderId, type);
+    }
+
+    @PostMapping("/project-library/import")
+    public CanvasAsset importProjectLibraryAsset(
+            @RequestAttribute("userId") String userId,
+            @Valid @RequestBody CanvasLibraryImportRequest request
+    ) {
+        return canvasProjectLibraryService.importAsset(
+                userId, request.canvasId(), request.libraryAssetId(), request.producerNodeId());
+    }
+
+    @PostMapping("/project-library/import-group")
+    public List<CanvasAsset> importProjectLibraryGroup(
+            @RequestAttribute("userId") String userId,
+            @Valid @RequestBody CanvasLibraryImportRequest request
+    ) {
+        return canvasProjectLibraryService.importGroup(
+                userId, request.canvasId(), request.libraryAssetId(), request.producerNodeId());
     }
 }

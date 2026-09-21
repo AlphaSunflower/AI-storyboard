@@ -17,7 +17,7 @@ import { refreshMediaBudget, setMediaBudgetQuality } from '../utils/mediaBudget'
 import { CanvasEdge } from './CanvasEdge';
 import { CanvasContextMenu, type CanvasContextTarget } from './CanvasContextMenu';
 import { ConnectionNodeMenu } from './ConnectionNodeMenu';
-import { AssetDrawer, ASSET_DRAG_MIME } from './AssetDrawer';
+import { AssetDrawer, ASSET_DRAG_MIME, LIBRARY_ASSET_DRAG_MIME } from './AssetDrawer';
 import { MediaNode } from './MediaNode';
 import { VideoNode } from './VideoNode';
 import { NodeLibrary } from './NodeLibrary';
@@ -26,7 +26,8 @@ import { TemplatePanel } from './TemplatePanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
 import { CanvasUiProvider } from '../canvas/CanvasUiContext';
 import { CanvasNodeDisplayProvider, shouldCompactNodeKind, useCanvasNodeDisplay, type NodeDisplayMode } from '../canvas/CanvasNodeDisplayContext';
-import { createPersistedCanvasAsset, persistExistingCanvasAsset } from '../services/canvasMedia';
+import { cacheCanvasAssetBlob, createPersistedCanvasAsset, persistExistingCanvasAsset } from '../services/canvasMedia';
+import { importCanvasLibraryAsset, importCanvasLibraryGroup } from '../services/canvasProjectLibrary';
 import { canvasCommandService } from '../canvas/canvasCommandService';
 
 const COMPACT_NODE_WIDTH = 156;
@@ -463,25 +464,74 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     notify(errors.length ? `已导入 ${completed.length} 个素材，${errors.length} 个失败：${errors[0]}` : `已导入 ${completed.length} 个真实素材`);
   }, [addImportedImages, addImportedVideos, canvasId, flowStore, notify, projectId, scheduleMediaViewport, screenToFlowPosition, upsertAssets]);
 
+  const addPersistedAssetAt = useCallback((persisted: PersistedAsset, position: { x: number; y: number }) => {
+    const item = {
+      assetId: persisted.id,
+      label: persisted.name.replace(/\.[^.]+$/, ''),
+      size: persisted.kind === 'video' ? getVideoNodeSize(persisted.width, persisted.height) : getMediaNodeSize(persisted.width, persisted.height),
+      position,
+      kind: persisted.kind,
+    };
+    upsertAssets([persisted]);
+    if (persisted.kind === 'image') addImportedImages([item]);
+    else addImportedVideos([item]);
+  }, [addImportedImages, addImportedVideos, upsertAssets]);
+
   const addAssetAt = useCallback(async (assetId: string, position: { x: number; y: number }) => {
     try {
       const asset = await getAsset(assetId);
       if (!asset) return;
       const persisted = await persistExistingCanvasAsset(asset, '');
-      const item = {
-        assetId: persisted.id,
-        label: persisted.name.replace(/\.[^.]+$/, ''),
-        size: persisted.kind === 'video' ? getVideoNodeSize(persisted.width, persisted.height) : getMediaNodeSize(persisted.width, persisted.height),
-        position,
-        kind: persisted.kind,
-      };
-      upsertAssets([persisted]);
-      if (persisted.kind === 'image') addImportedImages([item]);
-      else addImportedVideos([item]);
+      addPersistedAssetAt(persisted, position);
     } catch (error) {
       notify(error instanceof Error ? error.message : '素材写入 MinIO 失败');
     }
-  }, [addImportedImages, addImportedVideos, notify, upsertAssets]);
+  }, [addPersistedAssetAt, notify]);
+
+  const addLibraryAssetAt = useCallback(async (
+    libraryAssetId: string,
+    position: { x: number; y: number },
+  ) => {
+    try {
+      const descriptor = await importCanvasLibraryAsset(canvasId, libraryAssetId);
+      const persisted = await cacheCanvasAssetBlob(descriptor);
+      addPersistedAssetAt(persisted, position);
+      notify('项目库素材已导入画布');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '项目库素材导入失败');
+    }
+  }, [addPersistedAssetAt, canvasId, notify]);
+
+  const addLibraryGroupAt = useCallback(async (
+    groupAssetId: string,
+    position: { x: number; y: number },
+  ) => {
+    try {
+      const descriptors = await importCanvasLibraryGroup(canvasId, groupAssetId);
+      const loaded: Array<{ persisted: PersistedAsset; index: number }> = [];
+      const errors: string[] = [];
+      await processWithConcurrency(descriptors, 2, async (descriptor, index) => {
+        try {
+          loaded.push({ persisted: await cacheCanvasAssetBlob(descriptor), index });
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : '资产集文件读取失败');
+        }
+      });
+      loaded.sort((left, right) => left.index - right.index);
+      const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(loaded.length))));
+      loaded.forEach(({ persisted }, order) => {
+        addPersistedAssetAt(persisted, {
+          x: position.x + (order % columns) * 430 - ((columns - 1) * 430) / 2,
+          y: position.y + Math.floor(order / columns) * 390,
+        });
+      });
+      notify(errors.length
+        ? `资产集已导入 ${loaded.length} 个文件，${errors.length} 个失败：${errors[0]}`
+        : `资产集已导入 ${loaded.length} 个文件`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '资产集导入失败');
+    }
+  }, [addPersistedAssetAt, canvasId, notify]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -536,9 +586,41 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   return (
     <main className={`canvas-workspace ${isImporting ? 'is-importing-media' : ''} ${isFileDragActive ? 'is-file-drag-active' : ''} ${isViewportMoving ? 'is-viewport-moving' : ''} ${selectedNodes.length > 1 ? 'has-multi-selection' : ''}`}
       onDragEnter={(event) => { if (event.dataTransfer.types.includes('Files')) { dragDepthRef.current += 1; setIsFileDragActive(true); } }}
-      onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+      onDragOver={(event) => {
+        const types = event.dataTransfer.types;
+        if (types.includes('Files') || types.includes(LIBRARY_ASSET_DRAG_MIME) || types.includes(ASSET_DRAG_MIME)) {
+          event.preventDefault();
+        }
+      }}
       onDragLeave={() => { dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setIsFileDragActive(false); }}
-      onDrop={(event) => { event.preventDefault(); dragDepthRef.current = 0; setIsFileDragActive(false); const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME); if (assetId) { void addAssetAt(assetId, screenToFlowPosition({ x: event.clientX, y: event.clientY })); return; } if (event.dataTransfer.files.length) void importMedia(event.dataTransfer.files, screenToFlowPosition({ x: event.clientX, y: event.clientY })); }}>
+      onDrop={(event) => {
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setIsFileDragActive(false);
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const libraryPayload = event.dataTransfer.getData(LIBRARY_ASSET_DRAG_MIME);
+        if (libraryPayload) {
+          try {
+            const parsed = JSON.parse(libraryPayload) as { libraryAssetId?: string; type?: string };
+            if (parsed.libraryAssetId) {
+              if (parsed.type === 'group') {
+                void addLibraryGroupAt(parsed.libraryAssetId, position);
+              } else {
+                void addLibraryAssetAt(parsed.libraryAssetId, position);
+              }
+              return;
+            }
+          } catch {
+            // Ignore malformed cross-window drag payload and fall through.
+          }
+        }
+        const assetId = event.dataTransfer.getData(ASSET_DRAG_MIME);
+        if (assetId) {
+          void addAssetAt(assetId, position);
+          return;
+        }
+        if (event.dataTransfer.files.length) void importMedia(event.dataTransfer.files, position);
+      }}>
       <input ref={fileInputRef} className="canvas-file-input" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" multiple onChange={(event) => { if (event.target.files) void importMedia(event.target.files); event.target.value = ''; }} />
       <CanvasNodeDisplayProvider mode={nodeDisplayMode} expandedNodeIds={expandedNodeIds} minimizeNode={minimizeNode}>
       <CanvasUiProvider openInspector={onOpenInspector}>
@@ -679,7 +761,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /> 新建项目</button>
           </div>}
         </Panel>
-        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="资产库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
+        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="项目库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
         <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel onOpenRecords={() => setPanel('history')} /></Panel>
         <Controls
           className="canvas-controls canvas-view-bar"
@@ -718,7 +800,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       </ReactFlow>
       </CanvasUiProvider>
       </CanvasNodeDisplayProvider>
-      {assetDrawerOpen && <AssetDrawer projectId={projectId} onClose={() => setAssetDrawerOpen(false)} />}
+      {assetDrawerOpen && <AssetDrawer projectId={projectId} canvasId={canvasId} onClose={() => setAssetDrawerOpen(false)} />}
       {panel === 'nodes' && <NodeLibrary onClose={() => setPanel(null)} onImport={() => fileInputRef.current?.click()} />}
       {panel === 'templates' && <TemplatePanel onClose={() => setPanel(null)} />}
       {panel === 'history' && <GenerationRecordsPanel onClose={() => setPanel(null)} />}

@@ -188,6 +188,11 @@ interface AgentState {
   clearPickedAssetIds: () => void;
   setPickedAssetIds: (ids: string[]) => void;
 
+  pickedReferenceVideos: string[];
+  pickedReferenceAudios: string[];
+  setPickedReferenceMedia: (videos: string[], audios: string[]) => void;
+  clearPickedReferenceMedia: () => void;
+
   // 互斥标志（会话级，刷新即恢复）
   agentGeneratedScenes: boolean;
   setAgentGeneratedScenes: (v: boolean) => void;
@@ -202,6 +207,9 @@ interface AgentState {
     picUrls?: string[];
     assetIds?: string[];
     assetGroupIds?: string[];
+    assetGroupSnapshotIds?: string[];
+    referenceVideos?: string[];
+    referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
   }) => Promise<void>;
@@ -600,6 +608,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   removePickedAssetId: (id) => set((s) => ({ pickedAssetIds: s.pickedAssetIds.filter((a) => a !== id) })),
   clearPickedAssetIds: () => set({ pickedAssetIds: [] }),
   setPickedAssetIds: (ids) => set(() => ({ pickedAssetIds: [...new Set(ids)] })),
+  pickedReferenceVideos: [],
+  pickedReferenceAudios: [],
+  setPickedReferenceMedia: (videos, audios) => set({
+    pickedReferenceVideos: [...new Set(videos)],
+    pickedReferenceAudios: [...new Set(audios)],
+  }),
+  clearPickedReferenceMedia: () => set({ pickedReferenceVideos: [], pickedReferenceAudios: [] }),
 
   uploadRefImage: async (file, purpose?, kind?) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined, purpose, kind);
@@ -678,6 +693,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     picUrls?: string[];
     assetIds?: string[];
     assetGroupIds?: string[];
+    assetGroupSnapshotIds?: string[];
+    referenceVideos?: string[];
+    referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
   }) => {
@@ -699,6 +717,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
     // 不先存会导致首条消息 picUrls 丢失（首会话上传图「说话后被吞」）
     const refBefore = get().refImageUrls.map((u) => u);
+    const referenceVideosBefore = get().pickedReferenceVideos.map((u) => u);
+    const referenceAudiosBefore = get().pickedReferenceAudios.map((u) => u);
     // 同样的坑：createConversation → selectConversation 会清空 pickedAssetIds，必须先快照
     const assetIdsBefore = get().pickedAssetIds.map((id) => id);
     const requestPicUrls = (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
@@ -1051,7 +1071,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, requestAssetIds, opts?.assetGroupIds, signal, { ...opts, canvasContext });
+      }, requestAssetIds, opts?.assetGroupIds, signal, {
+        ...opts,
+        canvasContext,
+        referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
+        referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
+      });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {

@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
@@ -427,9 +428,11 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @Override
     public void exitCanvasMode(String userId, String conversationId) {
-        AgentConversation conversation = getOwnedConversation(userId, conversationId);
-        conversation.setCanvasContext(null);
-        conversationMapper.updateById(conversation);
+        getOwnedConversation(userId, conversationId);
+        conversationMapper.update(null, new UpdateWrapper<AgentConversation>()
+                .eq("id", conversationId)
+                .set("canvas_context", null)
+                .set("updated_at", OffsetDateTime.now()));
         log.info("已离开画布编辑模式: conversationId={}", conversationId);
     }
 
@@ -526,6 +529,15 @@ public class AgentChatServiceImpl implements AgentChatService {
     public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
                               java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
                               boolean cancelActiveTasks, CanvasSessionContext canvasContext) {
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, routingHint,
+                cancelActiveTasks, canvasContext, java.util.List.of(), java.util.List.of());
+    }
+
+    @Override
+    public void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
+                              java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
+                              boolean cancelActiveTasks, CanvasSessionContext canvasContext,
+                              java.util.List<String> referenceVideos, java.util.List<String> referenceAudios) {
         if (content == null || content.isBlank()) {
             sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
             emitter.complete();
@@ -589,7 +601,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         CompletableFuture.runAsync(() -> {
             try {
                 AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint,
-                        cancelActiveTasks, effectiveCanvasContext, emitter);
+                        cancelActiveTasks, effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
                 // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）；
                 // HITL 暂停已由 runHITLStage 落库 assistant 消息，不重复插入，仅补全 trace/reasoning 到该行 metadata
                 if (turn != null) {

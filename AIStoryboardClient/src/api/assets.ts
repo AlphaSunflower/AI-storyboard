@@ -29,7 +29,7 @@ export interface SceneAssets {
   videoAssets: Asset[];
 }
 
-export type SceneMaterialSource = 'output' | 'scene_image' | 'group_snapshot';
+export type SceneMaterialSource = 'output' | 'scene_image' | 'group_snapshot' | 'library_asset';
 
 /** 分镜素材选择器提交的产出素材或当前分镜图片引用。 */
 export interface SceneMaterialReferenceInput {
@@ -39,6 +39,8 @@ export interface SceneMaterialReferenceInput {
   role: 'REFERENCE';
   sourceType: SceneMaterialSource;
   sourceId: string;
+  /** 项目库媒体引用；生成时由后端换取当前有效地址。 */
+  mediaId?: string;
   sourceConversationId?: string | null;
 }
 

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -41,6 +42,24 @@ class VideoGenerationServiceImplReferenceTest {
                 "http://localhost/api/files/images/source.png", "image");
 
         assertEquals("mm_file://api-file", resolved);
+    }
+
+    @Test
+    void uploadsSignedLibraryMediaReference() {
+        VideoGenerationServiceImpl service = service();
+        String signedUrl = "/api/library/media/media-1/content?token=1789980511.signature";
+        doReturn(new byte[]{4, 5, 6})
+                .when(service)
+                .downloadBytes("http://localhost:8085" + signedUrl);
+        doReturn("mm_file://library-file").when(service)
+                .uploadReferenceToGateway(anyString(), any(byte[].class));
+
+        String resolved = service.resolveReferenceUrl(signedUrl, "image");
+
+        assertEquals("mm_file://library-file", resolved);
+        verify(service).uploadReferenceToGateway(
+                argThat(filename -> filename.endsWith(".png")),
+                aryEq(new byte[]{4, 5, 6}));
     }
 
     private static VideoGenerationServiceImpl service() {

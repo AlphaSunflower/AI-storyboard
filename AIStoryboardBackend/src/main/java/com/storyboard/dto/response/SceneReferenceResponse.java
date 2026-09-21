@@ -11,7 +11,23 @@ public record SceneReferenceResponse(
     String role,
     String sourceType,
     String sourceId,
+    String mediaId,
     String sourceConversationId,
     String fileName,
     Long fileSize
-) {}
+) {
+    public SceneReferenceResponse(
+            String id,
+            String type,
+            String purpose,
+            String url,
+            String role,
+            String sourceType,
+            String sourceId,
+            String sourceConversationId,
+            String fileName,
+            Long fileSize
+    ) {
+        this(id, type, purpose, url, role, sourceType, sourceId, null, sourceConversationId, fileName, fileSize);
+    }
+}

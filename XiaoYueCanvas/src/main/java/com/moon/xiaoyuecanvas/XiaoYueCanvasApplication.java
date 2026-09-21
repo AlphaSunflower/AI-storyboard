@@ -6,6 +6,7 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Morrow 设计助理作业执行服务（XiaoYueCanvas job-service）。
@@ -18,6 +19,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  */
 @SpringBootApplication(scanBasePackages = {"com.moon.xiaoyuecanvas", "com.moon.moonagent", "com.storyboard.common"})
 @MapperScan({"com.moon.moonagent.mapper", "com.moon.xiaoyuecanvas.mapper"})
+@EnableScheduling
 @EnableConfigurationProperties({AiConfigProperties.class, AiConfigProperties.Gateway.class, AgentAiConfigProperties.class})
 public class XiaoYueCanvasApplication {
 

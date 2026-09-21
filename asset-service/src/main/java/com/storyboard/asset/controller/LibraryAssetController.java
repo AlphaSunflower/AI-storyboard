@@ -5,7 +5,10 @@ import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.AssignTagsRequest;
+import com.storyboard.asset.client.AssetContracts.BulkAssetIdsRequest;
+import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.LinkProjectRequest;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.PromoteRequest;
@@ -14,6 +17,7 @@ import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.TagService;
 import com.storyboard.asset.service.MediaUploadService;
+import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
 import com.storyboard.common.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
@@ -53,6 +57,7 @@ public class LibraryAssetController {
             Authentication auth,
             @RequestParam(required = false) AssetScope scope,
             @RequestParam(required = false) String projectId,
+            @RequestParam(required = false) String folderId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) AssetType type,
             @RequestParam(required = false) List<String> tagIds,
@@ -62,12 +67,20 @@ public class LibraryAssetController {
             @RequestParam(defaultValue = "40") int size
     ) {
         return ApiResponse.ok(catalogService.list(
-                auth.getName(), scope, projectId, q, type, tagIds, tagMode, deleted, page, size));
+                auth.getName(), scope, projectId, folderId, q, type, tagIds, tagMode, deleted, page, size));
     }
 
     @GetMapping("/{id}")
     public ApiResponse<AssetDetail> get(Authentication auth, @PathVariable String id) {
         return ApiResponse.ok(catalogService.get(auth.getName(), id));
+    }
+
+    @GetMapping("/analysis-tasks")
+    public ApiResponse<List<AnalysisTaskStatus>> analysisTasks(
+            Authentication auth,
+            @RequestParam(required = false) List<String> assetIds
+    ) {
+        return ApiResponse.ok(catalogService.listAnalysisTaskStatuses(auth.getName(), assetIds));
     }
 
     @PostMapping
@@ -95,6 +108,30 @@ public class LibraryAssetController {
             @RequestBody PromoteRequest request
     ) {
         return ApiResponse.ok(catalogService.promote(auth.getName(), id, request.expectedVersion()));
+    }
+
+    @PostMapping("/bulk/trash")
+    public ApiResponse<BulkAssetOperationResult> bulkTrash(
+            Authentication auth,
+            @RequestBody BulkAssetIdsRequest request
+    ) {
+        return ApiResponse.ok(catalogService.bulkTrash(auth.getName(), request.assetIds()));
+    }
+
+    @PostMapping("/bulk/promote")
+    public ApiResponse<BulkAssetOperationResult> bulkPromote(
+            Authentication auth,
+            @RequestBody BulkAssetIdsRequest request
+    ) {
+        return ApiResponse.ok(catalogService.bulkPromote(auth.getName(), request.assetIds()));
+    }
+
+    @PostMapping("/bulk/duplicate")
+    public ApiResponse<BulkAssetOperationResult> duplicate(
+            Authentication auth,
+            @RequestBody DuplicateAssetsRequest request
+    ) {
+        return ApiResponse.ok(catalogService.duplicate(auth.getName(), request));
     }
 
     @PostMapping("/{id}/projects")

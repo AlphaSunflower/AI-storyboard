@@ -1,6 +1,7 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
+import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
 import com.moon.moonagent.dto.request.AgentSendMessageRequest;
@@ -9,6 +10,7 @@ import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
+import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.asset.client.AssetClient;
 import com.storyboard.asset.client.AssetContracts;
@@ -23,6 +25,7 @@ import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
+import com.moon.moonagent.service.ConversationAssetGroupService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -55,6 +58,7 @@ public class AgentConversationController {
     private final ProjectOutputMaterialService projectOutputMaterialService;
     private final AgentAiConfigProperties agentConfig;
     private final AssetClient assetClient;
+    private final ConversationAssetGroupService conversationAssetGroupService;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -69,6 +73,34 @@ public class AgentConversationController {
             Authentication auth, @RequestParam String projectId) {
         return ApiResponse.ok(chatService.listConversations(auth.getName(), projectId).stream()
                 .map(AgentConversationController::toVO).toList());
+    }
+
+    @GetMapping("/conversations/{id}/asset-groups")
+    public ApiResponse<List<ConversationAssetGroupVO>> listAssetGroups(
+            Authentication auth,
+            @PathVariable String id
+    ) {
+        return ApiResponse.ok(conversationAssetGroupService.list(auth.getName(), id));
+    }
+
+    @PostMapping("/conversations/{id}/asset-groups")
+    public ApiResponse<ConversationAssetGroupVO> attachAssetGroup(
+            Authentication auth,
+            @PathVariable String id,
+            @Valid @RequestBody AgentAssetGroupBindingRequest request
+    ) {
+        return ApiResponse.ok(conversationAssetGroupService.attach(
+                auth.getName(), id, request.groupId()));
+    }
+
+    @DeleteMapping("/conversations/{id}/asset-groups/{groupId}")
+    public ApiResponse<Void> removeAssetGroup(
+            Authentication auth,
+            @PathVariable String id,
+            @PathVariable String groupId
+    ) {
+        conversationAssetGroupService.remove(auth.getName(), id, groupId);
+        return ApiResponse.ok("已移除资产组", null);
     }
 
     /** 会话详情（含消息列表） */
@@ -194,29 +226,72 @@ public class AgentConversationController {
         }
         SseEmitter emitter = createSseEmitter();
         java.util.List<String> resolvedPicUrls = new java.util.ArrayList<>(picUrls(request));
-        if (request.assetGroupIds() != null && !request.assetGroupIds().isEmpty()) {
-            for (String groupId : request.assetGroupIds()) {
-                if (groupId == null || groupId.isBlank()) continue;
+        java.util.List<String> resolvedVideos = new java.util.ArrayList<>();
+        java.util.List<String> resolvedAudios = new java.util.ArrayList<>();
+        if (request.referenceVideos() != null) resolvedVideos.addAll(request.referenceVideos());
+        if (request.referenceAudios() != null) resolvedAudios.addAll(request.referenceAudios());
+        for (ConversationAssetGroupVO group : conversationAssetGroupService.list(auth.getName(), id)) {
+            for (ConversationAssetGroupVO.SnapshotMediaVO media : group.media()) {
+                if (media.contentUrl() == null || media.contentUrl().isBlank()) continue;
+                switch (media.type()) {
+                    case "IMAGE" -> resolvedPicUrls.add(media.contentUrl());
+                    case "VIDEO" -> resolvedVideos.add(media.contentUrl());
+                    case "AUDIO" -> resolvedAudios.add(media.contentUrl());
+                    default -> { }
+                }
+            }
+        }
+        if (request.assetGroupSnapshotIds() != null && !request.assetGroupSnapshotIds().isEmpty()) {
+            for (String snapshotId : request.assetGroupSnapshotIds()) {
+                if (snapshotId == null || snapshotId.isBlank()) continue;
                 AssetGroupSnapshot snapshot = assetClient.getSnapshot(
-                        groupId, auth.getName(), java.util.UUID.randomUUID().toString());
+                        snapshotId, auth.getName(), java.util.UUID.randomUUID().toString());
                 if (snapshot == null || snapshot.items() == null) continue;
                 snapshot.items().stream()
                         .filter(item -> "IMAGE".equals(item.type().name()))
                         .map(AssetContracts.SnapshotItem::contentUrl)
                         .filter(url -> url != null && !url.isBlank())
                         .forEach(resolvedPicUrls::add);
+                snapshot.items().stream()
+                        .filter(item -> "VIDEO".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedVideos::add);
+                snapshot.items().stream()
+                        .filter(item -> "AUDIO".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedAudios::add);
             }
         }
-        String routingHint = request.assetGroupIds() != null && !request.assetGroupIds().isEmpty()
+        resolvedPicUrls = resolvedPicUrls.stream().distinct().toList();
+        resolvedVideos = resolvedVideos.stream().distinct().toList();
+        resolvedAudios = resolvedAudios.stream().distinct().toList();
+        String routingHint = (request.assetGroupIds() != null && !request.assetGroupIds().isEmpty())
+                || (request.assetGroupSnapshotIds() != null && !request.assetGroupSnapshotIds().isEmpty())
                 ? "intent-video" : request.routingHint();
         if (request.canvasContext() == null) {
-            chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                    request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                    routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
+            if (resolvedVideos.isEmpty() && resolvedAudios.isEmpty()) {
+                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
+            } else {
+                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), null,
+                        resolvedVideos, resolvedAudios);
+            }
         } else {
-            chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                    request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                    routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext());
+            if (resolvedVideos.isEmpty() && resolvedAudios.isEmpty()) {
+                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext());
+            } else {
+                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
+                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
+                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext(),
+                        resolvedVideos, resolvedAudios);
+            }
         }
         return emitter;
     }

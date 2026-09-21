@@ -13,6 +13,7 @@ import com.moon.moonagent.ai.video.ReferenceImage;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -40,6 +41,8 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     private final VideoPollExecutor videoPollExecutor;
     private final FileStorageService fileStorageService;
     private final SceneGenerationBridge sceneBridge;
+    @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
+    private String assetServiceBaseUrl = "http://localhost:8085";
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -222,8 +225,28 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     }
 
     private String extractFilename(String urlPath) {
-        int idx = urlPath.lastIndexOf('/');
-        return idx >= 0 ? urlPath.substring(idx + 1) : urlPath;
+        String path = urlPath;
+        int query = path.indexOf('?');
+        if (query >= 0) path = path.substring(0, query);
+        int fragment = path.indexOf('#');
+        if (fragment >= 0) path = path.substring(0, fragment);
+        int idx = path.lastIndexOf('/');
+        return idx >= 0 ? path.substring(idx + 1) : path;
+    }
+
+    private String referenceFilename(String urlPath, String type) {
+        String filename = extractFilename(urlPath);
+        if (urlPath.startsWith("/api/library/media/")
+                || filename.isBlank()
+                || "content".equals(filename)) {
+            String extension = switch (type) {
+                case "video" -> "mp4";
+                case "audio" -> "mp3";
+                default -> "png";
+            };
+            return "reference-" + UUID.randomUUID() + "." + extension;
+        }
+        return filename;
     }
 
     /** 参考素材转换：已内联/绝对 URL 原样返回；`/api/files/**` 相对路径经主后端绝对 URL 拉取 → 网关上传换 mm_file://；
@@ -267,9 +290,14 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
         if (urlPath == null || urlPath.isBlank()) return null;
         if (urlPath.startsWith("mm_file://")) return urlPath;
         if (urlPath.startsWith("data:")) return resolveDataUri(urlPath);
-        String filename = extractFilename(urlPath);
+        String filename = referenceFilename(urlPath, type);
         byte[] bytes;
-        if (urlPath.startsWith("http://") || urlPath.startsWith("https://")) {
+        if (urlPath.startsWith("/api/library/media/")) {
+            bytes = downloadBytes(assetServiceBaseUrl + urlPath);
+            if (bytes == null) {
+                throw new BusinessException(50201, "参考素材下载失败: " + urlPath);
+            }
+        } else if (urlPath.startsWith("http://") || urlPath.startsWith("https://")) {
             bytes = downloadBytes(urlPath);
         } else if (urlPath.startsWith("/api/files/")) {
             bytes = downloadBytes(getRefBaseUrl() + urlPath);

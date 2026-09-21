@@ -7,6 +7,8 @@ export interface CanvasAssetDescriptor {
   mimeType: string;
   url: string;
   name?: string;
+  libraryAssetId?: string;
+  librarySyncState?: 'pending' | 'ready' | 'failed';
   generationRecordId?: string;
   producerNodeId?: string;
   createdAt?: string;
@@ -22,6 +24,8 @@ interface CanvasAssetRecord {
   generationRecordId?: string;
   producerNodeId?: string;
   createdAt?: string;
+  libraryAssetId?: string;
+  librarySyncState?: 'pending' | 'ready' | 'failed';
 }
 
 const normalizeAsset = (asset: CanvasAssetRecord): CanvasAssetDescriptor => ({
@@ -36,6 +40,8 @@ const normalizeAsset = (asset: CanvasAssetRecord): CanvasAssetDescriptor => ({
   generationRecordId: asset.generationRecordId,
   producerNodeId: asset.producerNodeId,
   createdAt: asset.createdAt,
+  libraryAssetId: asset.libraryAssetId,
+  librarySyncState: asset.librarySyncState,
 });
 
 export async function uploadCanvasAsset(

@@ -25,6 +25,7 @@
     "ogl": "^1.0.11",
     "postprocessing": "^6.39.4",
     "react": "^19.2.7",
+    "react-d3-tree": "3.6.6",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.1",

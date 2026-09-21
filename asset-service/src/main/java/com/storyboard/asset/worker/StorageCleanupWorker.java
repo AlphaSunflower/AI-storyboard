@@ -27,6 +27,10 @@ public class StorageCleanupWorker {
     public void run() {
         for (LibraryRepository.CleanupTask task : repository.claimCleanupTasks(workerId, 20)) {
             try {
+                if (repository.objectKeyHasReferences(task.objectKey())) {
+                    repository.completeCleanup(task.id());
+                    continue;
+                }
                 if (storage.exists(task.objectKey())) storage.delete(task.objectKey());
                 repository.completeCleanup(task.id());
             } catch (Exception e) {

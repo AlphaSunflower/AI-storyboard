@@ -11,8 +11,15 @@ import com.moon.xiaoyuecanvas.mapper.CanvasAssetMapper;
 import com.moon.xiaoyuecanvas.service.CanvasAssetService;
 import com.moon.xiaoyuecanvas.util.JsonUtil;
 import com.storyboard.common.BusinessException;
+import com.storyboard.asset.client.AssetClient;
+import com.storyboard.asset.client.AssetContracts.AssetDetail;
+import com.storyboard.asset.client.AssetContracts.ExternalMediaRegistration;
+import com.storyboard.asset.client.AssetContracts.MediaRole;
+import com.storyboard.asset.client.AssetServiceException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +29,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CanvasAssetServiceImpl implements CanvasAssetService {
 
     private static final String FILE_URL_PREFIX = "/api/files/";
@@ -30,6 +38,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
     private final MorrowCanvasService canvasService;
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
+    private final AssetClient assetClient;
 
     @Override
     public CanvasAsset upload(String userId, String canvasId, String producerNodeId,
@@ -40,6 +49,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
         CanvasAsset asset = newAsset(
                 userId, canvas, producerNodeId, normalizedType, objectUrl, null);
         canvasAssetMapper.insert(asset);
+        syncLibraryAsset(asset);
         return asset;
     }
 
@@ -66,10 +76,14 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
         }
 
         List<CanvasAsset> linked = new ArrayList<>();
-        for (String resultUrl : resultUrls) {
+        for (int index = 0; index < resultUrls.size(); index++) {
+            String resultUrl = resultUrls.get(index);
             String durableUrl = ensureMinioObject(resultUrl, generation.getType());
             CanvasAsset existing = findExisting(canvasId, generationRecordId, durableUrl);
             if (existing != null) {
+                if (existing.getLibraryAssetId() == null || existing.getLibraryAssetId().isBlank()) {
+                    syncLibraryAsset(existing);
+                }
                 linked.add(existing);
                 continue;
             }
@@ -79,6 +93,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
                     durableUrl, generationRecordId);
             try {
                 canvasAssetMapper.insert(asset);
+                syncLibraryAsset(asset);
                 linked.add(asset);
             } catch (DuplicateKeyException duplicate) {
                 linked.add(findExisting(canvasId, generationRecordId, durableUrl));
@@ -118,7 +133,62 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
         asset.setGenerationRecordId(generationRecordId);
         asset.setProducerNodeId(producerNodeId);
         asset.setStatus("ready");
+        asset.setLibraryAssetId(null);
+        asset.setLibrarySyncState("pending");
         return asset;
+    }
+
+    @Scheduled(fixedDelay = 60_000)
+    public void retryPendingLibrarySync() {
+        List<CanvasAsset> pending = canvasAssetMapper.selectList(new LambdaQueryWrapper<CanvasAsset>()
+                .in(CanvasAsset::getLibrarySyncState, "pending", "failed")
+                .orderByAsc(CanvasAsset::getCreatedAt)
+                .last("LIMIT 50"));
+        for (CanvasAsset asset : pending) {
+            syncLibraryAsset(asset);
+        }
+    }
+
+    private void syncLibraryAsset(CanvasAsset asset) {
+        try {
+            String sourceType = asset.getGenerationRecordId() == null || asset.getGenerationRecordId().isBlank()
+                    ? "canvas-upload"
+                    : "canvas-generation";
+            String sourceId = "canvas-upload".equals(sourceType)
+                    ? asset.getId()
+                    : asset.getGenerationRecordId() + ":" + filename(asset.getObjectUrl());
+            AssetDetail existing = null;
+            try {
+                existing = assetClient.findAssetBySource(
+                        asset.getUserId(), sourceType, sourceId, UUID.randomUUID().toString());
+            } catch (AssetServiceException e) {
+                if (e.code() != 40401) throw e;
+            }
+            String libraryAssetId = existing == null
+                    ? assetClient.registerExternalMedia(
+                            new ExternalMediaRegistration(
+                                    asset.getUserId(),
+                                    asset.getProjectId(),
+                                    asset.getType().toUpperCase(),
+                                    filename(asset.getObjectUrl()),
+                                    null,
+                                    sourceType,
+                                    sourceId,
+                                    asset.getObjectKey(),
+                                    asset.getMimeType(),
+                                    null,
+                                    null,
+                                    MediaRole.REFERENCE,
+                                    0),
+                            UUID.randomUUID().toString()).id()
+                    : existing.asset().id();
+            asset.setLibraryAssetId(libraryAssetId);
+            asset.setLibrarySyncState("ready");
+        } catch (Exception e) {
+            asset.setLibrarySyncState("failed");
+            log.warn("画布资产同步项目库失败: assetId={}, error={}", asset.getId(), e.getMessage());
+        }
+        canvasAssetMapper.updateById(asset);
     }
 
     private CanvasAsset findExisting(String canvasId, String generationRecordId, String objectUrl) {

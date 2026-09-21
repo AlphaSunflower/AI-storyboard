@@ -5,8 +5,10 @@ import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
+import { AssetGroupPickerModal } from '../library/AssetGroupPickerModal';
+import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
 import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
-import { sttStream } from '../../api/agent';
+import { agentApi, sttStream, type ConversationAssetGroupBinding } from '../../api/agent';
 import { Paperclip } from 'lucide-react';
 import { Image as ImageIcon, PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
@@ -16,6 +18,11 @@ import { assetUrl } from '../../config';
 import { buildSceneReviewPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
+import {
+  PROJECT_LIBRARY_DRAG_MIME,
+  parseProjectLibraryDragPayload,
+  type ProjectLibraryDragPayload,
+} from '../../lib/projectLibraryDrag';
 
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
@@ -46,6 +53,7 @@ export function ChatComposer() {
     removeRefImageUrl,
     addRefImageUrls, setRefImageUrls,
     pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
+    pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia, clearPickedReferenceMedia,
     canvasEditContext,
     canvasBinding,
     canvasBindingStatus,
@@ -70,7 +78,7 @@ export function ChatComposer() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const [dropActive, setDropActive] = useState(false);
-  const [dragKind, setDragKind] = useState<'file' | 'scene' | null>(null);
+  const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -79,6 +87,9 @@ export function ChatComposer() {
   // 流式语音识别状态：活跃会话句柄 + 已确认文本（增量追加，不清空）
   const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
   const confirmedRef = useRef(''); // 已确认片段累积（vosk 每条 text 是增量，片段间逗号分隔）
+  const projectLibraryDropRef = useRef<(payload: ProjectLibraryDragPayload) => Promise<void>>(
+    async () => undefined,
+  );
 
   // partial（预览全文）→ 显示「已确认 + 新片段」临时预览（新片段会随识别修正变化）
   const handleSttPartial = useCallback((t: string) => {
@@ -136,6 +147,9 @@ export function ChatComposer() {
   const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
   const [assetError, setAssetError] = useState('');
   const [pendingGroup, setPendingGroup] = useState<import('../../api/library').AssetGroupSnapshot | null>(null);
+  const [assetGroupOpen, setAssetGroupOpen] = useState(false);
+  const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
+  const [boundGroups, setBoundGroups] = useState<ConversationAssetGroupBinding[]>([]);
 
   // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
   useEffect(() => { setText(''); }, [activeConversationId]);
@@ -152,6 +166,22 @@ export function ChatComposer() {
       sessionStorage.removeItem('moon.pendingGroupSnapshot');
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      setBoundGroups([]);
+      return;
+    }
+    let cancelled = false;
+    agentApi.listConversationAssetGroups(activeConversationId)
+      .then((res) => {
+        if (!cancelled) setBoundGroups(res.data.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setBoundGroups([]);
+      });
+    return () => { cancelled = true; };
+  }, [activeConversationId]);
 
   useEffect(() => {
     if (!canvasEditContext) return;
@@ -188,6 +218,7 @@ export function ChatComposer() {
       picUrls: groupUrls.length ? groupUrls : undefined,
       assetIds: pickedAssetIds,
       assetGroupIds: pendingGroup ? [pendingGroup.groupId] : undefined,
+      assetGroupSnapshotIds: pendingGroup ? [pendingGroup.snapshotId] : undefined,
       routingHint: pendingGroup ? 'intent-video' : undefined,
     });
     setPendingGroup(null);
@@ -227,15 +258,18 @@ export function ChatComposer() {
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     const hasFiles = e.dataTransfer.types.includes('Files');
     const hasScenes = e.dataTransfer.types.includes(SCENE_DRAG_MIME);
-    if (!hasFiles && !hasScenes) return;
+    const hasLibrary = e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME);
+    if (!hasFiles && !hasScenes && !hasLibrary) return;
     e.preventDefault();
     dragDepthRef.current += 1;
     setDropActive(true);
-    setDragKind(hasScenes ? 'scene' : 'file');
+    setDragKind(hasScenes ? 'scene' : hasLibrary ? 'library' : 'file');
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files') && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)) return;
+    if (!e.dataTransfer.types.includes('Files')
+        && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)
+        && !e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, []);
@@ -253,6 +287,13 @@ export function ChatComposer() {
     dragDepthRef.current = 0;
     setDropActive(false);
     setDragKind(null);
+    const libraryPayload = parseProjectLibraryDragPayload(
+      e.dataTransfer.getData(PROJECT_LIBRARY_DRAG_MIME),
+    );
+    if (libraryPayload) {
+      void projectLibraryDropRef.current(libraryPayload);
+      return;
+    }
     const scenePayload = e.dataTransfer.getData(SCENE_DRAG_MIME) || e.dataTransfer.getData('text/plain');
     if (scenePayload) {
       try {
@@ -315,6 +356,68 @@ export function ChatComposer() {
     setAssetSelected(new Set());
     setAssetError('');
   };
+
+  const reloadBoundGroups = async (conversationId: string) => {
+    const response = await agentApi.listConversationAssetGroups(conversationId);
+    setBoundGroups(response.data.data ?? []);
+  };
+
+  const handleAssetGroupConfirm = async (groupIds: string[]) => {
+    let conversationId = useAgentStore.getState().activeConversationId;
+    if (!conversationId) {
+      await useAgentStore.getState().createConversation();
+      conversationId = useAgentStore.getState().activeConversationId;
+    }
+    if (!conversationId) throw new Error('请先选择项目并创建对话');
+    const currentIds = new Set(boundGroups.map((binding) => binding.groupId));
+    const nextIds = new Set(groupIds);
+    for (const groupId of nextIds) {
+      if (!currentIds.has(groupId)) await agentApi.attachConversationAssetGroup(conversationId, groupId);
+    }
+    for (const groupId of currentIds) {
+      if (!nextIds.has(groupId)) await agentApi.removeConversationAssetGroup(conversationId, groupId);
+    }
+    await reloadBoundGroups(conversationId);
+    if (groupIds.length) addLocalUserMessage(`已关联 ${groupIds.length} 个资产组`);
+  };
+
+  projectLibraryDropRef.current = async (payload) => {
+    try {
+      if (payload.kind === 'group') {
+        await handleAssetGroupConfirm([
+          ...new Set([...boundGroups.map((binding) => binding.groupId), payload.groupId]),
+        ]);
+        return;
+      }
+      if (payload.mediaType === 'IMAGE') {
+        addRefImageUrls([payload.url]);
+        addLocalUserMessage(`已添加项目库图片：${payload.name}`);
+        return;
+      }
+      if (payload.mediaType === 'VIDEO') {
+        setPickedReferenceMedia(
+          [...new Set([...pickedReferenceVideos, payload.url])],
+          pickedReferenceAudios,
+        );
+        addLocalUserMessage(`已添加项目库视频：${payload.name}`);
+        return;
+      }
+      setPickedReferenceMedia(
+        pickedReferenceVideos,
+        [...new Set([...pickedReferenceAudios, payload.url])],
+      );
+      addLocalUserMessage(`已添加项目库音频：${payload.name}`);
+    } catch (error) {
+      addLocalUserMessage(error instanceof Error ? `项目库素材添加失败：${error.message}` : '项目库素材添加失败');
+    }
+  };
+
+  const refreshBoundGroup = async (groupId: string) => {
+    const conversationId = useAgentStore.getState().activeConversationId;
+    if (!conversationId) return;
+    await agentApi.attachConversationAssetGroup(conversationId, groupId);
+    await reloadBoundGroups(conversationId);
+  };
   const toggleAsset = (id: string) => {
     setAssetSelected((prev) => {
       const next = new Set(prev);
@@ -343,7 +446,9 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
-      {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0 || pendingGroup) && (
+      {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
+        || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
+        || pendingGroup || boundGroups.length > 0) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           padding: '8px 12px', borderRadius: 12, background: DS.hover,
@@ -390,6 +495,41 @@ export function ChatComposer() {
               资产组 · {pendingGroup.items.length} 项
               <button
                 onClick={() => setPendingGroup(null)}
+                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
+              >×</button>
+            </span>
+          )}
+          {boundGroups.map((binding) => (
+            <span key={binding.groupId} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '5px 8px', borderRadius: 8, background: 'white',
+              color: binding.stale ? 'var(--color-error)' : DS.brand, fontSize: 12,
+              border: `1px solid ${binding.stale ? 'rgba(217,45,32,0.35)' : DS.border}`,
+            }}>
+              <Package size={14} strokeWidth={2} />
+              资产组 · {binding.media.length} 项{binding.stale ? ' · 已更新' : ''}
+              {binding.stale && (
+                <button
+                  onClick={() => void refreshBoundGroup(binding.groupId)}
+                  style={{ border: 'none', background: 'transparent', color: 'var(--color-primary)', cursor: 'pointer', fontSize: 11 }}
+                >刷新</button>
+              )}
+              <button
+                onClick={() => void handleAssetGroupConfirm(
+                  boundGroups.filter((item) => item.groupId !== binding.groupId).map((item) => item.groupId))}
+                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
+              >×</button>
+            </span>
+          ))}
+          {(pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0) && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '5px 8px', borderRadius: 8, background: 'white',
+              color: DS.textSecondary, fontSize: 12,
+            }}>
+              参考视频 {pickedReferenceVideos.length} · 音频 {pickedReferenceAudios.length}
+              <button
+                onClick={clearPickedReferenceMedia}
                 style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
               >×</button>
             </span>
@@ -461,7 +601,7 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={busy}
         rows={2}
         style={{
@@ -551,9 +691,32 @@ export function ChatComposer() {
       <UploadMaterialPickerModal
         open={materialPickerOpen}
         onClose={() => setMaterialPickerOpen(false)}
-        onAsset={handleAssetOpen}
+        onAssetGroup={() => setAssetGroupOpen(true)}
+        onProjectLibrary={() => setProjectLibraryOpen(true)}
         onProjectOutput={() => setOutputOpen(true)}
         onScene={() => setSceneModalOpen(true)}
+      />
+      <AssetGroupPickerModal
+        open={assetGroupOpen}
+        projectId={projectId}
+        selectedIds={boundGroups.map((binding) => binding.groupId)}
+        onClose={() => setAssetGroupOpen(false)}
+        onConfirm={handleAssetGroupConfirm}
+      />
+      <ProjectLibraryPickerModal
+        open={projectLibraryOpen}
+        projectId={projectId}
+        type="image"
+        allowedTypes={['image', 'video', 'audio']}
+        purpose="image"
+        onClose={() => setProjectLibraryOpen(false)}
+        onConfirm={async (references) => {
+          addRefImageUrls(references.filter((reference) => reference.type === 'image').map((reference) => reference.url));
+          setPickedReferenceMedia(
+            references.filter((reference) => reference.type === 'video').map((reference) => reference.url),
+            references.filter((reference) => reference.type === 'audio').map((reference) => reference.url),
+          );
+        }}
       />
 
       <ProjectOutputImagePickerModal

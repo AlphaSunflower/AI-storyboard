@@ -360,11 +360,11 @@ export function LeftSidebar() {
         {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
       </button>
 
-      {/* AI资产库（独立于剧本输入，侧栏内嵌） */}
+      {/* 项目库（独立于剧本输入，侧栏内嵌） */}
       <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
-            <Puzzle size={13} strokeWidth={1.8} /> AI资产库
+            <Puzzle size={13} strokeWidth={1.8} /> 项目库
           </span>
           <button
             onClick={() => setAssetsOpen(true)}

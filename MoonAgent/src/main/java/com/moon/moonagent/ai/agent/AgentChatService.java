@@ -118,6 +118,16 @@ public interface AgentChatService {
                        java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
                        boolean cancelActiveTasks, CanvasSessionContext canvasContext);
 
+    /** 流式发送消息（项目库资产组解析后的多模态参考素材）。 */
+    default void streamMessage(String userId, String conversationId, String content,
+                               java.util.List<String> picUrls, java.util.List<String> assetIds,
+                               SseEmitter emitter, String routingHint, boolean cancelActiveTasks,
+                               CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
+                               java.util.List<String> referenceAudios) {
+        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, routingHint,
+                cancelActiveTasks, canvasContext);
+    }
+
     /**
      * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
      * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 → 执行视频生成。

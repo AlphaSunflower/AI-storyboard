@@ -3,7 +3,10 @@ package com.storyboard.asset.service.impl;
 import com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
 import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetType;
+import com.storyboard.asset.client.AssetContracts.AssetStatus;
+import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.CreateGroupRequest;
+import com.storyboard.asset.client.AssetContracts.CreateGroupFromAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.ReplaceGroupItemsRequest;
 import com.storyboard.asset.client.AssetContracts.SnapshotRequest;
@@ -23,6 +26,8 @@ import java.util.Objects;
 
 @Service
 public class GroupServiceImpl implements GroupService {
+
+    private static final int MAX_BULK_ASSETS = 500;
 
     private final LibraryRepository repository;
     private final ProjectAccessPort projectAccess;
@@ -57,6 +62,68 @@ public class GroupServiceImpl implements GroupService {
         if (scope == AssetScope.PROJECT) repository.linkProject(userId, assetId, request.ownerProjectId());
         repository.createIdempotencyKey(userId, "group-create", idempotencyKey, assetId);
         return assetId;
+    }
+
+    @Override
+    @Transactional
+    public AssetSummary createFromAssets(
+            String userId,
+            CreateGroupFromAssetsRequest request,
+            String idempotencyKey
+    ) {
+        if (request == null || request.name() == null || request.name().isBlank()) {
+            throw new BusinessException(40001, "资产组名称不能为空");
+        }
+        if (request.ownerProjectId() == null || request.ownerProjectId().isBlank()) {
+            throw new BusinessException(40001, "项目资产组必须指定项目");
+        }
+        var existing = repository.findIdempotencyResource(userId, "group-from-assets", idempotencyKey);
+        if (existing.isPresent()) {
+            return repository.findAsset(userId, existing.get())
+                    .orElseThrow(() -> new BusinessException(40401, "资产组不存在"));
+        }
+        List<String> assetIds = request.assetIds() == null ? List.of() : request.assetIds().stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (assetIds.isEmpty()) throw new BusinessException(40001, "请选择要合并的素材");
+        if (assetIds.size() > MAX_BULK_ASSETS) throw new BusinessException(40001, "单次最多合并 500 项素材");
+        projectAccess.requireOwned(userId, request.ownerProjectId());
+        List<AssetSummary> assets = assetIds.stream()
+                .map(id -> repository.findAsset(userId, id)
+                        .orElseThrow(() -> new BusinessException(40401, "资产不存在")))
+                .toList();
+        if (assets.stream().anyMatch(asset -> asset.status() != AssetStatus.ACTIVE)) {
+            throw new BusinessException(40901, "所选素材中包含不可用项");
+        }
+        if (assets.stream().anyMatch(asset -> !belongsToProject(asset, request.ownerProjectId()))) {
+            throw new BusinessException(40001, "只能合并同一项目中的素材");
+        }
+        if (assets.stream().anyMatch(asset -> asset.type() != AssetType.IMAGE
+                && asset.type() != AssetType.VIDEO
+                && asset.type() != AssetType.AUDIO)) {
+            throw new BusinessException(40001, "资产组只允许图片、视频或音频素材");
+        }
+        String groupId = repository.insertAsset(
+                userId,
+                AssetScope.PROJECT,
+                request.ownerProjectId(),
+                AssetType.GROUP,
+                null,
+                request.name().trim(),
+                null,
+                "group-from-assets",
+                null
+        );
+        repository.insertGroup(groupId, userId, AssetScope.PROJECT, request.ownerProjectId());
+        repository.linkProject(userId, groupId, request.ownerProjectId());
+        for (int index = 0; index < assets.size(); index += 1) {
+            AssetSummary asset = assets.get(index);
+            String mediaId = repository.findPrimaryMediaId(asset.id())
+                    .orElseThrow(() -> new BusinessException(40001, "素材缺少可用媒体文件"));
+            repository.linkGroupItem(groupId, mediaId, asset.id(), index);
+        }
+        repository.createIdempotencyKey(userId, "group-from-assets", idempotencyKey, groupId);
+        return repository.findAsset(userId, groupId)
+                .orElseThrow(() -> new BusinessException(50000, "资产组创建失败"));
     }
 
     @Override
@@ -112,15 +179,29 @@ public class GroupServiceImpl implements GroupService {
     public com.storyboard.asset.dto.AssetGroupDetailResponse get(String userId, String groupId) {
         var group = repository.findGroup(userId, groupId)
                 .orElseThrow(() -> new BusinessException(40401, "资产组不存在"));
-        List<com.storyboard.asset.client.AssetContracts.MediaRef> media = repository.listGroupMediaIds(userId, groupId).stream()
-                .map(mediaId -> repository.findMedia(userId, mediaId).orElse(null))
+        List<com.storyboard.asset.dto.AssetGroupDetailResponse.AssetGroupMediaItem> media =
+                repository.listGroupItems(userId, groupId).stream()
+                .map(item -> {
+                    var mediaRef = repository.findMedia(userId, item.mediaId()).orElse(null);
+                    if (mediaRef == null) return null;
+                    AssetSummary member = repository.findAsset(userId, item.assetId()).orElse(null);
+                    var signed = new com.storyboard.asset.client.AssetContracts.MediaRef(
+                            mediaRef.id(), mediaRef.blobId(), mediaRef.type(), mediaRef.url(),
+                            mediaRef.contentUrl() + "?token=" + signer.sign(
+                                    mediaRef.id(), userId, Instant.now().plusSeconds(900)),
+                            mediaRef.objectKey(), mediaRef.fileName(), mediaRef.relativePath(),
+                            mediaRef.mimeType(), mediaRef.sizeBytes(), mediaRef.width(), mediaRef.height(),
+                            mediaRef.durationSeconds(), mediaRef.sortOrder(), mediaRef.role(),
+                            mediaRef.primary(), mediaRef.constraintText());
+                    return new com.storyboard.asset.dto.AssetGroupDetailResponse.AssetGroupMediaItem(
+                            signed,
+                            item.assetId(),
+                            member == null ? null : member.name(),
+                            member == null ? null : member.description(),
+                            member == null ? 0 : member.version(),
+                            member == null ? List.of() : member.tags());
+                })
                 .filter(Objects::nonNull)
-                .map(item -> new com.storyboard.asset.client.AssetContracts.MediaRef(
-                        item.id(), item.blobId(), item.type(), item.url(),
-                        item.contentUrl() + "?token=" + signer.sign(item.id(), userId, Instant.now().plusSeconds(900)),
-                        item.objectKey(), item.fileName(), item.relativePath(), item.mimeType(),
-                        item.sizeBytes(), item.width(), item.height(), item.durationSeconds(),
-                        item.sortOrder(), item.role(), item.primary(), item.constraintText()))
                 .toList();
         return new com.storyboard.asset.dto.AssetGroupDetailResponse(
                 group.id(), group.name(), group.description(), group.version(), media);
@@ -134,5 +215,11 @@ public class GroupServiceImpl implements GroupService {
                 item.assetId(), item.mediaId(), item.blobId(), item.objectKey(),
                 item.contentUrl() + "?token=" + signer.sign(item.mediaId(), userId, Instant.now().plusSeconds(900)),
                 item.type(), item.role(), item.sortOrder())).toList();
+    }
+
+    private static boolean belongsToProject(AssetSummary asset, String projectId) {
+        if (java.util.Objects.equals(asset.ownerProjectId(), projectId)) return true;
+        return asset.projects().stream()
+                .anyMatch(link -> java.util.Objects.equals(link.projectId(), projectId));
     }
 }

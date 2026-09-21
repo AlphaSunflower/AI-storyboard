@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriBuilder;
@@ -20,6 +19,7 @@ import java.util.UUID;
 
 import static com.storyboard.asset.client.AssetContracts.ApiEnvelope;
 import static com.storyboard.asset.client.AssetContracts.AssetDetail;
+import static com.storyboard.asset.client.AssetContracts.AssetGroupDetail;
 import static com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
 import static com.storyboard.asset.client.AssetContracts.AssetScope;
 import static com.storyboard.asset.client.AssetContracts.AssetSummary;
@@ -27,6 +27,8 @@ import static com.storyboard.asset.client.AssetContracts.AssignTagsRequest;
 import static com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import static com.storyboard.asset.client.AssetContracts.CreateGroupRequest;
 import static com.storyboard.asset.client.AssetContracts.CreateTagRequest;
+import static com.storyboard.asset.client.AssetContracts.ExternalMediaRegistration;
+import static com.storyboard.asset.client.AssetContracts.FolderTreeResponse;
 import static com.storyboard.asset.client.AssetContracts.GenerationOutputEvent;
 import static com.storyboard.asset.client.AssetContracts.LinkProjectRequest;
 import static com.storyboard.asset.client.AssetContracts.PageResponse;
@@ -75,10 +77,71 @@ public class AssetClient {
             int page,
             int size
     ) {
+        return listAssets(scope, projectId, null, q, type, tagIds, tagMode, deleted, page, size);
+    }
+
+    /** 以内置用户身份查询项目库，供画布服务等受信任调用方代理前端使用。 */
+    public PageResponse<AssetSummary> listAssetsForUser(
+            String actorUserId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            String q,
+            String type,
+            int page,
+            int size,
+            String correlationId
+    ) {
+        return exchange("GET", "/api/library/assets",
+                uri -> {
+                    UriBuilder builder = uri.path("/api/library/assets");
+                    if (scope != null) builder.queryParam("scope", scope.name());
+                    if (projectId != null && !projectId.isBlank()) builder.queryParam("projectId", projectId);
+                    if (folderId != null && !folderId.isBlank()) builder.queryParam("folderId", folderId);
+                    if (q != null && !q.isBlank()) builder.queryParam("q", q);
+                    if (type != null && !type.isBlank()) builder.queryParam("type", type);
+                    builder.queryParam("page", Math.max(1, page));
+                    builder.queryParam("size", Math.min(100, Math.max(1, size)));
+                    return builder.build();
+                },
+                null, null, correlationId, actorUserId,
+                new ParameterizedTypeReference<>() {});
+    }
+
+    public FolderTreeResponse getFolderTreeForUser(
+            String actorUserId,
+            AssetScope scope,
+            String projectId,
+            String correlationId
+    ) {
+        return exchange("GET", "/api/library/folders/tree",
+                uri -> {
+                    UriBuilder builder = uri.path("/api/library/folders/tree")
+                            .queryParam("scope", scope.name());
+                    if (projectId != null && !projectId.isBlank()) builder.queryParam("projectId", projectId);
+                    return builder.build();
+                },
+                null, null, correlationId, actorUserId,
+                new ParameterizedTypeReference<>() {});
+    }
+
+    public PageResponse<AssetSummary> listAssets(
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            String q,
+            String type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            boolean deleted,
+            int page,
+            int size
+    ) {
         return get("/api/library/assets", uri -> {
             UriBuilder builder = uri.path("/api/library/assets");
             if (scope != null) builder.queryParam("scope", scope.name());
             if (projectId != null && !projectId.isBlank()) builder.queryParam("projectId", projectId);
+            if (folderId != null && !folderId.isBlank()) builder.queryParam("folderId", folderId);
             if (q != null && !q.isBlank()) builder.queryParam("q", q);
             if (type != null && !type.isBlank()) builder.queryParam("type", type);
             if (tagIds != null && !tagIds.isEmpty()) builder.queryParam("tagIds", String.join(",", tagIds));
@@ -97,6 +160,13 @@ public class AssetClient {
     public AssetDetail getAssetInternal(String assetId, String actingUserId) {
         return exchange("GET", "/api/library/assets/{id}",
                 uri -> uri.path("/api/library/assets/{id}").build(assetId),
+                null, null, UUID.randomUUID().toString(), actingUserId,
+                new ParameterizedTypeReference<>() {});
+    }
+
+    public AssetGroupDetail getGroupInternal(String groupId, String actingUserId) {
+        return exchange("GET", "/api/library/groups/{id}",
+                uri -> uri.path("/api/library/groups/{id}").build(groupId),
                 null, null, UUID.randomUUID().toString(), actingUserId,
                 new ParameterizedTypeReference<>() {});
     }
@@ -169,9 +239,11 @@ public class AssetClient {
     }
 
     public AssetGroupSnapshot createSnapshot(String groupId, SnapshotRequest request, String correlationId) {
-        return post("/api/library/groups/" + groupId + "/snapshots", request,
+        return exchange("POST", "/api/library/groups/{id}/snapshots",
+                uri -> uri.path("/api/library/groups/{id}/snapshots").build(groupId),
+                request,
                 "group-snapshot:" + groupId + ":" + request.maxImages() + ":" + request.maxVideos() + ":" + request.maxAudios(),
-                correlationId, new ParameterizedTypeReference<>() {});
+                correlationId, request.actorUserId(), new ParameterizedTypeReference<>() {});
     }
 
     public AssetGroupSnapshot getSnapshot(String snapshotId, String actorUserId, String correlationId) {
@@ -184,6 +256,31 @@ public class AssetClient {
         return post("/api/internal/library/generation-outputs", event,
                 event.producer() + ":" + event.generationRecordId() + ":" + event.resultIndex(),
                 correlationId, event.ownerUserId(), new ParameterizedTypeReference<>() {});
+    }
+
+    public AssetSummary registerExternalMedia(
+            ExternalMediaRegistration request,
+            String correlationId
+    ) {
+        String idempotencyKey = "external:" + request.sourceType() + ":" + request.sourceId();
+        return post("/api/internal/library/external-media", request, idempotencyKey,
+                correlationId, request.ownerUserId(), new ParameterizedTypeReference<>() {});
+    }
+
+    public AssetDetail findAssetBySource(
+            String ownerUserId,
+            String sourceType,
+            String sourceId,
+            String correlationId
+    ) {
+        return exchange("GET", "/api/internal/library/assets/by-source",
+                uri -> uri.path("/api/internal/library/assets/by-source")
+                        .queryParam("ownerUserId", ownerUserId)
+                        .queryParam("sourceType", sourceType)
+                        .queryParam("sourceId", sourceId)
+                        .build(),
+                null, null, correlationId, ownerUserId,
+                new ParameterizedTypeReference<>() {});
     }
 
     private <T> T get(String path, java.util.function.Function<UriBuilder, java.net.URI> uriFn,
@@ -235,20 +332,38 @@ public class AssetClient {
             spec.contentType(MediaType.MULTIPART_FORM_DATA);
         }
 
-        ApiEnvelope<T> envelope = spec.exchange((request, response) -> {
+        return spec.exchange((request, response) -> {
             ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
             JavaType innerType = mapper.getTypeFactory().constructType(type.getType());
             JavaType javaType = mapper.getTypeFactory().constructParametricType(ApiEnvelope.class, innerType);
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new AssetServiceException(response.getStatusCode().value(), response.getStatusCode().value(),
-                        "asset-service 请求失败: " + response.getStatusCode(), correlationId);
+            var responseBody = response.getBody();
+            int httpStatus = response.getStatusCode().value();
+            if (responseBody == null) {
+                if (!response.getStatusCode().is2xxSuccessful()) {
+                    throw new AssetServiceException(httpStatus, httpStatus,
+                            "asset-service 请求失败: HTTP " + httpStatus, correlationId);
+                }
+                return null;
             }
-            return mapper.readValue(response.getBody(), javaType);
+            ApiEnvelope<T> envelope;
+            try {
+                envelope = mapper.readValue(responseBody, javaType);
+            } catch (Exception e) {
+                if (!response.getStatusCode().is2xxSuccessful()) {
+                    throw new AssetServiceException(httpStatus, httpStatus,
+                            "asset-service 请求失败: HTTP " + httpStatus, correlationId);
+                }
+                throw new AssetServiceException(50000, httpStatus,
+                        "asset-service 响应解析失败: " + e.getMessage(), correlationId);
+            }
+            if (envelope.code() != 0 && envelope.code() != 200) {
+                throw new AssetServiceException(envelope.code(), httpStatus, envelope.message(), correlationId);
+            }
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new AssetServiceException(httpStatus, httpStatus,
+                        "asset-service 请求失败: HTTP " + httpStatus, correlationId);
+            }
+            return envelope.data();
         });
-        if (envelope == null) return null;
-        if (envelope.code() != 0 && envelope.code() != 200) {
-            throw new AssetServiceException(envelope.code(), HttpStatusCode.valueOf(200).value(), envelope.message(), correlationId);
-        }
-        return envelope.data();
     }
 }

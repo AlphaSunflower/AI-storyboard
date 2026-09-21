@@ -33,6 +33,11 @@ public class CanvasAsset {
     private String objectKey;
     private String generationRecordId;
     private String producerNodeId;
+    /** 统一项目库资产 ID；节点仍使用本表 id。 */
+    private String libraryAssetId;
+
+    /** pending | ready | failed */
+    private String librarySyncState = "pending";
 
     /** pending | ready | failed */
     private String status = "ready";

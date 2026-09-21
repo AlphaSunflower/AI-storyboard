@@ -8,6 +8,7 @@ import { assetUrl } from '../../config';
 interface Props {
   open: boolean;
   projectId?: string;
+  mediaType?: 'image' | 'video' | 'audio';
   existingUrls: string[];
   remaining: number;
   onClose: () => void;
@@ -17,6 +18,7 @@ interface Props {
 export function ProjectOutputImagePickerModal({
   open,
   projectId,
+  mediaType = 'image',
   existingUrls,
   remaining,
   onClose,
@@ -68,7 +70,7 @@ export function ProjectOutputImagePickerModal({
     return groups
       .map((group) => {
         const items = group.items
-          .filter((item) => item.type === 'image')
+          .filter((item) => item.type === mediaType)
           .map((item) => ({
             ...item,
             urls: item.urls.filter((url) => {
@@ -81,7 +83,7 @@ export function ProjectOutputImagePickerModal({
         return { ...group, items };
       })
       .filter((group) => group.items.length > 0);
-  }, [groups]);
+  }, [groups, mediaType]);
 
   if (!open) return null;
 
@@ -120,9 +122,11 @@ export function ProjectOutputImagePickerModal({
       <div style={dialog} onPointerDown={(event) => event.stopPropagation()}>
         <header style={header}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }}>从项目产出素材添加参考图</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-ink)' }}>
+              从项目产出素材添加{mediaType === 'image' ? '参考图' : mediaType === 'video' ? '参考视频' : '参考音频'}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 3 }}>
-              仅显示项目内已生成完成的图片，已添加的图片不可重复选择
+              仅显示项目内已生成完成的{mediaType === 'image' ? '图片' : mediaType === 'video' ? '视频' : '音频'}，已添加的内容不可重复选择
             </div>
           </div>
           <button type="button" onClick={onClose} disabled={saving} style={iconButton} aria-label="关闭">
@@ -143,7 +147,7 @@ export function ProjectOutputImagePickerModal({
               </div>
             </>
           ) : visibleGroups.length === 0 ? (
-            <Empty icon={<ImageIcon size={20} />} text="当前项目暂无生成图片" />
+            <Empty icon={<ImageIcon size={20} />} text={`当前项目暂无生成${mediaType === 'image' ? '图片' : mediaType === 'video' ? '视频' : '音频'}`} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               {visibleGroups.map((group) => (
@@ -152,8 +156,8 @@ export function ProjectOutputImagePickerModal({
                   <div style={grid}>
                     {group.items.flatMap((item) => item.urls.map((url) => {
                       const reference: SceneMaterialReferenceInput = {
-                        type: 'image',
-                        purpose: 'image',
+                        type: mediaType,
+                        purpose: mediaType === 'image' ? 'image' : 'video',
                         url,
                         role: 'REFERENCE',
                         sourceType: 'output',
@@ -188,10 +192,10 @@ export function ProjectOutputImagePickerModal({
         </div>
 
         <footer style={footer}>
-          <span style={{ fontSize: 12, color: error ? 'var(--color-error)' : 'var(--color-muted)' }}>
+            <span style={{ fontSize: 12, color: error ? 'var(--color-error)' : 'var(--color-muted)' }}>
             {error || (remaining > 0
               ? `最多可选择 ${remaining} 张，已选 ${selected.size} 张`
-              : '当前分镜参考图数量已达上限')}
+              : '当前分镜参考素材数量已达上限')}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" onClick={onClose} disabled={saving} style={ghostButton}>取消</button>
@@ -201,7 +205,7 @@ export function ProjectOutputImagePickerModal({
               disabled={saving || selected.size === 0}
               style={primaryButton(selected.size === 0)}
             >
-              {saving ? '添加中...' : `添加 ${selected.size || ''} 张`}
+              {saving ? '添加中...' : `添加 ${selected.size || ''} 项`}
             </button>
           </div>
         </footer>

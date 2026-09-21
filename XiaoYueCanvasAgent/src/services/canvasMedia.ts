@@ -64,6 +64,20 @@ export async function persistExistingCanvasAsset(
   return persisted;
 }
 
+/** 下载项目库别名资产到 IndexedDB，并保持本地 ID 与画布资产 ID 一致。 */
+export async function cacheCanvasAssetBlob(asset: CanvasAssetDescriptor): Promise<PersistedAsset> {
+  const blob = await downloadCanvasAssetBlob(asset);
+  const file = new File([blob], asset.name ?? asset.id, { type: asset.mimeType });
+  const hydrated: PersistedAsset = asset.type === 'video'
+    ? await createVideoAsset(file, asset.id)
+    : await createImageAsset(file, asset.id);
+  hydrated.projectId = useCanvasStore.getState().projectId ?? undefined;
+  hydrated.canvasId = asset.canvasId ?? useCanvasStore.getState().canvasId ?? undefined;
+  await saveAsset(hydrated);
+  useMediaStore.getState().upsertAsset(hydrated);
+  return hydrated;
+}
+
 const generatedNodeParts = (nodeId: string) => {
   const match = /^result:generation-(.+):([^:]+)$/.exec(nodeId);
   return match ? { recordId: match[1], resultKey: match[2] } : null;
@@ -154,15 +168,7 @@ export async function hydrateReferencedCanvasAssets(canvasId: string) {
   for (const asset of missing) {
     try {
       useMediaStore.getState().clearAssetError(asset.id);
-      const blob = await downloadCanvasAssetBlob(asset);
-      const file = new File([blob], asset.name ?? asset.id, { type: asset.mimeType });
-      const hydrated: PersistedAsset = asset.type === 'video'
-        ? await createVideoAsset(file, asset.id)
-        : await createImageAsset(file, asset.id);
-      hydrated.projectId = useCanvasStore.getState().projectId ?? undefined;
-      hydrated.canvasId = canvasId;
-      await saveAsset(hydrated);
-      useMediaStore.getState().upsertAsset(hydrated);
+      await cacheCanvasAssetBlob({ ...asset, canvasId });
     } catch (error) {
       useMediaStore.getState().markAssetError(asset.id, error instanceof Error ? error.message : '资产加载失败');
     }

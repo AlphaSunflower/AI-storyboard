@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { assetApi, type Asset } from '../../api/assets';
+import { libraryApi, type LibraryAsset } from '../../api/library';
 import { assetUrl } from '../../config';
 
-const ASSET_TYPE_LABEL: Record<string, string> = { character: '人物', prop: '道具', scene: '场景' };
+const ASSET_TYPE_LABEL: Record<string, string> = { CHARACTER: '人物', PROP: '道具', SCENE: '场景' };
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
@@ -18,14 +18,14 @@ const labelStyle: React.CSSProperties = {
  */
 export function AssetScriptPicker({ projectId, value = [], onChange }: { projectId?: string; value?: string[]; onChange: (ids: string[]) => void }) {
   const [open, setOpen] = useState(false);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!projectId) { setAssets([]); return; }
     let alive = true;
-    assetApi.list(projectId).then((res) => {
-      if (alive) { setAssets(res.data.data || []); setLoaded(true); }
+    libraryApi.listAssets({ scope: 'PROJECT', projectId, type: 'GROUP', page: 1, size: 100 }).then((res) => {
+      if (alive) { setAssets(res.data.data?.records || []); setLoaded(true); }
     }).catch(() => { if (alive) { setAssets([]); setLoaded(true); } });
     return () => { alive = false; };
   }, [projectId]);
@@ -93,12 +93,12 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
               {!loaded && <p style={{ color: 'var(--color-muted)', fontSize: 13, textAlign: 'center', padding: 32 }}>加载中…</p>}
               {loaded && assets.length === 0 && (
                 <p style={{ color: 'var(--color-muted)', fontSize: 13, textAlign: 'center', padding: 32 }}>
-                  暂无资产 —— 请先在「AI资产库」创建人物/道具/场景
+                  暂无资产组 —— 请先在「项目库」创建人物/道具/场景
                 </p>
               )}
               {assets.map((a) => {
                 const checked = value.includes(a.id);
-                const cover = a.images[0];
+                const cover = a.coverUrl;
                 return (
                   <div
                     key={a.id}
@@ -114,7 +114,7 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
                   >
                     <div style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 'var(--rounded-md)', background: 'var(--color-surface-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                       {cover ? (
-                        <img src={assetUrl(cover.url)} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                        <img src={assetUrl(cover)} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                       ) : (
                         <span style={{ color: 'var(--color-muted-soft)', fontSize: 10 }}>无图</span>
                       )}
@@ -123,7 +123,7 @@ export function AssetScriptPicker({ projectId, value = [], onChange }: { project
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ font: 'var(--text-body-sm)', fontWeight: 600, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
                         <span style={{ fontSize: 10, color: 'var(--color-primary)', background: 'var(--color-surface-card)', padding: '2px 6px', borderRadius: 999, flexShrink: 0 }}>
-                          {ASSET_TYPE_LABEL[a.type] || a.type}{a.projectId ? '' : '·全局'}
+                          {ASSET_TYPE_LABEL[a.aiKind || ''] || '通用素材组'}{a.scope === 'GLOBAL' ? '·全局' : ''}
                         </span>
                       </div>
                       {a.description && <p style={{ margin: '2px 0 0', font: 'var(--text-caption)', color: 'var(--color-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.description}</p>}

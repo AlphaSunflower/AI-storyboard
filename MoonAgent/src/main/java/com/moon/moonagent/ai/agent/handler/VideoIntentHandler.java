@@ -219,9 +219,21 @@ public class VideoIntentHandler implements IntentHandler {
             log.info("[视频编排] 使用带角色的视频生成: semanticRole={}, 图片数={}, 拆解前3图={}",
                     refRole, refImages.size(),
                     refImages.stream().limit(3).map(r -> r.role() + ":" + r.url()).toList());
-            support.startVideoGenerationAsyncWithRole(request, message, duration, null, refImages, request.getParams());
+            if (request.getReferenceVideos().isEmpty() && request.getReferenceAudios().isEmpty()) {
+                support.startVideoGenerationAsyncWithRole(request, message, duration, null, refImages,
+                        request.getParams());
+            } else {
+                support.startVideoGenerationAsyncWithRole(request, message, duration, null, refImages,
+                        request.getReferenceVideos(), request.getParams());
+            }
         } else {
-            support.startVideoGenerationAsync(request, message, duration, null, sources, request.getParams());
+            if (request.getReferenceVideos().isEmpty() && request.getReferenceAudios().isEmpty()) {
+                support.startVideoGenerationAsync(request, message, duration, null, sources,
+                        request.getParams());
+            } else {
+                support.startVideoGenerationAsync(request, message, duration, null, sources,
+                        request.getReferenceVideos(), request.getParams());
+            }
         }
         return "";
     }
@@ -353,7 +365,9 @@ public class VideoIntentHandler implements IntentHandler {
                     List.of(Map.of("message", message, "duration", duration,
                             "picUrls", sources == null ? List.of() : sources,
                             "assetIds", String.join(",", assetIds),
-                            "referenceRole", referenceRole == null ? "" : referenceRole)),
+                            "referenceRole", referenceRole == null ? "" : referenceRole,
+                            "referenceVideos", request.getReferenceVideos(),
+                            "referenceAudios", request.getReferenceAudios())),
                     "video_plan",
                     support.buildHITLCard(request, planText, List.of(
                             Map.of("id", "generate_video", "title", "开始生成视频"),

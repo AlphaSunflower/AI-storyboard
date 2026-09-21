@@ -589,7 +589,7 @@ export function ChatPage() {
                   ><FolderKanban size={18} strokeWidth={1.8} /></button>
                 </div>
                 <button
-                  onClick={() => navigate('/library')}
+                  onClick={() => chatApps.open('library')}
                   title="项目库"
                   style={railIconBtn}
                   className="chat-icon-button"
@@ -911,13 +911,6 @@ export function ChatPage() {
                     onCancelCanvas={handleCancelCanvasBinding}
                   />
                 )}
-                <button
-                  onClick={() => navigate('/library?type=AI_ASSET')}
-                  title="项目库"
-                  style={headerBtn(1, embed ? 12 : 14)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-                ><Library size={16} strokeWidth={1.8} /> 项目库</button>
               </div>
             </div>
 
@@ -1119,14 +1112,6 @@ function CanvasTechAtmosphere({ active }: { active: boolean }) {
       <span className="chat-canvas-tech-atmosphere__line" />
     </div>
   );
-}
-
-function headerBtn(opacity: number, fontSize = 14): React.CSSProperties {
-  return {
-    border: 'none', background: 'transparent', color: DS.textSecondary, fontSize,
-    cursor: opacity === 1 ? 'pointer' : 'not-allowed', padding: '6px 10px', borderRadius: 8, opacity,
-    display: 'flex', alignItems: 'center', gap: 4,
-  };
 }
 
 /** 收起态 rail 图标按钮 */

@@ -61,7 +61,7 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         String mediaType = MediaValidation.mediaType(file.getContentType());
         MediaValidation.validateSize(mediaType, file.getSize());
         String extension = MediaValidation.extension(file.getContentType(), file.getOriginalFilename());
-        String objectKey = storage.objectKey(mediaType, extension);
+        String candidateObjectKey = storage.objectKey(mediaType, extension);
         byte[] bytes;
         try {
             bytes = file.getBytes();
@@ -70,7 +70,9 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         }
         String sha256 = LibraryRepository.sha256Hex(bytes);
         MediaValidation.validateMagic(mediaType, bytes);
-        if (repository.findBlobBySha(sha256).isEmpty()) {
+        var existingBlob = repository.findBlobBySha(sha256);
+        String objectKey = existingBlob.map(LibraryRepository.BlobRow::objectKey).orElse(candidateObjectKey);
+        if (existingBlob.isEmpty() || !storage.exists(objectKey)) {
             storage.put(objectKey, new ByteArrayInputStream(bytes), bytes.length, file.getContentType());
         }
         String assetName = name == null || name.isBlank() ? file.getOriginalFilename() : name;

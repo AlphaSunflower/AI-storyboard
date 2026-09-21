@@ -18,6 +18,7 @@ interface Props {
   onUpload: (file: File) => void;
   onDelete: (id: string) => void;
   onPickProjectOutput?: () => void;
+  onPickProjectLibrary?: () => void;
   projectOutputDisabled?: boolean;
   disabled?: boolean;
 }
@@ -43,6 +44,7 @@ export function ReferenceUploader({
   onUpload,
   onDelete,
   onPickProjectOutput,
+  onPickProjectLibrary,
   projectOutputDisabled,
   disabled,
 }: Props) {
@@ -107,7 +109,26 @@ export function ReferenceUploader({
             {remain > 0 ? ` · 还可添加 ${remain} 个` : ' · 已达上限'}
           </span>
         </div>
-        {type === 'image' && onPickProjectOutput && (
+        {onPickProjectLibrary && (
+          <button
+            type="button"
+            onClick={() => { if (!disabled) onPickProjectLibrary(); }}
+            disabled={disabled}
+            style={{
+              ...boxStyle,
+              flex: '0 0 auto',
+              borderStyle: 'solid',
+              background: 'var(--color-surface-card)',
+              color: 'var(--color-primary)',
+              fontWeight: 600,
+            }}
+            title="从项目库文件夹选择素材"
+          >
+            <FolderOpen size={14} />
+            项目库素材
+          </button>
+        )}
+        {onPickProjectOutput && (
           <button
             type="button"
             onClick={() => { if (!disabled && !projectOutputDisabled) onPickProjectOutput(); }}
@@ -120,7 +141,7 @@ export function ReferenceUploader({
               color: 'var(--color-primary)',
               fontWeight: 600,
             }}
-            title={projectOutputDisabled ? '参考图数量已达上限' : '从项目产出素材选择参考图'}
+            title={projectOutputDisabled ? '数量已达上限' : `从项目产出素材选择${TYPE_LABEL[type]}`}
           >
             <FolderOpen size={14} />
             项目产出素材

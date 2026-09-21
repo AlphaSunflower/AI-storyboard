@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, FileText, Frame, Grip, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
+import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
 import { isEmbeddedAppReadyMessage } from '../../../lib/embeddedAppMessages';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
-  key: 'canvas' | 'editor' | 'docs';
+  key: 'canvas' | 'editor' | 'docs' | 'library';
   title: string;
   url: string;
   projectId?: string;
@@ -43,6 +43,7 @@ function defaultHeight() {
 function appIcon(key: EmbeddedAppDescriptor['key']) {
   if (key === 'canvas') return <Frame size={13} strokeWidth={1.9} />;
   if (key === 'editor') return <PenLine size={13} strokeWidth={1.9} />;
+  if (key === 'library') return <Library size={13} strokeWidth={1.9} />;
   return <FileText size={13} strokeWidth={1.9} />;
 }
 
@@ -57,7 +58,7 @@ export function EmbeddedAppWindow({
   expandedWidthBonus,
   onLayoutChange,
 }: EmbeddedAppWindowProps) {
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() => activeKey === 'library' ? 620 : DEFAULT_WIDTH);
   const [height, setHeight] = useState(defaultHeight);
   const [fullscreen, setFullscreen] = useState(false);
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
@@ -143,7 +144,9 @@ export function EmbeddedAppWindow({
   const openActiveInBrowser = () => {
     const activeTab = tabs.find((tab) => tab.key === activeKey);
     if (!activeTab) return;
-    const target = new URL(activeTab.url, window.location.origin).toString();
+    const targetUrl = new URL(activeTab.url, window.location.origin);
+    targetUrl.searchParams.delete('embedded');
+    const target = targetUrl.toString();
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 

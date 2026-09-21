@@ -1,12 +1,14 @@
 package com.storyboard.asset.controller;
 
 import com.storyboard.asset.dto.ImportContracts.ItemResult;
+import com.storyboard.asset.dto.ImportContracts.ImportJobStatus;
 import com.storyboard.asset.dto.ImportContracts.ScanRequest;
 import com.storyboard.asset.dto.ImportContracts.ScanResponse;
 import com.storyboard.asset.service.ImportService;
 import com.storyboard.common.ApiResponse;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,5 +42,10 @@ public class LibraryImportController {
     ) {
         return ApiResponse.ok(importService.uploadItem(
                 auth.getName(), jobId, itemKey, confirmationToken, file));
+    }
+
+    @GetMapping("/{jobId}")
+    public ApiResponse<ImportJobStatus> getJob(Authentication auth, @PathVariable String jobId) {
+        return ApiResponse.ok(importService.getJob(auth.getName(), jobId));
     }
 }

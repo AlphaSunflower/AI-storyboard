@@ -5,20 +5,24 @@ import { DocsPage } from './pages/DocsPage';
 import { ChatPage } from './pages/ChatPage';
 import { StoryboardLibraryPage } from './pages/StoryboardLibraryPage';
 import NotFoundBrickBreaker from './components/ui/8bit/blocks/not-found-brick-breaker';
-import { LibraryPage } from './pages/LibraryPage';
+import { LibraryWorkspacePage } from './pages/LibraryWorkspacePage';
+import { LibraryTaskQueue } from './components/library/LibraryTaskQueue';
 
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<Navigate to="/chat" replace />} />
-      <Route path="/docs" element={<DocsPage />} />
-      <Route path="/chat" element={<ChatPage />} />
-      <Route path="/chat/storyboards" element={<StoryboardLibraryPage />} />
-      <Route path="/library" element={<LibraryPage />} />
-      <Route path="/editor" element={<EditorPage />} />
-      <Route path="*" element={<NotFoundBrickBreaker className="min-h-svh" href="/chat" />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/docs" element={<DocsPage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat/storyboards" element={<StoryboardLibraryPage />} />
+        <Route path="/library" element={<LibraryWorkspacePage />} />
+        <Route path="/editor" element={<EditorPage />} />
+        <Route path="*" element={<NotFoundBrickBreaker className="min-h-svh" href="/chat" />} />
+      </Routes>
+      <LibraryTaskQueue />
+    </>
   );
 }
 

@@ -60,6 +60,15 @@ ai:
   gateway-model-timeout: 30
   gateway-cooldown-ms: 300000
 
+storyboard:
+  internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
+  internal-secret: ${INTERNAL_SECRET:}
+  asset-client:
+    base-url: ${ASSET_SERVICE_URL:http://localhost:8085}
+    internal-token: ${INTERNAL_SECRET:${storyboard.internal-secret:}}
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 30
+
 # 跨域：dev 靠 vite proxy，生产走网关统一 CORS
 app:
   cors:

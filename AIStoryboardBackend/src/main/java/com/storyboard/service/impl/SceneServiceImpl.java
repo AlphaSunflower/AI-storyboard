@@ -161,7 +161,7 @@ public class SceneServiceImpl implements SceneService {
         checkProjectOwnership(userId, scene.getProjectId());
         return refImageMapper.findBySceneId(sceneId).stream()
             .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
-                    r.getRole(), r.getSourceType(), r.getSourceId(), r.getSourceConversationId(),
+                    r.getRole(), r.getSourceType(), r.getSourceId(), r.getMediaId(), r.getSourceConversationId(),
                     r.getFileName(), r.getFileSize()))
             .toList();
     }

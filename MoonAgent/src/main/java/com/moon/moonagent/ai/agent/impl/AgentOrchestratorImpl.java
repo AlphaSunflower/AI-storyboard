@@ -70,12 +70,21 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
                                    java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
                                    CanvasSessionContext canvasContext, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks,
+                canvasContext, java.util.List.of(), java.util.List.of(), emitter);
+    }
+
+    @Override
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
+                                   java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
+                                   CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
+                                   java.util.List<String> referenceAudios, SseEmitter emitter) {
         OrchestrationRequest request = new OrchestrationRequest(conversation, content, picUrls, emitter);
         request.setRoutingHint(routingHint);
         request.setCanvasContext(canvasContext);
         try {
             AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint,
-                    cancelActiveTasks, canvasContext, emitter);
+                    cancelActiveTasks, canvasContext, referenceVideos, referenceAudios, emitter);
             log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成", conversation.getId(), result.hitlPaused());
             return result;
         } catch (AgentInterruptException e) {

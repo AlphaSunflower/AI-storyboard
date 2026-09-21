@@ -111,7 +111,11 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
   }, [onClose]);
 
   const run = (action: () => void) => () => { action(); onClose(); };
-  const addNodeSubmenu = <GroupedNodeMenu onAdd={(kind: string) => { if (kind === 'image') run(props.onAddImage)(); else if (kind === 'text') run(props.onAddText)(); else props.onAddNode?.(kind); }} />;
+  const addNodeSubmenu = <GroupedNodeMenu onAdd={(kind: string) => {
+    if (kind === 'image') run(props.onAddImage)();
+    else if (kind === 'text') run(props.onAddText)();
+    else if (props.onAddNode) run(() => props.onAddNode!(kind))();
+  }} />;
 
   return <div ref={menuRef} className={`canvas-context-menu ${flyoutLeft ? 'is-flyout-left' : ''}`} role="menu" aria-label="画布右键菜单" style={position} onContextMenu={(event) => event.preventDefault()}>
     {target.type === 'pane' && <>

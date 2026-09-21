@@ -9,8 +9,11 @@ public record AgentSendMessageRequest(
     @NotBlank(message = "消息内容不能为空") String content,
     String picUrl,          // 兼容保留（弃用；新客户端用 picUrls）
     List<String> picUrls,   // 多图参考 URL 列表
+    List<String> referenceVideos, // 本轮项目库/上传参考视频
+    List<String> referenceAudios, // 本轮项目库/上传参考音频
     List<String> assetIds,  // 从资产库选中的资产 id（非空=用户已投资产，编排直接进方案不走资产弹窗）
-    List<String> assetGroupIds, // 项目库资产组快照对应的组 id（仅视频链）
+    List<String> assetGroupIds, // 项目库资产组 id（仅用于回写结果与路由标记）
+    List<String> assetGroupSnapshotIds, // 项目库资产组快照 id（服务端读取签名媒体）
     String routingHint,     // 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-scene-review）
     Boolean cancelActiveTasks, // 可空：true=本轮新消息前取消该会话进行中的异步任务（如视频）
     CanvasSessionContext canvasContext // 可空：画布编辑模式由前端持续携带，直到用户显式离开

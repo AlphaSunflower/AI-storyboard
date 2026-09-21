@@ -69,7 +69,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
 
       <div className="project-home__tabs" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         <button onClick={() => setTab('canvas')} style={tab === 'canvas' ? tabActive : tabInactive}>画布</button>
-        <button onClick={() => setTab('assets')} style={tab === 'assets' ? tabActive : tabInactive}>资产库</button>
+        <button onClick={() => setTab('assets')} style={tab === 'assets' ? tabActive : tabInactive}>项目库</button>
       </div>
 
       {tab === 'canvas' ? (

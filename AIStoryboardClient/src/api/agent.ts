@@ -14,6 +14,16 @@ export interface AgentConversation {
   updatedAt: string;
 }
 
+export interface ConversationAssetGroupBinding {
+  groupId: string;
+  snapshotId: string;
+  groupVersion: number;
+  contentHash: string;
+  target: string;
+  stale: boolean;
+  media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string }>;
+}
+
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
 export interface AgentReasoning {
   summary: string;
@@ -354,6 +364,17 @@ export const agentApi = {
       `/agent/conversations/${conversationId}`,
     ),
 
+  listConversationAssetGroups: (conversationId: string) =>
+    client.get<{ data: ConversationAssetGroupBinding[] }>(
+      `/agent/conversations/${conversationId}/asset-groups`),
+
+  attachConversationAssetGroup: (conversationId: string, groupId: string) =>
+    client.post<{ data: ConversationAssetGroupBinding }>(
+      `/agent/conversations/${conversationId}/asset-groups`, { groupId }),
+
+  removeConversationAssetGroup: (conversationId: string, groupId: string) =>
+    client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
+
   createConversation: (projectId: string, title?: string) =>
     client.post<{ data: AgentConversation }>('/agent/conversations', { projectId, title }),
 
@@ -532,7 +553,14 @@ export async function streamChat(
   assetIds?: string[],
   assetGroupIds?: string[],
   signal?: AbortSignal,
-  opts?: { routingHint?: string; cancelActiveTasks?: boolean; canvasContext?: CanvasEditContext },
+  opts?: {
+    assetGroupSnapshotIds?: string[];
+    referenceVideos?: string[];
+    referenceAudios?: string[];
+    routingHint?: string;
+    cancelActiveTasks?: boolean;
+    canvasContext?: CanvasEditContext;
+  },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
   const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
@@ -543,6 +571,9 @@ export async function streamChat(
       picUrls: picUrls ?? [],
       assetIds: assetIds ?? [],
       assetGroupIds: assetGroupIds ?? [],
+      assetGroupSnapshotIds: opts?.assetGroupSnapshotIds ?? [],
+      referenceVideos: opts?.referenceVideos ?? [],
+      referenceAudios: opts?.referenceAudios ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
       canvasContext: opts?.canvasContext,

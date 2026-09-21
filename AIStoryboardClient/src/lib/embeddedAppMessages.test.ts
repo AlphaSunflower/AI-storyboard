@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isEmbeddedAppReadyMessage,
   isCanvasModeControlMessage,
   isCanvasModeReadyMessage,
   isCanvasModeStatusMessage,
@@ -61,5 +62,12 @@ describe('embedded app canvas messages', () => {
       projectId: 'project-1',
       locked: 'yes',
     })).toBe(false);
+  });
+
+  it('accepts the embedded project library ready message', () => {
+    expect(isEmbeddedAppReadyMessage({
+      type: 'ai-storyboard:embedded-app-ready',
+      key: 'library',
+    })).toBe(true);
   });
 });

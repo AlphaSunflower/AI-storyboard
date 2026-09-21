@@ -33,6 +33,11 @@ class JwtAuthenticationFilterTest {
             return "ok";
         }
 
+        @GetMapping("/api/library/media/{id}/content")
+        String mediaContent() {
+            return "media";
+        }
+
         @GetMapping("/echo")
         Map<String, String> echo(HttpServletRequest req) {
             return Map.of("uid", req.getHeader("X-User-Id"));
@@ -60,6 +65,12 @@ class JwtAuthenticationFilterTest {
     @Test
     void whitelistPaths_passThroughWithoutToken() throws Exception {
         mockMvc.perform(get("/api/auth/health"))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    void signedMediaPaths_passThroughWithoutBearerToken() throws Exception {
+        mockMvc.perform(get("/api/library/media/m1/content").queryParam("token", "signed"))
             .andExpect(status().isOk());
     }
 

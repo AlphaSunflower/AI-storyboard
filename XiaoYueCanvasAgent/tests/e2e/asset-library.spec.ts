@@ -1,76 +1,365 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-test.beforeEach(async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('morrow-creative-canvas-v1', 4);
-      request.onsuccess = () => {
-        const db = request.result;
-        const stores = Array.from(db.objectStoreNames);
-        if (!stores.length) { db.close(); resolve(); return; }
-        const transaction = db.transaction(stores, 'readwrite');
-        stores.forEach((store) => transaction.objectStore(store).clear());
-        transaction.oncomplete = () => { db.close(); resolve(); };
-        transaction.onerror = () => reject(transaction.error);
-      };
+const projectId = 'asset-library-project';
+const canvasId = 'asset-library-canvas';
+const onePixelPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
+
+const seedCanvas = async (page: Page) => {
+  await page.goto('/?token=test-token&userId=test-user');
+  await page.evaluate(async ({ projectId, canvasId }) => {
+    const now = Date.now();
+    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('assetMeta')) db.createObjectStore('assetMeta', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('assetVariants')) db.createObjectStore('assetVariants', { keyPath: ['assetId', 'variant'] });
+      if (!db.objectStoreNames.contains('generationQueue')) db.createObjectStore('generationQueue', { keyPath: 'id' });
+    };
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    localStorage.clear(); sessionStorage.clear();
+    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
+    transaction.objectStore('projects').put({
+      schemaVersion: 2,
+      id: projectId,
+      title: '项目库测试',
+      canvases: [canvasId],
+      createdAt: now,
+      updatedAt: now,
+    });
+    transaction.objectStore('canvases').put({
+      schemaVersion: 1,
+      id: canvasId,
+      projectId,
+      title: '项目库画布',
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  }, { projectId, canvasId });
+};
+
+const mockCanvasApi = async (page: Page) => {
+  await page.route('**/api/canvas/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace('/api/canvas', '');
+    const method = request.method();
+    const json = (body: unknown) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+
+    if (path === '/projects' && method === 'GET') {
+      return json([{ id: projectId, title: '项目库测试' }]);
+    }
+    if (path === `/projects/${projectId}` && method === 'GET') {
+      return json({ id: projectId, title: '项目库测试' });
+    }
+    if (path === `/projects/${projectId}/canvases` && method === 'GET') {
+      return json([{ id: canvasId, projectId, title: '项目库画布' }]);
+    }
+    if (path === `/canvases/${canvasId}/graph` && method === 'GET') {
+      return json({
+        graph: { schemaVersion: 2, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, generationRecords: [] },
+        revision: 0,
+      });
+    }
+    if (path === '/project-library' && method === 'GET') {
+      const folderId = url.searchParams.get('folderId');
+      if (folderId === 'project-folder') {
+        return json({
+          projectTree: {
+            scope: 'PROJECT',
+            ownerProjectId: projectId,
+            folders: [{
+              id: 'project-folder',
+              parentId: null,
+              name: '项目参考',
+              scope: 'PROJECT',
+              ownerProjectId: projectId,
+              directAssetCount: 1,
+              descendantAssetCount: 1,
+              version: 1,
+            }],
+            unfiledAssetCount: 0,
+          },
+          globalTree: { scope: 'GLOBAL', ownerProjectId: null, folders: [], unfiledAssetCount: 0 },
+          assets: [{
+            id: 'folder-asset',
+            scope: 'PROJECT',
+            ownerProjectId: projectId,
+            type: 'IMAGE',
+            aiKind: null,
+            name: '文件夹内素材',
+            description: null,
+            coverUrl: null,
+            sourceType: 'canvas-upload',
+            sourceId: null,
+            status: 'ACTIVE',
+          }],
+          groups: [],
+        });
+      }
+      return json({
+        projectTree: {
+          scope: 'PROJECT',
+          ownerProjectId: projectId,
+          folders: [{
+            id: 'project-folder',
+            parentId: null,
+            name: '项目参考',
+            scope: 'PROJECT',
+            ownerProjectId: projectId,
+            directAssetCount: 1,
+            descendantAssetCount: 1,
+            version: 1,
+          }],
+          unfiledAssetCount: 1,
+        },
+        globalTree: {
+          scope: 'GLOBAL',
+          ownerProjectId: null,
+          folders: [{
+            id: 'global-folder',
+            parentId: null,
+            name: '全局参考',
+            scope: 'GLOBAL',
+            ownerProjectId: null,
+            directAssetCount: 1,
+            descendantAssetCount: 1,
+            version: 1,
+          }],
+          unfiledAssetCount: 1,
+        },
+        assets: [
+          {
+            id: 'canvas-asset',
+            scope: 'PROJECT',
+            ownerProjectId: projectId,
+            type: 'IMAGE',
+            aiKind: null,
+            name: '项目画布成品',
+            description: null,
+            coverUrl: null,
+            sourceType: 'canvas-generation',
+            sourceId: null,
+            status: 'ACTIVE',
+          },
+          {
+            id: 'global-asset',
+            scope: 'GLOBAL',
+            ownerProjectId: null,
+            type: 'VIDEO',
+            aiKind: null,
+            name: '全局共享素材',
+            description: null,
+            coverUrl: null,
+            sourceType: 'upload',
+            sourceId: null,
+            status: 'ACTIVE',
+          },
+        ],
+        groups: [{
+          id: 'global-group',
+          scope: 'GLOBAL',
+          ownerProjectId: null,
+          type: 'GROUP',
+          aiKind: 'SCENE',
+          name: '全局场景资产集',
+          description: null,
+          coverUrl: null,
+          sourceType: null,
+          sourceId: null,
+          status: 'ACTIVE',
+        }],
+      });
+    }
+    if (path === '/project-library/import' && method === 'POST') {
+      return json({
+        id: 'canvas-canvas-asset',
+        canvasId,
+        type: 'image',
+        mimeType: 'image/png',
+        objectUrl: '/api/files/images/canvas-asset.png',
+        libraryAssetId: 'canvas-asset',
+        librarySyncState: 'ready',
+      });
+    }
+    if (path === '/project-library/import-group' && method === 'POST') {
+      return json([
+        {
+          id: 'canvas-group-image-1',
+          canvasId,
+          type: 'image',
+          mimeType: 'image/png',
+          objectUrl: '/api/files/images/group-image-1.png',
+          libraryAssetId: 'group-image-1',
+          librarySyncState: 'ready',
+        },
+        {
+          id: 'canvas-group-image-2',
+          canvasId,
+          type: 'image',
+          mimeType: 'image/png',
+          objectUrl: '/api/files/images/group-image-2.png',
+          libraryAssetId: 'group-image-2',
+          librarySyncState: 'ready',
+        },
+      ]);
+    }
+    if (path.startsWith('/assets/') && method === 'GET') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: onePixelPng,
+      });
+    }
+    if (method === 'PUT') {
+      return json({ graph: JSON.parse(request.postData() ?? '{}').graph, revision: 1 });
+    }
+    if (method === 'PATCH' || method === 'DELETE') return json({ ok: true });
+    return json({ code: 40401, message: `not mocked: ${method} ${path}` });
   });
-  await page.reload();
-});
+};
 
-const png = async (page: import('@playwright/test').Page) => page.evaluate(async () => {
-  const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 40;
-  const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#ff775f'; ctx.fillRect(0, 0, 40, 40);
-  ctx.fillStyle = '#d7ff54'; ctx.fillRect(4, 4, 12, 8);
-  return [...new Uint8Array(await (await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!), 'image/png'))).arrayBuffer())];
-});
-
-test('imports assets into the project library and promotes to global', async ({ page }) => {
-  await page.getByRole('button', { name: '新建项目', exact: true }).click();
-  await page.getByRole('button', { name: '新建第一个画布' }).click();
-  await expect(page.getByText('空画布', { exact: true })).toBeVisible();
-
-  await page.locator('main.canvas-workspace input[type=file]').setInputFiles({ name: 'src.png', mimeType: 'image/png', buffer: Buffer.from(await png(page)) });
-  await expect(page.locator('.react-flow__node')).toHaveCount(1);
-
-  // 返回项目菜单 → 资产库 tab
-  await page.getByRole('button', { name: '本地工作区菜单' }).click();
-  await page.getByRole('menuitem', { name: '返回项目中心' }).click();
-  await page.getByRole('button', { name: '资产库', exact: true }).click();
-  await expect(page.getByAltText('src.png')).toBeVisible();
-  await expect(page.getByRole('button', { name: '导入', exact: true })).toBeVisible();
-
-  // 添加到全局库
-  await page.getByRole('button', { name: '添加到总资产库' }).click();
-  await page.getByRole('button', { name: '全局总资产库' }).click();
-  await expect(page.getByAltText('src.png')).toBeVisible();
-  await expect(page.getByText('跨项目可用')).toBeVisible();
-});
-
-test('canvas asset drawer lists assets and drops one onto the canvas', async ({ page }) => {
-  await page.getByRole('button', { name: '新建项目', exact: true }).click();
-  await page.getByRole('button', { name: '新建第一个画布' }).click();
-  await expect(page.getByText('空画布', { exact: true })).toBeVisible();
-
-  await page.locator('main.canvas-workspace input[type=file]').setInputFiles({ name: 'src.png', mimeType: 'image/png', buffer: Buffer.from(await png(page)) });
-  await expect(page.locator('.react-flow__node')).toHaveCount(1);
-
-  // 打开画布左侧资产库抽屉
-  await page.getByRole('button', { name: '资产库' }).click();
-  await expect(page.getByText('拖拽素材到画布上放置')).toBeVisible();
-  await expect(page.locator('.react-flow__node')).toHaveCount(1);
-
-  // 手动构造 HTML5 拖拽：抽屉卡片 → 画布
-  await page.evaluate(() => {
-    const source = document.querySelector('[draggable="true"]')!;
-    const target = document.querySelector('.react-flow__pane')!;
-    const rect = target.getBoundingClientRect();
-    const dataTransfer = new DataTransfer();
-    source.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));
-    target.dispatchEvent(new DragEvent('drop', { dataTransfer, bubbles: true, clientX: rect.x + rect.width * 0.7, clientY: rect.y + rect.height * 0.6 }));
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
+    localStorage.setItem('morrow_job_token', `header.${payload}.signature`);
   });
-  await expect(page.locator('.react-flow__node')).toHaveCount(2);
+});
+
+test('shows one project library containing folders, canvas assets, global assets, and asset sets', async ({ page }) => {
+  await mockCanvasApi(page);
+  await seedCanvas(page);
+  await page.goto('/?token=test-token&userId=test-user');
+
+  await page.locator('.canvas-home__grid article').first().getByRole('button').first().click();
+  await page.getByRole('button', { name: '项目库', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: '项目库', exact: true })).toBeVisible();
+  await expect(page.getByText('项目参考')).toBeVisible();
+  await expect(page.getByText('全局参考')).toBeVisible();
+  await expect(page.getByText('项目画布成品')).toBeVisible();
+  await expect(page.getByText('全局共享素材')).toBeVisible();
+  await expect(page.getByText('全局场景资产集')).toBeVisible();
+
+  await page.getByRole('button', { name: '项目画布素材' }).click();
+  await expect(page.getByText('项目画布成品')).toBeVisible();
+  await expect(page.getByText('全局共享素材')).toHaveCount(0);
+  await expect(page.getByText('全局场景资产集')).toHaveCount(0);
+});
+
+test('canvas project library drawer opens folders and groups without leaving the canvas', async ({ page }) => {
+  await mockCanvasApi(page);
+  await seedCanvas(page);
+  await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+
+  await expect(page.locator('.canvas-workspace')).toBeVisible();
+  await page.getByRole('button', { name: '项目库' }).click();
+  await expect(page.getByLabel('项目库抽屉')).toBeVisible();
+  await expect(page.getByText('项目参考')).toBeVisible();
+  await expect(page.getByText('全局参考')).toBeVisible();
+  await expect(page.getByText('项目画布成品')).toBeVisible();
+  await expect(page.getByText('全局场景资产集')).toBeVisible();
+
+  await page.getByRole('button', { name: '资产集', exact: true }).click();
+  await expect(page.getByText('全局场景资产集')).toBeVisible();
+  await expect(page.getByText('项目画布成品')).toHaveCount(0);
+  await expect(page.getByTitle('双击打开文件夹')).toHaveCount(2);
+
+  await page.getByRole('button', { name: '全部', exact: true }).click();
+  await page.getByTitle('双击打开文件夹').first().dblclick();
+  await expect(page.getByText('文件夹内素材')).toBeVisible();
+
+  await page.getByRole('button', { name: '关闭项目库' }).click();
+  await expect(page.getByLabel('项目库抽屉')).toHaveCount(0);
+});
+
+test('canvas accepts image and asset set drags from the project library drawer', async ({ page }) => {
+  await mockCanvasApi(page);
+  await seedCanvas(page);
+  await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+
+  await page.getByRole('button', { name: '项目库' }).click();
+  await expect(page.getByText('项目画布成品')).toBeVisible();
+  const dragAccepted = async (label: string) => page.evaluate((sourceLabel) => {
+    const source = [...document.querySelectorAll<HTMLElement>('[draggable="true"]')]
+      .find((element) => element.textContent?.includes(sourceLabel));
+    const workspace = document.querySelector<HTMLElement>('.canvas-workspace');
+    if (!source || !workspace) return { found: false, accepted: false };
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    }));
+    const dragover = new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    });
+    workspace.dispatchEvent(dragover);
+    return { found: true, accepted: dragover.defaultPrevented };
+  }, label);
+
+  expect(await dragAccepted('项目画布成品')).toEqual({ found: true, accepted: true });
+  expect(await dragAccepted('全局共享素材')).toEqual({ found: true, accepted: true });
+
+  await page.getByRole('button', { name: '资产集', exact: true }).click();
+  expect(await dragAccepted('全局场景资产集')).toEqual({ found: true, accepted: true });
+});
+
+test('dropping an image or asset set creates one canvas node per imported file', async ({ page }) => {
+  await mockCanvasApi(page);
+  await seedCanvas(page);
+  await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
+
+  await page.getByRole('button', { name: '项目库' }).click();
+  await expect(page.getByText('项目画布成品')).toBeVisible();
+  const dropLibraryItem = async (label: string) => page.evaluate((sourceLabel) => {
+    const source = [...document.querySelectorAll<HTMLElement>('[draggable="true"]')]
+      .find((element) => element.textContent?.includes(sourceLabel));
+    const workspace = document.querySelector<HTMLElement>('.canvas-workspace');
+    if (!source || !workspace) return false;
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: transfer,
+    }));
+    const rect = workspace.getBoundingClientRect();
+    const drop = new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + 520,
+      clientY: rect.top + 360,
+      dataTransfer: transfer,
+    });
+    workspace.dispatchEvent(drop);
+    return drop.defaultPrevented;
+  }, label);
+
+  expect(await dropLibraryItem('项目画布成品')).toBe(true);
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+
+  await page.getByRole('button', { name: '资产集', exact: true }).click();
+  expect(await dropLibraryItem('全局场景资产集')).toBe(true);
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
 });

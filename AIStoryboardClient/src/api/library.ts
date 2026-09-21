@@ -4,8 +4,10 @@ import type { ApiResponse } from './auth';
 export type AssetScope = 'PROJECT' | 'GLOBAL';
 export type AssetType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'AI_ASSET' | 'GROUP';
 export type AssetStatus = 'ACTIVE' | 'TRASHED' | 'PURGE_PENDING' | 'PURGE_BLOCKED' | 'PURGED';
+export type MetadataState = 'NONE' | 'AI_GENERATING' | 'AI_GENERATED' | 'AI_FAILED' | 'EDITED';
 export type TagMode = 'ALL' | 'ANY';
 export type MediaType = 'IMAGE' | 'VIDEO' | 'AUDIO';
+export type ImportMode = 'ASSETS' | 'GROUP' | 'TREE';
 
 export interface LibraryTag {
   id: string;
@@ -30,11 +32,14 @@ export interface LibraryAsset {
   description: string | null;
   aiDescription: string | null;
   manualOverride: boolean;
+  metadataState: MetadataState;
   status: AssetStatus;
   coverUrl: string | null;
   version: number;
   tags: LibraryTag[];
   projects: ProjectLinkRef[];
+  folderId: string | null;
+  folderPath: string[];
   sourceType: string | null;
   sourceId: string | null;
   createdAt: string;
@@ -65,6 +70,23 @@ export interface LibraryAssetDetail {
   asset: LibraryAsset;
   media: LibraryMedia[];
   linkedProjects: ProjectLinkRef[];
+}
+
+export interface LibraryAssetGroupDetail {
+  groupId: string;
+  name: string;
+  description: string | null;
+  version: number;
+  media: LibraryGroupMediaItem[];
+}
+
+export interface LibraryGroupMediaItem {
+  media: LibraryMedia;
+  assetId: string | null;
+  assetName: string | null;
+  assetDescription: string | null;
+  assetVersion: number;
+  assetTags: LibraryTag[];
 }
 
 export interface LibraryPage<T> {
@@ -107,13 +129,61 @@ export interface ImportScanResult {
   imageCount: number;
   totalBytes: number;
   ignoredCount: number;
+  groupId: string | null;
   expiresAt: string;
+}
+
+export interface ImportJobStatus {
+  id: string;
+  status: 'CREATED' | 'UPLOADING' | 'COMPLETED' | 'PARTIAL';
+  projectId: string | null;
+  scope: AssetScope;
+  mode: ImportMode;
+  groupId: string | null;
+  totalCount: number;
+  processedCount: number;
+  succeededCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  errorMessage: string | null;
+  updatedAt: string;
+}
+
+export interface AnalysisTaskStatus {
+  assetId: string;
+  status: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'DEAD';
+  errorMessage: string | null;
+  updatedAt: string;
+}
+
+export interface LibraryFolderNode {
+  id: string;
+  parentId: string | null;
+  name: string;
+  scope: AssetScope;
+  ownerProjectId: string | null;
+  directAssetCount: number;
+  descendantAssetCount: number;
+  version: number;
+}
+
+export interface LibraryFolderTree {
+  scope: AssetScope;
+  ownerProjectId: string | null;
+  folders: LibraryFolderNode[];
+  unfiledAssetCount: number;
+}
+
+export interface BulkAssetOperationResult {
+  updatedIds: string[];
+  skipped: Array<{ assetId: string; reason: string }>;
 }
 
 export const libraryApi = {
   listAssets: (params: {
     scope?: AssetScope;
     projectId?: string;
+    folderId?: string;
     q?: string;
     type?: AssetType;
     tagIds?: string[];
@@ -144,6 +214,15 @@ export const libraryApi = {
   promote: (id: string, expectedVersion: number) =>
     client.post<ApiResponse<LibraryAsset>>(`/library/assets/${id}/promote`, { expectedVersion }),
 
+  bulkTrash: (assetIds: string[]) =>
+    client.post<ApiResponse<BulkAssetOperationResult>>('/library/assets/bulk/trash', { assetIds }),
+
+  bulkPromote: (assetIds: string[]) =>
+    client.post<ApiResponse<BulkAssetOperationResult>>('/library/assets/bulk/promote', { assetIds }),
+
+  duplicateAssets: (data: { assetIds: string[]; folderId?: string | null }) =>
+    client.post<ApiResponse<BulkAssetOperationResult>>('/library/assets/bulk/duplicate', data),
+
   linkProject: (id: string, projectId: string) =>
     client.post(`/library/assets/${id}/projects`, { projectId }),
 
@@ -159,6 +238,9 @@ export const libraryApi = {
   createTag: (data: { name: string; color?: string }) =>
     client.post<ApiResponse<LibraryTag>>('/library/tags', data),
 
+  deleteTag: (tagId: string) =>
+    client.delete(`/library/tags/${tagId}`),
+
   replaceTags: (assetId: string, tagIds: string[]) =>
     client.put(`/library/assets/${assetId}/tags`, { tagIds }),
 
@@ -171,14 +253,45 @@ export const libraryApi = {
     headers: { 'Idempotency-Key': crypto.randomUUID() },
   }),
 
+  createGroupFromAssets: (data: {
+    ownerProjectId: string;
+    name: string;
+    assetIds: string[];
+  }) => client.post<ApiResponse<LibraryAsset>>('/library/groups/from-assets', data, {
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+  }),
+
+  getFolderTree: (params: { scope: AssetScope; projectId?: string | null }) =>
+    client.get<ApiResponse<LibraryFolderTree>>('/library/folders/tree', { params }),
+
+  createFolder: (data: {
+    scope: AssetScope;
+    ownerProjectId?: string | null;
+    parentId?: string | null;
+    name: string;
+  }) => client.post<ApiResponse<LibraryFolderNode>>('/library/folders', data),
+
+  renameFolder: (folderId: string, data: { name: string; expectedVersion: number }) =>
+    client.put<ApiResponse<LibraryFolderNode>>(`/library/folders/${folderId}`, data),
+
+  deleteFolder: (folderId: string, expectedVersion: number) =>
+    client.delete(`/library/folders/${folderId}`, { params: { expectedVersion } }),
+
+  moveFolder: (
+    folderId: string,
+    data: { parentId: string | null; expectedVersion: number },
+  ) => client.put(`/library/folders/${folderId}/parent`, data),
+
+  copyFolders: (data: { folderIds: string[]; parentId?: string | null }) =>
+    client.post<ApiResponse<BulkAssetOperationResult>>('/library/folders/bulk/copy', data),
+
+  moveAssetsToFolder: (
+    folderId: string,
+    data: { scope: AssetScope; ownerProjectId?: string | null; assetIds: string[] },
+  ) => client.put(`/library/folders/${folderId}/assets`, data),
+
   getGroup: (groupId: string) =>
-    client.get<ApiResponse<{
-      groupId: string;
-      name: string;
-      description: string | null;
-      version: number;
-      media: LibraryMedia[];
-    }>>(`/library/groups/${groupId}`),
+    client.get<ApiResponse<LibraryAssetGroupDetail>>(`/library/groups/${groupId}`),
 
   replaceGroupItems: (
     groupId: string,
@@ -211,6 +324,7 @@ export const libraryApi = {
   uploadDirect: (
     file: File,
     options: { projectId?: string; scope: AssetScope; name?: string; relativePath?: string },
+    onUploadProgress?: (progress: number) => void,
   ) => {
     const form = new FormData();
     form.append('file', file);
@@ -223,6 +337,12 @@ export const libraryApi = {
         'Content-Type': 'multipart/form-data',
         'Idempotency-Key': crypto.randomUUID(),
       },
+      onUploadProgress: onUploadProgress
+        ? (event) => {
+          const total = event.total || 0;
+          onUploadProgress(total > 0 ? Math.round(event.loaded / total * 100) : 0);
+        }
+        : undefined,
       timeout: 600_000,
     });
   },
@@ -230,21 +350,42 @@ export const libraryApi = {
   scanImport: (data: {
     projectId?: string | null;
     scope: AssetScope;
+    mode: ImportMode;
+    groupName?: string;
     entries: ImportEntry[];
   }) => client.post<ApiResponse<ImportScanResult>>('/library/imports/scan', data),
+
+  getImportJob: (jobId: string) =>
+    client.get<ApiResponse<ImportJobStatus>>(`/library/imports/${jobId}`),
 
   uploadImportItem: (
     jobId: string,
     itemKey: string,
     confirmationToken: string,
     file: File,
+    onUploadProgress?: (progress: number) => void,
   ) => {
     const form = new FormData();
     form.append('file', file);
-    return client.post<ApiResponse<{ status: string }>>(`/library/imports/${jobId}/items`, form, {
+    return client.post<ApiResponse<{ status: string; asset: LibraryAsset | null; message: string | null }>>(
+      `/library/imports/${jobId}/items`,
+      form,
+      {
       params: { itemKey, confirmationToken },
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onUploadProgress
+        ? (event) => {
+          const total = event.total || 0;
+          onUploadProgress(total > 0 ? Math.round(event.loaded / total * 100) : 0);
+        }
+        : undefined,
       timeout: 600_000,
-    });
+      },
+    );
   },
+
+  getAnalysisTasks: (assetIds: string[]) =>
+    client.get<ApiResponse<AnalysisTaskStatus[]>>('/library/assets/analysis-tasks', {
+      params: { assetIds: assetIds.join(',') },
+    }),
 };

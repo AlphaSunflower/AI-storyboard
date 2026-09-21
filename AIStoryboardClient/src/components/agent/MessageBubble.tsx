@@ -3,22 +3,48 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, ImagePlus } from 'lucide-react';
+import { Download, ImagePlus, Library, LoaderCircle } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentMessageMetadata } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { ReasoningPanel } from './ReasoningPanel';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { ContextMenu } from '../common/ContextMenu';
+import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
+import {
+  CHAT_MEDIA_DRAG_MIME,
+  serializeDragPayload,
+  type ChatMediaDragPayload,
+} from '../../lib/projectLibraryDrag';
+
+type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
+
+function extractMessageMedia(content: string): MessageMedia[] {
+  const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  const found = new Map<string, MessageMedia>();
+  for (const match of normalized.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+    found.set(match[1], { url: match[1], type: 'IMAGE' });
+  }
+  for (const match of normalized.matchAll(/((?:https?:\/\/|\/api\/files\/videos\/)\S+?\.(?:mp4|webm)(?:\?\S*)?)/gi)) {
+    found.set(match[1], { url: match[1], type: 'VIDEO' });
+  }
+  for (const match of normalized.matchAll(/((?:https?:\/\/|\/)\S+?\.(?:png|jpe?g|gif|webp)(?:\?\S*)?)/gi)) {
+    found.set(match[1], { url: match[1], type: 'IMAGE' });
+  }
+  return Array.from(found.values());
+}
 
 function imageExtension(url: string, mime: string): string {
   if (mime.includes('png')) return 'png';
   if (mime.includes('webp')) return 'webp';
   if (mime.includes('gif')) return 'gif';
   if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('mp4')) return 'mp4';
   const matched = url.match(/\.(png|jpe?g|gif|webp)(?:[?#]|$)/i)?.[1];
   return matched?.toLowerCase().replace('jpeg', 'jpg') ?? 'png';
 }
@@ -58,9 +84,10 @@ async function downloadImage(url: string, alt?: string) {
  * onClick 可选：点击图片放大预览（灯箱）。
  */
 function ImgWithFallback({
-  src, source, alt, style, onClick,
+  src, source, alt, style, onClick, onImport, importDisabled, importing, dragPayload,
 }: {
   src: string; source?: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
+  onImport?: () => void; importDisabled?: boolean; importing?: boolean; dragPayload?: ChatMediaDragPayload | null;
 }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -83,6 +110,12 @@ function ImgWithFallback({
           icon: <ImagePlus size={13} strokeWidth={1.8} />,
           onClick: () => useAgentStore.getState().addRefImageUrls([source || src]),
         },
+        {
+          label: importing ? '正在导入素材库' : '导入素材库',
+          icon: <Library size={13} strokeWidth={1.8} />,
+          disabled: importDisabled || importing,
+          onClick: () => onImport?.(),
+        },
       ]}
     >
       <img
@@ -91,13 +124,73 @@ function ImgWithFallback({
         style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
         onClick={onClick}
         onError={() => setFailed(true)}
+        draggable={Boolean(dragPayload)}
+        onDragStart={(event) => {
+          if (!dragPayload) return;
+          event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
+          event.dataTransfer.effectAllowed = 'copy';
+        }}
+      />
+    </ContextMenu>
+  );
+}
+
+function VideoWithActions({
+  src,
+  source,
+  onImport,
+  importDisabled,
+  importing,
+  dragPayload,
+}: {
+  src: string;
+  source: string;
+  onImport?: () => void;
+  importDisabled?: boolean;
+  importing?: boolean;
+  dragPayload?: ChatMediaDragPayload | null;
+}) {
+  return (
+    <ContextMenu
+      items={[
+        {
+          label: '下载',
+          icon: <Download size={13} strokeWidth={1.8} />,
+          onClick: () => { void downloadImage(src, 'chat-video'); },
+        },
+        {
+          label: importing ? '正在导入素材库' : '导入素材库',
+          icon: <Library size={13} strokeWidth={1.8} />,
+          disabled: importDisabled || importing,
+          onClick: () => onImport?.(),
+        },
+      ]}
+    >
+      <video
+        src={src}
+        controls
+        style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
+        data-source={source}
+        draggable={Boolean(dragPayload)}
+        onDragStart={(event) => {
+          if (!dragPayload) return;
+          event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
+          event.dataTransfer.effectAllowed = 'copy';
+        }}
       />
     </ContextMenu>
   );
 }
 
 /** 轻量渲染：**加粗**、换行、![]() 图片、[]() 链接、视频 URL 直接识别；onImgClick 为图片点击预览回调 */
-function renderContent(content: string, onImgClick: (url: string) => void) {
+function renderContent(
+  content: string,
+  onImgClick: (url: string) => void,
+  onImportMedia?: (media: MessageMedia) => void,
+  importDisabled?: boolean,
+  importing?: boolean,
+  dragProjectId?: string,
+) {
   // LLM 输出的 JSON 字符串中 \n 可能被转义为字面 \\n，split('\n') 无法匹配；
   // 统一将字面 \\n（及 \r\n）归一为真正换行后再拆行
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
@@ -113,6 +206,15 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
           source={imgMatch[2]}
           alt={imgMatch[1]}
           onClick={() => onImgClick(imgMatch[2])}
+          onImport={() => onImportMedia?.({ url: imgMatch[2], type: 'IMAGE' })}
+          importDisabled={importDisabled}
+          importing={importing}
+          dragPayload={dragProjectId ? {
+            projectId: dragProjectId,
+            mediaType: 'IMAGE',
+            url: imgMatch[2],
+            name: imgMatch[1] || '对话图片',
+          } : null}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
         />
       );
@@ -122,11 +224,19 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
     const videoMatch = line.match(/(?:https?:\/\/|\/api\/files\/videos\/)\S+\.(mp4|webm)(\?\S*)?/i);
     if (videoMatch) {
       return (
-        <video
+        <VideoWithActions
           key={i}
           src={assetUrl(videoMatch[0])}
-          controls
-          style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
+          source={videoMatch[0]}
+          onImport={() => onImportMedia?.({ url: videoMatch[0], type: 'VIDEO' })}
+          importDisabled={importDisabled}
+          importing={importing}
+          dragPayload={dragProjectId ? {
+            projectId: dragProjectId,
+            mediaType: 'VIDEO',
+            url: videoMatch[0],
+            name: '对话视频',
+          } : null}
         />
       );
     }
@@ -142,6 +252,15 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
           source={raw}
           alt=""
           onClick={() => onImgClick(raw)}
+          onImport={() => onImportMedia?.({ url: raw, type: 'IMAGE' })}
+          importDisabled={importDisabled}
+          importing={importing}
+          dragPayload={dragProjectId ? {
+            projectId: dragProjectId,
+            mediaType: 'IMAGE',
+            url: raw,
+            name: '对话图片',
+          } : null}
           style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
         />
       );
@@ -159,7 +278,21 @@ function renderContent(content: string, onImgClick: (url: string) => void) {
 }
 
 /** Markdown 渲染（Moon 助手消息）：保留 `[链接](url)`、视频裸 URL、图片 markdown / 裸图片 URL 的原有处理。 */
-function MarkdownContent({ content, onImgClick }: { content: string; onImgClick: (url: string) => void }) {
+function MarkdownContent({
+  content,
+  onImgClick,
+  onImportMedia,
+  importDisabled,
+  importing,
+  dragProjectId,
+}: {
+  content: string;
+  onImgClick: (url: string) => void;
+  onImportMedia?: (media: MessageMedia) => void;
+  importDisabled?: boolean;
+  importing?: boolean;
+  dragProjectId?: string;
+}) {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
   const nodes: React.ReactNode[] = [];
@@ -182,6 +315,15 @@ function MarkdownContent({ content, onImgClick }: { content: string; onImgClick:
                 source={src ?? ''}
                 alt={alt ?? ''}
                 onClick={() => onImgClick(src ?? '')}
+                onImport={() => onImportMedia?.({ url: src ?? '', type: 'IMAGE' })}
+                importDisabled={importDisabled}
+                importing={importing}
+                dragPayload={dragProjectId ? {
+                  projectId: dragProjectId,
+                  mediaType: 'IMAGE',
+                  url: src ?? '',
+                  name: alt || '对话图片',
+                } : null}
                 style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
               />
             ),
@@ -197,11 +339,19 @@ function MarkdownContent({ content, onImgClick }: { content: string; onImgClick:
     if (videoMatch) {
       flush(i);
       nodes.push(
-        <video
+        <VideoWithActions
           key={i}
           src={assetUrl(videoMatch[0])}
-          controls
-          style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
+          source={videoMatch[0]}
+          onImport={() => onImportMedia?.({ url: videoMatch[0], type: 'VIDEO' })}
+          importDisabled={importDisabled}
+          importing={importing}
+          dragPayload={dragProjectId ? {
+            projectId: dragProjectId,
+            mediaType: 'VIDEO',
+            url: videoMatch[0],
+            name: '对话视频',
+          } : null}
         />
       );
     } else {
@@ -286,11 +436,15 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
+  const currentProject = useProjectStore((state) => state.currentProject);
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [projectImportState, setProjectImportState] = useState<'idle' | 'importing' | 'done' | 'error'>('idle');
   const bubbleRef = useRef<HTMLDivElement>(null);
   const displayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
+  const messageMedia = extractMessageMedia(displayContent);
+  const importDisabled = !currentProject?.id || messageMedia.length === 0;
   // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
   const hitlMeta = metadata?.hitl;
   const isHitl = !!hitlMeta && !hitlMeta.pending && metadata?.kind !== 'video-plan';
@@ -318,6 +472,23 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => { /* 剪贴板不可用时静默 */ });
+  };
+
+  useEffect(() => {
+    setProjectImportState('idle');
+  }, [content]);
+
+  const handleImportMedia = async (media: MessageMedia[]) => {
+    if (!currentProject?.id || media.length === 0) return;
+    setProjectImportState('importing');
+    const results = await Promise.allSettled(media.map((item) => importMediaToProjectLibrary({
+      projectId: currentProject.id,
+      producer: 'moon-chat',
+      url: item.url,
+      mediaType: item.type,
+      label: item.type === 'VIDEO' ? 'Moon 生成视频' : 'Moon 生成图片',
+    })));
+    setProjectImportState(results.every((result) => result.status === 'fulfilled') ? 'done' : 'error');
   };
 
   // 新消息入场：从下往上轻微浮入（仅挂载时播放一次）
@@ -411,8 +582,24 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         {displayContent ? (
           <span className="chat-live-text">
             {role === 'assistant'
-              ? <MarkdownContent content={displayContent} onImgClick={setPreviewUrl} />
-              : renderContent(displayContent, setPreviewUrl)}
+              ? (
+                <MarkdownContent
+                  content={displayContent}
+                  onImgClick={setPreviewUrl}
+                  onImportMedia={(media) => void handleImportMedia([media])}
+                  importDisabled={importDisabled}
+                  importing={projectImportState === 'importing'}
+                  dragProjectId={currentProject?.id}
+                />
+              )
+              : renderContent(
+                  displayContent,
+                  setPreviewUrl,
+                  (media) => void handleImportMedia([media]),
+                  importDisabled,
+                  projectImportState === 'importing',
+                  currentProject?.id,
+                )}
           </span>
         ) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
@@ -456,6 +643,38 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
             }}
           >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+          {!isUser && messageMedia.length > 0 && (
+            <button
+              onClick={() => void handleImportMedia(messageMedia)}
+              disabled={importDisabled || projectImportState === 'importing'}
+              title={currentProject?.id ? '导入素材库' : '请先选择项目'}
+              onMouseEnter={(e) => {
+                if (importDisabled || projectImportState === 'importing') return;
+                const el = e.currentTarget;
+                el.style.background = 'rgba(0,0,0,0.05)';
+                el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget;
+                el.style.background = 'transparent';
+                el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)';
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                border: 'none', background: 'transparent', cursor: importDisabled ? 'not-allowed' : 'pointer',
+                fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
+                color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
+                opacity: importDisabled ? 0.55 : 1,
+              }}
+            >
+              {projectImportState === 'importing'
+                ? <LoaderCircle size={12} className="is-spinning" />
+                : <Library size={12} strokeWidth={1.8} />}
+              {projectImportState === 'done'
+                ? '已导入素材库'
+                : projectImportState === 'error' ? '重试导入素材库' : '导入素材库'}
+            </button>
+          )}
         </div>
       )}
     </div>

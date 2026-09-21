@@ -3,6 +3,7 @@ package com.storyboard.asset.controller;
 import com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.CreateGroupRequest;
+import com.storyboard.asset.client.AssetContracts.CreateGroupFromAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.ReplaceGroupItemsRequest;
 import com.storyboard.asset.client.AssetContracts.SnapshotRequest;
 import com.storyboard.asset.client.AssetContracts.GenerationOutputEvent;
@@ -55,6 +56,15 @@ public class LibraryGroupController {
         return ApiResponse.ok(groupService.get(auth.getName(), id));
     }
 
+    @PostMapping("/groups/from-assets")
+    public ApiResponse<AssetSummary> createFromAssets(
+            Authentication auth,
+            @RequestBody CreateGroupFromAssetsRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
+    ) {
+        return ApiResponse.ok(groupService.createFromAssets(auth.getName(), request, idempotencyKey));
+    }
+
     @PutMapping("/groups/{id}/items")
     public ApiResponse<Void> replaceItems(
             Authentication auth,
@@ -81,7 +91,7 @@ public class LibraryGroupController {
             @PathVariable String id,
             @RequestParam(required = false) String actorUserId
     ) {
-        String userId = actorUserId == null || actorUserId.isBlank() ? auth.getName() : actorUserId;
+        String userId = resolveActorUserId(auth, actorUserId);
         return ApiResponse.ok(groupService.getSnapshot(userId, id));
     }
 
@@ -96,5 +106,18 @@ public class LibraryGroupController {
                 event.groupId(), event.resultAssetId(), event.resultUrl(), event.mediaType(),
                 event.prompt(), event.model(), event.metadata());
         return ApiResponse.ok(generationOutputService.register(scoped));
+    }
+
+    private static String resolveActorUserId(Authentication auth, String actorUserId) {
+        String authenticatedUser = auth.getName();
+        if (actorUserId == null || actorUserId.isBlank() || actorUserId.equals(authenticatedUser)) {
+            return authenticatedUser;
+        }
+        boolean internal = auth.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_INTERNAL".equals(authority.getAuthority()));
+        if (!internal) {
+            throw new com.storyboard.common.BusinessException(40301, "无权以其他用户身份读取快照");
+        }
+        return actorUserId;
     }
 }

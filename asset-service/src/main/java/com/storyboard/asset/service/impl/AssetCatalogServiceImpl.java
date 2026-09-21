@@ -6,11 +6,16 @@ import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.AiAssetKind;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.AssetStatus;
+import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
 import com.storyboard.asset.domain.AssetStatePolicy;
+import com.storyboard.asset.domain.AssetSearchText;
+import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.AssetCatalogService;
@@ -26,6 +31,8 @@ import java.util.List;
 
 @Service
 public class AssetCatalogServiceImpl implements AssetCatalogService {
+
+    private static final int MAX_BULK_ASSETS = 500;
 
     private final LibraryRepository repository;
     private final ProjectAccessPort projectAccess;
@@ -46,10 +53,18 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
             String userId, AssetScope scope, String projectId, String query, AssetType type,
             Collection<String> tagIds, TagMode tagMode, boolean deleted, int page, int size
     ) {
+        return list(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted, page, size);
+    }
+
+    @Override
+    public PageResponse<AssetSummary> list(
+            String userId, AssetScope scope, String projectId, String folderId, String query, AssetType type,
+            Collection<String> tagIds, TagMode tagMode, boolean deleted, int page, int size
+    ) {
         if (scope == AssetScope.PROJECT && projectId != null && !projectId.isBlank()) {
             projectAccess.requireOwned(userId, projectId);
         }
-        return repository.searchAssets(userId, scope, projectId, query, type, tagIds,
+        return repository.searchAssets(userId, scope, projectId, folderId, query, type, tagIds,
                 tagMode == null ? TagMode.ALL : tagMode, deleted, page, size);
     }
 
@@ -57,6 +72,16 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     public AssetDetail get(String userId, String assetId) {
         AssetSummary asset = requireAsset(userId, assetId);
         List<MediaRef> media = repository.listMedia(assetId).stream()
+                .map(item -> withSignedUrl(userId, item))
+                .toList();
+        return new AssetDetail(asset, media, asset.projects());
+    }
+
+    @Override
+    public AssetDetail findBySource(String userId, String sourceType, String sourceId) {
+        AssetSummary asset = repository.findAssetBySource(userId, sourceType, sourceId)
+                .orElseThrow(() -> new BusinessException(40401, "来源媒体不存在"));
+        List<MediaRef> media = repository.listMedia(asset.id()).stream()
                 .map(item -> withSignedUrl(userId, item))
                 .toList();
         return new AssetDetail(asset, media, asset.projects());
@@ -108,7 +133,79 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         if (!repository.promote(userId, assetId, expectedVersion)) {
             throw new BusinessException(40901, "资产版本已变化，无法提升到全局库");
         }
+        repository.removeAssetFolderMappings(userId, assetId);
+        repository.unlinkAllProjects(assetId);
         return requireAsset(userId, assetId);
+    }
+
+    @Override
+    @Transactional
+    public BulkAssetOperationResult bulkPromote(String userId, Collection<String> assetIds) {
+        List<AssetSummary> assets = validateBulkAssets(userId, assetIds);
+        List<String> updated = new java.util.ArrayList<>(assets.size());
+        for (AssetSummary asset : assets) {
+            if (asset.scope() == AssetScope.GLOBAL) continue;
+            if (!repository.promote(userId, asset.id(), asset.version())) {
+                throw new BusinessException(40901, "资产状态已变化，批量提升已取消");
+            }
+            repository.removeAssetFolderMappings(userId, asset.id());
+            repository.unlinkAllProjects(asset.id());
+            updated.add(asset.id());
+        }
+        return new BulkAssetOperationResult(List.copyOf(updated), List.of());
+    }
+
+    @Override
+    @Transactional
+    public BulkAssetOperationResult duplicate(String userId, DuplicateAssetsRequest request) {
+        if (request == null || request.assetIds() == null || request.assetIds().isEmpty()) {
+            throw new BusinessException(40001, "请选择要复制的资产");
+        }
+        List<String> sourceIds = request.assetIds().stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (sourceIds.isEmpty()) throw new BusinessException(40001, "请选择要复制的资产");
+        if (sourceIds.size() > MAX_BULK_ASSETS) throw new BusinessException(40001, "单次最多复制 500 项资产");
+
+        var targetFolder = request.folderId() == null || request.folderId().isBlank()
+                ? null
+                : repository.findFolder(userId, request.folderId())
+                    .orElseThrow(() -> new BusinessException(40401, "目标文件夹不存在"));
+
+        List<String> updated = new java.util.ArrayList<>(sourceIds.size());
+        List<com.storyboard.asset.client.AssetContracts.SkippedAsset> skipped = new java.util.ArrayList<>();
+        for (String sourceId : sourceIds) {
+            AssetSummary source = repository.findAsset(userId, sourceId)
+                    .orElseThrow(() -> new BusinessException(40401, "资产不存在"));
+            if (source.status() != AssetStatus.ACTIVE) {
+                skipped.add(new com.storyboard.asset.client.AssetContracts.SkippedAsset(sourceId, "资产不可用"));
+                continue;
+            }
+            if (targetFolder != null && (
+                    targetFolder.scope() != source.scope()
+                    || !java.util.Objects.equals(targetFolder.ownerProjectId(), source.ownerProjectId()))) {
+                skipped.add(new com.storyboard.asset.client.AssetContracts.SkippedAsset(sourceId, "不能复制到其他项目文件夹"));
+                continue;
+            }
+
+            String name = duplicateName(source.name());
+            String searchText = AssetSearchText.build(
+                    name,
+                    source.description(),
+                    source.aiDescription(),
+                    source.tags().stream().map(tag -> tag.name()).toList()
+            );
+            String copyId = repository.duplicateAsset(source, name, searchText);
+            repository.copyMediaLinks(source.id(), copyId);
+            repository.copyAssetTags(source.id(), copyId);
+            repository.copyProjectLinks(source.id(), copyId, userId);
+            if (source.type() == AssetType.GROUP) repository.duplicateGroup(source.id(), copyId);
+            if (targetFolder != null) {
+                repository.assignAssetsToFolder(
+                        userId, source.scope(), source.ownerProjectId(), targetFolder.id(), List.of(copyId));
+            }
+            updated.add(copyId);
+        }
+        return new BulkAssetOperationResult(List.copyOf(updated), List.copyOf(skipped));
     }
 
     @Override
@@ -146,6 +243,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         if (!AssetStatePolicy.canPurge(asset.status().name())) {
             throw new BusinessException(40901, "只有回收站资产可以彻底删除");
         }
+        repository.unlinkAllProjects(assetId);
         if (repository.hasActiveReferences(assetId)) {
             repository.markPurgeBlocked(assetId);
             throw new BusinessException(40901, "资产仍被项目引用，已转为待处理状态");
@@ -179,11 +277,32 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         String url = "/api/files/" + registration.objectKey();
         repository.updateCover(assetId, url);
         if (registration.scope() == AssetScope.PROJECT) repository.linkProject(userId, assetId, registration.projectId());
-        if (registration.mediaType() == com.storyboard.asset.client.AssetContracts.MediaType.IMAGE) {
+        if (registration.scope() == AssetScope.PROJECT
+                && registration.mediaType() == com.storyboard.asset.client.AssetContracts.MediaType.IMAGE) {
             repository.createAnalysisTask(assetId);
         }
         repository.createIdempotencyKey(userId, "media-register", idempotencyKey, assetId);
         return requireAsset(userId, assetId);
+    }
+
+    @Override
+    @Transactional
+    public BulkAssetOperationResult bulkTrash(String userId, Collection<String> assetIds) {
+        List<AssetSummary> assets = validateBulkAssets(userId, assetIds);
+        List<String> updated = new java.util.ArrayList<>(assets.size());
+        java.time.OffsetDateTime purgeAfter = OffsetDateTime.now().plusDays(7);
+        for (AssetSummary asset : assets) {
+            if (!repository.trash(userId, asset.id(), asset.version(), purgeAfter)) {
+                throw new BusinessException(40901, "资产状态已变化，批量删除已取消");
+            }
+            updated.add(asset.id());
+        }
+        return new BulkAssetOperationResult(List.copyOf(updated), List.of());
+    }
+
+    @Override
+    public List<AnalysisTaskStatus> listAnalysisTaskStatuses(String userId, Collection<String> assetIds) {
+        return repository.listAnalysisTaskStatuses(userId, assetIds);
     }
 
     private void validateCreate(String userId, CreateAssetRequest request) {
@@ -195,6 +314,23 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
 
     private AssetSummary requireAsset(String userId, String assetId) {
         return repository.findAsset(userId, assetId).orElseThrow(() -> new BusinessException(40401, "资产不存在"));
+    }
+
+    private List<AssetSummary> validateBulkAssets(String userId, Collection<String> assetIds) {
+        List<String> normalized = assetIds == null ? List.of() : assetIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (normalized.isEmpty()) throw new BusinessException(40001, "请选择资产");
+        if (normalized.size() > MAX_BULK_ASSETS) {
+            throw new BusinessException(40001, "单次最多操作 500 项资产");
+        }
+        List<AssetSummary> assets = normalized.stream()
+                .map(id -> repository.findAsset(userId, id)
+                        .orElseThrow(() -> new BusinessException(40401, "资产不存在")))
+                .toList();
+        if (assets.stream().anyMatch(asset -> asset.status() != AssetStatus.ACTIVE)) {
+            throw new BusinessException(40901, "所选资产中包含不可操作项");
+        }
+        return assets;
     }
 
     private static AssetType parseType(String type) {
@@ -209,6 +345,11 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static String duplicateName(String name) {
+        String base = name == null || name.isBlank() ? "未命名素材" : name.trim();
+        return base + " - 副本";
     }
 
     private MediaRef withSignedUrl(String userId, MediaRef media) {

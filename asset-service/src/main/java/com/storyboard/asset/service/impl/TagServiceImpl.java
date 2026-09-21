@@ -43,6 +43,14 @@ public class TagServiceImpl implements TagService {
 
     @Override
     @Transactional
+    public void delete(String userId, String tagId) {
+        if (tagId == null || tagId.isBlank() || !repository.deleteTag(userId, tagId)) {
+            throw new BusinessException(40401, "标签不存在");
+        }
+    }
+
+    @Override
+    @Transactional
     public void replaceAssetTags(String actorUserId, String assetId, AssignTagsRequest request) {
         assetCatalogService.get(actorUserId, assetId);
         repository.replaceTags(actorUserId, assetId, request == null ? List.of() : request.tagIds(), "MANUAL");

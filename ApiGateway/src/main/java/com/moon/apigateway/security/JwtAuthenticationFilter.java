@@ -29,6 +29,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String[] WHITELIST = {
             "/api/auth/",
             "/api/files/",
+            // 图片/视频标签无法携带 Authorization；资产服务会继续校验短时签名 token
+            "/api/library/media/",
             "/actuator/"
     };
 

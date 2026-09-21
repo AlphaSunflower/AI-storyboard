@@ -12,5 +12,7 @@ public interface TagService {
 
     TagRef create(CreateTagRequest request);
 
+    void delete(String userId, String tagId);
+
     void replaceAssetTags(String actorUserId, String assetId, AssignTagsRequest request);
 }

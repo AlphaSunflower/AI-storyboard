@@ -29,8 +29,8 @@ export const IMAGE_POLL_INTERVAL: number =
  */
 export function assetUrl(path: string | null): string {
   if (!path) return '';
-  // http(s) 绝对 URL 与 data: URI 原样返回
-  if (path.startsWith('http') || path.startsWith('data:')) return path;
+  // 已解析的 URL 与浏览器内 Blob URL 原样返回
+  if (path.startsWith('http') || path.startsWith('data:') || path.startsWith('blob:')) return path;
   return BACKEND_URL + path;
 }
 

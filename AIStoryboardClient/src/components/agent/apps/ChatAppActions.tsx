@@ -1,4 +1,4 @@
-import { FileText, Frame, PenLine } from 'lucide-react';
+import { FileText, Frame, Library, PenLine } from 'lucide-react';
 import type { ChatAppKey } from './chatAppDefinitions';
 
 export type CanvasModePhase = 'natural' | 'binding' | 'locked' | 'exit_pending';
@@ -33,6 +33,7 @@ export function ChatAppActions({
     },
     { key: 'editor' as const, label: '编辑器', icon: <PenLine size={15} strokeWidth={1.8} />, disabled: false, onClick: undefined },
     { key: 'docs' as const, label: '使用文档', icon: <FileText size={15} strokeWidth={1.8} />, disabled: false, onClick: undefined },
+    { key: 'library' as const, label: '项目库', icon: <Library size={15} strokeWidth={1.8} />, disabled: false, onClick: undefined },
   ];
 
   return (

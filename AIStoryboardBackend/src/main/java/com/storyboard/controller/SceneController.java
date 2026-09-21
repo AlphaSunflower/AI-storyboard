@@ -2,11 +2,13 @@ package com.storyboard.controller;
 
 import com.storyboard.dto.request.ReorderScenesRequest;
 import com.storyboard.dto.request.SceneRequest;
+import com.storyboard.dto.request.SceneAssetGroupBindingRequest;
 import com.storyboard.dto.request.SceneMaterialReferenceRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.response.SceneResponse;
+import com.storyboard.dto.response.SceneAssetGroupBindingResponse;
 import com.storyboard.service.SceneService;
 import com.storyboard.service.SceneMaterialService;
 import lombok.RequiredArgsConstructor;
@@ -85,5 +87,33 @@ public class SceneController {
                                               @RequestBody SceneMaterialsUpdateRequest request) {
         sceneMaterialService.replaceMaterials(auth.getName(), id, request);
         return ApiResponse.ok("保存成功", null);
+    }
+
+    @GetMapping("/scenes/{id}/asset-groups")
+    public ApiResponse<List<SceneAssetGroupBindingResponse>> listAssetGroups(
+            Authentication auth,
+            @PathVariable String id
+    ) {
+        return ApiResponse.ok(sceneMaterialService.listAssetGroups(auth.getName(), id));
+    }
+
+    @PutMapping("/scenes/{id}/asset-groups")
+    public ApiResponse<SceneAssetGroupBindingResponse> bindAssetGroup(
+            Authentication auth,
+            @PathVariable String id,
+            @RequestBody SceneAssetGroupBindingRequest request
+    ) {
+        return ApiResponse.ok(sceneMaterialService.bindAssetGroup(auth.getName(), id, request));
+    }
+
+    @DeleteMapping("/scenes/{id}/asset-groups/{groupId}")
+    public ApiResponse<Void> removeAssetGroup(
+            Authentication auth,
+            @PathVariable String id,
+            @PathVariable String groupId,
+            @RequestParam String purpose
+    ) {
+        sceneMaterialService.removeAssetGroup(auth.getName(), id, groupId, purpose);
+        return ApiResponse.ok("已移除资产组", null);
     }
 }

@@ -2,6 +2,7 @@ package com.storyboard.service.impl;
 
 import com.storyboard.common.BusinessException;
 import com.storyboard.dto.request.SceneMaterialReferenceRequest;
+import com.storyboard.dto.request.SceneAssetGroupBindingRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Project;
@@ -13,12 +14,18 @@ import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.service.AssetService;
+import com.storyboard.asset.client.AssetClient;
+import com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
+import com.storyboard.asset.client.AssetContracts.MediaRole;
+import com.storyboard.asset.client.AssetContracts.MediaType;
+import com.storyboard.asset.client.AssetContracts.SnapshotItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.io.Serializable;
+import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +44,7 @@ class SceneMaterialServiceImplTest {
     private SceneReferenceImageMapper referenceMapper;
     private AgentAssetMapper agentAssetMapper;
     private SceneMaterialGroupSnapshotMapper groupSnapshotMapper;
+    private AssetClient assetClient;
     private SceneMaterialServiceImpl service;
 
     @BeforeEach
@@ -47,8 +55,10 @@ class SceneMaterialServiceImplTest {
         referenceMapper = mock(SceneReferenceImageMapper.class);
         agentAssetMapper = mock(AgentAssetMapper.class);
         groupSnapshotMapper = mock(SceneMaterialGroupSnapshotMapper.class);
+        assetClient = mock(AssetClient.class);
         service = new SceneMaterialServiceImpl(
-                sceneMapper, projectMapper, assetService, referenceMapper, agentAssetMapper, groupSnapshotMapper);
+                sceneMapper, projectMapper, assetService, referenceMapper, agentAssetMapper,
+                groupSnapshotMapper, assetClient);
 
         Scene scene = new Scene();
         scene.setId("s1");
@@ -230,6 +240,29 @@ class SceneMaterialServiceImplTest {
         verify(referenceMapper).insert(inserted.capture());
         assertEquals("image", inserted.getValue().getPurpose());
         assertEquals("image", result.get(0).purpose());
+    }
+
+    @Test
+    void bindAssetGroup_freezesImageSnapshotAndReturnsBinding() {
+        when(assetClient.createSnapshot(eq("group-1"), any(), any())).thenReturn(
+                new AssetGroupSnapshot(
+                        "snapshot-1", "group-1", 2L, "hash", "IMAGE",
+                        List.of(new SnapshotItem(
+                                "asset-1", "media-1", "blob-1", "images/a.png",
+                                "/api/library/media/media-1/content", MediaType.IMAGE,
+                                MediaRole.REFERENCE, 0)),
+                        OffsetDateTime.now()));
+
+        var result = service.bindAssetGroup(
+                "u1", "s1", new SceneAssetGroupBindingRequest("group-1", "image"));
+
+        assertEquals("snapshot-1", result.snapshotId());
+        assertEquals("image", result.purpose());
+        assertEquals(1, result.media().size());
+        verify(groupSnapshotMapper).deleteBinding("s1", "group-1", "image");
+        verify(groupSnapshotMapper).insert(
+                eq("s1"), eq("snapshot-1"), eq("group-1"), eq(2L), eq("hash"),
+                any(String.class), eq("image"));
     }
 
     private static SceneReferenceImage ref(String id, String sourceType, String sourceId,

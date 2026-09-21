@@ -21,6 +21,8 @@ public class SceneReferenceImage {
     private String sourceType;
     // 来源对象 ID：产出记录 ID 或分镜 ID
     private String sourceId;
+    // 项目库媒体 ID（source_type=library_asset）
+    private String mediaId;
     // 产出素材所属会话，用于选择和查看时分组
     private String sourceConversationId;
     private String fileName;

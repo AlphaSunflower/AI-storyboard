@@ -37,6 +37,24 @@ test('adapts every canvas page to a phone viewport', async ({ page }) => {
     if (path === '/canvases/mobile-canvas/graph' && method === 'GET') {
       return json({ graph: { schemaVersion: 2, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, generationRecords: [] }, revision: 0 });
     }
+    if (path === '/project-library' && method === 'GET') {
+      return json({
+        projectTree: {
+          scope: 'PROJECT',
+          ownerProjectId: 'mobile-project',
+          folders: [],
+          unfiledAssetCount: 0,
+        },
+        globalTree: {
+          scope: 'GLOBAL',
+          ownerProjectId: null,
+          folders: [],
+          unfiledAssetCount: 0,
+        },
+        assets: [],
+        groups: [],
+      });
+    }
     if (method === 'PUT') return json({ graph: JSON.parse(route.request().postData() ?? '{}').graph, revision: 1 });
     if (method === 'PATCH' || method === 'DELETE') return json({ ok: true });
     return json({ code: 40401, message: `not mocked: ${path}` });
@@ -77,11 +95,11 @@ test('adapts every canvas page to a phone viewport', async ({ page }) => {
   await assertInsideViewport(page, '.chat-workspace');
   await page.getByRole('button', { name: '收起面板' }).click();
 
-  await page.getByRole('button', { name: '资产库' }).click();
-  await expect(page.getByLabel('资产库抽屉')).toBeVisible();
+  await page.getByRole('button', { name: '项目库' }).click();
+  await expect(page.getByLabel('项目库抽屉')).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await assertInsideViewport(page, '.asset-drawer-panel');
-  await page.getByRole('button', { name: '关闭资产库' }).click();
+  await page.getByRole('button', { name: '关闭项目库' }).click();
 
   await page.getByRole('button', { name: '生成记录' }).click();
   await expect(page.getByRole('heading', { name: '生成记录' })).toBeVisible();

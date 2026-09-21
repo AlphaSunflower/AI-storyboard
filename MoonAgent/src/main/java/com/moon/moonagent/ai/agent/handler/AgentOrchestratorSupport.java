@@ -1507,15 +1507,28 @@ public class AgentOrchestratorSupport {
      *  多参考图走 referenceImages（图生视频/资产多图投喂），generatedImageUrl 传 null（统一按参考图处理） */
     public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
                                             String aspectRatio, java.util.List<String> referenceImages, Map<String, String> params) {
+        return startVideoGenerationAsync(req, prompt, duration, aspectRatio, referenceImages,
+                java.util.List.of(), params);
+    }
+
+    /** 多模态参考视频版本；图片仍走带角色的 referenceImages。 */
+    public String startVideoGenerationAsync(OrchestrationRequest req, String prompt, String duration,
+                                            String aspectRatio, java.util.List<String> referenceImages,
+                                            java.util.List<String> referenceVideos, Map<String, String> params) {
         checkInterrupted(req); // 打断：不再创建视频任务
         String model = params.getOrDefault("model", null);
         String resolution = params.getOrDefault("resolution", null);
         String effDuration = params.getOrDefault("duration", duration);
         String effAspectRatio = params.getOrDefault("aspectRatio", aspectRatio);
-        String taskId = generationService.createVideoTask(
+        List<com.moon.moonagent.ai.video.ReferenceImage> roleImages =
+                (referenceImages == null ? List.<String>of() : referenceImages).stream()
+                        .map(com.moon.moonagent.ai.video.ReferenceImage::ofReference)
+                        .toList();
+        String taskId = generationService.createVideoTaskWithRole(
                 req.getConversation(), null, prompt, model, resolution, null,
                 effAspectRatio, effDuration, null,
-                referenceImages == null ? List.of() : referenceImages, null);
+                roleImages, null,
+                referenceVideos == null ? List.of() : referenceVideos, true);
         if (taskId == null || taskId.isBlank()) {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
@@ -1567,6 +1580,16 @@ public class AgentOrchestratorSupport {
     public String startVideoGenerationAsyncWithRole(OrchestrationRequest req, String prompt, String duration,
                                                     String aspectRatio, java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
                                                     Map<String, String> params) {
+        return startVideoGenerationAsyncWithRole(req, prompt, duration, aspectRatio, referenceImages,
+                java.util.List.of(), params);
+    }
+
+    /** 带 ReferenceImage role + 多模态参考视频的异步视频生成。 */
+    public String startVideoGenerationAsyncWithRole(OrchestrationRequest req, String prompt, String duration,
+                                                    String aspectRatio,
+                                                    java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
+                                                    java.util.List<String> referenceVideos,
+                                                    Map<String, String> params) {
         checkInterrupted(req);
         Map<String, String> p = params == null ? Map.of() : params;
         String model = p.getOrDefault("model", null);
@@ -1576,7 +1599,8 @@ public class AgentOrchestratorSupport {
         String taskId = generationService.createVideoTaskWithRole(
                 req.getConversation(), null, prompt, model, resolution, null,
                 effAspectRatio, effDuration, null,
-                referenceImages == null ? List.of() : referenceImages, null);
+                referenceImages == null ? List.of() : referenceImages, null,
+                referenceVideos == null ? List.of() : referenceVideos, true);
         if (taskId == null || taskId.isBlank()) {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
@@ -1768,6 +1792,26 @@ public class AgentOrchestratorSupport {
             }
             return List.of();
         } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** 从 plan JSON 的 items[0] 读取字符串数组字段（缺失/坏数据返回空列表）。 */
+    public List<String> planStringList(String planJson, String field) {
+        if (planJson == null || planJson.isBlank() || field == null || field.isBlank()) return List.of();
+        try {
+            JsonNode root = objectMapper.readTree(planJson);
+            JsonNode node = root.path("items").isArray() && !root.path("items").isEmpty()
+                    ? root.path("items").get(0).path(field)
+                    : root.path(field);
+            if (!node.isArray()) return List.of();
+            List<String> result = new java.util.ArrayList<>();
+            for (JsonNode item : node) {
+                String value = item.asText("");
+                if (!value.isBlank()) result.add(value);
+            }
+            return List.copyOf(result);
+        } catch (Exception ignored) {
             return List.of();
         }
     }

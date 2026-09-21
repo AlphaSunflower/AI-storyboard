@@ -101,8 +101,8 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
 
   await submenu.getByRole('button', { name: '文生图', exact: true }).click();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
-  await expect(page.locator('.react-flow__node-toolbar.node-selected-toolbar')).toBeVisible();
-  await expect(page.locator('.react-flow__resize-control').first()).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
   await page.keyboard.press('Escape');
 
   await pane.click({ button: 'right', position: { x: 42, y: 84 } });

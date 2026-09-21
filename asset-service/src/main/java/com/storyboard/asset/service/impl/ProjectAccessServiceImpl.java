@@ -39,7 +39,7 @@ public class ProjectAccessServiceImpl implements ProjectAccessPort {
         String cacheKey = userId + "\n" + projectId;
         CachedOwnership cached = cache.get(cacheKey);
         if (cached != null && cached.expiresAt().isAfter(Instant.now())) {
-            return ownershipOrThrow(cached.ownership());
+            return ownershipOrThrow(userId, cached.ownership());
         }
         try {
             ApiEnvelope<ProjectOwnership> envelope = restClient.get()
@@ -49,7 +49,7 @@ public class ProjectAccessServiceImpl implements ProjectAccessPort {
                     .body(new ParameterizedTypeReference<>() {});
             ProjectOwnership ownership = envelope == null ? null : envelope.data();
             cache.put(cacheKey, new CachedOwnership(ownership, Instant.now().plus(CACHE_TTL)));
-            return ownershipOrThrow(ownership);
+            return ownershipOrThrow(userId, ownership);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -57,9 +57,12 @@ public class ProjectAccessServiceImpl implements ProjectAccessPort {
         }
     }
 
-    private ProjectOwnership ownershipOrThrow(ProjectOwnership ownership) {
+    private ProjectOwnership ownershipOrThrow(String userId, ProjectOwnership ownership) {
         if (ownership == null || !ownership.exists() || ownership.userId() == null) {
             throw new BusinessException(40401, "项目不存在");
+        }
+        if (!userId.equals(ownership.userId())) {
+            throw new BusinessException(40401, "项目不存在或无权访问");
         }
         return ownership;
     }

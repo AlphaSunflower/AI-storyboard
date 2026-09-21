@@ -1,10 +1,11 @@
 import { createPortal } from 'react-dom';
-import { Clapperboard, FolderOpen, Package, X } from 'lucide-react';
+import { Clapperboard, FolderOpen, Library, Package, X } from 'lucide-react';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onAsset: () => void;
+  onAssetGroup: () => void;
+  onProjectLibrary: () => void;
   onProjectOutput: () => void;
   onScene: () => void;
 }
@@ -12,7 +13,8 @@ interface Props {
 export function UploadMaterialPickerModal({
   open,
   onClose,
-  onAsset,
+  onAssetGroup,
+  onProjectLibrary,
   onProjectOutput,
   onScene,
 }: Props) {
@@ -41,9 +43,15 @@ export function UploadMaterialPickerModal({
         <div style={body}>
           <Option
             icon={<Package size={18} />}
-            title="上传资产"
-            description="从项目AI资产库选择人物、道具或场景"
-            onClick={() => choose(onAsset)}
+            title="关联资产组"
+            description="从项目库选择人物、道具、场景等资产组"
+            onClick={() => choose(onAssetGroup)}
+          />
+          <Option
+            icon={<Library size={18} />}
+            title="项目库素材"
+            description="选择项目库文件或文件夹，也可直接上传入库"
+            onClick={() => choose(onProjectLibrary)}
           />
           <Option
             icon={<FolderOpen size={18} />}

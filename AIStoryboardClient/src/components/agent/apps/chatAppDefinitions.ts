@@ -9,7 +9,7 @@ export interface ChatAppOpenOptions {
   canvasMode?: CanvasModeOptions;
 }
 
-export const CHAT_APP_KEYS = ['canvas', 'editor', 'docs'] as const;
+export const CHAT_APP_KEYS = ['canvas', 'editor', 'docs', 'library'] as const;
 
 export type ChatAppKey = typeof CHAT_APP_KEYS[number];
 
@@ -29,6 +29,17 @@ export function buildChatAppDescriptor(
 ): EmbeddedAppDescriptor | null {
   if (key === 'docs') {
     return { key, title: '使用文档', url: '/docs?embedded=1' };
+  }
+
+  if (key === 'library') {
+    const params = new URLSearchParams({ embedded: '1' });
+    if (currentProject?.id) params.set('projectId', currentProject.id);
+    return {
+      key,
+      title: currentProject?.name ? `项目库 · ${currentProject.name}` : '项目库',
+      url: `/library?${params.toString()}`,
+      projectId: currentProject?.id,
+    };
   }
 
   if (key === 'editor') {

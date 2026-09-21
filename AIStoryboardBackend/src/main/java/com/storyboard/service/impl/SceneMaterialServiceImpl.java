@@ -5,8 +5,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyboard.common.BusinessException;
 import com.storyboard.dto.request.SceneMaterialReferenceRequest;
+import com.storyboard.dto.request.SceneAssetGroupBindingRequest;
 import com.storyboard.dto.request.SceneMaterialGroupSnapshotRequest;
 import com.storyboard.dto.request.SceneMaterialsUpdateRequest;
+import com.storyboard.dto.response.SceneAssetGroupBindingResponse;
 import com.storyboard.entity.AgentAsset;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
@@ -19,6 +21,9 @@ import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.SceneMaterialService;
+import com.storyboard.asset.client.AssetClient;
+import com.storyboard.asset.client.AssetContracts.AssetGroupSnapshot;
+import com.storyboard.asset.client.AssetContracts.SnapshotRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +42,8 @@ import java.util.Set;
 public class SceneMaterialServiceImpl implements SceneMaterialService {
 
     private static final Set<String> REFERENCE_TYPES = Set.of("image", "video", "audio");
-    private static final Set<String> REFERENCE_SOURCES = Set.of("output", "scene_image", "group_snapshot");
+    private static final Set<String> REFERENCE_SOURCES =
+            Set.of("output", "scene_image", "group_snapshot", "library_asset");
     private static final Map<String, Integer> REFERENCE_LIMITS = Map.of(
             "image", 10,
             "video", 1);
@@ -49,6 +55,7 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
     private final AgentAssetMapper agentAssetMapper;
     private final SceneMaterialGroupSnapshotMapper groupSnapshotMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final AssetClient assetClient;
 
     @Override
     @Transactional
@@ -92,10 +99,11 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
             row.setType(reference.type());
             row.setPurpose(reference.purpose() == null || reference.purpose().isBlank()
                     ? reference.type() : reference.purpose());
-            row.setImageUrl(reference.url());
+            row.setImageUrl(stableReferenceUrl(userId, reference));
             row.setRole(reference.role() == null || reference.role().isBlank() ? "REFERENCE" : reference.role());
             row.setSourceType(reference.sourceType());
             row.setSourceId(reference.sourceId());
+            row.setMediaId(reference.mediaId());
             row.setSourceConversationId(reference.sourceConversationId());
             row.setSortOrder(nextOrder++);
             referenceMapper.insert(row);
@@ -110,11 +118,126 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
                         snapshot.groupId(),
                         snapshot.groupVersion() == null ? 0 : snapshot.groupVersion(),
                         snapshot.contentHash() == null ? "" : snapshot.contentHash(),
-                        objectMapper.writeValueAsString(snapshot.items() == null ? List.of() : snapshot.items()));
+                        objectMapper.writeValueAsString(snapshot.items() == null ? List.of() : snapshot.items()),
+                        snapshot.target() == null ? "video" : snapshot.target().toLowerCase());
             } catch (Exception e) {
                 throw new BusinessException(40001, "资产组快照保存失败");
             }
         }
+    }
+
+    @Override
+    public List<SceneAssetGroupBindingResponse> listAssetGroups(String userId, String sceneId) {
+        getOwnedScene(userId, sceneId);
+        List<com.storyboard.mapper.SceneMaterialGroupSnapshotMapper.BindingRow> rows =
+                groupSnapshotMapper.listBySceneId(sceneId);
+        Set<String> existingPurposes = rows.stream()
+                .map(com.storyboard.mapper.SceneMaterialGroupSnapshotMapper.BindingRow::purpose)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!existingPurposes.contains("image") || !existingPurposes.contains("video")) {
+            backfillLegacySceneAssetGroups(userId, sceneId, existingPurposes);
+            rows = groupSnapshotMapper.listBySceneId(sceneId);
+        }
+        return rows.stream().map(row -> {
+            AssetGroupSnapshot latest = createSnapshot(userId, row.groupId(), row.purpose());
+            AssetGroupSnapshot bound = assetClient.getSnapshot(
+                    row.snapshotId(), userId, java.util.UUID.randomUUID().toString());
+            boolean stale = latest != null && latest.snapshotId() != null
+                    && !latest.snapshotId().equals(row.snapshotId());
+            return toGroupBinding(row, bound, stale);
+        }).toList();
+    }
+
+    private void backfillLegacySceneAssetGroups(String userId, String sceneId, Set<String> existingPurposes) {
+        for (String purpose : List.of("image", "video")) {
+            if (existingPurposes.contains(purpose)) continue;
+            for (var asset : assetService.sceneAssets(sceneId, purpose)) {
+                if (asset == null || asset.id() == null || asset.id().isBlank()) continue;
+                try {
+                    bindAssetGroup(userId, sceneId,
+                            new SceneAssetGroupBindingRequest(asset.id(), purpose));
+                } catch (Exception ignored) {
+                    // 旧资产尚未迁移到项目库时保留旧读取接口，后续启动迁移或手动重试。
+                }
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public SceneAssetGroupBindingResponse bindAssetGroup(
+            String userId,
+            String sceneId,
+            SceneAssetGroupBindingRequest request
+    ) {
+        getOwnedScene(userId, sceneId);
+        if (request == null || request.groupId() == null || request.groupId().isBlank()) {
+            throw new BusinessException(40001, "资产组 ID 不能为空");
+        }
+        String purpose = "image".equals(request.purpose()) ? "image" : "video";
+        String target = "image".equals(purpose) ? "IMAGE" : "VIDEO";
+        AssetGroupSnapshot snapshot = createSnapshot(userId, request.groupId(), purpose);
+        groupSnapshotMapper.deleteBinding(sceneId, request.groupId(), purpose);
+        try {
+            groupSnapshotMapper.insert(
+                    sceneId,
+                    snapshot.snapshotId(),
+                    snapshot.groupId(),
+                    snapshot.groupVersion(),
+                    snapshot.contentHash(),
+                    objectMapper.writeValueAsString(snapshot.items() == null ? List.of() : snapshot.items()),
+                    purpose);
+        } catch (Exception e) {
+            throw new BusinessException(40001, "资产组快照保存失败");
+        }
+        return toGroupBinding(new com.storyboard.mapper.SceneMaterialGroupSnapshotMapper.BindingRow(
+                snapshot.snapshotId(), snapshot.groupId(), snapshot.groupVersion(),
+                snapshot.contentHash(), null, purpose), snapshot, false);
+    }
+
+    @Override
+    @Transactional
+    public void removeAssetGroup(String userId, String sceneId, String groupId, String purpose) {
+        getOwnedScene(userId, sceneId);
+        if (groupId == null || groupId.isBlank()) {
+            throw new BusinessException(40001, "资产组 ID 不能为空");
+        }
+        groupSnapshotMapper.deleteBinding(
+                sceneId, groupId, "image".equals(purpose) ? "image" : "video");
+    }
+
+    private AssetGroupSnapshot createSnapshot(String userId, String groupId, String purpose) {
+        int maxImages = 9;
+        int maxVideos = "video".equals(purpose) ? 3 : 0;
+        int maxAudios = "video".equals(purpose) ? 3 : 0;
+        return assetClient.createSnapshot(
+                groupId,
+                new SnapshotRequest(userId, "image".equals(purpose) ? "IMAGE" : "VIDEO",
+                        maxImages, maxVideos, maxAudios),
+                java.util.UUID.randomUUID().toString());
+    }
+
+    private static SceneAssetGroupBindingResponse toGroupBinding(
+            com.storyboard.mapper.SceneMaterialGroupSnapshotMapper.BindingRow row,
+            AssetGroupSnapshot snapshot,
+            boolean stale
+    ) {
+        List<SceneAssetGroupBindingResponse.Media> media = snapshot == null || snapshot.items() == null
+                ? List.of()
+                : snapshot.items().stream()
+                        .map(item -> new SceneAssetGroupBindingResponse.Media(
+                                item.type().name(), item.role().name(), item.contentUrl(), item.objectKey()))
+                        .toList();
+        return new SceneAssetGroupBindingResponse(
+                row.groupId(),
+                row.snapshotId(),
+                row.groupVersion(),
+                row.contentHash(),
+                snapshot == null ? null : snapshot.target(),
+                row.purpose(),
+                stale,
+                media
+        );
     }
 
     @Override
@@ -169,10 +292,11 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
             row.setType(reference.type());
             row.setPurpose(reference.purpose() == null || reference.purpose().isBlank()
                     ? reference.type() : reference.purpose());
-            row.setImageUrl(reference.url());
+            row.setImageUrl(stableReferenceUrl(userId, reference));
             row.setRole(reference.role() == null || reference.role().isBlank() ? "REFERENCE" : reference.role());
             row.setSourceType(reference.sourceType());
             row.setSourceId(reference.sourceId());
+            row.setMediaId(reference.mediaId());
             row.setSourceConversationId(reference.sourceConversationId());
             row.setSortOrder(nextOrder++);
             referenceMapper.insert(row);
@@ -200,6 +324,19 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
         if ("group_snapshot".equals(reference.sourceType())) {
             return;
         }
+        if ("library_asset".equals(reference.sourceType())) {
+            if (StringUtils.isBlank(reference.mediaId())) {
+                throw new BusinessException(40001, "项目库素材缺少媒体 ID");
+            }
+            var detail = assetClient.getAssetInternal(reference.sourceId(), userId);
+            boolean matched = detail != null && detail.media() != null && detail.media().stream()
+                    .anyMatch(media -> reference.mediaId().equals(media.id())
+                            && reference.type().equalsIgnoreCase(media.type().name()));
+            if (!matched) {
+                throw new BusinessException(40401, "项目库素材不存在或无权访问");
+            }
+            return;
+        }
 
         AgentAsset output = agentAssetMapper.findOwnedOutputRecord(userId, scene.getProjectId(), reference.sourceId());
         if (output == null || !reference.type().equals(output.getType()) || !outputUrls(output).contains(reference.url())) {
@@ -209,6 +346,16 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
                 && !reference.sourceConversationId().equals(output.getConversationId())) {
             throw new BusinessException(40001, "产出素材所属对话不匹配");
         }
+    }
+
+    private String stableReferenceUrl(String userId, SceneMaterialReferenceRequest reference) {
+        if (!"library_asset".equals(reference.sourceType())) return reference.url();
+        var detail = assetClient.getAssetInternal(reference.sourceId(), userId);
+        return detail.media().stream()
+                .filter(media -> reference.mediaId().equals(media.id()))
+                .map(media -> "/api/files/" + media.objectKey())
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(40401, "项目库素材不存在或无权访问"));
     }
 
     private Scene getOwnedScene(String userId, String sceneId) {
@@ -292,6 +439,7 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
                 reference.getRole(),
                 reference.getSourceType(),
                 reference.getSourceId(),
+                reference.getMediaId(),
                 reference.getSourceConversationId(),
                 reference.getFileName(),
                 reference.getFileSize());

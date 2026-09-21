@@ -3,6 +3,17 @@ import type { ApiResponse } from './auth';
 import type { SceneMaterialReferenceInput } from './assets';
 import type { SceneReferenceAsset, SceneResponse } from './projects';
 
+export interface SceneAssetGroupBinding {
+  groupId: string;
+  snapshotId: string;
+  groupVersion: number;
+  contentHash: string;
+  target: string;
+  purpose: 'image' | 'video';
+  stale: boolean;
+  media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string; objectKey: string }>;
+}
+
 export const sceneApi = {
   add: (projectId: string, data: Record<string, unknown>) =>
     client.post<ApiResponse<SceneResponse>>(`/projects/${projectId}/scenes`, data),
@@ -29,4 +40,13 @@ export const sceneApi = {
   /** 追加产出/分镜图片引用，不覆盖本地上传素材或已关联资产。 */
   linkMaterialReferences: (sceneId: string, references: SceneMaterialReferenceInput[]) =>
     client.post<ApiResponse<SceneReferenceAsset[]>>(`/scenes/${sceneId}/references/link`, references),
+
+  listAssetGroups: (sceneId: string) =>
+    client.get<ApiResponse<SceneAssetGroupBinding[]>>(`/scenes/${sceneId}/asset-groups`),
+
+  bindAssetGroup: (sceneId: string, data: { groupId: string; purpose: 'image' | 'video' }) =>
+    client.put<ApiResponse<SceneAssetGroupBinding>>(`/scenes/${sceneId}/asset-groups`, data),
+
+  removeAssetGroup: (sceneId: string, groupId: string, purpose: 'image' | 'video') =>
+    client.delete(`/scenes/${sceneId}/asset-groups/${groupId}`, { params: { purpose } }),
 };

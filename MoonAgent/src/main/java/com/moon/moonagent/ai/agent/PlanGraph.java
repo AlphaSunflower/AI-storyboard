@@ -88,6 +88,8 @@ public class PlanGraph {
     private static final String K_CUSTOM_TEXT = "customText";   // 自定义输入文本（action=custom 时）
     private static final String K_PARAMS = "params";            // 生成参数（model/resolution/...）
     private static final String K_ASSET_IDS = "assetIds";       // 资产选择卡片勾选
+    private static final String K_REFERENCE_VIDEOS = "referenceVideos";
+    private static final String K_REFERENCE_AUDIOS = "referenceAudios";
     private static final String K_SWITCH = "switch";            // 切链出口标记：重路由 intent_recognize
     private static final String K_ROUTING_HINT = "routingHint"; // 前端显式切链提示（目标 intentType，优先级最高）
     private static final String K_CANVAS_CONTEXT = "canvasContext"; // 画布编辑模式上下文（优先级高于 routingHint）
@@ -670,6 +672,14 @@ public class PlanGraph {
     public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
                                    java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
                                    CanvasSessionContext canvasContext, SseEmitter emitter) {
+        return runTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks,
+                canvasContext, java.util.List.of(), java.util.List.of(), emitter);
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, String content, java.util.List<String> picUrls,
+                                   java.util.List<String> assetIds, String routingHint, boolean cancelActiveTasks,
+                                   CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
+                                   java.util.List<String> referenceAudios, SseEmitter emitter) {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, content, picUrls == null ? java.util.List.of() : picUrls, emitter));
@@ -691,6 +701,8 @@ public class PlanGraph {
             inputs.put(K_CONTENT, content);
             inputs.put(K_PIC_URLS, picUrls == null ? java.util.List.of() : picUrls);
             inputs.put(K_ASSET_IDS, assetIds == null ? java.util.List.of() : assetIds);
+            inputs.put(K_REFERENCE_VIDEOS, referenceVideos == null ? java.util.List.of() : referenceVideos);
+            inputs.put(K_REFERENCE_AUDIOS, referenceAudios == null ? java.util.List.of() : referenceAudios);
             inputs.put(K_RESUME, false);
             inputs.put(K_SUBMIT_ACTION, "");
             inputs.put(K_CP_ACTION, "");
@@ -836,6 +848,16 @@ public class PlanGraph {
         request.setRoutingHint(state.<String>value(K_ROUTING_HINT).orElse(""));
         request.setCanvasContext(state.<CanvasSessionContext>value(K_CANVAS_CONTEXT).orElse(null));
         request.setAssetIds(state.<List<String>>value(K_ASSET_IDS).orElse(List.of()));
+        List<String> planJson = state.<List<String>>value(K_REFERENCE_VIDEOS).orElse(List.of());
+        List<String> referenceVideos = planJson.isEmpty()
+                ? support.planStringList(state.<String>value(K_CP_PLAN).orElse(""), "referenceVideos")
+                : planJson;
+        List<String> inputAudios = state.<List<String>>value(K_REFERENCE_AUDIOS).orElse(List.of());
+        List<String> referenceAudios = inputAudios.isEmpty()
+                ? support.planStringList(state.<String>value(K_CP_PLAN).orElse(""), "referenceAudios")
+                : inputAudios;
+        request.setReferenceVideos(referenceVideos);
+        request.setReferenceAudios(referenceAudios);
         requestsByThread.put(conversation.getId(), request);
         return request;
     }

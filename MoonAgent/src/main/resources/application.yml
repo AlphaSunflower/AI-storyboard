@@ -57,7 +57,7 @@ storyboard:
   internal-secret: ${INTERNAL_SECRET:}
   asset-client:
     base-url: ${ASSET_SERVICE_URL:http://localhost:8085}
-    internal-token: ${INTERNAL_SECRET:${internal.secret:}}
+    internal-token: ${INTERNAL_SECRET:${storyboard.internal-secret:}}
     connect-timeout-seconds: 10
     read-timeout-seconds: 30
   # MinIO 对象存储（图片/视频/音频统一存对象存储，替代本地 uploads/）

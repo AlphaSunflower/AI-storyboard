@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.mapper.AgentAssetMapper;
+import com.moon.moonagent.service.asset.AssetOutputOutboxService;
 import com.storyboard.common.generation.GenerationRecord;
 import com.storyboard.common.generation.GenerationRecordUpdate;
 import com.storyboard.common.generation.GenerationRecordWriter;
@@ -22,6 +23,7 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
     private static final Logger log = LoggerFactory.getLogger(AgentAssetGenerationRecordWriter.class);
 
     private final AgentAssetMapper assetMapper;
+    private final AssetOutputOutboxService assetOutputOutboxService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -45,6 +47,7 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
         if (!source.referenceUrls().isEmpty()) record.setReferenceUrls(toJson(source.referenceUrls()));
         if (!source.params().isEmpty()) record.setParams(toJson(source.params()));
         assetMapper.insert(record);
+        assetOutputOutboxService.enqueue(record);
         return record.getId();
     }
 
@@ -55,6 +58,7 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
         if (record == null) return;
         apply(record, update);
         assetMapper.updateById(record);
+        assetOutputOutboxService.enqueue(record);
     }
 
     @Override

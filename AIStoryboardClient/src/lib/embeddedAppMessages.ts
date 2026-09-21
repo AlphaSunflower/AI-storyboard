@@ -19,7 +19,7 @@ export interface StoryboardReferenceMessage {
 
 export interface EmbeddedAppReadyMessage {
   type: typeof EMBEDDED_APP_READY_MESSAGE;
-  key: 'canvas' | 'editor' | 'docs';
+  key: 'canvas' | 'editor' | 'docs' | 'library';
 }
 
 export type CanvasModeStatusState = 'selecting' | 'bridge-connecting' | 'bridge-error';
@@ -60,7 +60,7 @@ export function isEmbeddedAppReadyMessage(value: unknown): value is EmbeddedAppR
   if (!value || typeof value !== 'object') return false;
   const message = value as Partial<EmbeddedAppReadyMessage>;
   return message.type === EMBEDDED_APP_READY_MESSAGE
-    && (message.key === 'canvas' || message.key === 'editor' || message.key === 'docs');
+    && (message.key === 'canvas' || message.key === 'editor' || message.key === 'docs' || message.key === 'library');
 }
 
 export function isCanvasModeStatusMessage(value: unknown): value is CanvasModeStatusMessage {

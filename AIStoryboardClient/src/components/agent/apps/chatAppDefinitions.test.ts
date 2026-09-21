@@ -24,6 +24,20 @@ describe('chat app definitions', () => {
     expect(buildChatAppDescriptor('editor', null)).toBeNull();
   });
 
+  it('builds a project library tab with optional project context', () => {
+    expect(buildChatAppDescriptor('library', { id: 'project-1', name: '测试项目' })).toEqual({
+      key: 'library',
+      title: '项目库 · 测试项目',
+      url: '/library?embedded=1&projectId=project-1',
+      projectId: 'project-1',
+    });
+    expect(buildChatAppDescriptor('library', null)).toEqual({
+      key: 'library',
+      title: '项目库',
+      url: '/library?embedded=1',
+    });
+  });
+
   it('passes authentication and project context to the canvas app', () => {
     localStorage.setItem('accessToken', 'access-token');
     localStorage.setItem('user', JSON.stringify({ userId: 'user-1', displayName: '测试用户' }));

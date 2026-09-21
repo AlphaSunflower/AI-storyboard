@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.storyboard.asset", "com.storyboard.common"})
 @EnableScheduling
 @EnableConfigurationProperties
 @ConfigurationPropertiesScan

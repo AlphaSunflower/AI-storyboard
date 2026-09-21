@@ -5,13 +5,17 @@ import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
+import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
+import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
 
 import java.util.Collection;
+import java.util.List;
 
 /** 统一资产目录用例。 */
 public interface AssetCatalogService {
@@ -29,7 +33,23 @@ public interface AssetCatalogService {
             int size
     );
 
+    PageResponse<AssetSummary> list(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            boolean deleted,
+            int page,
+            int size
+    );
+
     AssetDetail get(String userId, String assetId);
+
+    AssetDetail findBySource(String userId, String sourceType, String sourceId);
 
     AssetSummary create(String actorUserId, CreateAssetRequest request, String idempotencyKey);
 
@@ -37,15 +57,23 @@ public interface AssetCatalogService {
 
     AssetSummary promote(String userId, String assetId, long expectedVersion);
 
+    BulkAssetOperationResult bulkPromote(String userId, Collection<String> assetIds);
+
     void linkProject(String userId, String assetId, String projectId);
 
     AssetSummary trash(String userId, String assetId, long expectedVersion);
+
+    BulkAssetOperationResult bulkTrash(String userId, Collection<String> assetIds);
+
+    BulkAssetOperationResult duplicate(String userId, DuplicateAssetsRequest request);
 
     AssetSummary restore(String userId, String assetId);
 
     void purge(String userId, String assetId);
 
     AssetSummary registerMedia(String userId, MediaRegistration registration, String idempotencyKey);
+
+    List<AnalysisTaskStatus> listAnalysisTaskStatuses(String userId, Collection<String> assetIds);
 
     record MediaRegistration(
             String projectId,

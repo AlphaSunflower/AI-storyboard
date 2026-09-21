@@ -12,7 +12,9 @@ import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.service.StoryboardImageQueueService;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
+import com.moon.moonagent.service.ConversationAssetGroupService;
 import com.storyboard.asset.client.AssetClient;
+import com.storyboard.asset.client.AssetContracts;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -31,7 +33,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -61,6 +65,8 @@ class MoonAgentControllerSmokeTest {
     private GenerationRecordService generationRecordService;
     @MockitoBean
     private ProjectOutputMaterialService projectOutputMaterialService;
+    @MockitoBean
+    private ConversationAssetGroupService conversationAssetGroupService;
     @MockitoBean
     private AssetClient assetClient;
     @MockitoBean
@@ -254,6 +260,51 @@ class MoonAgentControllerSmokeTest {
                 .contentType("application/json").content("{\"planToken\":\"pt\"}"))
             .andExpect(status().isOk());
         org.assertj.core.api.Assertions.assertThat(emitterTimeouts)
-            .containsExactly(1_800_000L, 1_800_000L, 1_800_000L);
+            .containsExactly(14_400_000L, 14_400_000L, 14_400_000L);
+    }
+
+    @Test
+    void streamMessage_resolvesSnapshotBySnapshotId() throws Exception {
+        when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
+        when(assetClient.getSnapshot(anyString(), anyString(), anyString())).thenReturn(
+            new AssetContracts.AssetGroupSnapshot(
+                "snapshot-1",
+                "group-1",
+                2,
+                "hash",
+                "VIDEO",
+                List.of(new AssetContracts.SnapshotItem(
+                    "asset-1",
+                    "media-1",
+                    "blob-1",
+                    "images/frame.png",
+                    "/api/library/media/media-1/content?token=test",
+                    AssetContracts.MediaType.IMAGE,
+                    AssetContracts.MediaRole.REFERENCE,
+                    0
+                )),
+                java.time.OffsetDateTime.now()
+            )
+        );
+        doAnswer(inv -> {
+            SseEmitter emitter = inv.getArgument(5);
+            emitter.complete();
+            return null;
+        }).when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(),
+            any(SseEmitter.class), any(), anyBoolean());
+
+        mockMvc.perform(post("/api/agent/conversations/c1/messages/stream")
+                .header("X-User-Id", "u1")
+                .contentType("application/json")
+                .content("""
+                    {
+                      "content": "请用这个资产组生成视频",
+                      "assetGroupIds": ["group-1"],
+                      "assetGroupSnapshotIds": ["snapshot-1"]
+                    }
+                    """))
+            .andExpect(status().isOk());
+
+        verify(assetClient).getSnapshot(eq("snapshot-1"), eq("u1"), anyString());
     }
 }

@@ -442,7 +442,8 @@ export function AgentChatPanel() {
       <UploadMaterialPickerModal
         open={materialPickerOpen}
         onClose={() => setMaterialPickerOpen(false)}
-        onAsset={handleAssetOpen}
+        onAssetGroup={handleAssetOpen}
+        onProjectLibrary={handleAssetOpen}
         onProjectOutput={() => setOutputOpen(true)}
         onScene={() => setSceneModalOpen(true)}
       />
