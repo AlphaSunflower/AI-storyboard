@@ -64,6 +64,39 @@ npm --prefix AIStoryboardClient run dev -- --host 127.0.0.1 --port 5174
    - 视频方案先通过普通对话输出。
    - 选择视频方案后才出现最终视频生成卡片。
 
+5. 图片生成完成后，先不要继续视频，直接发送：
+
+   ```text
+   图片还要调一下，年份是2025，我希望是2026
+   ```
+
+   - 预期系统回溯最近计划中的已完成图片，而不是把“调一下”当成一张全新的纯文生图。
+   - 回复应继续给出图片调整方案；确认生成后，新图必须继承上一张生成图作为编辑源。
+   - 如果最近图属于较早计划、最新计划正在等待视频，仍应命中最近一张可用成品图。
+
+## 参考图继承核对
+
+用当前会话 ID 查询最近一次图片资产的生成类型和参考素材：
+
+```sql
+select id, gen_type, status, url, reference_urls, created_at
+from agent_assets
+where conversation_id = '<conversation-id>'
+  and type = 'image'
+order by created_at desc
+limit 5;
+```
+
+关键断言：
+
+- “完善图片”产生的新记录 `gen_type` 应为 `image_to_image`，不是 `text_to_image`。
+- `reference_urls` 应包含上一张 Agent 生成图的 `/api/files/images/...` URL。
+- 只运行聚焦回归测试时使用：
+
+```powershell
+mvn -pl MoonAgent -am "-Dtest=DynamicTaskEngineTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
 ## 数据库核对
 
 ```sql
