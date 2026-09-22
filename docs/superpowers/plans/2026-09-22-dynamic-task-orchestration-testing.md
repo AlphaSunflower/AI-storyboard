@@ -21,6 +21,8 @@ $env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/ai_storyboard'
 $env:SPRING_DATASOURCE_USERNAME='postgres'
 $env:SPRING_DATASOURCE_PASSWORD='123456'
 $env:INTERNAL_SECRET='<与本机 8082 / asset-service 一致的密钥>'
+$env:LLM_GATEWAY_BASE_URL='http://localhost:8083'
+$env:LLM_GATEWAY_API_KEY='<本机 LLM Gateway API Key>'
 java -jar MoonAgent/target/moon-agent-0.0.1-SNAPSHOT.jar --server.port=8086
 ```
 
@@ -36,6 +38,8 @@ npm --prefix AIStoryboardClient run dev -- --host 127.0.0.1 --port 5174
 
 `VITE_DEV_USER_ID` 可替换为当前登录用户的真实 ID。`INTERNAL_SECRET` 必须与
 本机现有主后端、资产服务一致，否则新建会话和编排引擎切换会因内部接口 `403` 失败。
+`LLM_GATEWAY_API_KEY` 必须与本机 LLM Gateway 一致，否则媒体 MCP 不会注册，
+`generate_image` / `generate_video` 会显示为工具未就绪。
 
 ## 手动流程
 
