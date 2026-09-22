@@ -423,7 +423,11 @@ export const agentApi = {
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
 
   createConversation: (projectId: string, title?: string, orchestrationMode?: string) =>
-    client.post<{ data: AgentConversation }>('/agent/conversations', { projectId, title, orchestrationMode }),
+    client.post<{ data: AgentConversation }>('/agent/conversations', {
+      projectId,
+      title,
+      ...(orchestrationMode ? { orchestrationMode } : {}),
+    }),
 
   updateOrchestrationMode: (id: string, mode: 'LEGACY' | 'UNIFIED_LOOP') =>
     client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}/orchestration-mode`, { mode }),

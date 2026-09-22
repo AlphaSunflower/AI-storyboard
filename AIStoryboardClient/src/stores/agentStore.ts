@@ -530,7 +530,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
   },
 
-  createConversation: async (orchestrationMode = 'LEGACY') => {
+  createConversation: async (orchestrationMode) => {
     const projectId = useProjectStore.getState().currentProject?.id;
     if (!projectId) return;
     const res = await agentApi.createConversation(projectId, '新对话', orchestrationMode);

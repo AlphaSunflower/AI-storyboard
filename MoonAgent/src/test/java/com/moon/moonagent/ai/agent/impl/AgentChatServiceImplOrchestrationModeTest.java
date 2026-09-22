@@ -61,6 +61,22 @@ class AgentChatServiceImplOrchestrationModeTest {
         assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("LEGACY");
     }
 
+    @Test
+    void explicitUnifiedLoopIsForcedToLegacyWhenDynamicPlanDisabled() {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        when(storyboardClient.getProject("project-1")).thenReturn(Map.of("userId", "user-1"));
+        AgentChatServiceImpl service = service(conversationMapper, storyboardClient);
+        ReflectionTestUtils.setField(service, "dynamicPlanEnabled", false);
+
+        service.createConversation("user-1", "project-1", "title", "UNIFIED_LOOP");
+
+        org.mockito.ArgumentCaptor<AgentConversation> captor =
+                org.mockito.ArgumentCaptor.forClass(AgentConversation.class);
+        verify(conversationMapper).insert(captor.capture());
+        assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("LEGACY");
+    }
+
     private static AgentChatServiceImpl service(AgentConversationMapper conversationMapper,
                                                 StoryboardClient storyboardClient) {
         return new AgentChatServiceImpl(

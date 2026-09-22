@@ -175,7 +175,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         conversation.setProjectId(projectId);
         conversation.setTitle(title != null && !title.isBlank() ? title : "新对话");
         conversation.setStatus("active");
-        OrchestrationMode mode = OrchestrationMode.from(orchestrationMode);
+        OrchestrationMode mode = dynamicPlanEnabled
+                ? OrchestrationMode.from(orchestrationMode)
+                : OrchestrationMode.LEGACY;
         if (mode == OrchestrationMode.SHADOW) {
             throw new BusinessException(40001, "SHADOW 仅用于内部配置，用户端只能选择 LEGACY 或 UNIFIED_LOOP");
         }
