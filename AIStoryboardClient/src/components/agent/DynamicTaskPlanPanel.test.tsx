@@ -65,7 +65,7 @@ describe('DynamicTaskPlanPanel', () => {
     expect(screen.getByText('等待确认')).toBeTruthy();
     expect(screen.getByRole('button', { name: '批准' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '驳回' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '重试' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
     expect(screen.getByRole('button', { name: '重新规划' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '取消任务' })).toBeTruthy();
   });

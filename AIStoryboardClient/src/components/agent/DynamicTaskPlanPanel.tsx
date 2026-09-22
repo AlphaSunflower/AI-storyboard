@@ -28,7 +28,12 @@ const ACTION_ICONS: Record<AgentTaskPlanAction, typeof Check> = {
   resume: RefreshCw,
 };
 
-const VISIBLE_ACTIONS: AgentTaskPlanAction[] = ['approve', 'reject', 'retry', 'replan', 'cancel'];
+function availableActions(state: string): AgentTaskPlanAction[] {
+  if (state === 'COMPLETED' || state === 'CANCELLED') return [];
+  if (state === 'FAILED') return ['retry', 'replan', 'cancel'];
+  if (state === 'WAITING_HUMAN') return ['approve', 'reject', 'replan', 'cancel'];
+  return ['replan', 'cancel'];
+}
 
 function stateTone(state: string) {
   if (state === 'COMPLETED') return { color: '#16794b', background: '#edf8f1' };
@@ -135,7 +140,7 @@ export function DynamicTaskPlanPanel() {
         margin: '8px 0 14px',
         padding: '12px 14px',
         border: '1px solid var(--color-hairline)',
-        borderRadius: 12,
+        borderRadius: 8,
         background: 'white',
         boxShadow: '0 1px 3px rgba(16, 24, 40, 0.05)',
       }}
@@ -186,7 +191,7 @@ export function DynamicTaskPlanPanel() {
       )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-        {VISIBLE_ACTIONS.map((action) => {
+        {availableActions(plan.state).map((action) => {
           const Icon = ACTION_ICONS[action];
           const pending = pendingAction === action;
           return (
