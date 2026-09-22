@@ -1,12 +1,14 @@
 package com.moon.moonagent.ai.agent.orchestration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.orchestration.CapabilityDescriptor;
 import com.moon.moonagent.orchestration.TaskPlanDraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -19,10 +21,12 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final ChatClient chatClient;
+    private final GatewayModelService gatewayModelService;
     private final BeanOutputConverter<TaskPlanDraft> converter = new BeanOutputConverter<>(TaskPlanDraft.class);
 
-    public LlmTaskPlanSynthesizer(ChatClient.Builder builder) {
+    public LlmTaskPlanSynthesizer(ChatClient.Builder builder, GatewayModelService gatewayModelService) {
         this.chatClient = builder.build();
+        this.gatewayModelService = gatewayModelService;
     }
 
     @Override
@@ -35,6 +39,8 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
                     ? "none"
                     : String.join("; ", validationErrors);
             String raw = chatClient.prompt()
+                    .options(OpenAiChatOptions.builder()
+                            .model(gatewayModelService.getDefaultTextModel()))
                     .system(systemPrompt())
                     .user("""
                             Goal: %s
