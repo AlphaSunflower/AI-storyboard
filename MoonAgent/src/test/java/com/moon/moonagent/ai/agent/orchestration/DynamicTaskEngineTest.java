@@ -199,6 +199,72 @@ class DynamicTaskEngineTest {
     }
 
     @Test
+    void newImageIntentPreemptsWaitingVideoAndCarriesGeneratedImage() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability image = capability("intent-pic", "请确认完善方案");
+        TaskPlan waiting = new TaskPlan(
+                "plan-1", "conversation-1", "goal", TaskPlanState.WAITING_HUMAN, 1,
+                20, 3, 2, 0,
+                List.of(
+                        new TaskNode("media-image", "intent-pic", "生成图片", Map.of(), List.of(),
+                                TaskNodeState.COMPLETED, 1, HitlPolicy.NONE,
+                                EvaluationMode.DETERMINISTIC, "",
+                                "![生成图片](/api/files/images/generated.png)", "", ""),
+                        new TaskNode("media-video", "intent-video", "生成视频", Map.of(),
+                                List.of("media-image"), TaskNodeState.WAITING_HUMAN, 0,
+                                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, "",
+                                "{\"plansText\":\"视频方案\"}", "", "")),
+                List.of(new TaskEdge("media-image", "media-video")), "", "");
+        TaskPlan replanned = new TaskPlan(
+                "plan-2", "conversation-1", "refine image", TaskPlanState.READY, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode("refine-image", "intent-pic", "完善图片", Map.of(), List.of(),
+                        TaskNodeState.PENDING, 0, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "", "", "", "")),
+                List.of(), "", "");
+        when(store.findActive("conversation-1")).thenReturn(Optional.of(waiting));
+        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(planner.plan(any(), any())).thenReturn(replanned);
+        CapabilityDescriptor imageDescriptor = new CapabilityDescriptor(
+                "intent-pic", "picture", "picture", List.of(), false,
+                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3);
+        when(registry.descriptors()).thenReturn(Map.of(
+                "intent-pic", imageDescriptor));
+        when(registry.find("intent-pic")).thenReturn(Optional.of(image));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "能把这图完善吗，文字有问题", List.of(), null);
+
+        engine.runTurn(conversation, "能把这图完善吗，文字有问题", "intent-pic",
+                request, new AgentTraceAccumulator(request), null);
+
+        ArgumentCaptor<TaskPlanningRequest> planningRequest = ArgumentCaptor.forClass(TaskPlanningRequest.class);
+        verify(planner).plan(planningRequest.capture(), any());
+        assertThat(planningRequest.getValue().goal())
+                .contains("不是用户上传")
+                .contains("先完善这张图片");
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(image).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().picUrls())
+                .containsExactly("/api/files/images/generated.png");
+    }
+
+    @Test
     void continuesDependentNodeAfterAsyncCompletion() {
         TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
         TaskPlanStore store = mock(TaskPlanStore.class);

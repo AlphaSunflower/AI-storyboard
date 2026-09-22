@@ -70,21 +70,43 @@ public class DynamicTaskEngine {
                                    OrchestrationRequest request,
                                    AgentTraceAccumulator trace,
                                    AgentLoopRun run) {
-        TaskPlan waiting = planStore.findActive(conversation.getId())
-                .filter(plan -> plan.state() == TaskPlanState.WAITING_HUMAN)
-                .orElse(null);
+        TaskPlan waiting = planStore.findActive(conversation.getId()).orElse(null);
         if (waiting != null) {
             TaskNode node = waiting.nodes().stream()
                     .filter(candidate -> candidate.state() == TaskNodeState.WAITING_HUMAN)
                     .findFirst()
                     .orElse(null);
-            if (node != null) {
+            if (node != null && !shouldReplanForNewIntent(node, preferredCapability, content)) {
                 prepareQuestionResume(request, node, content);
                 return continuePlan(conversation, request, trace, run, waiting, node.nodeId());
             }
+            if (node != null) {
+                boolean carried = carryGeneratedArtifacts(waiting, request);
+                planStore.update(withState(waiting, TaskPlanState.CANCELLED,
+                        "superseded by user intent " + preferredCapability));
+                return startNewPlan(conversation, artifactAwareGoal(content, waiting, carried),
+                        preferredCapability, request, trace, run);
+            }
         }
+
+        if ((request.getPicUrls() == null || request.getPicUrls().isEmpty())
+                && looksLikeArtifactFollowUp(content)) {
+            TaskPlan latest = planStore.findLatest(conversation.getId()).orElse(null);
+            if (latest != null && carryGeneratedArtifacts(latest, request)) {
+                return startNewPlan(conversation, artifactAwareGoal(content, latest, true),
+                        preferredCapability, request, trace, run);
+            }
+        }
+        return startNewPlan(conversation, content, preferredCapability, request, trace, run);
+    }
+
+    private AgentTurnResult startNewPlan(AgentConversation conversation, String goal,
+                                         String preferredCapability,
+                                         OrchestrationRequest request,
+                                         AgentTraceAccumulator trace,
+                                         AgentLoopRun run) {
         TaskPlan plan = planner.plan(new TaskPlanningRequest(
-                        conversation.getId(), content, preferredCapability, 20, 3, 2),
+                        conversation.getId(), goal, preferredCapability, 20, 3, 2),
                 capabilities.descriptors());
         plan = planStore.save(plan);
         return continuePlan(conversation, request, trace, run, plan);
@@ -368,6 +390,56 @@ public class DynamicTaskEngine {
         } else {
             request.setAction("refine");
         }
+    }
+
+    private static boolean shouldReplanForNewIntent(TaskNode node, String preferredCapability, String content) {
+        if (node == null || preferredCapability == null || preferredCapability.isBlank()) return false;
+        boolean mediaIntent = "intent-pic".equals(preferredCapability)
+                || "intent-video".equals(preferredCapability);
+        if (!mediaIntent || preferredCapability.equals(node.capabilityKey())) return false;
+        return !isPlanSelection(content);
+    }
+
+    private static boolean isPlanSelection(String content) {
+        if (content == null || content.isBlank()) return false;
+        return content.trim().matches("(?i)^(?:方案\\s*)?[1-3](?:\\s*[-A-Z])?$");
+    }
+
+    private static boolean looksLikeArtifactFollowUp(String content) {
+        if (content == null || content.isBlank()) return false;
+        String text = content.trim();
+        return text.matches(".*(这|该|上|当前|刚才|之前).{0,6}(图|图片|画面).*")
+                || text.matches(".*(完善|修改|改图|错字|文字.{0,4}问题|重做|重新生成).{0,12}(图|图片|画面)?.*");
+    }
+
+    private static boolean carryGeneratedArtifacts(TaskPlan plan, OrchestrationRequest request) {
+        if (plan == null || request == null) return false;
+        List<String> urls = new ArrayList<>();
+        for (TaskNode node : plan.nodes()) {
+            if (node.state() == TaskNodeState.COMPLETED
+                    && node.outputSummary() != null
+                    && !node.outputSummary().isBlank()) {
+                collectImageUrls(node.outputSummary(), urls);
+            }
+        }
+        if (urls.isEmpty()) return false;
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("picUrls", urls.stream().distinct().toList());
+        state.put("artifactSource", "generated");
+        request.applyHandoffState(state);
+        return true;
+    }
+
+    private static String artifactAwareGoal(String content, TaskPlan sourcePlan, boolean carried) {
+        if (!carried) return content;
+        boolean continueVideo = sourcePlan != null && sourcePlan.nodes().stream()
+                .anyMatch(node -> "intent-video".equals(node.capabilityKey()));
+        String continuation = continueVideo
+                ? "用户希望先完善这张图片，确认并生成新图后，再继续原视频任务。"
+                : "用户希望继续完善这张图片。";
+        return "上下文：当前图片由智能体上一步调用工具生成，不是用户上传。"
+                + "请保留已有图片作为编辑源。" + continuation
+                + "用户本轮要求：" + content;
     }
 
     private static int selectedPlanIndex(String content) {
