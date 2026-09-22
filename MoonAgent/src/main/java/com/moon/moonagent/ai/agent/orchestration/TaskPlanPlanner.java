@@ -29,14 +29,25 @@ public class TaskPlanPlanner {
     }
 
     public TaskPlan plan(TaskPlanningRequest request, Map<String, CapabilityDescriptor> capabilities) {
-        TaskPlan first = fromDraft(request, synthesizer.synthesize(request, capabilities, List.of()));
+        TaskPlan first;
+        try {
+            first = fromDraft(request,
+                    synthesizer.synthesize(request, capabilities, List.of()), capabilities);
+        } catch (RuntimeException e) {
+            return fallback(request, capabilities, List.of("synthesis failed: " + e.getMessage()));
+        }
         TaskPlanValidationResult firstResult = validator.validate(first, capabilities);
         if (firstResult.valid()) {
             return first;
         }
 
-        TaskPlan repaired = fromDraft(request,
-                synthesizer.synthesize(request, capabilities, firstResult.errors()));
+        TaskPlan repaired;
+        try {
+            repaired = fromDraft(request,
+                    synthesizer.synthesize(request, capabilities, firstResult.errors()), capabilities);
+        } catch (RuntimeException e) {
+            return fallback(request, capabilities, List.of("synthesis failed: " + e.getMessage()));
+        }
         TaskPlanValidationResult repairedResult = validator.validate(repaired, capabilities);
         if (repairedResult.valid()) {
             return repaired;
@@ -45,21 +56,48 @@ public class TaskPlanPlanner {
         return fallback(request, capabilities, repairedResult.errors());
     }
 
-    private static TaskPlan fromDraft(TaskPlanningRequest request, TaskPlanDraft draft) {
+    private static TaskPlan fromDraft(TaskPlanningRequest request, TaskPlanDraft draft,
+                                      Map<String, CapabilityDescriptor> capabilities) {
+        List<TaskNode> nodes = draft.nodes().stream()
+                .map(node -> mergeDefaults(node, capabilities.get(node.capabilityKey())))
+                .toList();
+        int maxAttempts = request.maxAttemptsPerNode();
+        for (TaskNode node : nodes) {
+            CapabilityDescriptor descriptor = capabilities.get(node.capabilityKey());
+            if (descriptor != null) maxAttempts = Math.min(maxAttempts, descriptor.maxAttempts());
+        }
+        TaskPlanState state = nodes.stream().anyMatch(node ->
+                node.hitlPolicy() == HitlPolicy.BEFORE || node.hitlPolicy() == HitlPolicy.MANUAL)
+                ? TaskPlanState.WAITING_HUMAN
+                : TaskPlanState.READY;
         return new TaskPlan(
                 UUID.randomUUID().toString(),
                 request.conversationId(),
                 draft.goal() == null || draft.goal().isBlank() ? request.goal() : draft.goal(),
-                TaskPlanState.READY,
+                state,
                 1,
                 request.maxNodes(),
-                request.maxAttemptsPerNode(),
+                maxAttempts,
                 request.maxReplans(),
                 0,
-                draft.nodes(),
+                nodes,
                 draft.edges(),
                 "",
                 "");
+    }
+
+    private static TaskNode mergeDefaults(TaskNode node, CapabilityDescriptor descriptor) {
+        if (descriptor == null) return node;
+        HitlPolicy hitlPolicy = node.hitlPolicy() == HitlPolicy.NONE
+                ? descriptor.defaultHitlPolicy() : node.hitlPolicy();
+        EvaluationMode evaluationMode = node.evaluationMode() == EvaluationMode.DETERMINISTIC
+                ? descriptor.evaluationMode() : node.evaluationMode();
+        if (hitlPolicy == node.hitlPolicy() && evaluationMode == node.evaluationMode()) return node;
+        return new TaskNode(
+                node.nodeId(), node.capabilityKey(), node.title(), node.parameters(),
+                node.dependencies(), node.state(), node.attemptCount(), hitlPolicy,
+                evaluationMode, node.qualityCriteria(), node.outputSummary(),
+                node.asyncTaskId(), node.error());
     }
 
     private static TaskPlan fallback(TaskPlanningRequest request,

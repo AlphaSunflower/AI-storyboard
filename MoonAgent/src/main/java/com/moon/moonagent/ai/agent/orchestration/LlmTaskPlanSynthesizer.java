@@ -2,11 +2,6 @@ package com.moon.moonagent.ai.agent.orchestration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.orchestration.CapabilityDescriptor;
-import com.moon.moonagent.orchestration.EvaluationMode;
-import com.moon.moonagent.orchestration.HitlPolicy;
-import com.moon.moonagent.orchestration.TaskEdge;
-import com.moon.moonagent.orchestration.TaskNode;
-import com.moon.moonagent.orchestration.TaskNodeState;
 import com.moon.moonagent.orchestration.TaskPlanDraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +9,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -54,10 +48,11 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
             if (draft != null && !draft.nodes().isEmpty()) {
                 return draft;
             }
+            throw new IllegalStateException("LLM task plan synthesis returned no nodes");
         } catch (Exception e) {
             log.warn("LLM task plan synthesis failed: {}", e.getMessage());
+            throw new IllegalStateException("LLM task plan synthesis failed: " + e.getMessage(), e);
         }
-        return fallbackDraft(request, capabilities);
     }
 
     private static String systemPrompt() {
@@ -76,15 +71,4 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
                 """;
     }
 
-    private static TaskPlanDraft fallbackDraft(TaskPlanningRequest request,
-                                               Map<String, CapabilityDescriptor> capabilities) {
-        String key = capabilities.containsKey(request.preferredCapability())
-                ? request.preferredCapability()
-                : capabilities.keySet().stream().sorted(Comparator.naturalOrder()).findFirst().orElse("");
-        TaskNode node = new TaskNode(
-                "task-1", key, key, Map.of("goal", request.goal()), List.of(),
-                TaskNodeState.PENDING, 0, HitlPolicy.NONE, EvaluationMode.HYBRID,
-                "", "", "", "");
-        return new TaskPlanDraft(request.goal(), List.of(node), List.of());
-    }
 }

@@ -163,6 +163,22 @@ class TaskPlanValidatorTest {
         assertThat(result.errors()).contains("node budget exceeded: 3 > 2");
     }
 
+    @Test
+    void rejectsRuntimeNodeStatesOtherThanPendingOrReady() {
+        TaskPlan plan = plan(
+                new TaskNode(
+                        "write", "intent-aisplit", "write", Map.of(), List.of(),
+                        TaskNodeState.COMPLETED, 0, HitlPolicy.NONE, EvaluationMode.DETERMINISTIC,
+                        "", "", "", ""),
+                List.of());
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains("runtime node state not allowed: write: COMPLETED");
+    }
+
     private static TaskPlan plan(TaskNode node, List<TaskEdge> edges) {
         return plan(List.of(node), edges);
     }

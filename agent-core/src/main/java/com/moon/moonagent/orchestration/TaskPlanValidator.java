@@ -33,6 +33,9 @@ public class TaskPlanValidator {
             }
 
             if (nodeIds.add(nodeId)) {
+                if (node.state() != TaskNodeState.PENDING && node.state() != TaskNodeState.READY) {
+                    errors.add("runtime node state not allowed: " + node.nodeId() + ": " + node.state());
+                }
                 CapabilityDescriptor descriptor = safeCapabilities.get(node.capabilityKey());
                 if (descriptor == null) {
                     errors.add("unknown capability: " + node.capabilityKey());

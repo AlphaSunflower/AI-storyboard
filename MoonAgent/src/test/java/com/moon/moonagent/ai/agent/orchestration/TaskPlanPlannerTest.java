@@ -53,6 +53,41 @@ class TaskPlanPlannerTest {
         assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
     }
 
+    @Test
+    void synthesisFailureFallsBackToWaitingHumanConfirmation() {
+        TaskPlanSynthesizer synthesizer = (request, capabilities, errors) -> {
+            throw new IllegalStateException("gateway unavailable");
+        };
+        TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
+
+        TaskPlan plan = planner.plan(request(), capabilities());
+
+        assertThat(plan.state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(plan.nodes()).hasSize(1);
+        assertThat(plan.nodes().get(0).state())
+                .isEqualTo(com.moon.moonagent.orchestration.TaskNodeState.PENDING);
+        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
+        assertThat(plan.error()).contains("gateway unavailable");
+    }
+
+    @Test
+    void mergesCapabilityDefaultsAndAttemptBudgetIntoPlannedNodes() {
+        TaskPlanSynthesizer synthesizer = (request, capabilities, errors) ->
+                new TaskPlanDraft("goal", List.of(node("plan", "intent-aisplit")), List.of());
+        TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
+        Map<String, CapabilityDescriptor> descriptors = Map.of(
+                "intent-aisplit", new CapabilityDescriptor(
+                        "intent-aisplit", "storyboard", "storyboard", List.of(), false,
+                        HitlPolicy.BEFORE, EvaluationMode.HYBRID, 2));
+
+        TaskPlan plan = planner.plan(request(), descriptors);
+
+        assertThat(plan.state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(plan.maxAttemptsPerNode()).isEqualTo(2);
+        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
+        assertThat(plan.nodes().get(0).evaluationMode()).isEqualTo(EvaluationMode.HYBRID);
+    }
+
     private static TaskPlanningRequest request() {
         return new TaskPlanningRequest(
                 "conversation-1", "先做分镜，再生成图片", "intent-aisplit",
