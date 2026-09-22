@@ -125,6 +125,25 @@ class TaskPlanPlannerTest {
         assertThat(plan.nodes()).allMatch(node -> node.hitlPolicy() == HitlPolicy.NONE);
     }
 
+    @Test
+    void ignoresIncompleteNullEdgesFromSynthesizer() {
+        TaskPlanSynthesizer synthesizer = (request, capabilities, errors) -> new TaskPlanDraft(
+                "goal",
+                List.of(node("image", "intent-pic"), node("video", "intent-video")),
+                List.of(new TaskEdge(null, null)));
+        TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
+
+        TaskPlan plan = planner.plan(new TaskPlanningRequest(
+                "conversation-1",
+                "先生成一张PPT图片，再基于图片生成视频",
+                "intent-pic", 20, 3, 2), capabilities());
+
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
+        assertThat(plan.error()).isEmpty();
+        assertThat(plan.nodes()).extracting(TaskNode::capabilityKey)
+                .containsExactly("intent-pic", "intent-video");
+    }
+
     private static TaskPlanningRequest request() {
         return new TaskPlanningRequest(
                 "conversation-1", "先做分镜，再生成图片", "intent-aisplit",

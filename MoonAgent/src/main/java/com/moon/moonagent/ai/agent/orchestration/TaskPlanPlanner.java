@@ -67,7 +67,13 @@ public class TaskPlanPlanner {
     private static TaskPlan fromDraft(TaskPlanningRequest request, TaskPlanDraft draft,
                                       Map<String, CapabilityDescriptor> capabilities) {
         List<TaskNode> nodes = draft.nodes().stream()
+                .filter(java.util.Objects::nonNull)
                 .map(node -> mergeDefaults(node, capabilities.get(node.capabilityKey())))
+                .toList();
+        List<TaskEdge> edges = draft.edges().stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(edge -> edge.fromNodeId() != null && !edge.fromNodeId().isBlank()
+                        && edge.toNodeId() != null && !edge.toNodeId().isBlank())
                 .toList();
         int maxAttempts = request.maxAttemptsPerNode();
         for (TaskNode node : nodes) {
@@ -88,7 +94,7 @@ public class TaskPlanPlanner {
                 request.maxReplans(),
                 0,
                 nodes,
-                draft.edges(),
+                edges,
                 "",
                 "");
     }

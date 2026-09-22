@@ -59,6 +59,10 @@ public class TaskPlanValidator {
         }
 
         for (TaskEdge edge : plan.edges()) {
+            if (edge == null) {
+                errors.add("null edge entry");
+                continue;
+            }
             if (!nodeIds.contains(edge.fromNodeId()) || !nodeIds.contains(edge.toNodeId())) {
                 errors.add("edge references missing node: " + edge.fromNodeId() + " -> " + edge.toNodeId());
             }
