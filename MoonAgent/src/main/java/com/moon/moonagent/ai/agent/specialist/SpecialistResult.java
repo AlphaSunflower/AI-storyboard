@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.specialist;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -28,5 +29,15 @@ public record SpecialistResult(
 
     public boolean needsHandoff() {
         return handoffTarget != null && !handoffTarget.isBlank();
+    }
+
+    public static SpecialistResult question(String message, Map<String, Object> state) {
+        Map<String, Object> questionState = new LinkedHashMap<>(state == null ? Map.of() : state);
+        questionState.put("_question", true);
+        return new SpecialistResult(message, null, null, Map.copyOf(questionState));
+    }
+
+    public boolean needsUserInput() {
+        return handoffState != null && Boolean.TRUE.equals(handoffState.get("_question"));
     }
 }

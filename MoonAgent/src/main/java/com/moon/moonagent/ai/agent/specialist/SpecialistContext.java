@@ -37,8 +37,30 @@ public record SpecialistContext(
         /** 本轮轨迹累积器（可空；null 表示无 trace） */
         AgentTraceAccumulator trace,
         /** 画布编辑模式上下文（可空；非空时技能只能操作指定画布） */
-        CanvasSessionContext canvasContext
+        CanvasSessionContext canvasContext,
+        /** 动态任务引擎执行时为 true：跳过能力内部 HITL 卡片，直接执行。 */
+        boolean directExecution
 ) {
+    public SpecialistContext(
+            AgentConversation conversation,
+            String userMessage,
+            java.util.List<String> picUrls,
+            SseEmitter emitter,
+            SpecialistResult previousResult,
+            AgentSkill skill,
+            String action,
+            String customText,
+            Map<String, String> params,
+            java.util.List<String> assetIds,
+            String cpAction,
+            String cpPlan,
+            AgentTraceAccumulator trace,
+            CanvasSessionContext canvasContext
+    ) {
+        this(conversation, userMessage, picUrls, emitter, previousResult, skill, action,
+                customText, params, assetIds, cpAction, cpPlan, trace, canvasContext, false);
+    }
+
     /** 兼容旧 12 参数构造器：trace 置 null（无轨迹）。 */
     public SpecialistContext(AgentConversation conversation, String userMessage,
                              java.util.List<String> picUrls, SseEmitter emitter,
@@ -46,7 +68,7 @@ public record SpecialistContext(
                              String action, String customText, Map<String, String> params,
                              java.util.List<String> assetIds, String cpAction, String cpPlan) {
         this(conversation, userMessage, picUrls, emitter, previousResult, skill,
-                action, customText, params, assetIds, cpAction, cpPlan, null, null);
+                action, customText, params, assetIds, cpAction, cpPlan, null, null, false);
     }
 
     /** 兼容旧 13 参数构造器：canvasContext 置 null。 */
@@ -57,7 +79,7 @@ public record SpecialistContext(
                              java.util.List<String> assetIds, String cpAction, String cpPlan,
                              AgentTraceAccumulator trace) {
         this(conversation, userMessage, picUrls, emitter, previousResult, skill,
-                action, customText, params, assetIds, cpAction, cpPlan, trace, null);
+                action, customText, params, assetIds, cpAction, cpPlan, trace, null, false);
     }
 
     public static SpecialistContext from(OrchestrationRequest request, AgentSkill skill) {
@@ -75,7 +97,8 @@ public record SpecialistContext(
                 "",
                 "",
                 request.getTrace(),
-                request.getCanvasContext()
+                request.getCanvasContext(),
+                false
         );
     }
 }

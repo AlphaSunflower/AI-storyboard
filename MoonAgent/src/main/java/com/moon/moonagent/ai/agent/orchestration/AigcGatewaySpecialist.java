@@ -74,11 +74,99 @@ public class AigcGatewaySpecialist {
         if ("cancel".equals(context.action())) {
             return SpecialistResult.done("已取消媒体生成。");
         }
-        if (!isConfirmed(context)) {
+        if (context.directExecution()) {
+            return executeConversational(intent, toolName, context);
+        }
+        if (!context.directExecution() && !isConfirmed(context)) {
             AgentSkill skill = context.skill();
             if (skill == null) return SpecialistResult.done("当前媒体 Skill 未加载，请检查 Skill 配置。");
             return SpecialistResult.done(planAndPause(intent, toolName, context, toRequest(context, skill)));
         }
+        return executeTool(intent, toolName, context);
+    }
+
+    private SpecialistResult executeConversational(String intent, String toolName, SpecialistContext context) {
+        if (isConfirmed(context)) {
+            return executeTool(intent, toolName, context);
+        }
+        if (context.action() != null && context.action().startsWith("select_")) {
+            return SpecialistResult.done(confirmSelectedPlan(intent, toolName, context));
+        }
+        AgentSkill skill = context.skill();
+        if (skill == null) return SpecialistResult.done("当前媒体 Skill 未加载，请检查 Skill 配置。");
+        Map<String, Object> plan = callSkillPlan(intent, skill, context, toRequest(context, skill));
+        List<Map<String, Object>> plans = planList(plan.get("plans"));
+        String display = stringValue(plan.get("_display"));
+        if (display.isBlank()) display = planText(toolName, plan);
+        if (!display.isBlank() && !display.contains("请回复")) {
+            display = display + "\n\n请回复 1/2/3 选择方案，或直接说明需要如何继续完善。";
+        }
+        Map<String, Object> questionState = new LinkedHashMap<>(plan);
+        questionState.put("intent", skill.intentType());
+        questionState.put("skill", skill.name());
+        questionState.put("toolName", toolName);
+        questionState.put("plansText", display);
+        questionState.put("originalMessage", context.userMessage() == null ? "" : context.userMessage());
+        questionState.put("plans", plans);
+        return SpecialistResult.question(display, questionState);
+    }
+
+    private String confirmSelectedPlan(String intent, String toolName, SpecialistContext context) {
+        Map<String, Object> question = parsePlan(context.cpPlan());
+        List<Map<String, Object>> plans = planList(question.get("plans"));
+        int index = selectedPlanIndex(context.action());
+        int planIndex = Math.max(0, Math.min(plans.size() - 1, index - 1));
+        Map<String, Object> selected = plans.isEmpty() ? new LinkedHashMap<>() : new LinkedHashMap<>(plans.get(planIndex));
+        String plansText = stringValue(question.get("plansText"));
+        String selectedText = extractSelectedPlanText(plansText, index);
+        String originalMessage = stringValue(question.get("originalMessage"));
+        String title = stringValue(selected.get("title"));
+        if (title.isBlank()) title = "方案" + index;
+        String summary = stringValue(selected.get("summary"));
+        String body = "generate_video".equals(toolName)
+                ? stringValue(selected.get("message"))
+                : stringValue(selected.get("prompt"));
+        if (body.isBlank()) body = selectedText;
+        if (body.isBlank()) body = originalMessage;
+        if (!"generate_video".equals(toolName) && !body.endsWith("，风格方向：" + title)) {
+            body = body + "，采用方案" + index + "：" + title;
+        }
+        selected.put("title", title);
+        selected.put("summary", summary);
+        if ("generate_video".equals(toolName)) {
+            selected.put("message", body);
+        } else {
+            selected.put("prompt", body);
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("intent", intent);
+        payload.put("skill", question.getOrDefault("skill", ""));
+        payload.put("content", originalMessage);
+        payload.put("plans", List.of(selected));
+        String cardText = "已选择方案" + index + "：" + title
+                + (summary.isBlank() ? "" : "\n" + summary)
+                + "\n\n点击「开始生成」提交图片/视频任务，或点击「继续完善」返回对话调整方案。";
+        List<Map<String, Object>> actions = List.of(
+                Map.of("id", toolName + ":" + index, "title", "开始生成"),
+                Map.of("id", "refine", "title", "继续完善"),
+                Map.of("id", "cancel", "title", "取消"));
+        OrchestrationRequest request = toRequest(context, context.skill());
+        request.setAction(context.action());
+        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+                cardText, toolName, List.of(payload), "human_input", actions,
+                List.of(), Map.of(), Map.of()));
+    }
+
+    private static String extractSelectedPlanText(String plansText, int index) {
+        if (plansText == null || plansText.isBlank()) return "";
+        String marker = "【方案" + index;
+        int start = plansText.indexOf(marker);
+        if (start < 0) return plansText.trim();
+        int next = plansText.indexOf("【方案", start + marker.length());
+        return (next < 0 ? plansText.substring(start) : plansText.substring(start, next)).trim();
+    }
+
+    private SpecialistResult executeTool(String intent, String toolName, SpecialistContext context) {
         if (!skillExpander.hasTool(toolName)) {
             return SpecialistResult.done("媒体 MCP 工具尚未就绪，请确认 LLM 网关已启动并完成连接。");
         }
@@ -192,7 +280,13 @@ public class AigcGatewaySpecialist {
         } catch (Exception e) {
             log.warn("AIGC skill plan failed: intent={}, error={}", intent, e.getMessage());
         }
-        return fallbackPlans(intent, input);
+        String display = betweenMarkers(raw.toString(), PLAN_TEXT_START, PLAN_TEXT_END);
+        if (display.isBlank()) display = raw.toString().trim();
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (!display.isBlank()) result.put("_display", display);
+        result.put("_missingJson", true);
+        result.put("plans", List.of());
+        return result;
     }
 
     private void emitDisplayDelta(OrchestrationRequest request, String raw, DisplayCursor cursor, boolean finished) {

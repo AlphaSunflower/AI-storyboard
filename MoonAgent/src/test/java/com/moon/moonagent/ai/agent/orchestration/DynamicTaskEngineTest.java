@@ -25,6 +25,7 @@ import com.moon.moonagent.orchestration.TaskPlanState;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -52,8 +53,8 @@ class DynamicTaskEngineTest {
         AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
         AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
         OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
-        AgentCapability first = capability("intent-aisplit", "first");
-        AgentCapability second = capability("intent-pic", "second");
+        AgentCapability first = capability("intent-aisplit", "![生成图片](/api/files/images/generated.png)");
+        AgentCapability second = capability("intent-video", "second");
         TaskPlan plan = plan();
 
         when(planner.plan(any(), any())).thenReturn(plan);
@@ -63,12 +64,12 @@ class DynamicTaskEngineTest {
                 "intent-aisplit", new CapabilityDescriptor(
                         "intent-aisplit", "first", "first", List.of(), false,
                         HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3),
-                "intent-pic", new CapabilityDescriptor(
-                        "intent-pic", "second", "second", List.of(), false,
+                "intent-video", new CapabilityDescriptor(
+                        "intent-video", "second", "second", List.of(), true,
                         HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3));
         when(registry.descriptors()).thenReturn(descriptors);
         when(registry.find("intent-aisplit")).thenReturn(Optional.of(first));
-        when(registry.find("intent-pic")).thenReturn(Optional.of(second));
+        when(registry.find("intent-video")).thenReturn(Optional.of(second));
         when(checkpointMapper.selectOne(any())).thenReturn(null);
         when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
 
@@ -86,9 +87,15 @@ class DynamicTaskEngineTest {
                 request, trace, run);
 
         InOrder order = inOrder(first, second);
-        order.verify(first).execute(any());
-        order.verify(second).execute(any());
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> firstContext =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> secondContext =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        order.verify(first).execute(firstContext.capture());
+        order.verify(second).execute(secondContext.capture());
         assertThat(result.content()).isEqualTo("second");
+        assertThat(firstContext.getValue().directExecution()).isTrue();
+        assertThat(secondContext.getValue().picUrls()).containsExactly("/api/files/images/generated.png");
     }
 
     @Test
@@ -241,6 +248,80 @@ class DynamicTaskEngineTest {
         verify(store, times(1)).find("plan-1");
     }
 
+    @Test
+    void conversationalQuestionWaitsThenResumesFromNextUserMessage() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability capability = mock(AgentCapability.class);
+        CapabilityDescriptor descriptor = new CapabilityDescriptor(
+                "intent-pic", "picture", "picture", List.of(), false,
+                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3);
+        when(capability.key()).thenReturn("intent-pic");
+        when(capability.descriptor()).thenReturn(descriptor);
+        when(capability.execute(any())).thenReturn(
+                SpecialistResult.question("请选择方案", Map.of(
+                        "toolName", "generate_image",
+                        "plansText", "【方案1】方案一\n【方案2】方案二\n【方案3】方案三")),
+                SpecialistResult.done("generated"));
+        TaskPlan initial = new TaskPlan(
+                "plan-1", "conversation-1", "goal", TaskPlanState.READY, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode("one", "intent-pic", "one", Map.of(), List.of(),
+                        TaskNodeState.PENDING, 0, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "", "", "", "")),
+                List.of(), "", "");
+        java.util.concurrent.atomic.AtomicReference<TaskPlan> active =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(planner.plan(any(), any())).thenReturn(initial);
+        when(store.findActive("conversation-1"))
+                .thenAnswer(invocation -> Optional.ofNullable(active.get()));
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.find("plan-1"))
+                .thenAnswer(invocation -> Optional.ofNullable(active.get()));
+        when(store.update(any())).thenAnswer(invocation -> {
+            TaskPlan plan = invocation.getArgument(0);
+            active.set(plan);
+            return plan;
+        });
+        when(registry.descriptors()).thenReturn(Map.of("intent-pic", descriptor));
+        when(registry.find("intent-pic")).thenReturn(Optional.of(capability));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest firstRequest = new OrchestrationRequest(
+                conversation, "生成图片并继续做视频", List.of(), null);
+
+        AgentTurnResult waiting = engine.runTurn(
+                conversation, "生成图片并继续做视频", "intent-pic",
+                firstRequest, new AgentTraceAccumulator(firstRequest), null);
+
+        assertThat(waiting.content()).isEqualTo("请选择方案");
+        assertThat(active.get().state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(active.get().nodes().get(0).outputSummary()).contains("\"plansText\"");
+
+        OrchestrationRequest selection = new OrchestrationRequest(conversation, "1", List.of(), null);
+        AgentTurnResult generated = engine.runTurn(
+                conversation, "1", "intent-pic", selection,
+                new AgentTraceAccumulator(selection), null);
+
+        assertThat(generated.content()).isEqualTo("generated");
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contexts =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(capability, times(2)).execute(contexts.capture());
+        assertThat(contexts.getAllValues().get(1).action()).isEqualTo("select_image:1");
+    }
+
     private static AgentCapability capability(String key, String message) {
         CapabilityDescriptor descriptor = new CapabilityDescriptor(
                 key, key, key, List.of(), false, HitlPolicy.NONE,
@@ -258,7 +339,7 @@ class DynamicTaskEngineTest {
                 TaskNodeState.PENDING, 0, HitlPolicy.NONE, EvaluationMode.DETERMINISTIC,
                 "", "", "", "");
         TaskNode second = new TaskNode(
-                "two", "intent-pic", "two", Map.of(), List.of("one"),
+                "two", "intent-video", "two", Map.of(), List.of("one"),
                 TaskNodeState.PENDING, 0, HitlPolicy.NONE, EvaluationMode.DETERMINISTIC,
                 "", "", "", "");
         return new TaskPlan(

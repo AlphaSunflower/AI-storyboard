@@ -54,6 +54,24 @@ class TaskPlanPlannerTest {
     }
 
     @Test
+    void deterministicallyDecomposesImageThenVideoGoalWithoutHitlPlanCard() {
+        TaskPlanSynthesizer synthesizer = (request, capabilities, errors) ->
+                new TaskPlanDraft("goal", List.of(node("image-only", "intent-pic")), List.of());
+        TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
+
+        TaskPlan plan = planner.plan(new TaskPlanningRequest(
+                "conversation-1",
+                "先生成一张PPT图片，再基于图片生成一个前导动画视频",
+                "intent-pic", 20, 3, 2), capabilities());
+
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
+        assertThat(plan.nodes()).extracting(TaskNode::capabilityKey)
+                .containsExactly("intent-pic", "intent-video");
+        assertThat(plan.nodes().get(1).dependencies()).containsExactly("media-image");
+        assertThat(plan.nodes()).allMatch(node -> node.hitlPolicy() == HitlPolicy.NONE);
+    }
+
+    @Test
     void synthesisFailureFallsBackToWaitingHumanConfirmation() {
         TaskPlanSynthesizer synthesizer = (request, capabilities, errors) -> {
             throw new IllegalStateException("gateway unavailable");
@@ -97,7 +115,8 @@ class TaskPlanPlannerTest {
     private static Map<String, CapabilityDescriptor> capabilities() {
         return Map.of(
                 "intent-aisplit", descriptor("intent-aisplit"),
-                "intent-pic", descriptor("intent-pic"));
+                "intent-pic", descriptor("intent-pic"),
+                "intent-video", descriptor("intent-video"));
     }
 
     private static CapabilityDescriptor descriptor(String key) {

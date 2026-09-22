@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.orchestration;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.AgentTraceEvent;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
@@ -36,12 +37,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
 public class DynamicTaskEngine {
 
     private static final Logger log = LoggerFactory.getLogger(DynamicTaskEngine.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Pattern IMAGE_MARKDOWN = Pattern.compile("!\\[[^]]*]\\(([^)]+)\\)");
 
     private final TaskPlanPlanner planner;
     private final TaskPlanStore planStore;
@@ -64,6 +70,19 @@ public class DynamicTaskEngine {
                                    OrchestrationRequest request,
                                    AgentTraceAccumulator trace,
                                    AgentLoopRun run) {
+        TaskPlan waiting = planStore.findActive(conversation.getId())
+                .filter(plan -> plan.state() == TaskPlanState.WAITING_HUMAN)
+                .orElse(null);
+        if (waiting != null) {
+            TaskNode node = waiting.nodes().stream()
+                    .filter(candidate -> candidate.state() == TaskNodeState.WAITING_HUMAN)
+                    .findFirst()
+                    .orElse(null);
+            if (node != null) {
+                prepareQuestionResume(request, node, content);
+                return continuePlan(conversation, request, trace, run, waiting, node.nodeId());
+            }
+        }
         TaskPlan plan = planner.plan(new TaskPlanningRequest(
                         conversation.getId(), content, preferredCapability, 20, 3, 2),
                 capabilities.descriptors());
@@ -148,22 +167,24 @@ public class DynamicTaskEngine {
         int guard = Math.max(1, plan.maxNodes() * plan.maxAttemptsPerNode());
         for (int step = 0; step < guard; step++) {
             support.checkInterrupted(request);
+            boolean resumingNode = !resumeNodeId.isBlank();
             TaskPlan latest = planStore.find(plan.planId()).orElse(plan);
             if (latest.state() == TaskPlanState.CANCELLED) {
                 return buildTurnResult(request, trace, "任务已取消");
             }
             plan = latest;
-            if (terminal(plan.state())) {
+            if (terminal(plan.state()) && !resumingNode) {
                 return buildTurnResult(request, trace, lastMessage);
             }
             plan = scheduler.advance(plan);
             plan = planStore.update(plan);
-            if (terminal(plan.state())) {
+            if (terminal(plan.state()) && !resumingNode) {
                 return buildTurnResult(request, trace, lastMessage);
             }
 
             TaskNode node;
-            if (!resumeNodeId.isBlank()) {
+            boolean nodeResumed = resumingNode;
+            if (nodeResumed) {
                 String pendingNodeId = resumeNodeId;
                 node = plan.nodes().stream()
                         .filter(candidate -> candidate.nodeId().equals(pendingNodeId))
@@ -172,6 +193,12 @@ public class DynamicTaskEngine {
                 resumeNodeId = "";
             } else {
                 node = scheduler.nextReady(plan).orElse(null);
+            }
+            if (!nodeResumed) {
+                request.setAction("");
+                request.setCustomText("");
+                request.setCheckpointAction("");
+                request.setCheckpointPlan("");
             }
             if (node == null) {
                 TaskPlan failed = withState(plan, TaskPlanState.FAILED, "no ready task node");
@@ -192,10 +219,11 @@ public class DynamicTaskEngine {
             request.setIntentType(node.capabilityKey());
             AgentSkill skill = capability.skill();
             SpecialistContext context = new SpecialistContext(
-                    conversation, nodeContent(node, request, plan), request.getPicUrls(), request.getEmitter(),
+                    conversation, nodeContent(node, request, plan),
+                    nodePicUrls(node, request, previous), request.getEmitter(),
                     previous, skill, request.getAction(), request.getCustomText(), request.getParams(),
                     request.getAssetIds(), request.getCheckpointAction(), request.getCheckpointPlan(),
-                    trace, request.getCanvasContext());
+                    trace, request.getCanvasContext(), true);
             SpecialistResult result = executeCapability(capability, context);
             lastMessage = result == null || result.message() == null ? "" : result.message();
             previous = result;
@@ -206,6 +234,12 @@ public class DynamicTaskEngine {
                     result != null && result.needsHandoff() ? "SWITCH_CHAIN" : "CONTINUE",
                     node.nodeId(), lastMessage, "", "", "",
                     started, OffsetDateTime.now());
+
+            if (result != null && result.needsUserInput()) {
+                plan = scheduler.markWaitingHuman(plan, node.nodeId(), questionState(result));
+                planStore.update(plan);
+                return buildTurnResult(request, trace, lastMessage);
+            }
 
             AgentCheckpoint pending = findPendingCheckpoint(
                     conversation.getId(), plan.planId(), node.nodeId(), started);
@@ -294,6 +328,48 @@ public class DynamicTaskEngine {
             return request.getContent();
         }
         return plan.goal();
+    }
+
+    private static void prepareQuestionResume(OrchestrationRequest request, TaskNode node, String content) {
+        String toolName = "intent-video".equals(node.capabilityKey()) ? "generate_video" : "generate_image";
+        request.setCheckpointAction(toolName);
+        request.setCheckpointPlan(node.outputSummary());
+        request.setCustomText(content == null ? "" : content);
+        int selected = selectedPlanIndex(content);
+        if (selected > 0) {
+            request.setAction(("generate_video".equals(toolName) ? "select_video:" : "select_image:") + selected);
+        } else {
+            request.setAction("refine");
+        }
+    }
+
+    private static int selectedPlanIndex(String content) {
+        if (content == null || content.isBlank()) return -1;
+        java.util.regex.Matcher matcher = Pattern.compile("(?:方案\\s*)?([1-3])").matcher(content.trim());
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : -1;
+    }
+
+    private static String questionState(SpecialistResult result) {
+        try {
+            return JSON.writeValueAsString(result.handoffState());
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private static List<String> nodePicUrls(TaskNode node, OrchestrationRequest request,
+                                            SpecialistResult previous) {
+        List<String> urls = new ArrayList<>(request.getPicUrls() == null ? List.of() : request.getPicUrls());
+        if (!"intent-video".equals(node.capabilityKey())
+                || previous == null || previous.message() == null || previous.message().isBlank()) {
+            return urls;
+        }
+        Matcher matcher = IMAGE_MARKDOWN.matcher(previous.message());
+        while (matcher.find()) {
+            String url = matcher.group(1);
+            if (!url.isBlank() && !urls.contains(url)) urls.add(url);
+        }
+        return urls;
     }
 
     private static SpecialistResult previousResult(TaskPlan plan) {
