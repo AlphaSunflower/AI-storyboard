@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+@org.springframework.stereotype.Component
 public class TaskPlanScheduler {
 
     public TaskPlan advance(TaskPlan plan) {

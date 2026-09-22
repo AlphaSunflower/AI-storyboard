@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+@org.springframework.stereotype.Component
 public class TaskPlanValidator {
 
     public TaskPlanValidationResult validate(TaskPlan plan, Map<String, CapabilityDescriptor> capabilities) {

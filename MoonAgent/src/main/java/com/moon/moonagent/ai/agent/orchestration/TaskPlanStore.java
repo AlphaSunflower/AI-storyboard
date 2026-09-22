@@ -13,9 +13,9 @@ import com.moon.moonagent.orchestration.TaskEdge;
 import com.moon.moonagent.orchestration.TaskNode;
 import com.moon.moonagent.orchestration.TaskPlan;
 import com.moon.moonagent.orchestration.TaskPlanState;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +24,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class TaskPlanStore {
 
     private static final Logger log = LoggerFactory.getLogger(TaskPlanStore.class);
@@ -40,6 +39,23 @@ public class TaskPlanStore {
     private final AgentTaskNodeMapper nodeMapper;
     private final AgentTaskEdgeMapper edgeMapper;
     private final ObjectMapper objectMapper;
+
+    @Autowired
+    public TaskPlanStore(AgentTaskPlanMapper planMapper,
+                         AgentTaskNodeMapper nodeMapper,
+                         AgentTaskEdgeMapper edgeMapper) {
+        this(planMapper, nodeMapper, edgeMapper, new ObjectMapper());
+    }
+
+    TaskPlanStore(AgentTaskPlanMapper planMapper,
+                  AgentTaskNodeMapper nodeMapper,
+                  AgentTaskEdgeMapper edgeMapper,
+                  ObjectMapper objectMapper) {
+        this.planMapper = planMapper;
+        this.nodeMapper = nodeMapper;
+        this.edgeMapper = edgeMapper;
+        this.objectMapper = objectMapper;
+    }
 
     @Transactional
     public TaskPlan save(TaskPlan plan) {
