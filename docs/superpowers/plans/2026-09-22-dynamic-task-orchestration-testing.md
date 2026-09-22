@@ -20,7 +20,7 @@
 $env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/ai_storyboard'
 $env:SPRING_DATASOURCE_USERNAME='postgres'
 $env:SPRING_DATASOURCE_PASSWORD='123456'
-$env:INTERNAL_SECRET='codex-local-dynamic-plan-test'
+$env:INTERNAL_SECRET='<与本机 8082 / asset-service 一致的密钥>'
 java -jar MoonAgent/target/moon-agent-0.0.1-SNAPSHOT.jar --server.port=8086
 ```
 
@@ -34,8 +34,8 @@ npm --prefix AIStoryboardClient run dev -- --host 127.0.0.1 --port 5174
 
 打开 `http://127.0.0.1:5174/`。
 
-`VITE_DEV_USER_ID` 可替换为当前登录用户的真实 ID。只验证编排时可以给
-`INTERNAL_SECRET` 任意非空值；需要调用主后端内部接口时，必须与主后端使用同一个值。
+`VITE_DEV_USER_ID` 可替换为当前登录用户的真实 ID。`INTERNAL_SECRET` 必须与
+本机现有主后端、资产服务一致，否则新建会话和编排引擎切换会因内部接口 `403` 失败。
 
 ## 手动流程
 
