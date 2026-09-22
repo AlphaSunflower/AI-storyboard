@@ -119,4 +119,30 @@ class AigcGatewaySpecialistDirectExecutionTest {
         assertThat(input).contains("用户调整意见：请加强电影感");
         assertThat(input).contains("保持任务主题不变");
     }
+
+    @Test
+    void missingMediaToolReturnsFailureInsteadOfCompletedMessage() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        SkillExpander skillExpander = mock(SkillExpander.class);
+        when(skillExpander.hasTool("generate_image")).thenReturn(false);
+        AigcGatewaySpecialist specialist = new AigcGatewaySpecialist(
+                mock(ChatClient.Builder.class),
+                mock(GatewayModelService.class),
+                mock(FileStorageService.class),
+                skillExpander,
+                mock(MediaGenerationCoordinator.class),
+                support);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        SpecialistContext context = new SpecialistContext(
+                conversation, "1", List.of(), null, null,
+                AgentSkill.of("pic", Map.of("description", "image"), Map.of()),
+                "generate_image:1", "", Map.of(), List.of(), "generate_image",
+                "{\"plans\":[{\"prompt\":\"prompt\"}]}", null, null, true);
+
+        SpecialistResult result = specialist.execute("intent-pic", context);
+
+        assertThat(result.isFailed()).isTrue();
+        assertThat(result.message()).contains("媒体 MCP 工具尚未就绪");
+    }
 }

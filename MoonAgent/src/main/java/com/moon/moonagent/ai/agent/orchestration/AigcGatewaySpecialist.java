@@ -176,11 +176,11 @@ public class AigcGatewaySpecialist {
 
     private SpecialistResult executeTool(String intent, String toolName, SpecialistContext context) {
         if (!skillExpander.hasTool(toolName)) {
-            return SpecialistResult.done("媒体 MCP 工具尚未就绪，请确认 LLM 网关已启动并完成连接。");
+            return SpecialistResult.failed("媒体 MCP 工具尚未就绪，请确认 LLM 网关已启动并完成连接。");
         }
         ToolCallback[] callbacks = skillExpander.toolCallbacks(List.of(toolName));
         if (callbacks.length == 0) {
-            return SpecialistResult.done("媒体 MCP 工具尚未就绪，请确认 LLM 网关已启动并完成连接。");
+            return SpecialistResult.failed("媒体 MCP 工具尚未就绪，请确认 LLM 网关已启动并完成连接。");
         }
 
         AtomicReference<MediaToolResult> toolResult = new AtomicReference<>();
@@ -191,6 +191,18 @@ public class AigcGatewaySpecialist {
             String input = JSON.writeValueAsString(buildToolInput(toolName, context));
             tool.call(input);
             MediaToolResult result = toolResult.get();
+            if (result == null) {
+                return SpecialistResult.failed("媒体生成失败：工具未返回结果。");
+            }
+            if (!isBlank(result.error())) {
+                return SpecialistResult.failed("媒体生成失败：" + result.error());
+            }
+            if ("generate_image".equals(toolName) && result.resultUrls().isEmpty()) {
+                return SpecialistResult.failed("媒体生成失败：未返回图片结果。");
+            }
+            if ("generate_video".equals(toolName) && isBlank(result.taskId())) {
+                return SpecialistResult.failed("媒体生成失败：未返回视频任务 ID。");
+            }
             String answer = formatAnswer(toolName, result);
             emitVideoAccepted(context, result);
             emit(context, answer);
@@ -203,7 +215,7 @@ public class AigcGatewaySpecialist {
             return SpecialistResult.done(answer);
         } catch (Exception e) {
             log.error("AIGC gateway specialist failed: intent={}, error={}", intent, e.getMessage(), e);
-            return SpecialistResult.done("媒体生成失败：" + e.getMessage());
+            return SpecialistResult.failed("媒体生成失败：" + e.getMessage());
         }
     }
 

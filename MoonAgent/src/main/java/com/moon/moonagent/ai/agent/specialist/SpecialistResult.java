@@ -40,4 +40,13 @@ public record SpecialistResult(
     public boolean needsUserInput() {
         return handoffState != null && Boolean.TRUE.equals(handoffState.get("_question"));
     }
+
+    /** 非成功终态：动态调度器必须停止当前节点并阻止后继节点推进。 */
+    public static SpecialistResult failed(String message) {
+        return new SpecialistResult(message, null, null, Map.of("_failed", true));
+    }
+
+    public boolean isFailed() {
+        return handoffState != null && Boolean.TRUE.equals(handoffState.get("_failed"));
+    }
 }

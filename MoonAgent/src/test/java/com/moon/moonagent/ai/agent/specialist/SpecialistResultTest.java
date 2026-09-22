@@ -16,4 +16,13 @@ class SpecialistResultTest {
         assertThat(result.needsUserInput()).isTrue();
         assertThat(result.handoffState()).containsEntry("toolName", "generate_image");
     }
+
+    @Test
+    void failedResultIsDistinctFromSuccess() {
+        SpecialistResult result = SpecialistResult.failed("tool unavailable");
+
+        assertThat(result.isFailed()).isTrue();
+        assertThat(result.needsUserInput()).isFalse();
+        assertThat(result.needsHandoff()).isFalse();
+    }
 }

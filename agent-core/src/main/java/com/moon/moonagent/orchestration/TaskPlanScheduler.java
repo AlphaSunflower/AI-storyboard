@@ -75,6 +75,17 @@ public class TaskPlanScheduler {
         return advance(withNodesAndState(plan, nodes, TaskPlanState.RUNNING));
     }
 
+    /** 标记当前节点永久失败并停止计划，供不可重试的能力/工具错误使用。 */
+    public TaskPlan failNodeTerminal(TaskPlan plan, String nodeId, String error) {
+        List<TaskNode> nodes = plan.nodes().stream()
+                .map(node -> node.nodeId().equals(nodeId)
+                        ? withState(node, TaskNodeState.FAILED, node.attemptCount() + 1,
+                        node.outputSummary(), error)
+                        : node)
+                .toList();
+        return advance(withNodesAndState(plan, nodes, TaskPlanState.FAILED));
+    }
+
     public TaskPlan markRunning(TaskPlan plan, String nodeId) {
         List<TaskNode> nodes = plan.nodes().stream()
                 .map(node -> node.nodeId().equals(nodeId)

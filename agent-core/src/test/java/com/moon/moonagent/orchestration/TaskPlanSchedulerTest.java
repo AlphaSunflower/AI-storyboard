@@ -66,6 +66,19 @@ class TaskPlanSchedulerTest {
     }
 
     @Test
+    void terminalFailureStopsPlanImmediately() {
+        TaskPlan plan = plan(
+                node("one", "intent-pic", TaskNodeState.READY, List.of(), 0),
+                node("two", "intent-video", TaskNodeState.PENDING, List.of("one"), 0));
+
+        TaskPlan failed = scheduler.failNodeTerminal(plan, "one", "tool unavailable");
+
+        assertThat(failed.state()).isEqualTo(TaskPlanState.FAILED);
+        assertThat(failed.nodes().get(0).state()).isEqualTo(TaskNodeState.FAILED);
+        assertThat(failed.nodes().get(1).state()).isEqualTo(TaskNodeState.SKIPPED);
+    }
+
+    @Test
     void replanReplacesOnlyUnfinishedNodesAndPreservesCompletedArtifacts() {
         TaskPlan plan = plan(
                 node("one", "intent-aisplit", TaskNodeState.COMPLETED, List.of(), 1),

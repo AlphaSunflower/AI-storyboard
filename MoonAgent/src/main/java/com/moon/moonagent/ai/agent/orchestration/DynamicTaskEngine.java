@@ -227,14 +227,21 @@ public class DynamicTaskEngine {
             SpecialistResult result = executeCapability(capability, context);
             lastMessage = result == null || result.message() == null ? "" : result.message();
             previous = result;
+            boolean failed = result != null && result.isFailed();
             recorder.step(run, step,
                     node.capabilityKey(),
                     "task_node",
-                    result != null && result.needsHandoff() ? "handoff" : "completed",
-                    result != null && result.needsHandoff() ? "SWITCH_CHAIN" : "CONTINUE",
+                    failed ? "failed" : result != null && result.needsHandoff() ? "handoff" : "completed",
+                    failed ? "FAIL" : result != null && result.needsHandoff() ? "SWITCH_CHAIN" : "CONTINUE",
                     plan.planId(), node.nodeId(), node.attemptCount() + 1,
                     "", lastMessage, "", "", "",
                     started, OffsetDateTime.now());
+
+            if (failed) {
+                plan = scheduler.failNodeTerminal(plan, node.nodeId(), lastMessage);
+                planStore.update(plan);
+                return buildTurnResult(request, trace, lastMessage);
+            }
 
             if (result != null && result.needsUserInput()) {
                 plan = scheduler.markWaitingHuman(plan, node.nodeId(), questionState(result));

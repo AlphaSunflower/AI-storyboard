@@ -105,6 +105,53 @@ class DynamicTaskEngineTest {
     }
 
     @Test
+    void failedNodeStopsPlanAndDoesNotExecuteDependents() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability first = mock(AgentCapability.class);
+        AgentCapability second = capability("intent-video", "should not run");
+        TaskPlan plan = plan();
+        CapabilityDescriptor firstDescriptor = new CapabilityDescriptor(
+                "intent-aisplit", "first", "first", List.of(), false,
+                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3);
+        CapabilityDescriptor secondDescriptor = new CapabilityDescriptor(
+                "intent-video", "second", "second", List.of(), true,
+                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3);
+        when(first.key()).thenReturn("intent-aisplit");
+        when(first.descriptor()).thenReturn(firstDescriptor);
+        when(first.execute(any())).thenReturn(SpecialistResult.failed("tool unavailable"));
+        when(planner.plan(any(), any())).thenReturn(plan);
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(registry.descriptors()).thenReturn(Map.of(
+                "intent-aisplit", firstDescriptor,
+                "intent-video", secondDescriptor));
+        when(registry.find("intent-aisplit")).thenReturn(Optional.of(first));
+        when(registry.find("intent-video")).thenReturn(Optional.of(second));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "goal", List.of(), null);
+
+        AgentTurnResult result = engine.runTurn(conversation, "goal", "intent-aisplit",
+                request, new AgentTraceAccumulator(request), new AgentLoopRun());
+
+        assertThat(result.content()).isEqualTo("tool unavailable");
+        verify(first).execute(any());
+        verify(second, never()).execute(any());
+    }
+
+    @Test
     void continuesDependentNodeAfterAsyncCompletion() {
         TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
         TaskPlanStore store = mock(TaskPlanStore.class);
