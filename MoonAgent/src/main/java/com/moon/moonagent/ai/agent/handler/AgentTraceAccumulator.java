@@ -105,7 +105,9 @@ public class AgentTraceAccumulator {
     }
 
     public void setTurnMetadata(Map<String, Object> turnMetadata) {
-        this.turnMetadata = turnMetadata == null ? Map.of() : turnMetadata;
+        Map<String, Object> merged = new java.util.LinkedHashMap<>(this.turnMetadata);
+        if (turnMetadata != null) merged.putAll(turnMetadata);
+        this.turnMetadata = java.util.Collections.unmodifiableMap(merged);
     }
 
     public Map<String, Object> getTurnMetadata() {

@@ -10,6 +10,9 @@ export interface AgentConversation {
   title: string;
   status: 'active' | 'archived';
   canvasContext?: CanvasEditContext | null;
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  engineVersion?: string;
+  debugComparisonEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +98,11 @@ export interface AgentMessageMetadata {
   reasoning?: AgentReasoning;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  engineVersion?: string;
+  checkpointOwner?: string;
+  loopRunId?: string;
+  traceId?: string;
 }
 
 export interface AgentMessage {
@@ -265,6 +273,11 @@ export interface SseEvent {
   // /messages/stream 请求可选参数（后端可能透传/回显）
   routingHint?: string;
   cancelActiveTasks?: boolean;
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  engineVersion?: string;
+  checkpointOwner?: string;
+  loopRunId?: string;
+  traceId?: string;
   conversationId?: string;
   projectId?: string;
   requestedIntent?: string;
@@ -375,8 +388,11 @@ export const agentApi = {
   removeConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
 
-  createConversation: (projectId: string, title?: string) =>
-    client.post<{ data: AgentConversation }>('/agent/conversations', { projectId, title }),
+  createConversation: (projectId: string, title?: string, orchestrationMode?: string) =>
+    client.post<{ data: AgentConversation }>('/agent/conversations', { projectId, title, orchestrationMode }),
+
+  updateOrchestrationMode: (id: string, mode: 'LEGACY' | 'UNIFIED_LOOP') =>
+    client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}/orchestration-mode`, { mode }),
 
   updateConversation: (id: string, data: { title?: string; status?: string }) =>
     client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}`, data),

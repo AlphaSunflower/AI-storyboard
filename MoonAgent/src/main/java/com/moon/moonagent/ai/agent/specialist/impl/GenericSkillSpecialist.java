@@ -560,26 +560,49 @@ public class GenericSkillSpecialist implements SpecialistAgent {
         UserMessage userMessage = buildUserMessage(text, context.picUrls(), isVision(skill));
 
         OffsetDateTime started = OffsetDateTime.now();
-        ChatResponse response = client.prompt()
+        StringBuilder answerBuffer = new StringBuilder();
+        AssistantMessage lastOutput = null;
+        boolean streamed = false;
+        for (ChatResponse chunk : client.prompt()
                 .options(OpenAiChatOptions.builder().model(model).timeout(TIMEOUT))
                 .system(systemPrompt)
                 .messages(userMessage)
                 .tools((Object[]) tools)
-                .call()
-                .chatResponse();
-        AssistantMessage output = response != null && response.getResult() != null
-                ? response.getResult().getOutput() : null;
-        String answer = output == null ? "" : (output.getText() == null ? "" : output.getText());
+                .stream()
+                .chatResponse()
+                .toIterable()) {
+            AssistantMessage output = chunk == null || chunk.getResult() == null
+                    ? null : chunk.getResult().getOutput();
+            String delta = output == null || output.getText() == null ? "" : output.getText();
+            if (!delta.isEmpty()) answerBuffer.append(delta);
+            if (output != null) lastOutput = output;
+            if (!streamed && shouldStartStreaming(answerBuffer.toString())) {
+                support.sendMessage(request, answerBuffer.toString());
+                streamed = true;
+            } else if (streamed && !delta.isEmpty()) {
+                support.sendMessage(request, delta);
+            }
+        }
+        String answer = answerBuffer.toString();
         java.util.Optional<HumanInputRequest> humanInput = HumanInputRequest.parse(answer);
         if (humanInput.isPresent()) {
             return pauseForHumanInput(context, skill, request, humanInput.get());
         }
-        publishReasoning(context, request, output, model, started);
+        publishReasoning(context, request, lastOutput, model, started);
         String content = answer == null ? "" : answer;
-        support.sendMessage(request, content);
+        if (!streamed && !content.isBlank()) support.sendMessage(request, content);
         support.sendEvent(request, "message_end", Map.of(
                 "messageId", "", "sceneCount", -1L, "content", content));
         return content;
+    }
+
+    private static boolean shouldStartStreaming(String raw) {
+        if (raw == null) return false;
+        String text = raw.stripLeading();
+        if (text.isEmpty()) return false;
+        if (!text.startsWith("{")) return true;
+        if (text.contains("moonHumanInput")) return false;
+        return text.length() >= 32 || text.contains("\n");
     }
 
     private String pauseForHumanInput(SpecialistContext context, AgentSkill skill, OrchestrationRequest request,

@@ -29,6 +29,11 @@ public class AgentAsset {
     private String resultUrls;       // 结果 URL 数组 JSON 字符串
     private Long durationMs;         // 尝试开始到终态耗时（毫秒）
     private String sceneId;          // 命中真实分镜时记录 sceneId
+    private String loopRunId;        // UnifiedLoop 运行 ID
+    private String chainRunId;       // 链路执行 ID
+    private String idempotencyKey;   // 跨请求去重键
+    private String requestFingerprint; // 请求指纹，防同键不同参数
+    private String engineVersion;    // 创建记录的引擎版本
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
 }

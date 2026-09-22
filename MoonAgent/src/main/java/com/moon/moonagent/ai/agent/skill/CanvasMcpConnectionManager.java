@@ -44,23 +44,25 @@ public class CanvasMcpConnectionManager {
     }
 
     private void connectLoop() {
-        while (!stopped.get() && !canvasToolsReady()) {
+        while (!stopped.get() && !(canvasToolsReady() && mediaToolsReady())) {
             try {
                 List<McpSyncClient> clients = syncClients.getIfAvailable(List::of);
                 for (McpSyncClient client : clients) {
-                    if (!client.isInitialized()) client.initialize();
-                }
-                if (!clients.isEmpty()) {
-                    ToolCallback[] callbacks = SyncMcpToolCallbackProvider.builder()
-                            .mcpClients(clients)
-                            .build()
-                            .getToolCallbacks();
-                    skillExpander.registerRemoteCallbacks(callbacks);
+                    try {
+                        if (!client.isInitialized()) client.initialize();
+                        ToolCallback[] callbacks = SyncMcpToolCallbackProvider.builder()
+                                .mcpClients(List.of(client))
+                                .build()
+                                .getToolCallbacks();
+                        skillExpander.registerRemoteCallbacks(callbacks);
+                    } catch (Exception clientError) {
+                        log.debug("[MCP] 连接尚未就绪，将重试: {}", clientError.getMessage());
+                    }
                 }
             } catch (Exception e) {
-                log.debug("[CanvasMCP] Canvas MCP 尚未连接，将重试: {}", e.getMessage());
+                log.debug("[MCP] 连接尚未就绪，将重试: {}", e.getMessage());
             }
-            if (!canvasToolsReady() && !stopped.get()) {
+            if (!(canvasToolsReady() && mediaToolsReady()) && !stopped.get()) {
                 try {
                     Thread.sleep(RETRY_INTERVAL_MS);
                 } catch (InterruptedException e) {
@@ -69,8 +71,9 @@ public class CanvasMcpConnectionManager {
                 }
             }
         }
-        if (canvasToolsReady()) {
-            log.info("[CanvasMCP] Canvas MCP 已连接并注册工具");
+        if (canvasToolsReady() || mediaToolsReady()) {
+            log.info("[MCP] 已注册远程工具: canvas={}, media={}",
+                    canvasToolsReady(), mediaToolsReady());
         }
     }
 
@@ -83,5 +86,9 @@ public class CanvasMcpConnectionManager {
                 && skillExpander.hasTool("canvas_mark_result_slots")
                 && skillExpander.hasTool("canvas_get_node_model_config")
                 && skillExpander.hasTool("canvas_set_node_model_config");
+    }
+
+    private boolean mediaToolsReady() {
+        return skillExpander.hasTool("generate_image") && skillExpander.hasTool("generate_video");
     }
 }

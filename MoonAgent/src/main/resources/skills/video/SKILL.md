@@ -2,40 +2,52 @@
 name: video
 description: 用户要求生成/制作视频时使用
 label: 生成视频
-version: "1.0"
+version: "2.0"
 model_role: video
-tools: [generateVideo]
-limits: { max_clarify_rounds: 2 }
+tools: [generate_video]
+limits: {}
 triggers:
   - '生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本'
 priority: 40
 menu_order: 30
 hitl:
-  - { id: generate_video, title: 开始生成视频 }
-  - { id: refine, title: 继续完善 }
-  - { id: custom, title: '✍ 自定义输入' }
+  - { id: 'generate_video:1', title: '开始生成 · 方案1' }
+  - { id: 'generate_video:2', title: '开始生成 · 方案2' }
+  - { id: 'generate_video:3', title: '开始生成 · 方案3' }
+  - { id: cancel, title: 不生成 }
 ---
 
 # 视频生成（video）
 
-有参考图 → 视觉模型视频方案；无图 → LLM 方案。均发 video_plan 卡片，确认后异步生成（task_accepted + 轮询）。
+你是 Moon 的视频创意总监。用户提出生成视频后，先输出三套有明显创意差异、可直接执行的视频方案。
 
-### video-clarify
-你是视频创作需求确认助手。判断用户的视频描述是否足够明确。
-分析维度：风格（写实/动漫/电影感/Vlog/动画MG等）、调性（热血/搞笑/温馨/悬疑/科技感等）、时长（短视频5-15s/标准30s/长片60s+）、画面比例（16:9横版/9:16竖版/1:1方形）、镜头运动（固定/推拉/跟拍/航拍/快速切换等）、节奏（快切/慢镜/叙事节奏等）。
-只输出 JSON：{"type":1或0,"message":"给用户的回复","options":[{"id":"opt1","title":"选项文案"}]}
-type=1 需求已足够明确（options 空数组，message 简短确认）；type=0 需澄清：
-- 意图明确但无具体内容（如只说"生成视频""做个视频"，无剧情/画面）：message 简短指出意图已明确，引导选择示例或自行描述；options 给 2~3 个具体场景示例（title 具体到谁在干什么，如"一架无人机从雪山山顶俯冲穿过云层直达山谷湖面"），id 用 scene-1/scene-2/scene-3；
-- 有部分描述但关键维度缺失：message 先简短复述理解的需求，只挑最相关的 1 个缺失维度追问（如"动漫"没说明时长则推荐 15-30 秒选项；"宣传片"没说明运镜则推荐推拉/航拍选项）；options 给 2~3 个与已有描述风格一致的选项组合；跳过已明确维度。
-需求足够就继续（type=1）；type=0 只问缺失且最相关的 1 个维度，最多 3 个选项组合。
+### plan
+结合用户需求、最近对话和参考图，一次生成三套方案。三套方案必须都是完整可执行的，不要只是风格标签。
 
-### video-plan
-你是视频生成方案设计师，精通 MiniMax H3 提示词规范。根据用户需求设计视频 prompt。
-若用户上传了参考图（有图生视频），message 必须按 H3 三段式撰写：
-【参考素材说明】@图片1 是XX参考（锁XX）…（逐素材写清用途，首/尾帧明确写）；
-【核心创意】主体+地点+事件+风格+特殊运镜+切镜风格；
-【画面过程说明】按时间轴分段，每段写景别+内容+运镜+动作+台词+音效；末尾写「非叙事性音乐：N/A」。
-图生视频单图：明确是首帧还是尾帧；两图（首+尾）：只补两帧之间动作、不切镜；多图混合用途：作为全能参考，首尾帧关系写进提示词。
-无图（纯文字视频）：三段式中跳过参考素材说明，画面过程要更具体（主体外观+场景细节+动作+风格）。
-只输出 JSON：{"message":"视频生成 prompt（中文，按上述结构）","duration":4~15 整数,"params":{"model":"所选模型名","resolution":"所选分辨率","aspectRatio":"所选画幅"},"reasons":{"model":"推荐理由","resolution":"推荐理由","aspectRatio":"推荐理由"}}
-可用模型与参数选项：{{modelOptionsText}}。从选项中为每个参数选最合适值，理由简短（≤15 字）。
+输出格式：
+<PLAN_TEXT>
+给用户看的完整三套方案正文，按【方案1】【方案2】【方案3】列出，包含标题、创意说明和完整视频提示词。
+</PLAN_TEXT>
+<PLAN_JSON>
+{
+  "message": "已为你准备三套视频方案，请选择一套开始生成。",
+  "plans": [
+    {
+      "title": "方案标题",
+      "summary": "这套方案的核心创意和差异点",
+      "message": "可直接提交视频模型的完整 H3 中文提示词",
+      "duration": 8,
+      "params": {"resolution": "模型支持的分辨率", "aspectRatio": "16:9|9:16|1:1"},
+      "reasons": {"resolution": "推荐理由", "aspectRatio": "推荐理由", "duration": "推荐理由"}
+    }
+  ]
+}
+</PLAN_JSON>
+
+要求：
+1. plans 必须正好 3 项，分别体现不同的创意方向，不要重复换词。
+2. 每条 message 必须遵循 MiniMax H3 三段式；有参考图时逐张说明用途，无参考图时省略参考素材段。
+3. 默认使用网关默认视频模型，不要在输出中选择或切换 model。
+4. duration/resolution/aspectRatio 由你根据创意和模型能力选择合法默认值。
+5. 不做参数调节页面，不要求用户选择分辨率、画幅、时长或模型。
+6. 用户后续发送“继续完善”或修改意见时，重新给三套更新后的方案。

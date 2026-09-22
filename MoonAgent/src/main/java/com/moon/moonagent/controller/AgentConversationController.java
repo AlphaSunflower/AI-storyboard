@@ -4,6 +4,7 @@ import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
 import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
+import com.moon.moonagent.dto.request.AgentOrchestrationModeRequest;
 import com.moon.moonagent.dto.request.AgentSendMessageRequest;
 import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
@@ -64,7 +65,8 @@ public class AgentConversationController {
     @PostMapping("/conversations")
     public ApiResponse<AgentConversationVO> createConversation(
             Authentication auth, @Valid @RequestBody AgentCreateConversationRequest request) {
-        return ApiResponse.ok(toVO(chatService.createConversation(auth.getName(), request.projectId(), request.title())));
+        return ApiResponse.ok(toVO(chatService.createConversation(
+                auth.getName(), request.projectId(), request.title(), request.orchestrationMode())));
     }
 
     /** 当前用户的项目会话列表（updated_at 倒序） */
@@ -384,6 +386,15 @@ public class AgentConversationController {
                 auth.getName(), id, request.title(), request.status())));
     }
 
+    /** 空会话切换新旧编排引擎；已有消息会话由前端创建新会话。 */
+    @PatchMapping("/conversations/{id}/orchestration-mode")
+    public ApiResponse<AgentConversationVO> updateOrchestrationMode(
+            Authentication auth, @PathVariable String id,
+            @Valid @RequestBody AgentOrchestrationModeRequest request) {
+        return ApiResponse.ok(toVO(chatService.updateOrchestrationMode(
+                auth.getName(), id, request.mode())));
+    }
+
     /** 删除资产（仅限归属本人会话；未归属资产拒绝） */
     @DeleteMapping("/assets/{id}")
     public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
@@ -402,7 +413,11 @@ public class AgentConversationController {
             }
         }
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
-                c.getStatus(), canvasContext, c.getCreatedAt(), c.getUpdatedAt());
+                c.getStatus(), canvasContext,
+                c.getOrchestrationMode() == null ? "LEGACY" : c.getOrchestrationMode(),
+                c.getEngineVersion() == null ? "plan-graph-v1" : c.getEngineVersion(),
+                c.getDebugComparisonEnabled() == null || c.getDebugComparisonEnabled(),
+                c.getCreatedAt(), c.getUpdatedAt());
     }
 
     /** 消息实体 → VO 映射 */

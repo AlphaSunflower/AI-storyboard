@@ -105,14 +105,17 @@ class SkillExpanderTests {
 
     @Test
     void everySkillDeclaredToolResolves() {
-        // 非 Canvas 工具必须全部可解析；Canvas MCP 是可选进程，允许未启动或版本落后。
+        // 本地工具必须可解析；Canvas 和媒体 MCP 是外部服务，单测环境允许未启动。
         for (AgentSkill skill : skillManager.all()) {
             if (skill.tools() == null || skill.tools().isEmpty()) continue;
             java.util.List<String> missing = skill.tools().stream()
                     .filter(tool -> !skillExpander.hasTool(tool))
                     .toList();
-            assertTrue(missing.isEmpty() || missing.stream().allMatch(tool -> tool.startsWith("canvas_")),
-                    "技能 " + skill.name() + " 存在不可解析的非 Canvas 工具：" + missing);
+            assertTrue(missing.isEmpty() || missing.stream().allMatch(tool ->
+                            tool.startsWith("canvas_")
+                                    || "generate_image".equals(tool)
+                                    || "generate_video".equals(tool)),
+                    "技能 " + skill.name() + " 存在不可解析的本地工具：" + missing);
         }
     }
 

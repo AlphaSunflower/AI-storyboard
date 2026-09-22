@@ -19,6 +19,7 @@ import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
 import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
+import { OrchestrationModeSwitch } from './OrchestrationModeSwitch';
 
 export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
@@ -229,6 +230,7 @@ export function AgentChatPanel() {
         >
           {currentTitle}
         </span>
+        <OrchestrationModeSwitch compact />
       </div>
 
       {/* 消息流 */}

@@ -145,11 +145,33 @@ public class OrchestrationRequest {
     /** 显式路由提示（前端「换个话题」等按钮；非空时意图识别绕过高置信度锁定目标链）。 */
     private String routingHint = "";
 
+    /** resume 时 checkpoint 的真实 action；run 阶段为空。 */
+    private String checkpointAction = "";
+
+    /** resume 时 checkpoint.plan 原文；run 阶段为空。 */
+    private String checkpointPlan = "";
+
     /** 画布编辑模式上下文；非空时本轮只能进入画布技能。 */
     private CanvasSessionContext canvasContext;
 
     public String getRoutingHint() {
         return routingHint == null ? "" : routingHint;
+    }
+
+    public String getCheckpointAction() {
+        return checkpointAction == null ? "" : checkpointAction;
+    }
+
+    public void setCheckpointAction(String checkpointAction) {
+        this.checkpointAction = checkpointAction == null ? "" : checkpointAction;
+    }
+
+    public String getCheckpointPlan() {
+        return checkpointPlan == null ? "" : checkpointPlan;
+    }
+
+    public void setCheckpointPlan(String checkpointPlan) {
+        this.checkpointPlan = checkpointPlan == null ? "" : checkpointPlan;
     }
 
     public void setRoutingHint(String routingHint) {

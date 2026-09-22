@@ -14,6 +14,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,7 @@ class OtherSpecialistModelSwitchTests {
         ChatClient.Builder builder = mock(ChatClient.Builder.class);
         ChatClient client = mock(ChatClient.class);
         ChatClient.ChatClientRequestSpec spec = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.CallResponseSpec callSpec = mock(ChatClient.CallResponseSpec.class);
+        ChatClient.StreamResponseSpec streamSpec = mock(ChatClient.StreamResponseSpec.class);
         GatewayModelService gateway = mock(GatewayModelService.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
 
@@ -42,7 +43,7 @@ class OtherSpecialistModelSwitchTests {
         when(spec.system(any(String.class))).thenReturn(spec);
         when(spec.messages(any(UserMessage.class))).thenReturn(spec);
         when(spec.options(any(OpenAiChatOptions.Builder.class))).thenReturn(spec);
-        when(spec.call()).thenReturn(callSpec);
+        when(spec.stream()).thenReturn(streamSpec);
         when(messageMapper.selectList(any())).thenReturn(List.of());
 
         AssistantMessage output = mock(AssistantMessage.class);
@@ -52,7 +53,7 @@ class OtherSpecialistModelSwitchTests {
         when(generation.getOutput()).thenReturn(output);
         ChatResponse response = mock(ChatResponse.class);
         when(response.getResult()).thenReturn(generation);
-        when(callSpec.chatResponse()).thenReturn(response);
+        when(streamSpec.chatResponse()).thenReturn(Flux.just(response));
 
         OtherSpecialist specialist = new OtherSpecialist(
                 builder,

@@ -36,5 +36,9 @@ class PlanGraphTests {
         Map<String, String> map = (Map<String, String>) field.get(null);
         assertEquals("intent-aisplit", map.get("expand-review"),
                 "扩写审核卡（cpAction=expand-review）应路由回 node_aisplit");
+        assertEquals("intent-pic", map.get("generate_image"),
+                "图片确认卡的 refine/custom 必须继续锚定图片链");
+        assertEquals("intent-video", map.get("generate_video"),
+                "视频确认卡的 refine/custom 必须继续锚定视频链");
     }
 }

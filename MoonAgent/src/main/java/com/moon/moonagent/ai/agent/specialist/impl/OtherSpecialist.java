@@ -79,27 +79,36 @@ public class OtherSpecialist implements SpecialistAgent {
 
             OffsetDateTime start = OffsetDateTime.now();
             String model = gatewayModelService.getDefaultTextModel();
-            ChatResponse response = getClient().prompt()
+            OrchestrationRequest request = new OrchestrationRequest(
+                    context.conversation(), context.userMessage(), context.picUrls(), emitter);
+            request.setTrace(context.trace());
+            StringBuilder answerBuffer = new StringBuilder();
+            Map<String, Object> responseMetadata = Map.of();
+            for (ChatResponse chunk : getClient().prompt()
                     .options(OpenAiChatOptions.builder()
                             .model(model)
                             .timeout(Duration.ofSeconds(60)))
                     .system("你是 Moon 智能体，一个专业的分镜创作助手。用中文回答，简洁友好。")
                     .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrls()))
-                    .call()
-                    .chatResponse();
-            String answer = response != null && response.getResult() != null && response.getResult().getOutput() != null
-                    ? response.getResult().getOutput().getText() : null;
+                    .stream()
+                    .chatResponse()
+                    .toIterable()) {
+                AssistantMessage output = chunk == null || chunk.getResult() == null
+                        ? null : chunk.getResult().getOutput();
+                String delta = output == null || output.getText() == null ? "" : output.getText();
+                if (!delta.isBlank()) {
+                    answerBuffer.append(delta);
+                    support.sendMessage(request, delta);
+                }
+                if (output != null && output.getMetadata() != null && !output.getMetadata().isEmpty()) {
+                    responseMetadata = output.getMetadata();
+                }
+            }
+            String answer = answerBuffer.toString();
             Long durationMs = Duration.between(start, OffsetDateTime.now()).toMillis();
 
-            // 发送消息增量（模拟流式：一次性发送）
-            if (emitter != null && answer != null && !answer.isBlank()) {
-                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                        .name("message").data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(Map.of("content", answer))));
-            }
-
             // reasoning
-            String reasonDelta = extractReasoning(response != null && response.getResult() != null && response.getResult().getOutput() != null
-                    ? response.getResult().getOutput().getMetadata() : null);
+            String reasonDelta = extractReasoning(responseMetadata);
             AgentReasoningSnapshot reasoning;
             if (reasonDelta != null && !reasonDelta.isBlank()) {
                 if (emitter != null) {
@@ -119,10 +128,7 @@ public class OtherSpecialist implements SpecialistAgent {
             // 把 reasoning 回写到 context trace / request metadata（供 turn 落库）；SpecialistResult 不直接带 metadata，
             // 交由 AgentTraceAccumulator 记录（若 trace 非空）。
             if (context.trace() != null) context.trace().reasoning(reasoning);
-            OrchestrationRequest request = new OrchestrationRequest(
-                    context.conversation(), context.userMessage(), context.picUrls(), emitter);
             request.setReasoning(reasoning);
-            request.setTrace(context.trace());
             support.sendEvent(request, "message_end", Map.of(
                     "messageId", "", "sceneCount", -1L, "content", answer == null ? "" : answer));
 

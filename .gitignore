@@ -10,6 +10,9 @@ dist/
 uploads/
 logs/
 META-INF/
+!asset-client/src/main/resources/META-INF/
+!asset-client/src/main/resources/META-INF/spring/
+!asset-client/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
 
 # IDE
 .idea/

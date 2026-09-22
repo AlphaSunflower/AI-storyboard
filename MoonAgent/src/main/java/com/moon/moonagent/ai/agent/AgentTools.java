@@ -87,11 +87,11 @@ public class AgentTools {
     public Map<String, Object> refineImage(
             @ToolParam(description = "会话 ID") @McpToolParam(description = "会话 ID") String conversationId,
             @ToolParam(description = "图片生成提示词") @McpToolParam(description = "图片生成提示词") String prompt,
-            @ToolParam(description = "源图 URL 列表（可空，空则纯文生图；改图取首张为基准）") @McpToolParam(description = "源图 URL 列表（可空）") List<String> picUrls,
-            @ToolParam(description = "模型名（可空，默认配置）") @McpToolParam(description = "模型名（可空）") String model,
-            @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") @McpToolParam(description = "图片尺寸（可空）") String size,
-            @ToolParam(description = "图片质量（可空，默认配置）") @McpToolParam(description = "图片质量（可空）") String quality,
-            @ToolParam(description = "生成数量（可空，默认 1）") @McpToolParam(description = "生成数量（可空）") String n) {
+            @ToolParam(description = "源图 URL 列表（可空，空则纯文生图；改图取首张为基准）") @McpToolParam(description = "源图 URL 列表（可空）", required = false) List<String> picUrls,
+            @ToolParam(description = "模型名（可空，默认配置）") @McpToolParam(description = "模型名（可空）", required = false) String model,
+            @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") @McpToolParam(description = "图片尺寸（可空）", required = false) String size,
+            @ToolParam(description = "图片质量（可空，默认配置）") @McpToolParam(description = "图片质量（可空）", required = false) String quality,
+            @ToolParam(description = "生成数量（可空，默认 1）") @McpToolParam(description = "生成数量（可空）", required = false) String n) {
         try {
             AgentConversation conv = conversationMapper.selectById(conversationId);
             if (conv == null) {
@@ -103,8 +103,8 @@ public class AgentTools {
                 try { nInt = Integer.parseInt(n.trim()); } catch (NumberFormatException ignored) { }
             }
             Map<String, Object> result = generationService.generateImage(
-                    conv, null, prompt, model, size, quality, nInt, mode, null,
-                    (picUrls == null || picUrls.isEmpty()) ? null : picUrls.getFirst());
+                    conv, null, prompt, model, size, quality, nInt, mode,
+                    (picUrls == null || picUrls.isEmpty()) ? List.of() : picUrls, null);
             @SuppressWarnings("unchecked")
             List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
             if (urls.isEmpty()) {
@@ -125,11 +125,11 @@ public class AgentTools {
     public Map<String, Object> generateVideo(
             @ToolParam(description = "会话 ID") @McpToolParam(description = "会话 ID") String conversationId,
             @ToolParam(description = "视频提示词") @McpToolParam(description = "视频提示词") String prompt,
-            @ToolParam(description = "时长秒（可空）") @McpToolParam(description = "时长秒（可空）") String duration,
-            @ToolParam(description = "画幅如 16:9 或 9:16（可空）") @McpToolParam(description = "画幅（可空）") String aspectRatio,
-            @ToolParam(description = "参考图 URL 列表（可空，多张投喂）") @McpToolParam(description = "参考图 URL 列表（可空）") List<String> picUrls,
-            @ToolParam(description = "模型名（可空，默认 MiniMax-H3）") @McpToolParam(description = "模型名（可空）") String model,
-            @ToolParam(description = "分辨率（可空，默认配置档）") @McpToolParam(description = "分辨率（可空）") String resolution) {
+            @ToolParam(description = "时长秒（可空）") @McpToolParam(description = "时长秒（可空）", required = false) String duration,
+            @ToolParam(description = "画幅如 16:9 或 9:16（可空）") @McpToolParam(description = "画幅（可空）", required = false) String aspectRatio,
+            @ToolParam(description = "参考图 URL 列表（可空，多张投喂）") @McpToolParam(description = "参考图 URL 列表（可空）", required = false) List<String> picUrls,
+            @ToolParam(description = "模型名（可空，默认 MiniMax-H3）") @McpToolParam(description = "模型名（可空）", required = false) String model,
+            @ToolParam(description = "分辨率（可空，默认配置档）") @McpToolParam(description = "分辨率（可空）", required = false) String resolution) {
         try {
             AgentConversation conv = conversationMapper.selectById(conversationId);
             if (conv == null) {

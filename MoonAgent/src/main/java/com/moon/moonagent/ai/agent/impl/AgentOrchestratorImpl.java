@@ -9,6 +9,8 @@ import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.orchestration.UnifiedAgentLoop;
+import com.moon.moonagent.orchestration.OrchestrationMode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +40,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorImpl.class);
 
     private final com.moon.moonagent.ai.agent.PlanGraph planGraph;
+    private final UnifiedAgentLoop unifiedAgentLoop;
     private final AgentCheckpointMapper checkpointMapper;
     private final AgentOrchestratorSupport support;
 
@@ -83,9 +86,31 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
         request.setRoutingHint(routingHint);
         request.setCanvasContext(canvasContext);
         try {
-            AgentTurnResult result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint,
-                    cancelActiveTasks, canvasContext, referenceVideos, referenceAudios, emitter);
-            log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成", conversation.getId(), result.hitlPaused());
+            OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
+            AgentTurnResult result;
+            if (mode == OrchestrationMode.UNIFIED_LOOP) {
+                result = unifiedAgentLoop.runTurn(conversation, content, picUrls, assetIds, routingHint,
+                        cancelActiveTasks, canvasContext, referenceVideos, referenceAudios, emitter);
+                log.info("AgentOrchestrator(UnifiedLoop).runTurn: conversationId={} hitlPaused={} 完成",
+                        conversation.getId(), result.hitlPaused());
+            } else {
+                result = planGraph.runTurn(conversation, content, picUrls, assetIds, routingHint,
+                        cancelActiveTasks, canvasContext, referenceVideos, referenceAudios, emitter);
+                log.info("AgentOrchestrator(PlanGraph).runTurn: conversationId={} hitlPaused={} 完成",
+                        conversation.getId(), result.hitlPaused());
+            }
+            if (mode == OrchestrationMode.SHADOW) {
+                try {
+                    var shadow = unifiedAgentLoop.preview(conversation, content, routingHint, canvasContext);
+                    result = withEngineMetadata(result, mode, shadow.getId());
+                } catch (Exception shadowError) {
+                    log.warn("Shadow UnifiedLoop preview failed: conversationId={}, error={}",
+                            conversation.getId(), shadowError.getMessage());
+                    result = withEngineMetadata(result, mode, "");
+                }
+            } else {
+                result = withEngineMetadata(result, mode, "");
+            }
             return result;
         } catch (AgentInterruptException e) {
             log.info("AgentOrchestrator.runTurn 被用户打断: conversationId={}", conversation.getId());
@@ -128,12 +153,19 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已过期，请重新发起"));
                 return AgentTurnResult.done("");
             }
+            OrchestrationMode owner = OrchestrationMode.from(cp.getOwnerEngine());
+            if (owner == OrchestrationMode.UNIFIED_LOOP
+                    && (cp.getStateSchemaVersion() == null || cp.getStateSchemaVersion() != 1)) {
+                support.sendEvent(request, "error",
+                        Map.of("code", "40902", "message", "编排检查点版本不兼容，请重新发起"));
+                return AgentTurnResult.done("");
+            }
             // 一次性消费：status → used（原子条件防并发重放）
             int updated = checkpointMapper.update(null,
-                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentCheckpoint>()
-                    .eq(AgentCheckpoint::getId, cp.getId())
-                    .eq(AgentCheckpoint::getStatus, "pending")
-                    .set(AgentCheckpoint::getStatus, "used"));
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentCheckpoint>()
+                    .eq("id", cp.getId())
+                    .eq("status", "pending")
+                    .set("status", "used"));
             if (updated == 0) {
                 support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已被使用，请重新发起"));
                 return AgentTurnResult.done("");
@@ -153,10 +185,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                         : fromPlan);
             }
 
-            AgentTurnResult result = planGraph.resumeTurn(conversation, cp, action, customText, params,
-                    request.getAssetIds(), routingHint, canvasContext, emitter);
-            log.info("AgentOrchestrator(PlanGraph).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
-                    conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
+            AgentTurnResult result;
+            if (owner == OrchestrationMode.UNIFIED_LOOP) {
+                result = unifiedAgentLoop.resumeTurn(conversation, cp, action, customText, params,
+                        request.getAssetIds(), routingHint, canvasContext, emitter);
+            } else {
+                result = planGraph.resumeTurn(conversation, cp, action, customText, params,
+                        request.getAssetIds(), routingHint, canvasContext, emitter);
+            }
+            result = withEngineMetadata(result, owner, "");
+            log.info("AgentOrchestrator({}).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
+                    owner, conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
             return result;
         } catch (AgentInterruptException e) {
             log.info("AgentOrchestrator.resumeTurn 被用户打断: conversationId={}", conversation.getId());
@@ -165,5 +204,17 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             log.error("AgentOrchestrator.resumeTurn 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
             return AgentTurnResult.done(support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再试一次。"));
         }
+    }
+
+    private static AgentTurnResult withEngineMetadata(AgentTurnResult result,
+                                                      OrchestrationMode mode,
+                                                      String loopRunId) {
+        java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>(result.metadata());
+        metadata.put("orchestrationMode", mode.name());
+        metadata.put("engineVersion", mode.engineVersion());
+        metadata.put("checkpointOwner", mode == OrchestrationMode.UNIFIED_LOOP ? "UNIFIED_LOOP" : "LEGACY");
+        if (loopRunId != null && !loopRunId.isBlank()) metadata.put("loopRunId", loopRunId);
+        return new AgentTurnResult(result.content(), metadata, result.agentTrace(), result.reasoning(),
+                result.suggestedActions(), result.hitlPaused(), result.messageId());
     }
 }

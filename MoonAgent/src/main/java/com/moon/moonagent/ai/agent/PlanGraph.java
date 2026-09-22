@@ -21,6 +21,7 @@ import com.moon.moonagent.ai.agent.skill.AgentSkill;
 import com.moon.moonagent.ai.agent.skill.SkillManager;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.orchestration.OrchestrationMode;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import jakarta.annotation.PostConstruct;
@@ -142,8 +143,10 @@ public class PlanGraph {
             Map.entry("video-clarify", "intent-video"),
             Map.entry("video-source", "intent-video"),
             Map.entry("video-role-select", "intent-video"),
+            Map.entry("generate_video", "intent-video"),
             Map.entry("pic-option", "intent-pic"),
             Map.entry("pic-clarify", "intent-pic"),
+            Map.entry("generate_image", "intent-pic"),
             Map.entry("prompt-source", "intent-pic"),
             Map.entry("delete-confirm", "intent-delete"));
 
@@ -683,6 +686,7 @@ public class PlanGraph {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, content, picUrls == null ? java.util.List.of() : picUrls, emitter));
+        trace.setTurnMetadata(runtimeMetadata(conversation));
         traceByThread.put(conversation.getId(), trace);
         try {
             if (cancelActiveTasks) {
@@ -749,6 +753,7 @@ public class PlanGraph {
         emittersByThread.put(conversation.getId(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
                 new OrchestrationRequest(conversation, "", java.util.List.of(), emitter));
+        trace.setTurnMetadata(runtimeMetadata(conversation));
         traceByThread.put(conversation.getId(), trace);
         try {
             RunnableConfig config = RunnableConfig.builder().threadId(conversation.getId()).build();
@@ -821,6 +826,14 @@ public class PlanGraph {
             case "delete-confirm" -> "intent-delete";
             default -> ""; // asset-selection/asset-gate/intent-clarify 等：由其他分支处理
         };
+    }
+
+    private static Map<String, Object> runtimeMetadata(AgentConversation conversation) {
+        OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
+        return Map.of(
+                "orchestrationMode", mode.name(),
+                "engineVersion", mode.engineVersion(),
+                "checkpointOwner", mode == OrchestrationMode.UNIFIED_LOOP ? "UNIFIED_LOOP" : "LEGACY");
     }
 
     /** run 路由目标：有 handler → 原节点；无 handler 但已注册 skill → skill_manager；否则 → intent-other */

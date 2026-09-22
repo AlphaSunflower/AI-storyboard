@@ -25,6 +25,7 @@ import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
+import com.moon.moonagent.orchestration.OrchestrationMode;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.ImageRefinePromptService;
@@ -155,6 +156,12 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /** 创建会话：校验项目归属，返回会话 */
     public AgentConversation createConversation(String userId, String projectId, String title) {
+        return createConversation(userId, projectId, title, "LEGACY");
+    }
+
+    @Override
+    public AgentConversation createConversation(String userId, String projectId, String title,
+                                                String orchestrationMode) {
         var project = storyboardClient.getProject(projectId);
         if (project == null) throw new BusinessException(40401, "项目不存在");
         if (!userId.equals(project.get("userId"))) throw new BusinessException(40301, "无权为该项目创建对话");
@@ -164,6 +171,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         conversation.setProjectId(projectId);
         conversation.setTitle(title != null && !title.isBlank() ? title : "新对话");
         conversation.setStatus("active");
+        OrchestrationMode mode = OrchestrationMode.from(orchestrationMode);
+        if (mode == OrchestrationMode.SHADOW) {
+            throw new BusinessException(40001, "SHADOW 仅用于内部配置，用户端只能选择 LEGACY 或 UNIFIED_LOOP");
+        }
+        conversation.setOrchestrationMode(mode.name());
+        conversation.setEngineVersion(mode.engineVersion());
+        conversation.setDebugComparisonEnabled(true);
         conversationMapper.insert(conversation);
         return conversation;
     }
@@ -291,6 +305,29 @@ public class AgentChatServiceImpl implements AgentChatService {
         // PATCH 后手动刷新 updatedAt：MyBatis-Plus strictUpdateFill 仅在字段为 null 时填充，
         // 实体加载后 updatedAt 非空会写回旧值，导致列表按 updated_at 倒序时重命名/归档不置顶
         conversation.setUpdatedAt(OffsetDateTime.now());
+        conversationMapper.updateById(conversation);
+        return conversation;
+    }
+
+    @Override
+    public AgentConversation updateOrchestrationMode(String userId, String conversationId,
+                                                     String orchestrationMode) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        long messageCount = messageMapper.selectCount(new LambdaQueryWrapper<AgentMessage>()
+                .eq(AgentMessage::getConversationId, conversationId));
+        long pendingCheckpoints = checkpointMapper.selectCount(
+                new LambdaQueryWrapper<AgentCheckpoint>()
+                        .eq(AgentCheckpoint::getConversationId, conversationId)
+                        .eq(AgentCheckpoint::getStatus, "pending"));
+        if (messageCount > 0 || pendingCheckpoints > 0) {
+            throw new BusinessException(40901, "已有消息的会话不能切换编排引擎，请新建会话");
+        }
+        OrchestrationMode mode = OrchestrationMode.from(orchestrationMode);
+        if (mode == OrchestrationMode.SHADOW) {
+            throw new BusinessException(40001, "SHADOW 仅用于内部配置，用户端只能选择 LEGACY 或 UNIFIED_LOOP");
+        }
+        conversation.setOrchestrationMode(mode.name());
+        conversation.setEngineVersion(mode.engineVersion());
         conversationMapper.updateById(conversation);
         return conversation;
     }

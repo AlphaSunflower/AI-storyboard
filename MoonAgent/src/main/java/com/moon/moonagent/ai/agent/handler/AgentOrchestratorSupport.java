@@ -9,6 +9,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.orchestration.OrchestrationMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.dto.response.AssetVO;
@@ -379,13 +380,8 @@ public class AgentOrchestratorSupport {
                 new GatePrompt("intent-aisplit", "requirement-clarify", "orchestrator/requirement-clarify"),
                 new GatePrompt("intent-aisplit", "storyboard-plan", "orchestrator/storyboard-plan"),
                 new GatePrompt("intent-aisplit", "scene-params-recommend", "orchestrator/scene-params-recommend"),
-                new GatePrompt("intent-pic", "image-clarify", "orchestrator/image-clarify"),
-                new GatePrompt("intent-pic", "image-prompt", "orchestrator/image-prompt"),
-                new GatePrompt("intent-pic", "image-prompt-with-params", "orchestrator/image-prompt-with-params"),
-                new GatePrompt("intent-pic", "pic-refine-options", "orchestrator/pic-refine-options"),
-                new GatePrompt("intent-pic", "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note"),
-                new GatePrompt("intent-video", "video-clarify", "orchestrator/video-clarify"),
-                new GatePrompt("intent-video", "video-plan", "orchestrator/video-plan"),
+                new GatePrompt("intent-pic", "plan", "orchestrator/image-plan"),
+                new GatePrompt("intent-video", "plan", "orchestrator/video-plan"),
                 new GatePrompt("intent-scene-review", "scene-review", "services/scene-review"));
     }
 
@@ -888,6 +884,10 @@ public class AgentOrchestratorSupport {
                                    List<Map<String, Object>> assets) {
         AgentCheckpoint cp = new AgentCheckpoint();
         cp.setConversationId(conversation.getId());
+        OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
+        cp.setOwnerEngine(mode == OrchestrationMode.UNIFIED_LOOP
+                ? OrchestrationMode.UNIFIED_LOOP.name() : OrchestrationMode.LEGACY.name());
+        cp.setStateSchemaVersion(1);
         cp.setAction(action);
         cp.setFormToken(UUID.randomUUID().toString());
         cp.setStep(step);
@@ -1994,6 +1994,12 @@ public class AgentOrchestratorSupport {
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {
         if ("message_end".equals(eventName)) {
             Map<String, Object> enriched = new java.util.LinkedHashMap<>(data);
+            if (req.getTrace() != null && !req.getTrace().getTurnMetadata().isEmpty()) {
+                enriched.putAll(req.getTrace().getTurnMetadata());
+            }
+            if (req.getTurnMetadata() != null && !req.getTurnMetadata().isEmpty()) {
+                enriched.putAll(req.getTurnMetadata());
+            }
             if (!enriched.containsKey("reasoning")) {
                 Object reasoning = req.getReasoning() != null ? req.getReasoning()
                         : req.getTrace() != null ? req.getTrace().getReasoning() : null;
