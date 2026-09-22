@@ -37,4 +37,17 @@ describe('agentStore createConversation', () => {
     expect(createConversation).toHaveBeenCalledWith('project-1', '新对话', undefined);
     expect(selectConversation).toHaveBeenCalledWith('conversation-1');
   });
+
+  it('surfaces orchestration switch failures instead of silently doing nothing', async () => {
+    useProjectStore.setState({
+      currentProject: { id: 'project-1', name: 'Project' } as never,
+    });
+    vi.spyOn(agentApi, 'createConversation').mockRejectedValue(new Error('切换失败：服务不可用'));
+
+    await expect(
+      useAgentStore.getState().switchOrchestrationMode('UNIFIED_LOOP'),
+    ).resolves.toBeUndefined();
+
+    expect(useAgentStore.getState().streamError).toBe('切换失败：服务不可用');
+  });
 });

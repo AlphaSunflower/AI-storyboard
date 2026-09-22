@@ -544,15 +544,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (state.streaming || state.waitingHumanInput || state.waitingVideoPlan || state.agentVideoTask) return;
     const current = state.conversations.find((c) => c.id === state.activeConversationId);
     if (current?.orchestrationMode === mode) return;
-    if (!current || state.messages.length > 0) {
-      await get().createConversation(mode);
-      return;
+    set({ streamError: null });
+    try {
+      if (!current || state.messages.length > 0) {
+        await get().createConversation(mode);
+        return;
+      }
+      const res = await agentApi.updateOrchestrationMode(current.id, mode);
+      const updated = res.data.data;
+      set((s) => ({
+        conversations: s.conversations.map((c) => c.id === updated.id ? updated : c),
+      }));
+    } catch (err) {
+      set({ streamError: err instanceof Error ? err.message : '切换编排引擎失败，请重试' });
     }
-    const res = await agentApi.updateOrchestrationMode(current.id, mode);
-    const updated = res.data.data;
-    set((s) => ({
-      conversations: s.conversations.map((c) => c.id === updated.id ? updated : c),
-    }));
   },
 
   renameConversation: async (id, title) => {
