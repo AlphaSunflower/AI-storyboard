@@ -95,10 +95,16 @@ public class DynamicTaskEngine {
 
         if ((request.getPicUrls() == null || request.getPicUrls().isEmpty())
                 && looksLikeArtifactFollowUp(content)) {
-            TaskPlan latest = planStore.findLatest(conversation.getId()).orElse(null);
-            if (latest != null && carryGeneratedArtifacts(latest, request)) {
-                return startNewPlan(conversation, artifactAwareGoal(content, latest, true),
-                        preferredCapability, request, trace, run);
+            List<TaskPlan> recent = planStore.findRecent(conversation.getId(), 6);
+            if (waiting != null && waiting.state() != TaskPlanState.WAITING_HUMAN) {
+                planStore.update(withState(waiting, TaskPlanState.CANCELLED,
+                        "superseded by new artifact follow-up"));
+            }
+            for (TaskPlan candidate : recent) {
+                if (carryGeneratedArtifacts(candidate, request)) {
+                    return startNewPlan(conversation, artifactAwareGoal(content, candidate, true),
+                            preferredCapability, request, trace, run);
+                }
             }
         }
         return startNewPlan(conversation, content, preferredCapability, request, trace, run);
@@ -413,7 +419,7 @@ public class DynamicTaskEngine {
         if (content == null || content.isBlank()) return false;
         String text = content.trim();
         return text.matches(".*(这|该|上|当前|刚才|之前).{0,6}(图|图片|画面).*")
-                || text.matches(".*(完善|修改|改图|错字|文字.{0,4}问题|重做|重新生成).{0,12}(图|图片|画面)?.*");
+                || text.matches(".*(完善|修改|调整|调一下|改图|错字|文字.{0,4}问题|重做|重新生成).{0,12}(图|图片|画面)?.*");
     }
 
     private static boolean carryGeneratedArtifacts(TaskPlan plan, OrchestrationRequest request) {

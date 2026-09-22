@@ -98,6 +98,17 @@ public class TaskPlanStore {
         return Optional.ofNullable(row).flatMap(this::fromRow);
     }
 
+    public List<TaskPlan> findRecent(String conversationId, int limit) {
+        return planMapper.selectList(new LambdaQueryWrapper<AgentTaskPlan>()
+                        .eq(AgentTaskPlan::getConversationId, conversationId)
+                        .orderByDesc(AgentTaskPlan::getUpdatedAt)
+                        .last("LIMIT " + Math.max(1, limit)))
+                .stream()
+                .map(this::fromRow)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
     public List<TaskPlan> findRecoverable(int limit) {
         return planMapper.selectList(new LambdaQueryWrapper<AgentTaskPlan>()
                         .in(AgentTaskPlan::getStatus,

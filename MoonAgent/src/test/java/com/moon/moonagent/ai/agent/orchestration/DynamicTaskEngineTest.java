@@ -265,6 +265,70 @@ class DynamicTaskEngineTest {
     }
 
     @Test
+    void artifactFollowUpSearchesRecentPlansForCompletedImage() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability image = capability("intent-pic", "请确认");
+        TaskPlan runningWithoutArtifact = new TaskPlan(
+                "newer", "conversation-1", "goal", TaskPlanState.RUNNING, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode("pending", "intent-pic", "待执行", Map.of(), List.of(),
+                        TaskNodeState.RUNNING, 0, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "", "", "", "")),
+                List.of(), "", "");
+        TaskPlan olderWithImage = new TaskPlan(
+                "older", "conversation-1", "goal", TaskPlanState.COMPLETED, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode("old-image", "intent-pic", "旧图", Map.of(), List.of(),
+                        TaskNodeState.COMPLETED, 1, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "",
+                        "![生成图片](/api/files/images/old.png)", "", "")),
+                List.of(), "", "");
+        TaskPlan replanned = new TaskPlan(
+                "replanned", "conversation-1", "edit", TaskPlanState.READY, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode("edit", "intent-pic", "完善图片", Map.of(), List.of(),
+                        TaskNodeState.PENDING, 0, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "", "", "", "")),
+                List.of(), "", "");
+        when(store.findActive("conversation-1")).thenReturn(Optional.empty());
+        when(store.findRecent("conversation-1", 6))
+                .thenReturn(List.of(runningWithoutArtifact, olderWithImage));
+        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(planner.plan(any(), any())).thenReturn(replanned);
+        CapabilityDescriptor descriptor = new CapabilityDescriptor(
+                "intent-pic", "picture", "picture", List.of(), false,
+                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, 3);
+        when(registry.descriptors()).thenReturn(Map.of("intent-pic", descriptor));
+        when(registry.find("intent-pic")).thenReturn(Optional.of(image));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "图片还要调一下，年份是2025，我希望是2026", List.of(), null);
+
+        engine.runTurn(conversation, request.getContent(), "intent-pic",
+                request, new AgentTraceAccumulator(request), null);
+
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(image).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().picUrls())
+                .containsExactly("/api/files/images/old.png");
+    }
+
+    @Test
     void continuesDependentNodeAfterAsyncCompletion() {
         TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
         TaskPlanStore store = mock(TaskPlanStore.class);
