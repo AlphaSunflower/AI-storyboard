@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.OffsetDateTime;
 
 @Service
 public class TaskPlanStore {
@@ -87,6 +88,21 @@ public class TaskPlanStore {
                 .orderByDesc(AgentTaskPlan::getUpdatedAt)
                 .last("LIMIT 1"));
         return Optional.ofNullable(row).flatMap(this::fromRow);
+    }
+
+    public List<TaskPlan> findRecoverable(int limit) {
+        return planMapper.selectList(new LambdaQueryWrapper<AgentTaskPlan>()
+                        .in(AgentTaskPlan::getStatus,
+                                TaskPlanState.READY.name(),
+                                TaskPlanState.RUNNING.name(),
+                                TaskPlanState.REPLANNING.name())
+                        .lt(AgentTaskPlan::getUpdatedAt, OffsetDateTime.now().minusSeconds(20))
+                        .orderByAsc(AgentTaskPlan::getUpdatedAt)
+                        .last("LIMIT " + Math.max(1, limit)))
+                .stream()
+                .map(this::fromRow)
+                .flatMap(Optional::stream)
+                .toList();
     }
 
     private void mirrorNodesAndEdges(TaskPlan plan) {

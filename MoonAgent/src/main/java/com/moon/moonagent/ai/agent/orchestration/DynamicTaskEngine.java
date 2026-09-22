@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.AgentTraceEvent;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.ai.agent.capability.AgentCapability;
 import com.moon.moonagent.ai.agent.capability.AgentCapabilityRegistry;
@@ -55,6 +56,9 @@ public class DynamicTaskEngine {
     @Value("${ai.agent.unified-media-gateway-enabled:false}")
     private boolean unifiedMediaGatewayEnabled;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient ConversationLock conversationLock;
+
     public AgentTurnResult runTurn(AgentConversation conversation, String content,
                                    String preferredCapability,
                                    OrchestrationRequest request,
@@ -105,6 +109,18 @@ public class DynamicTaskEngine {
 
     public boolean hasActivePlan(String conversationId) {
         return planStore.findActive(conversationId).isPresent();
+    }
+
+    public void resumePlan(AgentConversation conversation, TaskPlan plan) {
+        boolean acquired = conversationLock == null || conversationLock.tryAcquire(conversation.getId());
+        if (!acquired) return;
+        try {
+            OrchestrationRequest request = new OrchestrationRequest(conversation, plan.goal(), List.of(), null);
+            AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+            continuePlan(conversation, request, trace, null, plan);
+        } finally {
+            if (conversationLock != null) conversationLock.release(conversation.getId());
+        }
     }
 
     private AgentTurnResult continuePlan(AgentConversation conversation,
