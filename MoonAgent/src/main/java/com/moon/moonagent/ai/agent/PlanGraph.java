@@ -871,6 +871,7 @@ public class PlanGraph {
                 : inputAudios;
         request.setReferenceVideos(referenceVideos);
         request.setReferenceAudios(referenceAudios);
+        request.applyHandoffState(state.<Map<String, Object>>value(K_HANDOFF_STATE).orElse(Map.of()));
         requestsByThread.put(conversation.getId(), request);
         return request;
     }

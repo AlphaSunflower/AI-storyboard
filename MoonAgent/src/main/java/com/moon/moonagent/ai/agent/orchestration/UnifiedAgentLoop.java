@@ -216,6 +216,7 @@ public class UnifiedAgentLoop {
                     resolveChain(result.handoffTarget(), request.getCanvasContext()),
                     result.handoffReason(), result.handoffState());
             recorder.handoff(run, handoff);
+            request.applyHandoffState(result.handoffState());
             intent = result.handoffTarget();
         }
         throw new IllegalStateException("UnifiedLoop exceeded max handoff steps");

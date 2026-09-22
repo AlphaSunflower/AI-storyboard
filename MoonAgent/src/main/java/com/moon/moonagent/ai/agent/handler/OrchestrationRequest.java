@@ -9,6 +9,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -127,6 +130,60 @@ public class OrchestrationRequest {
 
     public void setHitlMessageId(String hitlMessageId) {
         this.hitlMessageId = hitlMessageId == null ? "" : hitlMessageId;
+    }
+
+    /**
+     * 合并上游链移交的文件和会话状态。动态任务和人工确认都可能跨节点继续执行，
+     * 因此图片、资产和参数只能追加或覆盖，不能因切换链路被清空。
+     */
+    public void applyHandoffState(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) return;
+        Map<String, Object> merged = new LinkedHashMap<>(handoffState);
+        merged.putAll(state);
+        handoffState = Map.copyOf(merged);
+
+        List<String> mergedPics = new ArrayList<>(getPicUrls() == null ? List.of() : getPicUrls());
+        for (String key : List.of("picUrls", "sourceImages", "referenceImages")) {
+            appendUrls(mergedPics, merged.get(key));
+        }
+        if (!mergedPics.isEmpty()) setPicUrls(mergedPics.stream().distinct().toList());
+
+        List<String> mergedAssets = new ArrayList<>(assetIds == null ? List.of() : assetIds);
+        appendStrings(mergedAssets, merged.get("assetIds"));
+        if (!mergedAssets.isEmpty()) {
+            assetIds = mergedAssets.stream().distinct().toList();
+        }
+
+        Object incomingParams = merged.get("params");
+        if (incomingParams instanceof Map<?, ?> params) {
+            Map<String, String> mergedParams = new LinkedHashMap<>(this.params == null ? Map.of() : this.params);
+            params.forEach((key, value) -> {
+                if (key != null && value != null && !String.valueOf(value).isBlank()) {
+                    mergedParams.put(String.valueOf(key), String.valueOf(value));
+                }
+            });
+            this.params = Map.copyOf(mergedParams);
+        }
+    }
+
+    private static void appendUrls(List<String> target, Object value) {
+        if (!(value instanceof List<?> list)) return;
+        for (Object item : list) {
+            if (item instanceof String text) {
+                appendString(target, text);
+            } else if (item instanceof Map<?, ?> map) {
+                appendString(target, map.get("url") == null ? "" : String.valueOf(map.get("url")));
+            }
+        }
+    }
+
+    private static void appendStrings(List<String> target, Object value) {
+        if (!(value instanceof List<?> list)) return;
+        list.forEach(item -> appendString(target, item == null ? "" : String.valueOf(item)));
+    }
+
+    private static void appendString(List<String> target, String value) {
+        if (value != null && !value.isBlank() && !target.contains(value)) target.add(value);
     }
 
     public AgentReasoningSnapshot getReasoning() {

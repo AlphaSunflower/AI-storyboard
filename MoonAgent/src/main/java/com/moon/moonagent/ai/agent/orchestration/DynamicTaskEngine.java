@@ -254,6 +254,10 @@ public class DynamicTaskEngine {
                 return buildTurnResult(request, trace, lastMessage);
             }
 
+            if (result != null && result.needsHandoff()) {
+                request.applyHandoffState(result.handoffState());
+            }
+
             if (result != null && result.needsUserInput()) {
                 plan = scheduler.markWaitingHuman(plan, node.nodeId(), questionState(result));
                 planStore.update(plan);
