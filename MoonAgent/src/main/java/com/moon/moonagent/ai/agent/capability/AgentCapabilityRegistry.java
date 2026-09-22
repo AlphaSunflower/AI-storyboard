@@ -5,8 +5,6 @@ import com.moon.moonagent.ai.agent.skill.SkillManager;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgentRegistry;
 import com.moon.moonagent.orchestration.CapabilityDescriptor;
-import com.moon.moonagent.orchestration.EvaluationMode;
-import com.moon.moonagent.orchestration.HitlPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +27,7 @@ public class AgentCapabilityRegistry {
             Optional<SpecialistAgent> specialist = specialistRegistry.get(skill.intentType());
             if (specialist.isEmpty()) continue;
             CapabilityDescriptor descriptor = descriptor(skill);
-            capabilities.put(skill.intentType(), new SpecialistCapabilityAdapter(specialist.get(), descriptor));
+            capabilities.put(skill.intentType(), new SpecialistCapabilityAdapter(skill, specialist.get(), descriptor));
         }
         registry = Map.copyOf(capabilities);
     }
@@ -45,10 +43,6 @@ public class AgentCapabilityRegistry {
     }
 
     private static CapabilityDescriptor descriptor(AgentSkill skill) {
-        boolean async = "video".equalsIgnoreCase(skill.modelRole());
-        HitlPolicy hitl = skill.hitlManifest() == null || skill.hitlManifest().isEmpty()
-                ? HitlPolicy.NONE
-                : HitlPolicy.BEFORE;
         int maxAttempts = skill.limits() == null
                 ? 3
                 : skill.limits().getOrDefault("max_attempts", 3);
@@ -57,9 +51,9 @@ public class AgentCapabilityRegistry {
                 skill.label() == null || skill.label().isBlank() ? skill.name() : skill.label(),
                 skill.description(),
                 skill.tools(),
-                async,
-                hitl,
-                EvaluationMode.HYBRID,
+                skill.async(),
+                skill.defaultHitlPolicy(),
+                skill.evaluationMode(),
                 maxAttempts);
     }
 }

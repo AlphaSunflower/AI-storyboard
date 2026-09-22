@@ -4,6 +4,9 @@ description: 用户要求生成/制作视频时使用
 label: 生成视频
 version: "2.0"
 model_role: video
+async: true
+evaluation_mode: hybrid
+default_hitl_policy: before
 tools: [generate_video]
 limits: {}
 triggers:

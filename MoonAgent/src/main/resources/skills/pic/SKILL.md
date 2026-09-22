@@ -4,6 +4,9 @@ description: 用户要求生成/修改图片时使用
 label: 生成图片
 version: "2.0"
 model_role: image
+async: false
+evaluation_mode: hybrid
+default_hitl_policy: before
 tools: [generate_image]
 limits: {}
 triggers:

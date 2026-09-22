@@ -1,5 +1,8 @@
 package com.moon.moonagent.ai.agent.skill;
 
+import com.moon.moonagent.orchestration.EvaluationMode;
+import com.moon.moonagent.orchestration.HitlPolicy;
+
 import java.util.List;
 import java.util.Map;
 
@@ -45,7 +48,36 @@ public record AgentSkill(
         int menuOrder,
         List<Map<String, Object>> hitlManifest,
         Map<String, String> nodePrompts,
-        List<String> flow) {
+        List<String> flow,
+        EvaluationMode evaluationMode,
+        HitlPolicy defaultHitlPolicy,
+        boolean async
+) {
+
+    public AgentSkill(
+            String intentType,
+            String name,
+            String description,
+            String label,
+            String modelRole,
+            List<String> tools,
+            Map<String, Integer> limits,
+            List<String> triggers,
+            int priority,
+            int menuOrder,
+            List<Map<String, Object>> hitlManifest,
+            Map<String, String> nodePrompts,
+            List<String> flow
+    ) {
+        this(intentType, name, description, label, modelRole, tools, limits, triggers,
+                priority, menuOrder, hitlManifest, nodePrompts, flow,
+                EvaluationMode.HYBRID, HitlPolicy.NONE, false);
+    }
+
+    public AgentSkill {
+        evaluationMode = evaluationMode == null ? EvaluationMode.HYBRID : evaluationMode;
+        defaultHitlPolicy = defaultHitlPolicy == null ? HitlPolicy.NONE : defaultHitlPolicy;
+    }
 
     /** 意图前缀：Skill name 与 intentType 的映射规则（handler.intentType() = "intent-" + name） */
     private static final String INTENT_PREFIX = "intent-";
@@ -73,7 +105,10 @@ public record AgentSkill(
                 intVal(frontmatter.get("menu_order"), 100),
                 hitl == null ? List.of() : hitl,
                 nodePrompts == null ? Map.of() : nodePrompts,
-                toStrList(frontmatter.get("flow")));
+                toStrList(frontmatter.get("flow")),
+                evaluationMode(frontmatter.get("evaluation_mode")),
+                hitlPolicy(frontmatter.get("default_hitl_policy")),
+                boolVal(frontmatter.get("async")));
     }
 
     /** 澄清菜单最终 id（与 handler.intentType() 对齐，resume/clarify 共用） */
@@ -126,5 +161,30 @@ public record AgentSkill(
             }
         });
         return out;
+    }
+
+    private static EvaluationMode evaluationMode(Object value) {
+        String normalized = str(value).trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "deterministic" -> EvaluationMode.DETERMINISTIC;
+            case "llm" -> EvaluationMode.LLM;
+            default -> EvaluationMode.HYBRID;
+        };
+    }
+
+    private static HitlPolicy hitlPolicy(Object value) {
+        String normalized = str(value).trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "before" -> HitlPolicy.BEFORE;
+            case "after" -> HitlPolicy.AFTER;
+            case "on_risk", "on-risk" -> HitlPolicy.ON_RISK;
+            case "manual" -> HitlPolicy.MANUAL;
+            default -> HitlPolicy.NONE;
+        };
+    }
+
+    private static boolean boolVal(Object value) {
+        if (value instanceof Boolean b) return b;
+        return value != null && "true".equalsIgnoreCase(String.valueOf(value).trim());
     }
 }

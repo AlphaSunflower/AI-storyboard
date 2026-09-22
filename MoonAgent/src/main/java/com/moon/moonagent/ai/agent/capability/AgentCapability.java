@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.capability;
 
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
+import com.moon.moonagent.ai.agent.skill.AgentSkill;
 import com.moon.moonagent.orchestration.CapabilityDescriptor;
 
 public interface AgentCapability {
@@ -11,4 +12,8 @@ public interface AgentCapability {
     CapabilityDescriptor descriptor();
 
     SpecialistResult execute(SpecialistContext context);
+
+    default AgentSkill skill() {
+        return null;
+    }
 }
