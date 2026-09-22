@@ -40,17 +40,17 @@ class TaskPlanPlannerTest {
     }
 
     @Test
-    void fallsBackToConfirmedSingleCapabilityPlanAfterSecondFailure() {
+    void fallsBackToSingleCapabilityPlanAfterSecondFailure() {
         TaskPlanSynthesizer synthesizer = (request, capabilities, errors) ->
                 new TaskPlanDraft("goal", List.of(node("bad", "intent-missing")), List.of());
         TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
 
         TaskPlan plan = planner.plan(request(), capabilities());
 
-        assertThat(plan.state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
         assertThat(plan.nodes()).hasSize(1);
         assertThat(plan.nodes().get(0).capabilityKey()).isEqualTo("intent-aisplit");
-        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
+        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.NONE);
     }
 
     @Test
@@ -72,7 +72,7 @@ class TaskPlanPlannerTest {
     }
 
     @Test
-    void synthesisFailureFallsBackToWaitingHumanConfirmation() {
+    void synthesisFailureFallsBackToExecutablePlan() {
         TaskPlanSynthesizer synthesizer = (request, capabilities, errors) -> {
             throw new IllegalStateException("gateway unavailable");
         };
@@ -80,11 +80,11 @@ class TaskPlanPlannerTest {
 
         TaskPlan plan = planner.plan(request(), capabilities());
 
-        assertThat(plan.state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
         assertThat(plan.nodes()).hasSize(1);
         assertThat(plan.nodes().get(0).state())
                 .isEqualTo(com.moon.moonagent.orchestration.TaskNodeState.PENDING);
-        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
+        assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.NONE);
         assertThat(plan.error()).contains("gateway unavailable");
     }
 
@@ -100,10 +100,29 @@ class TaskPlanPlannerTest {
 
         TaskPlan plan = planner.plan(request(), descriptors);
 
-        assertThat(plan.state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
         assertThat(plan.maxAttemptsPerNode()).isEqualTo(2);
         assertThat(plan.nodes().get(0).hitlPolicy()).isEqualTo(HitlPolicy.BEFORE);
         assertThat(plan.nodes().get(0).evaluationMode()).isEqualTo(EvaluationMode.HYBRID);
+    }
+
+    @Test
+    void invalidRepairedMediaDraftUsesDeterministicImageThenVideoPlan() {
+        TaskPlanSynthesizer synthesizer = (request, capabilities, errors) -> new TaskPlanDraft(
+                "goal",
+                List.of(node("image", "intent-pic"), node("video", "intent-video")),
+                List.of(new TaskEdge("missing", "video")));
+        TaskPlanPlanner planner = new TaskPlanPlanner(synthesizer, new TaskPlanValidator());
+
+        TaskPlan plan = planner.plan(new TaskPlanningRequest(
+                "conversation-1",
+                "先生成一张PPT图片，再基于图片生成视频",
+                "intent-pic", 20, 3, 2), capabilities());
+
+        assertThat(plan.state()).isEqualTo(TaskPlanState.READY);
+        assertThat(plan.nodes()).extracting(TaskNode::capabilityKey)
+                .containsExactly("intent-pic", "intent-video");
+        assertThat(plan.nodes()).allMatch(node -> node.hitlPolicy() == HitlPolicy.NONE);
     }
 
     private static TaskPlanningRequest request() {

@@ -87,6 +87,10 @@ public class DynamicTaskEngine {
                 return startNewPlan(conversation, artifactAwareGoal(content, waiting, carried),
                         preferredCapability, request, trace, run);
             }
+            if (waiting.state() == TaskPlanState.WAITING_HUMAN) {
+                planStore.update(withState(waiting, TaskPlanState.CANCELLED,
+                        "invalid waiting plan had no WAITING_HUMAN node"));
+            }
         }
 
         if ((request.getPicUrls() == null || request.getPicUrls().isEmpty())

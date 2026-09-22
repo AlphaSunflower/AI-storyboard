@@ -59,6 +59,8 @@ public class TaskPlanPlanner {
             return repaired;
         }
 
+        TaskPlan deterministic = deterministicMediaPlan(request, capabilities);
+        if (deterministic != null) return deterministic;
         return fallback(request, capabilities, repairedResult.errors());
     }
 
@@ -72,8 +74,7 @@ public class TaskPlanPlanner {
             CapabilityDescriptor descriptor = capabilities.get(node.capabilityKey());
             if (descriptor != null) maxAttempts = Math.min(maxAttempts, descriptor.maxAttempts());
         }
-        TaskPlanState state = nodes.stream().anyMatch(node ->
-                node.hitlPolicy() == HitlPolicy.BEFORE || node.hitlPolicy() == HitlPolicy.MANUAL)
+        TaskPlanState state = nodes.stream().anyMatch(node -> node.state() == TaskNodeState.WAITING_HUMAN)
                 ? TaskPlanState.WAITING_HUMAN
                 : TaskPlanState.READY;
         return new TaskPlan(
@@ -193,7 +194,7 @@ public class TaskPlanPlanner {
                 List.of(),
                 TaskNodeState.PENDING,
                 0,
-                HitlPolicy.BEFORE,
+                HitlPolicy.NONE,
                 EvaluationMode.HYBRID,
                 "",
                 "",
@@ -203,7 +204,7 @@ public class TaskPlanPlanner {
                 UUID.randomUUID().toString(),
                 request.conversationId(),
                 request.goal(),
-                TaskPlanState.WAITING_HUMAN,
+                TaskPlanState.READY,
                 1,
                 request.maxNodes(),
                 request.maxAttemptsPerNode(),
