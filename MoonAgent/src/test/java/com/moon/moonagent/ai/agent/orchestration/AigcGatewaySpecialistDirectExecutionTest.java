@@ -48,7 +48,8 @@ class AigcGatewaySpecialistDirectExecutionTest {
         SpecialistResult result = specialist.execute("intent-pic", context);
 
         assertThat(result.needsUserInput()).isTrue();
-        assertThat(result.message()).contains("请回复 1/2/3 选择方案");
+        assertThat(result.message()).contains("方案生成超过");
+        assertThat(result.message()).contains("回复“继续”");
         verify(support, never()).runHITLStage(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }

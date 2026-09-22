@@ -19,6 +19,7 @@ import com.moon.moonagent.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -38,6 +39,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -54,7 +60,11 @@ public class AigcGatewaySpecialist {
 
     private static final Logger log = LoggerFactory.getLogger(AigcGatewaySpecialist.class);
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Duration MODEL_TIMEOUT = Duration.ofHours(1);
+    private static final ScheduledExecutorService PLAN_WATCHDOG = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "aigc-plan-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static final String PLAN_TEXT_START = "<PLAN_TEXT>";
     private static final String PLAN_TEXT_END = "</PLAN_TEXT>";
     private static final String PLAN_JSON_START = "<PLAN_JSON>";
@@ -66,6 +76,12 @@ public class AigcGatewaySpecialist {
     private final SkillExpander skillExpander;
     private final MediaGenerationCoordinator coordinator;
     private final AgentOrchestratorSupport support;
+
+    @Value("${ai.agent.media-plan-slow-notice-seconds:60}")
+    private long mediaPlanSlowNoticeSeconds = 60;
+
+    @Value("${ai.agent.media-plan-timeout-seconds:120}")
+    private long mediaPlanTimeoutSeconds = 120;
 
     private volatile ChatClient chatClient;
 
@@ -97,6 +113,20 @@ public class AigcGatewaySpecialist {
         Map<String, Object> plan = callSkillPlan(intent, skill, context, toRequest(context, skill));
         List<Map<String, Object>> plans = planList(plan.get("plans"));
         String display = stringValue(plan.get("_display"));
+        if (Boolean.TRUE.equals(plan.get("_timedOut"))) {
+            String timeoutMessage = display.isBlank()
+                    ? "方案生成超过 " + Math.max(1, mediaPlanTimeoutSeconds) + " 秒，模型响应较慢。"
+                    + "请回复“继续”让我重试，或简化一下本次需求。"
+                    : display + "\n\n方案生成超过 " + Math.max(1, mediaPlanTimeoutSeconds)
+                    + " 秒，已保留以上内容。请回复“继续”让我重试，或简化一下本次需求。";
+            Map<String, Object> timeoutState = new LinkedHashMap<>(plan);
+            timeoutState.put("intent", skill.intentType());
+            timeoutState.put("skill", skill.name());
+            timeoutState.put("toolName", toolName);
+            timeoutState.put("plansText", display);
+            timeoutState.put("originalMessage", context.userMessage() == null ? "" : context.userMessage());
+            return SpecialistResult.question(timeoutMessage, timeoutState);
+        }
         if (display.isBlank()) display = planText(toolName, plan);
         if (!display.isBlank() && !display.contains("请回复")) {
             display = display + "\n\n请回复 1/2/3 选择方案，或直接说明需要如何继续完善。";
@@ -282,9 +312,17 @@ public class AigcGatewaySpecialist {
                 + "严格使用下面格式：\n" + schema;
         StringBuilder raw = new StringBuilder();
         DisplayCursor cursor = new DisplayCursor();
+        AtomicBoolean slowNoticeSent = new AtomicBoolean(false);
+        ScheduledFuture<?> slowNotice = PLAN_WATCHDOG.schedule(() -> {
+            if (slowNoticeSent.compareAndSet(false, true)) {
+                support.sendMessage(request, "\n\n方案生成较慢，仍在等待模型返回，请稍候。\n\n");
+            }
+        }, Math.max(1, mediaPlanSlowNoticeSeconds), TimeUnit.SECONDS);
         try {
             for (String chunk : getClient().prompt()
-                    .options(OpenAiChatOptions.builder().model(model).timeout(MODEL_TIMEOUT))
+                    .options(OpenAiChatOptions.builder().model(model)
+                            .timeout(Duration.ofSeconds(Math.max(
+                                    mediaPlanSlowNoticeSeconds + 1, mediaPlanTimeoutSeconds))))
                     .system(system)
                     .messages(buildUserMessage(input, sources, vision))
                     .stream()
@@ -305,12 +343,15 @@ public class AigcGatewaySpecialist {
             }
         } catch (Exception e) {
             log.warn("AIGC skill plan failed: intent={}, error={}", intent, e.getMessage());
+        } finally {
+            slowNotice.cancel(false);
         }
         String display = betweenMarkers(raw.toString(), PLAN_TEXT_START, PLAN_TEXT_END);
         if (display.isBlank()) display = raw.toString().trim();
         Map<String, Object> result = new LinkedHashMap<>();
         if (!display.isBlank()) result.put("_display", display);
         result.put("_missingJson", true);
+        result.put("_timedOut", true);
         result.put("plans", List.of());
         return result;
     }
