@@ -93,7 +93,7 @@ class DynamicTaskEngineTest {
                 ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
         order.verify(first).execute(firstContext.capture());
         order.verify(second).execute(secondContext.capture());
-        assertThat(result.content()).isEqualTo("second");
+        assertThat(result.content()).contains("接下来执行第 2/2 步").contains("second");
         assertThat(firstContext.getValue().directExecution()).isTrue();
         assertThat(secondContext.getValue().picUrls()).containsExactly("/api/files/images/generated.png");
         verify(recorder).step(eq(run), eq(0), eq("intent-aisplit"), eq("task_node"),
@@ -146,9 +146,56 @@ class DynamicTaskEngineTest {
         AgentTurnResult result = engine.runTurn(conversation, "goal", "intent-aisplit",
                 request, new AgentTraceAccumulator(request), new AgentLoopRun());
 
-        assertThat(result.content()).isEqualTo("tool unavailable");
+        assertThat(result.content()).contains("tool unavailable");
         verify(first).execute(any());
         verify(second, never()).execute(any());
+    }
+
+    @Test
+    void resumedVideoNodeReceivesImageFromCompletedDependency() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability video = capability("intent-video", "video submitted");
+        TaskPlan plan = new TaskPlan(
+                "plan-1", "conversation-1", "goal", TaskPlanState.WAITING_HUMAN, 1,
+                20, 3, 2, 0,
+                List.of(
+                        new TaskNode("media-image", "intent-pic", "生成图片", Map.of(), List.of(),
+                                TaskNodeState.COMPLETED, 1, HitlPolicy.NONE,
+                                EvaluationMode.DETERMINISTIC, "",
+                                "![生成图片](/api/files/images/reference.png)", "", ""),
+                        new TaskNode("media-video", "intent-video", "生成视频", Map.of(),
+                                List.of("media-image"), TaskNodeState.WAITING_HUMAN, 0,
+                                HitlPolicy.NONE, EvaluationMode.DETERMINISTIC, "",
+                                "{\"plansText\":\"视频方案\"}", "", "")),
+                List.of(new TaskEdge("media-image", "media-video")), "", "");
+        when(store.findActive("conversation-1")).thenReturn(Optional.of(plan));
+        when(store.find("plan-1")).thenReturn(Optional.of(plan));
+        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(registry.find("intent-video")).thenReturn(Optional.of(video));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "1", List.of(), null);
+
+        engine.runTurn(conversation, "1", "intent-video", request,
+                new AgentTraceAccumulator(request), null);
+
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(video).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().picUrls())
+                .containsExactly("/api/files/images/reference.png");
     }
 
     @Test
@@ -359,7 +406,7 @@ class DynamicTaskEngineTest {
                 conversation, "生成图片并继续做视频", "intent-pic",
                 firstRequest, new AgentTraceAccumulator(firstRequest), null);
 
-        assertThat(waiting.content()).isEqualTo("请选择方案");
+        assertThat(waiting.content()).contains("接下来执行第 1/1 步").contains("请选择方案");
         assertThat(active.get().state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
         assertThat(active.get().nodes().get(0).outputSummary()).contains("\"plansText\"");
 
@@ -368,7 +415,7 @@ class DynamicTaskEngineTest {
                 conversation, "1", "intent-pic", selection,
                 new AgentTraceAccumulator(selection), null);
 
-        assertThat(generated.content()).isEqualTo("generated");
+        assertThat(generated.content()).contains("generated");
         ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contexts =
                 ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
         verify(capability, times(2)).execute(contexts.capture());

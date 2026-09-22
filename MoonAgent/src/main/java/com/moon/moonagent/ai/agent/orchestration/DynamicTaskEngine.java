@@ -206,6 +206,13 @@ public class DynamicTaskEngine {
                 return buildTurnResult(request, trace, "任务计划无法继续执行");
             }
 
+            String transition = transitionMessage(node, plan);
+            if (!transition.isBlank()) {
+                support.sendWorkflowEvent(request, node.nodeId(), transition, "node_started");
+                support.sendMessage(request, transition + "\n\n");
+                lastMessage = transition;
+            }
+
             plan = scheduler.markRunning(plan, node.nodeId());
             plan = planStore.update(plan);
             AgentCapability capability = capabilities.find(node.capabilityKey()).orElse(null);
@@ -220,12 +227,15 @@ public class DynamicTaskEngine {
             AgentSkill skill = capability.skill();
             SpecialistContext context = new SpecialistContext(
                     conversation, nodeContent(node, request, plan),
-                    nodePicUrls(node, request, previous), request.getEmitter(),
+                    nodePicUrls(node, request, plan), request.getEmitter(),
                     previous, skill, request.getAction(), request.getCustomText(), request.getParams(),
                     request.getAssetIds(), request.getCheckpointAction(), request.getCheckpointPlan(),
                     trace, request.getCanvasContext(), true);
             SpecialistResult result = executeCapability(capability, context);
-            lastMessage = result == null || result.message() == null ? "" : result.message();
+            String resultMessage = result == null || result.message() == null ? "" : result.message();
+            lastMessage = transition.isBlank() || resultMessage.isBlank()
+                    ? transition + resultMessage
+                    : transition + "\n\n" + resultMessage;
             previous = result;
             boolean failed = result != null && result.isFailed();
             recorder.step(run, step,
@@ -240,12 +250,14 @@ public class DynamicTaskEngine {
             if (failed) {
                 plan = scheduler.failNodeTerminal(plan, node.nodeId(), lastMessage);
                 planStore.update(plan);
+                support.sendWorkflowEvent(request, node.nodeId(), lastMessage, "node_failed");
                 return buildTurnResult(request, trace, lastMessage);
             }
 
             if (result != null && result.needsUserInput()) {
                 plan = scheduler.markWaitingHuman(plan, node.nodeId(), questionState(result));
                 planStore.update(plan);
+                support.sendWorkflowEvent(request, node.nodeId(), node.title(), "node_finished");
                 return buildTurnResult(request, trace, lastMessage);
             }
 
@@ -257,6 +269,7 @@ public class DynamicTaskEngine {
                 checkpointMapper.updateById(pending);
                 plan = scheduler.markWaitingHuman(plan, node.nodeId(), lastMessage);
                 planStore.update(plan);
+                support.sendWorkflowEvent(request, node.nodeId(), node.title(), "node_finished");
                 return buildTurnResult(request, trace, lastMessage);
             }
 
@@ -269,11 +282,13 @@ public class DynamicTaskEngine {
                 plan = scheduler.markWaitingAsync(
                         plan, node.nodeId(), asyncAsset.getTaskId(), lastMessage);
                 planStore.update(plan);
+                support.sendWorkflowEvent(request, node.nodeId(), node.title(), "node_finished");
                 return buildTurnResult(request, trace, lastMessage);
             }
 
             plan = scheduler.completeNode(plan, node.nodeId(), lastMessage);
             plan = planStore.update(plan);
+            support.sendWorkflowEvent(request, node.nodeId(), node.title(), "node_finished");
         }
         TaskPlan failed = withState(plan, TaskPlanState.FAILED, "task plan exceeded execution guard");
         planStore.update(failed);
@@ -365,19 +380,44 @@ public class DynamicTaskEngine {
         }
     }
 
-    private static List<String> nodePicUrls(TaskNode node, OrchestrationRequest request,
-                                            SpecialistResult previous) {
+    private static List<String> nodePicUrls(TaskNode node, OrchestrationRequest request, TaskPlan plan) {
         List<String> urls = new ArrayList<>(request.getPicUrls() == null ? List.of() : request.getPicUrls());
-        if (!"intent-video".equals(node.capabilityKey())
-                || previous == null || previous.message() == null || previous.message().isBlank()) {
+        if (!"intent-video".equals(node.capabilityKey()) || node.dependencies().isEmpty()) {
             return urls;
         }
-        Matcher matcher = IMAGE_MARKDOWN.matcher(previous.message());
+        for (String dependencyId : node.dependencies()) {
+            TaskNode dependency = plan.nodes().stream()
+                    .filter(candidate -> candidate.nodeId().equals(dependencyId))
+                    .findFirst()
+                    .orElse(null);
+            if (dependency == null || dependency.outputSummary() == null
+                    || dependency.outputSummary().isBlank()) {
+                continue;
+            }
+            collectImageUrls(dependency.outputSummary(), urls);
+        }
+        return urls.stream().distinct().toList();
+    }
+
+    private static void collectImageUrls(String text, List<String> urls) {
+        Matcher matcher = IMAGE_MARKDOWN.matcher(text);
         while (matcher.find()) {
             String url = matcher.group(1);
             if (!url.isBlank() && !urls.contains(url)) urls.add(url);
         }
-        return urls;
+    }
+
+    private static String transitionMessage(TaskNode node, TaskPlan plan) {
+        int index = plan.nodes().indexOf(node) + 1;
+        int total = plan.nodes().size();
+        String prefix = "接下来执行第 " + index + "/" + total + " 步：「" + node.title() + "」。";
+        if ("intent-pic".equals(node.capabilityKey())) {
+            return prefix + "先确认图片方案；生成成功后，我会把成品图作为下一步视频的参考图。";
+        }
+        if ("intent-video".equals(node.capabilityKey())) {
+            return prefix + "上一步图片已就绪，我会使用它作为参考图；先确认视频方案，再提交视频任务。";
+        }
+        return prefix;
     }
 
     private static SpecialistResult previousResult(TaskPlan plan) {

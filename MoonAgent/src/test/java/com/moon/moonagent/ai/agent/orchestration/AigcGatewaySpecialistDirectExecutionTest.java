@@ -145,4 +145,28 @@ class AigcGatewaySpecialistDirectExecutionTest {
         assertThat(result.isFailed()).isTrue();
         assertThat(result.message()).contains("媒体 MCP 工具尚未就绪");
     }
+
+    @Test
+    void finalFrameWorkflowUsesLastFrameReferenceRole() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist specialist = new AigcGatewaySpecialist(
+                mock(ChatClient.Builder.class),
+                mock(GatewayModelService.class),
+                mock(FileStorageService.class),
+                mock(SkillExpander.class),
+                mock(MediaGenerationCoordinator.class),
+                support);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        SpecialistContext context = new SpecialistContext(
+                conversation,
+                "参考上一张 PPT 图片生成前导动画，动画最后稳定落到该图并最终定格",
+                List.of("/api/files/images/reference.png"), null, null,
+                AgentSkill.of("video", Map.of("description", "video"), Map.of()),
+                "generate_video:1", "", Map.of(), List.of(),
+                "generate_video", "{\"plans\":[{\"message\":\"方案\"}]}",
+                null, null, true);
+
+        assertThat(specialist.referenceRoleFor(context)).isEqualTo("LAST_FRAME");
+    }
 }

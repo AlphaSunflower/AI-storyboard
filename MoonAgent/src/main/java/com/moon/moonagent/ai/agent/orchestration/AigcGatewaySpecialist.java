@@ -239,6 +239,8 @@ public class AigcGatewaySpecialist {
         payload.put("content", context.userMessage() == null ? "" : context.userMessage());
         payload.put("picUrls", context.picUrls() == null ? List.of() : context.picUrls());
         payload.put("plans", plans);
+        String referenceRole = referenceRoleFor(context);
+        if (!referenceRole.isBlank()) payload.put("referenceRole", referenceRole);
 
         String eventName = "generate_video".equals(toolName) ? "video_plan" : "human_input";
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
@@ -518,7 +520,7 @@ public class AigcGatewaySpecialist {
         List<String> sources = videoSources(context);
         ArrayNode references = input.putArray("referenceImages");
         if (!sources.isEmpty()) {
-            String semanticRole = support.planField(context.cpPlan(), "referenceRole");
+            String semanticRole = referenceRoleFor(context);
             for (int i = 0; i < sources.size(); i++) {
                 ObjectNode reference = references.addObject();
                 reference.put("url", sources.get(i));
@@ -550,6 +552,18 @@ public class AigcGatewaySpecialist {
             }
         }
         return sources.stream().filter(value -> !isBlank(value)).distinct().toList();
+    }
+
+    String referenceRoleFor(SpecialistContext context) {
+        String explicit = support.planField(context.cpPlan(), "referenceRole");
+        if (!isBlank(explicit)) return explicit;
+        String text = (context.userMessage() == null ? "" : context.userMessage())
+                + " " + support.planField(context.cpPlan(), PlanField.CONTENT);
+        if (text.contains("最终定格") || text.contains("最后定格")
+                || text.contains("最后引出") || text.contains("结尾定格")) {
+            return "LAST_FRAME";
+        }
+        return "";
     }
 
     private String confirmedPrompt(SpecialistContext context, PlanField field) {
