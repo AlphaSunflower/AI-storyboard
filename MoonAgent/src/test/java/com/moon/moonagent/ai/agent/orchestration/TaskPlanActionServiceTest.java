@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TaskPlanActionServiceTest {
 
@@ -46,6 +47,38 @@ class TaskPlanActionServiceTest {
 
         assertThat(result.state()).isEqualTo(TaskPlanState.RUNNING);
         assertThat(result.nodes().get(0).state()).isEqualTo(TaskNodeState.READY);
+    }
+
+    @Test
+    void approveWithoutWaitingNodeFailsWithoutChangingThePlan() {
+        TaskPlan original = plan(TaskNodeState.RUNNING, TaskPlanState.RUNNING);
+
+        assertThatThrownBy(() -> service.apply(original, "approve"))
+                .isInstanceOf(InvalidTaskPlanTransitionException.class)
+                .hasMessageContaining("no waiting human node");
+
+        assertThat(original.state()).isEqualTo(TaskPlanState.RUNNING);
+        assertThat(original.nodes().get(0).state()).isEqualTo(TaskNodeState.RUNNING);
+    }
+
+    @Test
+    void retryWithoutFailedNodeFailsWithoutChangingThePlan() {
+        TaskPlan original = plan(TaskNodeState.RUNNING, TaskPlanState.RUNNING);
+
+        assertThatThrownBy(() -> service.apply(original, "retry"))
+                .isInstanceOf(InvalidTaskPlanTransitionException.class)
+                .hasMessageContaining("no failed node");
+
+        assertThat(original.state()).isEqualTo(TaskPlanState.RUNNING);
+    }
+
+    @Test
+    void replanRequiresPlannerBackedControllerFlow() {
+        TaskPlan original = plan(TaskNodeState.FAILED, TaskPlanState.FAILED);
+
+        assertThatThrownBy(() -> service.apply(original, "replan"))
+                .isInstanceOf(InvalidTaskPlanTransitionException.class)
+                .hasMessageContaining("planner");
     }
 
     private static TaskPlan plan(TaskNodeState nodeState, TaskPlanState planState) {
