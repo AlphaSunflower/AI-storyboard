@@ -14,7 +14,9 @@ import com.moon.moonagent.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -46,6 +48,12 @@ public class MediaGenerationCoordinator {
 
     @Value("${storyboard.internal-url:http://localhost:8082}")
     private String internalBaseUrl;
+
+    @Value("${ai.agent.video-poll-delay-ms:5000}")
+    private long videoPollDelayMs = 5_000L;
+
+    @Autowired(required = false)
+    private transient ApplicationEventPublisher taskEventPublisher;
 
     public Prepared prepare(AgentConversation conversation, String toolName, String rawInput) {
         return prepare(conversation, toolName, rawInput, toolName + ":" + UUID.randomUUID());
@@ -146,29 +154,94 @@ public class MediaGenerationCoordinator {
     private void startVideoPolling(String taskId) {
         if (!pollingTasks.add(taskId)) return;
         videoPoller.submit(() -> {
+            boolean terminalPersisted = false;
             try {
                 for (int attempt = 0; attempt < 720; attempt++) {
-                    try {
-                        Map<String, String> status = videoGenerationService.pollVideoTask(taskId);
-                        String state = status.getOrDefault("status", "processing");
-                        if ("completed".equals(state)) return;
-                        if ("failed".equals(state)
-                                && !status.getOrDefault("error", "").contains("视频任务查询失败")) return;
-                    } catch (Exception e) {
-                        log.warn("视频轮询单次失败，继续重试: taskId={}, error={}", taskId, e.getMessage());
+                    if (terminalPersisted) {
+                        if (publishTerminalIfCorrelated(taskId)) return;
+                    } else {
+                        try {
+                            Map<String, String> status = videoGenerationService.pollVideoTask(taskId);
+                            String state = status.getOrDefault("status", "processing");
+                            if ("completed".equals(state)) {
+                                terminalPersisted = persistVideoTerminal(taskId, status, "completed");
+                                if (terminalPersisted && publishTerminalIfCorrelated(taskId)) return;
+                            } else if ("failed".equals(state)
+                                    && !status.getOrDefault("error", "").contains("视频任务查询失败")) {
+                                terminalPersisted = persistVideoTerminal(taskId, status, "failed");
+                                if (terminalPersisted && publishTerminalIfCorrelated(taskId)) return;
+                            }
+                        } catch (Exception e) {
+                            log.warn("视频轮询单次失败，继续重试: taskId={}, error={}", taskId, e.getMessage());
+                        }
                     }
                     try {
-                        Thread.sleep(5_000L);
+                        Thread.sleep(Math.max(1L, videoPollDelayMs));
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         return;
                     }
                 }
-                log.warn("视频轮询超过上限: taskId={}", taskId);
+                if (!terminalPersisted) {
+                    log.warn("视频轮询超过上限: taskId={}", taskId);
+                } else {
+                    log.warn("视频任务已终态但尚未关联动态计划节点: taskId={}", taskId);
+                }
             } finally {
                 pollingTasks.remove(taskId);
             }
         });
+    }
+
+    private boolean persistVideoTerminal(String taskId, Map<String, String> status, String terminalStatus) {
+        try {
+            AgentAsset record = findAssetByTaskId(taskId);
+            if (record == null) return false;
+            record.setStatus(terminalStatus);
+            String url = status.getOrDefault("url", "");
+            String error = status.getOrDefault("error", "");
+            if (!url.isBlank()) {
+                record.setUrl(url);
+                record.setResultUrls(JSON.writeValueAsString(List.of(url)));
+            }
+            record.setError(error);
+            if (record.getCreatedAt() != null) {
+                record.setDurationMs(java.time.Duration.between(record.getCreatedAt(), OffsetDateTime.now()).toMillis());
+            }
+            assetMapper.updateById(record);
+            return true;
+        } catch (Exception e) {
+            log.warn("视频终态保存失败: taskId={}, error={}", taskId, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean publishTerminalIfCorrelated(String taskId) {
+        try {
+            AgentAsset record = findAssetByTaskId(taskId);
+            if (record == null || isBlank(record.getPlanId()) || isBlank(record.getNodeId())) return false;
+            if (!"completed".equals(record.getStatus()) && !"failed".equals(record.getStatus())) return false;
+            if (taskEventPublisher != null) {
+                boolean success = "completed".equals(record.getStatus());
+                taskEventPublisher.publishEvent(new TaskAssetTerminalEvent(
+                        record.getConversationId(), record.getPlanId(), record.getNodeId(), success,
+                        success ? stringValue(record.getUrl()) : stringValue(record.getError())));
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn("视频终态事件发布失败: taskId={}, error={}", taskId, e.getMessage());
+            return false;
+        }
+    }
+
+    private AgentAsset findAssetByTaskId(String taskId) {
+        return assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
+                .eq(AgentAsset::getTaskId, taskId)
+                .last("LIMIT 1"));
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public void fail(Prepared prepared, Throwable error) {

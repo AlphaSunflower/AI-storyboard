@@ -10,11 +10,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,6 +27,7 @@ class MediaGenerationCoordinatorTest {
     @Mock AgentAssetMapper assetMapper;
     @Mock FileStorageService fileStorageService;
     @Mock VideoGenerationService videoGenerationService;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     @Test
     void videoRequestCreatesQueuedGenerationRecordWithTrustedOwnership() {
@@ -140,5 +143,38 @@ class MediaGenerationCoordinatorTest {
         assertThat(record.getUrl()).isEqualTo("/api/files/images/image.png");
         assertThat(result.resultUrls()).containsExactly("/api/files/images/image.png");
         verify(fileStorageService).saveImage("http://provider/image.png");
+    }
+
+    @Test
+    void publishesTerminalEventWhenPolledVideoAssetIsCorrelatedToPlanNode() {
+        AgentAsset record = new AgentAsset();
+        record.setId("a1");
+        record.setConversationId("c1");
+        record.setType("video");
+        record.setStatus("queued");
+        record.setCreatedAt(java.time.OffsetDateTime.now().minusSeconds(1));
+        record.setPlanId("plan-1");
+        record.setNodeId("node-1");
+        when(assetMapper.selectById("a1")).thenReturn(record);
+        when(assetMapper.selectOne(any())).thenReturn(record);
+        when(videoGenerationService.pollVideoTask("task-1")).thenReturn(java.util.Map.of(
+                "status", "completed",
+                "url", "/api/files/videos/video.mp4"));
+        MediaGenerationCoordinator coordinator = new MediaGenerationCoordinator(
+                assetMapper, fileStorageService, videoGenerationService);
+        ReflectionTestUtils.setField(coordinator, "taskEventPublisher", eventPublisher);
+        ReflectionTestUtils.setField(coordinator, "videoPollDelayMs", 5L);
+
+        coordinator.complete(new MediaGenerationCoordinator.Prepared(record, "{}"),
+                "{\"status\":\"queued\",\"taskId\":\"task-1\",\"mediaType\":\"video\"}");
+
+        ArgumentCaptor<TaskAssetTerminalEvent> captor =
+                ArgumentCaptor.forClass(TaskAssetTerminalEvent.class);
+        verify(eventPublisher, timeout(2_000)).publishEvent(captor.capture());
+        assertThat(captor.getValue().conversationId()).isEqualTo("c1");
+        assertThat(captor.getValue().planId()).isEqualTo("plan-1");
+        assertThat(captor.getValue().nodeId()).isEqualTo("node-1");
+        assertThat(captor.getValue().success()).isTrue();
+        assertThat(captor.getValue().summary()).isEqualTo("/api/files/videos/video.mp4");
     }
 }

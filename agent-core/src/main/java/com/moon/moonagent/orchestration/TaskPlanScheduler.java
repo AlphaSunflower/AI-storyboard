@@ -85,20 +85,28 @@ public class TaskPlanScheduler {
     }
 
     public TaskPlan markWaitingHuman(TaskPlan plan, String nodeId) {
+        return markWaitingHuman(plan, nodeId, "");
+    }
+
+    public TaskPlan markWaitingHuman(TaskPlan plan, String nodeId, String outputSummary) {
         List<TaskNode> nodes = plan.nodes().stream()
                 .map(node -> node.nodeId().equals(nodeId)
-                        ? withState(node, TaskNodeState.WAITING_HUMAN, node.attemptCount(), node.outputSummary(), node.error())
+                        ? withState(node, TaskNodeState.WAITING_HUMAN, node.attemptCount(), outputSummary, node.error())
                         : node)
                 .toList();
         return withNodesAndState(plan, nodes, TaskPlanState.WAITING_HUMAN);
     }
 
     public TaskPlan markWaitingAsync(TaskPlan plan, String nodeId, String taskId) {
+        return markWaitingAsync(plan, nodeId, taskId, "");
+    }
+
+    public TaskPlan markWaitingAsync(TaskPlan plan, String nodeId, String taskId, String outputSummary) {
         List<TaskNode> nodes = plan.nodes().stream()
                 .map(node -> node.nodeId().equals(nodeId)
                         ? new TaskNode(node.nodeId(), node.capabilityKey(), node.title(), node.parameters(),
                         node.dependencies(), TaskNodeState.WAITING_ASYNC, node.attemptCount(), node.hitlPolicy(),
-                        node.evaluationMode(), node.qualityCriteria(), node.outputSummary(), taskId, node.error())
+                        node.evaluationMode(), node.qualityCriteria(), outputSummary, taskId, node.error())
                         : node)
                 .toList();
         return withNodesAndState(plan, nodes, TaskPlanState.WAITING_ASYNC);
@@ -125,6 +133,16 @@ public class TaskPlanScheduler {
                 plan.replanCount() + 1, nodes,
                 replacementEdges == null ? List.of() : replacementEdges,
                 "", plan.planSignature());
+    }
+
+    public TaskPlan recoverInterrupted(TaskPlan plan) {
+        List<TaskNode> nodes = plan.nodes().stream()
+                .map(node -> node.state() == TaskNodeState.RUNNING
+                        ? withState(node, TaskNodeState.READY, node.attemptCount(),
+                        node.outputSummary(), node.error())
+                        : node)
+                .toList();
+        return withNodesAndState(plan, nodes, TaskPlanState.RUNNING);
     }
 
     private static Map<String, List<String>> dependencies(TaskPlan plan) {

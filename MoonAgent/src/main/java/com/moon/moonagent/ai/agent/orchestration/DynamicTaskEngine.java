@@ -95,16 +95,22 @@ public class DynamicTaskEngine {
 
     public void continueAfterAsync(AgentConversation conversation, String planId, String nodeId,
                                    boolean success, String outputSummary) {
-        TaskPlan plan = planStore.find(planId).orElse(null);
-        if (plan == null || plan.state() != TaskPlanState.WAITING_ASYNC) return;
-        plan = success
-                ? scheduler.completeNode(plan, nodeId, outputSummary)
-                : scheduler.failNode(plan, nodeId, outputSummary);
-        planStore.update(plan);
-        if (!success) return;
-        OrchestrationRequest request = new OrchestrationRequest(conversation, plan.goal(), List.of(), null);
-        AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
-        continuePlan(conversation, request, trace, null, plan);
+        boolean acquired = conversationLock == null || conversationLock.tryAcquire(conversation.getId());
+        if (!acquired) return;
+        try {
+            TaskPlan plan = planStore.find(planId).orElse(null);
+            if (plan == null || plan.state() != TaskPlanState.WAITING_ASYNC) return;
+            plan = success
+                    ? scheduler.completeNode(plan, nodeId, outputSummary)
+                    : scheduler.failNode(plan, nodeId, outputSummary);
+            planStore.update(plan);
+            if (!success) return;
+            OrchestrationRequest request = new OrchestrationRequest(conversation, plan.goal(), List.of(), null);
+            AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+            continuePlan(conversation, request, trace, null, plan);
+        } finally {
+            if (conversationLock != null) conversationLock.release(conversation.getId());
+        }
     }
 
     public boolean hasActivePlan(String conversationId) {
@@ -137,11 +143,19 @@ public class DynamicTaskEngine {
                                          AgentLoopRun run,
                                          TaskPlan plan,
                                          String resumeNodeId) {
-        SpecialistResult previous = null;
-        String lastMessage = "";
+        SpecialistResult previous = previousResult(plan);
+        String lastMessage = previous == null || previous.message() == null ? "" : previous.message();
         int guard = Math.max(1, plan.maxNodes() * plan.maxAttemptsPerNode());
         for (int step = 0; step < guard; step++) {
             support.checkInterrupted(request);
+            TaskPlan latest = planStore.find(plan.planId()).orElse(plan);
+            if (latest.state() == TaskPlanState.CANCELLED) {
+                return buildTurnResult(request, trace, "任务已取消");
+            }
+            plan = latest;
+            if (terminal(plan.state())) {
+                return buildTurnResult(request, trace, lastMessage);
+            }
             plan = scheduler.advance(plan);
             plan = planStore.update(plan);
             if (terminal(plan.state())) {
@@ -178,7 +192,7 @@ public class DynamicTaskEngine {
             request.setIntentType(node.capabilityKey());
             AgentSkill skill = capability.skill();
             SpecialistContext context = new SpecialistContext(
-                    conversation, request.getContent(), request.getPicUrls(), request.getEmitter(),
+                    conversation, nodeContent(node, request, plan), request.getPicUrls(), request.getEmitter(),
                     previous, skill, request.getAction(), request.getCustomText(), request.getParams(),
                     request.getAssetIds(), request.getCheckpointAction(), request.getCheckpointPlan(),
                     trace, request.getCanvasContext());
@@ -193,22 +207,25 @@ public class DynamicTaskEngine {
                     node.nodeId(), lastMessage, "", "", "",
                     started, OffsetDateTime.now());
 
-            AgentCheckpoint pending = findPendingCheckpoint(conversation.getId());
+            AgentCheckpoint pending = findPendingCheckpoint(
+                    conversation.getId(), plan.planId(), node.nodeId(), started);
             if (pending != null) {
                 pending.setPlanId(plan.planId());
                 pending.setNodeId(node.nodeId());
                 checkpointMapper.updateById(pending);
-                plan = scheduler.markWaitingHuman(plan, node.nodeId());
+                plan = scheduler.markWaitingHuman(plan, node.nodeId(), lastMessage);
                 planStore.update(plan);
                 return buildTurnResult(request, trace, lastMessage);
             }
 
-            AgentAsset asyncAsset = findNewAsyncAsset(conversation.getId());
+            AgentAsset asyncAsset = findNewAsyncAsset(
+                    conversation.getId(), plan.planId(), node.nodeId(), started);
             if (asyncAsset != null) {
                 asyncAsset.setPlanId(plan.planId());
                 asyncAsset.setNodeId(node.nodeId());
                 assetMapper.updateById(asyncAsset);
-                plan = scheduler.markWaitingAsync(plan, node.nodeId(), asyncAsset.getTaskId());
+                plan = scheduler.markWaitingAsync(
+                        plan, node.nodeId(), asyncAsset.getTaskId(), lastMessage);
                 planStore.update(plan);
                 return buildTurnResult(request, trace, lastMessage);
             }
@@ -229,11 +246,17 @@ public class DynamicTaskEngine {
                 : capability.execute(context);
     }
 
-    private AgentCheckpoint findPendingCheckpoint(String conversationId) {
+    private AgentCheckpoint findPendingCheckpoint(String conversationId, String planId,
+                                                  String nodeId, OffsetDateTime started) {
         try {
             return checkpointMapper.selectOne(new LambdaQueryWrapper<AgentCheckpoint>()
                     .eq(AgentCheckpoint::getConversationId, conversationId)
                     .eq(AgentCheckpoint::getStatus, "pending")
+                    .ge(AgentCheckpoint::getCreatedAt, started.minusSeconds(1))
+                    .and(wrapper -> wrapper.isNull(AgentCheckpoint::getPlanId)
+                            .or().eq(AgentCheckpoint::getPlanId, planId))
+                    .and(wrapper -> wrapper.isNull(AgentCheckpoint::getNodeId)
+                            .or().eq(AgentCheckpoint::getNodeId, nodeId))
                     .orderByDesc(AgentCheckpoint::getCreatedAt)
                     .last("LIMIT 1"));
         } catch (Exception e) {
@@ -242,19 +265,48 @@ public class DynamicTaskEngine {
         }
     }
 
-    private AgentAsset findNewAsyncAsset(String conversationId) {
+    private AgentAsset findNewAsyncAsset(String conversationId, String planId,
+                                         String nodeId, OffsetDateTime started) {
         try {
             return assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
                     .eq(AgentAsset::getConversationId, conversationId)
                     .isNotNull(AgentAsset::getTaskId)
                     .in(AgentAsset::getStatus, List.of("queued", "generating", "running"))
-                    .isNull(AgentAsset::getPlanId)
+                    .ge(AgentAsset::getCreatedAt, started.minusSeconds(1))
+                    .and(wrapper -> wrapper.isNull(AgentAsset::getPlanId)
+                            .or().eq(AgentAsset::getPlanId, planId))
+                    .and(wrapper -> wrapper.isNull(AgentAsset::getNodeId)
+                            .or().eq(AgentAsset::getNodeId, nodeId))
                     .orderByDesc(AgentAsset::getCreatedAt)
                     .last("LIMIT 1"));
         } catch (Exception e) {
             log.warn("task engine async asset lookup failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    private static String nodeContent(TaskNode node, OrchestrationRequest request, TaskPlan plan) {
+        for (String key : List.of("goal", "content", "prompt")) {
+            Object value = node.parameters().get(key);
+            if (value != null && !String.valueOf(value).isBlank()) return String.valueOf(value);
+        }
+        if (request != null && request.getContent() != null && !request.getContent().isBlank()) {
+            return request.getContent();
+        }
+        return plan.goal();
+    }
+
+    private static SpecialistResult previousResult(TaskPlan plan) {
+        for (int i = plan.nodes().size() - 1; i >= 0; i--) {
+            TaskNode node = plan.nodes().get(i);
+            if (node.outputSummary() == null || node.outputSummary().isBlank()) continue;
+            if (node.state() == TaskNodeState.COMPLETED
+                    || node.state() == TaskNodeState.WAITING_HUMAN
+                    || node.state() == TaskNodeState.WAITING_ASYNC) {
+                return SpecialistResult.done(node.outputSummary());
+            }
+        }
+        return null;
     }
 
     private static boolean terminal(TaskPlanState state) {

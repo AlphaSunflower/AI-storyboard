@@ -81,6 +81,18 @@ class TaskPlanSchedulerTest {
         assertThat(replanned.replanCount()).isEqualTo(1);
     }
 
+    @Test
+    void recoversInterruptedRunningNodeAsReady() {
+        TaskPlan plan = plan(
+                node("one", "intent-pic", TaskNodeState.RUNNING, List.of(), 1));
+
+        TaskPlan recovered = scheduler.recoverInterrupted(plan);
+
+        assertThat(recovered.state()).isEqualTo(TaskPlanState.RUNNING);
+        assertThat(recovered.nodes().get(0).state()).isEqualTo(TaskNodeState.READY);
+        assertThat(recovered.nodes().get(0).attemptCount()).isEqualTo(1);
+    }
+
     private static TaskPlan plan(TaskNode... nodes) {
         return new TaskPlan(
                 "plan-1", "conversation-1", "goal", TaskPlanState.READY, 1,

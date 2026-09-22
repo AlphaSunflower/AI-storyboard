@@ -95,7 +95,8 @@ public class TaskPlanStore {
                         .in(AgentTaskPlan::getStatus,
                                 TaskPlanState.READY.name(),
                                 TaskPlanState.RUNNING.name(),
-                                TaskPlanState.REPLANNING.name())
+                                TaskPlanState.REPLANNING.name(),
+                                TaskPlanState.WAITING_ASYNC.name())
                         .lt(AgentTaskPlan::getUpdatedAt, OffsetDateTime.now().minusSeconds(20))
                         .orderByAsc(AgentTaskPlan::getUpdatedAt)
                         .last("LIMIT " + Math.max(1, limit)))

@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.orchestration;
 
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.capability.AgentCapability;
 import com.moon.moonagent.ai.agent.capability.AgentCapabilityRegistry;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
@@ -23,6 +24,8 @@ import com.moon.moonagent.orchestration.TaskPlanScheduler;
 import com.moon.moonagent.orchestration.TaskPlanState;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -103,14 +108,20 @@ class DynamicTaskEngineTest {
                 List.of(
                         new TaskNode("one", "intent-video", "one", Map.of(), List.of(),
                                 TaskNodeState.WAITING_ASYNC, 1, HitlPolicy.NONE,
-                                EvaluationMode.DETERMINISTIC, "", "", "task-1", ""),
+                                EvaluationMode.DETERMINISTIC, "", "queued video task", "task-1", ""),
                         new TaskNode("two", "intent-pic", "two", Map.of(), List.of("one"),
                                 TaskNodeState.PENDING, 0, HitlPolicy.NONE,
                                 EvaluationMode.DETERMINISTIC, "", "", "", "")),
                 List.of(new TaskEdge("one", "two")), "", "");
 
-        when(store.find("plan-1")).thenReturn(Optional.of(waiting));
-        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        java.util.concurrent.atomic.AtomicReference<TaskPlan> current =
+                new java.util.concurrent.atomic.AtomicReference<>(waiting);
+        when(store.find("plan-1")).thenAnswer(invocation -> Optional.of(current.get()));
+        when(store.update(any())).thenAnswer(invocation -> {
+            TaskPlan updated = invocation.getArgument(0);
+            current.set(updated);
+            return updated;
+        });
         when(registry.find("intent-pic")).thenReturn(Optional.of(next));
         when(checkpointMapper.selectOne(any())).thenReturn(null);
         when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
@@ -123,7 +134,111 @@ class DynamicTaskEngineTest {
 
         engine.continueAfterAsync(conversation, "plan-1", "one", true, "video-url");
 
-        verify(next).execute(any());
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(next).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().previousResult()).isNotNull();
+        assertThat(contextCaptor.getValue().previousResult().message()).isEqualTo("video-url");
+    }
+
+    @Test
+    void usesNodeParameterOverridesInsteadOfRootRequestContent() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability capability = capability("intent-pic", "done");
+        TaskNode node = new TaskNode(
+                "one", "intent-pic", "one", Map.of("prompt", "node prompt"), List.of(),
+                TaskNodeState.PENDING, 0, HitlPolicy.NONE, EvaluationMode.DETERMINISTIC,
+                "", "", "", "");
+        TaskPlan plan = new TaskPlan(
+                "plan-1", "conversation-1", "root goal", TaskPlanState.READY, 1,
+                20, 3, 2, 0, List.of(node), List.of(), "", "");
+        when(planner.plan(any(), any())).thenReturn(plan);
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        java.util.concurrent.atomic.AtomicReference<TaskPlan> current =
+                new java.util.concurrent.atomic.AtomicReference<>(plan);
+        when(store.find("plan-1")).thenAnswer(invocation -> Optional.of(current.get()));
+        when(store.update(any())).thenAnswer(invocation -> {
+            TaskPlan updated = invocation.getArgument(0);
+            current.set(updated);
+            return updated;
+        });
+        CapabilityDescriptor descriptor = capability.descriptor();
+        when(registry.descriptors()).thenReturn(Map.of("intent-pic", descriptor));
+        when(registry.find("intent-pic")).thenReturn(Optional.of(capability));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "root request", List.of(), null);
+
+        engine.runTurn(conversation, "root request", "intent-pic",
+                request, new AgentTraceAccumulator(request), new AgentLoopRun());
+
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(capability).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().userMessage()).isEqualTo("node prompt");
+    }
+
+    @Test
+    void continueAfterAsyncSkipsMutationWhenConversationLockIsHeld() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        when(lock.tryAcquire("conversation-1")).thenReturn(false);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        ReflectionTestUtils.setField(engine, "conversationLock", lock);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+
+        engine.continueAfterAsync(conversation, "plan-1", "one", true, "url");
+
+        verify(store, never()).find("plan-1");
+        verify(store, never()).update(any());
+    }
+
+    @Test
+    void reloadsPlanAndStopsBeforeStepWhenCancelled() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        TaskPlan cancelled = new TaskPlan(
+                "plan-1", "conversation-1", "goal", TaskPlanState.CANCELLED, 1,
+                20, 3, 2, 0, plan().nodes(), plan().edges(), "", "");
+        when(store.find("plan-1")).thenReturn(Optional.of(cancelled));
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+
+        engine.resumePlan(conversation, plan());
+
+        verify(registry, never()).find(any());
+        verify(store, times(1)).find("plan-1");
     }
 
     private static AgentCapability capability(String key, String message) {
