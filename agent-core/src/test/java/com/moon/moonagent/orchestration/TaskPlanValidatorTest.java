@@ -2,10 +2,13 @@ package com.moon.moonagent.orchestration;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TaskPlanValidatorTest {
 
@@ -37,11 +40,100 @@ class TaskPlanValidatorTest {
     }
 
     @Test
-    void rejectsCycles() {
+    void rejectsDuplicateNodeIds() {
+        TaskPlan plan = plan(
+                List.of(
+                        node("write", "intent-aisplit", List.of()),
+                        node("write", "intent-pic", List.of())),
+                List.of());
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit"),
+                "intent-pic", descriptor("intent-pic")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains("duplicate node: write");
+    }
+
+    @Test
+    void rejectsNullNodeEntriesWithoutThrowing() {
+        TaskPlan plan = mock(TaskPlan.class);
+        when(plan.nodes()).thenReturn(Arrays.asList(
+                node("write", "intent-aisplit", List.of()), null));
+        when(plan.edges()).thenReturn(List.of());
+        when(plan.maxNodes()).thenReturn(20);
+        when(plan.maxAttemptsPerNode()).thenReturn(3);
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains("null node entry");
+    }
+
+    @Test
+    void rejectsNullNodeIds() {
+        TaskPlan plan = plan(
+                node(null, "intent-aisplit", List.of()),
+                List.of());
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains("node ID must not be null or blank");
+    }
+
+    @Test
+    void rejectsBlankNodeIds() {
+        TaskPlan plan = plan(
+                node("   ", "intent-aisplit", List.of()),
+                List.of());
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains("node ID must not be null or blank");
+    }
+
+    @Test
+    void rejectsEdgesReferencingMissingNodes() {
+        TaskPlan plan = plan(
+                node("write", "intent-aisplit", List.of()),
+                List.of(edge("missing-from", "write"), edge("write", "missing-to")));
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).contains(
+                "edge references missing node: missing-from -> write",
+                "edge references missing node: write -> missing-to");
+    }
+
+    @Test
+    void rejectsDependencyOnlyCycles() {
         TaskPlan plan = plan(
                 List.of(
                         node("a", "intent-aisplit", List.of("b")),
                         node("b", "intent-pic", List.of("a"))),
+                List.of());
+
+        TaskPlanValidationResult result = validator.validate(plan, Map.of(
+                "intent-aisplit", descriptor("intent-aisplit"),
+                "intent-pic", descriptor("intent-pic")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anyMatch(error -> error.startsWith("cycle detected:"));
+    }
+
+    @Test
+    void rejectsEdgeOnlyCycles() {
+        TaskPlan plan = plan(
+                List.of(
+                        node("a", "intent-aisplit", List.of()),
+                        node("b", "intent-pic", List.of())),
                 List.of(edge("a", "b"), edge("b", "a")));
 
         TaskPlanValidationResult result = validator.validate(plan, Map.of(

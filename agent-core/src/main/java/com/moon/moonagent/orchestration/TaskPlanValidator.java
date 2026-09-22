@@ -20,7 +20,18 @@ public class TaskPlanValidator {
 
         Set<String> nodeIds = new HashSet<>();
         for (TaskNode node : plan.nodes()) {
-            if (nodeIds.add(node.nodeId())) {
+            if (node == null) {
+                errors.add("null node entry");
+                continue;
+            }
+
+            String nodeId = node.nodeId();
+            if (nodeId == null || nodeId.isBlank()) {
+                errors.add("node ID must not be null or blank");
+                continue;
+            }
+
+            if (nodeIds.add(nodeId)) {
                 CapabilityDescriptor descriptor = safeCapabilities.get(node.capabilityKey());
                 if (descriptor == null) {
                     errors.add("unknown capability: " + node.capabilityKey());
@@ -28,11 +39,14 @@ public class TaskPlanValidator {
                     errors.add("attempt budget exceeded: " + node.nodeId());
                 }
             } else {
-                errors.add("duplicate node: " + node.nodeId());
+                errors.add("duplicate node: " + nodeId);
             }
         }
 
         for (TaskNode node : plan.nodes()) {
+            if (node == null || node.nodeId() == null || node.nodeId().isBlank()) {
+                continue;
+            }
             for (String dependency : node.dependencies()) {
                 if (!nodeIds.contains(dependency)) {
                     errors.add("missing dependency: " + node.nodeId() + " -> " + dependency);
@@ -46,7 +60,7 @@ public class TaskPlanValidator {
             }
         }
 
-        String cycle = detectCycle(plan);
+        String cycle = detectCycle(plan, nodeIds);
         if (cycle != null) {
             errors.add("cycle detected: " + cycle);
         }
@@ -54,12 +68,27 @@ public class TaskPlanValidator {
         return errors.isEmpty() ? TaskPlanValidationResult.ok() : TaskPlanValidationResult.invalid(errors);
     }
 
-    private static String detectCycle(TaskPlan plan) {
+    private static String detectCycle(TaskPlan plan, Set<String> validNodeIds) {
         Map<String, List<String>> outgoing = new HashMap<>();
         for (TaskNode node : plan.nodes()) {
-            outgoing.put(node.nodeId(), new ArrayList<>(node.dependencies()));
+            if (node == null || !validNodeIds.contains(node.nodeId())) {
+                continue;
+            }
+
+            List<String> dependencies = new ArrayList<>();
+            for (String dependency : node.dependencies()) {
+                if (validNodeIds.contains(dependency)) {
+                    dependencies.add(dependency);
+                }
+            }
+            outgoing.put(node.nodeId(), dependencies);
         }
         for (TaskEdge edge : plan.edges()) {
+            if (edge == null
+                    || !validNodeIds.contains(edge.fromNodeId())
+                    || !validNodeIds.contains(edge.toNodeId())) {
+                continue;
+            }
             outgoing.computeIfAbsent(edge.toNodeId(), ignored -> new ArrayList<>()).add(edge.fromNodeId());
         }
 
