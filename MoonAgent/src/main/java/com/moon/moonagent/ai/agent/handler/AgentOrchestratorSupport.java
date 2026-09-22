@@ -33,6 +33,8 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -55,6 +57,9 @@ import java.util.regex.Pattern;
 @Component
 @RequiredArgsConstructor
 public class AgentOrchestratorSupport {
+
+    @Autowired(required = false)
+    private transient ApplicationEventPublisher taskEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorSupport.class);
 
@@ -1619,6 +1624,7 @@ public class AgentOrchestratorSupport {
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
                             .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
             if (asset == null) return;
+            String previousStatus = asset.getStatus();
             asset.setStatus(status);
             if (url != null && !url.isBlank()) asset.setUrl(url);
             if (error != null && !error.isBlank()) asset.setError(error);
@@ -1635,6 +1641,14 @@ public class AgentOrchestratorSupport {
             assetMapper.updateById(asset);
             if ("completed".equals(status) && url != null && !url.isBlank()) {
                 persistVideoMessage(asset, url);
+            }
+            if ((!status.equals(previousStatus))
+                    && ("completed".equals(status) || "failed".equals(status))
+                    && asset.getPlanId() != null && !asset.getPlanId().isBlank()
+                    && taskEventPublisher != null) {
+                taskEventPublisher.publishEvent(new com.moon.moonagent.ai.agent.orchestration.TaskAssetTerminalEvent(
+                        asset.getConversationId(), asset.getPlanId(), asset.getNodeId(),
+                        "completed".equals(status), "completed".equals(status) ? url : error));
             }
         } catch (Exception e) {
             log.warn("视频资产状态更新失败: taskId={}, error={}", taskId, e.getMessage());

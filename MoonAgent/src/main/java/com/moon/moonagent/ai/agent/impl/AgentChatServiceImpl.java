@@ -33,6 +33,7 @@ import com.moon.moonagent.ai.VideoPlanService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -106,6 +107,9 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
+    @Value("${ai.agent.dynamic-plan.enabled:true}")
+    private boolean dynamicPlanEnabled;
+
     /**
      * 首条消息异步 AI 重命名标题：
      * - titleScheduled：并发去重，仅调度一次；任务结束（无论成败）移除，允许清空后重聊再次触发；
@@ -156,7 +160,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /** 创建会话：校验项目归属，返回会话 */
     public AgentConversation createConversation(String userId, String projectId, String title) {
-        return createConversation(userId, projectId, title, "LEGACY");
+        return createConversation(userId, projectId, title, dynamicPlanEnabled ? "UNIFIED_LOOP" : "LEGACY");
     }
 
     @Override

@@ -32,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -65,6 +66,12 @@ public class UnifiedAgentLoop {
     @Value("${ai.agent.unified-media-gateway-enabled:false}")
     private boolean unifiedMediaGatewayEnabled;
 
+    @Autowired(required = false)
+    private transient DynamicTaskEngine dynamicTaskEngine;
+
+    @Value("${ai.agent.dynamic-plan.enabled:true}")
+    private boolean dynamicPlanEnabled;
+
     public AgentTurnResult runTurn(AgentConversation conversation, String content,
                                    List<String> picUrls, List<String> assetIds,
                                    String routingHint, boolean cancelActiveTasks,
@@ -86,6 +93,14 @@ public class UnifiedAgentLoop {
         AgentLoopRun run = recorder.start(conversation.getId(), "", OrchestrationMode.UNIFIED_LOOP,
                 chain == null ? "" : chain.name(), Map.of("intent", intent));
         try {
+            if (dynamicPlanEnabled && dynamicTaskEngine != null && canvasContext == null) {
+                AgentTurnResult turn = dynamicTaskEngine.runTurn(
+                        conversation, content, intent, request, trace, run);
+                recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",
+                        "FINISH", chain == null ? "" : chain.name(),
+                        Map.of("intent", intent, "dynamicPlan", true), "", "");
+                return withoutOwnedMetadata(turn, run);
+            }
             SpecialistResult result = execute(conversation, intent, request, trace, run, 0);
             AgentTurnResult turn = buildTurnResult(request, trace, result == null ? "" : result.message());
             recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",
@@ -122,6 +137,17 @@ public class UnifiedAgentLoop {
         AgentLoopRun run = recorder.start(conversation.getId(), "", OrchestrationMode.UNIFIED_LOOP,
                 chain == null ? "" : chain.name(), Map.of("intent", intent, "resume", true));
         try {
+            boolean planOwned = checkpoint.getPlanId() != null && !checkpoint.getPlanId().isBlank();
+            if (dynamicPlanEnabled && dynamicTaskEngine != null && canvasContext == null
+                    && (planOwned || dynamicTaskEngine.hasActivePlan(conversation.getId()))) {
+                AgentTurnResult turn = dynamicTaskEngine.resumeTurn(
+                        conversation, checkpoint, intent, request, trace, run);
+                recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",
+                        "FINISH", chain == null ? "" : chain.name(),
+                        Map.of("intent", intent, "dynamicPlan", true, "resume", true),
+                        checkpoint.getId(), "");
+                return withoutOwnedMetadata(turn, run);
+            }
             SpecialistResult result = execute(conversation, intent, request, trace, run, 0);
             AgentTurnResult turn = buildTurnResult(request, trace, result == null ? "" : result.message());
             recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",

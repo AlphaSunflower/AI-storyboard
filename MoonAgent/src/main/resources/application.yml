@@ -78,6 +78,9 @@ ai:
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
+    # 新建会话默认启用运行时任务 DAG；关闭后新会话回退 LEGACY，旧会话始终保持原引擎。
+    dynamic-plan:
+      enabled: ${DYNAMIC_TASK_PLAN_ENABLED:true}
     # pic/video 默认由 Skill 驱动的 AIGC 执行器处理，并通过网关媒体 MCP 生成。
     unified-media-gateway-enabled: ${UNIFIED_MEDIA_GATEWAY_ENABLED:true}
     plan-timeout-seconds: 1800
