@@ -239,8 +239,6 @@ public class AigcGatewaySpecialist {
         payload.put("content", context.userMessage() == null ? "" : context.userMessage());
         payload.put("picUrls", context.picUrls() == null ? List.of() : context.picUrls());
         payload.put("plans", plans);
-        String referenceRole = referenceRoleFor(context);
-        if (!referenceRole.isBlank()) payload.put("referenceRole", referenceRole);
 
         String eventName = "generate_video".equals(toolName) ? "video_plan" : "human_input";
         return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
@@ -262,6 +260,7 @@ public class AigcGatewaySpecialist {
                 ? PLAN_TEXT_START + "\n给用户看的三套视频方案正文\n" + PLAN_TEXT_END + "\n"
                         + PLAN_JSON_START + "\n{\"message\":\"已准备三套方案\",\"plans\":["
                         + "{\"title\":\"\",\"summary\":\"\",\"message\":\"完整H3提示词\",\"duration\":8,"
+                        + "\"referenceRole\":\"FIRST_FRAME|LAST_FRAME|STYLE_REFERENCE\","
                         + "\"params\":{\"resolution\":\"\",\"aspectRatio\":\"\"},"
                         + "\"reasons\":{\"resolution\":\"\",\"aspectRatio\":\"\",\"duration\":\"\"}}]}\n"
                         + PLAN_JSON_END
@@ -275,6 +274,11 @@ public class AigcGatewaySpecialist {
                 + "\n\n当前只做方案设计，禁止调用任何工具，禁止声称已经生成。"
                 + "必须完整遵循上面的 SKILL.md 流程、约束和输出要求。"
                 + "先输出 PLAN_TEXT 中给用户看的完整三套方案，再输出 PLAN_JSON 中给程序使用的结构化数据。"
+                + ("intent-video".equals(intent)
+                ? "\n每套视频方案必须根据用户意图自行选择 referenceRole："
+                + "FIRST_FRAME（参考图作为首帧）、LAST_FRAME（参考图作为尾帧）或 STYLE_REFERENCE（仅风格参考）。"
+                + "不要省略该字段，不要用固定规则代替判断。"
+                : "")
                 + "严格使用下面格式：\n" + schema;
         StringBuilder raw = new StringBuilder();
         DisplayCursor cursor = new DisplayCursor();
@@ -557,13 +561,15 @@ public class AigcGatewaySpecialist {
     String referenceRoleFor(SpecialistContext context) {
         String explicit = support.planField(context.cpPlan(), "referenceRole");
         if (!isBlank(explicit)) return explicit;
-        String text = (context.userMessage() == null ? "" : context.userMessage())
-                + " " + support.planField(context.cpPlan(), PlanField.CONTENT);
-        if (text.contains("最终定格") || text.contains("最后定格")
-                || text.contains("最后引出") || text.contains("结尾定格")) {
-            return "LAST_FRAME";
+        Map<String, Object> question = parsePlan(context.cpPlan());
+        List<Map<String, Object>> plans = planList(question.get("plans"));
+        if (!plans.isEmpty()) {
+            int index = selectedPlanIndex(context.action()) - 1;
+            if (index < 0 || index >= plans.size()) index = 0;
+            String selected = stringValue(plans.get(index).get("referenceRole"));
+            if (!isBlank(selected)) return selected;
         }
-        return "";
+        return "STYLE_REFERENCE";
     }
 
     private String confirmedPrompt(SpecialistContext context, PlanField field) {

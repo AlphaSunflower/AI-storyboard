@@ -147,7 +147,7 @@ class AigcGatewaySpecialistDirectExecutionTest {
     }
 
     @Test
-    void finalFrameWorkflowUsesLastFrameReferenceRole() {
+    void agentSelectedPlanControlsReferenceRole() {
         AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
         AigcGatewaySpecialist specialist = new AigcGatewaySpecialist(
                 mock(ChatClient.Builder.class),
@@ -164,7 +164,8 @@ class AigcGatewaySpecialistDirectExecutionTest {
                 List.of("/api/files/images/reference.png"), null, null,
                 AgentSkill.of("video", Map.of("description", "video"), Map.of()),
                 "generate_video:1", "", Map.of(), List.of(),
-                "generate_video", "{\"plans\":[{\"message\":\"方案\"}]}",
+                "generate_video",
+                "{\"plans\":[{\"message\":\"方案\",\"referenceRole\":\"LAST_FRAME\"}]}",
                 null, null, true);
 
         assertThat(specialist.referenceRoleFor(context)).isEqualTo("LAST_FRAME");
