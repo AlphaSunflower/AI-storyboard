@@ -47,9 +47,21 @@ public class OrchestrationRunRecorder {
                      String decision, String inputSummary, String outputSummary,
                      String toolCallId, String jobId, String error,
                      OffsetDateTime startedAt, OffsetDateTime completedAt) {
+        step(run, index, chain, phase, status, decision, "", "", null,
+                inputSummary, outputSummary, toolCallId, jobId, error, startedAt, completedAt);
+    }
+
+    public void step(AgentLoopRun run, int index, String chain, String phase, String status,
+                     String decision, String planId, String nodeId, Integer attemptNo,
+                     String inputSummary, String outputSummary,
+                     String toolCallId, String jobId, String error,
+                     OffsetDateTime startedAt, OffsetDateTime completedAt) {
         if (run == null) return;
         AgentLoopStep step = new AgentLoopStep();
         step.setLoopRunId(run.getId());
+        step.setPlanId(blankToNull(planId));
+        step.setNodeId(blankToNull(nodeId));
+        step.setAttemptNo(attemptNo);
         step.setStepIndex(index);
         step.setChain(chain);
         step.setPhase(phase);
@@ -102,5 +114,9 @@ public class OrchestrationRunRecorder {
     private static String safe(String value) {
         if (value == null) return "";
         return value.length() <= 2000 ? value : value.substring(0, 2000);
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

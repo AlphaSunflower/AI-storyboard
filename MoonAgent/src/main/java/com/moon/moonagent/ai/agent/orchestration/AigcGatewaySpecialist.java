@@ -106,7 +106,10 @@ public class AigcGatewaySpecialist {
         questionState.put("skill", skill.name());
         questionState.put("toolName", toolName);
         questionState.put("plansText", display);
-        questionState.put("originalMessage", context.userMessage() == null ? "" : context.userMessage());
+        Map<String, Object> previousQuestion = parsePlan(context.cpPlan());
+        String originalMessage = stringValue(previousQuestion.get("originalMessage"));
+        if (originalMessage.isBlank()) originalMessage = context.userMessage() == null ? "" : context.userMessage();
+        questionState.put("originalMessage", originalMessage);
         questionState.put("plans", plans);
         return SpecialistResult.question(display, questionState);
     }
@@ -152,9 +155,14 @@ public class AigcGatewaySpecialist {
                 Map.of("id", "cancel", "title", "取消"));
         OrchestrationRequest request = toRequest(context, context.skill());
         request.setAction(context.action());
-        return support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
+        String hitlText = support.runHITLStage(request, null, new AgentOrchestratorSupport.StagePlan(
                 cardText, toolName, List.of(payload), "human_input", actions,
                 List.of(), Map.of(), Map.of()));
+        if (context.trace() != null) {
+            context.trace().setHitlPaused(request.isHitlPaused());
+            context.trace().setHitlMessageId(request.getHitlMessageId());
+        }
+        return hitlText;
     }
 
     private static String extractSelectedPlanText(String plansText, int index) {
@@ -320,13 +328,25 @@ public class AigcGatewaySpecialist {
         private int emitted;
     }
 
-    private String planningInput(SpecialistContext context, String intent) {
+    String planningInput(SpecialistContext context, String intent) {
         String custom = context.customText() == null ? "" : context.customText().trim();
         String previous = "intent-video".equals(intent)
                 ? support.planField(context.cpPlan(), PlanField.MESSAGE)
                 : support.planField(context.cpPlan(), PlanField.PROMPT);
         if (!custom.isBlank()) {
-            return previous.isBlank() ? custom : previous + "\n\n用户调整意见：" + custom;
+            Map<String, Object> question = parsePlan(context.cpPlan());
+            String original = stringValue(question.get("originalMessage"));
+            String plansText = stringValue(question.get("plansText"));
+            StringBuilder input = new StringBuilder();
+            if (!original.isBlank()) input.append("原始需求：").append(original).append("\n\n");
+            if (!plansText.isBlank()) {
+                input.append("上一轮方案：\n").append(plansText).append("\n\n");
+            } else if (!previous.isBlank()) {
+                input.append("上一轮方案：").append(previous).append("\n\n");
+            }
+            input.append("用户调整意见：").append(custom)
+                    .append("\n请基于原始需求和上一轮方案修改，保持任务主题不变。");
+            return input.toString();
         }
         if (context.userMessage() != null && !context.userMessage().isBlank()) return context.userMessage();
         return previous;

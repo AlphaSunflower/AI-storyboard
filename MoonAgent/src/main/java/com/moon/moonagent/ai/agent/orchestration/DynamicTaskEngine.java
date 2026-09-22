@@ -232,7 +232,8 @@ public class DynamicTaskEngine {
                     "task_node",
                     result != null && result.needsHandoff() ? "handoff" : "completed",
                     result != null && result.needsHandoff() ? "SWITCH_CHAIN" : "CONTINUE",
-                    node.nodeId(), lastMessage, "", "", "",
+                    plan.planId(), node.nodeId(), node.attemptCount() + 1,
+                    "", lastMessage, "", "", "",
                     started, OffsetDateTime.now());
 
             if (result != null && result.needsUserInput()) {

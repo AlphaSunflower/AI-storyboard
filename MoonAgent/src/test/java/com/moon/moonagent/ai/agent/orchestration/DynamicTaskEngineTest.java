@@ -25,7 +25,6 @@ import com.moon.moonagent.orchestration.TaskPlanState;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
-import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -34,6 +33,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,6 +96,12 @@ class DynamicTaskEngineTest {
         assertThat(result.content()).isEqualTo("second");
         assertThat(firstContext.getValue().directExecution()).isTrue();
         assertThat(secondContext.getValue().picUrls()).containsExactly("/api/files/images/generated.png");
+        verify(recorder).step(eq(run), eq(0), eq("intent-aisplit"), eq("task_node"),
+                eq("completed"), eq("CONTINUE"), eq("plan-1"), eq("one"), eq(1),
+                eq(""), any(), eq(""), eq(""), eq(""), any(), any());
+        verify(recorder).step(eq(run), eq(1), eq("intent-video"), eq("task_node"),
+                eq("completed"), eq("CONTINUE"), eq("plan-1"), eq("two"), eq(1),
+                eq(""), any(), eq(""), eq(""), eq(""), any(), any());
     }
 
     @Test
