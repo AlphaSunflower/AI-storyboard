@@ -13,6 +13,9 @@ public class AgentLoopStep {
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
     private String loopRunId;
+    private String planId;
+    private String nodeId;
+    private Integer attemptNo;
     private Integer stepIndex;
     private String chain;
     private String phase;

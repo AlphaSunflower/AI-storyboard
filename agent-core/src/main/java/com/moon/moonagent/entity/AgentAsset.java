@@ -31,6 +31,8 @@ public class AgentAsset {
     private String sceneId;          // 命中真实分镜时记录 sceneId
     private String loopRunId;        // UnifiedLoop 运行 ID
     private String chainRunId;       // 链路执行 ID
+    private String planId;           // 动态任务计划 ID
+    private String nodeId;           // 动态任务节点 ID
     private String idempotencyKey;   // 跨请求去重键
     private String requestFingerprint; // 请求指纹，防同键不同参数
     private String engineVersion;    // 创建记录的引擎版本

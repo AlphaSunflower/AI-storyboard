@@ -30,6 +30,10 @@ public class AgentCheckpoint {
     private String ownerEngine;
     /** checkpoints.plan 的状态协议版本。 */
     private Integer stateSchemaVersion;
+    /** 动态任务计划归属（旧 checkpoint 为空）。 */
+    private String planId;
+    /** 动态任务节点归属（旧 checkpoint 为空）。 */
+    private String nodeId;
     /** pending | used | expired */
     private String status;
     /** 过期时间（创建 + 30min，对齐原 FORM_SNAPSHOT_TTL_MS） */
