@@ -11,6 +11,7 @@ import { HumanInputCard } from './HumanInputCard';
 import { SceneReviewCard } from './SceneReviewCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
+import { DynamicTaskPlanPanel } from './DynamicTaskPlanPanel';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
@@ -291,7 +292,8 @@ export function AgentChatPanel() {
             `}</style>
           </div>
         )}
-        
+
+        <DynamicTaskPlanPanel />
         {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
         {confirmResult && <ConfirmResultCard />}
         {streamError && (

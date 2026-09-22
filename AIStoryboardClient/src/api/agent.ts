@@ -27,6 +27,40 @@ export interface ConversationAssetGroupBinding {
   media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string }>;
 }
 
+export type AgentTaskPlanAction = 'approve' | 'reject' | 'retry' | 'replan' | 'cancel' | 'resume';
+
+export interface AgentTaskPlanNode {
+  nodeId: string;
+  capabilityKey: string;
+  title: string;
+  state: string;
+  attemptCount: number;
+  dependencies: string[];
+  hitlPolicy: string;
+  evaluationMode: string;
+  qualityCriteria: string;
+  outputSummary: string | null;
+  asyncTaskId: string | null;
+  error: string | null;
+}
+
+export interface AgentTaskPlanEdge {
+  fromNodeId: string;
+  toNodeId: string;
+}
+
+export interface AgentTaskPlanView {
+  planId: string;
+  conversationId: string;
+  goal: string;
+  state: string;
+  version: number;
+  replanCount: number;
+  error: string | null;
+  nodes: AgentTaskPlanNode[];
+  edges: AgentTaskPlanEdge[];
+}
+
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
 export interface AgentReasoning {
   summary: string;
@@ -409,6 +443,15 @@ export const agentApi = {
 
   listAssets: (id: string, page = 1, size = 20) =>
     client.get<{ data: AgentPage<AgentAsset> }>(`/agent/conversations/${id}/assets`, { params: { page, size } }),
+
+  getActiveTaskPlan: (conversationId: string) =>
+    client.get<{ data: AgentTaskPlanView | null }>(`/agent/conversations/${conversationId}/plans/active`),
+
+  actOnTaskPlan: (conversationId: string, planId: string, action: AgentTaskPlanAction) =>
+    client.post<{ data: AgentTaskPlanView }>(
+      `/agent/conversations/${conversationId}/plans/${planId}/actions`,
+      { action },
+    ),
 
   deleteAsset: (assetId: string) =>
     client.delete(`/agent/assets/${assetId}`),
