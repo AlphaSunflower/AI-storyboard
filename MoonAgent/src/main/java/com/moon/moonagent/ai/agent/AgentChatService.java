@@ -24,6 +24,9 @@ public interface AgentChatService {
     /** 创建会话：校验项目归属，返回会话 */
     AgentConversation createConversation(String userId, String projectId, String title);
 
+    /** 创建会话并锁定编排引擎；已有会话不得中途切换。 */
+    AgentConversation createConversation(String userId, String projectId, String title, String orchestrationMode);
+
     /**
      * 校验会话归属，返回会话。
      * 会话不存在与无权访问统一返回 40401 + 同一文案（M4），防止 IDOR 枚举。

@@ -111,7 +111,7 @@ class MoonAgentControllerSmokeTest {
 
     @Test
     void conversationEndpoints_returnContract() throws Exception {
-        when(chatService.createConversation(anyString(), anyString(), anyString())).thenReturn(conversation());
+        when(chatService.createConversation(anyString(), anyString(), anyString(), any())).thenReturn(conversation());
         when(chatService.listConversations(anyString(), anyString())).thenReturn(List.of(conversation()));
         when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
         when(chatService.getPendingCheckpoint(anyString())).thenReturn(Map.of("token", "t"));

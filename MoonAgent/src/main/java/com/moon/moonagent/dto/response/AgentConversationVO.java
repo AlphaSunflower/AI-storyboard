@@ -15,6 +15,9 @@ public record AgentConversationVO(
     String title,
     String status,
     CanvasSessionContext canvasContext,
+    String orchestrationMode,
+    String engineVersion,
+    Boolean debugComparisonEnabled,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt
 ) {}

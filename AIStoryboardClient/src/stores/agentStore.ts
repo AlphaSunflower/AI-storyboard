@@ -42,6 +42,114 @@ function appendReasoningDetails(prev: AgentReasoning | undefined, event: SseEven
     : previous + delta;
 }
 
+type GenerationSnapshot = {
+  hint: string;
+  assistantId?: string;
+  assistantContent?: string;
+  reasoningDraft?: AgentReasoning;
+  traceDraft?: AgentTraceEvent[];
+  assistantMessageMetadata?: AgentMessageMetadata;
+  /** message_end 已完成正文回复；异步视频任务可随后重新置回 false */
+  finished?: boolean;
+};
+
+type StreamSettlement = {
+  promise: Promise<void>;
+  settle: () => void;
+};
+
+const streamSettlements = new Map<string, StreamSettlement>();
+
+/** 同一会话 SSE 串行收尾：UI 可在 message_end 立即解锁，同时避免后端会话锁未释放时提交撞 40901。 */
+async function reserveStreamSlot(conversationId: string): Promise<() => void> {
+  const previous = streamSettlements.get(conversationId)?.promise;
+  let settle!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  const current: StreamSettlement = { promise, settle };
+  streamSettlements.set(conversationId, current);
+  if (previous) await previous;
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (streamSettlements.get(conversationId) === current) {
+      streamSettlements.delete(conversationId);
+    }
+    settle();
+  };
+}
+
+function generationInProgress(generation?: GenerationSnapshot): boolean {
+  return !!generation && !generation.finished;
+}
+
+function generationHint(generation?: GenerationSnapshot): string {
+  return generationInProgress(generation) ? generation?.hint ?? '' : '';
+}
+
+/** 完整正文保存到属主 generating；仅当前正在查看该会话时同步可见消息。 */
+function storeAssistantContent(conversationId: string, assistantId: string, content: string) {
+  useAgentStore.setState((state) => {
+    const current = state.generating[conversationId] ?? { hint: '' };
+    const generating = {
+      ...state.generating,
+      [conversationId]: { ...current, assistantId, assistantContent: content },
+    };
+    if (state.activeConversationId !== conversationId) return { generating };
+    return {
+      generating,
+      messages: state.messages.map((message) =>
+        message.id === assistantId ? { ...message, content } : message),
+    };
+  });
+}
+
+/** message_end 收到完整正文后立即结束对话中状态，不再等待持久化和 SSE EOF。 */
+function finishAssistantReply(conversationId: string, assistantId: string) {
+  useAgentStore.setState((state) => {
+    const current = state.generating[conversationId];
+    if (!current || current.assistantId !== assistantId) return {};
+
+    const generating = {
+      ...state.generating,
+      [conversationId]: {
+        ...current,
+        hint: '',
+        finished: true,
+        reasoningDraft: undefined,
+        traceDraft: undefined,
+      },
+    };
+    const view = state.activeConversationId ? generating[state.activeConversationId] : undefined;
+    return {
+      generating,
+      streaming: generationInProgress(view),
+      workflowHint: generationHint(view),
+      ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
+    };
+  });
+}
+
+/** 视频任务已受理：正文即使已结束，也保持生成状态直到轮询到 completed/failed。 */
+function resumeGenerationForTask(conversationId: string, assistantId: string, hint = '') {
+  useAgentStore.setState((state) => {
+    const current = state.generating[conversationId] ?? { hint };
+    const generating = {
+      ...state.generating,
+      [conversationId]: { ...current, assistantId, hint, finished: false },
+    };
+    const view = state.activeConversationId ? generating[state.activeConversationId] : undefined;
+    return {
+      generating,
+      streaming: generationInProgress(view),
+      workflowHint: generationHint(view),
+    };
+  });
+}
+
 /** 审核分镜的同步生图结束后刷新编辑器和生成记录；卡片卸载后也必须执行。 */
 async function refreshAfterReviewImageGeneration(projectId: string | undefined) {
   if (!projectId) return;
@@ -150,17 +258,7 @@ interface AgentState {
   messages: AgentMessage[];
   streaming: boolean;
   /** 会话级进行中生成状态（key=conversationId）：切走保留、切回恢复；streaming/workflowHint 由此派生 */
-  generating: Record<string, {
-    hint: string;
-    assistantId?: string;
-    assistantContent?: string;
-    /** 实时推理草稿（reasoning_delta 累积；message_end 后清空并写入 assistantMessageMetadata） */
-    reasoningDraft?: AgentReasoning;
-    /** 实时轨迹草稿（agent_trace 追加；message_end 后清空并写入 assistantMessageMetadata） */
-    traceDraft?: AgentTraceEvent[];
-    /** message_end 最终消息元数据（切会话后恢复占位气泡用） */
-    assistantMessageMetadata?: AgentMessageMetadata;
-  }>;
+  generating: Record<string, GenerationSnapshot>;
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
   confirmResult: ConfirmResultInfo | null;
@@ -264,6 +362,131 @@ let manualStop = false;
 // 视频异步任务轮询句柄 + 代次令牌：新一轮发送/停止时作废旧轮询，防止过期轮询结果污染新流
 let videoPollTimer: ReturnType<typeof setInterval> | null = null;
 let videoPollToken = 0;
+
+function taskKindHint(kind: VideoTaskStatus['kind'], status: string, waitingSec: number) {
+  const waiting = `已等待约 ${waitingSec} 秒`;
+  if (kind === 'image-batch') {
+    return status === 'queued' ? `批量生图排队中…（${waiting}）` : `批量生图中…（${waiting}）`;
+  }
+  if (kind === 'long-tool') {
+    return status === 'queued' ? `后台任务排队中…（${waiting}）` : `后台任务处理中…（${waiting}）`;
+  }
+  return status === 'queued' ? `视频排队中…（${waiting}）` : `视频生成中…（${waiting}）`;
+}
+
+function taskCompletedContent(task: VideoTaskStatus) {
+  if (task.result) return task.result;
+  const urls = task.resultUrls?.length ? task.resultUrls : [task.url];
+  if (task.kind === 'image-batch' || task.kind === 'long-tool') {
+    return urls.filter(Boolean).map((url) => `![生成图片](${url})`).join('\n\n');
+  }
+  return task.url || '';
+}
+
+function appendTaskResult(existing: string | undefined, result: string) {
+  const current = existing?.trim() ?? '';
+  const addition = result?.trim() ?? '';
+  if (!addition) return current;
+  if (!current) return addition;
+  if (current.includes(addition)) return current;
+  return `${current}\n\n${addition}`;
+}
+
+/** UnifiedLoop 异步任务：收到 task_accepted 后独立轮询到终态。 */
+function beginUnifiedVideoPolling(
+  taskId: string,
+  conversationId: string,
+  assistantId: string,
+  taskKind?: VideoTaskStatus['kind'],
+) {
+  if (!taskId) return;
+  resumeGenerationForTask(conversationId, assistantId,
+    taskKind === 'image-batch' ? '批量生图中...' : taskKind === 'long-tool' ? '后台任务处理中...' : '视频生成中...');
+  const myToken = ++videoPollToken;
+  let waitingSec = 0;
+  useAgentStore.setState({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
+  const timer = setInterval(async () => {
+    if (videoPollToken !== myToken || useAgentStore.getState().agentVideoTask?.taskId !== taskId) {
+      clearInterval(timer);
+      if (videoPollTimer === timer) videoPollTimer = null;
+      return;
+    }
+    waitingSec += 5;
+    try {
+      const response = await agentApi.getVideoTaskStatus(taskId);
+      const task = response.data.data;
+      if (task.status === 'completed') {
+        clearInterval(timer);
+        if (videoPollTimer === timer) videoPollTimer = null;
+        useAgentStore.setState((state) => {
+          const generating = { ...state.generating };
+          if (generating[conversationId]?.assistantId === assistantId) delete generating[conversationId];
+        const currentGenerating = state.activeConversationId ? generating[state.activeConversationId] : undefined;
+        const active = state.activeConversationId === conversationId;
+        const completedContent = appendTaskResult(
+          state.generating[conversationId]?.assistantContent
+            ?? state.messages.find((message) => message.id === assistantId)?.content,
+          taskCompletedContent(task));
+        return {
+            generating,
+          streaming: generationInProgress(currentGenerating),
+          workflowHint: generationHint(currentGenerating),
+            pendingAssistantId: null,
+            agentVideoTask: null,
+            messages: active ? state.messages.map((message) =>
+              message.id === assistantId ? { ...message, content: completedContent } : message) : state.messages,
+            confirmResult: active ? {
+              kind: task.kind === 'image-batch' ? 'image' : 'video',
+              url: task.url || '',
+              urls: task.resultUrls,
+              assetId: task.assetId || task.assetIds?.[0],
+              sceneCount: 0,
+              actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
+            } : state.confirmResult,
+          };
+        });
+        void useAgentStore.getState().loadAssets();
+        if (task.kind === 'image-batch' && task.followUpTaskId) {
+          beginUnifiedVideoPolling(task.followUpTaskId, conversationId, assistantId, 'video');
+        }
+        return;
+      }
+      if (task.status === 'failed') {
+        clearInterval(timer);
+        if (videoPollTimer === timer) videoPollTimer = null;
+        useAgentStore.setState((state) => {
+          const generating = { ...state.generating };
+          if (generating[conversationId]?.assistantId === assistantId) delete generating[conversationId];
+        const currentGenerating = state.activeConversationId ? generating[state.activeConversationId] : undefined;
+        const active = state.activeConversationId === conversationId;
+        return {
+            generating,
+            streaming: generationInProgress(currentGenerating),
+            workflowHint: generationHint(currentGenerating),
+            agentVideoTask: null,
+            streamError: active ? (task.error || '任务生成失败，请重试') : state.streamError,
+          };
+        });
+        return;
+      }
+      useAgentStore.setState((state) => {
+        const status = task.status === 'queued' ? 'queued' : 'running';
+        const hint = taskKindHint(task.kind ?? taskKind, status, waitingSec);
+        return {
+          agentVideoTask: { taskId, status, waitingSec },
+          workflowHint: state.activeConversationId === conversationId ? hint : state.workflowHint,
+          generating: {
+            ...state.generating,
+            [conversationId]: { ...(state.generating[conversationId] ?? { hint: '' }), assistantId, hint },
+          },
+        };
+      });
+    } catch {
+      // 单次轮询失败继续，下一 tick 自愈。
+    }
+  }, VIDEO_POLL_INTERVAL);
+  videoPollTimer = timer;
+}
 
 /** 从会话 generating 记录恢复 assistant 占位气泡的消息元数据（切会话后重建占位用） */
 function buildGeneratingMetadata(g?: { reasoningDraft?: AgentReasoning; traceDraft?: AgentTraceEvent[]; assistantMessageMetadata?: AgentMessageMetadata }): AgentMessageMetadata | undefined {
@@ -486,8 +709,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         conversations: s.conversations.filter((c) => c.id !== id),
         activeConversationId: active,
         generating: g,
-        streaming: !!gview,
-        workflowHint: gview?.hint ?? '',
+        streaming: generationInProgress(gview),
+        workflowHint: generationHint(gview),
         messages: isActive ? [] : s.messages,
         waitingHumanInput: isActive ? null : s.waitingHumanInput, 
         waitingVideoPlan: isActive ? null : s.waitingVideoPlan,
@@ -520,8 +743,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return {
         activeConversationId: id,
         messages: [],
-        streaming: !!g,
-        workflowHint: g?.hint ?? '',
+        streaming: generationInProgress(g),
+        workflowHint: generationHint(g),
         waitingHumanInput: null,
       
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
@@ -762,7 +985,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((s) => ({
       messages: [...s.messages, optimisticUser],
       streaming: true,
-      generating: { ...s.generating, [id]: { hint: '' } },
+      generating: { ...s.generating, [id]: { hint: '', finished: false } },
       streamError: null,
       waitingHumanInput: null,
       
@@ -796,12 +1019,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
     // （增量拼接的签名 URL 已被后端替换为 /api/files/images/ 永久地址）
-    const updateAssistantFull = (full: string) =>
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: full } : m),
-        generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } },
-      }));
+    const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
@@ -869,8 +1087,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
+    let acceptedTaskId: string | null = null;
     let receivedCanvasModeRequired = false;
 
+    const releaseStream = await reserveStreamSlot(snapshotId);
     try {
       await streamChat(id, content, requestPicUrls, (e: SseEvent) => {
         switch (e.type) {
@@ -925,7 +1145,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               });
               set((s) => {
                 const g = { ...s.generating };
-                delete g[snapshotId];
+                if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
                 return {
                   messages: s.messages.filter((m) => m.id !== assistantId),
                   generating: g,
@@ -984,9 +1204,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
             mergeFinalMetadata(e);
-            if (get().activeConversationId !== snapshotId) break;
-            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
+            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
+            if (!acceptedTaskId) finishAssistantReply(snapshotId, assistantId);
+            // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
+            if (get().activeConversationId !== snapshotId) break;
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
             if (typeof e.title === 'string' && e.title) {
               set((s) => ({
@@ -1008,6 +1230,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
             refreshStoryboardQueues();
+            break;
+          case 'task_accepted':
+            receivedMessageEnd = true;
+            acceptedTaskId = e.taskId ?? '';
+            if (acceptedTaskId) {
+              beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+            }
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -1083,6 +1312,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       }
     } finally {
+      releaseStream();
+      if (acceptedTaskId) return;
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
@@ -1092,12 +1323,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
-        delete g[snapshotId];
+        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
         const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
         return {
           generating: g,
-          streaming: !!gview,
-          workflowHint: gview?.hint ?? '',
+          streaming: generationInProgress(gview),
+          workflowHint: generationHint(gview),
           ...(isThisStream ? { pendingAssistantId: null } : {}),
           messages: stillSameConversation
           ? s.messages.map((m) =>
@@ -1160,7 +1391,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (opts?.hiddenCard) {
         return {
           streaming: true,
-          generating: { ...s.generating, [id]: { hint: '' } },
+          generating: { ...s.generating, [id]: { hint: '', finished: false } },
           waitingHumanInput: null,
           streamError: null,
         };
@@ -1176,7 +1407,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       };
       return {
         streaming: true,
-        generating: { ...s.generating, [id]: { hint: '' } },
+        generating: { ...s.generating, [id]: { hint: '', finished: false } },
         waitingHumanInput: null,
         streamError: null,
         messages: hasCard
@@ -1195,12 +1426,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     };
 
     // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
-    const updateAssistantFull = (full: string) =>
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: full } : m),
-        generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } },
-      }));
+    const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
 
     // 预定义选项不 push 用户气泡（选中状态已标记在卡片 metadata.hitl 上）；
     // action=custom 只 push 用户原文气泡（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
@@ -1294,7 +1520,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
+    let acceptedTaskId: string | null = null;
 
+    const releaseStream = await reserveStreamSlot(snapshotId);
     try {
       await submitForm(id, info.formToken, info.taskId, actionId, (e: SseEvent) => {
         switch (e.type) {
@@ -1384,9 +1612,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             receivedMessageEnd = true;
             // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
             mergeFinalMetadata(e);
-            if (get().activeConversationId !== snapshotId) break;
-            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡
+            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
+            if (!acceptedTaskId) finishAssistantReply(snapshotId, assistantId);
+            // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
+            if (get().activeConversationId !== snapshotId) break;
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
             if (typeof e.title === 'string' && e.title) {
               set((s) => ({
@@ -1408,6 +1638,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
             refreshStoryboardQueues();
+            break;
+          case 'task_accepted':
+            receivedMessageEnd = true;
+            acceptedTaskId = e.taskId ?? '';
+            if (acceptedTaskId) {
+              beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+            }
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -1483,6 +1720,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       }
     } finally {
+      releaseStream();
+      if (acceptedTaskId) return;
       // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
       // （已切换会话时旧占位消息已被 selectConversation 整组替换）
       // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
@@ -1492,12 +1731,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
-        delete g[snapshotId];
+        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
         const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
         return {
           generating: g,
-          streaming: !!gview,
-          workflowHint: gview?.hint ?? '',
+          streaming: generationInProgress(gview),
+          workflowHint: generationHint(gview),
           ...(isThisStream ? { pendingAssistantId: null } : {}),
           messages: stillSameConversation
           ? s.messages.map((m) =>
@@ -1592,7 +1831,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (actionId === 'custom') {
       set((s) => {
         const h = { ...s.hitlVideoPlan }; delete h[id];
-        return { streaming: true, generating: { ...s.generating, [id]: { hint: '' } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
+        return { streaming: true, generating: { ...s.generating, [id]: { hint: '', finished: false } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
       });
       const assistantId = `tmp-assistant-${Date.now()}`;
       set((s) => ({
@@ -1608,8 +1847,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }));
       const updateAssistant = (delta: string) =>
         set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: m.content + delta } : m), generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: (s.generating[id]?.assistantContent ?? '') + delta } } }));
-      const updateAssistantFull = (full: string) =>
-        set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: full } : m), generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } } }));
+      const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
       const snapshotId = id;
       const updateLiveReasoning = (reasoning: AgentReasoning) => {
         set((s) => {
@@ -1672,6 +1910,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       };
       let receivedMessageEnd = false;
       let receivedHumanInput = false;
+      const releaseStream = await reserveStreamSlot(snapshotId);
       try {
         await submitForm(id, info.planToken, '', 'custom', (e: SseEvent) => {
           switch (e.type) {
@@ -1791,8 +2030,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             case 'message_end':
               receivedMessageEnd = true;
               mergeFinalMetadata(e);
-              if (get().activeConversationId !== snapshotId) break;
               if (e.content) updateAssistantFull(e.content);
+              finishAssistantReply(snapshotId, assistantId);
+              if (get().activeConversationId !== snapshotId) break;
               if (e.title) {
                 set((s) => ({
                   conversations: s.conversations.map((c) => c.id === id && c.title !== e.title ? { ...c, title: e.title! } : c),
@@ -1817,18 +2057,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       } catch (err) {
         if (!manualStop && get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       } finally {
+        releaseStream();
         // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
         const isThisStream = get().pendingAssistantId === assistantId;
         const stillSame = get().activeConversationId === snapshotId;
         const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
         set((s) => {
           const g = { ...s.generating };
-          delete g[snapshotId];
+          if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
           const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
           return {
             generating: g,
-            streaming: !!gview,
-            workflowHint: gview?.hint ?? '',
+            streaming: generationInProgress(gview),
+            workflowHint: generationHint(gview),
             ...(isThisStream ? { pendingAssistantId: null } : {}),
             messages: stillSame
             ? s.messages.map((m) => m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput ? { ...m, content: failedText } : m)
@@ -1841,7 +2082,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 开始生成视频：与 submitHumanInput 一致——提交时清除上次 streamError
     set((s) => {
       const h = { ...s.hitlVideoPlan }; delete h[id];
-      return { streaming: true, generating: { ...s.generating, [id]: { hint: '' } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
+      return { streaming: true, generating: { ...s.generating, [id]: { hint: '', finished: false } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
     });
 
     // 新建 assistant 占位气泡：视频异步生成期间为空（AgentChatPanel 显示生成中加载条），
@@ -1861,12 +2102,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       generating: { ...s.generating, [id]: { ...s.generating[id], assistantId, assistantContent: '' } },
     }));
 
-    const updateAssistantFull = (full: string) =>
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: full } : m),
-        generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: full } },
-      }));
+    const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
@@ -1874,7 +2110,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 视频异步任务：task_accepted 后启动 5s 轮询（跨会话守卫；completed/failed 停止）
     let acceptedTaskId: string | null = null;
     let pollTick = 0; // 轮询次数（阶段提示「已等待约 X 秒」用，5s/tick）
-    const startTaskPolling = (taskId: string) => {
+    const startTaskPolling = (taskId: string, taskKind?: VideoTaskStatus['kind']) => {
+      resumeGenerationForTask(snapshotId, assistantId,
+        taskKind === 'image-batch' ? '批量生图中...' : taskKind === 'long-tool' ? '后台任务处理中...' : '视频生成中...');
       // 任务中心：任务开始，暴露进行中状态（completed/failed 清空）
       set({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
       const myToken = ++videoPollToken;
@@ -1889,19 +2127,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           if (t.status === 'completed') {
             clearInterval(timer); videoPollTimer = null;
             receivedResult = true;
-            updateAssistantFull(t.url || '');
+            updateAssistantFull(appendTaskResult(
+              get().generating[snapshotId]?.assistantContent,
+              taskCompletedContent(t)));
             set((s) => {
               const g = { ...s.generating };
-              delete g[snapshotId];
+              if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
               const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
               return {
                 generating: g,
-                streaming: !!gview,
-                workflowHint: gview?.hint ?? '',
+                streaming: generationInProgress(gview),
+                workflowHint: generationHint(gview),
                 pendingAssistantId: null,
                 agentVideoTask: null,
                 confirmResult: {
-                  kind: 'video', url: t.url || '', assetId: t.assetId, sceneCount: 0,
+                  kind: t.kind === 'image-batch' ? 'image' : 'video',
+                  url: t.url || '',
+                  urls: t.resultUrls,
+                  assetId: t.assetId || t.assetIds?.[0],
+                  sceneCount: 0,
                   actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
                 },
               };
@@ -1922,34 +2166,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               }).catch(() => undefined);
               sessionStorage.removeItem('moon.activeGroupId');
             }
+            if (t.kind === 'image-batch' && t.followUpTaskId) {
+              startTaskPolling(t.followUpTaskId, 'video');
+            }
           } else if (t.status === 'failed') {
             clearInterval(timer); videoPollTimer = null;
             set((s) => {
               const g = { ...s.generating };
-              delete g[snapshotId];
+              if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
               const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
               const isThis = s.activeConversationId === snapshotId;
               return {
                 generating: g,
-                streaming: !!gview,
-                workflowHint: gview?.hint ?? '',
+                streaming: generationInProgress(gview),
+                workflowHint: generationHint(gview),
                 agentVideoTask: null,
-                ...(isThis ? { streamError: t.error || '视频生成失败，请重试' } : {}),
+                ...(isThis ? { streamError: t.error || '任务生成失败，请重试' } : {}),
               };
             });
           } else {
             // queued/running：写入属主会话 generating（切走后台继续、切回见最新进度）；仅当正看该会话才同步视图
             const waiting = Math.round(pollTick * 5);
-            const stage = t.status === 'queued'
-              ? `视频排队中…（已等待约 ${waiting} 秒）`
-              : `视频生成中…（已等待约 ${waiting} 秒，通常 1~3 分钟）`;
+            const stage = taskKindHint(t.kind ?? taskKind, t.status, waiting);
             set((s) => {
               const g = { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: stage } };
               const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
               return {
                 generating: g,
-                streaming: !!gview,
-                workflowHint: gview?.hint ?? '',
+                streaming: generationInProgress(gview),
+                workflowHint: generationHint(gview),
                 agentVideoTask: { taskId, status: t.status === 'queued' ? 'queued' : 'running', waitingSec: waiting },
               };
             });
@@ -1962,19 +2207,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       videoPollTimer = timer;
     };
 
+    // 统一 HITL 提交路径：video_plan 的 planToken 即 checkpoint formToken
+    const releaseStream = await reserveStreamSlot(snapshotId);
     try {
-      // 统一 HITL 提交路径：video_plan 的 planToken 即 checkpoint formToken
       await submitForm(id, info.planToken, '', 'generate_video', (e: SseEvent) => {
         switch (e.type) {
           case 'task_accepted':
-            // 视频任务已受理：流即将结束，转轮询取结果（跨会话守卫）
-            if (get().activeConversationId !== snapshotId) break;
+            // 视频任务已受理：流即将结束，转轮询取结果；即使已切走也要恢复属主会话的生成状态。
             acceptedTaskId = e.taskId ?? '';
             set((s) => ({
               workflowHint: e.message ?? '视频任务已受理，正在排队生成…',
               generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: e.message ?? '视频任务已受理，正在排队生成…' } },
             }));
-            if (acceptedTaskId) startTaskPolling(acceptedTaskId);
+            if (acceptedTaskId) startTaskPolling(acceptedTaskId, e.taskKind);
             break;
           case 'confirm_result':
             if (get().activeConversationId !== snapshotId) break;
@@ -2000,6 +2245,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         set({ streamError: err instanceof Error ? err.message : '生成出错，请重试' });
       }
     } finally {
+      releaseStream();
       const stillSameConversation = get().activeConversationId === snapshotId;
       // 异步视频任务已受理：保持 streaming（轮询 completed 时关闭），占位气泡不补写
       if (acceptedTaskId) {
@@ -2010,12 +2256,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const failedText = manualStop ? '（已停止）' : (get().streamError ? '（生成失败）' : '（未收到回复）');
       set((s) => {
         const g = { ...s.generating };
-        delete g[snapshotId];
+        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
         const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
         return {
           generating: g,
-          streaming: !!gview,
-          workflowHint: gview?.hint ?? '',
+          streaming: generationInProgress(gview),
+          workflowHint: generationHint(gview),
           pendingAssistantId: null,
           messages: stillSameConversation
           ? s.messages.map((m) =>
@@ -2046,7 +2292,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const g = { ...s.generating };
       if (id) delete g[id];
       const gview = id && s.activeConversationId ? g[s.activeConversationId] : undefined;
-      return { generating: g, streaming: !!gview, workflowHint: gview?.hint ?? '' };
+      return { generating: g, streaming: generationInProgress(gview), workflowHint: generationHint(gview) };
     });
   },
 

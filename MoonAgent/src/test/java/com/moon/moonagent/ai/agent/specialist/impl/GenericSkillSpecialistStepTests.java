@@ -19,6 +19,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,6 +51,7 @@ class GenericSkillSpecialistStepTests {
     private ChatClient client;
     private ChatClient.ChatClientRequestSpec spec;
     private ChatClient.CallResponseSpec callSpec;
+    private ChatClient.StreamResponseSpec streamSpec;
     private AgentOrchestratorSupport support;
     private SkillExpander skillExpander;
     private GenericSkillSpecialist specialist;
@@ -60,6 +62,7 @@ class GenericSkillSpecialistStepTests {
         client = mock(ChatClient.class);
         spec = mock(ChatClient.ChatClientRequestSpec.class);
         callSpec = mock(ChatClient.CallResponseSpec.class);
+        streamSpec = mock(ChatClient.StreamResponseSpec.class);
         support = mock(AgentOrchestratorSupport.class);
         skillExpander = mock(SkillExpander.class);
 
@@ -82,6 +85,8 @@ class GenericSkillSpecialistStepTests {
         when(spec.messages(any(Message[].class))).thenReturn(spec);
         when(spec.tools(any(Object[].class))).thenReturn(spec);
         when(spec.call()).thenReturn(callSpec);
+        when(spec.stream()).thenReturn(streamSpec);
+        when(streamSpec.chatResponse()).thenReturn(Flux.empty());
         when(support.runHITLStage(any(), any(), any())).thenAnswer(inv ->
                 ((AgentOrchestratorSupport.StagePlan) inv.getArgument(2)).planText());
     }
@@ -164,6 +169,7 @@ class GenericSkillSpecialistStepTests {
         ChatResponse response = mock(ChatResponse.class);
         when(response.getResult()).thenReturn(generation);
         when(callSpec.chatResponse()).thenReturn(response);
+        when(streamSpec.chatResponse()).thenReturn(Flux.just(response));
     }
 
     private AgentSkill testSkill() {

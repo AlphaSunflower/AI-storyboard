@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { streamChat } from './agent';
+import client from './client';
+import { agentApi, streamChat } from './agent';
 
 describe('streamChat', () => {
   afterEach(() => {
@@ -25,5 +26,16 @@ describe('streamChat', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.assetGroupIds).toEqual(['group-1']);
     expect(body.assetGroupSnapshotIds).toEqual(['snapshot-1']);
+  });
+
+  it('omits orchestrationMode when creating a conversation without an explicit choice', async () => {
+    const post = vi.spyOn(client, 'post').mockResolvedValue({ data: { data: {} } });
+
+    await agentApi.createConversation('project-1', '新对话');
+
+    expect(post).toHaveBeenCalledWith('/agent/conversations', {
+      projectId: 'project-1',
+      title: '新对话',
+    });
   });
 });

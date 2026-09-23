@@ -1,5 +1,8 @@
 package com.moon.moonagent.ai.agent.skill;
 
+import com.moon.moonagent.orchestration.EvaluationMode;
+import com.moon.moonagent.orchestration.HitlPolicy;
+
 import java.util.List;
 import java.util.Map;
 
@@ -15,7 +18,7 @@ import java.util.Map;
  *       有 handler 的能力仍走 {@code PromptConfig}（prompts/**）。</li>
  * </ul>
  *
- * <p>Graph 仍是代码（{@code PlanGraph}）管流程/HITL/循环；Skill 只是被节点代码消费的 data，
+ * <p>UnifiedAgentLoop 管流程/HITL/循环；Skill 只是被执行器消费的 data，
  * 不声明 graph 拓扑（防「Skill 声明 Graph」反模式）。
  *
  * @param intentType 意图标识（intent-aisplit / intent-pic / ...），由 name 加 "intent-" 前缀推导
@@ -45,7 +48,36 @@ public record AgentSkill(
         int menuOrder,
         List<Map<String, Object>> hitlManifest,
         Map<String, String> nodePrompts,
-        List<String> flow) {
+        List<String> flow,
+        EvaluationMode evaluationMode,
+        HitlPolicy defaultHitlPolicy,
+        boolean async
+) {
+
+    public AgentSkill(
+            String intentType,
+            String name,
+            String description,
+            String label,
+            String modelRole,
+            List<String> tools,
+            Map<String, Integer> limits,
+            List<String> triggers,
+            int priority,
+            int menuOrder,
+            List<Map<String, Object>> hitlManifest,
+            Map<String, String> nodePrompts,
+            List<String> flow
+    ) {
+        this(intentType, name, description, label, modelRole, tools, limits, triggers,
+                priority, menuOrder, hitlManifest, nodePrompts, flow,
+                EvaluationMode.HYBRID, HitlPolicy.NONE, false);
+    }
+
+    public AgentSkill {
+        evaluationMode = evaluationMode == null ? EvaluationMode.HYBRID : evaluationMode;
+        defaultHitlPolicy = defaultHitlPolicy == null ? HitlPolicy.NONE : defaultHitlPolicy;
+    }
 
     /** 意图前缀：Skill name 与 intentType 的映射规则（handler.intentType() = "intent-" + name） */
     private static final String INTENT_PREFIX = "intent-";
@@ -73,7 +105,10 @@ public record AgentSkill(
                 intVal(frontmatter.get("menu_order"), 100),
                 hitl == null ? List.of() : hitl,
                 nodePrompts == null ? Map.of() : nodePrompts,
-                toStrList(frontmatter.get("flow")));
+                toStrList(frontmatter.get("flow")),
+                evaluationMode(frontmatter.get("evaluation_mode")),
+                hitlPolicy(frontmatter.get("default_hitl_policy")),
+                boolVal(frontmatter.get("async")));
     }
 
     /** 澄清菜单最终 id（与 handler.intentType() 对齐，resume/clarify 共用） */
@@ -126,5 +161,30 @@ public record AgentSkill(
             }
         });
         return out;
+    }
+
+    private static EvaluationMode evaluationMode(Object value) {
+        String normalized = str(value).trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "deterministic" -> EvaluationMode.DETERMINISTIC;
+            case "llm" -> EvaluationMode.LLM;
+            default -> EvaluationMode.HYBRID;
+        };
+    }
+
+    private static HitlPolicy hitlPolicy(Object value) {
+        String normalized = str(value).trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "before" -> HitlPolicy.BEFORE;
+            case "after" -> HitlPolicy.AFTER;
+            case "on_risk", "on-risk" -> HitlPolicy.ON_RISK;
+            case "manual" -> HitlPolicy.MANUAL;
+            default -> HitlPolicy.NONE;
+        };
+    }
+
+    private static boolean boolVal(Object value) {
+        if (value instanceof Boolean b) return b;
+        return value != null && "true".equalsIgnoreCase(String.valueOf(value).trim());
     }
 }

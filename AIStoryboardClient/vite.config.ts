@@ -12,11 +12,28 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-    },
+    proxy: process.env.VITE_API_PROXY_TARGET
+      ? {
+          '/api/agent': {
+            target: process.env.VITE_API_PROXY_TARGET,
+            changeOrigin: true,
+            configure: (proxy) => {
+              if (!process.env.VITE_DEV_USER_ID) return;
+              proxy.on('proxyReq', (proxyReq) => {
+                proxyReq.setHeader('X-User-Id', process.env.VITE_DEV_USER_ID!);
+              });
+            },
+          },
+          '/api': {
+            target: 'http://localhost:8080',
+            changeOrigin: true,
+          },
+        }
+      : {
+          '/api': {
+            target: 'http://localhost:8080',
+            changeOrigin: true,
+          },
+        },
   },
 })

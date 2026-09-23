@@ -9,6 +9,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.orchestration.OrchestrationMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.dto.response.AssetVO;
@@ -32,12 +33,16 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -54,6 +59,9 @@ import java.util.regex.Pattern;
 @Component
 @RequiredArgsConstructor
 public class AgentOrchestratorSupport {
+
+    @Autowired(required = false)
+    private transient ApplicationEventPublisher taskEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorSupport.class);
 
@@ -79,6 +87,7 @@ public class AgentOrchestratorSupport {
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final Set<String> activeVideoPolls = ConcurrentHashMap.newKeySet();
 
     /** 主计划 LLM（懒加载，复用网关默认对话模型，超时由 ai.agent.plan-timeout-seconds 控制） */
     private volatile ChatClient planClient;
@@ -379,13 +388,8 @@ public class AgentOrchestratorSupport {
                 new GatePrompt("intent-aisplit", "requirement-clarify", "orchestrator/requirement-clarify"),
                 new GatePrompt("intent-aisplit", "storyboard-plan", "orchestrator/storyboard-plan"),
                 new GatePrompt("intent-aisplit", "scene-params-recommend", "orchestrator/scene-params-recommend"),
-                new GatePrompt("intent-pic", "image-clarify", "orchestrator/image-clarify"),
-                new GatePrompt("intent-pic", "image-prompt", "orchestrator/image-prompt"),
-                new GatePrompt("intent-pic", "image-prompt-with-params", "orchestrator/image-prompt-with-params"),
-                new GatePrompt("intent-pic", "pic-refine-options", "orchestrator/pic-refine-options"),
-                new GatePrompt("intent-pic", "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note"),
-                new GatePrompt("intent-video", "video-clarify", "orchestrator/video-clarify"),
-                new GatePrompt("intent-video", "video-plan", "orchestrator/video-plan"),
+                new GatePrompt("intent-pic", "plan", "orchestrator/image-plan"),
+                new GatePrompt("intent-video", "plan", "orchestrator/video-plan"),
                 new GatePrompt("intent-scene-review", "scene-review", "services/scene-review"));
     }
 
@@ -888,6 +892,10 @@ public class AgentOrchestratorSupport {
                                    List<Map<String, Object>> assets) {
         AgentCheckpoint cp = new AgentCheckpoint();
         cp.setConversationId(conversation.getId());
+        OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
+        cp.setOwnerEngine(mode == OrchestrationMode.UNIFIED_LOOP
+                ? OrchestrationMode.UNIFIED_LOOP.name() : OrchestrationMode.LEGACY.name());
+        cp.setStateSchemaVersion(1);
         cp.setAction(action);
         cp.setFormToken(UUID.randomUUID().toString());
         cp.setStep(step);
@@ -1534,9 +1542,24 @@ public class AgentOrchestratorSupport {
             return null;
         }
         // 立即受理：task_accepted → 本轮 SSE 结束（前端转轮询，不再同步阻塞 7.5min）
-        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
-        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        sendEvent(req, "task_accepted", Map.of(
+                "taskId", taskId,
+                "taskKind", "video",
+                "message", "视频任务已受理，正在排队生成"));
+        scheduleVideoPolling(taskId);
         return taskId;
+    }
+
+    /** 幂等启动视频轮询；重复调用不会为同一 taskId 创建多个后台循环。 */
+    public void scheduleVideoPolling(String taskId) {
+        if (taskId == null || taskId.isBlank() || !activeVideoPolls.add(taskId)) return;
+        agentExecutor.submit(() -> {
+            try {
+                pollVideoTaskAndUpdate(taskId);
+            } finally {
+                activeVideoPolls.remove(taskId);
+            }
+        });
     }
 
     /** 后台轮询视频任务直至终态（90×5s ≈ 7.5min 上限），终态更新 agent_assets 行 */
@@ -1605,8 +1628,11 @@ public class AgentOrchestratorSupport {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
         }
-        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
-        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        sendEvent(req, "task_accepted", Map.of(
+                "taskId", taskId,
+                "taskKind", "video",
+                "message", "视频任务已受理，正在排队生成"));
+        scheduleVideoPolling(taskId);
         return taskId;
     }
 
@@ -1619,6 +1645,7 @@ public class AgentOrchestratorSupport {
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
                             .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
             if (asset == null) return;
+            String previousStatus = asset.getStatus();
             asset.setStatus(status);
             if (url != null && !url.isBlank()) asset.setUrl(url);
             if (error != null && !error.isBlank()) asset.setError(error);
@@ -1635,6 +1662,14 @@ public class AgentOrchestratorSupport {
             assetMapper.updateById(asset);
             if ("completed".equals(status) && url != null && !url.isBlank()) {
                 persistVideoMessage(asset, url);
+            }
+            if ((!status.equals(previousStatus))
+                    && ("completed".equals(status) || "failed".equals(status))
+                    && asset.getPlanId() != null && !asset.getPlanId().isBlank()
+                    && taskEventPublisher != null) {
+                taskEventPublisher.publishEvent(new com.moon.moonagent.ai.agent.orchestration.TaskAssetTerminalEvent(
+                        asset.getConversationId(), asset.getPlanId(), asset.getNodeId(),
+                        "completed".equals(status), "completed".equals(status) ? url : error));
             }
         } catch (Exception e) {
             log.warn("视频资产状态更新失败: taskId={}, error={}", taskId, e.getMessage());
@@ -1994,6 +2029,12 @@ public class AgentOrchestratorSupport {
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {
         if ("message_end".equals(eventName)) {
             Map<String, Object> enriched = new java.util.LinkedHashMap<>(data);
+            if (req.getTrace() != null && !req.getTrace().getTurnMetadata().isEmpty()) {
+                enriched.putAll(req.getTrace().getTurnMetadata());
+            }
+            if (req.getTurnMetadata() != null && !req.getTurnMetadata().isEmpty()) {
+                enriched.putAll(req.getTurnMetadata());
+            }
             if (!enriched.containsKey("reasoning")) {
                 Object reasoning = req.getReasoning() != null ? req.getReasoning()
                         : req.getTrace() != null ? req.getTrace().getReasoning() : null;

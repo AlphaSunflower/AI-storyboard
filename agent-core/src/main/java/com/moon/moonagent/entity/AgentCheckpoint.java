@@ -26,6 +26,14 @@ public class AgentCheckpoint {
     private String plan;
     /** 编排状态名（SCRIPT_OPTIMIZE / STORYBOARD_PLAN / ... 便于恢复对应 step） */
     private String step;
+    /** 创建该检查点的引擎：LEGACY | UNIFIED_LOOP。恢复必须按 owner 路由。 */
+    private String ownerEngine;
+    /** checkpoints.plan 的状态协议版本。 */
+    private Integer stateSchemaVersion;
+    /** 动态任务计划归属（旧 checkpoint 为空）。 */
+    private String planId;
+    /** 动态任务节点归属（旧 checkpoint 为空）。 */
+    private String nodeId;
     /** pending | used | expired */
     private String status;
     /** 过期时间（创建 + 30min，对齐原 FORM_SNAPSHOT_TTL_MS） */

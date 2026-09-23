@@ -91,21 +91,27 @@ public class SkillConsistencyValidator {
                 handledTypes.size(), handlerLess);
     }
 
-    /** 技能声明的 tools 必须能被 SkillExpander 解析（@Tool/@McpTool 存在）；缺失即 fail-fast。 */
+    /** 本地工具必须能被 SkillExpander 解析；远程 MCP 工具允许在延迟连接完成前缺失。 */
     private void validateTools(AgentSkill s) {
         if (s.tools() == null || s.tools().isEmpty()) return;
         int resolved = skillExpander.toolCallbacks(s.tools()).length;
         if (resolved != s.tools().size()) {
             Set<String> available = skillExpander.allToolNames();
             List<String> missing = s.tools().stream().filter(tool -> !available.contains(tool)).toList();
-            boolean optionalCanvasTools = !missing.isEmpty() && missing.stream().allMatch(tool -> tool.startsWith("canvas_"));
-            if (optionalCanvasTools) {
-                log.warn("SKILL.md {} 的 Canvas MCP 工具当前不可用，将在调用时返回连接错误: {}", s.name(), missing);
+            boolean deferredRemoteTools = !missing.isEmpty() && missing.stream().allMatch(this::isDeferredRemoteTool);
+            if (deferredRemoteTools) {
+                log.warn("SKILL.md {} 声明的远程 MCP 工具尚未连接，将在调用前检查: {}", s.name(), missing);
                 return;
             }
             throw fail("SKILL.md {} 声明了工具 {}，但有 {} 项无法解析（@Tool/@McpTool 缺失）",
                     s.name(), s.tools(), s.tools().size() - resolved);
         }
+    }
+
+    private boolean isDeferredRemoteTool(String tool) {
+        return tool != null && (tool.startsWith("canvas_")
+                || "generate_image".equals(tool)
+                || "generate_video".equals(tool));
     }
 
     private IllegalStateException fail(String fmt, Object... args) {

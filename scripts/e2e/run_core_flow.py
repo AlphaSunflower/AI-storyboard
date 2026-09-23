@@ -13,7 +13,7 @@ import sys
 import time
 
 sys.path.insert(0, "scripts/e2e")
-from common import req, parse, check, load_creds, BASE_GW, BASE_BE, BASE_MA
+from common import req, parse, check, load_creds, save_creds, BASE_GW, BASE_BE, BASE_MA
 
 # 1x1 红色 PNG
 PNG_1PX = base64.b64decode(
@@ -163,6 +163,9 @@ def main():
     T("改用户资料", st == 200 and (parse(raw).get("data") or {}).get("displayName") == "E2E改名用户", f"{st} {raw[:120]}")
     st, raw = req("PUT", "/api/user/password", {"oldPassword": c["password"], "newPassword": "E2eNewPass123!"}, token=ta)
     T("改密码", st == 200, f"{st} {raw[:120]}")
+    if st == 200:  # 密码已变，回写凭据供后续脚本（B6.4 登录）使用
+        c["password"] = "E2eNewPass123!"
+        save_creds(c)
     st, raw = req("GET", "/api/user/stats", token=ta)
     T("用户统计", st == 200 and "projectCount" in (parse(raw).get("data") or {}), f"{st} {raw[:120]}")
 
@@ -212,14 +215,14 @@ def main():
         ("GET", f"/api/internal/projects/{pid3}", None),
         ("GET", f"/api/internal/projects/{pid3}/scenes", None),
         ("POST", "/api/internal/scenes/batch", []),
-        ("DELETE", f"/api/internal/scenes/project/{pid3}", None),
         ("GET", f"/api/internal/scenes/{sidA}/assets", None),
         ("POST", f"/api/internal/scenes/{sidA}/assets", [aid]),
         ("GET", f"/api/internal/scenes/{sidA}", None),
         ("PUT", f"/api/internal/scenes/{sidA}", {"id": sidA, "scriptContent": "A"}),
-        ("PATCH", f"/api/internal/scenes/project/{pid3}/params", {"imageModel": "gpt-image-2"}),
+        ("POST", f"/api/internal/scenes/project/{pid3}/params", {"imageModel": "gpt-image-2"}),
         ("GET", f"/api/internal/projects/{pid3}/assets", None),
         ("GET", "/api/internal/scenes/by-video-task/__nonexistent__", None),
+        ("DELETE", f"/api/internal/scenes/project/{pid3}", None),
     ]:
         st, raw = req(method, path, body, headers={"X-Internal-Token": SEC}, base=BASE_BE)
         T(f"internal {method} {path}", internal_ok(st, raw) or st == 404, f"{st} {raw[:120]}")
@@ -239,7 +242,8 @@ def main():
     T("项目转 active", st == 200, f"{st}")
     st, raw = req("PUT", f"/api/projects/{pid}", {"status": "draft"}, token=ta)
     T("项目转 draft", st == 200, f"{st}")
-    # 业务规则：至少保留一个项目 → 建第 2 个项目后删第 1 个（成功），再删第 2 个（403 规则）
+    # 业务规则：至少保留一个项目 → 先清掉 B4.8b 遗留的 pid3，再测末位删除（403 规则）
+    req("DELETE", f"/api/projects/{pid3}", token=ta)
     st, raw = req("POST", "/api/projects", {"name": "E2E占位项目"}, token=ta)
     pid2 = (parse(raw).get("data") or {}).get("id")
     st, raw = req("DELETE", f"/api/projects/{pid}", token=ta)

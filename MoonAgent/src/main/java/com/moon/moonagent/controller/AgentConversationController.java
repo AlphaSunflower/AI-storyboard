@@ -64,7 +64,8 @@ public class AgentConversationController {
     @PostMapping("/conversations")
     public ApiResponse<AgentConversationVO> createConversation(
             Authentication auth, @Valid @RequestBody AgentCreateConversationRequest request) {
-        return ApiResponse.ok(toVO(chatService.createConversation(auth.getName(), request.projectId(), request.title())));
+        return ApiResponse.ok(toVO(chatService.createConversation(
+                auth.getName(), request.projectId(), request.title(), request.orchestrationMode())));
     }
 
     /** 当前用户的项目会话列表（updated_at 倒序） */
@@ -402,7 +403,11 @@ public class AgentConversationController {
             }
         }
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
-                c.getStatus(), canvasContext, c.getCreatedAt(), c.getUpdatedAt());
+                c.getStatus(), canvasContext,
+                c.getOrchestrationMode() == null ? "LEGACY" : c.getOrchestrationMode(),
+                c.getEngineVersion() == null ? "plan-graph-v1" : c.getEngineVersion(),
+                c.getDebugComparisonEnabled() == null || c.getDebugComparisonEnabled(),
+                c.getCreatedAt(), c.getUpdatedAt());
     }
 
     /** 消息实体 → VO 映射 */
