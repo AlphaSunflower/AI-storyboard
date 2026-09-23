@@ -16,7 +16,7 @@ public class AgentConversation {
     private String status;
     /** 画布编辑模式 JSON（CanvasSessionContext）；空=未锁定画布链路。 */
     private String canvasContext;
-    /** 会话级编排引擎：LEGACY | UNIFIED_LOOP | SHADOW */
+    /** 历史编排标记：LEGACY 仅用于只读归档识别；新会话固定 UNIFIED_LOOP。 */
     private String orchestrationMode;
     /** 引擎/状态协议版本，用于新旧检查点隔离。 */
     private String engineVersion;

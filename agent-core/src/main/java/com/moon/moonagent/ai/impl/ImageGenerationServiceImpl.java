@@ -19,6 +19,7 @@ import org.springframework.ai.image.ImageModel;
 import org.springframework.ai.image.ImagePrompt;
 import org.springframework.ai.image.ImageResponse;
 import org.springframework.ai.openai.OpenAiImageOptions;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -61,6 +62,9 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 生图走 Spring AI ImageModel（自动装配的 OpenAiImageModel，spring.ai.openai.* 指向网关，文生图 /v1/images/generations） */
     private final ImageModel imageModel;
+
+    @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
+    private String assetServiceBaseUrl;
     /** edits 图改图仍用 HttpClient 直连（multipart octet-stream workaround，Spring AI 无对应适配） */
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -220,15 +224,17 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     /** Seedream 4.x：统一走 Ark 原生 JSON + SSE，支持文生图、图生图、多图融合和组图。 */
     private List<String> callSeedreamImage(String model, String prompt, String size, Integer n,
-                                           List<String> referenceImages, String generatedImageUrl) {
+                                           List<String> referenceImages, String generatedImageUrl)
+            throws Exception {
         List<String> orderedImages = new ArrayList<>();
         if (generatedImageUrl != null && !generatedImageUrl.isBlank()) {
             orderedImages.add(generatedImageUrl);
         }
         if (referenceImages != null) {
-            referenceImages.stream()
-                    .filter(ref -> ref != null && !ref.isBlank())
-                    .forEach(orderedImages::add);
+            for (String ref : referenceImages) {
+                if (ref == null || ref.isBlank()) continue;
+                orderedImages.add(resolveSeedreamReference(ref));
+            }
         }
 
         SeedreamImageExecutor.ImageStore store = new SeedreamImageExecutor.ImageStore() {
@@ -346,9 +352,15 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             imageBytes = fileBytes;
             imageFilename = filename;
         } else if (referenceImages != null && !referenceImages.isEmpty()) {
-            // 参考图生图：使用第一张参考图（后端文件路径 /api/files/... 或 base64 data URI 旧格式）
+            // 参考图生图：使用第一张参考图（主后端文件、资产服务媒体或 base64 data URI）
             String ref = referenceImages.getFirst();
-            if (isImagePath(ref)) {
+            if (ref.startsWith("/api/library/media/")) {
+                imageBytes = fetchAssetServiceImage(ref);
+                imageFilename = imageFilename(ref);
+            } else if (ref.startsWith("http://") || ref.startsWith("https://")) {
+                imageBytes = fetchRemoteImage(ref);
+                imageFilename = imageFilename(ref);
+            } else if (isImagePath(ref)) {
                 // 分镜参考素材上传后存的是本地文件路径（文件名含 UUID 连字符，直接当 base64
                 // 解码会报 Illegal base64 character 2d）→ 与 generatedImageUrl 一致，从本地存储读文件
                 String filename = extractFilename(ref);
@@ -370,7 +382,11 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
         // 2. 构建 multipart/form-data 请求体
         byte[] maskBytes = null;
         if (maskImageUrl != null && !maskImageUrl.isBlank()) {
-            maskBytes = isImagePath(maskImageUrl)
+            maskBytes = maskImageUrl.startsWith("/api/library/media/")
+                    ? fetchAssetServiceImage(maskImageUrl)
+                    : maskImageUrl.startsWith("http://") || maskImageUrl.startsWith("https://")
+                    ? fetchRemoteImage(maskImageUrl)
+                    : isImagePath(maskImageUrl)
                     ? fileStorageService.readImage(extractFilename(maskImageUrl))
                     : decodeBase64Image(maskImageUrl);
             if (maskBytes == null || maskBytes.length == 0) {
@@ -465,6 +481,89 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     /** 判断参考图是否为本地文件路径/URL（/api/files/... 或 http...），而非 base64 data URI */
     private boolean isImagePath(String ref) {
         return ref.startsWith("/") || ref.startsWith("http://") || ref.startsWith("https://");
+    }
+
+    String resolveSeedreamReference(String reference) throws Exception {
+        String value = reference == null ? "" : reference.trim();
+        if (value.startsWith("data:")) return value;
+        if (isLibraryMediaReference(value)) {
+            byte[] bytes = fetchAssetServiceImage(value);
+            return toDataUri(bytes, value);
+        }
+        return value;
+    }
+
+    byte[] fetchAssetServiceImage(String contentPath) throws Exception {
+        if (contentPath.startsWith("http://") || contentPath.startsWith("https://")) {
+            return fetchRemoteImage(contentPath);
+        }
+        String base = assetServiceBaseUrl == null ? "" : assetServiceBaseUrl.replaceAll("/+$", "");
+        return fetchRemoteImage(base + contentPath);
+    }
+
+    private static boolean isLibraryMediaReference(String value) {
+        if (value == null || value.isBlank()) return false;
+        if (value.startsWith("/api/library/media/")) return true;
+        try {
+            String path = URI.create(value).getPath();
+            return path != null && path.startsWith("/api/library/media/");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    static String toDataUri(byte[] bytes, String source) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40401, "参考图不存在或无法读取: " + source);
+        }
+        return "data:" + detectImageContentType(bytes, source) + ";base64,"
+                + Base64.getEncoder().encodeToString(bytes);
+    }
+
+    private static String detectImageContentType(byte[] bytes, String source) {
+        if (bytes.length >= 3
+                && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8) {
+            return "image/jpeg";
+        }
+        if (bytes.length >= 8
+                && bytes[0] == (byte) 0x89 && bytes[1] == 'P'
+                && bytes[2] == 'N' && bytes[3] == 'G') {
+            return "image/png";
+        }
+        if (bytes.length >= 6
+                && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') {
+            return "image/gif";
+        }
+        if (bytes.length >= 12
+                && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F') {
+            return "image/webp";
+        }
+        return source != null && source.toLowerCase().contains(".jpg") ? "image/jpeg" : "image/png";
+    }
+
+    private byte[] fetchRemoteImage(String url) throws Exception {
+        HttpResponse<byte[]> response = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(60))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() < 200 || response.statusCode() >= 300
+                || response.body() == null || response.body().length == 0) {
+            throw new BusinessException(40401, "参考图不存在或无法读取: " + url);
+        }
+        return response.body();
+    }
+
+    private static String imageFilename(String url) {
+        try {
+            String path = URI.create(url).getPath();
+            String filename = path == null ? "" : path.substring(path.lastIndexOf('/') + 1);
+            return filename.isBlank() ? "reference.png" : filename + ".png";
+        } catch (Exception ignored) {
+            return "reference.png";
+        }
     }
 
     /**

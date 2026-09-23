@@ -40,7 +40,9 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -85,6 +87,7 @@ public class AgentOrchestratorSupport {
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final Set<String> activeVideoPolls = ConcurrentHashMap.newKeySet();
 
     /** 主计划 LLM（懒加载，复用网关默认对话模型，超时由 ai.agent.plan-timeout-seconds 控制） */
     private volatile ChatClient planClient;
@@ -1539,9 +1542,24 @@ public class AgentOrchestratorSupport {
             return null;
         }
         // 立即受理：task_accepted → 本轮 SSE 结束（前端转轮询，不再同步阻塞 7.5min）
-        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
-        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        sendEvent(req, "task_accepted", Map.of(
+                "taskId", taskId,
+                "taskKind", "video",
+                "message", "视频任务已受理，正在排队生成"));
+        scheduleVideoPolling(taskId);
         return taskId;
+    }
+
+    /** 幂等启动视频轮询；重复调用不会为同一 taskId 创建多个后台循环。 */
+    public void scheduleVideoPolling(String taskId) {
+        if (taskId == null || taskId.isBlank() || !activeVideoPolls.add(taskId)) return;
+        agentExecutor.submit(() -> {
+            try {
+                pollVideoTaskAndUpdate(taskId);
+            } finally {
+                activeVideoPolls.remove(taskId);
+            }
+        });
     }
 
     /** 后台轮询视频任务直至终态（90×5s ≈ 7.5min 上限），终态更新 agent_assets 行 */
@@ -1610,8 +1628,11 @@ public class AgentOrchestratorSupport {
             sendFriendlyError(req, null, "视频任务暂时创建不了，请稍后重试。");
             return null;
         }
-        sendEvent(req, "task_accepted", Map.of("taskId", taskId, "message", "视频任务已受理，正在排队生成"));
-        agentExecutor.submit(() -> pollVideoTaskAndUpdate(taskId));
+        sendEvent(req, "task_accepted", Map.of(
+                "taskId", taskId,
+                "taskKind", "video",
+                "message", "视频任务已受理，正在排队生成"));
+        scheduleVideoPolling(taskId);
         return taskId;
     }
 

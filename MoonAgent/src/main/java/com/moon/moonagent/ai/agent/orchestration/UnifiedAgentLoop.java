@@ -10,6 +10,7 @@ import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.IntentResult;
 import com.moon.moonagent.ai.agent.SuggestedAction;
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
 import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
@@ -44,7 +45,7 @@ import java.util.UUID;
 
 /**
  * UnifiedLoop 首版：统一决策、切链、Trace 和恢复入口，业务步骤仍委托现有
- * SpecialistAgent / IntentHandler。旧 PlanGraph 只由 LEGACY 会话或旧 checkpoint 使用。
+ * SpecialistAgent / IntentHandler。
  */
 @Component
 @RequiredArgsConstructor
@@ -68,6 +69,9 @@ public class UnifiedAgentLoop {
 
     @Autowired(required = false)
     private transient DynamicTaskEngine dynamicTaskEngine;
+
+    @Autowired(required = false)
+    private transient AgentScopeMediaRuntime agentScopeMediaRuntime;
 
     @Value("${ai.agent.dynamic-plan.enabled:true}")
     private boolean dynamicPlanEnabled;
@@ -93,6 +97,15 @@ public class UnifiedAgentLoop {
         AgentLoopRun run = recorder.start(conversation.getId(), "", OrchestrationMode.UNIFIED_LOOP,
                 chain == null ? "" : chain.name(), Map.of("intent", intent));
         try {
+            if (shouldUseAgentScope(conversation, intent, canvasContext)) {
+                AgentTurnResult turn = agentScopeMediaRuntime.runTurn(conversation, request, trace);
+                if (turn != null) {
+                    recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",
+                            "FINISH", chain == null ? "" : chain.name(),
+                            Map.of("intent", intent, "agentScope", true), "", "");
+                    return withoutOwnedMetadata(turn, run);
+                }
+            }
             if (dynamicPlanEnabled && dynamicTaskEngine != null && canvasContext == null) {
                 AgentTurnResult turn = dynamicTaskEngine.runTurn(
                         conversation, content, intent, request, trace, run);
@@ -137,6 +150,27 @@ public class UnifiedAgentLoop {
         AgentLoopRun run = recorder.start(conversation.getId(), "", OrchestrationMode.UNIFIED_LOOP,
                 chain == null ? "" : chain.name(), Map.of("intent", intent, "resume", true));
         try {
+            boolean agentScopeOwner = "AGENTSCOPE".equalsIgnoreCase(checkpoint.getOwnerEngine());
+            if (agentScopeOwner && (agentScopeMediaRuntime == null
+                    || !agentScopeMediaRuntime.enabled())) {
+                recorder.finish(run, "failed", "FAIL",
+                        chain == null ? "" : chain.name(),
+                        Map.of("agentScope", false, "resume", true),
+                        checkpoint.getId(), "AgentScope runtime disabled");
+                return buildTurnResult(request, trace,
+                        "当前 AgentScope 执行器已停用，请重新发起生成请求。");
+            }
+            if (agentScopeOwner) {
+                AgentTurnResult turn = agentScopeMediaRuntime.resumeTurn(
+                        conversation, checkpoint, request, trace, action, customText);
+                if (turn != null) {
+                    recorder.finish(run, turn.hitlPaused() ? "waiting_user" : "completed",
+                            "FINISH", chain == null ? "" : chain.name(),
+                            Map.of("intent", intent, "agentScope", true, "resume", true),
+                            checkpoint.getId(), "");
+                    return withoutOwnedMetadata(turn, run);
+                }
+            }
             boolean planOwned = checkpoint.getPlanId() != null && !checkpoint.getPlanId().isBlank();
             if (dynamicPlanEnabled && dynamicTaskEngine != null && canvasContext == null
                     && (planOwned || dynamicTaskEngine.hasActivePlan(conversation.getId()))) {
@@ -159,21 +193,6 @@ public class UnifiedAgentLoop {
                     Map.of("intent", intent, "resume", true), checkpoint.getId(), e.getMessage());
             throw e;
         }
-    }
-
-    /** Shadow 只记录新 Loop 的首个决策，不执行 Specialist、不写媒体。 */
-    public AgentLoopRun preview(AgentConversation conversation, String content, String routingHint,
-                                CanvasSessionContext canvasContext) {
-        String intent = resolveIntent(conversation, content, routingHint, canvasContext, null);
-        ChainType chain = resolveChain(intent, canvasContext);
-        AgentLoopRun run = recorder.start(conversation.getId(), "", OrchestrationMode.SHADOW,
-                chain == null ? "" : chain.name(), Map.of("intent", intent, "shadow", true));
-        recorder.step(run, 0, chain == null ? "" : chain.name(), "shadow_decision", "completed",
-                "FINISH", "", "shadow decision only", "", "", "",
-                OffsetDateTime.now(), OffsetDateTime.now());
-        recorder.finish(run, "completed", "FINISH", chain == null ? "" : chain.name(),
-                Map.of("intent", intent, "shadow", true), "", "");
-        return run;
     }
 
     private SpecialistResult execute(AgentConversation conversation, String initialIntent,
@@ -220,6 +239,16 @@ public class UnifiedAgentLoop {
             intent = result.handoffTarget();
         }
         throw new IllegalStateException("UnifiedLoop exceeded max handoff steps");
+    }
+
+    private boolean shouldUseAgentScope(AgentConversation conversation, String intent,
+                                        CanvasSessionContext canvasContext) {
+        if (agentScopeMediaRuntime == null || !agentScopeMediaRuntime.enabled()
+                || canvasContext != null) {
+            return false;
+        }
+        if (!"intent-pic".equals(intent) && !"intent-video".equals(intent)) return false;
+        return dynamicTaskEngine == null || !dynamicTaskEngine.hasActivePlan(conversation.getId());
     }
 
     private String resolveIntent(AgentConversation conversation, String content, String routingHint,

@@ -93,7 +93,7 @@ class DynamicTaskEngineTest {
                 ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
         order.verify(first).execute(firstContext.capture());
         order.verify(second).execute(secondContext.capture());
-        assertThat(result.content()).contains("接下来执行第 2/2 步").contains("second");
+        assertThat(result.content()).contains("继续执行：two").contains("second");
         assertThat(firstContext.getValue().directExecution()).isTrue();
         assertThat(secondContext.getValue().picUrls()).containsExactly("/api/files/images/generated.png");
         verify(recorder).step(eq(run), eq(0), eq("intent-aisplit"), eq("task_node"),
@@ -262,6 +262,61 @@ class DynamicTaskEngineTest {
         verify(image).execute(contextCaptor.capture());
         assertThat(contextCaptor.getValue().picUrls())
                 .containsExactly("/api/files/images/generated.png");
+    }
+
+    @Test
+    void nonMediaWaitingNodeStartsNewPlanInsteadOfQuestionResume() {
+        TaskPlanPlanner planner = mock(TaskPlanPlanner.class);
+        TaskPlanStore store = mock(TaskPlanStore.class);
+        AgentCapabilityRegistry registry = mock(AgentCapabilityRegistry.class);
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AigcGatewaySpecialist gateway = mock(AigcGatewaySpecialist.class);
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        OrchestrationRunRecorder recorder = mock(OrchestrationRunRecorder.class);
+        AgentCapability storyboard = capability("intent-aisplit", "new storyboard plan");
+        TaskPlan waiting = new TaskPlan(
+                "plan-1", "conversation-1", "我要生成分镜", TaskPlanState.WAITING_HUMAN, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode(
+                        "storyboard-1", "intent-aisplit", "分镜", Map.of(), List.of(),
+                        TaskNodeState.WAITING_HUMAN, 1, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "",
+                        "⚠ 分镜方案已确认，但未解析到分镜内容，请重新描述需求", "", "")),
+                List.of(), "", "");
+        TaskPlan replanned = new TaskPlan(
+                "plan-2", "conversation-1", "我要生成分镜", TaskPlanState.READY, 1,
+                20, 3, 2, 0,
+                List.of(new TaskNode(
+                        "storyboard-2", "intent-aisplit", "分镜", Map.of(), List.of(),
+                        TaskNodeState.PENDING, 0, HitlPolicy.NONE,
+                        EvaluationMode.DETERMINISTIC, "", "", "", "")),
+                List.of(), "", "");
+        when(store.findActive("conversation-1")).thenReturn(Optional.of(waiting));
+        when(store.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(store.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(planner.plan(any(), any())).thenReturn(replanned);
+        when(registry.descriptors()).thenReturn(Map.of());
+        when(registry.find("intent-aisplit")).thenReturn(Optional.of(storyboard));
+        when(checkpointMapper.selectOne(any())).thenReturn(null);
+        when(assetMapper.selectOne(any())).thenReturn((AgentAsset) null);
+        DynamicTaskEngine engine = new DynamicTaskEngine(
+                planner, store, new TaskPlanScheduler(), registry, support, gateway,
+                checkpointMapper, assetMapper, recorder);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "我要生成分镜", List.of(), null);
+
+        engine.runTurn(conversation, "我要生成分镜", "intent-aisplit", request,
+                new AgentTraceAccumulator(request), null);
+
+        verify(planner).plan(any(), any());
+        ArgumentCaptor<com.moon.moonagent.ai.agent.specialist.SpecialistContext> contextCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.specialist.SpecialistContext.class);
+        verify(storyboard).execute(contextCaptor.capture());
+        assertThat(contextCaptor.getValue().cpPlan()).isEmpty();
+        assertThat(contextCaptor.getValue().action()).isEmpty();
     }
 
     @Test
@@ -536,7 +591,7 @@ class DynamicTaskEngineTest {
                 conversation, "生成图片并继续做视频", "intent-pic",
                 firstRequest, new AgentTraceAccumulator(firstRequest), null);
 
-        assertThat(waiting.content()).contains("接下来执行第 1/1 步").contains("请选择方案");
+        assertThat(waiting.content()).doesNotContain("接下来执行第").contains("请选择方案");
         assertThat(active.get().state()).isEqualTo(TaskPlanState.WAITING_HUMAN);
         assertThat(active.get().nodes().get(0).outputSummary()).contains("\"plansText\"");
 

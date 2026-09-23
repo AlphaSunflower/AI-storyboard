@@ -18,7 +18,7 @@ import java.util.Map;
  *       有 handler 的能力仍走 {@code PromptConfig}（prompts/**）。</li>
  * </ul>
  *
- * <p>Graph 仍是代码（{@code PlanGraph}）管流程/HITL/循环；Skill 只是被节点代码消费的 data，
+ * <p>UnifiedAgentLoop 管流程/HITL/循环；Skill 只是被执行器消费的 data，
  * 不声明 graph 拓扑（防「Skill 声明 Graph」反模式）。
  *
  * @param intentType 意图标识（intent-aisplit / intent-pic / ...），由 name 加 "intent-" 前缀推导

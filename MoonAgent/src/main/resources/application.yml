@@ -78,6 +78,27 @@ ai:
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
+    agentscope:
+      enabled: ${AGENTSCOPE_ENABLED:false}
+      model: ${AGENTSCOPE_MODEL:}
+      fallback-model: ${AGENTSCOPE_FALLBACK_MODEL:deepseek-flash}
+      max-retries: ${AGENTSCOPE_MAX_RETRIES:3}
+      max-iters: ${AGENTSCOPE_MAX_ITERS:24}
+      asset-search-limit: ${AGENTSCOPE_ASSET_SEARCH_LIMIT:8}
+      direct-media-generation: ${AGENTSCOPE_DIRECT_MEDIA_GENERATION:true}
+      state-schema: ${AGENTSCOPE_STATE_SCHEMA:public}
+      state-table: ${AGENTSCOPE_STATE_TABLE:agentscope_sessions}
+      workspace-dir: ${AGENTSCOPE_WORKSPACE_DIR:${java.io.tmpdir}/moonagent-agentscope}
+      structured-output-enabled: ${AGENTSCOPE_STRUCTURED_OUTPUT_ENABLED:true}
+      subagents-enabled: ${AGENTSCOPE_SUBAGENTS_ENABLED:true}
+      compaction-enabled: ${AGENTSCOPE_COMPACTION_ENABLED:true}
+      compaction-trigger-messages: ${AGENTSCOPE_COMPACTION_TRIGGER_MESSAGES:40}
+      compaction-trigger-tokens: ${AGENTSCOPE_COMPACTION_TRIGGER_TOKENS:60000}
+      compaction-keep-messages: ${AGENTSCOPE_COMPACTION_KEEP_MESSAGES:12}
+      compaction-keep-tokens: ${AGENTSCOPE_COMPACTION_KEEP_TOKENS:8000}
+      async-enabled: ${AGENTSCOPE_ASYNC_ENABLED:true}
+      async-tool-timeout: ${AGENTSCOPE_ASYNC_TOOL_TIMEOUT:90s}
+      batch-confirm-threshold: ${AGENTSCOPE_BATCH_CONFIRM_THRESHOLD:4}
     # 新建会话默认启用运行时任务 DAG；关闭后新会话回退 LEGACY，旧会话始终保持原引擎。
     dynamic-plan:
       enabled: ${DYNAMIC_TASK_PLAN_ENABLED:true}
@@ -90,7 +111,7 @@ ai:
     # 素材编排优先等待高质量模型完成，超时边界与网关保持一致
     material-timeout-seconds: 1800
     # 骨架只做结构化规划，显式使用快模型；场景 worker 仍使用高质量模型
-    skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.5-pro}
+    skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.6-pro}
     max-parallel-agents: ${AGENT_MAX_PARALLEL_AGENTS:4}
     intent-timeout-seconds: 60
     # 长剧本分批生成可能持续十余分钟；该值控制 MVC SSE 连接生命周期

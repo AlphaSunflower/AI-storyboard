@@ -686,6 +686,7 @@ public class AigcGatewaySpecialist {
             context.emitter().send(SseEmitter.event().name("task_accepted")
                     .data(AgentOrchestratorSupport.sseJson(Map.of(
                             "taskId", result.taskId(),
+                            "taskKind", "video",
                             "status", result.status(),
                             "message", "视频任务已受理，正在排队生成…"))));
         } catch (Exception e) {

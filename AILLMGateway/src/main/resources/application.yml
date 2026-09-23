@@ -14,6 +14,12 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+# MCP Server: expose gateway media tools to MoonAgent at /mcp
+spring.ai.mcp.server.enabled: true
+spring.ai.mcp.server.name: llm-gateway-media
+spring.ai.mcp.server.version: 1.0.0
+spring.ai.mcp.server.type: SYNC
+spring.ai.mcp.server.protocol: STREAMABLE
 server:
   port: 8083
 

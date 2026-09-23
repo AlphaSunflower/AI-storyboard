@@ -19,6 +19,8 @@ import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
 import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
@@ -33,7 +35,6 @@ import com.moon.moonagent.ai.VideoPlanService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -107,8 +108,11 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-    @Value("${ai.agent.dynamic-plan.enabled:true}")
-    private boolean dynamicPlanEnabled;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentScopeMediaRuntime agentScopeMediaRuntime;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentScopeAsyncTaskService agentScopeAsyncTaskService;
 
     /**
      * 首条消息异步 AI 重命名标题：
@@ -160,7 +164,7 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /** 创建会话：校验项目归属，返回会话 */
     public AgentConversation createConversation(String userId, String projectId, String title) {
-        return createConversation(userId, projectId, title, dynamicPlanEnabled ? "UNIFIED_LOOP" : "LEGACY");
+        return createConversation(userId, projectId, title, null);
     }
 
     @Override
@@ -175,15 +179,10 @@ public class AgentChatServiceImpl implements AgentChatService {
         conversation.setProjectId(projectId);
         conversation.setTitle(title != null && !title.isBlank() ? title : "新对话");
         conversation.setStatus("active");
-        OrchestrationMode mode = dynamicPlanEnabled
-                ? OrchestrationMode.from(orchestrationMode)
-                : OrchestrationMode.LEGACY;
-        if (mode == OrchestrationMode.SHADOW) {
-            throw new BusinessException(40001, "SHADOW 仅用于内部配置，用户端只能选择 LEGACY 或 UNIFIED_LOOP");
-        }
+        OrchestrationMode mode = OrchestrationMode.UNIFIED_LOOP;
         conversation.setOrchestrationMode(mode.name());
         conversation.setEngineVersion(mode.engineVersion());
-        conversation.setDebugComparisonEnabled(true);
+        conversation.setDebugComparisonEnabled(false);
         conversationMapper.insert(conversation);
         return conversation;
     }
@@ -200,6 +199,17 @@ public class AgentChatServiceImpl implements AgentChatService {
         return conversation;
     }
 
+    private static void requireWritable(AgentConversation conversation) {
+        if (conversation == null) return;
+        if ("archived".equalsIgnoreCase(conversation.getStatus())) {
+            throw new BusinessException(40903, "该会话已归档，只能查看历史记录，请新建会话后继续。");
+        }
+        if (OrchestrationMode.from(conversation.getOrchestrationMode())
+                != OrchestrationMode.UNIFIED_LOOP) {
+            throw new BusinessException(40903, "旧版会话已只读归档，请新建会话后继续。");
+        }
+    }
+
     /** 会话消息列表（created_at 正序） */
     public List<AgentMessage> listMessages(String conversationId) {
         return messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
@@ -214,11 +224,15 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     public void clearMessages(String userId, String conversationId) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         transactionTemplate().executeWithoutResult(tx -> {
             messageMapper.delete(new LambdaQueryWrapper<AgentMessage>()
                 .eq(AgentMessage::getConversationId, conversationId));
             conversationMapper.updateById(conversation); // 触发 updatedAt fill
         });
+        if (agentScopeMediaRuntime != null) {
+            agentScopeMediaRuntime.clearSession(userId, conversationId);
+        }
         log.info("已清空会话聊天记录: conversationId={}, userId={}", conversationId, userId);
     }
 
@@ -291,6 +305,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         renamedTitleByConversation.remove(conversationId);
         lastPicUrlByConversation.remove(conversationId);
         orchestratorSupport.cleanupOnDelete(conversationId);
+        if (agentScopeMediaRuntime != null) {
+            agentScopeMediaRuntime.clearSession(userId, conversationId);
+        }
         conversationLock.releaseAndRemove(conversationId);
         // 消息/资产由 DB 外键 ON DELETE CASCADE 级联删除
         conversationMapper.deleteById(conversation.getId());
@@ -311,29 +328,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         // PATCH 后手动刷新 updatedAt：MyBatis-Plus strictUpdateFill 仅在字段为 null 时填充，
         // 实体加载后 updatedAt 非空会写回旧值，导致列表按 updated_at 倒序时重命名/归档不置顶
         conversation.setUpdatedAt(OffsetDateTime.now());
-        conversationMapper.updateById(conversation);
-        return conversation;
-    }
-
-    @Override
-    public AgentConversation updateOrchestrationMode(String userId, String conversationId,
-                                                     String orchestrationMode) {
-        AgentConversation conversation = getOwnedConversation(userId, conversationId);
-        long messageCount = messageMapper.selectCount(new LambdaQueryWrapper<AgentMessage>()
-                .eq(AgentMessage::getConversationId, conversationId));
-        long pendingCheckpoints = checkpointMapper.selectCount(
-                new LambdaQueryWrapper<AgentCheckpoint>()
-                        .eq(AgentCheckpoint::getConversationId, conversationId)
-                        .eq(AgentCheckpoint::getStatus, "pending"));
-        if (messageCount > 0 || pendingCheckpoints > 0) {
-            throw new BusinessException(40901, "已有消息的会话不能切换编排引擎，请新建会话");
-        }
-        OrchestrationMode mode = OrchestrationMode.from(orchestrationMode);
-        if (mode == OrchestrationMode.SHADOW) {
-            throw new BusinessException(40001, "SHADOW 仅用于内部配置，用户端只能选择 LEGACY 或 UNIFIED_LOOP");
-        }
-        conversation.setOrchestrationMode(mode.name());
-        conversation.setEngineVersion(mode.engineVersion());
         conversationMapper.updateById(conversation);
         return conversation;
     }
@@ -413,7 +407,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                        String purpose, String kind) {
         // 校验会话归属（传了 conversationId 时）
         if (conversationId != null && !conversationId.isBlank()) {
-            getOwnedConversation(userId, conversationId);
+            requireWritable(getOwnedConversation(userId, conversationId));
         }
         String mediaType = referenceMediaType(file.getContentType());
         if (mediaType.isBlank()) {
@@ -502,6 +496,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             throw new BusinessException(40001, "消息内容不能为空");
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
 
         // 会话级互斥：同一会话只允许一个活跃编排实例（blocking 同步执行，锁持整个编排期）
         if (!conversationLock.tryAcquire(conversationId)) {
@@ -587,6 +582,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             return;
         }
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
         log.info("[Agent 消息接收] conversationId={}, picUrls={}, assetIds={}",
                 conversationId,
@@ -822,6 +818,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      */
     public void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
         if (!conversationLock.tryAcquire(conversationId)) {
             sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
@@ -971,6 +968,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     java.util.List<String> assetIds, String routingHint,
                                     CanvasSessionContext canvasContext, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
         // 会话级互斥：同一会话只允许一个活跃编排实例（同步获取）
         if (!conversationLock.tryAcquire(conversationId)) {
@@ -1034,6 +1032,10 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 资产未归属（conversationId 空）或会话无权访问 → 统一 40401。
      */
     public Map<String, Object> getVideoTaskStatus(String userId, String taskId) {
+        if (agentScopeAsyncTaskService != null) {
+            Map<String, Object> asyncStatus = agentScopeAsyncTaskService.getStatus(userId, taskId);
+            if (!asyncStatus.isEmpty()) return asyncStatus;
+        }
         AgentAsset asset = assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
         if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
@@ -1045,9 +1047,12 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         return Map.of(
                 "taskId", taskId,
+                "kind", "video",
                 "assetId", asset.getId(),
+                "assetIds", List.of(asset.getId()),
                 "status", asset.getStatus() == null ? "unknown" : asset.getStatus(),
                 "url", asset.getUrl() == null ? "" : asset.getUrl(),
+                "resultUrls", asset.getUrl() == null ? List.of() : List.of(asset.getUrl()),
                 "error", asset.getError() == null ? "" : asset.getError());
     }
 

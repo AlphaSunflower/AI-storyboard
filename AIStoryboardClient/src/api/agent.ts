@@ -10,7 +10,7 @@ export interface AgentConversation {
   title: string;
   status: 'active' | 'archived';
   canvasContext?: CanvasEditContext | null;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
   engineVersion?: string;
   debugComparisonEnabled?: boolean;
   createdAt: string;
@@ -132,7 +132,7 @@ export interface AgentMessageMetadata {
   reasoning?: AgentReasoning;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
   engineVersion?: string;
   checkpointOwner?: string;
   loopRunId?: string;
@@ -267,6 +267,7 @@ export interface SseEvent {
   status?: string;
   formToken?: string;
   taskId?: string;
+  taskKind?: 'video' | 'image-batch' | 'long-tool';
   formContent?: string;
   actions?: { id: string; title: string }[];
   expirationTime?: number | string;
@@ -307,7 +308,7 @@ export interface SseEvent {
   // /messages/stream 请求可选参数（后端可能透传/回显）
   routingHint?: string;
   cancelActiveTasks?: boolean;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'SHADOW';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
   engineVersion?: string;
   checkpointOwner?: string;
   loopRunId?: string;
@@ -323,9 +324,16 @@ export interface SseEvent {
 /** 视频异步任务状态（GET /api/agent/tasks/{taskId} 轮询结果） */
 export interface VideoTaskStatus {
   taskId: string;
-  assetId: string;
+  kind?: 'video' | 'image-batch' | 'long-tool';
+  toolName?: string;
+  assetId?: string;
+  assetIds?: string[];
   status: 'queued' | 'running' | 'completed' | 'failed' | 'unknown';
   url: string;
+  resultUrls?: string[];
+  result?: string;
+  followUpTaskId?: string;
+  messageId?: string;
   error: string;
 }
 
@@ -422,15 +430,11 @@ export const agentApi = {
   removeConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
 
-  createConversation: (projectId: string, title?: string, orchestrationMode?: string) =>
+  createConversation: (projectId: string, title?: string) =>
     client.post<{ data: AgentConversation }>('/agent/conversations', {
       projectId,
       title,
-      ...(orchestrationMode ? { orchestrationMode } : {}),
     }),
-
-  updateOrchestrationMode: (id: string, mode: 'LEGACY' | 'UNIFIED_LOOP') =>
-    client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}/orchestration-mode`, { mode }),
 
   updateConversation: (id: string, data: { title?: string; status?: string }) =>
     client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}`, data),

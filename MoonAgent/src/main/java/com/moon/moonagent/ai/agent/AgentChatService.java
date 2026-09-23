@@ -62,9 +62,6 @@ public interface AgentChatService {
      */
     AgentConversation updateConversation(String userId, String conversationId, String title, String status);
 
-    /** 仅允许空会话设置编排引擎；已有消息时必须新建会话。 */
-    AgentConversation updateOrchestrationMode(String userId, String conversationId, String orchestrationMode);
-
     /** 删除资产（仅限归属本人会话的资产；未归属资产拒绝 40401）。 */
     void deleteAsset(String userId, String assetId);
 

@@ -61,7 +61,7 @@ def main():
     st, raw = req("POST", "/api/auth/unlogin",
                   {"authorizationCode": "placeholder"}, token=creds["userA"]["accessToken"])
     d = parse(raw)
-    check("unlogin(带token) 可达且返回JSON", st in (200, 400), f"{st} {raw[:120]}")
+    check("unlogin(带token) 可达且返回JSON", st in (200, 400, 401) and '"code"' in raw, f"{st} {raw[:120]}")
     st, raw = req("POST", "/api/auth/unlogin", {"authorizationCode": "placeholder"})
     check("unlogin(无头) 不 5xx", st not in (500,), f"{st} {raw[:120]}")
 

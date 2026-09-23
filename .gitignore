@@ -33,6 +33,8 @@ ICAN/
 
 # E2E 测试临时凭据（含 token，禁止入库）
 scripts/e2e/.creds.json
+# E2E 从 fat jar 临时抽取的依赖，运行时生成
+scripts/e2e/seed_tmp/
 
 # 运行时日志与本地缓存（模块级 gateway 日志、Web 探测缓存）
 *.log

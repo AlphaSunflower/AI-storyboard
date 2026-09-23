@@ -76,7 +76,8 @@ public class DynamicTaskEngine {
                     .filter(candidate -> candidate.state() == TaskNodeState.WAITING_HUMAN)
                     .findFirst()
                     .orElse(null);
-            if (node != null && !shouldReplanForNewIntent(node, preferredCapability, content)) {
+            if (node != null && isQuestionResumable(node)
+                    && !shouldReplanForNewIntent(node, preferredCapability, content)) {
                 prepareQuestionResume(request, node, content);
                 return continuePlan(conversation, request, trace, run, waiting, node.nodeId());
             }
@@ -410,6 +411,12 @@ public class DynamicTaskEngine {
         return !isPlanSelection(content);
     }
 
+    private static boolean isQuestionResumable(TaskNode node) {
+        if (node == null) return false;
+        return "intent-pic".equals(node.capabilityKey())
+                || "intent-video".equals(node.capabilityKey());
+    }
+
     private static boolean isPlanSelection(String content) {
         if (content == null || content.isBlank()) return false;
         return content.trim().matches("(?i)^(?:方案\\s*)?[1-3](?:\\s*[-A-Z])?$");
@@ -494,9 +501,11 @@ public class DynamicTaskEngine {
     }
 
     private static String transitionMessage(TaskNode node, TaskPlan plan) {
+        if (plan.nodes().size() <= 1) return "";
         int index = plan.nodes().indexOf(node) + 1;
         int total = plan.nodes().size();
-        String prefix = "接下来执行第 " + index + "/" + total + " 步：「" + node.title() + "」。";
+        if (index <= 1) return "";
+        String prefix = "继续执行：" + node.title() + "。";
         if ("intent-pic".equals(node.capabilityKey())) {
             return prefix + "先确认图片方案；生成成功后，我会把成品图作为下一步视频的参考图。";
         }

@@ -20,7 +20,6 @@ import TextType from '../TextType';
 import SpecularButton from '../SpecularButton';
 import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
-import { OrchestrationModeSwitch } from './OrchestrationModeSwitch';
 
 export function AgentChatPanel() {
   const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
@@ -71,6 +70,12 @@ export function AgentChatPanel() {
     }
   }, [pendingPicUrls]);
 
+  const currentConversation = conversations.find((c) => c.id === activeConversationId);
+  const currentTitle = currentConversation?.title ?? '未选择对话';
+  const readOnly = currentConversation?.status === 'archived'
+    || (currentConversation?.orchestrationMode != null
+      && currentConversation.orchestrationMode !== 'UNIFIED_LOOP');
+
   // 新的 HITL 卡片默认折叠，保证下方输入框始终可见
   useEffect(() => {
     setHitlCollapsed(true);
@@ -88,7 +93,7 @@ export function AgentChatPanel() {
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || (streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan) return;
+    if (!content || readOnly || (streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan) return;
     setText('');
     sendMessage(content, { assetIds: pickedAssetIds });
   };
@@ -114,11 +119,9 @@ export function AgentChatPanel() {
   };
 
   // 当前会话标题：对话窗口顶部展示；无会话时占位
-  const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
-
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+    if (readOnly || files.length === 0) return;
     try {
       await uploadRefImages(files);
     } catch {
@@ -231,7 +234,6 @@ export function AgentChatPanel() {
         >
           {currentTitle}
         </span>
-        <OrchestrationModeSwitch compact />
       </div>
 
       {/* 消息流 */}
@@ -324,6 +326,14 @@ export function AgentChatPanel() {
 
       {/* 输入区 */}
       <div style={{ padding: 16, borderTop: '1px solid var(--color-hairline)', background: 'white' }}>
+        {readOnly && (
+          <div style={{
+            marginBottom: 10, padding: '9px 12px', borderRadius: 8,
+            background: 'var(--color-surface-soft)', color: 'var(--color-muted)', fontSize: 13,
+          }}>
+            该会话已归档，仅可查看历史记录，请新建会话后继续。
+          </div>
+        )}
         {refImageUrls.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <img src={refImageUrls[0]} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
@@ -356,13 +366,14 @@ export function AgentChatPanel() {
           <div style={{ position: 'relative' }}>
             <button
               ref={menuBtnRef}
-              onClick={openMenu}
+              onClick={readOnly ? undefined : openMenu}
+              disabled={readOnly}
               title="上传"
               onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(38,49,72,0.06)'; el.style.borderColor = 'var(--color-primary)'; }}
               onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'var(--color-canvas)'; el.style.borderColor = 'var(--color-hairline)'; }}
-              style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: 'pointer', fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: readOnly ? 'not-allowed' : 'pointer', opacity: readOnly ? 0.45 : 1, fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
-            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFile} />
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden disabled={readOnly} onChange={handleFile} />
             {/* 下拉菜单：portal 到 body */}
             {menuOpen && menuPos && createPortal(
               <div ref={menuRef} style={{
@@ -389,8 +400,8 @@ export function AgentChatPanel() {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-            disabled={(streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan}
+            placeholder={readOnly ? '该会话已归档' : waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+            disabled={readOnly || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan}
             rows={2}
             style={{
               flex: 1, padding: '12px 14px', border: '1px solid var(--color-hairline)',
@@ -415,7 +426,7 @@ export function AgentChatPanel() {
               onToggle={handleMicToggle}
               onPcm={handlePcm}
               // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
-              disabled={((streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
+              disabled={readOnly || ((streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
             />
             <SpecularButton
               size="sm"
@@ -427,7 +438,7 @@ export function AgentChatPanel() {
               baseColor="#ffffff"
               intensity={1}
               thickness={1.2}
-              disabled={recording || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
+              disabled={readOnly || recording || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
               onClick={handleSend}
             >
               发送

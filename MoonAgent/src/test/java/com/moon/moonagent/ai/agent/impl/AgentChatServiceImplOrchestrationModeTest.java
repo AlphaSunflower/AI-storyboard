@@ -15,12 +15,12 @@ import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.service.FileStorageService;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -29,13 +29,11 @@ import static org.mockito.Mockito.when;
 class AgentChatServiceImplOrchestrationModeTest {
 
     @Test
-    void newConversationsDefaultToUnifiedLoopWhenDynamicPlanEnabled() {
+    void newConversationsAlwaysUseUnifiedLoop() {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         when(storyboardClient.getProject("project-1")).thenReturn(Map.of("userId", "user-1"));
         AgentChatServiceImpl service = service(conversationMapper, storyboardClient);
-        ReflectionTestUtils.setField(service, "dynamicPlanEnabled", true);
-
         service.createConversation("user-1", "project-1", "title");
 
         verify(conversationMapper).insert(any(AgentConversation.class));
@@ -43,38 +41,71 @@ class AgentChatServiceImplOrchestrationModeTest {
                 org.mockito.ArgumentCaptor.forClass(AgentConversation.class);
         verify(conversationMapper).insert(captor.capture());
         assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("UNIFIED_LOOP");
+        assertThat(captor.getValue().getEngineVersion()).isEqualTo("unified-loop-v1");
+        assertThat(captor.getValue().getDebugComparisonEnabled()).isFalse();
     }
 
     @Test
-    void newConversationsFallBackToLegacyWhenDynamicPlanDisabled() {
+    void requestedLegacyModeIsIgnored() {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         when(storyboardClient.getProject("project-1")).thenReturn(Map.of("userId", "user-1"));
         AgentChatServiceImpl service = service(conversationMapper, storyboardClient);
-        ReflectionTestUtils.setField(service, "dynamicPlanEnabled", false);
-
-        service.createConversation("user-1", "project-1", "title");
+        service.createConversation("user-1", "project-1", "title", "LEGACY");
 
         org.mockito.ArgumentCaptor<AgentConversation> captor =
                 org.mockito.ArgumentCaptor.forClass(AgentConversation.class);
         verify(conversationMapper).insert(captor.capture());
-        assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("LEGACY");
+        assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("UNIFIED_LOOP");
     }
 
     @Test
-    void explicitUnifiedLoopIsForcedToLegacyWhenDynamicPlanDisabled() {
+    void explicitUnifiedLoopRemainsUnifiedLoop() {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         when(storyboardClient.getProject("project-1")).thenReturn(Map.of("userId", "user-1"));
         AgentChatServiceImpl service = service(conversationMapper, storyboardClient);
-        ReflectionTestUtils.setField(service, "dynamicPlanEnabled", false);
-
         service.createConversation("user-1", "project-1", "title", "UNIFIED_LOOP");
 
         org.mockito.ArgumentCaptor<AgentConversation> captor =
                 org.mockito.ArgumentCaptor.forClass(AgentConversation.class);
         verify(conversationMapper).insert(captor.capture());
-        assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("LEGACY");
+        assertThat(captor.getValue().getOrchestrationMode()).isEqualTo("UNIFIED_LOOP");
+    }
+
+    @Test
+    void archivedConversationRejectsWrites() {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentConversation conversation = writableConversation("UNIFIED_LOOP");
+        conversation.setStatus("archived");
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        AgentChatServiceImpl service = service(conversationMapper, mock(StoryboardClient.class));
+
+        assertThatThrownBy(() -> service.sendMessage("user-1", "conversation-1", "继续"))
+                .isInstanceOf(com.storyboard.common.BusinessException.class)
+                .hasMessageContaining("已归档");
+    }
+
+    @Test
+    void legacyConversationRejectsWrites() {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentConversation conversation = writableConversation("LEGACY");
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        AgentChatServiceImpl service = service(conversationMapper, mock(StoryboardClient.class));
+
+        assertThatThrownBy(() -> service.sendMessage("user-1", "conversation-1", "继续"))
+                .isInstanceOf(com.storyboard.common.BusinessException.class)
+                .hasMessageContaining("旧版会话已只读归档");
+    }
+
+    private static AgentConversation writableConversation(String mode) {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setStatus("active");
+        conversation.setOrchestrationMode(mode);
+        conversation.setEngineVersion("unified-loop-v1");
+        return conversation;
     }
 
     private static AgentChatServiceImpl service(AgentConversationMapper conversationMapper,

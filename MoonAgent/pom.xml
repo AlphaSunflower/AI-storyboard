@@ -16,6 +16,7 @@
     <properties>
         <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
+        <agentscope.version>2.0.3</agentscope.version>
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
@@ -34,6 +35,58 @@
                 <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-bom</artifactId>
+                <version>${agentscope.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- AgentScope pins an older MCP SDK. MoonAgent owns the MCP transport and
+                 adapts Spring AI ToolCallbacks into AgentScope tools, so keep the whole
+                 MCP module family aligned with Spring AI 2.0.0. -->
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp</artifactId>
+                <version>2.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-core</artifactId>
+                <version>2.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-json</artifactId>
+                <version>2.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-json-jackson3</artifactId>
+                <version>2.0.0</version>
+            </dependency>
+            <!-- Spring AI 2.0 uses json schema generator 5.x; AgentScope's 4.x
+                 artifact no longer contains JacksonSchemaModule. -->
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-generator</artifactId>
+                <version>5.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-jackson</artifactId>
+                <version>5.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-swagger-2</artifactId>
+                <version>5.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.networknt</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>3.0.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -113,6 +166,24 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-mcp-client</artifactId>
+        </dependency>
+
+        <!-- AgentScope Java: in-process ReAct runtime, on-demand skills and tool groups. -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-harness</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-postgresql</artifactId>
         </dependency>
 
         <!-- Nacos 服务发现 -->

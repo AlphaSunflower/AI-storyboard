@@ -4,8 +4,7 @@ import java.util.Locale;
 
 public enum OrchestrationMode {
     LEGACY("plan-graph-v1"),
-    UNIFIED_LOOP("unified-loop-v1"),
-    SHADOW("unified-loop-v1");
+    UNIFIED_LOOP("unified-loop-v1");
 
     private final String engineVersion;
 

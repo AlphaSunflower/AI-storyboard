@@ -4,7 +4,6 @@ import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
 import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
-import com.moon.moonagent.dto.request.AgentOrchestrationModeRequest;
 import com.moon.moonagent.dto.request.AgentSendMessageRequest;
 import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
@@ -384,15 +383,6 @@ public class AgentConversationController {
                                                              @RequestBody AgentConversationUpdateRequest request) {
         return ApiResponse.ok(toVO(chatService.updateConversation(
                 auth.getName(), id, request.title(), request.status())));
-    }
-
-    /** 空会话切换新旧编排引擎；已有消息会话由前端创建新会话。 */
-    @PatchMapping("/conversations/{id}/orchestration-mode")
-    public ApiResponse<AgentConversationVO> updateOrchestrationMode(
-            Authentication auth, @PathVariable String id,
-            @Valid @RequestBody AgentOrchestrationModeRequest request) {
-        return ApiResponse.ok(toVO(chatService.updateOrchestrationMode(
-                auth.getName(), id, request.mode())));
     }
 
     /** 删除资产（仅限归属本人会话；未归属资产拒绝） */

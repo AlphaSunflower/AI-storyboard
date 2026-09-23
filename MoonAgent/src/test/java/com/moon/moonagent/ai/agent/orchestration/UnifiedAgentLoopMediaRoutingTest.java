@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.orchestration;
 
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.skill.SkillManager;
@@ -38,6 +39,7 @@ class UnifiedAgentLoopMediaRoutingTest {
     @Mock SpecialistAgentRegistry specialistRegistry;
     @Mock OrchestrationRunRecorder recorder;
     @Mock AigcGatewaySpecialist aigcGatewaySpecialist;
+    @Mock AgentScopeMediaRuntime agentScopeMediaRuntime;
     @Mock SpecialistAgent specialist;
     @Mock SseEmitter emitter;
 
@@ -96,6 +98,27 @@ class UnifiedAgentLoopMediaRoutingTest {
         org.assertj.core.api.Assertions.assertThat(result.content()).isEqualTo("gateway-result");
     }
 
+    @Test
+    void enabledAgentScopeTakesNewMediaTurnBeforeLegacySpecialists() {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        when(agentScopeMediaRuntime.enabled()).thenReturn(true);
+        when(agentScopeMediaRuntime.runTurn(any(), any(), any()))
+                .thenReturn(AgentTurnResult.done("direct-image"));
+
+        UnifiedAgentLoop loop = loopWithGatewayEnabled(false);
+        ReflectionTestUtils.setField(loop, "agentScopeMediaRuntime", agentScopeMediaRuntime);
+        AgentTurnResult result = loop.runTurn(
+                conversation, "生成一张海边日落图片", List.of(), List.of(),
+                "intent-pic", false, null, List.of(), List.of(), emitter);
+
+        org.assertj.core.api.Assertions.assertThat(result.content()).isEqualTo("direct-image");
+        verify(agentScopeMediaRuntime).runTurn(any(), any(), any());
+        verify(specialist, never()).execute(any());
+        verify(aigcGatewaySpecialist, never()).execute(anyString(), any());
+    }
+
     private AgentTurnResult runMediaTurn(AgentConversation conversation, boolean gatewayEnabled) {
         return loopWithGatewayEnabled(gatewayEnabled).runTurn(
                 conversation, "把这张图卡通化", List.of("http://localhost/a.png"),
@@ -111,9 +134,12 @@ class UnifiedAgentLoopMediaRoutingTest {
         run.setId("run-1");
         run.setTraceId("trace-1");
         run.setEngineVersion("unified-loop-v1");
-        when(recorder.start(anyString(), anyString(), any(), anyString(), any())).thenReturn(run);
-        when(specialistRegistry.get("intent-pic")).thenReturn(Optional.of(specialist));
-        when(skillManager.byIntent("intent-pic")).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(
+                recorder.start(anyString(), anyString(), any(), anyString(), any())).thenReturn(run);
+        org.mockito.Mockito.lenient().when(
+                specialistRegistry.get("intent-pic")).thenReturn(Optional.of(specialist));
+        org.mockito.Mockito.lenient().when(
+                skillManager.byIntent("intent-pic")).thenReturn(Optional.empty());
         return loop;
     }
 }

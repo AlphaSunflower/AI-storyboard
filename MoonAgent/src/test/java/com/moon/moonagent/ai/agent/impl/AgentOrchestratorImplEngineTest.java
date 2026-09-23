@@ -1,7 +1,6 @@
 package com.moon.moonagent.ai.agent.impl;
 
 import com.moon.moonagent.ai.agent.AgentTurnResult;
-import com.moon.moonagent.ai.agent.PlanGraph;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.orchestration.UnifiedAgentLoop;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -28,24 +27,21 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AgentOrchestratorImplEngineTest {
 
-    @Mock PlanGraph planGraph;
     @Mock UnifiedAgentLoop unifiedAgentLoop;
     @Mock AgentCheckpointMapper checkpointMapper;
     @Mock AgentOrchestratorSupport support;
     @Mock SseEmitter emitter;
 
     @Test
-    void legacyConversationOnlyRunsPlanGraph() {
+    void legacyConversationIsReadOnly() {
         AgentOrchestratorImpl orchestrator = new AgentOrchestratorImpl(
-                planGraph, unifiedAgentLoop, checkpointMapper, support);
+                unifiedAgentLoop, checkpointMapper, support);
         AgentConversation conversation = conversation("LEGACY");
-        when(planGraph.runTurn(any(), anyString(), any(), any(), anyString(), anyBoolean(),
-                any(), any(), any(), any())).thenReturn(AgentTurnResult.done("legacy"));
 
         AgentTurnResult result = orchestrator.runTurn(conversation, "hello", List.of(), List.of(),
                 "", false, null, List.of(), List.of(), emitter);
 
-        assertThat(result.metadata().get("orchestrationMode")).isEqualTo("LEGACY");
+        assertThat(result.content()).contains("旧版会话已只读归档");
         verify(unifiedAgentLoop, never()).runTurn(any(), anyString(), any(), any(), anyString(), anyBoolean(),
                 any(), any(), any(), any());
     }
@@ -53,7 +49,7 @@ class AgentOrchestratorImplEngineTest {
     @Test
     void unifiedConversationOnlyRunsUnifiedLoop() {
         AgentOrchestratorImpl orchestrator = new AgentOrchestratorImpl(
-                planGraph, unifiedAgentLoop, checkpointMapper, support);
+                unifiedAgentLoop, checkpointMapper, support);
         AgentConversation conversation = conversation("UNIFIED_LOOP");
         when(unifiedAgentLoop.runTurn(any(), anyString(), any(), any(), anyString(), anyBoolean(),
                 any(), any(), any(), any())).thenReturn(AgentTurnResult.done("unified"));
@@ -62,14 +58,12 @@ class AgentOrchestratorImplEngineTest {
                 "", false, null, List.of(), List.of(), emitter);
 
         assertThat(result.metadata().get("orchestrationMode")).isEqualTo("UNIFIED_LOOP");
-        verify(planGraph, never()).runTurn(any(), anyString(), any(), any(), anyString(), anyBoolean(),
-                any(), any(), any(), any());
     }
 
     @Test
-    void checkpointOwnerRoutesResumeIndependentlyOfConversationMode() {
+    void legacyCheckpointCannotResume() {
         AgentOrchestratorImpl orchestrator = new AgentOrchestratorImpl(
-                planGraph, unifiedAgentLoop, checkpointMapper, support);
+                unifiedAgentLoop, checkpointMapper, support);
         AgentConversation conversation = conversation("UNIFIED_LOOP");
         AgentCheckpoint checkpoint = new AgentCheckpoint();
         checkpoint.setId("cp1");
@@ -81,14 +75,12 @@ class AgentOrchestratorImplEngineTest {
         checkpoint.setExpirationTime(OffsetDateTime.now().plusMinutes(10));
         checkpoint.setPlan("{}");
         when(checkpointMapper.selectOne(any())).thenReturn(checkpoint);
-        when(checkpointMapper.update(any(), any())).thenReturn(1);
-        when(planGraph.resumeTurn(any(), any(), any(), anyString(), any(), any(), anyString(), any(), any()))
-                .thenReturn(AgentTurnResult.done("legacy-resume"));
 
         AgentTurnResult result = orchestrator.resumeTurn(conversation, "token", "role", "",
                 Map.of(), List.of(), "", null, emitter);
 
-        assertThat(result.metadata().get("orchestrationMode")).isEqualTo("LEGACY");
+        assertThat(result.content()).isEmpty();
+        verify(checkpointMapper, never()).update(any(), any());
         verify(unifiedAgentLoop, never()).resumeTurn(any(), any(), any(), anyString(), any(), any(),
                 anyString(), any(), any());
     }

@@ -15,7 +15,6 @@ import { ChatAppsHost } from '../components/agent/apps/ChatAppsHost';
 import { useChatApps } from '../components/agent/apps/useChatApps';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
-import { OrchestrationModeSwitch } from '../components/agent/OrchestrationModeSwitch';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
@@ -830,7 +829,6 @@ export function ChatPage() {
               <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} /></div>
               <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
-            {!embed && <OrchestrationModeSwitch />}
             <ChatComposer />
             {/* 快捷提示 chips */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: DS.maxContent, padding: '0 16px' }}>
@@ -904,7 +902,6 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {!embed && <OrchestrationModeSwitch compact />}
                 {embed && canvasEditContext && <CanvasModeExitButton />}
                 {!embed && (
                   <ChatAppActions

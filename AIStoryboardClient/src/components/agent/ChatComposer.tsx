@@ -83,7 +83,12 @@ export function ChatComposer() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
+  const conversations = useAgentStore((s) => s.conversations);
   const projectId = useProjectStore((s) => s.currentProject?.id);
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
+  const readOnly = activeConversation?.status === 'archived'
+    || (activeConversation?.orchestrationMode != null
+      && activeConversation.orchestrationMode !== 'UNIFIED_LOOP');
   // 流式语音识别状态：活跃会话句柄 + 已确认文本（增量追加，不清空）
   const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
   const confirmedRef = useRef(''); // 已确认片段累积（vosk 每条 text 是增量，片段间逗号分隔）
@@ -209,7 +214,7 @@ export function ChatComposer() {
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || busy) return;
+    if (!content || busy || readOnly) return;
     setText('');
     const groupUrls = pendingGroup?.items.map((item) =>
       item.objectKey.startsWith('http') ? item.objectKey : `/api/files/${item.objectKey}`) || [];
@@ -227,7 +232,7 @@ export function ChatComposer() {
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+    if (readOnly || files.length === 0) return;
     setUploadDrafts(files.map((file) => ({
       file,
       preview: URL.createObjectURL(file),
@@ -243,7 +248,7 @@ export function ChatComposer() {
 
   const handleUploadConfirm = async () => {
     const drafts = uploadDrafts;
-    if (drafts.length === 0) return;
+    if (readOnly || drafts.length === 0) return;
     try {
       await uploadRefImages(
         drafts.map((d) => d.file),
@@ -256,6 +261,7 @@ export function ChatComposer() {
   };
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (readOnly) return;
     const hasFiles = e.dataTransfer.types.includes('Files');
     const hasScenes = e.dataTransfer.types.includes(SCENE_DRAG_MIME);
     const hasLibrary = e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME);
@@ -264,15 +270,16 @@ export function ChatComposer() {
     dragDepthRef.current += 1;
     setDropActive(true);
     setDragKind(hasScenes ? 'scene' : hasLibrary ? 'library' : 'file');
-  }, []);
+  }, [readOnly]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (readOnly) return;
     if (!e.dataTransfer.types.includes('Files')
         && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)
         && !e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-  }, []);
+  }, [readOnly]);
 
   const handleDragLeave = useCallback(() => {
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
@@ -284,6 +291,7 @@ export function ChatComposer() {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    if (readOnly) return;
     dragDepthRef.current = 0;
     setDropActive(false);
     setDragKind(null);
@@ -306,9 +314,10 @@ export function ChatComposer() {
     }
     const files = Array.from(e.dataTransfer.files ?? []).filter((file) => file.type.startsWith('image/'));
     if (files.length > 0) void uploadRefImages(files);
-  }, [sendMessage, uploadRefImages]);
+  }, [readOnly, sendMessage, uploadRefImages]);
 
   const openMenu = () => {
+    if (readOnly) return;
     const btn = menuBtnRef.current;
     if (btn) {
       const r = btn.getBoundingClientRect();
@@ -318,6 +327,7 @@ export function ChatComposer() {
   };
 
   const handleSceneConfirm = (selected: SceneResponse[]) => {
+    if (readOnly) return;
     const sceneRefs = selected.map((scene) => `分镜${scene.sceneNumber}`).join('、');
     sendMessage(`请审查 ${sceneRefs}`, { routingHint: 'intent-scene-review' });
     setSceneModalOpen(false);
@@ -337,11 +347,13 @@ export function ChatComposer() {
     }
   };
   const handleAssetOpen = () => {
+    if (readOnly) return;
     setAssetOpen(true);
     setAssetSelected(new Set(pickedAssetIds));
     void loadAssetList();
   };
   const handleAssetConfirm = async () => {
+    if (readOnly) return;
     if (!useAgentStore.getState().activeConversationId) {
       await useAgentStore.getState().createConversation();
     }
@@ -363,6 +375,7 @@ export function ChatComposer() {
   };
 
   const handleAssetGroupConfirm = async (groupIds: string[]) => {
+    if (readOnly) return;
     let conversationId = useAgentStore.getState().activeConversationId;
     if (!conversationId) {
       await useAgentStore.getState().createConversation();
@@ -382,6 +395,7 @@ export function ChatComposer() {
   };
 
   projectLibraryDropRef.current = async (payload) => {
+    if (readOnly) return;
     try {
       if (payload.kind === 'group') {
         await handleAssetGroupConfirm([
@@ -413,6 +427,7 @@ export function ChatComposer() {
   };
 
   const refreshBoundGroup = async (groupId: string) => {
+    if (readOnly) return;
     const conversationId = useAgentStore.getState().activeConversationId;
     if (!conversationId) return;
     await agentApi.attachConversationAssetGroup(conversationId, groupId);
@@ -546,18 +561,22 @@ export function ChatComposer() {
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <button
-              onClick={() => fileRef.current?.click()}
+              onClick={readOnly ? undefined : () => fileRef.current?.click()}
+              disabled={readOnly}
               style={{
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
-                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
+                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
+                opacity: readOnly ? 0.45 : 1,
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
             ><ImageIcon size={12} strokeWidth={2} /> 加素材</button>
             <button
-              onClick={handleAssetOpen}
+              onClick={readOnly ? undefined : handleAssetOpen}
+              disabled={readOnly}
               style={{
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
-                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
+                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
+                opacity: readOnly ? 0.45 : 1,
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
             ><Package size={12} strokeWidth={2} /> 加资产</button>
@@ -590,6 +609,14 @@ export function ChatComposer() {
             : (canvasBindingStatus || '正在准备画布…')}
         </div>
       )}
+      {readOnly && (
+        <div style={{
+          padding: '8px 12px', borderRadius: 12, background: 'rgba(0,0,0,0.04)',
+          color: DS.textSecondary, fontSize: 13,
+        }}>
+          该会话已归档，仅可查看历史记录，请新建会话后继续。
+        </div>
+      )}
       <textarea
         ref={inputRef}
         value={text}
@@ -601,8 +628,8 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-        disabled={busy}
+        placeholder={readOnly ? '该会话已归档' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        disabled={busy || readOnly}
         rows={2}
         style={{
           border: 'none', outline: 'none', resize: 'none', background: 'transparent',
@@ -613,18 +640,20 @@ export function ChatComposer() {
         <div style={{ position: 'relative' }}>
           <button
             ref={menuBtnRef}
-            onClick={openMenu}
+            onClick={readOnly ? undefined : openMenu}
+            disabled={readOnly}
             title="上传"
             className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
             style={{
               width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
-              fontSize: 17, cursor: 'pointer', color: DS.textSecondary, flexShrink: 0,
+              fontSize: 17, cursor: readOnly ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: readOnly ? 0.45 : 1,
             }}
           >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
-          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={handleFile} />
+          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden disabled={readOnly} onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
           {menuPresence.mounted && menuPos && createPortal(
             <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
@@ -648,7 +677,7 @@ export function ChatComposer() {
             onToggle={handleMicToggle}
             onPcm={handlePcm}
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
-            disabled={(busy && !recording)}
+            disabled={readOnly || (busy && !recording)}
           />
           {streaming && !agentVideoTask ? (
             <button
@@ -666,12 +695,12 @@ export function ChatComposer() {
           ) : (
             <button
               onClick={handleSend}
-              disabled={busy || !text.trim()}
+              disabled={readOnly || busy || !text.trim()}
               style={{
                 height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
                 background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-                cursor: busy || !text.trim() ? 'not-allowed' : 'pointer',
-                opacity: busy || !text.trim() ? 0.45 : 1,
+                cursor: readOnly || busy || !text.trim() ? 'not-allowed' : 'pointer',
+                opacity: readOnly || busy || !text.trim() ? 0.45 : 1,
                 transition: 'background 0.15s',
               }}
               onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}

@@ -82,7 +82,7 @@ public class OrchestrationRequest {
     /** 移交附带的下游状态（如 projectId / sceneNums）；与 {@link #handoffTarget} 一起被下一专家消费 */
     private Map<String, Object> handoffState = Map.of();
 
-    /** 本轮轨迹累积器（不参与状态序列化；由 PlanGraph 在 runTurn/resumeTurn 创建）。 */
+    /** 本轮轨迹累积器（不参与状态序列化；由 UnifiedAgentLoop 在 runTurn/resumeTurn 创建）。 */
     private AgentTraceAccumulator trace;
 
     /** 本轮 turn 落库用的结构化元数据（trace/reasoning/suggestedActions/hitl 等）。 */

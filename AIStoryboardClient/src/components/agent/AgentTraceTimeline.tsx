@@ -1,6 +1,35 @@
 import { ChevronRight } from 'lucide-react';
 import type { AgentTraceEvent } from '../../api/agent';
 
+function statusLabel(status: string) {
+  switch (status) {
+    case 'node_started': return '进行中';
+    case 'node_completed':
+    case 'completed': return '已完成';
+    case 'node_success':
+    case 'success': return '成功';
+    case 'node_failed':
+    case 'failed': return '失败';
+    case 'node_error':
+    case 'error': return '出错';
+    case 'route_changed': return '已切换';
+    default: return status || '处理中';
+  }
+}
+
+function phaseLabel(phase: string) {
+  switch (phase) {
+    case 'model_reasoning': return '模型推理';
+    case 'tool_call': return '工具调用';
+    case 'intent_recognize': return '意图识别';
+    case 'specialist_execute': return '专家执行';
+    case 'handoff': return '任务交接';
+    case 'route_change': return '链路切换';
+    case 'hitl': return '等待确认';
+    default: return phase || '';
+  }
+}
+
 /** 交接轨迹时间线：Moon → 分镜专家 → 审查专家 等阶段，左点右文，不嵌套卡片。 */
 export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
   if (!events || events.length === 0) return null;
@@ -38,8 +67,10 @@ export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-ink)' }}>{ev.agent || 'Agent'}</span>
-                  {ev.specialist && <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>{ev.specialist}</span>}
-                  {ev.phase && <span style={{ fontSize: 11, color: 'var(--color-muted-soft)' }}>{ev.phase}</span>}
+                  {ev.specialist && <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
+                    {ev.specialist === 'agentscope' ? 'AIGC 执行器' : ev.specialist}
+                  </span>}
+                  {ev.phase && <span style={{ fontSize: 11, color: 'var(--color-muted-soft)' }}>{phaseLabel(ev.phase)}</span>}
                   <span
                     style={{
                       fontSize: 11, padding: '1px 6px', borderRadius: 999,
@@ -47,7 +78,7 @@ export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
                       color: ok ? 'var(--color-success)' : 'var(--color-warning)',
                     }}
                   >
-                    {ev.status}
+                    {statusLabel(ev.status)}
                   </span>
                 </div>
                 {ev.title && <div style={{ fontSize: 13, color: 'var(--color-body)', fontWeight: 500, marginTop: 2 }}>{ev.title}</div>}
