@@ -1,10 +1,14 @@
 ---
 name: canvas-design
-description: 用户要求在画布上查找、创建、更新、连接或布局节点时使用
-label: 设计画布
-version: "1.0"
-model_role: text
-tools:
+description: 当用户要求在画布上查找、创建、更新、连接、布局或删除节点与连线时使用
+license: Apache-2.0
+metadata:
+  moon:
+    label: 设计画布
+    model_role: text
+    version: "1.0"
+    priority: 8
+allowed-tools:
   - canvas_get_context
   - canvas_list_node_types
   - canvas_get_state
@@ -25,11 +29,9 @@ tools:
   - canvas_create_edge
   - canvas_move_nodes
   - canvas_layout_graph
-limits: {}
-triggers:
-  - '画布|创建节点|连接节点|节点连线|布局画布|节点列表|画布结构'
-priority: 8
-menu_order: 5
+  - canvas_delete_nodes
+  - canvas_delete_edges
+  - moon_request_human_input
 ---
 
 # 画布设计
@@ -52,6 +54,6 @@ menu_order: 5
 13. 新建单动作生成节点后，读取模型目录并补齐网关默认模型和合法默认参数；用户指定的模型与参数优先。目录不可用时保留未选状态并说明原因，不得使用本地硬编码模型冒充网关模型。
 14. 只有用户明确要求“自动选模型/自动优化参数”时才主动替换模型；没有明确的画质、速度或成本标准时保持网关默认，不擅自优化。
 15. 使用 Spring AI 工具循环连续完成多步任务：可先查询、再创建/重命名、再补齐中继、再读取结果确认，不要只调用一个工具就结束。
-16. 本技能不得执行节点，也不得删除节点或连线。
+16. 删除节点或连线前必须先读取目标，并通过 `moon_request_human_input` 获得明确确认；不得把隐藏、替换或修改误判为删除。执行节点属于 canvas-run，不在本技能范围内。
 17. 目标不明确或存在多个候选画布时，必须调用 moon_request_human_input 让用户按“项目名称 / 画布名称”点击选择，禁止展示或要求输入 projectId、canvasId、nodeId。
 18. 最终回复只说明实际创建、更新、连接、重命名、模型调整或布局的内容；ID 仅用于工具参数，不展示给用户。

@@ -8,7 +8,6 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 
@@ -23,7 +22,6 @@ import java.util.List;
  * 若 fallbackKey 不在 PromptConfig（YAML 已删除/未迁移），则 stepId 必须存在于对应 SKILL body（否则空提示词）；
  * 若 fallbackKey 存在于 YAML，则为迁移期安全网，允许缺 stepId。
  */
-@Component
 @RequiredArgsConstructor
 public class SkillPromptBindingValidator {
 

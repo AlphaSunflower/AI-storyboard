@@ -24,7 +24,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -47,7 +46,6 @@ import java.util.concurrent.Executors;
  * </ul>
  * 剧本优化与分镜方案两个 gate 仍为手动澄清循环（type=0 选项卡片追问，type=1 继续）。
  */
-@Component
 @RequiredArgsConstructor
 public class AisplitIntentHandler implements IntentHandler {
 

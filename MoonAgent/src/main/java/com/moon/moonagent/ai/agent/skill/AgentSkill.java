@@ -86,32 +86,56 @@ public record AgentSkill(
 
     /** 从 name + frontmatter + body 构建（name 推导 intentType；body 仅作知识归属，暂不消费） */
     public static AgentSkill of(String name, Map<String, Object> frontmatter, Map<String, String> nodePrompts) {
-        String label = str(frontmatter.get("label"));
+        Map<String, Object> moon = moonMetadata(frontmatter);
+        String label = str(value(frontmatter, moon, "label"));
         if (label.isBlank()) label = str(frontmatter.get("description"));
+        List<String> tools = toStrList(value(frontmatter, moon, "tools"));
+        if (tools.isEmpty()) tools = toStrList(frontmatter.get("allowed-tools"));
+        List<String> triggers = toStrList(value(frontmatter, moon, "triggers"));
         @SuppressWarnings("unchecked")
-        List<String> tools = toStrList(frontmatter.get("tools"));
-        @SuppressWarnings("unchecked")
-        List<String> triggers = toStrList(frontmatter.get("triggers"));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> hitl = (List<Map<String, Object>>) frontmatter.getOrDefault("hitl", List.of());
+        List<Map<String, Object>> hitl = (List<Map<String, Object>>) value(
+                frontmatter, moon, "hitl", List.of());
         return new AgentSkill(
                 INTENT_PREFIX + name,
                 name,
                 str(frontmatter.get("description")),
                 label,
-                str(frontmatter.get("model_role")).isBlank() ? "text" : str(frontmatter.get("model_role")),
+                str(value(frontmatter, moon, "model_role")).isBlank()
+                        ? "text" : str(value(frontmatter, moon, "model_role")),
                 tools,
-                toIntMap(frontmatter.get("limits")),
+                toIntMap(value(frontmatter, moon, "limits")),
                 triggers,
-                intVal(frontmatter.get("priority"), 100),
-                intVal(frontmatter.get("menu_order"), 100),
+                intVal(value(frontmatter, moon, "priority"), 100),
+                intVal(value(frontmatter, moon, "menu_order"), 100),
                 hitl == null ? List.of() : hitl,
                 nodePrompts == null ? Map.of() : nodePrompts,
-                toStrList(frontmatter.get("flow")),
-                evaluationMode(frontmatter.get("evaluation_mode")),
-                hitlPolicy(frontmatter.get("default_hitl_policy")),
-                boolVal(frontmatter.get("async")),
-                str(frontmatter.get("version")));
+                toStrList(value(frontmatter, moon, "flow")),
+                evaluationMode(value(frontmatter, moon, "evaluation_mode")),
+                hitlPolicy(value(frontmatter, moon, "default_hitl_policy")),
+                boolVal(value(frontmatter, moon, "async")),
+                str(value(frontmatter, moon, "version")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> moonMetadata(Map<String, Object> frontmatter) {
+        Object metadata = frontmatter.get("metadata");
+        if (!(metadata instanceof Map<?, ?> meta)) return Map.of();
+        Object moon = meta.get("moon");
+        if (!(moon instanceof Map<?, ?> values)) return Map.of();
+        java.util.LinkedHashMap<String, Object> out = new java.util.LinkedHashMap<>();
+        values.forEach((key, value) -> out.put(String.valueOf(key), value));
+        return out;
+    }
+
+    private static Object value(Map<String, Object> frontmatter,
+                                Map<String, Object> moon, String key) {
+        return value(frontmatter, moon, key, null);
+    }
+
+    private static Object value(Map<String, Object> frontmatter,
+                                Map<String, Object> moon, String key, Object fallback) {
+        if (moon.containsKey(key)) return moon.get(key);
+        return frontmatter.getOrDefault(key, fallback);
     }
 
     /** 澄清菜单最终 id（与 handler.intentType() 对齐，resume/clarify 共用） */

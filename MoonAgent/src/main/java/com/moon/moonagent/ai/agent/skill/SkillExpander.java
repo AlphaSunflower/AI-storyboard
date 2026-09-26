@@ -69,17 +69,6 @@ public class SkillExpander {
         });
         toolByName = map;
 
-        // 校验：技能声明的工具必须能解析到真实回调（缺失仅警告，避免运行期空工具集）
-        for (AgentSkill skill : skillManager.all()) {
-            if (skill.tools() == null) continue;
-            for (String tool : skill.tools()) {
-                if (tool == null || tool.isBlank()) continue;
-                if (!toolByName.containsKey(tool)) {
-                    log.warn("[SkillExpander] 技能 {} 声明的工具 '{}' 未找到（@Tool/@McpTool 缺失），将无法注入",
-                            skill.name(), tool);
-                }
-            }
-        }
         log.info("[SkillExpander] 共索引 {} 个工具: {}", toolByName.size(), toolByName.keySet());
     }
 

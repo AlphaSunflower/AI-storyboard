@@ -63,12 +63,14 @@ public class AgentScopeToolkitFactory {
             register(toolkit, interactionTools.tool());
         }
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
-        for (ToolCallback canvasTool : skillExpander.toolCallbacksByPrefix("canvas_")) {
+        ToolCallback[] canvasCallbacks = skillExpander.toolCallbacksByPrefix("canvas_");
+        if (canvasCallbacks == null) canvasCallbacks = new ToolCallback[0];
+        for (ToolCallback canvasTool : canvasCallbacks) {
             register(toolkit, toolPipeline.wrapGeneric(new SpringAiToolAdapter(canvasTool)));
         }
 
         toolkit.createSkillToolGroup(
-                IMAGE_TOOLS, "Image generation and reference-edit tools", false, "pic");
+                IMAGE_TOOLS, "Image generation and reference-edit tools", false, "image");
         toolkit.registration()
                 .agentTool(toolPipeline.wrap(imageTools.tool()))
                 .group(IMAGE_TOOLS).apply();

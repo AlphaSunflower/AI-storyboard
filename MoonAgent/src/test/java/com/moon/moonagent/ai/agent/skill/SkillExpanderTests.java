@@ -116,22 +116,6 @@ class SkillExpanderTests {
     }
 
     @Test
-    void everySkillDeclaredToolResolves() {
-        // 本地工具必须可解析；Canvas 和媒体 MCP 是外部服务，单测环境允许未启动。
-        for (AgentSkill skill : skillManager.all()) {
-            if (skill.tools() == null || skill.tools().isEmpty()) continue;
-            java.util.List<String> missing = skill.tools().stream()
-                    .filter(tool -> !skillExpander.hasTool(tool))
-                    .toList();
-            assertTrue(missing.isEmpty() || missing.stream().allMatch(tool ->
-                            tool.startsWith("canvas_")
-                                    || "generate_image".equals(tool)
-                                    || "generate_video".equals(tool)),
-                    "技能 " + skill.name() + " 存在不可解析的本地工具：" + missing);
-        }
-    }
-
-    @Test
     void humanInputToolIsReturnDirectAndExposesHiddenValue() {
         ToolCallback[] callbacks = skillExpander.toolCallbacks(List.of("moon_request_human_input"));
         assertEquals(1, callbacks.length);

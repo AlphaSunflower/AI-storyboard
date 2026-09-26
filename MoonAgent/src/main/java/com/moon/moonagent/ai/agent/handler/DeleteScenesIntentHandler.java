@@ -3,7 +3,6 @@ package com.moon.moonagent.ai.agent.handler;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -15,7 +14,6 @@ import java.util.Set;
  * <p>handle 弹确认卡片（human_input），用户点「确认删除」才真正执行；
  * 点「取消」则不删除，保持现状。
  */
-@Component
 @RequiredArgsConstructor
 public class DeleteScenesIntentHandler implements IntentHandler {
 

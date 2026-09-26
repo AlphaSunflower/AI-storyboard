@@ -9,7 +9,6 @@ import com.moon.moonagent.ai.ImageRefinePromptService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +19,6 @@ import java.util.Set;
  * pic 图片链：有参考图 → 视觉模型改图方案 + HITL「生成图片/继续完善」→ resume 图改图；
  * 无参考图 → LLM 提示词直接文生图（自动完成，无 HITL）。
  */
-@Component
 @RequiredArgsConstructor
 public class PicIntentHandler implements IntentHandler {
 

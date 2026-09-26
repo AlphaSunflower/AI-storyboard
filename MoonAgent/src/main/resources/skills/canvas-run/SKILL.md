@@ -1,10 +1,17 @@
 ---
 name: canvas-run
-description: 用户要求执行节点、运行画布或按依赖批量执行时使用
-label: 执行画布
-version: "1.0"
-model_role: text
-tools:
+description: 当用户要求执行节点、运行画布、按依赖批量执行、查询执行状态或取消执行时使用
+license: Apache-2.0
+metadata:
+  moon:
+    label: 执行画布
+    model_role: text
+    version: "1.0"
+    priority: 5
+    hitl:
+      - { id: execute, title: 确认执行 }
+      - { id: cancel, title: 取消 }
+allowed-tools:
   - canvas_get_context
   - canvas_list_node_types
   - canvas_get_state
@@ -29,14 +36,7 @@ tools:
   - canvas_execute_graph
   - canvas_get_execution
   - canvas_cancel_execution
-limits: {}
-triggers:
-  - '执行节点|运行节点|执行画布|运行画布|批量执行|执行整张图|跑一遍画布|DAG'
-priority: 5
-menu_order: 6
-hitl:
-  - { id: execute, title: 确认执行 }
-  - { id: cancel, title: 取消 }
+  - moon_request_human_input
 ---
 
 # 画布执行

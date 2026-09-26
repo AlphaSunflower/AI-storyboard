@@ -1,20 +1,20 @@
 ---
 name: video
-description: 用户要求生成/制作视频时使用
-label: 生成视频
-version: "3.0"
-model_role: video
-async: true
-evaluation_mode: hybrid
-default_hitl_policy: none
-tools: [generate_video]
-limits: {}
-triggers:
-  - '生成视频|做视频|做动画|视频方案|动画片|短片|视频脚本'
-priority: 40
-menu_order: 30
-hitl:
-  - { id: cancel, title: 不生成 }
+description: 当用户要求生成、制作或完善单段视频、动画或短片时使用
+license: Apache-2.0
+metadata:
+  moon:
+    label: 生成视频
+    model_role: video
+    async: true
+    evaluation_mode: hybrid
+    default_hitl_policy: none
+    version: "3.0"
+    priority: 40
+allowed-tools:
+  - generate_video
+  - resolve_reference_assets
+  - moon_request_human_input
 ---
 
 # 视频生成（video）

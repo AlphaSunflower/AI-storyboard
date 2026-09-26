@@ -10,7 +10,6 @@ import com.moon.moonagent.ai.video.ReferenceImageRole;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -22,7 +21,6 @@ import java.util.Set;
  * （有参考图 → 视觉模型 buildVideoPlan；无图 → LLM callVideoPlan；勾选资产设定集拼入方案输入）
  * → HITL video_plan 卡片（开始生成视频/继续完善）→ resume 异步视频生成（task_accepted + 后台轮询）。
  */
-@Component
 @RequiredArgsConstructor
 public class VideoIntentHandler implements IntentHandler {
 

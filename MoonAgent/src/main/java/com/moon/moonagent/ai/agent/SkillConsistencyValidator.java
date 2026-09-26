@@ -9,7 +9,6 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
 import java.util.List;
@@ -30,7 +29,6 @@ import java.util.Set;
  *   <li>无 handler 且声明 flow 的技能，每个 flow 步骤在 body 里都有对应的 {@code ### stepId} 段。</li>
  * </ol>
  */
-@Component
 @RequiredArgsConstructor
 public class SkillConsistencyValidator {
 

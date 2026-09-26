@@ -3,7 +3,6 @@ package com.moon.moonagent.ai.agent.handler;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.ai.agent.AgentAnswerService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
@@ -12,7 +11,6 @@ import java.util.Set;
  * other 回答链：AgentAnswerService 主回答（流式打字机 message 增量 + message_end 收尾）。
  * 无 HITL 阶段，resume 无认领动作。
  */
-@Component
 @RequiredArgsConstructor
 public class OtherIntentHandler implements IntentHandler {
 
