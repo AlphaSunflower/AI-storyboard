@@ -211,6 +211,9 @@ public class OrchestrationRequest {
     /** 画布编辑模式上下文；非空时本轮只能进入画布技能。 */
     private CanvasSessionContext canvasContext;
 
+    /** 新 AgentScope 传输只发送带序号的 envelope，不再混发旧 SSE 事件。 */
+    private boolean nativeEventsOnly;
+
     public String getRoutingHint() {
         return routingHint == null ? "" : routingHint;
     }

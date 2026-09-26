@@ -117,4 +117,13 @@ public class SkillExpander {
         }
         return out.toArray(new ToolCallback[0]);
     }
+
+    /** Return callbacks whose tool name starts with the supplied prefix. */
+    public ToolCallback[] toolCallbacksByPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) return new ToolCallback[0];
+        return toolByName.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue)
+                .toArray(ToolCallback[]::new);
+    }
 }

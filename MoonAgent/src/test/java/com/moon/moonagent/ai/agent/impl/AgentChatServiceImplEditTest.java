@@ -10,9 +10,12 @@ import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
+import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
+import com.moon.moonagent.entity.AgentTurnEntity;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
@@ -72,6 +75,8 @@ class AgentChatServiceImplEditTest {
                 mock(com.moon.moonagent.ai.agent.AgentOrchestrator.class);
         AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
         AgentScopeMediaRuntime mediaRuntime = mock(AgentScopeMediaRuntime.class);
+        AgentTurnEventStore turnEventStore = mock(AgentTurnEventStore.class);
+        AgentScopeEventMapper eventMapper = mock(AgentScopeEventMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
@@ -87,12 +92,14 @@ class AgentChatServiceImplEditTest {
                 message("assistant-1", "assistant", "第一条回复"),
                 target,
                 lateReply));
-        when(orchestrator.runTurn(
-                any(), eq("修改后的问题"), any(), any(), any(), anyBoolean(),
-                any(), any(), any(), any()))
+        when(mediaRuntime.enabled()).thenReturn(true);
+        AgentTurnEntity turn = new AgentTurnEntity();
+        turn.setId("turn-1");
+        when(turnEventStore.start(any(), eq("修改后的问题"))).thenReturn(turn);
+        when(mediaRuntime.runTurn(any(), any(), any(), any()))
                 .thenReturn(new AgentTurnResult(
                         "新回复",
-                        Map.of("_terminalEventSent", true),
+                        Map.of(),
                         List.of(),
                         null,
                         List.of(),
@@ -101,20 +108,18 @@ class AgentChatServiceImplEditTest {
 
         AgentChatServiceImpl service = service(
                 conversationMapper, messageMapper, orchestrator, support, lock, transactionManager);
-        inject(service, "agentScopeMediaRuntime", mediaRuntime);
+        injectTurnRuntime(service, mediaRuntime, turnEventStore, eventMapper);
         service.editAndResend(
                 "user-1", "conversation-1", "user-2", "修改后的问题", new SseEmitter(0L));
 
-        verify(lock, timeout(2_000)).release("conversation-1");
+        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
         ArgumentCaptor<AgentMessage> updated = ArgumentCaptor.forClass(AgentMessage.class);
         verify(messageMapper).updateById(updated.capture());
         assertThat(updated.getValue().getId()).isEqualTo("user-2");
         assertThat(updated.getValue().getContent()).isEqualTo("修改后的问题");
         verify(messageMapper).deleteBatchIds(List.of("assistant-2"));
         verify(mediaRuntime).rewindLastTurn("user-1", "conversation-1", "原问题");
-        verify(orchestrator).runTurn(
-                any(), eq("修改后的问题"), eq(List.of("/api/files/images/ref.png")),
-                eq(List.of("asset-1")), any(), anyBoolean(), any(), any(), any(), any());
+        verify(mediaRuntime, timeout(2_000)).runTurn(any(), any(), any(), any());
     }
 
     @Test
@@ -148,7 +153,7 @@ class AgentChatServiceImplEditTest {
                 List.of("/api/files/images/ref.png"), List.of("asset-1"),
                 new SseEmitter(0L), null, false, null, List.of(), List.of());
 
-        verify(lock, timeout(2_000)).release("conversation-1");
+        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
         ArgumentCaptor<AgentMessage> messages = ArgumentCaptor.forClass(AgentMessage.class);
         verify(messageMapper, times(2)).insert(messages.capture());
         AgentMessage userMessage = messages.getAllValues().stream()
@@ -163,23 +168,29 @@ class AgentChatServiceImplEditTest {
     }
 
     @Test
-    void interruptAndSendWaitsForTheConversationLockBeforeStartingTheNewTurn() {
+    void interruptAndSendWaitsForTheConversationLockBeforeStartingTheNewTurn() throws Exception {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         com.moon.moonagent.ai.agent.AgentOrchestrator orchestrator =
                 mock(com.moon.moonagent.ai.agent.AgentOrchestrator.class);
         AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentScopeMediaRuntime mediaRuntime = mock(AgentScopeMediaRuntime.class);
+        AgentTurnEventStore turnEventStore = mock(AgentTurnEventStore.class);
+        AgentScopeEventMapper eventMapper = mock(AgentScopeEventMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
         when(lock.acquireWithTimeout(eq("conversation-1"), any(Duration.class))).thenReturn(true);
-        when(orchestrator.runTurn(
-                any(), eq("新的指导"), any(), any(), any(), anyBoolean(),
-                any(), any(), any(), any()))
+        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(mediaRuntime.enabled()).thenReturn(true);
+        AgentTurnEntity turn = new AgentTurnEntity();
+        turn.setId("turn-2");
+        when(turnEventStore.start(any(), eq("新的指导"))).thenReturn(turn);
+        when(mediaRuntime.runTurn(any(), any(), any(), any()))
                 .thenReturn(new AgentTurnResult(
                         "新回复",
-                        Map.of("_terminalEventSent", true),
+                        Map.of(),
                         List.of(),
                         null,
                         List.of(),
@@ -187,6 +198,7 @@ class AgentChatServiceImplEditTest {
                         ""));
         AgentChatServiceImpl service = service(
                 conversationMapper, messageMapper, orchestrator, support, lock, transactionManager);
+        injectTurnRuntime(service, mediaRuntime, turnEventStore, eventMapper);
 
         service.interruptAndStream(
                 "user-1", "conversation-1", "新的指导",
@@ -198,10 +210,8 @@ class AgentChatServiceImplEditTest {
         verify(messageMapper, timeout(2_000).atLeastOnce()).insert(inserted.capture());
         assertThat(inserted.getAllValues()).anyMatch(message ->
                 "user".equals(message.getRole()) && "新的指导".equals(message.getContent()));
-        verify(orchestrator, timeout(2_000)).runTurn(
-                any(), eq("新的指导"), any(), any(), any(), anyBoolean(),
-                any(), any(), any(), any());
-        verify(lock, timeout(2_000)).release("conversation-1");
+        verify(mediaRuntime, timeout(2_000)).runTurn(any(), any(), any(), any());
+        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
     }
 
     private static AgentConversation conversation() {
@@ -252,5 +262,13 @@ class AgentChatServiceImplEditTest {
         Field field = AgentChatServiceImpl.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static void injectTurnRuntime(Object target, AgentScopeMediaRuntime runtime,
+                                          AgentTurnEventStore store,
+                                          AgentScopeEventMapper mapper) throws Exception {
+        inject(target, "agentScopeMediaRuntime", runtime);
+        inject(target, "turnEventStore", store);
+        inject(target, "agentScopeEventMapper", mapper);
     }
 }

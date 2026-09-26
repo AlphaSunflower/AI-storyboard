@@ -21,6 +21,9 @@ import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
+import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
@@ -28,6 +31,7 @@ import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
 import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
@@ -36,6 +40,7 @@ import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.ImageRefinePromptService;
 import com.moon.moonagent.ai.VideoPlanService;
+import io.agentscope.core.event.AgentEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import lombok.RequiredArgsConstructor;
@@ -119,6 +124,12 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentScopeAsyncTaskService agentScopeAsyncTaskService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentTurnEventStore turnEventStore;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentScopeEventMapper agentScopeEventMapper;
 
     /**
      * 首条消息异步 AI 重命名标题：
@@ -642,9 +653,11 @@ public class AgentChatServiceImpl implements AgentChatService {
                 CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
                 persistUserMessage(conversation, content, picUrls, assetIds, routingHint,
                         referenceVideos, referenceAudios);
-                dispatchStreamTurn(conversation, content, picUrls, assetIds, routingHint,
-                        cancelActiveTasks, effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
+                conversationLock.release(conversationId);
                 lockAcquired = false;
+                streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
+                        routingHint, effectiveCanvasContext, referenceVideos, referenceAudios,
+                        false, emitter);
             } catch (Exception e) {
                 log.error("打断并发送失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
                 sendFriendlyError(emitter, e.getMessage(), "打断失败，请稍后重试。");
@@ -695,6 +708,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
+        boolean lockHeld = true;
         try {
             checkpointResumeService.expirePending(conversationId);
             if (agentScopeMediaRuntime != null) {
@@ -709,10 +723,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                 if (!laterMessageIds.isEmpty()) messageMapper.deleteBatchIds(laterMessageIds);
                 conversationMapper.updateById(conversation);
             });
-            dispatchStreamTurn(conversation, content, picUrls, assetIds, routingHint, false,
-                    effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
-        } catch (Exception e) {
             conversationLock.release(conversationId);
+            lockHeld = false;
+            streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
+                    routingHint, effectiveCanvasContext, referenceVideos, referenceAudios,
+                    false, emitter);
+        } catch (Exception e) {
+            if (lockHeld) conversationLock.release(conversationId);
             log.error("编辑并重发失败: conversationId={}, messageId={}, error={}",
                     conversationId, messageId, e.getMessage(), e);
             sendFriendlyError(emitter, e.getMessage(), "修改失败，请稍后重试。");
@@ -1000,6 +1017,261 @@ public class AgentChatServiceImpl implements AgentChatService {
     /** conversationId → 最近一次消息携带的 PicUrl（图改图兜底：node_finished 不带 code 节点 outputs，
      *  plan 无 picture；本字段在 streamMessage 按轮更新/清空，仅当轮生效） */
     private final Map<String, java.util.List<String>> lastPicUrlByConversation = new ConcurrentHashMap<>();
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     SseEmitter emitter) {
+        streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
+                routingHint, canvasContext, referenceVideos, referenceAudios, true, emitter);
+    }
+
+    private void streamAgentScopeTurnInternal(String userId, String conversationId, String content,
+                                              List<String> picUrls, List<String> assetIds,
+                                              String routingHint, CanvasSessionContext canvasContext,
+                                              List<String> referenceVideos, List<String> referenceAudios,
+                                              boolean persistUser, SseEmitter emitter) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        if (!requireAgentScope(emitter)) {
+            emitter.complete();
+            return;
+        }
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
+            emitter.complete();
+            return;
+        }
+        orchestratorSupport.clearInterrupt(conversationId);
+        configureEmitter(emitter);
+
+        CompletableFuture.runAsync(() -> {
+            com.moon.moonagent.entity.AgentTurnEntity turn = null;
+            try {
+                if (persistUser) {
+                    persistUserMessage(conversation, content, picUrls, assetIds, routingHint,
+                            referenceVideos, referenceAudios);
+                }
+                turn = turnEventStore.start(conversation, content);
+                Map<String, Object> started = new LinkedHashMap<>();
+                started.put("turnId", turn.getId());
+                started.put("conversationId", conversationId);
+                started.put("runtime", turn.getRuntimeEngine() == null
+                        ? "agentscope-java-2.0.3" : turn.getRuntimeEngine());
+                sendRuntimeEvent(emitter, "turn_started", started);
+
+                OrchestrationRequest request = new OrchestrationRequest(
+                        conversation, content, picUrls == null ? List.of() : picUrls, emitter);
+                request.setAssetIds(assetIds == null ? List.of() : assetIds);
+                request.setRoutingHint(routingHint);
+                request.setCanvasContext(canvasContext);
+                request.setNativeEventsOnly(true);
+                request.setReferenceVideos(referenceVideos == null ? List.of() : referenceVideos);
+                request.setReferenceAudios(referenceAudios == null ? List.of() : referenceAudios);
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                request.setTrace(trace);
+
+                AgentTurnResult result = agentScopeMediaRuntime.runTurn(
+                        conversation, request, trace, eventObserver(turn.getId(), emitter));
+                throwIfInterrupted(conversationId);
+                finishAgentScopeTurn(conversation, turn, result, emitter);
+            } catch (AgentInterruptException e) {
+                if (turn != null) {
+                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                }
+                log.info("AgentScope turn 被用户打断: conversationId={}", conversationId);
+            } catch (Exception e) {
+                if (turn != null) {
+                    turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                }
+                log.error("AgentScope turn 失败: conversationId={}, error={}",
+                        conversationId, e.getMessage(), e);
+                sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+            } finally {
+                conversationLock.release(conversationId);
+                try { emitter.complete(); } catch (Exception ignore) { }
+            }
+        }, agentExecutor);
+    }
+
+    @Override
+    public void resumeAgentScopeTurn(String userId, String conversationId, String formToken,
+                                     String action, String customText, Map<String, String> params,
+                                     List<String> assetIds, CanvasSessionContext canvasContext,
+                                     SseEmitter emitter) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        if (!requireAgentScope(emitter)) {
+            emitter.complete();
+            return;
+        }
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
+            emitter.complete();
+            return;
+        }
+        orchestratorSupport.clearInterrupt(conversationId);
+        configureEmitter(emitter);
+
+        CompletableFuture.runAsync(() -> {
+            com.moon.moonagent.entity.AgentTurnEntity turn = null;
+            try {
+                if ("custom".equals(action) && customText != null && !customText.isBlank()) {
+                    persistUserText(conversation, customText);
+                }
+                ResumeCommand command = ResumeCommand.of(
+                        action, customText, params, assetIds, "", canvasContext);
+                CheckpointClaim claim = checkpointResumeService.claim(
+                        conversationId, formToken, command);
+                turn = turnEventStore.start(conversation,
+                        "resume:" + (action == null ? "" : action));
+                Map<String, Object> started = new LinkedHashMap<>();
+                started.put("turnId", turn.getId());
+                started.put("conversationId", conversationId);
+                started.put("resume", true);
+                started.put("runtime", turn.getRuntimeEngine());
+                sendRuntimeEvent(emitter, "turn_started", started);
+
+                OrchestrationRequest request = new OrchestrationRequest(
+                        conversation, "", List.of(), emitter);
+                request.setAction(action == null ? "" : action);
+                request.setCustomText(customText == null ? "" : customText);
+                request.setParams(params == null ? Map.of() : params);
+                request.setAssetIds(assetIds == null ? List.of() : assetIds);
+                request.setCanvasContext(canvasContext);
+                request.setNativeEventsOnly(true);
+                request.setCheckpointAction(claim.checkpoint().getAction());
+                request.setCheckpointPlan(claim.checkpoint().getPlan());
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                request.setTrace(trace);
+
+                AgentTurnResult result = agentScopeMediaRuntime.resumeTurn(
+                        conversation, claim.checkpoint(), request, trace,
+                        action, customText, eventObserver(turn.getId(), emitter));
+                throwIfInterrupted(conversationId);
+                checkpointResumeService.complete(claim);
+                finishAgentScopeTurn(conversation, turn, result, emitter);
+            } catch (AgentInterruptException e) {
+                if (turn != null) {
+                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                }
+            } catch (Exception e) {
+                if (turn != null) {
+                    turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                }
+                log.error("AgentScope resume 失败: conversationId={}, error={}",
+                        conversationId, e.getMessage(), e);
+                sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+            } finally {
+                conversationLock.release(conversationId);
+                try { emitter.complete(); } catch (Exception ignore) { }
+            }
+        }, agentExecutor);
+    }
+
+    @Override
+    public Map<String, Object> getRuntimeStatus(String userId, String conversationId) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("conversationId", conversationId);
+        status.put("engineVersion", conversation.getEngineVersion());
+        status.put("agentscopeEnabled", agentScopeMediaRuntime != null
+                && agentScopeMediaRuntime.enabled());
+        boolean locked = !conversationLock.tryAcquire(conversationId);
+        status.put("locked", locked);
+        if (!locked) conversationLock.release(conversationId);
+        return status;
+    }
+
+    @Override
+    public List<AgentTurnEventEnvelope> getTurnEvents(String userId, String conversationId,
+                                                      String turnId, int afterSequence) {
+        getOwnedConversation(userId, conversationId);
+        if (turnEventStore == null || turnId == null || turnId.isBlank()) return List.of();
+        com.moon.moonagent.entity.AgentTurnEntity turn = turnEventStore.find(turnId);
+        if (turn == null || !conversationId.equals(turn.getConversationId())) return List.of();
+        return turnEventStore.eventsAfter(turnId, afterSequence);
+    }
+
+    private java.util.function.Consumer<AgentEvent> eventObserver(String turnId, SseEmitter emitter) {
+        return event -> {
+            AgentTurnEventEnvelope envelope = turnEventStore.append(
+                    turnId,
+                    agentScopeEventMapper.type(event),
+                    agentScopeEventMapper.payload(event));
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("turnId", envelope.turnId());
+            payload.put("seq", envelope.seq());
+            payload.put("eventType", envelope.type());
+            payload.put("data", envelope.payload());
+            sendRuntimeEvent(emitter, "agent_event", payload);
+        };
+    }
+
+    private void finishAgentScopeTurn(AgentConversation conversation,
+                                      com.moon.moonagent.entity.AgentTurnEntity turn,
+                                      AgentTurnResult result, SseEmitter emitter) {
+        if (result == null) {
+            turnEventStore.finish(turn.getId(), "failed", "runtime returned no result", OffsetDateTime.now());
+            sendRuntimeError(emitter, "50001", "AgentScope 运行时没有返回结果");
+            return;
+        }
+        if (result.hitlPaused()) {
+            turnEventStore.attachCheckpoint(turn.getId(), result.messageId());
+            Map<String, Object> paused = new LinkedHashMap<>();
+            paused.put("turnId", turn.getId());
+            paused.put("messageId", result.messageId() == null ? "" : result.messageId());
+            paused.put("content", result.content() == null ? "" : result.content());
+            paused.put("metadata", result.metadata() == null ? Map.of() : result.metadata());
+            Map<String, Object> pending = getPendingCheckpoint(conversation.getId());
+            if (pending != null && !pending.isEmpty()) paused.put("hitl", pending);
+            sendRuntimeEvent(emitter, "turn_paused", paused);
+            return;
+        }
+        if (result.content() != null && !result.content().isBlank()) {
+            persistAssistant(conversation, result);
+        }
+        turnEventStore.finish(turn.getId(), "completed", "", OffsetDateTime.now());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("turnId", turn.getId());
+        payload.put("status", "completed");
+        payload.put("content", result.content() == null ? "" : result.content());
+        payload.put("metadata", result.metadata() == null ? Map.of() : result.metadata());
+        sendRuntimeEvent(emitter, "turn_completed", payload);
+    }
+
+    private boolean requireAgentScope(SseEmitter emitter) {
+        if (agentScopeMediaRuntime == null || !agentScopeMediaRuntime.enabled()
+                || turnEventStore == null || agentScopeEventMapper == null) {
+            sendRuntimeError(emitter, "50301", "AgentScope 运行时未就绪");
+            return false;
+        }
+        return true;
+    }
+
+    private void configureEmitter(SseEmitter emitter) {
+        AtomicBoolean cancel = new AtomicBoolean(false);
+        Runnable interruptTrap = () -> cancel.set(true);
+        emitter.onCompletion(interruptTrap);
+        emitter.onTimeout(interruptTrap);
+        emitter.onError(ignored -> interruptTrap.run());
+    }
+
+    private void sendRuntimeEvent(SseEmitter emitter, String eventName, Map<String, Object> data) {
+        sendEvent(emitter, eventName, data);
+    }
+
+    private void sendRuntimeError(SseEmitter emitter, String code, String message) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("code", code);
+        payload.put("message", message);
+        sendRuntimeEvent(emitter, "turn_failed", payload);
+    }
+
+    private String friendlyRuntimeError(Exception error) {
+        String raw = error == null ? "" : error.getMessage();
+        return orchestratorSupport.friendlyErrorText(raw, "服务暂时出了点问题，请稍后重试。");
+    }
 
 
 

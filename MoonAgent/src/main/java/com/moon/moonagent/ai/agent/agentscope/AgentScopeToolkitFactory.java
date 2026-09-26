@@ -63,6 +63,9 @@ public class AgentScopeToolkitFactory {
             register(toolkit, interactionTools.tool());
         }
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
+        for (ToolCallback canvasTool : skillExpander.toolCallbacksByPrefix("canvas_")) {
+            register(toolkit, toolPipeline.wrapGeneric(new SpringAiToolAdapter(canvasTool)));
+        }
 
         toolkit.createSkillToolGroup(
                 IMAGE_TOOLS, "Image generation and reference-edit tools", false, "pic");
@@ -90,5 +93,9 @@ public class AgentScopeToolkitFactory {
 
     private void register(Toolkit toolkit, AgentScopeTool tool) {
         toolkit.registerAgentTool(toolPipeline.wrap(tool));
+    }
+
+    private void register(Toolkit toolkit, io.agentscope.core.tool.AgentTool tool) {
+        toolkit.registerAgentTool(tool);
     }
 }

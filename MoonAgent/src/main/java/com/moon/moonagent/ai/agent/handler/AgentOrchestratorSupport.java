@@ -2144,6 +2144,12 @@ public class AgentOrchestratorSupport {
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */
     public void sendEvent(OrchestrationRequest req, String eventName, Map<String, Object> data) {
+        if (req != null && req.isNativeEventsOnly()) {
+            if ("message".equals(eventName) && data.get("content") != null) {
+                req.setLastMessage(String.valueOf(data.get("content")));
+            }
+            return;
+        }
         if ("message_end".equals(eventName)) {
             Map<String, Object> enriched = new java.util.LinkedHashMap<>(data);
             if (req.getTrace() != null && !req.getTrace().getTurnMetadata().isEmpty()) {

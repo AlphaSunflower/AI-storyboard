@@ -24,6 +24,7 @@ import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
@@ -219,83 +220,65 @@ public class AgentConversationController {
     @PostMapping(value = "/conversations/{id}/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamMessage(Authentication auth, @PathVariable String id,
                                     @Valid @RequestBody AgentSendMessageRequest request) {
-        // 同步快速校验归属（失败抛 401/404 而非 SSE）
+        throw new BusinessException(41001,
+                "旧消息流已停用，请使用 /conversations/{id}/turns/stream");
+    }
+
+    /** AgentScope turn stream using sequenced native event envelopes. */
+    @PostMapping(value = "/conversations/{id}/turns/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamTurn(Authentication auth, @PathVariable String id,
+                                 @Valid @RequestBody AgentSendMessageRequest request) {
         chatService.getOwnedConversation(auth.getName(), id);
-        // 同步校验消息内容非空：空内容直接抛 40001（与 blocking sendMessage 语义一致），
-        // 避免 service 在 emitter 未初始化前 sendEvent 抛 IllegalStateException 被吞掉、客户端收到空 200
         if (request.content() == null || request.content().isBlank()) {
             throw new BusinessException(40001, "消息内容不能为空");
         }
+        ResolvedTurnMedia media = resolveTurnMedia(auth, id, request);
         SseEmitter emitter = createSseEmitter();
-        java.util.List<String> resolvedPicUrls = new java.util.ArrayList<>(picUrls(request));
-        java.util.List<String> resolvedVideos = new java.util.ArrayList<>();
-        java.util.List<String> resolvedAudios = new java.util.ArrayList<>();
-        if (request.referenceVideos() != null) resolvedVideos.addAll(request.referenceVideos());
-        if (request.referenceAudios() != null) resolvedAudios.addAll(request.referenceAudios());
-        for (ConversationAssetGroupVO group : conversationAssetGroupService.list(auth.getName(), id)) {
-            for (ConversationAssetGroupVO.SnapshotMediaVO media : group.media()) {
-                if (media.contentUrl() == null || media.contentUrl().isBlank()) continue;
-                switch (media.type()) {
-                    case "IMAGE" -> resolvedPicUrls.add(media.contentUrl());
-                    case "VIDEO" -> resolvedVideos.add(media.contentUrl());
-                    case "AUDIO" -> resolvedAudios.add(media.contentUrl());
-                    default -> { }
-                }
-            }
-        }
-        if (request.assetGroupSnapshotIds() != null && !request.assetGroupSnapshotIds().isEmpty()) {
-            for (String snapshotId : request.assetGroupSnapshotIds()) {
-                if (snapshotId == null || snapshotId.isBlank()) continue;
-                AssetGroupSnapshot snapshot = assetClient.getSnapshot(
-                        snapshotId, auth.getName(), java.util.UUID.randomUUID().toString());
-                if (snapshot == null || snapshot.items() == null) continue;
-                snapshot.items().stream()
-                        .filter(item -> "IMAGE".equals(item.type().name()))
-                        .map(AssetContracts.SnapshotItem::contentUrl)
-                        .filter(url -> url != null && !url.isBlank())
-                        .forEach(resolvedPicUrls::add);
-                snapshot.items().stream()
-                        .filter(item -> "VIDEO".equals(item.type().name()))
-                        .map(AssetContracts.SnapshotItem::contentUrl)
-                        .filter(url -> url != null && !url.isBlank())
-                        .forEach(resolvedVideos::add);
-                snapshot.items().stream()
-                        .filter(item -> "AUDIO".equals(item.type().name()))
-                        .map(AssetContracts.SnapshotItem::contentUrl)
-                        .filter(url -> url != null && !url.isBlank())
-                        .forEach(resolvedAudios::add);
-            }
-        }
-        resolvedPicUrls = resolvedPicUrls.stream().distinct().toList();
-        resolvedVideos = resolvedVideos.stream().distinct().toList();
-        resolvedAudios = resolvedAudios.stream().distinct().toList();
-        String routingHint = (request.assetGroupIds() != null && !request.assetGroupIds().isEmpty())
-                || (request.assetGroupSnapshotIds() != null && !request.assetGroupSnapshotIds().isEmpty())
-                ? "intent-video" : request.routingHint();
-        if (request.canvasContext() == null) {
-            if (resolvedVideos.isEmpty() && resolvedAudios.isEmpty()) {
-                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()));
-            } else {
-                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), null,
-                        resolvedVideos, resolvedAudios);
-            }
-        } else {
-            if (resolvedVideos.isEmpty() && resolvedAudios.isEmpty()) {
-                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext());
-            } else {
-                chatService.streamMessage(auth.getName(), id, request.content(), resolvedPicUrls,
-                        request.assetIds() == null ? java.util.List.of() : request.assetIds(), emitter,
-                        routingHint, Boolean.TRUE.equals(request.cancelActiveTasks()), request.canvasContext(),
-                        resolvedVideos, resolvedAudios);
-            }
-        }
+        chatService.streamAgentScopeTurn(
+                auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
+                request.routingHint(), request.canvasContext(), media.videoUrls(),
+                media.audioUrls(), emitter);
         return emitter;
+    }
+
+    /** Resume an AgentScope HITL checkpoint using the sequenced event protocol. */
+    @PostMapping(value = "/conversations/{id}/turns/{turnId}/resume/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter resumeTurn(Authentication auth, @PathVariable String id,
+                                 @PathVariable String turnId,
+                                 @RequestBody AgentFormSubmitRequest request) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = createSseEmitter();
+        chatService.resumeAgentScopeTurn(
+                auth.getName(), id, request.formToken(), request.action(), request.content(),
+                request.params() == null ? Map.of() : request.params(),
+                request.assetIds() == null ? List.of() : request.assetIds(),
+                request.canvasContext(), emitter);
+        return emitter;
+    }
+
+    /** Interrupt endpoint aligned with the turn protocol. */
+    @PostMapping("/conversations/{id}/turns/{turnId}/interrupt")
+    public ApiResponse<Boolean> interruptTurn(Authentication auth, @PathVariable String id,
+                                              @PathVariable String turnId) {
+        return ApiResponse.ok(chatService.interrupt(auth.getName(), id));
+    }
+
+    /** Runtime health/session status for the AgentScope transport. */
+    @GetMapping("/conversations/{id}/runtime")
+    public ApiResponse<Map<String, Object>> runtimeStatus(Authentication auth,
+                                                          @PathVariable String id) {
+        return ApiResponse.ok(chatService.getRuntimeStatus(auth.getName(), id));
+    }
+
+    /** Replay native AgentScope turn events after a sequence for reconnect. */
+    @GetMapping("/conversations/{id}/turns/{turnId}/events")
+    public ApiResponse<List<AgentTurnEventEnvelope>> turnEvents(
+            Authentication auth, @PathVariable String id, @PathVariable String turnId,
+            @RequestParam(defaultValue = "0") int afterSeq) {
+        return ApiResponse.ok(chatService.getTurnEvents(
+                auth.getName(), id, turnId, afterSeq));
     }
 
     /** 编辑最后一轮用户消息并覆盖重发（SSE）。 */
@@ -320,13 +303,11 @@ public class AgentConversationController {
         chatService.interruptAndStream(
                 auth.getName(), id, request.content(),
                 picUrls(request),
-                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
-                emitter,
-                request.routingHint(),
-                Boolean.TRUE.equals(request.cancelActiveTasks()),
+                request.assetIds() == null ? List.of() : request.assetIds(),
+                emitter, request.routingHint(), Boolean.TRUE.equals(request.cancelActiveTasks()),
                 request.canvasContext(),
-                request.referenceVideos() == null ? java.util.List.of() : request.referenceVideos(),
-                request.referenceAudios() == null ? java.util.List.of() : request.referenceAudios());
+                request.referenceVideos() == null ? List.of() : request.referenceVideos(),
+                request.referenceAudios() == null ? List.of() : request.referenceAudios());
         return emitter;
     }
 
@@ -334,33 +315,16 @@ public class AgentConversationController {
     @PostMapping(value = "/conversations/{id}/form/submit", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter submitForm(Authentication auth, @PathVariable String id,
                                  @RequestBody AgentFormSubmitRequest request) {
-        chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = createSseEmitter();
-        if (request.canvasContext() == null) {
-            chatService.submitFormAndResume(auth.getName(), id,
-                request.formToken(), request.taskId(), request.action(), request.content(),
-                request.params() == null ? java.util.Map.of() : request.params(),
-                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
-                request.routingHint(), emitter);
-        } else {
-            chatService.submitFormAndResume(auth.getName(), id,
-                request.formToken(), request.taskId(), request.action(), request.content(),
-                request.params() == null ? java.util.Map.of() : request.params(),
-                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
-                request.routingHint(), request.canvasContext(), emitter);
-        }
-        return emitter;
+        throw new BusinessException(41001,
+                "旧 HITL 提交接口已停用，请使用 /turns/{turnId}/resume/stream");
     }
 
     /** 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE） */
     @PostMapping(value = "/conversations/{id}/video/plan/generate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter generateVideoFromPlan(Authentication auth, @PathVariable String id,
                                             @RequestBody AgentVideoPlanGenerateRequest request) {
-        // 同步快速校验归属（失败抛 401/404 而非 SSE）
-        chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = createSseEmitter();
-        chatService.generateVideoFromPlan(auth.getName(), id, request.planToken(), emitter);
-        return emitter;
+        throw new BusinessException(41001,
+                "旧视频方案接口已停用，请使用 AgentScope HITL resume");
     }
 
     /** 视频异步任务状态（前端轮询：task_accepted 后 5s 间隔 GET，取 status/url/error） */
@@ -423,6 +387,59 @@ public class AgentConversationController {
     public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
         chatService.deleteAsset(auth.getName(), id);
         return ApiResponse.ok("删除成功", null);
+    }
+
+    private ResolvedTurnMedia resolveTurnMedia(Authentication auth, String conversationId,
+                                               AgentSendMessageRequest request) {
+        List<String> resolvedPicUrls = new java.util.ArrayList<>(picUrls(request));
+        List<String> resolvedVideos = new java.util.ArrayList<>();
+        List<String> resolvedAudios = new java.util.ArrayList<>();
+        if (request.referenceVideos() != null) resolvedVideos.addAll(request.referenceVideos());
+        if (request.referenceAudios() != null) resolvedAudios.addAll(request.referenceAudios());
+        for (ConversationAssetGroupVO group
+                : conversationAssetGroupService.list(auth.getName(), conversationId)) {
+            for (ConversationAssetGroupVO.SnapshotMediaVO media : group.media()) {
+                if (media.contentUrl() == null || media.contentUrl().isBlank()) continue;
+                switch (media.type()) {
+                    case "IMAGE" -> resolvedPicUrls.add(media.contentUrl());
+                    case "VIDEO" -> resolvedVideos.add(media.contentUrl());
+                    case "AUDIO" -> resolvedAudios.add(media.contentUrl());
+                    default -> { }
+                }
+            }
+        }
+        if (request.assetGroupSnapshotIds() != null) {
+            for (String snapshotId : request.assetGroupSnapshotIds()) {
+                if (snapshotId == null || snapshotId.isBlank()) continue;
+                AssetGroupSnapshot snapshot = assetClient.getSnapshot(
+                        snapshotId, auth.getName(), java.util.UUID.randomUUID().toString());
+                if (snapshot == null || snapshot.items() == null) continue;
+                snapshot.items().stream()
+                        .filter(item -> "IMAGE".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedPicUrls::add);
+                snapshot.items().stream()
+                        .filter(item -> "VIDEO".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedVideos::add);
+                snapshot.items().stream()
+                        .filter(item -> "AUDIO".equals(item.type().name()))
+                        .map(AssetContracts.SnapshotItem::contentUrl)
+                        .filter(url -> url != null && !url.isBlank())
+                        .forEach(resolvedAudios::add);
+            }
+        }
+        return new ResolvedTurnMedia(
+                resolvedPicUrls.stream().distinct().toList(),
+                request.assetIds() == null ? List.of() : request.assetIds(),
+                resolvedVideos.stream().distinct().toList(),
+                resolvedAudios.stream().distinct().toList());
+    }
+
+    private record ResolvedTurnMedia(List<String> picUrls, List<String> assetIds,
+                                     List<String> videoUrls, List<String> audioUrls) {
     }
 
     /** 会话实体 → VO 映射 */

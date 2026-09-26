@@ -65,6 +65,9 @@ public class AgentTaskPlanController {
             @PathVariable String id,
             @PathVariable String planId,
             @Valid @RequestBody AgentTaskPlanActionRequest request) {
+        throw new com.storyboard.common.BusinessException(
+                41001, "旧任务计划操作已停用，请使用 AgentScope turn/HITL 协议");
+        /*
         AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
         TaskPlan plan = planStore.find(planId)
                 .filter(candidate -> id.equals(candidate.conversationId()))
@@ -101,6 +104,7 @@ public class AgentTaskPlanController {
             resumeIfReady(conversation, updated);
         }
         return ApiResponse.ok(AgentTaskPlanView.from(updated));
+        */
     }
 
     private TaskPlan replan(AgentConversation conversation, TaskPlan plan) {

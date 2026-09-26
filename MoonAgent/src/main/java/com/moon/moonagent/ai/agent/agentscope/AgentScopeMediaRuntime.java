@@ -59,6 +59,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Component
 @ConditionalOnProperty(prefix = "ai.agent.agentscope", name = "enabled",
@@ -256,9 +257,16 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
             }
             for (String tool : List.of(
                     "delete_project_storyboard_shot",
-                    "clear_project_storyboard")) {
+                    "clear_project_storyboard",
+                    "canvas_delete_nodes",
+                    "canvas_delete_edges")) {
                 permissions.addAskRule(tool, new PermissionRule(
                         tool, null, PermissionBehavior.ASK, "MoonAgentStoryboardDeletePolicy"));
+            }
+            for (String tool : List.of(
+                    "canvas_execute_node", "canvas_execute_graph", "canvas_cancel_execution")) {
+                permissions.addAskRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ASK, "MoonAgentCanvasExecutionPolicy"));
             }
             if (properties.isCompactionEnabled()) {
                 builder.compaction(CompactionConfig.builder()
@@ -294,6 +302,11 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     public AgentTurnResult runTurn(AgentConversation conversation, OrchestrationRequest request,
                                    AgentTraceAccumulator trace) {
+        return runTurn(conversation, request, trace, null);
+    }
+
+    public AgentTurnResult runTurn(AgentConversation conversation, OrchestrationRequest request,
+                                   AgentTraceAccumulator trace, Consumer<AgentEvent> observer) {
         if (!enabled()) return null;
         String input = request.getContent() == null ? "" : request.getContent();
         if (request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
@@ -304,7 +317,7 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
             input = taskContext + "\n\n本轮用户消息：\n" + input;
         }
         Msg message = UserMessage.builder().textContent(input).build();
-        return stream(conversation, request, trace, List.of(message));
+        return stream(conversation, request, trace, List.of(message), null, observer);
     }
 
     public AgentTurnResult runWakeup(AgentConversation conversation) {
@@ -319,6 +332,13 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
     public AgentTurnResult resumeTurn(AgentConversation conversation, AgentCheckpoint checkpoint,
                                       OrchestrationRequest request, AgentTraceAccumulator trace,
                                       String action, String customText) {
+        return resumeTurn(conversation, checkpoint, request, trace, action, customText, null);
+    }
+
+    public AgentTurnResult resumeTurn(AgentConversation conversation, AgentCheckpoint checkpoint,
+                                      OrchestrationRequest request, AgentTraceAccumulator trace,
+                                      String action, String customText,
+                                      Consumer<AgentEvent> observer) {
         if (!enabled()) return null;
         if (checkpoint.getRuntimeSessionId() != null
                 && !checkpoint.getRuntimeSessionId().equals(conversation.getId())) {
@@ -336,10 +356,11 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
                     .textContent(value.text())
                     .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, results))
                     .build();
-            return stream(conversation, request, trace, List.of(resume), checkpoint.getId());
+            return stream(conversation, request, trace, List.of(resume),
+                    checkpoint.getId(), observer);
         }
         return stream(conversation, request, trace,
-                List.of(resumeMessage(value)), checkpoint.getId());
+                List.of(resumeMessage(value)), checkpoint.getId(), observer);
     }
 
     static Msg resumeMessage(AgentScopeCheckpointService.ResumeValue value) {
@@ -355,12 +376,18 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
                                    AgentTraceAccumulator trace, List<Msg> messages) {
-        return stream(conversation, request, trace, messages, null);
+        return stream(conversation, request, trace, messages, null, null);
     }
 
     private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
                                    AgentTraceAccumulator trace, List<Msg> messages,
                                    String checkpointId) {
+        return stream(conversation, request, trace, messages, checkpointId, null);
+    }
+
+    private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
+                                   AgentTraceAccumulator trace, List<Msg> messages,
+                                   String checkpointId, Consumer<AgentEvent> observer) {
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
@@ -379,6 +406,13 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
         try {
             for (AgentEvent event : agent.streamEvents(messages, runtime).toIterable()) {
                 support.checkInterrupted(request);
+                if (observer != null) {
+                    try {
+                        observer.accept(event);
+                    } catch (Exception e) {
+                        log.warn("[AgentScope] event observer failed: {}", e.getMessage());
+                    }
+                }
                 if (event instanceof ModelCallStartEvent) {
                     trace.beginModelCall();
                 } else if (event instanceof ModelCallEndEvent modelEnd) {

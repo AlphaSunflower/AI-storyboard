@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -204,4 +205,27 @@ public interface AgentChatService {
      * @return true（命中断开请求；无论是否有活跃编排均安全返回）
      */
     boolean interrupt(String userId, String conversationId);
+
+    /**
+     * AgentScope native turn stream. Emits sequenced `turn_started`, `agent_event`,
+     * `turn_paused`/`turn_completed`, and `turn_failed` envelopes.
+     */
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              SseEmitter emitter);
+
+    /** Resume an AgentScope HITL checkpoint and continue the turn stream. */
+    void resumeAgentScopeTurn(String userId, String conversationId, String formToken,
+                              String action, String customText, Map<String, String> params,
+                              List<String> assetIds, CanvasSessionContext canvasContext,
+                              SseEmitter emitter);
+
+    /** Runtime status used by the new frontend transport. */
+    Map<String, Object> getRuntimeStatus(String userId, String conversationId);
+
+    /** Replay persisted AgentScope turn events after the supplied sequence. */
+    List<AgentTurnEventEnvelope> getTurnEvents(String userId, String conversationId,
+                                               String turnId, int afterSequence);
 }

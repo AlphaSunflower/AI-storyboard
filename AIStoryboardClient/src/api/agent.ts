@@ -437,7 +437,8 @@ export interface AssetOption {
 }
 
 export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace' | 'canvas_mode_required';
+  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace' | 'canvas_mode_required'
+    | 'turn_started' | 'agent_event' | 'turn_paused' | 'turn_completed' | 'turn_failed';
   content?: string;
   /** workflow 阶段稳定标识（如 intent_recognize / generate_storyboard） */
   stage?: string;
@@ -500,6 +501,14 @@ export interface SseEvent {
   picUrls?: string[];
   code?: string;
   message?: string;
+  // Sequenced AgentScope transport envelope.
+  turnId?: string;
+  seq?: number;
+  eventType?: string;
+  data?: Record<string, unknown>;
+  runtime?: string;
+  hitl?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 /** 视频异步任务状态（GET /api/agent/tasks/{taskId} 轮询结果） */
@@ -860,7 +869,7 @@ export async function streamChat(
   },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
+  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -950,7 +959,8 @@ export async function submitForm(
   opts?: { canvasContext?: CanvasEditContext },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
+  const turnId = activeTurnByConversation.get(conversationId) ?? 'latest';
+  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/${turnId}/resume/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -970,8 +980,91 @@ export async function submitForm(
 /** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
 async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void> {
   await consumeSseData<SseEvent>(res, (eventName, data) => {
-    onEvent({ ...data, type: eventName } as SseEvent);
+    const mapped = mapAgentScopeEvent(eventName, data);
+    if (mapped) onEvent(mapped);
   }, signal);
+}
+
+const activeTurnByConversation = new Map<string, string>();
+
+function mapAgentScopeEvent(eventName: string, data: SseEvent): SseEvent | null {
+  if (eventName === 'turn_started') {
+    if (data.conversationId && data.turnId) {
+      activeTurnByConversation.set(data.conversationId, data.turnId);
+    }
+    return {
+      ...data,
+      stage: 'agentscope',
+      title: 'AgentScope 正在处理',
+      status: 'node_started',
+      type: 'workflow',
+    };
+  }
+  if (eventName === 'turn_completed') {
+    if (data.conversationId) activeTurnByConversation.delete(data.conversationId);
+    return {
+      ...data,
+      type: 'message_end',
+      content: data.content ?? '',
+      messageId: data.messageId ?? '',
+      sceneCount: -1,
+      ...(data.metadata ? { ...data.metadata } : {}),
+    };
+  }
+  if (eventName === 'turn_failed') {
+    return { type: 'error', code: data.code ?? '50001', message: data.message ?? 'AgentScope 执行失败' };
+  }
+  if (eventName === 'turn_paused') {
+    const hitl = (data.hitl ?? data.metadata?.hitl ?? {}) as Record<string, unknown>;
+    const source = { ...data, ...hitl };
+    return {
+      type: 'human_input',
+      turnId: data.turnId,
+      messageId: source.messageId as string | undefined,
+      formToken: source.formToken as string | undefined,
+      formContent: (source.formContent ?? data.content ?? '') as string,
+      actions: source.actions as { id: string; title: string }[] | undefined,
+      expirationTime: source.expirationTime as string | number | undefined,
+      models: source.models as GatewayModelOption[] | undefined,
+      imageModels: source.imageModels as GatewayModelOption[] | undefined,
+      videoModels: source.videoModels as GatewayModelOption[] | undefined,
+      recommended: source.recommended as Record<string, string> | undefined,
+      reasons: source.reasons as Record<string, string> | undefined,
+      assets: source.assets as AssetOption[] | undefined,
+    };
+  }
+  if (eventName !== 'agent_event') {
+    return { ...data, type: eventName } as SseEvent;
+  }
+
+  const agentType = data.eventType ?? '';
+  const payload = data.data ?? {};
+  if (agentType === 'TEXT_BLOCK_DELTA') {
+    return { type: 'message', content: String(payload.delta ?? '') };
+  }
+  if (agentType === 'THINKING_BLOCK_DELTA') {
+    const delta = String(payload.delta ?? '');
+    return { type: 'reasoning_delta', summary: delta, details: delta, source: 'agentscope' };
+  }
+  if (agentType === 'TOOL_CALL_START' || agentType === 'TOOL_CALL_END'
+      || agentType === 'TOOL_RESULT_END') {
+    const toolName = String(payload.toolName ?? 'tool');
+    const ended = agentType !== 'TOOL_CALL_START';
+    return {
+      type: 'agent_trace',
+      traceEvent: {
+        id: String(payload.eventId ?? `${toolName}-${data.seq ?? Date.now()}`),
+        phase: 'tool',
+        agent: 'agentscope',
+        specialist: toolName,
+        status: ended ? 'node_completed' : 'node_started',
+        title: ended ? `工具完成：${toolName}` : `调用工具：${toolName}`,
+        summary: '',
+        startedAt: String(payload.createdAt ?? new Date().toISOString()),
+      },
+    };
+  }
+  return null;
 }
 
 async function consumeSseData<T>(
