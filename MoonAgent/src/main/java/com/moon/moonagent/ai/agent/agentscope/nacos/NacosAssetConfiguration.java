@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope.nacos;
 
 import com.alibaba.nacos.api.ai.AiService;
 import com.alibaba.nacos.api.exception.NacosException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.nacos.skill.NacosSkillRepository;
 import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.skill.repository.ClasspathSkillRepository;
@@ -89,5 +90,21 @@ public class NacosAssetConfiguration {
                 properties,
                 () -> properties.isEnabled() ? aiServiceProvider.getIfAvailable() : null,
                 fallback);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(NacosMcpMetadataRepository.class)
+    NacosMcpMetadataRepository nacosMcpMetadataRepository(
+            NacosAssetProperties properties,
+            ObjectProvider<AiService> aiServiceProvider,
+            ResourceLoader resourceLoader,
+            ObjectMapper objectMapper) {
+        Resource fallback = resourceLoader.getResource(
+                "classpath:" + properties.getMcpMetadataFallbackLocation());
+        return new NacosMcpMetadataRepository(
+                properties,
+                () -> properties.isEnabled() ? aiServiceProvider.getIfAvailable() : null,
+                fallback,
+                objectMapper);
     }
 }

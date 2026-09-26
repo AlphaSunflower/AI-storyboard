@@ -67,15 +67,27 @@ class NacosApi:
         self.access_token = access_token.strip()
         self.username = username.strip()
         self.password = password
+        self._authenticating = False
 
     def login_if_needed(self) -> None:
         if self.access_token or not self.username:
             return
-        payload = self._request_form(
-            "POST",
-            "/v1/auth/login",
-            {"username": self.username, "password": self.password},
-        )
+        if self._authenticating:
+            raise NacosApiError("Recursive Nacos authentication request")
+        self._authenticating = True
+        try:
+            payload = self._request_bytes(
+                "POST",
+                "/v1/auth/login",
+                body=urllib.parse.urlencode(
+                    {"username": self.username, "password": self.password}
+                ).encode(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                expect_json=True,
+                authenticate=False,
+            )
+        finally:
+            self._authenticating = False
         token = ""
         if isinstance(payload, dict):
             token = str(payload.get("accessToken") or payload.get("access_token") or "")
@@ -157,8 +169,10 @@ class NacosApi:
         body: bytes | None = None,
         headers: dict[str, str] | None = None,
         expect_json: bool = True,
+        authenticate: bool = True,
     ) -> Any:
-        self.login_if_needed()
+        if authenticate:
+            self.login_if_needed()
         url = self.base_url + path
         if params:
             query = urllib.parse.urlencode(
@@ -181,7 +195,7 @@ class NacosApi:
                 response_body = response.read()
         except urllib.error.HTTPError as error:
             error_body = error.read()
-            if error.code == 404:
+            if error.code == 404 and method.upper() == "GET":
                 return None
             raise NacosApiError(
                 f"Nacos {method} {path} failed with HTTP {error.code}: "
@@ -232,6 +246,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--username", default=os.getenv("NACOS_USERNAME", ""))
     parser.add_argument("--password", default=os.getenv("NACOS_PASSWORD", ""))
     parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--publish-timeout", type=float, default=120.0)
     parser.add_argument("--offline", action="store_true", help="verify local packages only")
     parser.add_argument("--force", action="store_true", help="allow overwrite/force paths")
     parser.add_argument("--json", action="store_true", help="emit a JSON report")
@@ -544,7 +559,7 @@ def online_verify(
                 f"Nacos skill hash mismatch for {artifact.name}@{artifact.version}: "
                 f"{remote_hash} != {artifact.content_hash}"
             )
-        ensure_label(api, namespace, artifact.name, label, artifact.version)
+        assert_skill_label(api, namespace, artifact.name, label, artifact.version)
         results.append(
             {"name": artifact.name, "version": artifact.version, "sha256": remote_hash}
         )
@@ -562,16 +577,7 @@ def online_verify(
     remote_template = normalize_newlines(str(prompt_detail.get("template") or ""))
     if remote_template != prompt["template"]:
         raise AssetError(f"Nacos prompt hash mismatch for {prompt['key']}@{prompt['version']}")
-    prompt_metadata = api.get(
-        "/v3/admin/ai/prompt/metadata",
-        {"namespaceId": namespace, "promptKey": prompt["key"]},
-    )
-    labels = prompt_metadata.get("labels") if isinstance(prompt_metadata, dict) else {}
-    if isinstance(labels, dict) and labels.get(prompt["label"]) not in (None, prompt["version"]):
-        raise AssetError(
-            f"Prompt label {prompt['label']} points to {labels.get(prompt['label'])}, "
-            f"expected {prompt['version']}"
-        )
+    assert_prompt_label(api, namespace, prompt)
 
     mcp_results = []
     for server in mcp_servers:
@@ -610,11 +616,14 @@ def publish_assets(
     prompt: dict[str, Any],
     mcp_servers: list[dict[str, Any]],
     force: bool,
+    publish_timeout: float,
 ) -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     for artifact in artifacts:
-        actions.append(publish_skill(api, namespace, label, artifact, force))
-    actions.append(publish_prompt(api, namespace, prompt))
+        actions.append(
+            publish_skill(api, namespace, label, artifact, force, publish_timeout)
+        )
+    actions.append(publish_prompt(api, namespace, prompt, publish_timeout))
     for server in mcp_servers:
         actions.append(publish_mcp(api, namespace, server))
     return {"mode": "publish", "namespace": namespace, "actions": actions}
@@ -626,6 +635,7 @@ def publish_skill(
     label: str,
     artifact: SkillArtifact,
     force: bool,
+    publish_timeout: float,
 ) -> dict[str, Any]:
     remote = api.get_raw(
         "/v3/admin/ai/skills/version/download",
@@ -643,6 +653,7 @@ def publish_skill(
                 "bump the manifest version"
             )
         ensure_label(api, namespace, artifact.name, label, artifact.version)
+        assert_skill_label(api, namespace, artifact.name, label, artifact.version)
         return {"asset": "skill", "name": artifact.name, "result": "unchanged"}
 
     api.post_multipart(
@@ -673,6 +684,9 @@ def publish_skill(
                 "updateLatestLabel": "true",
             },
         )
+        wait_for_skill_publish(
+            api, namespace, artifact.name, artifact.version, True, publish_timeout
+        )
     else:
         api.post_form(
             "/v3/admin/ai/skills/submit",
@@ -682,8 +696,11 @@ def publish_skill(
                 "version": artifact.version,
             },
         )
-        wait_for_skill_publish(api, namespace, artifact.name, artifact.version)
+        wait_for_skill_publish(
+            api, namespace, artifact.name, artifact.version, False, publish_timeout
+        )
     ensure_label(api, namespace, artifact.name, label, artifact.version)
+    assert_skill_label(api, namespace, artifact.name, label, artifact.version)
     return {"asset": "skill", "name": artifact.name, "result": "published"}
 
 
@@ -692,8 +709,10 @@ def wait_for_skill_publish(
     namespace: str,
     skill_name: str,
     version: str,
+    force: bool,
+    publish_timeout: float,
 ) -> None:
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + max(1.0, publish_timeout)
     last_status = "unknown"
     while time.monotonic() < deadline:
         detail = api.get(
@@ -705,7 +724,7 @@ def wait_for_skill_publish(
             return
         if last_status in {"pipeline_rejected", "rejected", "failed"}:
             raise AssetError(f"Skill pipeline rejected {skill_name}@{version}")
-        if last_status == "reviewing":
+        if last_status in {"reviewing", "draft"}:
             try:
                 api.post_form(
                     "/v3/admin/ai/skills/publish",
@@ -717,10 +736,27 @@ def wait_for_skill_publish(
                     },
                 )
             except NacosApiError:
-                pass
+                if not force:
+                    time.sleep(1)
+                    continue
+                try:
+                    api.post_form(
+                        "/v3/admin/ai/skills/force-publish",
+                        {
+                            "namespaceId": namespace,
+                            "skillName": skill_name,
+                            "version": version,
+                            "updateLatestLabel": "true",
+                        },
+                    )
+                except NacosApiError:
+                    # The force request can race with pipeline completion.
+                    time.sleep(1)
+                    continue
         time.sleep(1)
     raise AssetError(
-        f"Skill {skill_name}@{version} did not publish within 30s; last status={last_status}"
+        f"Skill {skill_name}@{version} did not publish within "
+        f"{publish_timeout:g}s; last status={last_status}"
     )
 
 
@@ -759,10 +795,54 @@ def ensure_label(
     )
 
 
+def assert_skill_label(
+    api: NacosApi,
+    namespace: str,
+    skill_name: str,
+    label: str,
+    version: str,
+) -> None:
+    if not label:
+        raise AssetError(f"Skill {skill_name} verification requires a configured label")
+    detail = api.get(
+        "/v3/admin/ai/skills",
+        {"namespaceId": namespace, "skillName": skill_name},
+    )
+    labels = detail.get("labels") if isinstance(detail, dict) else {}
+    actual = labels.get(label) if isinstance(labels, dict) else None
+    if actual is None:
+        raise AssetError(f"Skill label {label} is missing for {skill_name}")
+    if actual != version:
+        raise AssetError(
+            f"Skill label {label} points to {actual}, expected {version}"
+        )
+
+
+def assert_prompt_label(
+    api: NacosApi,
+    namespace: str,
+    prompt: dict[str, Any],
+) -> None:
+    metadata = api.get(
+        "/v3/admin/ai/prompt/metadata",
+        {"namespaceId": namespace, "promptKey": prompt["key"]},
+    )
+    labels = metadata.get("labels") if isinstance(metadata, dict) else {}
+    actual = labels.get(prompt["label"]) if isinstance(labels, dict) else None
+    if actual is None:
+        raise AssetError(f"Prompt label {prompt['label']} is missing for {prompt['key']}")
+    if actual != prompt["version"]:
+        raise AssetError(
+            f"Prompt label {prompt['label']} points to {actual}, "
+            f"expected {prompt['version']}"
+        )
+
+
 def publish_prompt(
     api: NacosApi,
     namespace: str,
     prompt: dict[str, Any],
+    publish_timeout: float,
 ) -> dict[str, Any]:
     detail = api.get(
         "/v3/admin/ai/prompt/detail",
@@ -793,6 +873,7 @@ def publish_prompt(
             },
         )
         result = "published"
+    wait_for_prompt_publish(api, namespace, prompt, publish_timeout)
     api.put_form(
         "/v3/admin/ai/prompt/label",
         {
@@ -802,7 +883,39 @@ def publish_prompt(
             "version": prompt["version"],
         },
     )
+    assert_prompt_label(api, namespace, prompt)
     return {"asset": "prompt", "name": prompt["key"], "result": result}
+
+
+def wait_for_prompt_publish(
+    api: NacosApi,
+    namespace: str,
+    prompt: dict[str, Any],
+    publish_timeout: float,
+) -> None:
+    deadline = time.monotonic() + max(1.0, publish_timeout)
+    last_state = "missing"
+    while time.monotonic() < deadline:
+        detail = api.get(
+            "/v3/admin/ai/prompt/detail",
+            {
+                "namespaceId": namespace,
+                "promptKey": prompt["key"],
+                "version": prompt["version"],
+            },
+        )
+        if isinstance(detail, dict):
+            remote_template = normalize_newlines(str(detail.get("template") or ""))
+            if remote_template == prompt["template"]:
+                return
+            last_state = "template-mismatch"
+        else:
+            last_state = "missing"
+        time.sleep(1)
+    raise AssetError(
+        f"Prompt {prompt['key']}@{prompt['version']} did not become visible "
+        f"within {publish_timeout:g}s; last state={last_state}"
+    )
 
 
 def publish_mcp(api: NacosApi, namespace: str, server: dict[str, Any]) -> dict[str, Any]:
@@ -850,20 +963,49 @@ def assert_mcp_matches(remote: dict[str, Any], expected: dict[str, Any]) -> None
             f"Nacos={remote_version}, expected={expected['version']}"
         )
     remote_tools = {
-        str(tool.get("name"))
+        str(tool.get("name")): tool
         for tool in ((remote.get("toolSpec") or {}).get("tools") or [])
         if isinstance(tool, dict)
     }
     expected_tools = {
-        str(tool.get("name"))
+        str(tool.get("name")): tool
         for tool in expected["toolSpecification"]["tools"]
         if isinstance(tool, dict)
     }
-    if remote_tools != expected_tools:
+    if set(remote_tools) != set(expected_tools):
         raise AssetError(
             f"MCP tools mismatch for {expected['name']}: "
             f"Nacos={sorted(remote_tools)}, expected={sorted(expected_tools)}"
         )
+    for tool_name, expected_tool in expected_tools.items():
+        remote_shape = schema_shape(remote_tools[tool_name].get("inputSchema"))
+        expected_shape = schema_shape(expected_tool.get("inputSchema"))
+        if remote_shape != expected_shape:
+            raise AssetError(
+                f"MCP input schema mismatch for {expected['name']}.{tool_name}: "
+                f"Nacos={remote_shape}, expected={expected_shape}"
+            )
+
+
+def schema_shape(schema: Any) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        return {}
+    shape: dict[str, Any] = {}
+    for key in ("type", "enum", "additionalProperties"):
+        if key in schema:
+            value = schema[key]
+            shape[key] = sorted(value) if isinstance(value, list) else value
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        shape["properties"] = {
+            str(name): schema_shape(value)
+            for name, value in sorted(properties.items())
+        }
+    if isinstance(schema.get("required"), list):
+        shape["required"] = sorted(str(value) for value in schema["required"])
+    if "items" in schema:
+        shape["items"] = schema_shape(schema["items"])
+    return shape
 
 
 def main() -> int:
@@ -913,6 +1055,7 @@ def main() -> int:
                     prompt,
                     mcp_servers,
                     args.force,
+                    args.publish_timeout,
                 )
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

@@ -1177,6 +1177,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         status.put("engineVersion", conversation.getEngineVersion());
         status.put("agentscopeEnabled", agentScopeMediaRuntime != null
                 && agentScopeMediaRuntime.enabled());
+        if (agentScopeMediaRuntime != null && agentScopeMediaRuntime.enabled()) {
+            status.put("assets", agentScopeMediaRuntime.assetStatus());
+        }
         boolean locked = !conversationLock.tryAcquire(conversationId);
         status.put("locked", locked);
         if (!locked) conversationLock.release(conversationId);

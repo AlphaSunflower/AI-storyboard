@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
+import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
@@ -100,6 +101,7 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
     private final AgentAssetMapper assetMapper;
     private final AgentSkillRepository skillRepository;
     private final GlobalPromptRepository globalPromptRepository;
+    private final NacosMcpMetadataRepository mcpMetadataRepository;
 
     private volatile HarnessAgent agent;
     private volatile AgentStateStore stateStore;
@@ -241,6 +243,22 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     public boolean enabled() {
         return properties.isEnabled() && agent != null;
+    }
+
+    public Map<String, Object> assetStatus() {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("skills", repositorySource(skillRepository));
+        status.put("globalPrompt", globalPromptRepository.selectedSource());
+        try {
+            status.put("mcpMetadata", mcpMetadataRepository.status());
+        } catch (RuntimeException exception) {
+            status.put("mcpMetadata", Map.of(
+                    "source", "unavailable",
+                    "error", exception.getMessage() == null
+                            ? exception.getClass().getSimpleName()
+                            : exception.getMessage()));
+        }
+        return status;
     }
 
     public AgentTurnResult runTurn(AgentConversation conversation, OrchestrationRequest request,
@@ -473,6 +491,16 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     private static boolean isAssetContentUrl(String url) {
         return url != null && url.contains("/api/library/media/");
+    }
+
+    private static String repositorySource(AgentSkillRepository repository) {
+        try {
+            return repository.getSource();
+        } catch (RuntimeException exception) {
+            return "unavailable: " + (exception.getMessage() == null
+                    ? exception.getClass().getSimpleName()
+                    : exception.getMessage());
+        }
     }
 
     private AgentTurnResult turnResult(OrchestrationRequest request, AgentTraceAccumulator trace,

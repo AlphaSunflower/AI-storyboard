@@ -21,20 +21,56 @@
           "inputSchema": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "TEXT_TO_IMAGE",
+                  "IMAGE_EDIT"
+                ],
+                "description": "TEXT_TO_IMAGE or IMAGE_EDIT"
+              },
               "prompt": {
                 "type": "string",
-                "description": "Image generation or edit prompt."
+                "description": "Image generation or edit prompt"
               },
-              "source_asset_ids": {
+              "sourceImages": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Optional MoonAgent session asset ids used as references."
+                "description": "Source image URLs or data URIs"
               },
               "model": {
                 "type": "string",
-                "description": "Optional image model."
+                "description": "Optional model"
+              },
+              "size": {
+                "type": "string",
+                "description": "Optional image size"
+              },
+              "quality": {
+                "type": "string",
+                "description": "Optional image quality"
+              },
+              "n": {
+                "type": "integer",
+                "description": "Number of images"
+              },
+              "negativePrompt": {
+                "type": "string",
+                "description": "Optional negative prompt"
+              },
+              "projectId": {
+                "type": "string",
+                "description": "Project ID"
+              },
+              "conversationId": {
+                "type": "string",
+                "description": "Conversation ID"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "description": "Idempotency key"
               }
             },
             "required": [
@@ -51,26 +87,90 @@
             "properties": {
               "prompt": {
                 "type": "string",
-                "description": "Video generation prompt."
+                "description": "Video prompt"
               },
-              "source_asset_ids": {
+              "referenceImages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "FIRST_FRAME",
+                        "LAST_FRAME",
+                        "REFERENCE"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "role"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Reference images"
+              },
+              "model": {
+                "type": "string",
+                "description": "Optional model"
+              },
+              "duration": {
+                "type": "integer",
+                "description": "Duration in seconds"
+              },
+              "aspectRatio": {
+                "type": "string",
+                "description": "Aspect ratio"
+              },
+              "resolution": {
+                "type": "string",
+                "description": "Resolution"
+              },
+              "size": {
+                "type": "string",
+                "description": "Optional size"
+              },
+              "negativePrompt": {
+                "type": "string",
+                "description": "Optional negative prompt"
+              },
+              "seed": {
+                "type": "integer",
+                "description": "Optional seed"
+              },
+              "imageUrl": {
+                "type": "string",
+                "description": "Optional first-frame image URL"
+              },
+              "referenceVideos": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Optional MoonAgent session asset ids used as references."
+                "description": "Optional reference video URLs"
               },
-              "duration": {
-                "type": "integer",
-                "minimum": 4,
-                "maximum": 15
+              "referenceAudios": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional reference audio URLs"
               },
-              "aspect_ratio": {
-                "type": "string"
-              },
-              "model": {
+              "projectId": {
                 "type": "string",
-                "description": "Optional video model."
+                "description": "Project ID"
+              },
+              "conversationId": {
+                "type": "string",
+                "description": "Conversation ID"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "description": "Idempotency key"
               }
             },
             "required": [
