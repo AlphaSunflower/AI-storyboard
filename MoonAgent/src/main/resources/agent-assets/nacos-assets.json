@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "namespace": "public",
+  "skills": [
+    {
+      "name": "image",
+      "version": "3.0.0",
+      "path": "MoonAgent/src/main/resources/skills/image"
+    },
+    {
+      "name": "video",
+      "version": "3.0.0",
+      "path": "MoonAgent/src/main/resources/skills/video"
+    },
+    {
+      "name": "storyboard",
+      "version": "1.0.0",
+      "path": "MoonAgent/src/main/resources/skills/storyboard"
+    },
+    {
+      "name": "canvas-design",
+      "version": "1.0.0",
+      "path": "MoonAgent/src/main/resources/skills/canvas-design"
+    },
+    {
+      "name": "canvas-run",
+      "version": "1.0.0",
+      "path": "MoonAgent/src/main/resources/skills/canvas-run"
+    },
+    {
+      "name": "general",
+      "version": "1.0.0",
+      "path": "MoonAgent/src/main/resources/skills/general"
+    }
+  ],
+  "globalPrompt": {
+    "key": "moon-agent-global-system",
+    "version": "1.0.0",
+    "label": "stable",
+    "path": "MoonAgent/src/main/resources/agent-assets/global-system-prompt.txt"
+  },
+  "mcpMetadata": {
+    "path": "MoonAgent/src/main/resources/agent-assets/mcp-servers.json",
+    "servers": [
+      "llm-gateway-media"
+    ]
+  }
+}

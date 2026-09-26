@@ -1,14 +1,15 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.recovery.ExternalActionLedgerService;
 import com.moon.moonagent.ai.agent.recovery.AgentRecoverySource;
 import com.moon.moonagent.ai.agent.recovery.RecoveryCandidate;
 import com.moon.moonagent.ai.agent.recovery.RecoveryOutcome;
-import com.moon.moonagent.ai.agent.recovery.ExternalActionLedgerService;
 import com.moon.moonagent.ai.agent.stream.ToolCallStreamGuard;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -35,7 +36,7 @@ import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.skill.SkillFilter;
-import io.agentscope.core.skill.repository.ClasspathSkillRepository;
+import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.extensions.postgresql.state.PostgresAgentStateStore;
@@ -68,19 +69,6 @@ import java.util.function.Consumer;
 public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeMediaRuntime.class);
-    private static final String SYSTEM_PROMPT = """
-            你是 Moon 智能体。先根据用户意图选择并加载最相关的 Skill，再严格按 Skill 指令执行。
-
-            全局规则：
-            1. 不编造工具结果、资产、任务状态或执行成功。只有工具明确返回成功或任务 ID 时，
-               才能描述为已提交或已完成。
-            2. 面向用户输出自然、简洁的中文；不要暴露内部 ID、工具名、参数名或英文错误字段。
-            3. 读取现有状态时先调用工具确认；高风险写入、删除、覆盖或执行操作遵守权限系统。
-            4. 信息不足时优先使用安全默认值；只有存在实质歧义或敏感操作时才请求人工确认。
-            5. 一个回合内不要重复创建同一媒体任务；异步任务返回 taskId 后结束当前轮。
-            6. 需要长期任务、计划或多步协作时，使用 Harness 提供的计划、子智能体和任务工具。
-             """;
-
     private static final String COMPACTION_PROMPT = """
             Compress this AIGC conversation for continuation. Preserve only execution-critical
             facts and write "None" when a section has no data.
@@ -110,6 +98,8 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
     private final AgentScopeMessageBus messageBus;
     private final DataSource dataSource;
     private final AgentAssetMapper assetMapper;
+    private final AgentSkillRepository skillRepository;
+    private final GlobalPromptRepository globalPromptRepository;
 
     private volatile HarnessAgent agent;
     private volatile AgentStateStore stateStore;
@@ -175,13 +165,13 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
             }
             HarnessAgent.Builder builder = HarnessAgent.builder()
                     .name("moon-agent")
-                    .sysPrompt(SYSTEM_PROMPT)
+                    .sysPrompt(globalPromptRepository.getPrompt(Map.of()))
                     .model(model)
                     .toolkit(toolkit)
                     .maxIters(properties.getMaxIters())
                     .maxRetries(properties.getMaxRetries())
                     .stateStore(stateStore)
-                    .skillRepository(new ClasspathSkillRepository("skills"))
+                    .skillRepository(skillRepository)
                     .skillFilter(SkillFilter.only(
                             "image", "video", "storyboard", "canvas-design",
                             "canvas-run", "general"))

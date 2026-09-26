@@ -130,6 +130,29 @@ ai:
         timeout: ${AGENTSCOPE_PREFLIGHT_TIMEOUT:20s}
         reference-confidence-threshold: ${AGENTSCOPE_PREFLIGHT_REFERENCE_CONFIDENCE:0.65}
         max-repairs: ${AGENTSCOPE_PREFLIGHT_MAX_REPAIRS:1}
+      # Nacos is the versioned source for production assets. Keep this disabled
+      # until the release label and asset set have been published and verified.
+      nacos:
+        enabled: ${AGENTSCOPE_NACOS_ENABLED:false}
+        server-address: ${NACOS_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+        skill-version: ${AGENTSCOPE_NACOS_SKILL_VERSION:}
+        skill-label: ${AGENTSCOPE_NACOS_SKILL_LABEL:stable}
+        prompt-key: ${AGENTSCOPE_NACOS_PROMPT_KEY:moon-agent-global-system}
+        prompt-version: ${AGENTSCOPE_NACOS_PROMPT_VERSION:}
+        prompt-label: ${AGENTSCOPE_NACOS_PROMPT_LABEL:stable}
+        allow-classpath-fallback: ${AGENTSCOPE_NACOS_CLASSPATH_FALLBACK:true}
+        connect-timeout: ${AGENTSCOPE_NACOS_CONNECT_TIMEOUT:2s}
+        request-timeout: ${AGENTSCOPE_NACOS_REQUEST_TIMEOUT:5s}
+        skill-names:
+          - image
+          - video
+          - storyboard
+          - canvas-design
+          - canvas-run
+          - general
     # 新建会话默认启用运行时任务 DAG；关闭后新会话回退 LEGACY，旧会话始终保持原引擎。
     dynamic-plan:
       enabled: ${DYNAMIC_TASK_PLAN_ENABLED:true}

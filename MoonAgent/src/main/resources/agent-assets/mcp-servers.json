@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "servers": [
+    {
+      "name": "llm-gateway-media",
+      "version": "1.0.0",
+      "description": "LLM Gateway media tools consumed by MoonAgent through streamable HTTP MCP.",
+      "protocol": "mcp-streamable",
+      "endpoint": {
+        "type": "DIRECT",
+        "data": {
+          "address": "${MCP_GATEWAY_ADDRESS}",
+          "port": "${MCP_GATEWAY_PORT}",
+          "transportProtocol": "streamable-http"
+        }
+      },
+      "tools": [
+        {
+          "name": "generate_image",
+          "description": "Generate or edit images through the LLM Gateway.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Image generation or edit prompt."
+              },
+              "source_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional MoonAgent session asset ids used as references."
+              },
+              "model": {
+                "type": "string",
+                "description": "Optional image model."
+              }
+            },
+            "required": [
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "generate_video",
+          "description": "Generate a video through the LLM Gateway.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Video generation prompt."
+              },
+              "source_asset_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional MoonAgent session asset ids used as references."
+              },
+              "duration": {
+                "type": "integer",
+                "minimum": 4,
+                "maximum": 15
+              },
+              "aspect_ratio": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string",
+                "description": "Optional video model."
+              }
+            },
+            "required": [
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  ]
+}

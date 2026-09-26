@@ -17,6 +17,7 @@
         <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
         <agentscope.version>2.0.3</agentscope.version>
+        <nacos.client.version>3.2.1-2026.03.30</nacos.client.version>
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
@@ -42,6 +43,14 @@
                 <version>${agentscope.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- AgentScope 2.0.3 Nacos extensions use the Nacos 3.2.1 AI APIs.
+                 Pin the client family so Spring Cloud Alibaba's older 3.1.1 does
+                 not win Maven mediation and break prompt/skill calls at runtime. -->
+            <dependency>
+                <groupId>com.alibaba.nacos</groupId>
+                <artifactId>nacos-client</artifactId>
+                <version>${nacos.client.version}</version>
             </dependency>
             <!-- AgentScope pins an older MCP SDK. MoonAgent owns the MCP transport and
                  adapts Spring AI ToolCallbacks into AgentScope tools, so keep the whole
@@ -170,6 +179,14 @@
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-nacos-skill</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-nacos-prompt</artifactId>
         </dependency>
 
         <!-- Nacos 服务发现 -->
