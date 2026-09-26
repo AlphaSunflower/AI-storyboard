@@ -824,6 +824,19 @@ function refreshStoryboardQueues() {
   void useAgentStore.getState().refetchStoryboardImageQueue(projectId);
 }
 
+async function reconnectTurnThenRecover(conversationId: string) {
+  const state = useAgentStore.getState();
+  const turnId = state.generating[conversationId]?.turnId;
+  if (turnId) {
+    try {
+      await state.replayTurnEvents(conversationId, turnId);
+    } catch {
+      // Fall through to checkpoint recovery; replay is best-effort during disconnects.
+    }
+  }
+  await useAgentStore.getState().recoverPendingCheckpoint(conversationId);
+}
+
 type AgentScopeTaskAccepted = {
   taskId: string;
   taskKind: 'video' | 'image-batch' | 'long-tool';
@@ -2229,7 +2242,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         });
         // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
         if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired && !manualStop) {
-          void get().recoverPendingCheckpoint(snapshotId);
+          void reconnectTurnThenRecover(snapshotId);
         }
       }
     }
@@ -2423,7 +2436,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         });
         // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
         if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
-          void get().recoverPendingCheckpoint(snapshotId);
+          void reconnectTurnThenRecover(snapshotId);
         }
       }
     }
