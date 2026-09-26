@@ -8,30 +8,7 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 8
-allowed-tools:
-  - canvas_get_context
-  - canvas_list_node_types
-  - canvas_get_state
-  - canvas_list_nodes
-  - canvas_get_node
-  - canvas_list_edges
-  - canvas_get_selection
-  - canvas_create_node
-  - canvas_create_nodes
-  - canvas_import_media
-  - canvas_create_canvas
-  - canvas_rename_canvas
-  - canvas_create_result_slots
-  - canvas_mark_result_slots
-  - canvas_get_node_model_config
-  - canvas_set_node_model_config
-  - canvas_update_node
-  - canvas_create_edge
-  - canvas_move_nodes
-  - canvas_layout_graph
-  - canvas_delete_nodes
-  - canvas_delete_edges
-  - moon_request_human_input
+allowed-tools: canvas_get_context canvas_list_node_types canvas_get_state canvas_list_nodes canvas_get_node canvas_list_edges canvas_get_selection canvas_create_node canvas_create_nodes canvas_import_media canvas_create_canvas canvas_rename_canvas canvas_create_result_slots canvas_mark_result_slots canvas_get_node_model_config canvas_set_node_model_config canvas_update_node canvas_create_edge canvas_move_nodes canvas_layout_graph canvas_delete_nodes canvas_delete_edges request_human_input
 ---
 
 # 画布设计
@@ -49,11 +26,11 @@ allowed-tools:
 8. 默认每个生产节点创建 1 个结果槽；用户指定 n、数量或 variations 时按该数量创建。新建结果槽使用 canvas_create_result_slots；已有空 image/video 节点使用 canvas_mark_result_slots 按顺序标记。
 9. 中间占位必须形成“生产节点 → 结果槽 → 下游功能节点”的完整链路，并从占位节点的输出口连接到下游必填输入。禁止把生产节点输出直接连到图生图、图生视频等下游功能节点，也禁止只创建最终占位而漏掉中间占位。
 10. 分镜使用结构化占位：storyboardPlanner → shot 承载镜头数据；shot 生成图片或视频时仍必须先创建 media 结果槽。不得把故事板产物直接当作媒体结果。
-11. 组链完成后必须重新读取节点和连线，确认不存在 missingInputs。若某个下游缺少媒体输入且只有一个明确的生产节点候选，可自动创建或标记结果槽并补齐；存在多个候选时调用 moon_request_human_input。
+11. 组链完成后必须重新读取节点和连线，确认不存在 missingInputs。若某个下游缺少媒体输入且只有一个明确的生产节点候选，可自动创建或标记结果槽并补齐；存在多个候选时调用 request_human_input。
 12. 选择和调整生成模型必须使用 canvas_get_node_model_config 与 canvas_set_node_model_config。禁止通过 canvas_create_node、canvas_create_nodes 或 canvas_update_node 写入 model、gatewayParams、size、quality、style、aspectRatio、n、duration、resolution。
 13. 新建单动作生成节点后，读取模型目录并补齐网关默认模型和合法默认参数；用户指定的模型与参数优先。目录不可用时保留未选状态并说明原因，不得使用本地硬编码模型冒充网关模型。
 14. 只有用户明确要求“自动选模型/自动优化参数”时才主动替换模型；没有明确的画质、速度或成本标准时保持网关默认，不擅自优化。
 15. 使用 Spring AI 工具循环连续完成多步任务：可先查询、再创建/重命名、再补齐中继、再读取结果确认，不要只调用一个工具就结束。
-16. 删除节点或连线前必须先读取目标，并通过 `moon_request_human_input` 获得明确确认；不得把隐藏、替换或修改误判为删除。执行节点属于 canvas-run，不在本技能范围内。
-17. 目标不明确或存在多个候选画布时，必须调用 moon_request_human_input 让用户按“项目名称 / 画布名称”点击选择，禁止展示或要求输入 projectId、canvasId、nodeId。
+16. 删除节点或连线前必须先读取目标，并通过 `request_human_input` 获得明确确认；不得把隐藏、替换或修改误判为删除。执行节点属于 canvas-run，不在本技能范围内。
+17. 目标不明确或存在多个候选画布时，必须调用 request_human_input 让用户按“项目名称 / 画布名称”点击选择，禁止展示或要求输入 projectId、canvasId、nodeId。
 18. 最终回复只说明实际创建、更新、连接、重命名、模型调整或布局的内容；ID 仅用于工具参数，不展示给用户。

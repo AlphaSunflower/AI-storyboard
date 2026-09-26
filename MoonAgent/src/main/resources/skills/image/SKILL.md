@@ -10,12 +10,7 @@ metadata:
     evaluation_mode: hybrid
     default_hitl_policy: none
     version: "3.0"
-allowed-tools:
-  - generate_image
-  - generate_image_batch
-  - refineImage
-  - resolve_reference_assets
-  - moon_request_human_input
+allowed-tools: generate_image generate_image_batch refineImage resolve_reference_assets request_human_input
 ---
 
 # 图片生成
@@ -28,9 +23,8 @@ allowed-tools:
    提交后立即结束本轮。
 3. 不要输出“先确认方案”“三套方案”“接下来执行第 x 步”等流程话术。
 4. 只有目标存在实质歧义、缺少必须由用户决定的文字或品牌信息，或用户明确要求先比较方案时，
-   才调用 `moon_request_human_input`，最多提供 3 套。
+   才调用 `request_human_input`，最多提供 3 套。
 5. 用户说“继续完善、改一下、上一张、刚才那张”时，先调用 `resolve_reference_assets`，
    找到相关会话产物并作为编辑源，不得凭空假设参考图。
 6. 失败时说明失败原因并给一次可执行的修正建议，不要重新机械展开多套方案。
 7. `generate_image_batch.follow_up_video` 默认必须为 false。只有用户明确要求继续制作视频时才设为 true。
-

@@ -174,6 +174,13 @@ public record AgentSkill(
     }
 
     private static List<String> toStrList(Object o) {
+        if (o instanceof String s) {
+            String value = s.trim();
+            if (value.isEmpty()) return List.of();
+            return java.util.Arrays.stream(value.split("\\s+"))
+                    .filter(item -> !item.isBlank())
+                    .toList();
+        }
         if (!(o instanceof List<?> list)) return List.of();
         return list.stream().map(String::valueOf).filter(x -> !x.isBlank()).toList();
     }

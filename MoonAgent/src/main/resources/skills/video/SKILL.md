@@ -11,10 +11,7 @@ metadata:
     default_hitl_policy: none
     version: "3.0"
     priority: 40
-allowed-tools:
-  - generate_video
-  - resolve_reference_assets
-  - moon_request_human_input
+allowed-tools: generate_video resolve_reference_assets request_human_input
 ---
 
 # 视频生成（video）
