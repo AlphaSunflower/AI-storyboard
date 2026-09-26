@@ -2,7 +2,7 @@
 
 日期：2026-08-21
 分支：feature/plan-graph-orchestration
-状态：设计已批准，P0 spike 已完成
+状态：已归档（2026-09-26）；被 AgentScope 全量迁移架构取代
 
 ## 背景与目标
 

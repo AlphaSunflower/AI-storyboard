@@ -23,7 +23,7 @@ import java.util.Map;
  *
  * @param intentType 意图标识（intent-aisplit / intent-pic / ...），由 name 加 "intent-" 前缀推导
  * @param label     澄清卡片显示名（用户可点选的目标能力标题）
- * @param modelRole 模型角色（text / vision / image / video），AgentNodeClients / 各 LLM 调用据此选客户端
+ * @param modelRole 模型角色（text / vision / image / video），运行时与 LLM 调用据此选客户端
  * @param tools     声明式工具清单（AgentTools @Tool 名）
  * @param limits    行为上限（max_clarify_rounds / max_regenerate_rounds 等）
  * @param triggers  路由触发正则/关键词（有序，priority 升序先查——delete 须先于 aisplit 的「分镜」）

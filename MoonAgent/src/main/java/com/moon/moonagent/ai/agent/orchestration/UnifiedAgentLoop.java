@@ -297,7 +297,7 @@ public class UnifiedAgentLoop {
             case "generate_image", "pic-option", "pic-clarify", "prompt-source", "refine" -> "intent-pic";
             case "generate_video", "video-opinion", "video-clarify", "video-source", "video-role-select" -> "intent-video";
             case "delete-confirm" -> "intent-delete";
-            default -> action.startsWith("skill-") ? "intent-test" : IntentRecognitionService.FALLBACK_TYPE;
+            default -> IntentRecognitionService.FALLBACK_TYPE;
         };
     }
 

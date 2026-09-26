@@ -18,7 +18,6 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -87,7 +86,6 @@ class SkillExpanderTests {
         assertTrue(names.contains("replaceSpecificScenes"), "应索引到 replaceSpecificScenes");
         assertTrue(names.contains("refineImage"), "应索引到 refineImage");
         assertTrue(names.contains("generateVideo"), "应索引到 generateVideo");
-        assertTrue(names.contains("testEcho"), "应索引到新增的 testEcho");
         assertTrue(names.contains("moon_request_human_input"), "应索引到人工介入工具");
     }
 
@@ -151,14 +149,6 @@ class SkillExpanderTests {
     }
 
     @Test
-    void testSkillLoadedWithMultiStepFlow() {
-        var skill = skillManager.byIntent("intent-test");
-        assertTrue(skill.isPresent(), "test 技能应被 SkillLoader 加载");
-        assertFalse(skill.get().flow().isEmpty(), "test 技能应声明 flow 多步澄清流程");
-        assertEquals("clarify_style", skill.get().flow().getFirst(), "flow 首步应为 clarify_style");
-    }
-
-    @Test
     void legacySceneReviewSkillIsNoLongerLoaded() {
         assertTrue(skillManager.byIntent("intent-scene-review").isEmpty(),
                 "旧分镜审查链路应从静态技能目录彻底移除");
@@ -179,14 +169,4 @@ class SkillExpanderTests {
         assertTrue(run.contains("canvas_set_node_model_config"));
     }
 
-    @Test
-    void testEchoReturnsConcatenatedFirstSentence() {
-        String result = agentTools.testEcho("测试一下这个功能好不好？后面是废话。");
-        assertEquals("测试无效，略略略。用户第一句话：测试一下这个功能好不好？", result);
-    }
-
-    @Test
-    void testEchoWithoutPunctuationUsesWholeText() {
-        assertEquals("测试无效，略略略。用户第一句话：测试", agentTools.testEcho("测试"));
-    }
 }
