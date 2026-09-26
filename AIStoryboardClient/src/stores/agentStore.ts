@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import {
-  agentApi, streamChat, streamEditedMessage, streamInterruptAndSend, submitForm, streamTaskEvents,
+  agentApi, streamChat, submitForm, streamTaskEvents,
   type AgentConversation, type AgentMessage, type AgentAsset,
-  type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
+  type AgentPage, type AgentTurnEventEnvelope, type AgentScopeEvent,
+  type AgentTurnMetrics, type VideoTaskStatus, type AssetOption,
   type AgentTaskView,
   type AgentWakeupMessage,
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
@@ -26,15 +27,11 @@ import {
   type CanvasEditContext,
 } from '../lib/canvasEditMode';
 
-/** 阶段完成/失败事件若未携带标题，不清空仍在运行的阶段提示。 */
-function resolveWorkflowHint(current: string, event: SseEvent): string {
-  const title = event.title ?? '';
-  if (!title && (event.status === 'node_finished' || event.status === 'node_failed')) return current;
-  return title;
-}
-
-/** 阶段级推理快照之间换行分隔；未来若恢复逐 token delta，仍保持原样拼接。 */
-function appendReasoningDetails(prev: AgentReasoning | undefined, event: SseEvent): string {
+/** Newlines separate stage snapshots; token deltas concatenate directly. */
+function appendReasoningDetails(
+  prev: AgentReasoning | undefined,
+  event: { details?: string; source?: string },
+): string {
   const previous = prev?.details ?? '';
   const delta = event.details ?? '';
   if (!previous || !delta) return previous + delta;
@@ -43,12 +40,107 @@ function appendReasoningDetails(prev: AgentReasoning | undefined, event: SseEven
     : previous + delta;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : value == null ? fallback : String(value);
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === 'string' && item.length > 0)
+    : [];
+}
+
+function deepFindRecordWith(value: unknown, predicate: (record: Record<string, unknown>) => boolean): Record<string, unknown> | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  if (predicate(record)) return record;
+  for (const child of Object.values(record)) {
+    const found = deepFindRecordWith(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  const record = asRecord(value);
+  if (record) return record;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+/** Ordered per-turn envelope sequencer; gaps are held until replay or the missing event arrives. */
+export class AgentTurnEventSequencer {
+  private lastSeqByTurn = new Map<string, number>();
+  private pendingByTurn = new Map<string, Map<number, AgentTurnEventEnvelope>>();
+
+  accept(envelope: AgentTurnEventEnvelope): AgentTurnEventEnvelope[] {
+    if (!envelope.turnId || !Number.isInteger(envelope.seq) || envelope.seq < 1) return [];
+    const last = this.lastSeqByTurn.get(envelope.turnId) ?? 0;
+    if (envelope.seq <= last) return [];
+    const pending = this.pendingByTurn.get(envelope.turnId) ?? new Map<number, AgentTurnEventEnvelope>();
+    pending.set(envelope.seq, envelope);
+    const ready: AgentTurnEventEnvelope[] = [];
+    let next = last + 1;
+    for (;;) {
+      const candidate = pending.get(next);
+      if (!candidate) break;
+      pending.delete(next);
+      ready.push(candidate);
+      this.lastSeqByTurn.set(envelope.turnId, next);
+      next += 1;
+    }
+    if (pending.size > 0) this.pendingByTurn.set(envelope.turnId, pending);
+    else this.pendingByTurn.delete(envelope.turnId);
+    return ready;
+  }
+
+  lastSeq(turnId: string): number {
+    return this.lastSeqByTurn.get(turnId) ?? 0;
+  }
+
+  reset(turnId: string) {
+    this.lastSeqByTurn.delete(turnId);
+    this.pendingByTurn.delete(turnId);
+  }
+}
+
+export interface AgentScopeTimelineEntry {
+  id: string;
+  turnId: string;
+  seq: number;
+  kind: 'plan' | 'subagent' | 'artifact';
+  title: string;
+  status: string;
+  summary?: string;
+  agent?: string;
+}
+
+const turnEventSequencer = new AgentTurnEventSequencer();
+
 type GenerationSnapshot = {
   hint: string;
+  turnId?: string;
   assistantId?: string;
   assistantContent?: string;
   reasoningDraft?: AgentReasoning;
   traceDraft?: AgentTraceEvent[];
+  usageDraft?: AgentTurnMetrics;
+  toolDrafts?: Record<string, { name: string; text: string; input: string; status: string }>;
   assistantMessageMetadata?: AgentMessageMetadata;
   /** message_end 已完成正文回复；异步视频任务可随后重新置回 false */
   finished?: boolean;
@@ -209,6 +301,7 @@ function resumeGenerationForTask(conversationId: string, assistantId: string, hi
 }
 
 export interface HumanInputInfo {
+  turnId?: string;
   formToken: string;
   taskId: string;
   formContent: string;
@@ -247,6 +340,7 @@ export interface ConfirmResultInfo {
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
 export interface VideoPlanInfo {
+  turnId?: string;
   planToken: string;
   message: string;
   duration: number;
@@ -301,6 +395,10 @@ interface AgentState {
   // 消息
   messages: AgentMessage[];
   streaming: boolean;
+  /** AgentScope plan/subagent/artifact timeline, scoped by conversation. */
+  timelineByConversation: Record<string, AgentScopeTimelineEntry[]>;
+  /** Replay durable turn events after a known sequence, then reduce them in order. */
+  replayTurnEvents: (conversationId: string, turnId: string, afterSeq?: number) => Promise<void>;
   /** 会话级进行中生成状态（key=conversationId）：切走保留、切回恢复；streaming/workflowHint 由此派生 */
   generating: Record<string, GenerationSnapshot>;
   waitingHumanInput: HumanInputInfo | null;
@@ -382,7 +480,7 @@ interface AgentState {
     customText?: string,
     params?: Record<string, string>,
     assetIds?: string[],
-    opts?: { hiddenCard?: boolean; formToken?: string; canvasContext?: CanvasEditContext },
+    opts?: { hiddenCard?: boolean; formToken?: string; turnId?: string; canvasContext?: CanvasEditContext },
   ) => Promise<void>;
   // 图生视频方案确认卡片（video_plan 事件）：开始生成视频 → 后端生成；继续完善 → 本地保留参考图
   waitingVideoPlan: VideoPlanInfo | null;
@@ -726,7 +824,587 @@ function refreshStoryboardQueues() {
   void useAgentStore.getState().refetchStoryboardImageQueue(projectId);
 }
 
+type AgentScopeTaskAccepted = {
+  taskId: string;
+  taskKind: 'video' | 'image-batch' | 'long-tool';
+  message: string;
+};
+
+export type AgentTurnEnvelopeEffects = {
+  started: boolean;
+  paused: boolean;
+  completed: boolean;
+  failed: boolean;
+  canvasModeRequired: Record<string, unknown> | null;
+  taskAccepted: AgentScopeTaskAccepted | null;
+  confirmResult: ConfirmResultInfo | null;
+};
+
+type TurnReductionContext = {
+  conversationId: string;
+  assistantId: string;
+};
+
+function emptyTurnEffects(): AgentTurnEnvelopeEffects {
+  return {
+    started: false,
+    paused: false,
+    completed: false,
+    failed: false,
+    canvasModeRequired: null,
+    taskAccepted: null,
+    confirmResult: null,
+  };
+}
+
+function upsertTimelineEntry(
+  conversationId: string,
+  entry: AgentScopeTimelineEntry,
+) {
+  useAgentStore.setState((state) => {
+    const current = state.timelineByConversation[conversationId] ?? [];
+    const index = current.findIndex((item) => item.id === entry.id);
+    const next = index >= 0
+      ? current.map((item) => item.id === entry.id ? { ...item, ...entry } : item)
+      : [...current, entry];
+    return {
+      timelineByConversation: {
+        ...state.timelineByConversation,
+        [conversationId]: next,
+      },
+    };
+  });
+}
+
+function setLiveReasoning(context: TurnReductionContext, reasoning: AgentReasoning) {
+  useAgentStore.setState((state) => {
+    const generating = {
+      ...state.generating,
+      [context.conversationId]: {
+        ...(state.generating[context.conversationId] ?? { hint: '' }),
+        reasoningDraft: reasoning,
+      },
+    };
+    if (state.activeConversationId !== context.conversationId) return { generating };
+    return {
+      generating,
+      messages: state.messages.map((message) =>
+        message.id === context.assistantId
+          ? { ...message, metadata: { ...(message.metadata ?? {}), kind: message.metadata?.kind ?? 'assistant-reply', reasoning } }
+          : message),
+    };
+  });
+}
+
+function setLiveTrace(context: TurnReductionContext, traceEvent: AgentTraceEvent) {
+  useAgentStore.setState((state) => {
+    const generation = state.generating[context.conversationId] ?? { hint: '' };
+    const current = generation.traceDraft ?? [];
+    const existing = current.findIndex((item) => item.id === traceEvent.id);
+    const traceDraft = existing >= 0
+      ? current.map((item) => item.id === traceEvent.id ? { ...item, ...traceEvent } : item)
+      : [...current, traceEvent];
+    const generating = {
+      ...state.generating,
+      [context.conversationId]: { ...generation, traceDraft },
+    };
+    if (state.activeConversationId !== context.conversationId) return { generating };
+    return {
+      generating,
+      messages: state.messages.map((message) =>
+        message.id === context.assistantId
+          ? { ...message, metadata: { ...(message.metadata ?? {}), kind: message.metadata?.kind ?? 'assistant-reply', agentTrace: traceDraft } }
+          : message),
+    };
+  });
+}
+
+function mergeUsage(
+  context: TurnReductionContext,
+  data: Record<string, unknown>,
+): AgentTurnMetrics | null {
+  const usage = asRecord(data.usage) ?? data;
+  const inputTokens = asNumber(usage.inputTokens ?? usage.input_tokens);
+  const outputTokens = asNumber(usage.outputTokens ?? usage.output_tokens);
+  const cachedInputTokens = asNumber(usage.cachedTokens ?? usage.cached_input_tokens);
+  const totalTokens = asNumber(usage.totalTokens ?? usage.total_tokens, inputTokens + outputTokens);
+  if (!inputTokens && !outputTokens && !cachedInputTokens && !totalTokens) return null;
+  let next: AgentTurnMetrics | null = null;
+  useAgentStore.setState((state) => {
+    const generation = state.generating[context.conversationId] ?? { hint: '' };
+    const previous = generation.usageDraft;
+    next = {
+      inputTokens: (previous?.inputTokens ?? 0) + inputTokens,
+      outputTokens: (previous?.outputTokens ?? 0) + outputTokens,
+      cachedInputTokens: (previous?.cachedInputTokens ?? 0) + cachedInputTokens,
+      totalTokens: (previous?.totalTokens ?? 0) + totalTokens,
+      durationMs: previous?.durationMs ?? asNumber(data.durationMs),
+      modelCalls: (previous?.modelCalls ?? 0) + 1,
+      complete: false,
+    };
+    const generating = {
+      ...state.generating,
+      [context.conversationId]: { ...generation, usageDraft: next },
+    };
+    if (state.activeConversationId !== context.conversationId) return { generating };
+    return {
+      generating,
+      messages: state.messages.map((message) =>
+        message.id === context.assistantId
+          ? { ...message, metadata: { ...(message.metadata ?? {}), metrics: next ?? undefined } }
+          : message),
+    };
+  });
+  return next;
+}
+
+function toolStatus(eventType: string, data: Record<string, unknown>): string {
+  if (eventType === 'TOOL_CALL_START') return 'node_started';
+  if (eventType === 'TOOL_RESULT_START') return 'node_running';
+  if (eventType === 'TOOL_RESULT_END') {
+    const state = asString(data.state).toUpperCase();
+    return state.includes('FAIL') || state.includes('DENIED') ? 'node_failed' : 'node_completed';
+  }
+  return 'node_running';
+}
+
+function toolTitle(eventType: string, toolName: string): string {
+  if (eventType === 'TOOL_CALL_START') return `调用工具：${toolName}`;
+  if (eventType === 'TOOL_RESULT_START') return `工具执行：${toolName}`;
+  if (eventType === 'TOOL_RESULT_END') return `工具完成：${toolName}`;
+  return `工具流式输出：${toolName}`;
+}
+
+function timelineKindForTool(toolName: string): AgentScopeTimelineEntry['kind'] | null {
+  if (toolName === 'plan_enter' || toolName === 'plan_write' || toolName === 'plan_exit' || toolName === 'todo_write') {
+    return 'plan';
+  }
+  if (toolName === 'deliver_artifact') return 'artifact';
+  return null;
+}
+
+function timelineTitleForTool(toolName: string, draft?: { input: string }) {
+  if (toolName === 'plan_enter') return '进入规划模式';
+  if (toolName === 'plan_write') {
+    const parsed = parseJsonRecord(draft?.input);
+    const content = asString(parsed?.content);
+    if (content) return content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || '更新执行计划';
+    return '更新执行计划';
+  }
+  if (toolName === 'plan_exit') return '等待计划确认';
+  if (toolName === 'todo_write') return '更新任务清单';
+  return '交付产物';
+}
+
+function taskAcceptedFromText(value: string): AgentScopeTaskAccepted | null {
+  const parsed = parseJsonRecord(value);
+  const record = parsed ? deepFindRecordWith(parsed, (candidate) => !!asString(candidate.taskId)) : null;
+  const taskId = asString(record?.taskId);
+  if (!taskId) return null;
+  const rawKind = asString(record?.taskKind ?? record?.kind);
+  const taskKind = rawKind === 'image-batch' || rawKind === 'long-tool' ? rawKind : 'video';
+  return {
+    taskId,
+    taskKind,
+    message: asString(record?.message) || (taskKind === 'image-batch'
+      ? '批量生图任务已受理'
+      : taskKind === 'long-tool' ? '后台任务已受理' : '视频任务已受理'),
+  };
+}
+
+function confirmResultFromText(value: string): ConfirmResultInfo | null {
+  const parsed = parseJsonRecord(value);
+  const record = parsed ? deepFindRecordWith(parsed, (candidate) =>
+    Array.isArray(candidate.imageUrls) || Array.isArray(candidate.urls) || !!asString(candidate.url)) : null;
+  if (!record) return null;
+  const urls = asStringArray(record.urls ?? record.imageUrls);
+  const url = asString(record.url) || urls[0] || '';
+  if (!url && urls.length === 0) return null;
+  const mediaType = asString(record.mediaType ?? record.type).toLowerCase();
+  return {
+    kind: mediaType.includes('video') ? 'video' : mediaType.includes('script') ? 'script' : 'image',
+    url,
+    urls,
+    assetId: asString(record.assetId) || undefined,
+    assetIds: asStringArray(record.assetIds),
+    sceneCount: asNumber(record.sceneCount, 0),
+    actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
+  };
+}
+
+function turnMetadata(payload: Record<string, unknown>): AgentMessageMetadata | undefined {
+  const raw = asRecord(payload.metadata);
+  if (!raw) return undefined;
+  const metadata = { ...raw } as AgentMessageMetadata;
+  if (raw.reasoning && typeof raw.reasoning === 'object') {
+    metadata.reasoning = raw.reasoning as AgentReasoning;
+  }
+  if (Array.isArray(raw.agentTrace)) {
+    metadata.agentTrace = raw.agentTrace as AgentTraceEvent[];
+  }
+  if (raw.metrics && typeof raw.metrics === 'object') {
+    metadata.metrics = raw.metrics as AgentTurnMetrics;
+  }
+  return metadata;
+}
+
+function applyOneEnvelope(
+  envelope: AgentTurnEventEnvelope,
+  context: TurnReductionContext,
+  effects: AgentTurnEnvelopeEffects,
+) {
+  const payload = envelope.payload;
+  if (envelope.type === 'turn_started') {
+    effects.started = true;
+    useAgentStore.setState((state) => {
+      const generating = {
+        ...state.generating,
+        [context.conversationId]: {
+          ...(state.generating[context.conversationId] ?? { hint: '' }),
+          turnId: envelope.turnId,
+          hint: 'AgentScope 正在处理',
+        },
+      };
+      return {
+        generating,
+        ...(state.activeConversationId === context.conversationId
+          ? { workflowHint: 'AgentScope 正在处理', streaming: true }
+          : {}),
+      };
+    });
+    return;
+  }
+
+  if (envelope.type === 'turn_paused') {
+    effects.paused = true;
+    const metadata = asRecord(payload.metadata) ?? {};
+    const hitl = asRecord(payload.hitl) ?? asRecord(metadata.hitl) ?? {};
+    const source = { ...payload, ...metadata, ...hitl };
+    const formToken = asString(source.formToken);
+    const messageId = asString(source.messageId) || context.assistantId;
+    const actions = Array.isArray(source.actions)
+      ? source.actions.filter(asRecord).map((action) => ({
+          id: asString(action?.id),
+          title: asString(action?.title),
+        })).filter((action) => action.id && action.title)
+      : [];
+    const info: HumanInputInfo = {
+      turnId: envelope.turnId,
+      formToken,
+      taskId: asString(source.taskId),
+      formContent: asString(source.formContent ?? source.content),
+      actions,
+      expirationTime: asNumber(source.expirationTime),
+      messageId,
+      kind: asString(source.kind) === 'video-plan' ? 'video-plan' : 'human-input',
+      hitlType: asString(source.hitlType),
+      models: source.models as GatewayModelOption[] | undefined,
+      imageModels: source.imageModels as GatewayModelOption[] | undefined,
+      videoModels: source.videoModels as GatewayModelOption[] | undefined,
+      recommended: asRecord(source.recommended) as Record<string, string> | undefined,
+      reasons: asRecord(source.reasons) as Record<string, string> | undefined,
+      assets: source.assets as AssetOption[] | undefined,
+      message: asString(source.message),
+      duration: asNumber(source.duration, 8),
+      picUrl: asString(source.picUrl),
+    };
+    useAgentStore.setState((state) => {
+      const videoPlan = info.kind === 'video-plan' || info.hitlType === 'generate_video';
+      const videoInfo: VideoPlanInfo | null = videoPlan ? {
+        turnId: envelope.turnId,
+        planToken: formToken,
+        message: info.message || info.formContent,
+        duration: info.duration ?? 8,
+        picUrl: info.picUrl ?? '',
+        actions,
+        messageId,
+        models: info.models,
+        recommended: info.recommended,
+        reasons: info.reasons,
+      } : null;
+      const messages = state.messages.map((message) => message.id === context.assistantId
+        ? {
+            ...message,
+            id: messageId || message.id,
+            content: info.formContent || videoInfo?.message || message.content,
+            metadata: {
+              ...(message.metadata ?? {}),
+              kind: videoPlan ? 'video-plan' as const : 'hitl' as const,
+              hitl: {
+                formContent: info.formContent || videoInfo?.message || '',
+                actions,
+                pending: true,
+                messageId,
+              },
+              ...(videoInfo ? { videoPlan: {
+                message: videoInfo.message,
+                duration: videoInfo.duration,
+                picUrl: videoInfo.picUrl,
+                actions,
+                formToken,
+                messageId,
+                models: videoInfo.models,
+                recommended: videoInfo.recommended,
+                reasons: videoInfo.reasons,
+              } } : {}),
+            },
+          }
+        : message);
+      return {
+        workflowHint: '',
+        waitingHumanInput: videoPlan ? null : info,
+        waitingVideoPlan: videoInfo,
+        hitlVideoPlan: videoInfo
+          ? { ...state.hitlVideoPlan, [context.conversationId]: videoInfo }
+          : state.hitlVideoPlan,
+        messages: state.activeConversationId === context.conversationId ? messages : state.messages,
+      };
+    });
+    return;
+  }
+
+  if (envelope.type === 'turn_completed') {
+    effects.completed = true;
+    const content = asString(payload.content);
+    const metadata = turnMetadata(payload);
+    const generation = useAgentStore.getState().generating[context.conversationId];
+    const finalMetadata: AgentMessageMetadata | undefined = (
+      metadata || generation?.reasoningDraft || generation?.traceDraft?.length
+      || generation?.usageDraft || generation?.assistantMessageMetadata
+    ) ? {
+        ...(generation?.assistantMessageMetadata ?? {}),
+        ...(metadata ?? {}),
+        kind: metadata?.kind ?? generation?.assistantMessageMetadata?.kind ?? 'assistant-reply',
+        reasoning: metadata?.reasoning ?? generation?.reasoningDraft,
+        agentTrace: metadata?.agentTrace ?? generation?.traceDraft,
+        metrics: metadata?.metrics ?? generation?.usageDraft ?? generation?.assistantMessageMetadata?.metrics,
+      } : undefined;
+    if (content) storeAssistantContent(context.conversationId, context.assistantId, content);
+    if (finalMetadata) {
+      useAgentStore.setState((state) => {
+        const generating = {
+          ...state.generating,
+          [context.conversationId]: {
+            ...(state.generating[context.conversationId] ?? { hint: '' }),
+            assistantMessageMetadata: finalMetadata,
+            usageDraft: undefined,
+          },
+        };
+        return {
+          generating,
+          ...(state.activeConversationId === context.conversationId
+            ? { messages: state.messages.map((message) => message.id === context.assistantId ? { ...message, metadata: finalMetadata } : message) }
+            : {}),
+        };
+      });
+    }
+    return;
+  }
+
+  if (envelope.type === 'turn_failed') {
+    effects.failed = true;
+    const message = asString(payload.message, 'AgentScope 执行失败');
+    useAgentStore.setState((state) => ({
+      ...(state.activeConversationId === context.conversationId ? { streamError: message } : {}),
+    }));
+    return;
+  }
+
+  const native = asRecord(payload) as AgentScopeEvent | null;
+  const eventType = asString(native?.eventType);
+  const data = asRecord(native?.data) ?? {};
+  if (!eventType) return;
+
+  if (eventType === 'TEXT_BLOCK_DELTA') {
+    const delta = asString(data.delta);
+    if (!delta) return;
+    useAgentStore.setState((state) => {
+      const generation = state.generating[context.conversationId] ?? { hint: '' };
+      const content = `${generation.assistantContent ?? ''}${delta}`;
+      const generating = {
+        ...state.generating,
+        [context.conversationId]: { ...generation, assistantId: context.assistantId, assistantContent: content },
+      };
+      if (state.activeConversationId !== context.conversationId) return { generating };
+      return {
+        generating,
+        messages: state.messages.map((message) =>
+          message.id === context.assistantId ? { ...message, content: message.content + delta } : message),
+      };
+    });
+    return;
+  }
+
+  if (eventType === 'AGENT_RESULT') {
+    const result = asString(data.result ?? data.content);
+    if (result) storeAssistantContent(context.conversationId, context.assistantId, result);
+    return;
+  }
+
+  if (eventType === 'THINKING_BLOCK_DELTA') {
+    const delta = asString(data.delta);
+    if (!delta) return;
+    const previous = useAgentStore.getState().generating[context.conversationId]?.reasoningDraft;
+    setLiveReasoning(context, {
+      summary: delta.trim().split('\n').filter(Boolean).at(-1) ?? previous?.summary ?? '',
+      details: appendReasoningDetails(previous, { details: delta, source: 'agentscope' }),
+      durationMs: previous?.durationMs,
+      source: 'agentscope',
+    });
+    return;
+  }
+
+  if (eventType === 'MODEL_CALL_END') {
+    mergeUsage(context, data);
+    return;
+  }
+
+  if (eventType.startsWith('TOOL_')) {
+    const toolName = asString(data.toolName, 'tool');
+    const toolCallId = asString(data.toolCallId, `tool-${envelope.seq}`);
+    const status = toolStatus(eventType, data);
+    setLiveTrace(context, {
+      id: `${toolCallId}-call`,
+      phase: 'tool',
+      agent: 'agentscope',
+      specialist: toolName,
+      status,
+      title: toolTitle(eventType, toolName),
+      summary: asString(data.delta ?? data.state),
+      startedAt: asString(data.createdAt, new Date().toISOString()),
+    });
+
+    const kind = timelineKindForTool(toolName);
+    if (kind) {
+      upsertTimelineEntry(context.conversationId, {
+        id: `${envelope.turnId}:${toolCallId}:${kind}`,
+        turnId: envelope.turnId,
+        seq: envelope.seq,
+        kind,
+        title: timelineTitleForTool(toolName),
+        status,
+        summary: asString(data.delta ?? data.state),
+      });
+    }
+
+    useAgentStore.setState((state) => {
+      const generation = state.generating[context.conversationId] ?? { hint: '' };
+      const drafts = { ...(generation.toolDrafts ?? {}) };
+      const draft = drafts[toolCallId] ?? { name: toolName, text: '', input: '', status };
+      if (eventType === 'TOOL_CALL_DELTA') draft.input += asString(data.delta);
+      if (eventType === 'TOOL_RESULT_TEXT_DELTA' || eventType === 'TOOL_RESULT_DATA_DELTA') {
+        const delta = typeof data.delta === 'string' ? data.delta : data.delta ? JSON.stringify(data.delta) : '';
+        draft.text += delta;
+      }
+      draft.status = status;
+      drafts[toolCallId] = draft;
+      return {
+        generating: {
+          ...state.generating,
+          [context.conversationId]: { ...generation, toolDrafts: drafts },
+        },
+      };
+    });
+
+    if (eventType === 'TOOL_RESULT_END') {
+      const draft = useAgentStore.getState().generating[context.conversationId]?.toolDrafts?.[toolCallId];
+      if (!effects.taskAccepted) effects.taskAccepted = taskAcceptedFromText(draft?.text ?? '');
+      if (!effects.confirmResult) effects.confirmResult = confirmResultFromText(draft?.text ?? '');
+      if (toolName === 'deliver_artifact') {
+        const input = parseJsonRecord(draft?.input);
+        const fileName = asString(input?.fileName) || asString(input?.filePath).split(/[\\/]/).pop() || '产物';
+        upsertTimelineEntry(context.conversationId, {
+          id: `${envelope.turnId}:${toolCallId}:artifact`,
+          turnId: envelope.turnId,
+          seq: envelope.seq,
+          kind: 'artifact',
+          title: fileName,
+          status,
+          summary: asString(input?.description) || draft?.text,
+        });
+      }
+    }
+    return;
+  }
+
+  if (eventType === 'SUBAGENT_EXPOSED') {
+    const subagentId = asString(data.subagentId, `subagent-${envelope.seq}`);
+    const label = asString(data.label ?? data.agentId, subagentId);
+    upsertTimelineEntry(context.conversationId, {
+      id: `${envelope.turnId}:${subagentId}:subagent`,
+      turnId: envelope.turnId,
+      seq: envelope.seq,
+      kind: 'subagent',
+      title: label,
+      status: 'node_started',
+      agent: asString(data.agentId, subagentId),
+      summary: asString(data.sessionId),
+    });
+    return;
+  }
+
+  if (eventType === 'HINT_BLOCK') {
+    const hint = asString(data.hint ?? data.delta);
+    if (hint) {
+      useAgentStore.setState((state) => ({
+        ...(state.activeConversationId === context.conversationId ? { workflowHint: hint } : {}),
+      }));
+    }
+    return;
+  }
+
+  if (eventType === 'CUSTOM') {
+    const name = asString(data.name);
+    const value = asRecord(data.value) ?? {};
+    if (name.toLowerCase().includes('canvas_mode_required')) {
+      effects.canvasModeRequired = { ...value, turnId: envelope.turnId };
+      return;
+    }
+    const lower = name.toLowerCase();
+    const kind: AgentScopeTimelineEntry['kind'] | null = lower.includes('plan')
+      ? 'plan' : lower.includes('subagent') ? 'subagent' : lower.includes('artifact') ? 'artifact' : null;
+    if (kind) {
+      upsertTimelineEntry(context.conversationId, {
+        id: `${envelope.turnId}:${name}:${envelope.seq}`,
+        turnId: envelope.turnId,
+        seq: envelope.seq,
+        kind,
+        title: asString(value.title ?? name),
+        status: asString(value.status, 'node_running'),
+        summary: asString(value.summary ?? value.content ?? value.message),
+      });
+    }
+  }
+}
+
+/** Reduce a streamed envelope into store state; stale/gapped events are handled per turn. */
+export function applyAgentTurnEnvelope(
+  envelope: AgentTurnEventEnvelope,
+  context: TurnReductionContext,
+): AgentTurnEnvelopeEffects {
+  const effects = emptyTurnEffects();
+  for (const ready of turnEventSequencer.accept(envelope)) {
+    applyOneEnvelope(ready, context, effects);
+  }
+  return effects;
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
+  timelineByConversation: {},
+  replayTurnEvents: async (conversationId, turnId, afterSeq) => {
+    if (!conversationId || !turnId) return;
+    const assistantId = get().generating[conversationId]?.assistantId
+      ?? get().pendingAssistantId
+      ?? `turn-assistant-${turnId}`;
+    const response = await agentApi.listTurnEvents(
+      conversationId,
+      turnId,
+      afterSeq ?? turnEventSequencer.lastSeq(turnId),
+    );
+    for (const envelope of response.data.data ?? []) {
+      applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+    }
+  },
   canvasEditContext: null,
   canvasBinding: null,
   canvasBindingStatus: '',
@@ -1298,10 +1976,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (interruptCurrent) {
       const runningConversationId = get().activeConversationId;
       const runningAssistantId = get().pendingAssistantId;
+      const runningTurnId = runningConversationId
+        ? get().generating[runningConversationId]?.turnId
+        : undefined;
       manualStop = true;
       streamAbort?.abort();
       streamAbort = null;
-      if (runningConversationId) void agentApi.interrupt(runningConversationId).catch(() => undefined);
+      if (runningConversationId && runningTurnId) {
+        void agentApi.interruptTurn(runningConversationId, runningTurnId).catch(() => undefined);
+      }
       set((s) => {
         const generating = { ...s.generating };
         if (runningConversationId) delete generating[runningConversationId];
@@ -1408,351 +2091,109 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       generating: { ...s.generating, [id]: { ...s.generating[id], assistantId, assistantContent: '' } },
     }));
 
-    const updateAssistant = (delta: string) => {
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: m.content + delta } : m),
-        generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: (s.generating[id]?.assistantContent ?? '') + delta } },
-      }));
-    };
-
-    // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
-    // （增量拼接的签名 URL 已被后端替换为 /api/files/images/ 永久地址）
-    const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
-
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
-    // 推理/轨迹实时草稿（reasoning_delta / agent_trace）写入属主会话 generating + 当前气泡 metadata
-    const updateLiveReasoning = (reasoning: AgentReasoning) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextG = { ...g, reasoningDraft: reasoning };
-        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-        return {
-          messages: s.messages.map((m) =>
-            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
-          generating: { ...s.generating, [snapshotId]: nextG },
-        };
-      });
-    };
-    const updateLiveTrace = (ev: AgentTraceEvent) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
-        const nextTrace = existingIndex >= 0
-          ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
-          : [...(g.traceDraft ?? []), ev];
-        const nextG = { ...g, traceDraft: nextTrace };
-        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-        return {
-          messages: s.messages.map((m) =>
-            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
-          generating: { ...s.generating, [snapshotId]: nextG },
-        };
-      });
-    };
-    const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextG = { ...g, assistantMessageMetadata: metadata };
-        delete nextG.reasoningDraft;
-        delete nextG.traceDraft;
-        const base = { ...s.generating, [snapshotId]: nextG };
-        if (s.activeConversationId !== snapshotId) return { generating: base };
-        return {
-          messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
-          generating: base,
-        };
-      });
-    };
-    const mergeFinalMetadata = (e: SseEvent) => {
-      const g = get().generating[snapshotId] ?? { hint: '' };
-      const reasoning = e.reasoning ?? g.reasoningDraft;
-      const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
-      const suggestedActions = e.suggestedActions;
-      const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
-      const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
-      const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
-      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
-        || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
-        setFinalMetadata({
-          kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
-          reasoning,
-          agentTrace,
-          suggestedActions,
-          taskCards,
-          metrics,
-          storyboardReview,
-        });
-      }
-    };
-    /** 从 agent_trace 事件里提取轨迹事件（兼容单条直发 / traceEvent 包装 / agentTrace 数组） */
-    const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
-      const out: AgentTraceEvent[] = [];
-      if (e.traceEvent) out.push(e.traceEvent);
-      if (e.agentTrace) out.push(...e.agentTrace);
-      const raw = e as unknown as AgentTraceEvent;
-      if (raw.id && raw.phase && raw.agent) out.push(raw);
-      return out;
-    };
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
     let acceptedTaskId: string | null = null;
-    let acceptedTaskKind: string | null = null;
+    let acceptedTaskKind: VideoTaskStatus['kind'] | null = null;
     let receivedCanvasModeRequired = false;
 
     const releaseStream = await reserveStreamSlot(snapshotId);
     manualStop = false;
     try {
-      const handleStreamEvent = (e: SseEvent) => {
-        switch (e.type) {
-          case 'message':
-            // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
-            if (get().activeConversationId !== snapshotId) {
-              set((s) => ({ generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: (s.generating[snapshotId]?.assistantContent ?? '') + (e.content ?? '') } } }));
-              break;
-            }
-            updateAssistant(e.content ?? '');
-            break;
-          case 'reasoning_delta': {
-            // 实时推理：拼接 details、按需更新 summary/durationMs/source，写入当前气泡 metadata.reasoning
-            const prev = get().generating[snapshotId]?.reasoningDraft;
-            const reasoning: AgentReasoning = {
-              summary: e.summary ?? prev?.summary ?? '',
-              details: appendReasoningDetails(prev, e),
-              durationMs: e.durationMs ?? prev?.durationMs,
-              source: e.source ?? prev?.source ?? 'assistant',
-            };
-            updateLiveReasoning(reasoning);
-            break;
+      const handleStreamEvent = (event: AgentTurnEventEnvelope) => {
+        const effects = applyAgentTurnEnvelope(event, {
+          conversationId: snapshotId,
+          assistantId,
+        });
+        if (effects.paused) receivedHumanInput = true;
+        if (effects.completed) {
+          receivedMessageEnd = true;
+          if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+            finishAssistantReply(snapshotId, assistantId);
           }
-          case 'agent_trace': {
-            const events = collectTraceEvents(e);
-            if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
-            break;
-          }
-          case 'workflow':
-            // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
-            if (get().activeConversationId !== snapshotId) break;
-            // 阶段进度提示：写入属主会话 generating（切走保留、切回恢复）；当前视图同步 workflowHint
-            set((s) => {
-              const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
-              return {
-                workflowHint: hint,
-                generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } },
-              };
-            });
-            break;
-          case 'canvas_mode_required':
-            receivedCanvasModeRequired = true;
-            if (get().activeConversationId === snapshotId && e.formToken && e.projectId && e.conversationId) {
-              get().startCanvasBinding({
-                conversationId: e.conversationId,
-                projectId: e.projectId,
-                requestedIntent: e.requestedIntent,
-                formToken: e.formToken,
-                expirationTime: String(e.expirationTime ?? ''),
-                picUrls: e.picUrls,
-                assetIds: e.assetIds,
-              });
-              set((s) => {
-                const g = { ...s.generating };
-                if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
-                return {
-                  messages: s.messages.filter((m) => m.id !== assistantId),
-                  generating: g,
-                  workflowHint: '',
-                };
-              });
-            }
-            break;
-          case 'human_input':
-            // 跨会话守卫：已切换会话则忽略旧流事件
-            if (get().activeConversationId !== snapshotId) break;
-            receivedHumanInput = true;
-            {
-              const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
-              set((s) => ({
-                workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-                waitingHumanInput: {
-                  formToken: e.formToken ?? '',
-                  taskId: e.taskId ?? '',
-                  formContent: e.formContent ?? '',
-                  actions: e.actions ?? [],
-                  expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
-                  models: e.models,
-                  imageModels: e.imageModels,
-                  videoModels: e.videoModels,
-                  recommended: e.recommended,
-                  reasons: e.reasons,
-                  assets: e.assets,
-                  messageId: cardId,
-                },
-                // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
-                messages: s.messages.map((m) =>
-                  m.id === assistantId ? {
-                    ...m,
-                    id: cardId,
-                    content: e.formContent ?? '',
-                    metadata: {
-                      ...(m.metadata ?? {}),
-                      kind: 'hitl',
-                      hitl: {
-                        formContent: e.formContent ?? '',
-                        actions: e.actions ?? [],
-                        pending: true,
-                        messageId: cardId,
-                      },
-                    },
-                  } : m),
-                generating: {
-                  ...s.generating,
-                  [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
-                },
-              }));
-            }
-            break;
-          case 'message_end':
-            receivedMessageEnd = true;
-            // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
-            mergeFinalMetadata(e);
-            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
-            if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
-            if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
-              finishAssistantReply(snapshotId, assistantId);
-            }
-            // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
-            if (get().activeConversationId !== snapshotId) break;
-            // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
-            if (typeof e.title === 'string' && e.title) {
+          const metadata = asRecord(event.payload.metadata) ?? {};
+          const title = asString(metadata.title);
+          const sceneCount = asNumber(metadata.sceneCount, -1);
+          if (get().activeConversationId === snapshotId) {
+            if (title) {
               cancelConversationTitleRefresh(snapshotId);
-              set((s) => ({
-                conversations: s.conversations.map((c) =>
-                  c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
+              set((state) => ({
+                conversations: state.conversations.map((conversation) =>
+                  conversation.id === snapshotId && conversation.title !== title
+                    ? { ...conversation, title } : conversation),
               }));
-            } else if (get().conversations.some((c) => c.id === snapshotId && c.title === '新对话')) {
+            } else if (get().conversations.some((conversation) => conversation.id === snapshotId && conversation.title === '新对话')) {
               scheduleConversationTitleRefresh(snapshotId);
             }
-            // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
-            // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
-            if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
-              if (e.sceneCount > initialSceneCount) {
-                get().setAgentGeneratedScenes(true);
-              }
-              // currentProject 守卫：项目不存在时跳过 loadProject 刷新
+            if (sceneCount >= 0) {
+              if (sceneCount > initialSceneCount) get().setAgentGeneratedScenes(true);
               const currentProject = useProjectStore.getState().currentProject;
-              if (currentProject) {
-                void useProjectStore.getState().loadProject(currentProject.id);
-              }
+              if (currentProject) void useProjectStore.getState().loadProject(currentProject.id);
             }
-            // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
             refreshStoryboardQueues();
-            break;
-          case 'task_accepted':
-            receivedMessageEnd = true;
-            mergeFinalMetadata(e);
-            acceptedTaskId = e.taskId ?? '';
-            acceptedTaskKind = e.taskKind ?? null;
-            if (acceptedTaskId) {
-              if (e.taskKind === 'long-tool' || e.taskKind === 'image-batch') {
-                attachTaskCard(snapshotId, assistantId, {
-                  taskId: acceptedTaskId,
-                  title: e.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
-                  kind: e.taskKind,
-                });
-                void agentApi.getTask(acceptedTaskId)
-                  .then((res) => {
-                    get().upsertTask(res.data.data);
-                    attachTaskCard(snapshotId, assistantId, res.data.data);
-                  })
-                  .catch(() => undefined);
-              } else {
-                beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
-              }
-            }
-            break;
-          case 'confirm_result':
-            if (get().activeConversationId !== snapshotId) break;
-            set({ confirmResult: e as ConfirmResultInfo });
-            break;
-          case 'video_plan':
-            // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
-            if (get().activeConversationId !== snapshotId) break;
-            set((s) => {
-              const cardId = e.messageId ?? `video-plan-${Date.now()}`;
-              const info = {
-                // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
-                planToken: e.formToken ?? e.planToken ?? '',
-                message: e.message ?? '',
-                duration: e.duration ?? 8,
-                picUrl: e.picUrl ?? '',
-                actions: e.actions ?? [],
-                messageId: cardId,
-                models: e.models,
-                recommended: e.recommended,
-                reasons: e.reasons,
-              };
-              const videoPlanMeta = {
-                message: info.message,
-                duration: info.duration,
-                picUrl: info.picUrl,
-                actions: info.actions,
-                formToken: info.planToken,
-                messageId: cardId,
-                models: info.models,
-                recommended: info.recommended,
-                reasons: info.reasons,
-              };
+          }
+        }
+        if (effects.taskAccepted) {
+          receivedMessageEnd = true;
+          acceptedTaskId = effects.taskAccepted.taskId;
+          acceptedTaskKind = effects.taskAccepted.taskKind;
+          if (acceptedTaskKind === 'long-tool' || acceptedTaskKind === 'image-batch') {
+            attachTaskCard(snapshotId, assistantId, {
+              taskId: acceptedTaskId,
+              title: acceptedTaskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+              kind: acceptedTaskKind,
+            });
+            void agentApi.getTask(acceptedTaskId)
+              .then((response) => {
+                get().upsertTask(response.data.data);
+                attachTaskCard(snapshotId, assistantId, response.data.data);
+              })
+              .catch(() => undefined);
+          } else {
+            beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, acceptedTaskKind);
+          }
+        }
+        if (effects.confirmResult && get().activeConversationId === snapshotId) {
+          set({ confirmResult: effects.confirmResult });
+        }
+        if (effects.canvasModeRequired) {
+          receivedCanvasModeRequired = true;
+          const canvas = effects.canvasModeRequired;
+          const canvasConversationId = asString(canvas.conversationId);
+          const projectId = asString(canvas.projectId);
+          const formToken = asString(canvas.formToken);
+          if (get().activeConversationId === snapshotId && canvasConversationId && projectId && formToken) {
+            get().startCanvasBinding({
+              conversationId: canvasConversationId,
+              projectId,
+              requestedIntent: asString(canvas.requestedIntent),
+              formToken,
+              expirationTime: asString(canvas.expirationTime),
+              picUrls: asStringArray(canvas.picUrls),
+              assetIds: asStringArray(canvas.assetIds),
+            });
+            set((state) => {
+              const generating = { ...state.generating };
+              delete generating[snapshotId];
               return {
-                waitingVideoPlan: info,
-                hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
-                messages: s.messages.map((m) =>
-                  m.id === assistantId ? {
-                    ...m,
-                    id: cardId,
-                    content: info.message || info.picUrl || '',
-                    metadata: {
-                      ...(m.metadata ?? {}),
-                      kind: 'video-plan',
-                      hitl: {
-                        formContent: info.message,
-                        actions: info.actions,
-                        pending: true,
-                        messageId: cardId,
-                      },
-                      videoPlan: videoPlanMeta,
-                    },
-                  } : m),
+                generating,
+                messages: state.messages.filter((message) => message.id !== assistantId),
+                workflowHint: '',
               };
             });
-            break;
-          case 'error':
-            // M3：跨会话守卫——已切换会话则忽略旧流错误
-            if (get().activeConversationId === snapshotId) {
-              set({ streamError: e.message ?? '对话出错，请重试' });
-            }
-            break;
+          }
         }
       };
-      if (editMessageId) {
-        await streamEditedMessage(id, editMessageId, content, handleStreamEvent, signal);
-      } else if (interruptCurrent) {
-        await streamInterruptAndSend(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, signal, {
-          referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
-          referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
-          routingHint: opts?.routingHint,
-          cancelActiveTasks: opts?.cancelActiveTasks,
-          canvasContext,
-        });
-      } else {
-        await streamChat(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, opts?.assetGroupIds, signal, {
-          ...opts,
-          canvasContext,
-          referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
-          referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
-        });
-      }
+      await streamChat(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, opts?.assetGroupIds, signal, {
+        ...opts,
+        editMessageId,
+        canvasContext,
+        referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
+        referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
+      });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -1799,6 +2240,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   submitHumanInput: async (actionId, customText = '', params, assetIds, opts) => {
     const info: HumanInputInfo | null = opts?.formToken
       ? {
+          turnId: opts.turnId,
           formToken: opts.formToken,
           taskId: '',
           formContent: '',
@@ -1808,6 +2250,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       : get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    const resumeTurnId = info.turnId ?? get().generating[id]?.turnId;
+    if (!resumeTurnId) {
+      set({ streamError: '当前确认卡片缺少 turnId，请刷新后重试' });
+      return;
+    }
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
     manualStop = false;
     streamAbort = new AbortController();
@@ -1862,17 +2309,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
 
     const assistantId = `tmp-assistant-${Date.now()}`;
-    const updateAssistant = (delta: string) => {
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: m.content + delta } : m),
-        generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: (s.generating[id]?.assistantContent ?? '') + delta } },
-      }));
-    };
-
-    // I5：message_end 携带后端本地化后的完整回复，整体覆盖占位气泡
-    const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
-
     // 预定义选项不 push 用户气泡（选中状态已标记在卡片 metadata.hitl 上）；
     // action=custom 只 push 用户原文气泡（与后端 persistUserConfirmation 对齐，不带「确认：」前缀）
     if (actionId === 'custom' && customText) {
@@ -1902,286 +2338,49 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
     // 流快照：发起流时的会话 id，防止切换会话后旧流事件污染新会话
     const snapshotId = id;
-    // 推理/轨迹实时草稿写入属主会话 generating + 当前气泡 metadata（与 sendMessage 一致）
-    const updateLiveReasoning = (reasoning: AgentReasoning) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextG = { ...g, reasoningDraft: reasoning };
-        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-        return {
-          messages: s.messages.map((m) =>
-            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
-          generating: { ...s.generating, [snapshotId]: nextG },
-        };
-      });
-    };
-    const updateLiveTrace = (ev: AgentTraceEvent) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
-        const nextTrace = existingIndex >= 0
-          ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
-          : [...(g.traceDraft ?? []), ev];
-        const nextG = { ...g, traceDraft: nextTrace };
-        if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-        return {
-          messages: s.messages.map((m) =>
-            m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
-          generating: { ...s.generating, [snapshotId]: nextG },
-        };
-      });
-    };
-    const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
-      set((s) => {
-        const g = s.generating[snapshotId] ?? { hint: '' };
-        const nextG = { ...g, assistantMessageMetadata: metadata };
-        delete nextG.reasoningDraft;
-        delete nextG.traceDraft;
-        const base = { ...s.generating, [snapshotId]: nextG };
-        if (s.activeConversationId !== snapshotId) return { generating: base };
-        return {
-          messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
-          generating: base,
-        };
-      });
-    };
-    const mergeFinalMetadata = (e: SseEvent) => {
-      const g = get().generating[snapshotId] ?? { hint: '' };
-      const reasoning = e.reasoning ?? g.reasoningDraft;
-      const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
-      const suggestedActions = e.suggestedActions;
-      const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
-      const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
-      const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
-      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
-        || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
-        setFinalMetadata({
-          kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
-          reasoning,
-          agentTrace,
-          suggestedActions,
-          taskCards,
-          metrics,
-          storyboardReview,
-        });
-      }
-    };
-    const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
-      const out: AgentTraceEvent[] = [];
-      if (e.traceEvent) out.push(e.traceEvent);
-      if (e.agentTrace) out.push(...e.agentTrace);
-      const raw = e as unknown as AgentTraceEvent;
-      if (raw.id && raw.phase && raw.agent) out.push(raw);
-      return out;
-    };
     // 结束标志：正常收尾（message_end / human_input）不算"未收到回复"
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
     let acceptedTaskId: string | null = null;
-    let acceptedTaskKind: string | null = null;
+    let acceptedTaskKind: VideoTaskStatus['kind'] | null = null;
 
     const releaseStream = await reserveStreamSlot(snapshotId);
     try {
-      await submitForm(id, info.formToken, info.taskId, actionId, (e: SseEvent) => {
-        switch (e.type) {
-          case 'message':
-            // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
-            if (get().activeConversationId !== snapshotId) {
-              set((s) => ({ generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: (s.generating[snapshotId]?.assistantContent ?? '') + (e.content ?? '') } } }));
-              break;
-            }
-            updateAssistant(e.content ?? '');
-            break;
-          case 'reasoning_delta': {
-            const prev = get().generating[snapshotId]?.reasoningDraft;
-            const reasoning: AgentReasoning = {
-              summary: e.summary ?? prev?.summary ?? '',
-              details: appendReasoningDetails(prev, e),
-              durationMs: e.durationMs ?? prev?.durationMs,
-              source: e.source ?? prev?.source ?? 'assistant',
-            };
-            updateLiveReasoning(reasoning);
-            break;
+      await submitForm(id, resumeTurnId, info.formToken, info.taskId, actionId, (event: AgentTurnEventEnvelope) => {
+        const effects = applyAgentTurnEnvelope(event, {
+          conversationId: snapshotId,
+          assistantId,
+        });
+        if (effects.paused) receivedHumanInput = true;
+        if (effects.completed) {
+          receivedMessageEnd = true;
+          if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+            finishAssistantReply(snapshotId, assistantId);
           }
-          case 'agent_trace': {
-            const events = collectTraceEvents(e);
-            if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
-            break;
+          refreshStoryboardQueues();
+        }
+        if (effects.taskAccepted) {
+          receivedMessageEnd = true;
+          acceptedTaskId = effects.taskAccepted.taskId;
+          acceptedTaskKind = effects.taskAccepted.taskKind;
+          if (acceptedTaskKind === 'long-tool' || acceptedTaskKind === 'image-batch') {
+            attachTaskCard(snapshotId, assistantId, {
+              taskId: acceptedTaskId,
+              title: acceptedTaskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+              kind: acceptedTaskKind,
+            });
+            void agentApi.getTask(acceptedTaskId)
+              .then((response) => {
+                get().upsertTask(response.data.data);
+                attachTaskCard(snapshotId, assistantId, response.data.data);
+              })
+              .catch(() => undefined);
+          } else {
+            beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, acceptedTaskKind);
           }
-          case 'workflow':
-            // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
-            if (get().activeConversationId !== snapshotId) break;
-            // 阶段进度提示：写入属主会话 generating（切走保留、切回恢复）；当前视图同步 workflowHint
-            set((s) => {
-              const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
-              return {
-                workflowHint: hint,
-                generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } },
-              };
-            });
-            break;
-          case 'human_input':
-            // 跨会话守卫：已切换会话则忽略旧流事件
-            if (get().activeConversationId !== snapshotId) break;
-            receivedHumanInput = true;
-            {
-              const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
-              set((s) => ({
-                workflowHint: '', // HITL 卡片接管展示，阶段提示清空
-                waitingHumanInput: {
-                  formToken: e.formToken ?? '',
-                  taskId: e.taskId ?? '',
-                  formContent: e.formContent ?? '',
-                  actions: e.actions ?? [],
-                  expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
-                  models: e.models,
-                  imageModels: e.imageModels,
-                  videoModels: e.videoModels,
-                  recommended: e.recommended,
-                  reasons: e.reasons,
-                  assets: e.assets,
-                  messageId: cardId,
-                },
-                // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
-                messages: s.messages.map((m) =>
-                  m.id === assistantId ? {
-                    ...m,
-                    id: cardId,
-                    content: e.formContent ?? '',
-                    metadata: {
-                      ...(m.metadata ?? {}),
-                      kind: 'hitl',
-                      hitl: {
-                        formContent: e.formContent ?? '',
-                        actions: e.actions ?? [],
-                        pending: true,
-                        messageId: cardId,
-                      },
-                    },
-                  } : m),
-                generating: {
-                  ...s.generating,
-                  [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
-                },
-              }));
-            }
-            break;
-          case 'message_end':
-            receivedMessageEnd = true;
-            // 跨会话守卫：已切换则仅累积到属主会话 generating（metadata/草稿），不写当前视图
-            mergeFinalMetadata(e);
-            // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
-            if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
-            if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
-              finishAssistantReply(snapshotId, assistantId);
-            }
-            // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
-            if (get().activeConversationId !== snapshotId) break;
-            // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
-            if (typeof e.title === 'string' && e.title) {
-              set((s) => ({
-                conversations: s.conversations.map((c) =>
-                  c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
-              }));
-            }
-            // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
-            // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
-            if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
-              if (e.sceneCount > initialSceneCount) {
-                get().setAgentGeneratedScenes(true);
-              }
-              // currentProject 守卫：项目不存在时跳过 loadProject 刷新
-              const currentProject = useProjectStore.getState().currentProject;
-              if (currentProject) {
-                void useProjectStore.getState().loadProject(currentProject.id);
-              }
-            }
-            // 分镜审查触发的生成（全自动生成视频/完善图片）可能刚入队 → 刷新任务队列面板，无需刷新网页
-            refreshStoryboardQueues();
-            break;
-          case 'task_accepted':
-            receivedMessageEnd = true;
-            acceptedTaskId = e.taskId ?? '';
-            acceptedTaskKind = e.taskKind ?? null;
-            if (acceptedTaskId) {
-              if (e.taskKind === 'long-tool' || e.taskKind === 'image-batch') {
-                attachTaskCard(snapshotId, assistantId, {
-                  taskId: acceptedTaskId,
-                  title: e.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
-                  kind: e.taskKind,
-                });
-                void agentApi.getTask(acceptedTaskId)
-                  .then((res) => {
-                    get().upsertTask(res.data.data);
-                    attachTaskCard(snapshotId, assistantId, res.data.data);
-                  })
-                  .catch(() => undefined);
-              } else {
-                beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
-              }
-            }
-            break;
-          case 'confirm_result':
-            if (get().activeConversationId !== snapshotId) break;
-            set({ confirmResult: e as ConfirmResultInfo });
-            break;
-          case 'video_plan':
-            // 图生视频方案确认卡片（跨会话守卫：已切换会话则忽略旧流事件）
-            if (get().activeConversationId !== snapshotId) break;
-            set((s) => {
-              const cardId = e.messageId ?? `video-plan-${Date.now()}`;
-              const info = {
-                // 后端 runHITLStage 统一下发 formToken（曾误读 planToken 恒空 → 提交 40401 checkpoint 不存在）
-                planToken: e.formToken ?? e.planToken ?? '',
-                message: e.message ?? '',
-                duration: e.duration ?? 8,
-                picUrl: e.picUrl ?? '',
-                actions: e.actions ?? [],
-                messageId: cardId,
-                models: e.models,
-                recommended: e.recommended,
-                reasons: e.reasons,
-              };
-              const videoPlanMeta = {
-                message: info.message,
-                duration: info.duration,
-                picUrl: info.picUrl,
-                actions: info.actions,
-                formToken: info.planToken,
-                messageId: cardId,
-                models: info.models,
-                recommended: info.recommended,
-                reasons: info.reasons,
-              };
-              return {
-                waitingVideoPlan: info,
-                hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
-                messages: s.messages.map((m) =>
-                  m.id === assistantId ? {
-                    ...m,
-                    id: cardId,
-                    content: info.message || info.picUrl || '',
-                    metadata: {
-                      ...(m.metadata ?? {}),
-                      kind: 'video-plan',
-                      hitl: {
-                        formContent: info.message,
-                        actions: info.actions,
-                        pending: true,
-                        messageId: cardId,
-                      },
-                      videoPlan: videoPlanMeta,
-                    },
-                  } : m),
-              };
-            });
-            break;
-          case 'error':
-            // M3：跨会话守卫——已切换会话则忽略旧流错误
-            if (get().activeConversationId === snapshotId) {
-              set({ streamError: e.message ?? '对话出错，请重试' });
-            }
-            break;
+        }
+        if (effects.confirmResult && get().activeConversationId === snapshotId) {
+          set({ confirmResult: effects.confirmResult });
         }
       }, customText, params, assetIds, signal, {
         canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
@@ -2242,6 +2441,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    const resumeTurnId = info.turnId ?? get().generating[id]?.turnId;
+    if (!resumeTurnId) {
+      set({ streamError: '当前视频方案缺少 turnId，请刷新后重试' });
+      return;
+    }
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
     manualStop = false;
     streamAbort = new AbortController();
@@ -2318,223 +2522,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         pendingAssistantId: assistantId,
         generating: { ...s.generating, [id]: { ...s.generating[id], assistantId, assistantContent: '' } },
       }));
-      const updateAssistant = (delta: string) =>
-        set((s) => ({ messages: s.messages.map((m) => m.id === assistantId ? { ...m, content: m.content + delta } : m), generating: { ...s.generating, [id]: { ...(s.generating[id] ?? { hint: '' }), assistantId, assistantContent: (s.generating[id]?.assistantContent ?? '') + delta } } }));
-      const updateAssistantFull = (full: string) => storeAssistantContent(id, assistantId, full);
       const snapshotId = id;
-      const updateLiveReasoning = (reasoning: AgentReasoning) => {
-        set((s) => {
-          const g = s.generating[snapshotId] ?? { hint: '' };
-          const nextG = { ...g, reasoningDraft: reasoning };
-          if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-          return {
-            messages: s.messages.map((m) =>
-              m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', reasoning } } : m),
-            generating: { ...s.generating, [snapshotId]: nextG },
-          };
-        });
-      };
-      const updateLiveTrace = (ev: AgentTraceEvent) => {
-        set((s) => {
-          const g = s.generating[snapshotId] ?? { hint: '' };
-          const existingIndex = (g.traceDraft ?? []).findIndex((item) => item.id === ev.id);
-          const nextTrace = existingIndex >= 0
-            ? (g.traceDraft ?? []).map((item) => item.id === ev.id ? ev : item)
-            : [...(g.traceDraft ?? []), ev];
-          const nextG = { ...g, traceDraft: nextTrace };
-          if (s.activeConversationId !== snapshotId) return { generating: { ...s.generating, [snapshotId]: nextG } };
-          return {
-            messages: s.messages.map((m) =>
-              m.id === assistantId ? { ...m, metadata: { ...(m.metadata ?? {}), kind: m.metadata?.kind ?? 'assistant-reply', agentTrace: nextTrace } } : m),
-            generating: { ...s.generating, [snapshotId]: nextG },
-          };
-        });
-      };
-      const setFinalMetadata = (metadata: AgentMessageMetadata | undefined) => {
-        set((s) => {
-          const g = s.generating[snapshotId] ?? { hint: '' };
-          const nextG = { ...g, assistantMessageMetadata: metadata };
-          delete nextG.reasoningDraft;
-          delete nextG.traceDraft;
-          const base = { ...s.generating, [snapshotId]: nextG };
-          if (s.activeConversationId !== snapshotId) return { generating: base };
-          return {
-            messages: s.messages.map((m) => m.id === assistantId ? { ...m, metadata } : m),
-            generating: base,
-          };
-        });
-      };
-      const mergeFinalMetadata = (e: SseEvent) => {
-        const g = get().generating[snapshotId] ?? { hint: '' };
-        const reasoning = e.reasoning ?? g.reasoningDraft;
-        const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
-        const suggestedActions = e.suggestedActions;
-        const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
-        const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
-        const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
-        if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
-          || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
-          setFinalMetadata({
-            kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
-            reasoning,
-            agentTrace,
-            suggestedActions,
-            taskCards,
-            metrics,
-            storyboardReview,
-          });
-        }
-      };
-      const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
-        const out: AgentTraceEvent[] = [];
-        if (e.traceEvent) out.push(e.traceEvent);
-        if (e.agentTrace) out.push(...e.agentTrace);
-        const raw = e as unknown as AgentTraceEvent;
-        if (raw.id && raw.phase && raw.agent) out.push(raw);
-        return out;
-      };
       let receivedMessageEnd = false;
       let receivedHumanInput = false;
       const releaseStream = await reserveStreamSlot(snapshotId);
       try {
-        await submitForm(id, info.planToken, '', 'custom', (e: SseEvent) => {
-          switch (e.type) {
-            case 'message':
-              // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
-              if (get().activeConversationId !== snapshotId) {
-                set((s) => ({ generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: (s.generating[snapshotId]?.assistantContent ?? '') + (e.content ?? '') } } }));
-                break;
-              }
-              updateAssistant(e.content ?? ''); break;
-            case 'reasoning_delta': {
-              const prev = get().generating[snapshotId]?.reasoningDraft;
-              const reasoning: AgentReasoning = {
-                summary: e.summary ?? prev?.summary ?? '',
-                details: appendReasoningDetails(prev, e),
-                durationMs: e.durationMs ?? prev?.durationMs,
-                source: e.source ?? prev?.source ?? 'assistant',
-              };
-              updateLiveReasoning(reasoning);
-              break;
-            }
-            case 'agent_trace': {
-              const events = collectTraceEvents(e);
-              if (events.length > 0) for (const ev of events) updateLiveTrace(ev);
-              break;
-            }
-            case 'workflow':
-              // 跨会话守卫：已切换会话则忽略旧流阶段提示（防 A 的阶段提示污染 B）
-              if (get().activeConversationId !== snapshotId) break;
-              set((s) => {
-                const hint = resolveWorkflowHint(s.generating[snapshotId]?.hint ?? s.workflowHint, e);
-                return { workflowHint: hint, generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint } } };
-              }); break;
-            case 'human_input':
-              if (get().activeConversationId !== snapshotId) break;
-              receivedHumanInput = true;
-              {
-                const cardId = e.messageId ?? `hitl-card-${Date.now()}`;
-                set((s) => ({
-                  workflowHint: '',
-                  waitingHumanInput: {
-                    formToken: e.formToken ?? '', taskId: e.taskId ?? '', formContent: e.formContent ?? '',
-                    actions: e.actions ?? [],
-                    expirationTime: typeof e.expirationTime === 'number' ? e.expirationTime : Number(e.expirationTime ?? 0),
-                    models: e.models, imageModels: e.imageModels, videoModels: e.videoModels,
-                    recommended: e.recommended, reasons: e.reasons, assets: (e as any).assets,
-                    messageId: cardId,
-                  },
-                  // 未提交期间不渲染卡片，但把占位气泡绑定到后端 messageId，提交后原位复用
-                  messages: s.messages.map((m) =>
-                    m.id === assistantId ? {
-                      ...m,
-                      id: cardId,
-                      content: e.formContent ?? '',
-                      metadata: {
-                        ...(m.metadata ?? {}),
-                        kind: 'hitl',
-                        hitl: {
-                          formContent: e.formContent ?? '',
-                          actions: e.actions ?? [],
-                          pending: true,
-                          messageId: cardId,
-                        },
-                      },
-                    } : m),
-                  generating: {
-                    ...s.generating,
-                    [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), assistantId, assistantContent: s.generating[snapshotId]?.assistantContent ?? '' },
-                  },
-                }));
-              }
-              break;
-            case 'video_plan':
-              if (get().activeConversationId !== snapshotId) break;
-              set((s) => {
-                const cardId = e.messageId ?? `video-plan-${Date.now()}`;
-                const info = {
-                  planToken: e.formToken ?? e.planToken ?? '', message: e.message ?? '',
-                  duration: e.duration ?? 8, picUrl: e.picUrl ?? '', actions: e.actions ?? [],
-                  messageId: cardId,
-                  models: e.models, recommended: e.recommended, reasons: e.reasons,
-                };
-                const videoPlanMeta = {
-                  message: info.message,
-                  duration: info.duration,
-                  picUrl: info.picUrl,
-                  actions: info.actions,
-                  formToken: info.planToken,
-                  messageId: cardId,
-                  models: info.models,
-                  recommended: info.recommended,
-                  reasons: info.reasons,
-                };
-                return {
-                  waitingVideoPlan: info,
-                  hitlVideoPlan: { ...s.hitlVideoPlan, [snapshotId]: info },
-                  messages: s.messages.map((m) =>
-                    m.id === assistantId ? {
-                      ...m,
-                      id: cardId,
-                      content: info.message || info.picUrl || '',
-                      metadata: {
-                        ...(m.metadata ?? {}),
-                        kind: 'video-plan',
-                        hitl: {
-                          formContent: info.message,
-                          actions: info.actions,
-                          pending: true,
-                          messageId: cardId,
-                        },
-                        videoPlan: videoPlanMeta,
-                      },
-                    } : m),
-                };
-              });
-              break;
-            case 'message_end':
-              receivedMessageEnd = true;
-              mergeFinalMetadata(e);
-              if (e.content) updateAssistantFull(e.content);
-              finishAssistantReply(snapshotId, assistantId);
-              if (get().activeConversationId !== snapshotId) break;
-              if (e.title) {
-                cancelConversationTitleRefresh(snapshotId);
-                set((s) => ({
-                  conversations: s.conversations.map((c) => c.id === id && c.title !== e.title ? { ...c, title: e.title! } : c),
-                }));
-              } else if (get().conversations.some((c) => c.id === snapshotId && c.title === '新对话')) {
-                scheduleConversationTitleRefresh(snapshotId);
-              }
-              if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
-                const proj = useProjectStore.getState().currentProject;
-                if (proj) void useProjectStore.getState().loadProject(proj.id);
-              }
-              refreshStoryboardQueues();
-              break;
-            case 'error':
-              if (get().activeConversationId === snapshotId) set({ streamError: e.message ?? '对话出错，请重试' });
-              break;
+        await submitForm(id, resumeTurnId, info.planToken, '', 'custom', (event: AgentTurnEventEnvelope) => {
+          const effects = applyAgentTurnEnvelope(event, {
+            conversationId: snapshotId,
+            assistantId,
+          });
+          if (effects.paused) receivedHumanInput = true;
+          if (effects.completed) {
+            receivedMessageEnd = true;
+            finishAssistantReply(snapshotId, assistantId);
+            refreshStoryboardQueues();
           }
         }, customText, params, undefined, signal, {
           canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
@@ -2705,28 +2707,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 统一 HITL 提交路径：video_plan 的 planToken 即 checkpoint formToken
     const releaseStream = await reserveStreamSlot(snapshotId);
     try {
-      await submitForm(id, info.planToken, '', 'generate_video', (e: SseEvent) => {
-        switch (e.type) {
-          case 'task_accepted':
-            // 视频任务已受理：流即将结束，转轮询取结果；即使已切走也要恢复属主会话的生成状态。
-            acceptedTaskId = e.taskId ?? '';
-            set((s) => ({
-              workflowHint: e.message ?? '视频任务已受理，正在排队生成…',
-              generating: { ...s.generating, [snapshotId]: { ...(s.generating[snapshotId] ?? { hint: '' }), hint: e.message ?? '视频任务已受理，正在排队生成…' } },
-            }));
-            if (acceptedTaskId) startTaskPolling(acceptedTaskId, e.taskKind);
-            break;
-          case 'confirm_result':
-            if (get().activeConversationId !== snapshotId) break;
-            receivedResult = true;
-            set({ confirmResult: e as ConfirmResultInfo });
-            break;
-          case 'error':
-            // M3：跨会话守卫——已切换会话则忽略旧流错误
-            if (get().activeConversationId === snapshotId) {
-              set({ streamError: e.message ?? '生成出错，请重试' });
-            }
-            break;
+      await submitForm(id, resumeTurnId, info.planToken, '', 'generate_video', (event: AgentTurnEventEnvelope) => {
+        const effects = applyAgentTurnEnvelope(event, {
+          conversationId: snapshotId,
+          assistantId,
+        });
+        if (effects.taskAccepted) {
+          acceptedTaskId = effects.taskAccepted.taskId;
+          set((state) => ({
+            workflowHint: effects.taskAccepted?.message ?? '视频任务已受理，正在排队生成…',
+            generating: {
+              ...state.generating,
+              [snapshotId]: {
+                ...(state.generating[snapshotId] ?? { hint: '' }),
+                hint: effects.taskAccepted?.message ?? '视频任务已受理，正在排队生成…',
+              },
+            },
+          }));
+          if (acceptedTaskId) startTaskPolling(acceptedTaskId, effects.taskAccepted.taskKind);
+        }
+        if (effects.confirmResult && get().activeConversationId === snapshotId) {
+          receivedResult = true;
+          set({ confirmResult: effects.confirmResult });
         }
       }, '', params, undefined, signal, {
         canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
@@ -2781,8 +2783,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 视频异步任务轮询期：停止轮询并作废代次令牌
     if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
     videoPollToken += 1;
-    // 后端协作式取消：置位会话级 interrupt 标志（编排流式循环/阶段边界检测后停止生成、释放会话锁）
-    if (id) void agentApi.interrupt(id).catch(() => { /* 静默：后端取消尽力而为 */ });
+    // Turn-scoped cancellation; no active turn means there is nothing to interrupt.
+    const turnId = id ? get().generating[id]?.turnId : undefined;
+    if (id && turnId) void agentApi.interruptTurn(id, turnId).catch(() => { /* 静默 */ });
     // 视频异步任务轮询期 / 无活跃 SSE 流：直接复位当前会话视图（后端视频任务仍会后台跑完）
     set((s) => {
       const g = { ...s.generating };
@@ -2958,7 +2961,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
     videoPollToken += 1;
     clearCanvasEditContext();
-    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
+    set({ messages: [], generating: {}, timelineByConversation: {}, streaming: false, waitingHumanInput: null,
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
        pendingAssistantId: null,
        confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],

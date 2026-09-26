@@ -11,7 +11,7 @@ import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
-import { DynamicTaskPlanPanel } from './DynamicTaskPlanPanel';
+import { AgentScopeTimeline } from './AgentScopeTimeline';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
@@ -309,7 +309,7 @@ export function AgentChatPanel() {
           </div>
         )}
 
-        <DynamicTaskPlanPanel />
+        <AgentScopeTimeline />
         {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
         {confirmResult && <ConfirmResultCard />}
         {streamError && (

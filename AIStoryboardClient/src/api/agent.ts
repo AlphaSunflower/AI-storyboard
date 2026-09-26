@@ -436,79 +436,54 @@ export interface AssetOption {
   negativePrompt?: string;
 }
 
-export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace' | 'canvas_mode_required'
-    | 'turn_started' | 'agent_event' | 'turn_paused' | 'turn_completed' | 'turn_failed';
-  content?: string;
-  /** workflow 阶段稳定标识（如 intent_recognize / generate_storyboard） */
-  stage?: string;
-  title?: string;
-  status?: string;
-  formToken?: string;
-  taskId?: string;
-  taskKind?: 'video' | 'image-batch' | 'long-tool';
-  formContent?: string;
-  actions?: { id: string; title: string }[];
-  expirationTime?: number | string;
-  // 卡片模型/参数选项（后端下发网关模型列表，含各模型参数能力；无配置时缺失）
-  models?: GatewayModelOption[];
-  // aisplit 分镜确认卡片：图片/视频两组模型列表（分区参数选择器用）
-  imageModels?: GatewayModelOption[];
-  videoModels?: GatewayModelOption[];
-  // LLM 推荐的生成参数值与推荐理由（video 链方案生成时输出）
-  recommended?: Record<string, string>;
-  reasons?: Record<string, string>;
-  messageId?: string;
-  sceneCount?: number;
-  // confirm_result 事件字段（生成结果看图确认卡片）
-  kind?: 'script' | 'image' | 'video';
-  url?: string;
-  assetId?: string;
-  // confirm_result 多图结果（n>1 时后端下发）
-  urls?: string[];
-  assetIds?: string[];
-  // video_plan 事件字段（图生视频方案确认卡片）
-  planToken?: string;
-  duration?: number;
-  picUrl?: string;
-  // 资产选择卡片（human_input 事件带 assets 时渲染勾选列表）
-  assets?: AssetOption[];
-  // reasoning / agentTrace / suggestedActions（reasoning_delta / agent_trace / message_end）
-  reasoning?: AgentReasoning;
-  metrics?: AgentTurnMetrics;
-  agentTrace?: SseTraceEvent[];
-  suggestedActions?: SuggestedAction[];
-  taskCards?: AgentTaskCardRef[];
-  storyboardReview?: StoryboardReviewRef;
-  // reasoning_delta 增量字段
-  summary?: string;
-  details?: string;
-  durationMs?: number;
-  source?: string;
-  // agent_trace 单条事件（后端可能直接下发事件对象，也可能包在 traceEvent 中）
-  traceEvent?: AgentTraceEvent;
-  // /messages/stream 请求可选参数（后端可能透传/回显）
-  routingHint?: string;
-  cancelActiveTasks?: boolean;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
-  engineVersion?: string;
-  checkpointOwner?: string;
-  loopRunId?: string;
-  traceId?: string;
-  conversationId?: string;
-  projectId?: string;
-  requestedIntent?: string;
-  picUrls?: string[];
-  code?: string;
-  message?: string;
-  // Sequenced AgentScope transport envelope.
-  turnId?: string;
-  seq?: number;
-  eventType?: string;
-  data?: Record<string, unknown>;
-  runtime?: string;
-  hitl?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+export type AgentTurnEventType =
+  | 'turn_started'
+  | 'agent_event'
+  | 'turn_paused'
+  | 'turn_completed'
+  | 'turn_failed';
+
+/** Native AgentScope event carried inside an `agent_event` payload. */
+export interface AgentScopeEvent {
+  eventType: string;
+  data: Record<string, unknown>;
+}
+
+/** Sequenced transport unit for one AgentScope turn. */
+export interface AgentTurnEventEnvelope {
+  turnId: string;
+  seq: number;
+  type: AgentTurnEventType;
+  payload: Record<string, unknown>;
+}
+
+const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
+  'turn_started',
+  'agent_event',
+  'turn_paused',
+  'turn_completed',
+  'turn_failed',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Parse and validate one SSE JSON payload as an AgentScope turn envelope. */
+export function parseAgentTurnEnvelope(raw: unknown): AgentTurnEventEnvelope | null {
+  if (!isRecord(raw)) return null;
+  const turnId = typeof raw.turnId === 'string' ? raw.turnId : '';
+  const seq = typeof raw.seq === 'number' ? raw.seq : Number.NaN;
+  const type = typeof raw.type === 'string' ? raw.type : '';
+  if (!turnId || !Number.isInteger(seq) || seq < 1 || !AGENT_TURN_EVENT_TYPES.has(type as AgentTurnEventType)) {
+    return null;
+  }
+  return {
+    turnId,
+    seq,
+    type: type as AgentTurnEventType,
+    payload: isRecord(raw.payload) ? raw.payload : {},
+  };
 }
 
 /** 视频异步任务状态（GET /api/agent/tasks/{taskId} 轮询结果） */
@@ -645,6 +620,12 @@ export const agentApi = {
   getActiveTaskPlan: (conversationId: string) =>
     client.get<{ data: AgentTaskPlanView | null }>(`/agent/conversations/${conversationId}/plans/active`),
 
+  listTurnEvents: (conversationId: string, turnId: string, afterSeq = 0) =>
+    client.get<{ data: AgentTurnEventEnvelope[] }>(
+      `/agent/conversations/${conversationId}/turns/${turnId}/events`,
+      { params: { afterSeq } },
+    ),
+
   actOnTaskPlan: (conversationId: string, planId: string, action: AgentTaskPlanAction) =>
     client.post<{ data: AgentTaskPlanView }>(
       `/agent/conversations/${conversationId}/plans/${planId}/actions`,
@@ -777,8 +758,10 @@ export const agentApi = {
     client.post<{ data: null }>(`/agent/conversations/${conversationId}/canvas-mode/exit`),
 
   // 打断当前会话的生成（「停止生成」按钮触发）：后端置位会话级 interrupt 标志 → 编排协作式取消
-  interrupt: (conversationId: string) =>
-    client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
+  interruptTurn: (conversationId: string, turnId: string) =>
+    client.post<{ data: boolean }>(
+      `/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/interrupt`,
+    ),
 };
 
 /**
@@ -850,12 +833,12 @@ export function sttStream(onPartial: (text: string) => void, onFinal: (text: str
   };
 }
 
-/** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */
+/** Stream one AgentScope turn as sequenced envelopes. */
 export async function streamChat(
   conversationId: string,
   content: string,
   picUrls: string[],
-  onEvent: (e: SseEvent) => void,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
   assetIds?: string[],
   assetGroupIds?: string[],
   signal?: AbortSignal,
@@ -865,6 +848,7 @@ export async function streamChat(
     referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
+    editMessageId?: string;
     canvasContext?: CanvasEditContext;
   },
 ): Promise<void> {
@@ -882,62 +866,7 @@ export async function streamChat(
       referenceAudios: opts?.referenceAudios ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
-      canvasContext: opts?.canvasContext,
-    }),
-    signal,
-  });
-  await consumeSse(res, onEvent, signal);
-}
-
-/** 编辑最后一轮用户消息并覆盖重发。 */
-export async function streamEditedMessage(
-  conversationId: string,
-  messageId: string,
-  content: string,
-  onEvent: (e: SseEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(
-    `${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/${messageId}/edit-and-resend`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ content }),
-      signal,
-    },
-  );
-  await consumeSse(res, onEvent, signal);
-}
-
-/** 打断当前生成，并把本轮输入作为下一条消息发送。 */
-export async function streamInterruptAndSend(
-  conversationId: string,
-  content: string,
-  picUrls: string[],
-  onEvent: (e: SseEvent) => void,
-  assetIds?: string[],
-  signal?: AbortSignal,
-  opts?: {
-    referenceVideos?: string[];
-    referenceAudios?: string[];
-    routingHint?: string;
-    cancelActiveTasks?: boolean;
-    canvasContext?: CanvasEditContext;
-  },
-): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/interrupt-and-send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      content,
-      picUrls: picUrls ?? [],
-      assetIds: assetIds ?? [],
-      referenceVideos: opts?.referenceVideos ?? [],
-      referenceAudios: opts?.referenceAudios ?? [],
-      routingHint: opts?.routingHint,
-      cancelActiveTasks: opts?.cancelActiveTasks,
+      editMessageId: opts?.editMessageId,
       canvasContext: opts?.canvasContext,
     }),
     signal,
@@ -948,10 +877,11 @@ export async function streamInterruptAndSend(
 /** HITL 表单提交并续流 */
 export async function submitForm(
   conversationId: string,
+  turnId: string,
   formToken: string,
   taskId: string,
   action: string,
-  onEvent: (e: SseEvent) => void,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
   customText?: string,
   params?: Record<string, string>,
   assetIds?: string[],
@@ -959,112 +889,36 @@ export async function submitForm(
   opts?: { canvasContext?: CanvasEditContext },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
-  const turnId = activeTurnByConversation.get(conversationId) ?? 'latest';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/${turnId}/resume/stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      formToken,
-      taskId,
-      action,
-      content: customText ?? '',
-      params: params ?? {},
-      assetIds: assetIds ?? [],
-      canvasContext: opts?.canvasContext,
-    }),
-    signal,
-  });
+  const res = await fetch(
+    `${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/resume/stream`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        formToken,
+        taskId,
+        action,
+        content: customText ?? '',
+        params: params ?? {},
+        assetIds: assetIds ?? [],
+        canvasContext: opts?.canvasContext,
+      }),
+      signal,
+    },
+  );
   await consumeSse(res, onEvent, signal);
 }
 
-/** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
-async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void> {
-  await consumeSseData<SseEvent>(res, (eventName, data) => {
-    const mapped = mapAgentScopeEvent(eventName, data);
-    if (mapped) onEvent(mapped);
+/** Read typed turn-envelope payloads; the SSE event name is transport metadata. */
+async function consumeSse(
+  res: Response,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await consumeSseData<unknown>(res, (_eventName, data) => {
+    const envelope = parseAgentTurnEnvelope(data);
+    if (envelope) onEvent(envelope);
   }, signal);
-}
-
-const activeTurnByConversation = new Map<string, string>();
-
-function mapAgentScopeEvent(eventName: string, data: SseEvent): SseEvent | null {
-  if (eventName === 'turn_started') {
-    if (data.conversationId && data.turnId) {
-      activeTurnByConversation.set(data.conversationId, data.turnId);
-    }
-    return {
-      ...data,
-      stage: 'agentscope',
-      title: 'AgentScope 正在处理',
-      status: 'node_started',
-      type: 'workflow',
-    };
-  }
-  if (eventName === 'turn_completed') {
-    if (data.conversationId) activeTurnByConversation.delete(data.conversationId);
-    return {
-      ...data,
-      type: 'message_end',
-      content: data.content ?? '',
-      messageId: data.messageId ?? '',
-      sceneCount: -1,
-      ...(data.metadata ? { ...data.metadata } : {}),
-    };
-  }
-  if (eventName === 'turn_failed') {
-    return { type: 'error', code: data.code ?? '50001', message: data.message ?? 'AgentScope 执行失败' };
-  }
-  if (eventName === 'turn_paused') {
-    const hitl = (data.hitl ?? data.metadata?.hitl ?? {}) as Record<string, unknown>;
-    const source = { ...data, ...hitl };
-    return {
-      type: 'human_input',
-      turnId: data.turnId,
-      messageId: source.messageId as string | undefined,
-      formToken: source.formToken as string | undefined,
-      formContent: (source.formContent ?? data.content ?? '') as string,
-      actions: source.actions as { id: string; title: string }[] | undefined,
-      expirationTime: source.expirationTime as string | number | undefined,
-      models: source.models as GatewayModelOption[] | undefined,
-      imageModels: source.imageModels as GatewayModelOption[] | undefined,
-      videoModels: source.videoModels as GatewayModelOption[] | undefined,
-      recommended: source.recommended as Record<string, string> | undefined,
-      reasons: source.reasons as Record<string, string> | undefined,
-      assets: source.assets as AssetOption[] | undefined,
-    };
-  }
-  if (eventName !== 'agent_event') {
-    return { ...data, type: eventName } as SseEvent;
-  }
-
-  const agentType = data.eventType ?? '';
-  const payload = data.data ?? {};
-  if (agentType === 'TEXT_BLOCK_DELTA') {
-    return { type: 'message', content: String(payload.delta ?? '') };
-  }
-  if (agentType === 'THINKING_BLOCK_DELTA') {
-    const delta = String(payload.delta ?? '');
-    return { type: 'reasoning_delta', summary: delta, details: delta, source: 'agentscope' };
-  }
-  if (agentType === 'TOOL_CALL_START' || agentType === 'TOOL_CALL_END'
-      || agentType === 'TOOL_RESULT_END') {
-    const toolName = String(payload.toolName ?? 'tool');
-    const ended = agentType !== 'TOOL_CALL_START';
-    return {
-      type: 'agent_trace',
-      traceEvent: {
-        id: String(payload.eventId ?? `${toolName}-${data.seq ?? Date.now()}`),
-        phase: 'tool',
-        agent: 'agentscope',
-        specialist: toolName,
-        status: ended ? 'node_completed' : 'node_started',
-        title: ended ? `工具完成：${toolName}` : `调用工具：${toolName}`,
-        summary: '',
-        startedAt: String(payload.createdAt ?? new Date().toISOString()),
-      },
-    };
-  }
-  return null;
 }
 
 async function consumeSseData<T>(

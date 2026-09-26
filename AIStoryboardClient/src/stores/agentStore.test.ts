@@ -1,7 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentApi, type AgentConversation, type AgentTaskView } from '../api/agent';
-import { taskStatusLabel, useAgentStore } from './agentStore';
+import {
+  AgentTurnEventSequencer,
+  applyAgentTurnEnvelope,
+  taskStatusLabel,
+  useAgentStore,
+} from './agentStore';
 import { useProjectStore } from './projectStore';
+
+function sseEnvelope(
+  seq: number,
+  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'turn_completed' | 'turn_failed',
+  payload: Record<string, unknown>,
+  turnId = 'turn-1',
+) {
+  return { turnId, seq, type, payload };
+}
+
+let testTurnSequence = 0;
+
+function sseBody(events: Array<ReturnType<typeof sseEnvelope>>) {
+  const generatedTurnId = `turn-test-${++testTurnSequence}`;
+  return events
+    .map((event) => event.turnId === 'turn-1' ? { ...event, turnId: generatedTurnId } : event)
+    .map((event) => [
+      `event: ${event.type}`,
+      `data: ${JSON.stringify(event)}`,
+      '',
+      '',
+    ].join('\n'))
+    .join('');
+}
 
 describe('agentStore createConversation', () => {
   afterEach(() => {
@@ -239,15 +268,14 @@ describe('agentStore message metrics', () => {
       modelCalls: 1,
       complete: true,
     };
-    const body = [
-      'event: message',
-      'data: {"content":"完成"}',
-      '',
-      'event: message_end',
-      `data: ${JSON.stringify({ content: '完成', metrics })}`,
-      '',
-      '',
-    ].join('\n');
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: '完成' },
+      }),
+      sseEnvelope(3, 'turn_completed', { content: '完成', metadata: { metrics } }),
+    ]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -318,6 +346,26 @@ describe('agentStore detached async tasks', () => {
     });
   };
 
+  const taskAcceptedBody = (
+    taskKind: 'long-tool' | 'image-batch' | 'video',
+    content: string,
+  ) => sseBody([
+    sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+    sseEnvelope(2, 'agent_event', {
+      eventType: 'TOOL_RESULT_TEXT_DELTA',
+      data: {
+        toolCallId: 'tool-1',
+        toolName: 'start_task',
+        delta: JSON.stringify({ taskId: 'task-1', taskKind, message: '任务已受理' }),
+      },
+    }),
+    sseEnvelope(3, 'agent_event', {
+      eventType: 'TOOL_RESULT_END',
+      data: { toolCallId: 'tool-1', toolName: 'start_task', state: 'SUCCESS' },
+    }),
+    sseEnvelope(4, 'turn_completed', { content }),
+  ]);
+
   afterEach(() => {
     vi.unstubAllGlobals();
     useAgentStore.getState().stopGeneration();
@@ -335,15 +383,7 @@ describe('agentStore detached async tasks', () => {
   });
 
   it('finishes the foreground turn when a long-tool task is accepted', async () => {
-    const body = [
-      'event: task_accepted',
-      `data: ${JSON.stringify({ taskId: 'task-1', taskKind: 'long-tool', message: '任务已受理' })}`,
-      '',
-      'event: message_end',
-      `data: ${JSON.stringify({ content: '任务已受理，完成后会展示结果。' })}`,
-      '',
-      '',
-    ].join('\n');
+    const body = taskAcceptedBody('long-tool', '任务已受理，完成后会展示结果。');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -359,15 +399,7 @@ describe('agentStore detached async tasks', () => {
   });
 
   it('finishes the foreground turn when an image batch task is accepted', async () => {
-    const body = [
-      'event: task_accepted',
-      `data: ${JSON.stringify({ taskId: 'task-1', taskKind: 'image-batch', message: '任务已受理' })}`,
-      '',
-      'event: message_end',
-      `data: ${JSON.stringify({ content: '批量生图任务已受理。' })}`,
-      '',
-      '',
-    ].join('\n');
+    const body = taskAcceptedBody('image-batch', '批量生图任务已受理。');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -385,12 +417,21 @@ describe('agentStore detached async tasks', () => {
   });
 
   it('releases the foreground turn when a detached task stream closes without message_end', async () => {
-    const body = [
-      'event: task_accepted',
-      `data: ${JSON.stringify({ taskId: 'task-1', taskKind: 'long-tool', message: '任务已受理' })}`,
-      '',
-      '',
-    ].join('\n');
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TOOL_RESULT_TEXT_DELTA',
+        data: {
+          toolCallId: 'tool-1',
+          toolName: 'start_task',
+          delta: JSON.stringify({ taskId: 'task-1', taskKind: 'long-tool', message: '任务已受理' }),
+        },
+      }),
+      sseEnvelope(3, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: { toolCallId: 'tool-1', toolName: 'start_task', state: 'SUCCESS' },
+      }),
+    ]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -407,17 +448,12 @@ describe('agentStore detached async tasks', () => {
 
   it('keeps the foreground turn active for video tasks until polling settles', async () => {
     vi.useFakeTimers();
-    const body = [
-      'event: task_accepted',
-      `data: ${JSON.stringify({ taskId: 'task-1', taskKind: 'video', message: '视频任务已受理' })}`,
-      '',
-      '',
-    ].join('\n');
+    const body = taskAcceptedBody('video', '视频任务已受理');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
     })));
-    vi.spyOn(agentApi, 'interrupt').mockResolvedValue({} as never);
+    vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     resetStore();
 
     await useAgentStore.getState().sendMessage('生成视频');
@@ -428,7 +464,7 @@ describe('agentStore detached async tasks', () => {
   });
 
   it('removes the unfinished assistant bubble when the user stops generation', () => {
-    vi.spyOn(agentApi, 'interrupt').mockResolvedValue({} as never);
+    const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     resetStore();
     useAgentStore.setState({
       streaming: true,
@@ -452,6 +488,7 @@ describe('agentStore detached async tasks', () => {
       generating: {
         'conversation-1': {
           hint: '',
+          turnId: 'turn-running',
           assistantId: 'assistant-pending',
           assistantContent: '这半截回复不应留在对话中',
           finished: false,
@@ -465,18 +502,18 @@ describe('agentStore detached async tasks', () => {
     expect(state.pendingAssistantId).toBeNull();
     expect(state.streaming).toBe(false);
     expect(state.messages.map((message) => message.id)).toEqual(['user-1']);
+    expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
   });
 
   it('replaces the last user turn and removes its old assistant reply when edited', async () => {
-    const body = [
-      'event: message',
-      'data: {"content":"修改后的回复"}',
-      '',
-      'event: message_end',
-      'data: {"content":"修改后的回复"}',
-      '',
-      '',
-    ].join('\n');
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: '修改后的回复' },
+      }),
+      sseEnvelope(3, 'turn_completed', { content: '修改后的回复' }),
+    ]);
     const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -505,25 +542,26 @@ describe('agentStore detached async tasks', () => {
 
     const state = useAgentStore.getState();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/conversations/conversation-1/messages/user-1/edit-and-resend'),
+      expect.stringContaining('/conversations/conversation-1/turns/stream'),
       expect.objectContaining({ method: 'POST' }),
     );
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.editMessageId).toBe('user-1');
     expect(state.messages[0].content).toBe('修改后的问题');
     expect(state.messages.some((message) => message.id === 'assistant-old')).toBe(false);
     expect(state.messages.at(-1)?.content).toBe('修改后的回复');
   });
 
   it('interrupts the active run and sends the queued message as a new turn', async () => {
-    const interrupt = vi.spyOn(agentApi, 'interrupt').mockResolvedValue({} as never);
-    const body = [
-      'event: message',
-      'data: {"content":"新回复"}',
-      '',
-      'event: message_end',
-      'data: {"content":"新回复"}',
-      '',
-      '',
-    ].join('\n');
+    const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: '新回复' },
+      }),
+      sseEnvelope(3, 'turn_completed', { content: '新回复' }),
+    ]);
     const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -552,6 +590,7 @@ describe('agentStore detached async tasks', () => {
       generating: {
         'conversation-1': {
           hint: '',
+          turnId: 'turn-running',
           assistantId: 'assistant-running',
           assistantContent: '正在生成',
           finished: false,
@@ -561,14 +600,208 @@ describe('agentStore detached async tasks', () => {
 
     await useAgentStore.getState().interruptAndSend('改成新的问题');
 
-    expect(interrupt).toHaveBeenCalledWith('conversation-1');
+    expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/conversations/conversation-1/messages/interrupt-and-send'),
+      expect.stringContaining('/conversations/conversation-1/turns/stream'),
       expect.objectContaining({ method: 'POST' }),
     );
     const state = useAgentStore.getState();
     expect(state.messages.some((message) => message.id === 'assistant-running')).toBe(false);
     expect(state.messages.find((message) => message.role === 'user' && message.content === '改成新的问题')).toBeTruthy();
     expect(state.messages.at(-1)?.content).toBe('新回复');
+  });
+});
+
+describe('AgentScope turn envelope reduction', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+      streamError: null,
+      timelineByConversation: {},
+    });
+    useProjectStore.setState({ currentProject: null });
+  });
+
+  it('buffers gaps and ignores stale or duplicate sequences', () => {
+    const sequencer = new AgentTurnEventSequencer();
+    const first = sseEnvelope(1, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'a' } }, 'seq-test');
+    const second = sseEnvelope(2, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'b' } }, 'seq-test');
+    const third = sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, 'seq-test');
+
+    expect(sequencer.accept(third)).toEqual([]);
+    expect(sequencer.accept(first).map((event) => event.seq)).toEqual([1]);
+    expect(sequencer.accept(second).map((event) => event.seq)).toEqual([2, 3]);
+    expect(sequencer.accept(second)).toEqual([]);
+    expect(sequencer.lastSeq('seq-test')).toBe(3);
+  });
+
+  it('reduces native thinking and text deltas in order', () => {
+    const turnId = 'ordered-reduce';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: '结果' } }, turnId),
+      context,
+    );
+    expect(useAgentStore.getState().messages[0].content).toBe('');
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'agent_event', { eventType: 'THINKING_BLOCK_DELTA', data: { delta: '推理' } }, turnId),
+      context,
+    );
+
+    const state = useAgentStore.getState();
+    expect(state.messages[0].content).toBe('结果');
+    expect(state.generating['conversation-1'].reasoningDraft?.details).toBe('推理');
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+    expect(useAgentStore.getState().messages[0].content).toBe('结果');
+  });
+
+  it('pauses on turn_paused and resumes with the same turn id', async () => {
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, 'turn-pause'),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-message',
+        content: '请确认',
+        hitl: {
+          formToken: 'form-1',
+          taskId: 'task-1',
+          formContent: '请确认',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, 'turn-pause'),
+    ]);
+    const resumeBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, 'turn-resume'),
+      sseEnvelope(2, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: '已继续' } }, 'turn-resume'),
+      sseEnvelope(3, 'turn_completed', { content: '已继续' }, 'turn-resume'),
+    ]);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(pauseBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(resumeBody, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+    });
+
+    await useAgentStore.getState().sendMessage('需要确认');
+
+    expect(useAgentStore.getState().waitingHumanInput?.turnId).toBe('turn-pause');
+    expect(useAgentStore.getState().waitingHumanInput?.formToken).toBe('form-1');
+
+    await useAgentStore.getState().submitHumanInput('approve');
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('/turns/turn-pause/resume/stream');
+    expect(useAgentStore.getState().messages.at(-1)?.content).toBe('已继续');
+  });
+
+  it('applies completed metadata and failed turn errors directly', () => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', assistantId: 'assistant-1' },
+      },
+      streamError: null,
+    });
+
+    const metrics = {
+      inputTokens: 4,
+      outputTokens: 2,
+      cachedInputTokens: 0,
+      totalTokens: 6,
+      durationMs: 10,
+      modelCalls: 1,
+      complete: true,
+    };
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_completed', { content: '完成', metadata: { metrics } }, 'turn-complete'),
+      context,
+    );
+    expect(useAgentStore.getState().messages[0].content).toBe('完成');
+    expect(useAgentStore.getState().messages[0].metadata?.metrics).toEqual(metrics);
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_failed', { code: '50001', message: '执行失败' }, 'turn-failed'),
+      context,
+    );
+    expect(useAgentStore.getState().streamError).toBe('执行失败');
+  });
+
+  it('replays turn events afterSeq and ignores duplicates on a second replay', async () => {
+    const turnId = 'replay-turn';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-replay' };
+    const replayEvents = [
+      sseEnvelope(2, 'agent_event', { eventType: 'THINKING_BLOCK_DELTA', data: { delta: '回放推理' } }, turnId),
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: '回放正文' } }, turnId),
+      sseEnvelope(4, 'turn_completed', { content: '回放正文' }, turnId),
+    ];
+    const listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents')
+      .mockResolvedValue({ data: { data: replayEvents } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-replay',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-replay' },
+      },
+      pendingAssistantId: 'assistant-replay',
+    });
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+
+    await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 1);
+    expect(listTurnEvents).toHaveBeenCalledWith('conversation-1', turnId, 1);
+    expect(useAgentStore.getState().messages[0].content).toBe('回放正文');
+
+    await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 1);
+    expect(useAgentStore.getState().messages[0].content).toBe('回放正文');
   });
 });
