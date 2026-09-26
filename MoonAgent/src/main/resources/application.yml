@@ -100,7 +100,7 @@ ai:
       base-backoff: ${AGENT_RECOVERY_BASE_BACKOFF:5s}
       max-backoff: ${AGENT_RECOVERY_MAX_BACKOFF:5m}
     agentscope:
-      enabled: ${AGENTSCOPE_ENABLED:false}
+      enabled: ${AGENTSCOPE_ENABLED:true}
       model: ${AGENTSCOPE_MODEL:}
       fallback-model: ${AGENTSCOPE_FALLBACK_MODEL:deepseek-flash}
       max-retries: ${AGENTSCOPE_MAX_RETRIES:3}
