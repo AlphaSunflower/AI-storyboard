@@ -18,6 +18,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -90,6 +91,11 @@ class SkillExpanderTests {
     }
 
     @Test
+    void removedTestEchoToolIsNotIndexed() {
+        assertFalse(skillExpander.allToolNames().contains("testEcho"));
+    }
+
+    @Test
     void filterKnownToolByName() {
         ToolCallback[] callbacks = skillExpander.toolCallbacks(List.of("writeScenes"));
         assertEquals(1, callbacks.length, "已知工具应返回 1 个回调");
@@ -152,6 +158,12 @@ class SkillExpanderTests {
     void legacySceneReviewSkillIsNoLongerLoaded() {
         assertTrue(skillManager.byIntent("intent-scene-review").isEmpty(),
                 "旧分镜审查链路应从静态技能目录彻底移除");
+    }
+
+    @Test
+    void removedTestSkillIsNotLoaded() {
+        assertTrue(skillManager.get("test").isEmpty());
+        assertTrue(skillManager.byIntent("intent-test").isEmpty());
     }
 
     @Test

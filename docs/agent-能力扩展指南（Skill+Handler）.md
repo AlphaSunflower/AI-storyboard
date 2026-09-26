@@ -3,6 +3,11 @@
 > MoonAgent 模块化约定：**加一个能力 = 一个 `SKILL.md`（+ 若需新工具再加一个 `@Tool`/`@McpTool`）**，核心零改动。
 > 有复杂流程才写 `IntentHandler`；无 handler 的能力自动走 `skill_manager` 通用执行器（`GenericSkillSpecialist`）。
 > 路由（规则前置表/澄清菜单）、注册表、校验都按约定自动跟上。
+>
+> **架构状态（2026-09-26）：部分已被取代。** 本文中的 PlanGraph 编排细节属于旧路径；
+> MoonAgent 目标运行时是单一 AgentScope `MoonAgentRuntime`。Skill/Handler 编写约定可作
+> 迁移参考，但依赖 PlanGraph 的注册与路由说明不再代表目标架构。权威说明见
+> [`superpowers/specs/2026-09-26-agentscope-architecture.md`](superpowers/specs/2026-09-26-agentscope-architecture.md)。
 
 ## 流程（四步）
 
@@ -77,8 +82,8 @@ public class <Name>IntentHandler implements IntentHandler {
 ## 自动生效的点（零改动）
 
 - 意图识别规则前置表：`IntentRecognitionServiceImpl` @PostConstruct 从 `skill.all().triggers` 构建。
-- 澄清菜单：`PlanGraph.intent_clarify` 从 `skill.allMenuOrdered().label` 构建。
-- handler 注册表：`PlanGraph` 自动收集 `List<IntentHandler>`。
+- 澄清菜单（旧 PlanGraph 路径）：`PlanGraph.intent_clarify` 从 `skill.allMenuOrdered().label` 构建。
+- handler 注册表（旧 PlanGraph 路径）：`PlanGraph` 自动收集 `List<IntentHandler>`。
 - Skill 提示词：`AgentOrchestratorSupport.prompt(req, stepId, fallbackKey, vars)` 按需加载 skill body。
 - 一致性校验：`SkillConsistencyValidator`（handler↔skill 1:1 + 字段齐全）。
 

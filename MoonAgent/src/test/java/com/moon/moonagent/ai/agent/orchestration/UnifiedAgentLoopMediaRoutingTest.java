@@ -179,6 +179,25 @@ class UnifiedAgentLoopMediaRoutingTest {
         verify(specialist, never()).execute(any());
     }
 
+    @Test
+    void unknownSkillCheckpointFallsBackToIntentOther() {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setAction("skill-unknown");
+        checkpoint.setPlan("{}");
+
+        AgentTurnResult result = loopWithGatewayEnabled(false).resumeTurn(
+                conversation, checkpoint, "skill-unknown", "", Map.of(), List.of(), "",
+                null, emitter);
+
+        org.assertj.core.api.Assertions.assertThat(result.content())
+                .contains("intent-other");
+        verify(specialistRegistry).get("intent-other");
+        verify(specialistRegistry, never()).get("intent-test");
+    }
+
     private AgentTurnResult runMediaTurn(AgentConversation conversation, boolean gatewayEnabled) {
         return loopWithGatewayEnabled(gatewayEnabled).runTurn(
                 conversation, "把这张图卡通化", List.of("http://localhost/a.png"),

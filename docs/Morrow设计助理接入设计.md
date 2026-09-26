@@ -2,7 +2,9 @@
 
 日期：2026-08-26
 范围：把 `XiaoYueCanvasAgent`（Morrow 画布）右侧「设计助理」面板的 AI 后端接入本系统，复用共享库 + LLM 网关；MoonAgent 纯化为编排+技能 hub；XiaoYueCanvas 独立画布 job-service。
-状态：**待评审**（评审通过后按 §10 阶段实施）
+状态：**待评审；部分架构已被取代**（2026-09-26 起，其中 PlanGraph /
+`AgentNodeClients` 编排结构不再是目标方案，权威说明见
+[`superpowers/specs/2026-09-26-agentscope-architecture.md`](superpowers/specs/2026-09-26-agentscope-architecture.md)）
 
 ---
 
@@ -155,7 +157,7 @@ com/moon/moonagent/
 │   ├── tools/          # AgentTools（分镜/画布工具）
 │   ├── specialists/    # SpecialistAgent / Registry / Context / Result
 │   ├── skills/         # SkillLoader / AgentSkill / SkillConsistencyValidator
-│   ├── plans/          # PlanGraph / PlanField / AgentNodeClients
+│   ├── agent-runtime/  # AgentScope runtime、skills、tools 与 permission policy
 │   └── memory/         # ConversationLock / CheckpointCleanupService
 └── MoonAgentApplication.java
 resources/
