@@ -23,8 +23,7 @@ import java.util.Set;
  * 工具/技能桥 —— 声明即扩展入口。
  *
  * <p>职责：把 {@link AgentTools} 上的 {@code @Tool}/{@code @McpTool} 方法提取为
- * {@link ToolCallback}，按工具名建立索引；供 {@code GenericSkillSpecialist} 按技能声明的
- * {@code tools} 名称过滤注入。启动时校验每个技能声明的工具都能解析到真实回调（缺失只警告、不阻断）。
+ * {@link ToolCallback}，按工具名建立索引，供 AgentScope Toolkit 注册。
  *
  * <p>设计定案：加能力 = 加一个 {@code SKILL.md} + 加/改一个 {@code @Tool}，编排零改动；
  * 不引入 LLM 自动发明技能（不做运行时合成）。
@@ -36,7 +35,6 @@ public class SkillExpander {
     private static final Logger log = LoggerFactory.getLogger(SkillExpander.class);
 
     private final AgentTools agentTools;
-    private final SkillManager skillManager;
     private final ObjectProvider<ToolCallbackProvider> toolCallbackProviders;
     private final ToolExecutionTemplate toolExecutionTemplate;
 

@@ -2444,7 +2444,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   /**
    * 图生视频方案确认卡片（video_plan 事件）：
-   * - 开始生成视频：统一走 /form/submit（action=generate_video → 后端 VideoIntentHandler.resume）
+   * - 开始生成视频：统一走 turn resume（action=generate_video）
    *   → 立即收到 task_accepted（视频任务已受理）→ 前端 5s 轮询 GET /tasks/{taskId}，
    *   completed 后渲染视频结果 + confirm_result 卡片；failed 显示错误；
    * - 继续完善：本地关闭卡片，参考图转 pendingPicUrl 保留（与图片完善 refine 同语义），

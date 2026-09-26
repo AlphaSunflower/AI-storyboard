@@ -70,7 +70,7 @@ public class OrchestrationRequest {
     /** 本轮由项目库资产组或项目库媒体解析出的参考音频。 */
     private java.util.List<String> referenceAudios = java.util.List.of();
 
-    /** 当前意图类型（如 intent-aisplit；由 Orchestrator 分发/续流时设置，供 Skill 按需取提示词） */
+    /** 兼容标签；AgentScope 由 Skill 描述自行选择工具，不再依赖意图分发。 */
     private String intentType = "";
 
     /**
@@ -82,7 +82,7 @@ public class OrchestrationRequest {
     /** 移交附带的下游状态（如 projectId / sceneNums）；与 {@link #handoffTarget} 一起被下一专家消费 */
     private Map<String, Object> handoffState = Map.of();
 
-    /** 本轮轨迹累积器（不参与状态序列化；由 UnifiedAgentLoop 在 runTurn/resumeTurn 创建）。 */
+    /** 本轮轨迹累积器（不参与状态序列化；由 AgentScope turn 执行边界创建）。 */
     private AgentTraceAccumulator trace;
 
     /** 本轮 turn 落库用的结构化元数据（trace/reasoning/suggestedActions/hitl 等）。 */

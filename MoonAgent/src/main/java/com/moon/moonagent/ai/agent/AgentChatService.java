@@ -85,94 +85,8 @@ public interface AgentChatService {
     String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
                                 String purpose, String kind);
 
-    /**
-     * 发送消息：落库 user 消息（独立事务）→ 编排回答 → 落库 assistant 消息。
-     *
-     * 事务语义（I1）：
-     * - user 消息在独立事务（REQUIRES_NEW）中立即提交；
-     * - 编排失败时 user 消息保留（独立事务已提交），assistant 消息不落库，抛业务异常；
-     * - 编排成功后，保存 assistant 消息在独立事务内完成。
-     *
-     * @return assistant 消息
-     */
-    AgentMessage sendMessage(String userId, String conversationId, String content);
-
     /** Persist the assistant message produced by a background wakeup turn. */
     AgentMessage persistWakeupResult(AgentConversation conversation, AgentTurnResult turn);
-
-    /**
-     * 流式发送消息：user 消息独立事务提交 → 编排（Spring AI 状态机）→ SSE 事件转发到 SseEmitter。
-     * HITL 暂停 → 转发 human_input 事件 → 结束流（等表单提交 resume）。
-     * message_end → 落库 assistant 消息 + 附带 sceneCount。
-     */
-    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter);
-
-    /**
-     * 流式发送消息（带显式路由提示）：
-     * 
-     * @param routingHint 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-storyboard）
-     */
-    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint);
-
-    /**
-     * 流式发送消息（带显式路由提示和旧异步任务取消标记）。
-     */
-    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint, boolean cancelActiveTasks);
-
-    /**
-     * 流式发送消息（画布编辑模式）：canvasContext 在同一画布会话的每轮消息和 HITL 续流中持续携带。
-     */
-    void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
-                       java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
-                       boolean cancelActiveTasks, CanvasSessionContext canvasContext);
-
-    /**
-     * 编辑最后一轮用户消息并覆盖重发：
-     * 校验目标必须是最后一条 user message → 回退 AgentScope 最后一轮上下文 →
-     * 事务更新目标消息并删除其后的旧回复 → 使用原输入快照重新编排。
-     */
-    void editAndResend(String userId, String conversationId, String messageId,
-                       String content, SseEmitter emitter);
-
-    /**
-     * 打断当前生成并发送下一条消息：
-     * 置位 interrupt → 等待旧编排安全释放会话锁 → 落库新消息 → 启动新 SSE 编排。
-     */
-    void interruptAndStream(String userId, String conversationId, String content,
-                            java.util.List<String> picUrls, java.util.List<String> assetIds,
-                            SseEmitter emitter, String routingHint, boolean cancelActiveTasks,
-                            CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
-                            java.util.List<String> referenceAudios);
-
-    /** 流式发送消息（项目库资产组解析后的多模态参考素材）。 */
-    default void streamMessage(String userId, String conversationId, String content,
-                               java.util.List<String> picUrls, java.util.List<String> assetIds,
-                               SseEmitter emitter, String routingHint, boolean cancelActiveTasks,
-                               CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
-                               java.util.List<String> referenceAudios) {
-        streamMessage(userId, conversationId, content, picUrls, assetIds, emitter, routingHint,
-                cancelActiveTasks, canvasContext);
-    }
-
-    /**
-     * 图生视频方案确认后生成（video_plan 事件「开始生成视频」触发，SSE）。
-     * 流程：按 planToken 取方案快照（消费即移除，防重放）→ 确认动作落库 → 执行视频生成。
-     */
-    void generateVideoFromPlan(String userId, String conversationId, String planToken, SseEmitter emitter);
-
-    /**
-     * HITL 表单提交并续流：校验 checkpoint form_token → 一次性消费 → 编排 resume 恢复执行。
-     *
-     * @param params 卡片参数选择器提交的生成参数（model/resolution/duration 等；空=未选择）
-     */
-    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
-
-    /**
-     * HITL 表单提交并续流（画布编辑模式）：上下文随确认卡一路传递。
-     */
-    void submitFormAndResume(String userId, String conversationId, String formToken, String taskId, String action,
-                             String customText, Map<String, String> params, java.util.List<String> assetIds,
-                             String routingHint, CanvasSessionContext canvasContext, SseEmitter emitter);
 
     /**
      * 视频异步任务状态查询（前端轮询）：按 taskId 查 agent_assets 行（归属校验，未归属/无权 40401）。
@@ -212,12 +126,14 @@ public interface AgentChatService {
      */
     void streamAgentScopeTurn(String userId, String conversationId, String content,
                               List<String> picUrls, List<String> assetIds,
-                              String routingHint, CanvasSessionContext canvasContext,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
                               List<String> referenceVideos, List<String> referenceAudios,
                               SseEmitter emitter);
 
     /** Resume an AgentScope HITL checkpoint and continue the turn stream. */
-    void resumeAgentScopeTurn(String userId, String conversationId, String formToken,
+    void resumeAgentScopeTurn(String userId, String conversationId, String turnId,
+                              String formToken,
                               String action, String customText, Map<String, String> params,
                               List<String> assetIds, CanvasSessionContext canvasContext,
                               SseEmitter emitter);

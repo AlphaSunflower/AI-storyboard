@@ -27,7 +27,7 @@ class NacosMcpMetadataRepositoryTest {
 
         assertThat(snapshot.source()).isEqualTo("classpath");
         assertThat(snapshot.servers()).extracting(server -> server.get("name"))
-                .containsExactly("llm-gateway-media");
+                .containsExactlyInAnyOrder("moon-agent", "llm-gateway-media");
         assertThat(repository.status())
                 .containsEntry("source", "classpath")
                 .containsKey("servers");
@@ -50,6 +50,11 @@ class NacosMcpMetadataRepositoryTest {
         tools.setTools(List.of(tool));
         detail.setToolSpec(tools);
         when(aiService.getMcpServer("llm-gateway-media", "1.0.0")).thenReturn(detail);
+        McpServerDetailInfo moonAgent = new McpServerDetailInfo();
+        moonAgent.setName("moon-agent");
+        moonAgent.setVersionDetail(version);
+        moonAgent.setToolSpec(tools);
+        when(aiService.getMcpServer("moon-agent", "1.0.0")).thenReturn(moonAgent);
 
         NacosMcpMetadataRepository repository = repository(properties, () -> aiService);
         NacosMcpMetadataRepository.Snapshot snapshot = repository.snapshot();
@@ -58,7 +63,11 @@ class NacosMcpMetadataRepositoryTest {
         assertThat(snapshot.fallbackReason()).isNull();
         @SuppressWarnings("unchecked")
         List<Map<?, ?>> remoteTools =
-                (List<Map<?, ?>>) snapshot.servers().getFirst().get("tools");
+                (List<Map<?, ?>>) snapshot.servers().stream()
+                        .filter(server -> "llm-gateway-media".equals(server.get("name")))
+                        .findFirst()
+                        .orElseThrow()
+                        .get("tools");
         assertThat(remoteTools).hasSize(1);
         assertThat(remoteTools.getFirst().get("name")).isEqualTo("generate_image");
     }

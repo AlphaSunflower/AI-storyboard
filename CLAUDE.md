@@ -205,7 +205,11 @@ spring:
 - 超时按 ChatClient 粒度（`OpenAiChatOptions.Builder.timeout`），非全局：标题/意图 30s、优化 60s、脚本/视觉 120s
 
 **仍保留 HttpClient 直连**（不在迁移范围）：`AgentGenerationService`（生图/生视频 REST）、`FileStorageService`（文件下载）、`AIController`。
-**编排层（2026-08-11 起）**：Agent 对话改 Spring AI 2.0 应用层编排（`AgentOrchestrator` 状态机 + `AgentTools` @Tool 工具面），不再依赖 Dify。
+**编排层（2026-09-26 起）**：MoonAgent 只有一个 `MoonAgentRuntime`
+（`HarnessAgent`、PostgreSQL StateStore、动态 Skill 仓库、PermissionContext、
+Subagent、Compaction、异步工具和 Wakeup）。旧 `AgentOrchestrator`、
+`UnifiedAgentLoop`、`DynamicTaskEngine`、Specialist/IntentHandler/Capability
+路由代码已退役；旧对象只能通过只读兼容查询访问。
 
 ## Frontend State Management (Zustand)
 
@@ -289,7 +293,53 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 - Draft detection: `ProjectMapper.findLatestDraft` + `AND status = 'draft'`; frontend `checkDraft` double-checks `draft.status === 'draft'`
 - Draft recovery: `EditorPage` loads → `checkDraft()` → shows `DraftRecoverBanner` if draft exists
 
-## AI Agent 对话模块 (`/api/agent/**`)
+## AgentScope 运行时 (`/api/agent/**`)
+
+MoonAgent 的唯一执行器是 `MoonAgentRuntime`。REST Controller 只负责会话归属、
+请求校验、事务边界和 SSE 传输；消息、资产、checkpoint、工具审计和生成记录仍是
+产品数据。Nacos 是六个标准 Skill、全局系统提示词和 MCP 元数据的版本化资产源，
+classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service 不在当前范围。
+
+### Turn API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/agent/conversations/{id}/turns/stream` | 新建或编辑重发一轮；body 可带 `editMessageId` |
+| POST | `/api/agent/conversations/{id}/turns/{turnId}/resume/stream` | 通过 checkpoint `formToken` 恢复同一 turn |
+| POST | `/api/agent/conversations/{id}/turns/{turnId}/interrupt` | 中断指定 turn 所属会话 |
+| GET | `/api/agent/conversations/{id}/runtime` | 运行时、Skill、Prompt、MCP 元数据状态 |
+| GET | `/api/agent/conversations/{id}/turns/{turnId}/events?afterSeq=N` | 按序号补偿重放 turn 事件 |
+
+`/messages/stream`、`/form/submit`、`/video/plan/generate`、计划 actions、
+`/messages/interrupt-and-send` 和 `/messages/{messageId}/edit-and-resend`
+返回 `410 Gone`。会话、消息、资产、生成记录和历史计划读取接口保持可用。
+
+### SSE 协议
+
+每个 SSE frame 的 `data` 都是 `AgentTurnEventEnvelope`：
+`{turnId, seq, type, payload}`。生命周期 `type` 为 `turn_started`、
+`turn_paused`、`turn_completed`、`turn_failed`；原生 AgentScope 事件使用
+`type=agent_event`，其中 `payload={eventType, data}`。前端按 `seq` 去重并按
+turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 和 Error。
+
+### 数据与恢复
+
+- `agent_turns` / `agent_turn_events`：流重连、审计和 `afterSeq` 补偿。
+- `agentscope_sessions`：AgentScope 运行时上下文。
+- `agent_messages/assets/checkpoints/tool_invocations`：产品数据。
+- 未迁移会话在首个 AgentScope turn 前从最近 20 条产品消息重建会话；已有运行时状态优先。
+- 旧 checkpoint 标记过期，活动旧计划标记取消；表和历史内容不删除。
+
+### 权限与资产
+
+- 读工具默认 ALLOW。
+- 删除、清空、覆盖、批量生成、Canvas 执行进入 AgentScope `ASK`/HITL。
+- 单张媒体生成是否直接执行由 `ai.agent.agentscope.direct-media-generation` 控制。
+- 六个生产 Skill：`storyboard`、`image`、`video`、`canvas-design`、`canvas-run`、`general`。
+- Nacos 发布脚本：`scripts/nacos/publish_assets.py`；只支持 upload/review/release 生命周期，
+  Canvas Bridge 不进入共享 Nacos。
+
+## Historical pre-AgentScope notes (`/api/agent/**`)
 
 ### 数据库（V2 migration `V2__agent_conversation.sql`，3 张表，与分镜 scenes 无关）
 

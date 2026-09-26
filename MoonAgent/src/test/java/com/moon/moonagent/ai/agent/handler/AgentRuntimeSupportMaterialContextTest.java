@@ -28,7 +28,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class AgentOrchestratorSupportMaterialContextTest {
+final class AgentRuntimeSupportMaterialContextTest {
 
     @Test
     void enrichMaterialContext_addsPicUrlsAndAssetIdsToEveryCard() {
@@ -36,7 +36,7 @@ class AgentOrchestratorSupportMaterialContextTest {
                 new AgentConversation(), "转场需求", List.of("img1.png", "img2.png"), new SseEmitter());
         request.setAssetIds(List.of("asset-1", "asset-2"));
 
-        var enriched = AgentOrchestratorSupport.enrichMaterialContext(
+        var enriched = AgentRuntimeSupport.enrichMaterialContext(
                 request, List.of(Map.of("content", "转场需求"), Map.of("content", "second")));
 
         assertEquals(2, enriched.size());
@@ -51,7 +51,7 @@ class AgentOrchestratorSupportMaterialContextTest {
         OrchestrationRequest request = new OrchestrationRequest(
                 new AgentConversation(), "x", List.of("img"), new SseEmitter());
 
-        var enriched = AgentOrchestratorSupport.enrichMaterialContext(
+        var enriched = AgentRuntimeSupport.enrichMaterialContext(
                 request, List.of(Map.of("content", "x", "picUrls", List.of("kept"))));
 
         assertEquals(List.of("kept"), enriched.get(0).get("picUrls"));
@@ -64,7 +64,7 @@ class AgentOrchestratorSupportMaterialContextTest {
                 new AgentConversation(), "x", List.of(), new SseEmitter());
         List<Map<String, Object>> payload = List.of(Map.of("content", "x"));
 
-        var enriched = AgentOrchestratorSupport.enrichMaterialContext(request, payload);
+        var enriched = AgentRuntimeSupport.enrichMaterialContext(request, payload);
 
         assertTrue(enriched == payload);
     }
@@ -72,13 +72,13 @@ class AgentOrchestratorSupportMaterialContextTest {
     @Test
     void planAssetIds_readsCheckpointCommaString() {
         String plan = "{\"items\":[{\"assetIds\":\"asset-1,asset-2\",\"picUrls\":[]}],\"_formContent\":\"x\"}";
-        assertEquals(List.of("asset-1", "asset-2"), AgentOrchestratorSupport.planAssetIds(plan));
+        assertEquals(List.of("asset-1", "asset-2"), AgentRuntimeSupport.planAssetIds(plan));
     }
 
     @Test
     void planAssetIds_readsCheckpointJsonArray() {
         String plan = "{\"items\":[{\"assetIds\":[\"asset-a\",\"asset-b\"]}]}";
-        assertEquals(List.of("asset-a", "asset-b"), AgentOrchestratorSupport.planAssetIds(plan));
+        assertEquals(List.of("asset-a", "asset-b"), AgentRuntimeSupport.planAssetIds(plan));
     }
 
     @Test
@@ -87,7 +87,7 @@ class AgentOrchestratorSupportMaterialContextTest {
         AgentMessage middle = message("assistant", "1234567890");
         AgentMessage newest = message("user", "newest-message");
 
-        String rendered = AgentOrchestratorSupport.renderHistoryContext(
+        String rendered = AgentRuntimeSupport.renderHistoryContext(
                 List.of(newest, middle, oldest), 6, 50);
 
         assertTrue(rendered.length() <= 50);
@@ -98,7 +98,7 @@ class AgentOrchestratorSupportMaterialContextTest {
 
     @Test
     void renderHistoryContext_keepsChronologicalOrder() {
-        String rendered = AgentOrchestratorSupport.renderHistoryContext(
+        String rendered = AgentRuntimeSupport.renderHistoryContext(
                 List.of(message("assistant", "new"), message("user", "old")), 0, 0);
 
         assertTrue(rendered.indexOf("用户：old") < rendered.indexOf("助手：new"));
@@ -106,7 +106,7 @@ class AgentOrchestratorSupportMaterialContextTest {
 
     @Test
     void requestOptions_carriesModelAndFiveMinuteTimeout() {
-        OpenAiChatOptions options = AgentOrchestratorSupport.requestOptions("gateway-text", 300).build();
+        OpenAiChatOptions options = AgentRuntimeSupport.requestOptions("gateway-text", 300).build();
 
         assertThat(options.getModel()).isEqualTo("gateway-text");
         assertThat(options.getTimeout()).isEqualTo(Duration.ofMinutes(5));
@@ -138,9 +138,9 @@ class AgentOrchestratorSupportMaterialContextTest {
         when(output.getMetadata()).thenReturn(Map.of("reasoning_content", "先分析用户需求，再整理剧本结构。"));
         when(gateway.getDefaultTextModel()).thenReturn("test-model");
 
-        AgentOrchestratorSupport support = new AgentOrchestratorSupport(
+        AgentRuntimeSupport support = new AgentRuntimeSupport(
                 null, builder, new AgentAiConfigProperties(), null, null, gateway, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null);
         OrchestrationRequest request = new OrchestrationRequest(
                 new AgentConversation(), "写一个转场分镜", List.of(), emitter);
 
@@ -155,9 +155,9 @@ class AgentOrchestratorSupportMaterialContextTest {
 
     @Test
     void parsePlanScenes_readsNumericAndStringDuration() {
-        AgentOrchestratorSupport support = new AgentOrchestratorSupport(
+        AgentRuntimeSupport support = new AgentRuntimeSupport(
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null);
         String plan = """
                 {"items":[
                   {"sceneNumber":1,"scriptContent":"第一镜","duration":10},
@@ -175,9 +175,9 @@ class AgentOrchestratorSupportMaterialContextTest {
     @Test
     void messageEndEventIncludesTurnMetrics() throws Exception {
         SseEmitter emitter = mock(SseEmitter.class);
-        AgentOrchestratorSupport support = new AgentOrchestratorSupport(
+        AgentRuntimeSupport support = new AgentRuntimeSupport(
                 null, null, null, null, null, null, null,
-                null, null, null, null, null, null);
+                null, null, null, null, null);
         OrchestrationRequest request = new OrchestrationRequest(
                 new AgentConversation(), "hello", List.of(), emitter);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(request);

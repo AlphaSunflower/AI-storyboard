@@ -1,7 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.entity.AgentConversation;
 import org.junit.jupiter.api.Test;
@@ -79,7 +79,7 @@ class AgentScopeMediaToolsTest {
 
     @Test
     void videoToolCreatesAsyncTaskAndReturnsTaskIdWithoutPolling() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);
         when(assets.urlsByIds("c1", List.of("a1"))).thenReturn(List.of("/a1.png"));
         when(support.startVideoGenerationAsyncWithRole(any(), eq("镜头推进"), eq("8"),
@@ -97,7 +97,7 @@ class AgentScopeMediaToolsTest {
 
     @Test
     void videoToolRejectsRequestsLongerThanFifteenSeconds() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);
         AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
         AgentConversation conversation = new AgentConversation();
@@ -119,7 +119,7 @@ class AgentScopeMediaToolsTest {
 
     @Test
     void storyboardShotKeepsItsOwnFifteenSecondLimitUnderLongOriginalRequest() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);
         when(support.startStoryboardShotVideoGenerationAsyncWithRole(
                 any(), eq("首个镜头"), eq("15"), eq("16:9"), any(), eq(List.of()), any()))
@@ -145,7 +145,7 @@ class AgentScopeMediaToolsTest {
 
     @Test
     void genericVideoToolCannotBypassAnActiveStoryboardWorkflow() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);
         AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
         AgentScopeTurnState turnState = new AgentScopeTurnState();

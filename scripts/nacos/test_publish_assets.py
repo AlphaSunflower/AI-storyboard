@@ -111,9 +111,11 @@ class VerificationTests(unittest.TestCase):
     def test_manifest_mcp_fields_match_gateway_signatures(self) -> None:
         manifest, _ = pipeline.load_manifest(pipeline.DEFAULT_MANIFEST)
         servers = pipeline.load_mcp_servers(pipeline.DEFAULT_MANIFEST, manifest)
+        by_name = {server["name"]: server for server in servers}
+        self.assertEqual({"moon-agent", "llm-gateway-media"}, set(by_name))
         tools = {
             tool["name"]: tool["inputSchema"]
-            for tool in servers[0]["tools"]
+            for tool in by_name["llm-gateway-media"]["tools"]
         }
 
         self.assertEqual(
@@ -134,6 +136,17 @@ class VerificationTests(unittest.TestCase):
         )
         self.assertEqual(["prompt"], tools["generate_image"]["required"])
         self.assertEqual(["prompt"], tools["generate_video"]["required"])
+
+        moon_tools = {
+            tool["name"]: tool["inputSchema"]
+            for tool in by_name["moon-agent"]["tools"]
+        }
+        self.assertEqual(
+            {"writeScenes", "replaceScenes", "replaceSpecificScenes", "refineImage", "generateVideo"},
+            set(moon_tools),
+        )
+        self.assertIn("scenes", moon_tools["writeScenes"]["properties"])
+        self.assertIn("picUrls", moon_tools["generateVideo"]["properties"])
 
     def test_prompt_publication_waits_until_visible(self) -> None:
         class SequencedApi:

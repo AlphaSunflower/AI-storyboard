@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -26,7 +26,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void externalInputPauseCreatesOwnedCheckpointAndResolvesCustomText() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-1");
@@ -52,8 +52,8 @@ class AgentScopeCheckpointServiceTest {
         String token = service.pauseForExternalInput(request, "reply-1", call);
 
         assertThat(token).isEqualTo("token-1");
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
@@ -83,7 +83,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void storyboardCommitOptionsUseReadableFallbackTitles() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-append-overwrite");
@@ -108,8 +108,8 @@ class AgentScopeCheckpointServiceTest {
 
         service.pauseForExternalInput(request, "reply-storyboard", call);
 
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("title"))
@@ -118,7 +118,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void storyboardCommitCardUsesFixedAppendOverwriteDeleteChoices() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-storyboard-commit");
@@ -139,8 +139,8 @@ class AgentScopeCheckpointServiceTest {
 
         service.pauseForStoryboardCommit(request, "reply-storyboard", call, 16);
 
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
@@ -166,7 +166,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void externalInputDoesNotGuessRuntimeReferenceFromPlanJson() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
         AgentCheckpoint checkpoint = new AgentCheckpoint();
@@ -181,7 +181,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void confirmationUsesChineseToolLabelsAndMarksAgentScopeOwner() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("card text");
@@ -203,8 +203,8 @@ class AgentScopeCheckpointServiceTest {
         String token = service.pauseForConfirmation(request, "reply-2", List.of(call));
 
         assertThat(token).isEqualTo("token-2");
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);

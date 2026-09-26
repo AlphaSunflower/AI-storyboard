@@ -11,21 +11,31 @@ class TaskParametersDeserializationTest {
 
     @Test
     void expandsEmbeddedJsonObjectParameters() throws Exception {
-        TaskPlanDraft draft = mapper.readValue("""
+        TaskPlan plan = mapper.readValue("""
                 {
+                  "planId": "plan-1",
+                  "conversationId": "conversation-1",
                   "goal": "生成三层别墅漫游分镜",
+                  "state": "READY",
+                  "version": 1,
+                  "maxNodes": 20,
+                  "maxAttemptsPerNode": 3,
+                  "maxReplans": 2,
+                  "replanCount": 0,
                   "nodes": [{
                     "nodeId": "storyboard",
-                    "capabilityKey": "intent-aisplit",
+                    "capabilityKey": "intent-storyboard",
                     "title": "生成分镜",
                     "parameters": "{\\"style\\":\\"电影感\\",\\"duration\\":30}",
                     "dependencies": []
                   }],
-                  "edges": []
+                  "edges": [],
+                  "error": "",
+                  "planSignature": ""
                 }
-                """, TaskPlanDraft.class);
+                """, TaskPlan.class);
 
-        assertThat(draft.nodes().getFirst().parameters())
+        assertThat(plan.nodes().getFirst().parameters())
                 .containsEntry("style", "电影感")
                 .containsEntry("duration", 30);
     }

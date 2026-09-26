@@ -33,15 +33,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 class SkillExpanderTests {
 
     private SkillExpander skillExpander;
-    private SkillManager skillManager;
     private AgentTools agentTools;
 
     @BeforeEach
     void setup() {
-        SkillLoader skillLoader = new SkillLoader();
-        skillLoader.loadAll(); // 包内可见，手动加载 resources/skills
-        skillManager = new SkillManager(skillLoader);
-
         ToolExecutionTemplate executionTemplate = mock(ToolExecutionTemplate.class);
         when(executionTemplate.execute(anyString(), anyString(), anyString(), any(), any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
@@ -75,7 +70,7 @@ class SkillExpanderTests {
         ObjectProvider<ToolCallbackProvider> providers = mock(ObjectProvider.class);
         when(providers.orderedStream()).thenReturn(Stream.of(canvasProvider));
 
-        skillExpander = new SkillExpander(agentTools, skillManager, providers, executionTemplate);
+        skillExpander = new SkillExpander(agentTools, providers, executionTemplate);
         skillExpander.init(); // 包内可见，手动触发索引
     }
 
@@ -136,33 +131,6 @@ class SkillExpanderTests {
         assertEquals("请选择画布", request.prompt());
         assertEquals("human-option-1", request.options().getFirst().get("id"));
         assertEquals("项目一 / 画布一", request.options().getFirst().get("title"));
-    }
-
-    @Test
-    void legacySceneReviewSkillIsNoLongerLoaded() {
-        assertTrue(skillManager.byIntent("intent-scene-review").isEmpty(),
-                "旧分镜审查链路应从静态技能目录彻底移除");
-    }
-
-    @Test
-    void removedTestSkillIsNotLoaded() {
-        assertTrue(skillManager.get("test").isEmpty());
-        assertTrue(skillManager.byIntent("intent-test").isEmpty());
-    }
-
-    @Test
-    void canvasSkillsDescribeMediaRelayAndAutomaticRepair() {
-        String design = skillManager.get("canvas-design").orElseThrow().systemPrompt();
-        String run = skillManager.get("canvas-run").orElseThrow().systemPrompt();
-
-        assertTrue(design.contains("结果槽"));
-        assertTrue(design.contains("中间占位"));
-        assertTrue(design.contains("输出口"));
-        assertTrue(design.contains("canvas_get_node_model_config"));
-        assertTrue(design.contains("canvas_set_node_model_config"));
-        assertTrue(run.contains("执行前"));
-        assertTrue(run.contains("自动补齐"));
-        assertTrue(run.contains("canvas_set_node_model_config"));
     }
 
 }

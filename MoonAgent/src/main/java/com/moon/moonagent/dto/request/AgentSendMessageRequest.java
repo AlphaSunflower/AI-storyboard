@@ -16,5 +16,6 @@ public record AgentSendMessageRequest(
     List<String> assetGroupSnapshotIds, // 项目库资产组快照 id（服务端读取签名媒体）
     String routingHint,     // 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-storyboard）
     Boolean cancelActiveTasks, // 可空：true=本轮新消息前取消该会话进行中的异步任务（如视频）
+    String editMessageId,   // 可空：编辑最后一条用户消息并覆盖重发
     CanvasSessionContext canvasContext // 可空：画布编辑模式由前端持续携带，直到用户显式离开
 ) {}

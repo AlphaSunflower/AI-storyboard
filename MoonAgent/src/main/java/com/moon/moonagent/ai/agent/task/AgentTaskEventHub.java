@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.task;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -45,7 +45,7 @@ public class AgentTaskEventHub {
             try {
                 emitter.send(SseEmitter.event()
                         .name("snapshot")
-                        .data(AgentOrchestratorSupport.sseJson(Map.of("task", task))));
+                        .data(AgentRuntimeSupport.sseJson(Map.of("task", task))));
             } catch (Exception e) {
                 remove(userId, emitter);
                 log.debug("agent task SSE subscriber removed: userId={}", userId);
@@ -60,7 +60,7 @@ public class AgentTaskEventHub {
             try {
                 emitter.send(SseEmitter.event()
                         .name("wakeup_message")
-                        .data(AgentOrchestratorSupport.sseJson(message)));
+                        .data(AgentRuntimeSupport.sseJson(message)));
             } catch (Exception e) {
                 remove(userId, emitter);
                 log.debug("agent wakeup SSE subscriber removed: userId={}", userId);

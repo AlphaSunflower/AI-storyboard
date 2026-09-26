@@ -125,7 +125,6 @@ class MoonAgentControllerSmokeTest {
         when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
         when(chatService.getPendingCheckpoint(anyString())).thenReturn(Map.of("token", "t"));
         when(chatService.listMessages(anyString())).thenReturn(List.of(message()));
-        when(chatService.sendMessage(anyString(), anyString(), anyString())).thenReturn(message());
         when(chatService.listAssets(anyString(), anyInt(), anyInt()))
             .thenReturn(Map.of("records", List.of(), "total", 0));
         when(chatService.uploadReferenceImage(anyString(), any(), any(), any(), any()))
@@ -162,7 +161,7 @@ class MoonAgentControllerSmokeTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].role").value("assistant"));
         mockMvc.perform(post("/api/agent/conversations/c1/messages").header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"content\":\"你好\"}"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("m1"));
+            .andExpect(status().isGone());
         mockMvc.perform(get("/api/agent/conversations/c1/assets?page=1&size=20").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
         mockMvc.perform(multipart("/api/agent/upload")
@@ -236,43 +235,46 @@ class MoonAgentControllerSmokeTest {
     }
 
     @Test
-    void sseEndpoints_requireAuth_andStartStream() throws Exception {
+    void turnEndpoints_startStream_andLegacyWritesReturnGone() throws Exception {
         List<Long> emitterTimeouts = new ArrayList<>();
         when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
         doAnswer(inv -> {
-            SseEmitter emitter = inv.getArgument(5);
+            SseEmitter emitter = inv.getArgument(10);
             emitterTimeouts.add(emitter.getTimeout());
             emitter.complete();
             return null;
         })
-            .when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(),
-                any(SseEmitter.class), any(), anyBoolean());
+            .when(chatService).streamAgentScopeTurn(
+                anyString(), anyString(), anyString(), any(), any(), any(), any(), any(),
+                any(), any(), any(SseEmitter.class));
         doAnswer(inv -> {
             SseEmitter emitter = inv.getArgument(9);
             emitterTimeouts.add(emitter.getTimeout());
             emitter.complete();
             return null;
         })
-            .when(chatService).submitFormAndResume(anyString(), anyString(), any(), any(), any(), any(), any(), any(), any(), any());
-        doAnswer(inv -> {
-            SseEmitter emitter = inv.getArgument(3);
-            emitterTimeouts.add(emitter.getTimeout());
-            emitter.complete();
-            return null;
-        })
-            .when(chatService).generateVideoFromPlan(anyString(), anyString(), any(), any(SseEmitter.class));
+            .when(chatService).resumeAgentScopeTurn(
+                anyString(), anyString(), anyString(), any(), any(), any(), any(), any(), any(),
+                any(SseEmitter.class));
 
-        mockMvc.perform(post("/api/agent/conversations/c1/messages/stream").header("X-User-Id", "u1")
+        mockMvc.perform(post("/api/agent/conversations/c1/turns/stream").header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"content\":\"你好\"}"))
             .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/conversations/c1/turns/turn-1/resume/stream")
+                .header("X-User-Id", "u1")
+                .contentType("application/json").content("{\"formToken\":\"token-1\",\"action\":\"approve\"}"))
+            .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/conversations/c1/messages/stream").header("X-User-Id", "u1")
+                        .contentType("application/json").content("{\"content\":\"你好\"}"))
+                .andExpect(status().isGone());
         mockMvc.perform(post("/api/agent/conversations/c1/form/submit").header("X-User-Id", "u1")
-                .contentType("application/json").content("{\"action\":\"confirm\",\"taskId\":\"t\"}"))
-            .andExpect(status().isOk());
+                        .contentType("application/json").content("{\"action\":\"confirm\",\"taskId\":\"t\"}"))
+                .andExpect(status().isGone());
         mockMvc.perform(post("/api/agent/conversations/c1/video/plan/generate").header("X-User-Id", "u1")
-                .contentType("application/json").content("{\"planToken\":\"pt\"}"))
-            .andExpect(status().isOk());
+                        .contentType("application/json").content("{\"planToken\":\"pt\"}"))
+                .andExpect(status().isGone());
         org.assertj.core.api.Assertions.assertThat(emitterTimeouts)
-            .containsExactly(14_400_000L, 14_400_000L, 14_400_000L);
+            .containsExactly(14_400_000L, 14_400_000L);
     }
 
     @Test
@@ -299,13 +301,14 @@ class MoonAgentControllerSmokeTest {
             )
         );
         doAnswer(inv -> {
-            SseEmitter emitter = inv.getArgument(5);
+            SseEmitter emitter = inv.getArgument(10);
             emitter.complete();
             return null;
-        }).when(chatService).streamMessage(anyString(), anyString(), anyString(), any(), any(),
-            any(SseEmitter.class), any(), anyBoolean());
+        }).when(chatService).streamAgentScopeTurn(
+            anyString(), anyString(), anyString(), any(), any(), any(), any(), any(),
+            any(), any(), any(SseEmitter.class));
 
-        mockMvc.perform(post("/api/agent/conversations/c1/messages/stream")
+        mockMvc.perform(post("/api/agent/conversations/c1/turns/stream")
                 .header("X-User-Id", "u1")
                 .contentType("application/json")
                 .content("""

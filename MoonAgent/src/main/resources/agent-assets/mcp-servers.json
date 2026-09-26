@@ -180,6 +180,207 @@
           }
         }
       ]
+    },
+    {
+      "name": "moon-agent",
+      "version": "1.0.0",
+      "description": "MoonAgent storyboard and media tools exposed over Streamable HTTP MCP.",
+      "protocol": "mcp-streamable",
+      "endpoint": {
+        "type": "DIRECT",
+        "data": {
+          "address": "${MOON_AGENT_MCP_ADDRESS}",
+          "port": "${MOON_AGENT_MCP_PORT}",
+          "path": "/mcp",
+          "transportProtocol": "streamable-http"
+        }
+      },
+      "tools": [
+        {
+          "name": "writeScenes",
+          "description": "把确认后的分镜方案批量写入项目",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string"
+              },
+              "scenes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sceneNumber": { "type": "integer" },
+                    "scriptContent": { "type": "string" },
+                    "imagePrompt": { "type": "string" },
+                    "videoPrompt": { "type": "string" },
+                    "negativePrompt": { "type": "string" },
+                    "cameraMovement": { "type": "string" },
+                    "shotType": { "type": "string" },
+                    "soundDesign": { "type": "string" },
+                    "duration": { "type": "integer" }
+                  },
+                  "required": [ "sceneNumber" ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "scenes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "replaceScenes",
+          "description": "覆盖写分镜：清空项目现有分镜后批量写入新分镜",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string"
+              },
+              "scenes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sceneNumber": { "type": "integer" },
+                    "scriptContent": { "type": "string" },
+                    "imagePrompt": { "type": "string" },
+                    "videoPrompt": { "type": "string" },
+                    "negativePrompt": { "type": "string" },
+                    "cameraMovement": { "type": "string" },
+                    "shotType": { "type": "string" },
+                    "soundDesign": { "type": "string" },
+                    "duration": { "type": "integer" }
+                  },
+                  "required": [ "sceneNumber" ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "scenes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "replaceSpecificScenes",
+          "description": "部分替换分镜：只更新指定 scene_number 的分镜，保留其他分镜及其素材关联",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string"
+              },
+              "scenes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sceneNumber": { "type": "integer" },
+                    "scriptContent": { "type": "string" },
+                    "imagePrompt": { "type": "string" },
+                    "videoPrompt": { "type": "string" },
+                    "negativePrompt": { "type": "string" },
+                    "cameraMovement": { "type": "string" },
+                    "shotType": { "type": "string" },
+                    "soundDesign": { "type": "string" },
+                    "duration": { "type": "integer" }
+                  },
+                  "required": [ "sceneNumber" ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "projectId",
+              "scenes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "refineImage",
+          "description": "生成或完善图片（图生图或文生图）",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "picUrls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "model": {
+                "type": "string"
+              },
+              "size": {
+                "type": "string"
+              },
+              "quality": {
+                "type": "string"
+              },
+              "n": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "conversationId",
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "generateVideo",
+          "description": "生成一段视频（文生视频或图生视频）",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "duration": {
+                "type": "string"
+              },
+              "aspectRatio": {
+                "type": "string"
+              },
+              "picUrls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "model": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "conversationId",
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ]
     }
   ]
 }

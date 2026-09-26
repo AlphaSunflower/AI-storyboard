@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -23,10 +23,10 @@ public class AgentScopeCheckpointService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final AgentOrchestratorSupport support;
+    private final AgentRuntimeSupport support;
     private final AgentCheckpointMapper checkpointMapper;
 
-    public AgentScopeCheckpointService(AgentOrchestratorSupport support,
+    public AgentScopeCheckpointService(AgentRuntimeSupport support,
                                        AgentCheckpointMapper checkpointMapper) {
         this.support = support;
         this.checkpointMapper = checkpointMapper;
@@ -63,7 +63,7 @@ public class AgentScopeCheckpointService {
         payload.put("allowCustom", allowCustom);
 
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-reply", List.of(payload), "human_input", actions),
                 checkpoint -> {
                     checkpoint.setOwnerEngine("AGENTSCOPE");
@@ -98,7 +98,7 @@ public class AgentScopeCheckpointService {
         payload.put("replyId", replyId);
         payload.put("toolCalls", calls);
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-confirm", List.of(payload), "human_input", actions),
                 checkpoint -> {
                     checkpoint.setOwnerEngine("AGENTSCOPE");
@@ -130,7 +130,7 @@ public class AgentScopeCheckpointService {
                 Map.of("id", "delete", "title", "删除全部分镜",
                         "description", "只删除现有分镜，本次不写入新分镜"));
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         "当前项目已有 " + existingSceneCount
                                 + " 个分镜。本次生成结果要怎么处理？",
                         "storyboard-commit", List.of(payload), "human_input", actions),

@@ -1,8 +1,7 @@
 package com.moon.moonagent.ai.agent.recovery;
 
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
-import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
-import com.moon.moonagent.ai.agent.orchestration.TaskPlanRecoveryWorker;
+import com.moon.moonagent.ai.agent.agentscope.MoonAgentRuntime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,14 +20,8 @@ import java.time.OffsetDateTime;
         havingValue = "legacy")
 public class LegacyRecoveryScheduler {
 
-    private final TaskPlanRecoveryWorker taskPlanRecovery;
     private final ObjectProvider<AgentScopeAsyncTaskService> asyncTaskRecovery;
-    private final ObjectProvider<AgentScopeMediaRuntime> videoRecovery;
-
-    @Scheduled(fixedDelayString = "${ai.agent.dynamic-plan.recovery-delay-ms:30000}")
-    void recoverTaskPlans() {
-        taskPlanRecovery.recover();
-    }
+    private final ObjectProvider<MoonAgentRuntime> videoRecovery;
 
     @Scheduled(fixedDelayString = "${ai.agent.agentscope.async-recovery-delay-ms:30000}",
             initialDelayString = "${ai.agent.agentscope.async-recovery-initial-delay-ms:15000}")
@@ -44,7 +37,7 @@ public class LegacyRecoveryScheduler {
     @Scheduled(fixedDelayString = "${ai.agent.agentscope.video-recovery-delay-ms:30000}",
             initialDelayString = "${ai.agent.agentscope.video-recovery-initial-delay-ms:15000}")
     void recoverVideoTasks() {
-        AgentScopeMediaRuntime service = videoRecovery.getIfAvailable();
+        MoonAgentRuntime service = videoRecovery.getIfAvailable();
         if (service == null) return;
         for (RecoveryCandidate candidate :
                 service.findCandidates(OffsetDateTime.now(), service.batchSize())) {

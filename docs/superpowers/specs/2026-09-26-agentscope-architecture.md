@@ -2,19 +2,18 @@
 
 Date: 2026-09-26
 
-Status: authoritative target architecture for the AgentScope full migration
+Status: implemented architecture for the AgentScope full migration
 
-This note supersedes the archived PlanGraph design as the direction for MoonAgent
-orchestration. Task 1 of the migration only removes stale assets and records this
-target; it does not switch production runtime behavior.
+This note supersedes the archived PlanGraph design and is the single
+authoritative MoonAgent orchestration architecture. The legacy PlanGraph,
+`UnifiedAgentLoop`, `DynamicTaskEngine`, Specialist, IntentHandler, and
+Capability routing paths have been removed from production code.
 
 ## Core Decision
 
-MoonAgent will have one orchestration runtime, `MoonAgentRuntime`, built on the
+MoonAgent has one orchestration runtime, `MoonAgentRuntime`, built on the
 AgentScope Harness. The runtime owns turn execution, model/tool calls, HITL
 suspension and resume, subagent delegation, and runtime event production.
-Legacy orchestration code may remain temporarily for compatibility, but it must
-not become a second writable or independently extensible runtime.
 
 The following are out of scope for this release:
 
@@ -100,9 +99,9 @@ disabled:
 5. return `410 Gone` from obsolete write endpoints only after their replacement
    contract is live.
 
-Existing read APIs remain compatible for the migration window. Frontend
-compatibility may translate the AgentScope event envelope temporarily, but the
-backend protocol and runtime remain singular.
+Existing read APIs remain compatible. The frontend consumes the sequenced
+AgentScope event envelope directly; no translation layer to the retired
+`SseEvent` protocol remains.
 
 ## Non-Negotiable Invariants
 

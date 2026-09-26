@@ -51,21 +51,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 意图处理器共享支持组件（组合优于继承：避免手写构造器，per-request 状态由
+ * AgentScope turn 共享支持组件（组合优于继承：避免手写构造器，per-request 状态由
  * {@link OrchestrationRequest#lastMessage} 承担，组件本身无状态、并发安全）。
  *
  * <p>职责：SSE 事件发送、HITL checkpoint 落库/解析、剧本优化/分镜方案/图片提示词/视频方案
  * 等 LLM 调用（复用网关默认文本模型（动态获取），超时 120s）、HITL 通用模板
- * {@link #runHITLStage}。原 AgentOrchestratorImpl 中对应私有方法整体迁入。
+ * {@link #runHITLStage}。
  */
 @Component
 @RequiredArgsConstructor
-public class AgentOrchestratorSupport {
+public class AgentRuntimeSupport {
 
     @Autowired(required = false)
     private transient ApplicationEventPublisher taskEventPublisher;
 
-    private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorSupport.class);
+    private static final Logger log = LoggerFactory.getLogger(AgentRuntimeSupport.class);
 
     /** checkpoint 过期时间（对齐原 FORM_SNAPSHOT_TTL_MS：30 分钟） */
     public static final Duration CHECKPOINT_TTL = Duration.ofMinutes(30);
@@ -83,7 +83,6 @@ public class AgentOrchestratorSupport {
     private final com.moon.moonagent.ai.agent.AssetMatchingService assetMatchingService;
     private final com.moon.moonagent.mapper.AgentMessageMapper messageMapper;
     private final com.moon.moonagent.config.PromptConfig promptConfig;
-    private final com.moon.moonagent.ai.agent.skill.SkillManager skillManager;
     private final AgentSessionState sessionState;
     private final ModelOptionsAssembler modelOptionsAssembler;
 
@@ -188,7 +187,7 @@ public class AgentOrchestratorSupport {
         sessionState.restoreCountersFromPlan(conversationId, planJson);
     }
 
-    // ===== 结构化输出 record（原 AgentOrchestratorImpl 内部 record 迁入） =====
+    // ===== 结构化输出 record =====
 
     /** 剧本优化结构化输出（options：type=0 追问时的 2~4 个选项；type=1 时为空/缺失） */
     public record ScriptOptimizeResult(int type, String message, String script,
@@ -372,44 +371,9 @@ public class AgentOrchestratorSupport {
         }
     }
 
-    /**
-     * 当前请求对应的能力 skill（按 req.intentType 解析；未知返回 null）。
-     * 供 gate/方案提示词「按需加载」——skill body 未命中时回退 promptConfig。
-     */
-    public com.moon.moonagent.ai.agent.skill.AgentSkill skill(OrchestrationRequest req) {
-        return req == null ? null : skillManager.byIntent(req.getIntentType()).orElse(null);
-    }
-
-    /** 用户面技能 gate 提示词绑定：stepId ↔ fallbackKey ↔ 所属 intentType（供启动期绑定校验防漂移）。 */
-    public record GatePrompt(String intentType, String stepId, String fallbackKey) {}
-
-    /**
-     * 用户面技能编排 gate 提示词清单（单一来源，供 {@code SkillPromptBindingValidator} 启动校验）。
-     *
-     * <p>规则：fallbackKey 在 prompts/** 不存在时，stepId 必须在对应 SKILL.md body 有 {@code ### stepId} 段；
-     * fallbackKey 存在（迁移期安全网）则允许缺段。当前所有演进到 skill-first 的 gate，fallback 已在 YAML 中删除。
-     */
-    public static List<GatePrompt> gatePrompts() {
-        return List.of(
-                new GatePrompt("intent-aisplit", "script-optimize", "orchestrator/script-optimize"),
-                new GatePrompt("intent-aisplit", "requirement-clarify", "orchestrator/requirement-clarify"),
-                new GatePrompt("intent-aisplit", "storyboard-plan", "orchestrator/storyboard-plan"),
-                new GatePrompt("intent-aisplit", "scene-params-recommend", "orchestrator/scene-params-recommend"),
-                new GatePrompt("intent-pic", "plan", "orchestrator/image-plan"),
-                new GatePrompt("intent-video", "plan", "orchestrator/video-plan"));
-    }
-
-    /**
-     * Skill 提示词按需加载：优先当前能力 SKILL.md body 的 {@code ### stepId} 段（单一来源——改提示词不用碰 Java），
-     * 未命中回退 promptConfig {@code fallbackKey}（迁移期安全网）；两者都替换 {@code {{var}}}。
-     */
+    /** Legacy helper retained only for internal services; AgentScope owns user-facing skill prompts. */
     public String prompt(OrchestrationRequest req, String stepId, String fallbackKey, Map<String, String> vars) {
-        com.moon.moonagent.ai.agent.skill.AgentSkill sk = skill(req);
-        String text = sk == null ? null : sk.nodePrompts().get(stepId);
-        if (text == null || text.isBlank()) {
-            return promptConfig.get(fallbackKey, vars == null ? Map.of() : vars);
-        }
-        return PromptResolver.resolve(text, vars);
+        return promptConfig.get(fallbackKey, vars == null ? Map.of() : vars);
     }
 
     /**
@@ -992,7 +956,7 @@ public class AgentOrchestratorSupport {
                 || cp.getRuntimeToolCallId() != null || cp.getResumePayload() != null) {
             checkpointMapper.updateRuntimeRef(cp);
         }
-        log.info("AgentOrchestrator: checkpoint 已落库 conversationId={} formToken={} action={}",
+        log.info("AgentRuntime: checkpoint 已落库 conversationId={} formToken={} action={}",
             conversation.getId(), cp.getFormToken(), action);
         return cp.getFormToken();
     }
@@ -1099,11 +1063,11 @@ public class AgentOrchestratorSupport {
                 m.setMetadata(metadata);
                 messageMapper.updateById(m);
             }
-            log.info("AgentOrchestrator: HITL 卡片已落库 assistant 消息 conversationId={} messageId={} formToken={}",
+            log.info("AgentRuntime: HITL 卡片已落库 assistant 消息 conversationId={} messageId={} formToken={}",
                     req.getConversation().getId(), m.getId(), formToken);
             return m.getId();
         } catch (Exception e) {
-            log.warn("AgentOrchestrator: HITL 卡片 assistant 消息落库失败 conversationId={} error={}",
+            log.warn("AgentRuntime: HITL 卡片 assistant 消息落库失败 conversationId={} error={}",
                     req.getConversation().getId(), e.getMessage());
             return "";
         }
@@ -1125,7 +1089,7 @@ public class AgentOrchestratorSupport {
             cp.setPlan(objectMapper.writeValueAsString(plan));
             checkpointMapper.updateById(cp);
         } catch (Exception e) {
-            log.warn("AgentOrchestrator: checkpoint plan 附加 _hitlMessageId 失败 formToken={} error={}", formToken, e.getMessage());
+            log.warn("AgentRuntime: checkpoint plan 附加 _hitlMessageId 失败 formToken={} error={}", formToken, e.getMessage());
         }
     }
 
@@ -1175,10 +1139,10 @@ public class AgentOrchestratorSupport {
                 msg.setMetadata(merged);
                 messageMapper.updateById(msg);
             }
-            log.info("AgentOrchestrator: HITL 卡片已标记提交 conversationId={} messageId={} action={}",
+            log.info("AgentRuntime: HITL 卡片已标记提交 conversationId={} messageId={} action={}",
                     conversationId, messageId, action);
         } catch (Exception e) {
-            log.warn("AgentOrchestrator: markHitlCardSubmitted 失败 conversationId={} formToken={} error={}",
+            log.warn("AgentRuntime: markHitlCardSubmitted 失败 conversationId={} formToken={} error={}",
                     conversationId, formToken, e.getMessage());
         }
     }

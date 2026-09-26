@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
@@ -46,7 +46,7 @@ final class MediaProgressMiddleware implements MiddlewareBase {
             SseEmitter emitter = context.request().getEmitter();
             if (emitter == null) return;
             emitter.send(SseEmitter.event().name("workflow")
-                    .data(AgentOrchestratorSupport.sseJson(Map.of(
+                    .data(AgentRuntimeSupport.sseJson(Map.of(
                             "stage", stage,
                             "title", title,
                             "status", status))));

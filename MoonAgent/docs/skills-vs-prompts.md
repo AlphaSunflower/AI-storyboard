@@ -1,6 +1,12 @@
-# skills 与 prompts 边界约定
+# skills 与 prompts 边界约定（历史说明）
 
-> 状态：定稿（2026-09-02）
+> **状态：部分废弃（2026-09-26）。** Skill 选择已由 AgentScope 按标准
+> `name/description` 完成；本文提到的 `SkillPromptBindingValidator` 和
+> `AgentOrchestratorSupport.prompt()` 路由绑定属于旧 PlanGraph 路径。
+> 当前 Skill、Prompt 和 MCP 资产治理见
+> `docs/superpowers/specs/2026-09-26-agentscope-architecture.md`。
+
+> 历史状态：定稿（2026-09-02）
 > 目标：消除「skill + yaml 双轨」的违和感，明确每种提示词该放哪、为什么。
 
 ## 结论

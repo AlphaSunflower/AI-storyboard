@@ -35,6 +35,8 @@ MCP endpoint placeholders are resolved only during publish or online verify:
 
 - `MCP_GATEWAY_ADDRESS`
 - `MCP_GATEWAY_PORT`
+- `MOON_AGENT_MCP_ADDRESS`
+- `MOON_AGENT_MCP_PORT`
 
 Canvas Bridge is intentionally absent from the shared asset manifest.
 

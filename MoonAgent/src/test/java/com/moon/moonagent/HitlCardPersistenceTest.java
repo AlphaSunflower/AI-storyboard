@@ -1,7 +1,7 @@
 package com.moon.moonagent;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class HitlCardPersistenceTest {
 
     @Autowired
-    private AgentOrchestratorSupport support;
+    private AgentRuntimeSupport support;
 
     @Autowired
     private AgentConversationMapper conversationMapper;
@@ -49,7 +49,7 @@ class HitlCardPersistenceTest {
         conversationMapper.insert(conversation);
 
         OrchestrationRequest request = new OrchestrationRequest(conversation, "测试需求", List.of(), new SseEmitter(0L));
-        var plan = new AgentOrchestratorSupport.StagePlan(
+        var plan = new AgentRuntimeSupport.StagePlan(
                 "请选择风格",
                 "test-style",
                 List.of(Map.of("content", "测试需求")),

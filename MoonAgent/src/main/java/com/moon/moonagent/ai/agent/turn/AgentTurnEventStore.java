@@ -62,6 +62,16 @@ public class AgentTurnEventStore {
         return turnId == null || turnId.isBlank() ? null : turnMapper.selectById(turnId);
     }
 
+    public AgentTurnEntity resume(String turnId) {
+        AgentTurnEntity turn = find(turnId);
+        if (turn == null) return null;
+        turn.setStatus("running");
+        turn.setError("");
+        turn.setCompletedAt(null);
+        turnMapper.updateById(turn);
+        return turn;
+    }
+
     public void attachCheckpoint(String turnId, String checkpointId) {
         AgentTurnEntity turn = turnMapper.selectById(turnId);
         if (turn == null) return;

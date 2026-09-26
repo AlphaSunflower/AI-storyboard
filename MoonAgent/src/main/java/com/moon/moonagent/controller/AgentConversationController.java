@@ -167,7 +167,8 @@ public class AgentConversationController {
     public ApiResponse<AgentMessageVO> sendMessage(
             Authentication auth, @PathVariable String id,
             @Valid @RequestBody AgentSendMessageRequest request) {
-        return ApiResponse.ok(toVO(chatService.sendMessage(auth.getName(), id, request.content())));
+        throw new BusinessException(41001,
+                "旧同步消息接口已停用，请使用 /conversations/{id}/turns/stream");
     }
 
     /** 资产列表（分页） */
@@ -237,7 +238,7 @@ public class AgentConversationController {
         SseEmitter emitter = createSseEmitter();
         chatService.streamAgentScopeTurn(
                 auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
-                request.routingHint(), request.canvasContext(), media.videoUrls(),
+                request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
                 media.audioUrls(), emitter);
         return emitter;
     }
@@ -251,7 +252,7 @@ public class AgentConversationController {
         chatService.getOwnedConversation(auth.getName(), id);
         SseEmitter emitter = createSseEmitter();
         chatService.resumeAgentScopeTurn(
-                auth.getName(), id, request.formToken(), request.action(), request.content(),
+                auth.getName(), id, turnId, request.formToken(), request.action(), request.content(),
                 request.params() == null ? Map.of() : request.params(),
                 request.assetIds() == null ? List.of() : request.assetIds(),
                 request.canvasContext(), emitter);
@@ -287,10 +288,8 @@ public class AgentConversationController {
     public SseEmitter editAndResend(Authentication auth, @PathVariable String id,
                                     @PathVariable String messageId,
                                     @Valid @RequestBody AgentEditMessageRequest request) {
-        chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = createSseEmitter();
-        chatService.editAndResend(auth.getName(), id, messageId, request.content(), emitter);
-        return emitter;
+        throw new BusinessException(41001,
+                "旧编辑重发接口已停用，请使用 /turns/stream 并传入 editMessageId");
     }
 
     /** 打断当前生成并把下一条消息作为新轮发送（SSE）。 */
@@ -298,17 +297,8 @@ public class AgentConversationController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter interruptAndSend(Authentication auth, @PathVariable String id,
                                        @Valid @RequestBody AgentSendMessageRequest request) {
-        chatService.getOwnedConversation(auth.getName(), id);
-        SseEmitter emitter = createSseEmitter();
-        chatService.interruptAndStream(
-                auth.getName(), id, request.content(),
-                picUrls(request),
-                request.assetIds() == null ? List.of() : request.assetIds(),
-                emitter, request.routingHint(), Boolean.TRUE.equals(request.cancelActiveTasks()),
-                request.canvasContext(),
-                request.referenceVideos() == null ? List.of() : request.referenceVideos(),
-                request.referenceAudios() == null ? List.of() : request.referenceAudios());
-        return emitter;
+        throw new BusinessException(41001,
+                "旧打断并发送接口已停用，请先调用 /turns/{turnId}/interrupt，再调用 /turns/stream");
     }
 
     /** HITL 表单提交并续流（SSE） */
@@ -454,8 +444,8 @@ public class AgentConversationController {
         }
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
                 c.getStatus(), canvasContext,
-                c.getOrchestrationMode() == null ? "LEGACY" : c.getOrchestrationMode(),
-                c.getEngineVersion() == null ? "plan-graph-v1" : c.getEngineVersion(),
+                c.getOrchestrationMode() == null ? "AGENTSCOPE" : c.getOrchestrationMode(),
+                c.getEngineVersion() == null ? "agentscope-java-2.0.3" : c.getEngineVersion(),
                 c.getDebugComparisonEnabled() == null || c.getDebugComparisonEnabled(),
                 c.getCreatedAt(), c.getUpdatedAt());
     }

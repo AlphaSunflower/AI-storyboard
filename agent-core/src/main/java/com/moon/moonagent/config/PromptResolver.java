@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * 提示词变量替换统一入口：用 {@link StringSubstitutor} 处理 {@code {{var}}} 占位符。
  *
- * <p>SKILL.md body 路径（{@code AgentOrchestratorSupport.prompt}）与 prompt YAML 路径
+ * <p>Nacos/classpath prompt 资产与本地 prompt YAML 路径
  * （{@link PromptConfig#get(String, Map)}）共用本工具，保证两套来源的变量替换语义一致——
  * 替换 {@code {{key}}} → 值；不在 vars 中的占位符原样保留；template 或 vars 为空时原样返回。
  *

@@ -42,6 +42,7 @@
   "mcpMetadata": {
     "path": "MoonAgent/src/main/resources/agent-assets/mcp-servers.json",
     "servers": [
+      "moon-agent",
       "llm-gateway-media"
     ]
   }

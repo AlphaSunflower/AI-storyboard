@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.ExternalActionLedgerService;
@@ -27,6 +27,7 @@ import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.AssistantMessage;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
@@ -39,6 +40,7 @@ import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.skill.SkillFilter;
 import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
+import io.agentscope.core.state.AgentState;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.extensions.postgresql.state.PostgresAgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
@@ -67,9 +69,9 @@ import java.util.function.Consumer;
 @ConditionalOnProperty(prefix = "ai.agent.agentscope", name = "enabled",
         havingValue = "true")
 @RequiredArgsConstructor
-public class AgentScopeMediaRuntime implements AgentRecoverySource {
+public class MoonAgentRuntime implements AgentRecoverySource {
 
-    private static final Logger log = LoggerFactory.getLogger(AgentScopeMediaRuntime.class);
+    private static final Logger log = LoggerFactory.getLogger(MoonAgentRuntime.class);
     private static final String COMPACTION_PROMPT = """
             Compress this AIGC conversation for continuation. Preserve only execution-critical
             facts and write "None" when a section has no data.
@@ -91,7 +93,7 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
     private final AgentScopeProperties properties;
     private final AgentScopeToolkitFactory toolkitFactory;
     private final AgentScopeCheckpointService checkpoints;
-    private final AgentOrchestratorSupport support;
+    private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
     private final AgentScopeAssetGroupService assetGroups;
     private final ExternalActionLedgerService externalActions;
@@ -132,7 +134,6 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
                     "task_output",
                     "wait_async_results",
                     "agent_list",
-                    "start_storyboard_production",
                     "revise_storyboard_production",
                     "approve_storyboard_production",
                     "generate_storyboard_image",
@@ -140,16 +141,14 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
                     "upsert_storyboard_shot",
                     "list_storyboard_draft",
                     "list_project_storyboard",
-                    "delete_storyboard_draft_shot",
                     "reorder_storyboard_draft",
-                    "generate_storyboard_images",
                     "load_skill_through_path",
                     "reset_equipped_tools")) {
                 permissions.addAllowRule(tool, new PermissionRule(
                         tool, null, PermissionBehavior.ALLOW, "MoonAgentReadOnlyPolicy"));
             }
             for (String tool : List.of(
-                    "generate_image", "generate_image_batch", "generate_video", "refineImage")) {
+                    "generate_image", "generate_video", "refineImage")) {
                 if (properties.isDirectMediaGeneration()) {
                     permissions.addAllowRule(tool, new PermissionRule(
                             tool, null, PermissionBehavior.ALLOW, "MoonAgentMediaPolicy"));
@@ -157,6 +156,21 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
                     permissions.addAskRule(tool, new PermissionRule(
                             tool, null, PermissionBehavior.ASK, "MoonAgentMediaPolicy"));
                 }
+            }
+            for (String tool : List.of(
+                    "generate_image_batch",
+                    "start_storyboard_production",
+                    "generate_storyboard_images",
+                    "delete_storyboard_draft_shot",
+                    "delete_project_storyboard_shot",
+                    "clear_project_storyboard",
+                    "canvas_delete_nodes",
+                    "canvas_delete_edges",
+                    "canvas_execute_node",
+                    "canvas_execute_graph",
+                    "canvas_cancel_execution")) {
+                permissions.addAskRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ASK, "MoonAgentMutationPolicy"));
             }
             Path workspace = resolveWorkspace();
             try {
@@ -200,19 +214,6 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
             if (messageBus.enabled()) {
                 builder.messageBus(messageBus.messageBus());
             }
-            for (String tool : List.of(
-                    "delete_project_storyboard_shot",
-                    "clear_project_storyboard",
-                    "canvas_delete_nodes",
-                    "canvas_delete_edges")) {
-                permissions.addAskRule(tool, new PermissionRule(
-                        tool, null, PermissionBehavior.ASK, "MoonAgentStoryboardDeletePolicy"));
-            }
-            for (String tool : List.of(
-                    "canvas_execute_node", "canvas_execute_graph", "canvas_cancel_execution")) {
-                permissions.addAskRule(tool, new PermissionRule(
-                        tool, null, PermissionBehavior.ASK, "MoonAgentCanvasExecutionPolicy"));
-            }
             if (properties.isCompactionEnabled()) {
                 builder.compaction(CompactionConfig.builder()
                         .triggerMessages(properties.getCompactionTriggerMessages())
@@ -243,6 +244,37 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
 
     public boolean enabled() {
         return properties.isEnabled() && agent != null;
+    }
+
+    /**
+     * Seeds a previously unseen AgentScope session with the product message history.
+     * Existing runtime state always wins, so this is a one-time migration path for
+     * conversations created before the AgentScope cutover.
+     */
+    public boolean ensureSessionFromHistory(String userId, String conversationId,
+                                            List<Msg> history) {
+        if (!enabled() || conversationId == null || conversationId.isBlank()
+                || history == null || history.isEmpty()) {
+            return false;
+        }
+        try {
+            AgentState state = agent.getDelegate().getAgentState(userId, conversationId);
+            if (state != null && !state.contextMutable().isEmpty()) {
+                return false;
+            }
+            if (state == null) {
+                return false;
+            }
+            state.contextMutable().addAll(history);
+            agent.getDelegate().saveAgentState(userId, conversationId);
+            log.info("[AgentScope] reconstructed session from {} product messages conversationId={}",
+                    history.size(), conversationId);
+            return true;
+        } catch (Exception exception) {
+            log.warn("[AgentScope] session reconstruction failed conversationId={}: {}",
+                    conversationId, exception.getMessage());
+            return false;
+        }
     }
 
     public Map<String, Object> assetStatus() {
@@ -470,7 +502,7 @@ public class AgentScopeMediaRuntime implements AgentRecoverySource {
         List<String> assetIds = request == null || request.getAssetIds() == null
                 ? List.of() : request.getAssetIds();
         boolean hasAssetUrls = picUrls.stream()
-                .anyMatch(AgentScopeMediaRuntime::isAssetContentUrl);
+                .anyMatch(MoonAgentRuntime::isAssetContentUrl);
         boolean hasUploadedImages = picUrls.stream()
                 .anyMatch(url -> url != null && !url.isBlank()
                         && !isAssetContentUrl(url));

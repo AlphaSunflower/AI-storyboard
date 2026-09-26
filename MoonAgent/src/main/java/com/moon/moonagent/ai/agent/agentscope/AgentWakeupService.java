@@ -39,7 +39,7 @@ public class AgentWakeupService implements WakeupDispatcher.WakeupTarget {
 
     private final AgentScopeProperties properties;
     private final AgentScopeMessageBus messageBus;
-    private final AgentScopeMediaRuntime mediaRuntime;
+    private final MoonAgentRuntime mediaRuntime;
     private final AgentChatService chatService;
     private final ConversationLock conversationLock;
     private final AgentAsyncTaskMapper taskMapper;

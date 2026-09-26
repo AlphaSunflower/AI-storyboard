@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 会话级内存状态（原 {@link AgentOrchestratorSupport} 迁出）：
+ * 会话级内存状态：
  * 澄清计数 / 不满意调整计数 / 本轮勾选资产。纯内存，重启即失；
  * 上限值由 {@code ai.agent.*} 配置控制，计数经 checkpoint.plan 持久化（resume 恢复）。
  *

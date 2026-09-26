@@ -97,14 +97,13 @@ public class NacosAssetConfiguration {
     NacosMcpMetadataRepository nacosMcpMetadataRepository(
             NacosAssetProperties properties,
             ObjectProvider<AiService> aiServiceProvider,
-            ResourceLoader resourceLoader,
-            ObjectMapper objectMapper) {
+            ResourceLoader resourceLoader) {
         Resource fallback = resourceLoader.getResource(
                 "classpath:" + properties.getMcpMetadataFallbackLocation());
         return new NacosMcpMetadataRepository(
                 properties,
                 () -> properties.isEnabled() ? aiServiceProvider.getIfAvailable() : null,
                 fallback,
-                objectMapper);
+                new ObjectMapper());
     }
 }

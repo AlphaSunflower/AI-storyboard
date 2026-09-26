@@ -43,7 +43,7 @@ export function HumanInputCard({
   const [customInputText, setCustomInputText] = useState("");
   // 卡片参数选择器的当前选择（模型/尺寸等；无选择器时为 {}）
   const [selectedParams, setSelectedParams] = useState<Record<string, string>>({});
-  // aisplit 分镜卡片：图片/视频两个分区选择器的提交值（键带 image*/video* 前缀）
+  // storyboard 分镜卡片：图片/视频两个分区选择器的提交值（键带 image*/video* 前缀）
   const mergeParams = (p: Record<string, string>) => setSelectedParams((prev) => ({ ...prev, ...p }));
   // 分区选择器模式：后端下发 imageModels/videoModels 时渲染图片+视频两组；否则保持原单选择器逻辑
   const hasSplitSelectors = !!((info.imageModels && info.imageModels.length > 0) || (info.videoModels && info.videoModels.length > 0));
@@ -213,7 +213,7 @@ export function HumanInputCard({
         </div>
       )}
       
-      {/* 模型/参数选择器：aisplit 分镜卡片渲染图片+视频两组（LLM 推荐预选+理由）；其余卡片保持单选择器 */}
+      {/* 模型/参数选择器：storyboard 分镜卡片渲染图片+视频两组（LLM 推荐预选+理由）；其余卡片保持单选择器 */}
       {hasSplitSelectors ? (
         <div style={{ marginBottom: 10 }}>
           {info.imageModels && info.imageModels.length > 0 && (
