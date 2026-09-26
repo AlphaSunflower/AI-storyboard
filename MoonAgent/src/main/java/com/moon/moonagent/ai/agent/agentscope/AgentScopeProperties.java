@@ -29,6 +29,12 @@ public class AgentScopeProperties {
     private boolean asyncEnabled = true;
     private Duration asyncToolTimeout = Duration.ofSeconds(90);
     private int batchConfirmThreshold = 4;
+    private int imageBatchConcurrency = 3;
+    private boolean wakeupEnabled = true;
+    private String wakeupDir = "";
+    private int wakeupMaxRetries = 5;
+    private Duration wakeupRetryDelay = Duration.ofSeconds(2);
+    private Preflight preflight = new Preflight();
 
     public boolean isEnabled() {
         return enabled;
@@ -189,5 +195,99 @@ public class AgentScopeProperties {
 
     public void setBatchConfirmThreshold(int batchConfirmThreshold) {
         this.batchConfirmThreshold = Math.max(1, batchConfirmThreshold);
+    }
+
+    public int getImageBatchConcurrency() {
+        return imageBatchConcurrency;
+    }
+
+    public void setImageBatchConcurrency(int imageBatchConcurrency) {
+        this.imageBatchConcurrency = Math.max(1, Math.min(8, imageBatchConcurrency));
+    }
+
+    public boolean isWakeupEnabled() {
+        return wakeupEnabled;
+    }
+
+    public void setWakeupEnabled(boolean wakeupEnabled) {
+        this.wakeupEnabled = wakeupEnabled;
+    }
+
+    public String getWakeupDir() {
+        return wakeupDir;
+    }
+
+    public void setWakeupDir(String wakeupDir) {
+        this.wakeupDir = wakeupDir == null ? "" : wakeupDir.trim();
+    }
+
+    public int getWakeupMaxRetries() {
+        return wakeupMaxRetries;
+    }
+
+    public void setWakeupMaxRetries(int wakeupMaxRetries) {
+        this.wakeupMaxRetries = Math.max(1, wakeupMaxRetries);
+    }
+
+    public Duration getWakeupRetryDelay() {
+        return wakeupRetryDelay;
+    }
+
+    public void setWakeupRetryDelay(Duration wakeupRetryDelay) {
+        this.wakeupRetryDelay = wakeupRetryDelay == null
+                ? Duration.ofSeconds(2) : wakeupRetryDelay;
+    }
+
+    public Preflight getPreflight() {
+        return preflight;
+    }
+
+    public void setPreflight(Preflight preflight) {
+        this.preflight = preflight == null ? new Preflight() : preflight;
+    }
+
+    public static class Preflight {
+
+        private boolean enabled = true;
+        private Duration timeout = Duration.ofSeconds(20);
+        private double referenceConfidenceThreshold = 0.65;
+        private int maxRepairs = 1;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout == null || timeout.isZero() || timeout.isNegative()
+                    ? Duration.ofSeconds(20) : timeout;
+        }
+
+        public double getReferenceConfidenceThreshold() {
+            return referenceConfidenceThreshold;
+        }
+
+        public void setReferenceConfidenceThreshold(double referenceConfidenceThreshold) {
+            if (referenceConfidenceThreshold <= 0 || referenceConfidenceThreshold > 1) {
+                this.referenceConfidenceThreshold = 0.65;
+            } else {
+                this.referenceConfidenceThreshold = referenceConfidenceThreshold;
+            }
+        }
+
+        public int getMaxRepairs() {
+            return maxRepairs;
+        }
+
+        public void setMaxRepairs(int maxRepairs) {
+            this.maxRepairs = Math.max(1, Math.min(1, maxRepairs));
+        }
     }
 }

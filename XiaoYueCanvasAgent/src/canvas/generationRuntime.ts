@@ -29,6 +29,8 @@ const recoveredGenerationRecord = (
     : capabilityId.startsWith('image.') ? 'generateImage'
       : capabilityId === 'video.generate' ? 'generateVideo'
         : capabilityId === 'storyboard.plan' ? 'plan'
+          : capabilityId === 'storyboard.outline' ? 'plan'
+            : capabilityId === 'storyboard.finalize' ? 'finalize'
           : capabilityId === 'agent.request' ? 'storyboardGrid'
             : 'generate';
   const sources = item.requestSnapshot.sourceAssetIds.flatMap((assetId, order) => {

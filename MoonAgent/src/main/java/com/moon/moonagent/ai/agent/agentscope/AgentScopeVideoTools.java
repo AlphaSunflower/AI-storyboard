@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.entity.AgentConversation;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +52,78 @@ public class AgentScopeVideoTools {
             String aspectRatio,
             String duration,
             AgentScopeRunContext context) {
+        return generateVideo(prompt, referenceAssetIds, referenceUrls, resolution,
+                aspectRatio, duration, context, false);
+    }
+
+    Map<String, Object> generateVideoForStoryboard(
+            String prompt,
+            List<String> referenceAssetIds,
+            List<String> referenceUrls,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            AgentScopeRunContext context) {
+        return generateVideo(prompt, referenceAssetIds, referenceUrls, resolution,
+                aspectRatio, duration, context, true);
+    }
+
+    Map<String, Object> generateVideoForStoryboard(
+            String prompt,
+            List<ReferenceImage> referenceImages,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            AgentScopeRunContext context) {
+        return startVideo(prompt, List.of(), referenceImages, resolution,
+                aspectRatio, duration, context, true);
+    }
+
+    private Map<String, Object> generateVideo(
+            String prompt,
+            List<String> referenceAssetIds,
+            List<String> referenceUrls,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            AgentScopeRunContext context,
+            boolean storyboardScoped) {
+        List<String> references = new java.util.ArrayList<>(
+                sessionAssets.urlsByIds(AgentScopeSessionTools.requireConversation(context).getId(),
+                        referenceAssetIds));
+        if (referenceUrls != null) {
+            referenceUrls.stream()
+                    .filter(url -> url != null && !url.isBlank())
+                    .forEach(url -> {
+                        if (!references.contains(url)) references.add(url);
+                    });
+        }
+        return startVideo(prompt, referenceAssetIds,
+                references.stream().map(ReferenceImage::ofReference).toList(),
+                resolution, aspectRatio, duration, context, storyboardScoped);
+    }
+
+    private Map<String, Object> startVideo(
+            String prompt,
+            List<String> referenceAssetIds,
+            List<ReferenceImage> referenceImages,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            AgentScopeRunContext context,
+            boolean storyboardScoped) {
         AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
+        if (!storyboardScoped && context.turnState() != null
+                && context.turnState().isStoryboardRequested()) {
+            throw new IllegalStateException(
+                    "本轮已进入分镜制作流程，不能改用通用视频生成；请先完成正式分镜列表，再按 shot_id 生成镜头视频。");
+        }
+        String originalRequest = context.request() == null ? null : context.request().getContent();
+        if (storyboardScoped) {
+            VideoGenerationPolicy.requireStoryboardShotAllowed(duration);
+        } else {
+            VideoGenerationPolicy.requireDirectAllowed(duration, originalRequest);
+        }
         if (context.turnState() != null && context.turnState().isFollowUpVideoPlanned()) {
             throw new IllegalStateException(
                     "批量图片完成后会自动创建首尾帧视频，请等待图片任务完成，不要单独重复创建。");
@@ -60,23 +132,17 @@ public class AgentScopeVideoTools {
             throw new IllegalStateException(
                     "本轮已经创建过视频任务，请直接使用已有 taskId 回复，不要重复调用。");
         }
-        List<String> references = new java.util.ArrayList<>(
-                sessionAssets.urlsByIds(conversation.getId(), referenceAssetIds));
-        if (referenceUrls != null) {
-            referenceUrls.stream()
-                    .filter(url -> url != null && !url.isBlank())
-                    .forEach(url -> {
-                        if (!references.contains(url)) references.add(url);
-                    });
-        }
         Map<String, String> params = new java.util.LinkedHashMap<>();
         if (resolution != null && !resolution.isBlank()) params.put("resolution", resolution);
-        List<ReferenceImage> roleImages = references.stream()
-                .map(ReferenceImage::ofReference)
-                .toList();
-        String taskId = support.startVideoGenerationAsyncWithRole(
-                context.request(), prompt, duration, aspectRatio, roleImages,
-                java.util.List.of(), params);
+        List<ReferenceImage> roleImages = referenceImages == null
+                ? List.of() : List.copyOf(referenceImages);
+        String taskId = storyboardScoped
+                ? support.startStoryboardShotVideoGenerationAsyncWithRole(
+                        context.request(), prompt, duration, aspectRatio, roleImages,
+                        java.util.List.of(), params)
+                : support.startVideoGenerationAsyncWithRole(
+                        context.request(), prompt, duration, aspectRatio, roleImages,
+                        java.util.List.of(), params);
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalStateException("视频任务创建失败");
         }
@@ -111,4 +177,5 @@ public class AgentScopeVideoTools {
         return param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
     }
+
 }

@@ -3,7 +3,7 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Download, ImagePlus, Library, LoaderCircle } from 'lucide-react';
+import { ChevronRight, Download, ImagePlus, Images, Library, LoaderCircle, Pencil } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentMessageMetadata } from '../../api/agent';
@@ -13,15 +13,21 @@ import { ReasoningPanel } from './ReasoningPanel';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
+import { AgentTaskCard } from './AgentTaskCard';
+import { StoryboardResultActions } from './StoryboardResultActions';
 import { ContextMenu } from '../common/ContextMenu';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
+import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
+import { remarkCjkStrong } from './remarkCjkStrong';
 import {
   CHAT_MEDIA_DRAG_MIME,
   serializeDragPayload,
   type ChatMediaDragPayload,
 } from '../../lib/projectLibraryDrag';
+import './MessageBubble.css';
 
 type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
+const IMAGE_BATCH_THRESHOLD = 4;
 
 function extractMessageMedia(content: string): MessageMedia[] {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
@@ -36,6 +42,99 @@ function extractMessageMedia(content: string): MessageMedia[] {
     found.set(match[1], { url: match[1], type: 'IMAGE' });
   }
   return Array.from(found.values());
+}
+
+function isStandaloneImageUrl(value: string): boolean {
+  return /^(https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?|data:image\/[a-z+]+;base64,\S+)$/i.test(value);
+}
+
+/**
+ * 批次卡片已经承载图片清单，正文只保留说明文字，避免同一批图片在消息里出现两次。
+ */
+function stripBatchImageMarkdown(content: string): string {
+  const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  return normalized
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !isStandaloneImageUrl(trimmed)
+        && !/^已生成\s*\d+\s*张图片$/u.test(trimmed)
+        && !trimmed.includes('(async-task:');
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function BatchThumbnail({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="chat-image-batch__fallback"><Images size={14} strokeWidth={1.7} /></span>;
+  }
+  return (
+    <img
+      src={assetUrl(url)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function GenerationImageBatch({
+  media,
+  streaming,
+  onOpen,
+}: {
+  media: MessageMedia[];
+  streaming?: boolean;
+  onOpen?: () => void;
+}) {
+  const covers = media.slice(0, IMAGE_BATCH_THRESHOLD);
+  const overflow = Math.max(0, media.length - covers.length);
+  const content = (
+    <>
+      <span className="chat-image-batch__covers" aria-hidden="true">
+        {covers.map((item, index) => (
+          <span key={`${item.url}-${index}`} className="chat-image-batch__cover">
+            <BatchThumbnail url={item.url} />
+            {index === covers.length - 1 && overflow > 0 && (
+              <span className="chat-image-batch__more">+{overflow}</span>
+            )}
+          </span>
+        ))}
+      </span>
+      <span className="chat-image-batch__copy">
+        <strong>{streaming ? '图片生成中' : '本批图片已生成'}</strong>
+        <small>
+          {streaming
+            ? `已生成 ${media.length} 张，任务仍在进行`
+            : `共 ${media.length} 张，集中到生成中心查看`}
+        </small>
+      </span>
+      {onOpen && (
+        <span className="chat-image-batch__action">
+          <span>查看全部</span>
+          <ChevronRight size={15} strokeWidth={1.9} />
+        </span>
+      )}
+    </>
+  );
+
+  if (!onOpen) {
+    return <div className="chat-image-batch is-static">{content}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className="chat-image-batch"
+      onClick={onOpen}
+      aria-label={`查看全部 ${media.length} 张生成图片`}
+    >
+      {content}
+    </button>
+  );
 }
 
 function imageExtension(url: string, mime: string): string {
@@ -307,8 +406,13 @@ function MarkdownContent({
     nodes.push(
       <div key={key} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, remarkCjkStrong]}
           components={{
+            table: ({ children }) => (
+              <div className="chat-markdown-table-wrap">
+                <table>{children}</table>
+              </div>
+            ),
             img: ({ src, alt }) => (
               <ImgWithFallback
                 src={assetUrl(src ?? '')}
@@ -375,6 +479,18 @@ function formatTime(iso?: string): string {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hh}:${mm}`;
 }
 
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat('en-US').format(Math.max(0, value));
+}
+
+function formatElapsed(ms: number): string {
+  const safeMs = Math.max(0, ms);
+  if (safeMs < 1000) return `${Math.round(safeMs)}ms`;
+  const seconds = safeMs / 1000;
+  if (seconds < 10) return `${seconds.toFixed(1).replace(/\.0$/, '')}s`;
+  return `${Math.round(seconds)}s`;
+}
+
 /**
  * Smooths tiny SSE chunks into a readable reveal. The target always stays the
  * server payload, so a faster stream only shortens the catch-up duration.
@@ -430,9 +546,13 @@ function useStreamingReveal(content: string, streaming: boolean): string {
   return streaming ? displayed : content;
 }
 
-export function MessageBubble({ role, content, streaming, variant = 'default', createdAt, metadata }: {
+export function MessageBubble({ messageId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
+  messageId?: string;
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
   variant?: 'default' | 'deepseek'; createdAt?: string; metadata?: AgentMessageMetadata;
+  editable?: boolean; onEdit?: () => void;
+  onEditMessage?: (messageId: string, content: string) => Promise<void>;
+  onOpenGenerationCenter?: () => void;
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
@@ -440,10 +560,27 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(content);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editFocused, setEditFocused] = useState(false);
   const [projectImportState, setProjectImportState] = useState<'idle' | 'importing' | 'done' | 'error'>('idle');
+  const storyboardResultReady = useAgentStore((state) => {
+    if (metadata?.storyboardReview?.stage === 'COMPLETED') return true;
+    return Boolean(metadata?.taskCards?.some((card) => {
+      const task = state.tasks[card.taskId];
+      return card.kind === 'storyboard'
+        && task?.status === 'completed'
+        && task.stage === 'completed';
+    }));
+  });
   const bubbleRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef<HTMLTextAreaElement>(null);
   const displayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
   const messageMedia = extractMessageMedia(displayContent);
+  const generatedImages = messageMedia.filter((item) => item.type === 'IMAGE');
+  const imageBatch = !isUser && generatedImages.length >= IMAGE_BATCH_THRESHOLD ? generatedImages : null;
+  const renderedContent = imageBatch ? stripBatchImageMarkdown(displayContent) : displayContent;
   const importDisabled = !currentProject?.id || messageMedia.length === 0;
   // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
   const hitlMeta = metadata?.hitl;
@@ -452,6 +589,16 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
     ? hitlFromMetadata(metadata)
     : null;
   const submittedActionId = hitlMeta?.selectedActionId;
+  const metrics = !isUser ? metadata?.metrics : undefined;
+  const metricsTitle = metrics
+    ? [
+        `输入 ${formatTokenCount(metrics.inputTokens)}`,
+        `输出 ${formatTokenCount(metrics.outputTokens)}`,
+        metrics.cachedInputTokens > 0 ? `缓存 ${formatTokenCount(metrics.cachedInputTokens)}` : '',
+        metrics.complete ? '' : '部分模型未返回用量',
+        `耗时 ${formatElapsed(metrics.durationMs)}`,
+      ].filter(Boolean).join(' · ')
+    : '';
   const submittedActionTitle = hitlMeta?.selectedActionTitle;
   const videoPlanInfo = metadata?.kind === 'video-plan' && metadata.videoPlan && !metadata.hitl?.pending
     ? {
@@ -466,6 +613,19 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         reasons: metadata.videoPlan.reasons,
       }
     : null;
+  const editShell = editing ? {
+    width: '100%',
+    maxWidth: '100%',
+    padding: '10px 14px',
+    borderRadius: 'var(--rounded-md)',
+    background: 'var(--color-canvas)',
+    border: `1px solid ${editFocused ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
+    boxShadow: editFocused ? '0 0 0 3px rgba(204, 120, 92, 0.14)' : 'none',
+    color: 'var(--color-ink)',
+    fontSize: 16,
+    lineHeight: 1.55,
+    whiteSpace: 'normal' as const,
+  } : {};
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -473,6 +633,50 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
       setTimeout(() => setCopied(false), 1500);
     }).catch(() => { /* 剪贴板不可用时静默 */ });
   };
+
+  const beginEdit = () => {
+    onEdit?.();
+    if (!messageId) return;
+    setEditDraft(content);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditDraft(content);
+    setEditing(false);
+  };
+
+  const submitEdit = async () => {
+    const next = editDraft.trim();
+    if (!messageId || !next || editSaving) return;
+    if (next === content.trim()) {
+      setEditing(false);
+      return;
+    }
+    setEditSaving(true);
+    setEditing(false);
+    try {
+      await onEditMessage?.(messageId, next);
+    } catch {
+      setEditing(true);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!editing) setEditDraft(content);
+  }, [content, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const frame = window.requestAnimationFrame(() => {
+      editRef.current?.focus();
+      editRef.current?.setSelectionRange(editDraft.length, editDraft.length);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editing]);
+  useAutoGrowTextarea(editRef, editDraft);
 
   useEffect(() => {
     setProjectImportState('idle');
@@ -563,6 +767,7 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               textAlign: 'left',
+              ...editShell,
             }
           : {
               maxWidth: '82%',
@@ -577,20 +782,84 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               wordBreak: 'break-word',
               // 全局 #root 有 text-align: center（模板遗留），必须显式左对齐，否则气泡内文字继承居中
               textAlign: 'left',
+              ...editShell,
             }}
       >
-        {displayContent ? (
+        {editing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <textarea
+              ref={editRef}
+              aria-label="编辑消息内容"
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              onFocus={() => setEditFocused(true)}
+              onBlur={() => setEditFocused(false)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelEdit();
+                } else if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void submitEdit();
+                }
+              }}
+              rows={3}
+              style={{
+                width: '100%', minHeight: 72, border: 'none', outline: 'none', resize: 'vertical',
+                background: 'transparent', color: 'inherit', fontFamily: 'inherit',
+                fontSize: 16, lineHeight: 1.55, padding: 0,
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                style={{
+                  height: 40, padding: '0 16px', borderRadius: 'var(--rounded-md)',
+                  border: '1px solid var(--color-hairline)',
+                  background: 'var(--color-canvas)', color: 'var(--color-ink)',
+                  cursor: 'pointer', fontSize: 14, fontWeight: 500,
+                }}
+              >取消</button>
+              <button
+                type="button"
+                onClick={() => void submitEdit()}
+                disabled={!editDraft.trim() || editSaving}
+                style={{
+                  height: 40, padding: '0 18px', borderRadius: 'var(--rounded-md)', border: 'none',
+                  background: 'var(--color-primary)',
+                  color: 'var(--color-on-primary)',
+                  cursor: !editDraft.trim() || editSaving ? 'not-allowed' : 'pointer',
+                  opacity: !editDraft.trim() || editSaving ? 0.5 : 1,
+                  fontSize: 14, fontWeight: 500,
+                }}
+              >{editSaving ? '发送中…' : '发送'}</button>
+            </div>
+          </div>
+        ) : displayContent ? (
           <span className="chat-live-text">
             {role === 'assistant'
               ? (
-                <MarkdownContent
-                  content={displayContent}
-                  onImgClick={setPreviewUrl}
-                  onImportMedia={(media) => void handleImportMedia([media])}
-                  importDisabled={importDisabled}
-                  importing={projectImportState === 'importing'}
-                  dragProjectId={currentProject?.id}
-                />
+                <>
+                  {renderedContent && (
+                    <MarkdownContent
+                      content={renderedContent}
+                      onImgClick={setPreviewUrl}
+                      onImportMedia={(media) => void handleImportMedia([media])}
+                      importDisabled={importDisabled}
+                      importing={projectImportState === 'importing'}
+                      dragProjectId={currentProject?.id}
+                    />
+                  )}
+                  {imageBatch && (
+                    <GenerationImageBatch
+                      media={imageBatch}
+                      streaming={streaming}
+                      onOpen={onOpenGenerationCenter}
+                    />
+                  )}
+                </>
               )
               : renderContent(
                   displayContent,
@@ -617,16 +886,23 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
       </div>
+      {!isUser && metadata?.taskCards?.map((task) => (
+        <AgentTaskCard key={task.taskId} taskId={task.taskId} />
+      ))}
+      {!isUser && storyboardResultReady && (
+        <StoryboardResultActions />
+      )}
       {/* 助手消息：正文下方渲染建议动作 */}
       {!isUser && metadata?.suggestedActions && metadata.suggestedActions.length > 0 && (
         <SuggestedActions actions={metadata.suggestedActions} />
       )}
       {/* 消息 meta 行：时间 + 复制，直接常显 */}
-      {!streaming && (
+      {!streaming && !editing && (
         <div
           style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
             padding: ds ? '0 2px' : '0 4px',
+            flexWrap: 'wrap', rowGap: 3,
           }}
         >
           <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
@@ -643,6 +919,31 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
               color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
             }}
           >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+          {isUser && editable && (onEdit || onEditMessage) && (
+            <button
+              onClick={beginEdit}
+              title="编辑消息"
+              onMouseEnter={(e) => {
+                const el = e.currentTarget;
+                el.style.background = 'rgba(0,0,0,0.05)';
+                el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget;
+                el.style.background = 'transparent';
+                el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)';
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
+                color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
+              }}
+            >
+              <Pencil size={12} strokeWidth={1.8} />
+              编辑
+            </button>
+          )}
           {!isUser && messageMedia.length > 0 && (
             <button
               onClick={() => void handleImportMedia(messageMedia)}
@@ -674,6 +975,21 @@ export function MessageBubble({ role, content, streaming, variant = 'default', c
                 ? '已导入素材库'
                 : projectImportState === 'error' ? '重试导入素材库' : '导入素材库'}
             </button>
+          )}
+          {metrics && (
+            <span
+              title={metricsTitle}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {metrics.totalTokens > 0 && (
+                <span>{metrics.complete ? '' : '≥ '}{formatTokenCount(metrics.totalTokens)} tokens</span>
+              )}
+              <span>{formatElapsed(metrics.durationMs)}</span>
+            </span>
           )}
         </div>
       )}

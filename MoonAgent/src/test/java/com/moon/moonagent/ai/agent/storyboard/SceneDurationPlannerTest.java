@@ -48,6 +48,20 @@ class SceneDurationPlannerTest {
     }
 
     @Test
+    void parseTotalSeconds_usesLongestExplicitTotalWhenMixedWithPerShotDuration() {
+        assertThat(SceneDurationPlanner.parseTotalSeconds("生成两分钟视频，每镜 8 秒"))
+                .isEqualTo(120);
+    }
+
+    @Test
+    void parseTotalSeconds_supportsHalfMinutePhrases() {
+        assertThat(SceneDurationPlanner.parseTotalSeconds("生成一分半的视频"))
+                .isEqualTo(90);
+        assertThat(SceneDurationPlanner.parseTotalSeconds("生成两分半的视频"))
+                .isEqualTo(150);
+    }
+
+    @Test
     void allocate_weightsLongerScenesWithinModelLimits() {
         SceneDurationPlanner.Allocation allocation =
                 SceneDurationPlanner.allocate(30, List.of("短", "中等长度的分镜内容", "这是一段明显更长的分镜内容"));

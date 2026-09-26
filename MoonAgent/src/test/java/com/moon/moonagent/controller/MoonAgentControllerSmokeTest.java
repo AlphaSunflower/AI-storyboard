@@ -1,6 +1,8 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
+import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
@@ -22,6 +24,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -47,11 +50,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = {
     AgentConversationController.class,
+    AgentTaskController.class,
     StoryboardImageQueueController.class,
     StoryboardVideoQueueController.class
 })
 @Import(SecurityConfig.class)
 @EnableConfigurationProperties(AgentAiConfigProperties.class)
+@TestPropertySource(properties = "ai.agent.agentscope.enabled=true")
 class MoonAgentControllerSmokeTest {
 
     @Autowired
@@ -75,6 +80,10 @@ class MoonAgentControllerSmokeTest {
     private StoryboardVideoQueueService videoQueueService;
     @MockitoBean
     private StoryboardClient storyboardClient;
+    @MockitoBean
+    private AgentScopeAsyncTaskService asyncTaskService;
+    @MockitoBean
+    private AgentTaskEventHub taskEventHub;
 
     private AgentConversation conversation() {
         AgentConversation c = new AgentConversation();
@@ -124,6 +133,9 @@ class MoonAgentControllerSmokeTest {
         when(chatService.confirmImageDone(anyString(), anyString())).thenReturn(true);
         when(chatService.interrupt(anyString(), anyString())).thenReturn(true);
         when(chatService.getVideoTaskStatus(anyString(), anyString())).thenReturn(Map.of("status", "processing"));
+        when(asyncTaskService.getStatus("u1", "task-1")).thenReturn(Map.of(
+                "taskId", "task-1", "status", "running",
+                "title", "剧情诊断", "stage", "plot_diagnosis"));
         when(chatService.updateConversation(anyString(), anyString(), any(), any())).thenReturn(conversation());
         when(optimizeService.optimize(anyString())).thenReturn("优化后的提示词");
         when(generationRecordService.listRecords(anyString(), any(), any(), any(), any(), anyInt(), anyInt()))
@@ -168,7 +180,7 @@ class MoonAgentControllerSmokeTest {
         mockMvc.perform(post("/api/agent/conversations/c1/interrupt").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data").value(true));
         mockMvc.perform(get("/api/agent/tasks/task-1").header("X-User-Id", "u1"))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("processing"));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("running"));
         mockMvc.perform(get("/api/agent/generation-records?page=1&size=20").header("X-User-Id", "u1"))
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/agent/projects/p1/output-materials?currentConversationId=c1").header("X-User-Id", "u1"))

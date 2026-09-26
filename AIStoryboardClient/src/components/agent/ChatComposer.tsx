@@ -15,9 +15,10 @@ import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
-import { buildSceneReviewPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
+import { buildSceneInspectPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
+import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   parseProjectLibraryDragPayload,
@@ -48,7 +49,7 @@ export const DS = {
 export function ChatComposer() {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
-    refImageUrls, uploadRefImages, sendMessage, stopGeneration,
+    refImageUrls, uploadRefImages, sendMessage, interruptAndSend, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
     addRefImageUrls, setRefImageUrls,
@@ -65,6 +66,7 @@ export function ChatComposer() {
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [canvasMediaOpen, setCanvasMediaOpen] = useState(false);
   const [uploadDrafts, setUploadDrafts] = useState<Array<{
     file: File;
@@ -86,15 +88,21 @@ export function ChatComposer() {
   const conversations = useAgentStore((s) => s.conversations);
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
-  const readOnly = activeConversation?.status === 'archived'
-    || (activeConversation?.orchestrationMode != null
-      && activeConversation.orchestrationMode !== 'UNIFIED_LOOP');
+  const archived = activeConversation?.status === 'archived';
+  const legacyOrchestration = activeConversation?.orchestrationMode != null
+    && activeConversation.orchestrationMode !== 'UNIFIED_LOOP';
+  const readOnly = archived || legacyOrchestration;
+  /** 只读原因不同提示分开：旧编排会话并未归档，不能一律说「已归档」 */
+  const readOnlyHint = archived
+    ? '该会话已归档，仅可查看历史记录，请新建会话后继续。'
+    : '该会话由旧版编排创建，仅可查看历史记录，请新建会话后继续。';
   // 流式语音识别状态：活跃会话句柄 + 已确认文本（增量追加，不清空）
   const sttRef = useRef<{ push: (p: Int16Array) => void; close: () => void; cancel: () => void } | null>(null);
   const confirmedRef = useRef(''); // 已确认片段累积（vosk 每条 text 是增量，片段间逗号分隔）
   const projectLibraryDropRef = useRef<(payload: ProjectLibraryDragPayload) => Promise<void>>(
     async () => undefined,
   );
+  useAutoGrowTextarea(inputRef, text);
 
   // partial（预览全文）→ 显示「已确认 + 新片段」临时预览（新片段会随识别修正变化）
   const handleSttPartial = useCallback((t: string) => {
@@ -211,11 +219,23 @@ export function ChatComposer() {
 
   const busy = (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan
     || !!canvasBinding || canvasExitPending;
+  const canInterruptSend = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan
+    && !canvasBinding && !canvasExitPending;
+  const attachLocked = readOnly;
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || busy || readOnly) return;
+    if (!content || readOnly || (busy && !canInterruptSend)) return;
+    // 未选项目时 sendMessage 会拒绝发送：先拦下并保留已输入文字，避免清空后丢内容
+    if (!projectId) {
+      useAgentStore.setState({ streamError: '请先在左上角选择一个项目' });
+      return;
+    }
     setText('');
+    if (canInterruptSend) {
+      void interruptAndSend(content);
+      return;
+    }
     const groupUrls = pendingGroup?.items.map((item) =>
       item.objectKey.startsWith('http') ? item.objectKey : `/api/files/${item.objectKey}`) || [];
     if (pendingGroup) sessionStorage.setItem('moon.activeGroupId', pendingGroup.groupId);
@@ -244,18 +264,22 @@ export function ChatComposer() {
   const closeUploadDrafts = () => {
     uploadDrafts.forEach((d) => URL.revokeObjectURL(d.preview));
     setUploadDrafts([]);
+    setUploadError('');
   };
 
   const handleUploadConfirm = async () => {
     const drafts = uploadDrafts;
     if (readOnly || drafts.length === 0) return;
+    setUploadError('');
     try {
       await uploadRefImages(
         drafts.map((d) => d.file),
         drafts.map((d) => d.purpose.trim()),
       );
     } catch {
-      alert('图片上传失败');
+      // 失败保留草稿弹窗与文字，用户可直接重试（原 alert 打断且无处看原因）
+      setUploadError('图片上传失败，请重试');
+      return;
     }
     closeUploadDrafts();
   };
@@ -307,7 +331,7 @@ export function ChatComposer() {
       try {
         const references = JSON.parse(scenePayload) as EmbeddedSceneReference[];
         if (Array.isArray(references) && references.length > 0) {
-          sendMessage(buildSceneReviewPrompt(references), { routingHint: 'intent-scene-review' });
+          sendMessage(buildSceneInspectPrompt(references), { routingHint: 'intent-storyboard' });
           return;
         }
       } catch { /* 无效拖拽数据按普通文件拖拽处理 */ }
@@ -329,7 +353,7 @@ export function ChatComposer() {
   const handleSceneConfirm = (selected: SceneResponse[]) => {
     if (readOnly) return;
     const sceneRefs = selected.map((scene) => `分镜${scene.sceneNumber}`).join('、');
-    sendMessage(`请审查 ${sceneRefs}`, { routingHint: 'intent-scene-review' });
+    sendMessage(`请查看 ${sceneRefs}`, { routingHint: 'intent-storyboard' });
     setSceneModalOpen(false);
   };
 
@@ -614,7 +638,7 @@ export function ChatComposer() {
           padding: '8px 12px', borderRadius: 12, background: 'rgba(0,0,0,0.04)',
           color: DS.textSecondary, fontSize: 13,
         }}>
-          该会话已归档，仅可查看历史记录，请新建会话后继续。
+          {readOnlyHint}
         </div>
       )}
       <textarea
@@ -628,32 +652,33 @@ export function ChatComposer() {
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={readOnly ? '该会话已归档' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-        disabled={busy || readOnly}
+        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        disabled={readOnly || (busy && !canInterruptSend)}
         rows={2}
         style={{
           border: 'none', outline: 'none', resize: 'none', background: 'transparent',
           fontSize: 16, lineHeight: 1.6, color: DS.ink, fontFamily: 'inherit',
+          boxSizing: 'border-box', overflowY: 'hidden', scrollbarWidth: 'thin',
         }}
       />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ position: 'relative' }}>
           <button
             ref={menuBtnRef}
-            onClick={readOnly ? undefined : openMenu}
-            disabled={readOnly}
+            onClick={attachLocked ? undefined : openMenu}
+            disabled={attachLocked}
             title="上传"
             className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
             style={{
               width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
-              fontSize: 17, cursor: readOnly ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
+              fontSize: 17, cursor: attachLocked ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              opacity: readOnly ? 0.45 : 1,
+              opacity: attachLocked ? 0.45 : 1,
             }}
           >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
-          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden disabled={readOnly} onChange={handleFile} />
+          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden disabled={attachLocked} onChange={handleFile} />
           {/* 下拉菜单：portal 到 body */}
           {menuPresence.mounted && menuPos && createPortal(
             <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
@@ -679,7 +704,7 @@ export function ChatComposer() {
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
             disabled={readOnly || (busy && !recording)}
           />
-          {streaming && !agentVideoTask ? (
+          {streaming && !agentVideoTask && !text.trim() ? (
             <button
               onClick={stopGeneration}
               title="停止生成"
@@ -695,17 +720,17 @@ export function ChatComposer() {
           ) : (
             <button
               onClick={handleSend}
-              disabled={readOnly || busy || !text.trim()}
+              disabled={readOnly || (busy && !canInterruptSend) || !text.trim()}
               style={{
                 height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
                 background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-                cursor: readOnly || busy || !text.trim() ? 'not-allowed' : 'pointer',
-                opacity: readOnly || busy || !text.trim() ? 0.45 : 1,
+                cursor: readOnly || (busy && !canInterruptSend) || !text.trim() ? 'not-allowed' : 'pointer',
+                opacity: readOnly || (busy && !canInterruptSend) || !text.trim() ? 0.45 : 1,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { if (!busy && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
+              onMouseEnter={(e) => { if ((!busy || canInterruptSend) && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
               onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-            >发送</button>
+            >{canInterruptSend ? '停止并发送' : '发送'}</button>
           )}
         </div>
       </div>
@@ -769,7 +794,7 @@ export function ChatComposer() {
             <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {refImageUrls.map((u, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', borderRadius: 12, background: DS.hover }}>
-                  <img src={u} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
+                  <img src={u} alt={`参考图 ${i + 1}`} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
                   <span style={{ fontSize: 12, color: DS.textCaption, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>图 {i + 1}</span>
                   <button
                     onClick={() => removeRefImageUrl(i)}
@@ -919,6 +944,7 @@ export function ChatComposer() {
                 </div>
               ))}
             </div>
+            {uploadError && <div style={{ color: 'rgb(217, 45, 32)', fontSize: 13 }}>{uploadError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={closeUploadDrafts} style={{
                 padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',

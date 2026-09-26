@@ -10,6 +10,7 @@ import urllib.error
 BASE_GW = "http://localhost:8080"   # ApiGateway 统一入口
 BASE_BE = "http://localhost:8082"   # 主后端直连（越权/内部接口测试）
 BASE_MA = "http://localhost:8084"   # MoonAgent 直连（X-User-Id 伪造测试）
+BASE_MN = BASE_MA                    # 别名（run_smoke.py 用）
 BASE_LLM = "http://localhost:8083"  # LLM 网关
 CREDS = "scripts/e2e/.creds.json"
 
@@ -37,6 +38,10 @@ def parse(raw):
         return json.loads(raw)
     except Exception:
         return {"raw": raw[:300]}
+
+
+def data(raw):
+    return parse(raw).get("data")
 
 
 def sse_post(path, body, token, max_wait=300):
@@ -83,7 +88,25 @@ def load_creds():
         return json.load(f)
 
 
+# ── 统计计数器（run_smoke.py 用） ──
+_pass_count = _fail_count = 0
+
+
 def check(label, cond, detail=""):
+    global _pass_count, _fail_count
     tag = "PASS" if cond else "FAIL"
-    print(f"[{tag}] {label}" + (f" — {detail}" if detail else ""))
+    if cond:
+        _pass_count += 1
+    else:
+        _fail_count += 1
+    print(f"  [{tag}] {label}" + (f"  ({detail})" if detail else ""))
     return cond
+
+
+def summary(suite_name):
+    total = _pass_count + _fail_count
+    status = "PASS" if _fail_count == 0 else "FAIL"
+    print(f"\n  {'='*56}")
+    print(f"  {suite_name}: {_pass_count}/{total} passed  [{status}]")
+    print(f"  {'='*56}\n")
+    return _fail_count == 0

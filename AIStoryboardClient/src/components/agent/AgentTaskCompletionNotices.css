@@ -1,0 +1,71 @@
+.agent-task-notice-stack {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 560px);
+  margin: 10px 0 2px;
+}
+
+.agent-task-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #22a06b 28%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #22a06b 7%, var(--color-surface));
+}
+
+.agent-task-notice > button:first-child {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-task-notice > button:first-child > svg {
+  flex: 0 0 auto;
+  color: #22a06b;
+}
+
+.agent-task-notice span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-task-notice strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-task-notice small {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.agent-task-notice__close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.is-task-focused {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}

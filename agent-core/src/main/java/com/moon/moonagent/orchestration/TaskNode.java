@@ -1,5 +1,7 @@
 package com.moon.moonagent.orchestration;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+
 import java.util.List;
 import java.util.Map;
 
@@ -7,6 +9,7 @@ public record TaskNode(
         String nodeId,
         String capabilityKey,
         String title,
+        @JsonDeserialize(using = TaskParametersDeserializer.class)
         Map<String, Object> parameters,
         List<String> dependencies,
         TaskNodeState state,

@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
+import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -22,7 +23,10 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeAssetGroupTools assetGroupTools;
     private final AgentScopeImageTools imageTools;
     private final AgentScopeVideoTools videoTools;
+    private final AgentScopeStoryboardTools storyboardTools;
+    private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
+    private final AgentAiConfigProperties agentConfig;
 
     public AgentScopeToolkitFactory(AgentScopeSessionTools sessionTools,
                                     AgentScopeInteractionTools interactionTools,
@@ -30,41 +34,61 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeAssetGroupTools assetGroupTools,
                                     AgentScopeImageTools imageTools,
                                     AgentScopeVideoTools videoTools,
-                                    SkillExpander skillExpander) {
+                                    AgentScopeStoryboardTools storyboardTools,
+                                    AgentScopeToolPipeline toolPipeline,
+                                    SkillExpander skillExpander,
+                                    AgentAiConfigProperties agentConfig) {
         this.sessionTools = sessionTools;
         this.interactionTools = interactionTools;
         this.structuredTools = structuredTools;
         this.assetGroupTools = assetGroupTools;
         this.imageTools = imageTools;
         this.videoTools = videoTools;
+        this.storyboardTools = storyboardTools;
+        this.toolPipeline = toolPipeline;
         this.skillExpander = skillExpander;
+        this.agentConfig = agentConfig;
     }
 
     public Toolkit create() {
         Toolkit toolkit = new Toolkit();
 
-        // Read-only discovery and one focused clarification tool stay available before a
-        // skill is activated. Media tools remain hidden until their skill group is loaded.
-        sessionTools.tools().forEach(toolkit::registerAgentTool);
-        structuredTools.tools().forEach(toolkit::registerAgentTool);
-        toolkit.registerAgentTool(assetGroupTools.tool());
-        toolkit.registerAgentTool(interactionTools.tool());
+        // Read-only discovery stays available before a skill is activated. Human input can be
+        // disabled temporarily so long-running media/storyboard work cannot stop on a card.
+        sessionTools.tools().forEach(tool -> register(toolkit, tool));
+        structuredTools.tools().forEach(tool -> register(toolkit, tool));
+        register(toolkit, assetGroupTools.tool());
+        register(toolkit, interactionTools.storyboardCommitTool());
+        if (agentConfig.isHumanInputEnabled()) {
+            register(toolkit, interactionTools.tool());
+        }
+        storyboardTools.tools().forEach(tool -> register(toolkit, tool));
 
         toolkit.createSkillToolGroup(
                 IMAGE_TOOLS, "Image generation and reference-edit tools", false, "pic");
-        toolkit.registration().agentTool(imageTools.tool()).group(IMAGE_TOOLS).apply();
-        toolkit.registration().agentTool(imageTools.batchTool()).group(IMAGE_TOOLS).apply();
+        toolkit.registration()
+                .agentTool(toolPipeline.wrap(imageTools.tool()))
+                .group(IMAGE_TOOLS).apply();
+        toolkit.registration()
+                .agentTool(toolPipeline.wrap(imageTools.batchTool()))
+                .group(IMAGE_TOOLS).apply();
         ToolCallback[] imageCallbacks = skillExpander.toolCallbacks(List.of("refineImage"));
         if (imageCallbacks.length > 0) {
             toolkit.registration()
-                    .agentTool(new SpringAiToolAdapter(imageCallbacks[0]))
+                    .agentTool(toolPipeline.wrapGeneric(new SpringAiToolAdapter(imageCallbacks[0])))
                     .group(IMAGE_TOOLS)
                     .apply();
         }
 
         toolkit.createSkillToolGroup(
                 VIDEO_TOOLS, "Asynchronous video generation tools", false, "video");
-        toolkit.registration().agentTool(videoTools.tool()).group(VIDEO_TOOLS).apply();
+        toolkit.registration()
+                .agentTool(toolPipeline.wrap(videoTools.tool()))
+                .group(VIDEO_TOOLS).apply();
         return toolkit;
+    }
+
+    private void register(Toolkit toolkit, AgentScopeTool tool) {
+        toolkit.registerAgentTool(toolPipeline.wrap(tool));
     }
 }

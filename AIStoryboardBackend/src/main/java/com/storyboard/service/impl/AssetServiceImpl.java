@@ -76,13 +76,13 @@ public class AssetServiceImpl implements AssetService {
     public List<AssetVO> list(String userId, String projectId, String type) {
         List<AssetSummary> merged = new ArrayList<>();
         if (projectId != null && !projectId.isBlank()) {
-            merged.addAll(assetClient.listAssets(
-                    AssetScope.PROJECT, projectId, null, AssetType.AI_ASSET.name(),
-                    List.of(), null, false, 1, 100).records());
+            merged.addAll(assetClient.listAssetsForUser(userId,
+                    AssetScope.PROJECT, projectId, null, null,
+                    AssetType.AI_ASSET.name(), 1, 100, UUID.randomUUID().toString()).records());
         }
-        merged.addAll(assetClient.listAssets(
-                AssetScope.GLOBAL, null, null, AssetType.AI_ASSET.name(),
-                List.of(), null, false, 1, 100).records());
+        merged.addAll(assetClient.listAssetsForUser(userId,
+                AssetScope.GLOBAL, null, null, null,
+                AssetType.AI_ASSET.name(), 1, 100, UUID.randomUUID().toString()).records());
         return merged.stream()
                 .filter(asset -> type == null || type.isBlank()
                         || aiKindName(asset.aiKind()).equalsIgnoreCase(type))
@@ -100,7 +100,7 @@ public class AssetServiceImpl implements AssetService {
                 null,
                 current.version(),
                 true
-        ), current.version(), UUID.randomUUID().toString());
+        ), current.version(), UUID.randomUUID().toString(), userId);
         return toVO(updated, mediaToImages(assetClient.getAssetInternal(assetId, userId).media()));
     }
 
@@ -125,7 +125,7 @@ public class AssetServiceImpl implements AssetService {
                     return file.getOriginalFilename();
                 }
             };
-            MediaRef media = assetClient.addAssetMedia(assetId, resource, UUID.randomUUID().toString());
+            MediaRef media = assetClient.addAssetMedia(assetId, resource, UUID.randomUUID().toString(), userId);
             return new AssetImageVO(
                     media.id(), media.url(), media.sortOrder(), file.getOriginalFilename(), text);
         } catch (Exception e) {
@@ -135,7 +135,7 @@ public class AssetServiceImpl implements AssetService {
 
     @Override
     public void deleteImage(String userId, String assetId, String imageId) {
-        assetClient.deleteAssetMedia(assetId, imageId, UUID.randomUUID().toString());
+        assetClient.deleteAssetMedia(assetId, imageId, UUID.randomUUID().toString(), userId);
     }
 
     @Override

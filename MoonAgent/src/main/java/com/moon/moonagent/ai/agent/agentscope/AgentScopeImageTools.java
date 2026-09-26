@@ -95,7 +95,51 @@ public class AgentScopeImageTools {
             String quality,
             String n,
             AgentScopeRunContext context) {
+        return generateImage(prompt, sourceAssetIds, sourceUrls, size, quality, n, context, false);
+    }
+
+    Map<String, Object> generateImageForStoryboard(
+            String prompt,
+            List<String> sourceAssetIds,
+            List<String> sourceUrls,
+            String size,
+            String quality,
+            String n,
+            String sceneId,
+            AgentScopeRunContext context) {
+        return generateImage(prompt, sourceAssetIds, sourceUrls, size, quality, n,
+                sceneId, context, true);
+    }
+
+    private Map<String, Object> generateImage(
+            String prompt,
+            List<String> sourceAssetIds,
+            List<String> sourceUrls,
+            String size,
+            String quality,
+            String n,
+            AgentScopeRunContext context,
+            boolean storyboardScoped) {
+        return generateImage(prompt, sourceAssetIds, sourceUrls, size, quality, n,
+                null, context, storyboardScoped);
+    }
+
+    private Map<String, Object> generateImage(
+            String prompt,
+            List<String> sourceAssetIds,
+            List<String> sourceUrls,
+            String size,
+            String quality,
+            String n,
+            String sceneId,
+            AgentScopeRunContext context,
+            boolean storyboardScoped) {
         AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
+        if (!storyboardScoped && context.turnState() != null
+                && context.turnState().isStoryboardRequested()) {
+            throw new IllegalStateException(
+                    "本轮已进入分镜制作流程，不能改用通用生图；请先完成正式分镜列表，再按 shot_id 生成镜头图片。");
+        }
         if (context.turnState() != null && context.turnState().hasStartedMedia("image")) {
             throw new IllegalStateException(
                     "本轮已经成功生成或提交过图片，请直接使用已有结果回复，不要重复调用。");
@@ -108,7 +152,7 @@ public class AgentScopeImageTools {
                     conversation, prompt, List.of(), sources, size, quality, count, context);
         }
         Map<String, Object> result = generationService.generateImage(
-                conversation, null, prompt, null, size, quality,
+                conversation, sceneId, prompt, null, size, quality,
                 1,
                 sources.isEmpty() ? null : "edit", sources, null);
         Map<String, Object> out = new LinkedHashMap<>(result);
@@ -144,6 +188,10 @@ public class AgentScopeImageTools {
             String videoResolution,
             AgentScopeRunContext context) {
         AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
+        if (context.turnState() != null && context.turnState().isStoryboardRequested()) {
+            throw new IllegalStateException(
+                    "本轮已进入分镜制作流程，不能改用通用批量生图；请先完成正式分镜列表，再按 shot_id 生成镜头图片。");
+        }
         if (context.turnState() != null && context.turnState().hasStartedMedia("image")) {
             throw new IllegalStateException(
                     "本轮已经成功生成或提交过图片，请直接使用已有结果，不要重复调用。");
@@ -220,6 +268,10 @@ public class AgentScopeImageTools {
         }
         if (context != null && context.turnState() != null) {
             context.turnState().addText("批量生图任务已提交，任务 ID：`" + taskId + "`，正在生成中。");
+            context.turnState().addTaskCard(
+                    taskId,
+                    count > 1 ? "批量生成 " + count + " 张图片" : "生成图片",
+                    "image");
             context.turnState().markMediaStarted("image");
         }
         return Map.of(
@@ -283,4 +335,5 @@ public class AgentScopeImageTools {
         return param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
     }
+
 }

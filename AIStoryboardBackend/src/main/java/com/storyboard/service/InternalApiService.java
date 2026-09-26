@@ -29,8 +29,17 @@ public interface InternalApiService {
     /** 批量写入分镜 */
     void batchInsertScenes(List<SceneFull> scenes);
 
+    /** 事务内全量替换项目分镜，返回按输入顺序生成的新 sceneId。 */
+    List<String> replaceProjectScenes(String projectId, List<SceneFull> scenes);
+
+    /** 事务内追加项目分镜，保留现有分镜并从最大 sceneNumber 后连续编号。 */
+    List<String> appendProjectScenes(String projectId, List<SceneFull> scenes);
+
     /** 清空项目分镜 */
     void deleteProjectScenes(String projectId);
+
+    /** 删除单个分镜。 */
+    void deleteScene(String sceneId);
 
     /** 查场景关联的资产 */
     List<SceneAsset> getSceneAssets(String sceneId);

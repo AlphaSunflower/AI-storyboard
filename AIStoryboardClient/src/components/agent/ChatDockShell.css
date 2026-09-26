@@ -1,0 +1,284 @@
+.chat-dock-shell {
+  box-sizing: border-box;
+}
+
+.chat-dock-shell.is-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-dock-shell__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-dock-shell.is-docked {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  background: var(--color-canvas);
+  box-shadow: 0 24px 70px rgba(20, 20, 19, 0.2);
+  transition:
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 220ms ease,
+    background-color 180ms ease;
+}
+
+.chat-dock-shell.is-pill {
+  width: min(480px, calc(100vw - 32px));
+  height: 56px;
+  overflow: visible;
+  border-color: rgba(250, 249, 245, 0.12);
+  border-radius: var(--rounded-pill);
+  background: var(--color-surface-dark);
+  box-shadow: 0 16px 42px rgba(20, 20, 19, 0.26);
+}
+
+.chat-dock-shell.is-open {
+  width: min(760px, calc(100vw - 32px));
+  height: min(214px, 32dvh);
+  border-radius: var(--rounded-xl);
+}
+
+.chat-dock-shell.is-history {
+  width: min(760px, calc(100vw - 32px));
+  height: min(680px, 72dvh);
+  border-radius: var(--rounded-xl);
+}
+
+.chat-dock-shell.is-hidden {
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.chat-dock-shell.is-pill .chat-dock-shell__content,
+.chat-dock-shell.is-hidden .chat-dock-shell__content {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.chat-dock-shell.is-open .chat-dock-shell__content,
+.chat-dock-shell.is-history .chat-dock-shell__content {
+  padding-top: 54px;
+}
+
+.chat-dock-shell.is-open .chat-composer-dock {
+  margin-top: auto;
+}
+
+.chat-dock-shell__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 219;
+  background: rgba(20, 20, 19, 0.025);
+  cursor: default;
+}
+
+.chat-dock-shell__pill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-on-dark);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-dock-shell__pill-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(250, 249, 245, 0.1);
+  color: #d9a88f;
+}
+
+.chat-dock-shell__pill-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-dock-shell__pill-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-on-dark-soft);
+}
+
+.chat-dock-shell__pill-status .is-spinning {
+  color: #d9a88f;
+}
+
+.chat-dock-shell__pill:hover,
+.chat-dock-shell__pill:focus-visible {
+  background: rgba(250, 249, 245, 0.06);
+}
+
+.chat-dock-shell__pill:focus-visible,
+.chat-dock-shell__pill-hide:focus-visible,
+.chat-dock-shell__history-toggle:focus-visible,
+.chat-dock-shell__handle:focus-visible,
+.chat-dock-shell__hover-zone:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.chat-dock-shell__pill-hide {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 50%;
+  z-index: 2;
+  width: 74px;
+  height: 22px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(250, 249, 245, 0.14);
+  border-top: 0;
+  border-radius: 0 0 11px 11px;
+  background: var(--color-surface-dark);
+  color: var(--color-on-dark-soft);
+  cursor: pointer;
+}
+
+.chat-dock-shell__pill-hide:hover {
+  color: var(--color-on-dark);
+}
+
+.chat-dock-shell__history-toggle {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-dock-shell__history-toggle:hover {
+  background: var(--color-surface-soft);
+}
+
+.chat-dock-shell__history-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-dock-shell__history-action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chat-dock-shell__history-action .is-spinning {
+  color: var(--color-primary);
+}
+
+.chat-dock-shell__hover-zone {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 3;
+  width: 184px;
+  height: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.chat-dock-shell__handle {
+  width: 42px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(250, 249, 245, 0.14);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--color-surface-dark);
+  color: var(--color-on-dark);
+  box-shadow: 0 -5px 18px rgba(20, 20, 19, 0.18);
+  cursor: pointer;
+  animation: chat-dock-handle-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes chat-dock-handle-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-dock-shell.is-open {
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    height: min(214px, 34dvh);
+  }
+
+  .chat-dock-shell.is-history {
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    height: min(680px, 76dvh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-dock-shell.is-docked,
+  .chat-dock-shell__handle {
+    transition: none;
+    animation: none;
+  }
+}

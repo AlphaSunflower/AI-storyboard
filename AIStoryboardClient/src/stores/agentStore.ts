@@ -1,14 +1,15 @@
 import { create } from 'zustand';
 import {
-  agentApi, streamChat, submitForm,
+  agentApi, streamChat, streamEditedMessage, streamInterruptAndSend, submitForm, streamTaskEvents,
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type SseEvent, type VideoTaskStatus, type AssetOption,
+  type AgentTaskView,
+  type AgentWakeupMessage,
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
-import { useGenerationRecordsStore } from './generationRecordsStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 import { libraryApi } from '../api/library';
@@ -58,7 +59,64 @@ type StreamSettlement = {
   settle: () => void;
 };
 
+export type AgentTaskNotice = {
+  taskId: string;
+  title: string;
+  conversationId: string;
+  createdAt: string;
+  storyboardRunId?: string;
+};
+
+type TaskUpsertOptions = {
+  notifyIfTerminal?: boolean;
+};
+
 const streamSettlements = new Map<string, StreamSettlement>();
+const titleRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const TITLE_REFRESH_DELAYS_MS = [1_200, 3_000, 7_000, 15_000, 30_000];
+
+function cancelConversationTitleRefresh(conversationId: string) {
+  const timer = titleRefreshTimers.get(conversationId);
+  if (timer) clearTimeout(timer);
+  titleRefreshTimers.delete(conversationId);
+}
+
+/**
+ * 标题可能晚于 message_end 落库：先出现首句兜底，再由 AI 条件替换。
+ * 首条消息没随 SSE 带回标题时，在 30 秒窗口内短暂拉取会话详情，覆盖两次更新后自动停止。
+ */
+function scheduleConversationTitleRefresh(conversationId: string) {
+  cancelConversationTitleRefresh(conversationId);
+  let attempt = 0;
+  const poll = async () => {
+    try {
+      const res = await agentApi.getConversation(conversationId);
+      const conversation = res.data.data?.conversation;
+      if (conversation?.title && conversation.title !== '新对话') {
+        useAgentStore.setState((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === conversationId && c.title !== conversation.title ? conversation : c),
+        }));
+      }
+    } catch {
+      // 标题补齐是锦上添花；失败时允许下一次计划重试。
+    }
+    attempt += 1;
+    if (attempt >= TITLE_REFRESH_DELAYS_MS.length) {
+      titleRefreshTimers.delete(conversationId);
+      return;
+    }
+    titleRefreshTimers.set(
+      conversationId,
+      setTimeout(() => { void poll(); }, TITLE_REFRESH_DELAYS_MS[attempt]),
+    );
+  };
+  titleRefreshTimers.set(
+    conversationId,
+    setTimeout(() => { void poll(); }, TITLE_REFRESH_DELAYS_MS[0]),
+  );
+}
 
 /** 同一会话 SSE 串行收尾：UI 可在 message_end 立即解锁，同时避免后端会话锁未释放时提交撞 40901。 */
 async function reserveStreamSlot(conversationId: string): Promise<() => void> {
@@ -148,20 +206,6 @@ function resumeGenerationForTask(conversationId: string, assistantId: string, hi
       workflowHint: generationHint(view),
     };
   });
-}
-
-/** 审核分镜的同步生图结束后刷新编辑器和生成记录；卡片卸载后也必须执行。 */
-async function refreshAfterReviewImageGeneration(projectId: string | undefined) {
-  if (!projectId) return;
-  const currentProject = useProjectStore.getState().currentProject;
-  if (currentProject?.id === projectId) {
-    await useProjectStore.getState().loadProject(projectId).catch(() => undefined);
-  }
-  const recordsStore = useGenerationRecordsStore.getState();
-  await recordsStore.loadRecords().catch(() => undefined);
-  if (recordsStore.activeId) {
-    await recordsStore.openDetail(recordsStore.activeId).catch(() => undefined);
-  }
 }
 
 export interface HumanInputInfo {
@@ -267,8 +311,28 @@ interface AgentState {
   setWorkflowHint: (v: string) => void;
   // 智能体视频异步任务（进行中；completed/failed 后清空）——任务中心悬浮球展示用
   agentVideoTask: { taskId: string; status: 'queued' | 'running'; waitingSec: number } | null;
+  // 统一智能体后台任务：key=taskId，version 保证 SSE/轮询乱序时不回退。
+  tasks: Record<string, AgentTaskView>;
+  taskNotices: Record<string, AgentTaskNotice[]>;
+  taskUnread: Record<string, number>;
+  taskDrawerId: string | null;
+  taskFocusId: string | null;
+  taskStreamConnected: boolean;
+  startTaskStream: () => void;
+  stopTaskStream: () => void;
+  loadTasks: (conversationId?: string) => Promise<void>;
+  upsertTask: (task: AgentTaskView, options?: TaskUpsertOptions) => void;
+  openTaskDrawer: (taskId: string) => void;
+  closeTaskDrawer: () => void;
+  focusTask: (taskId: string | null) => void;
+  dismissTaskNotice: (conversationId: string, taskId: string) => void;
+  cancelTask: (taskId: string) => Promise<void>;
+  retryTask: (taskId: string) => Promise<void>;
+  followUpTask: (taskId: string, instruction: string) => Promise<void>;
   // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
   pendingAssistantId: string | null;
+  editAndResend: (content: string, messageId?: string) => Promise<void>;
+  interruptAndSend: (content: string) => Promise<void>;
 
   // 输入
   refImageUrls: string[];
@@ -310,6 +374,8 @@ interface AgentState {
     referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
+    editMessageId?: string;
+    interruptCurrent?: boolean;
   }) => Promise<void>;
   submitHumanInput: (
     actionId: string,
@@ -356,12 +422,100 @@ interface AgentState {
 
 let initialSceneCount = 0;
 
-// 当前流式会话的 AbortController + 用户手动停止标志：点「停止生成」时中断 SSE fetch（typewriter 停）并委托后端协作式取消
+  // 当前流式会话的 AbortController + 用户手动停止标志：点「停止生成」时中断 SSE fetch（typewriter 停）并委托后端协作式取消
 let streamAbort: AbortController | null = null;
 let manualStop = false;
 // 视频异步任务轮询句柄 + 代次令牌：新一轮发送/停止时作废旧轮询，防止过期轮询结果污染新流
 let videoPollTimer: ReturnType<typeof setInterval> | null = null;
 let videoPollToken = 0;
+let taskStreamAbort: AbortController | null = null;
+let taskStreamRunning = false;
+let taskFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+const ACTIVE_TASK_STATUSES = new Set<AgentTaskView['status']>([
+  'waiting_parent', 'queued', 'running', 'cancelling',
+]);
+
+function isDetachedAsyncTask(taskKind: string | null | undefined): boolean {
+  return taskKind === 'long-tool' || taskKind === 'image-batch';
+}
+
+export function isActiveTask(task: AgentTaskView | undefined | null): boolean {
+  return !!task && ACTIVE_TASK_STATUSES.has(task.status);
+}
+
+export function taskStatusLabel(task: AgentTaskView): string {
+  if (task.status === 'waiting_parent') return '等待前置任务';
+  if (task.status === 'queued') return '排队中';
+  if (task.status === 'cancelling') return '取消中';
+  if (task.status === 'cancelled') return '已取消';
+  if (task.status === 'failed') return '失败';
+  if (task.status === 'completed') return task.stage === 'waiting_review' ? '待确认' : '已完成';
+  if (task.status === 'partial') return '部分完成';
+  if (task.stage === 'plot_diagnosis') return '剧情诊断中';
+  if (task.stage === 'script_optimization') return '脚本优化中';
+  if (task.stage === 'pseudo_planning') return '伪分镜生成中';
+  if (task.stage === 'final_generation') return '正式镜头生成中';
+  if (task.stage === 'generating_images') return '图片生成中';
+  return '处理中';
+}
+
+function mergeTask(
+  current: Record<string, AgentTaskView>,
+  incoming: AgentTaskView,
+  options?: TaskUpsertOptions,
+): { tasks: Record<string, AgentTaskView>; completedNotice: boolean } {
+  const previous = current[incoming.taskId];
+  if (previous && previous.version >= incoming.version) {
+    return { tasks: current, completedNotice: false };
+  }
+  const terminalWithoutReview = !isActiveTask(incoming)
+    && incoming.stage !== 'waiting_review';
+  const completedNotice = terminalWithoutReview && (
+    (!!previous && isActiveTask(previous))
+    || !!options?.notifyIfTerminal
+  );
+  return {
+    tasks: { ...current, [incoming.taskId]: incoming },
+    completedNotice: completedNotice && incoming.status !== 'cancelled',
+  };
+}
+
+export function storyboardRunIdFromTask(task: AgentTaskView): string {
+  const text = `${task.result ?? ''}\n${task.resultSummary ?? ''}`;
+  const match = text.match(/(?:run[_ ]?id|runid)\s*[:：]\s*`?([0-9a-fA-F-]{32,36})`?/);
+  return match?.[1] ?? '';
+}
+
+async function refreshAfterWakeup(message: AgentWakeupMessage) {
+  const conversationId = message.conversationId;
+  try {
+    const taskResponse = await agentApi.getTask(message.taskId);
+    useAgentStore.getState().upsertTask(taskResponse.data.data, {
+      notifyIfTerminal: true,
+    });
+  } catch {
+    // Message refresh below remains the fallback when task detail is temporarily unavailable.
+  }
+  if (useAgentStore.getState().activeConversationId === conversationId) {
+    await refreshConversationMessages(conversationId);
+    return;
+  }
+  useAgentStore.setState((state) => ({
+    taskUnread: {
+      ...state.taskUnread,
+      [conversationId]: (state.taskUnread[conversationId] ?? 0) + 1,
+    },
+  }));
+}
+
+async function refreshConversationMessages(conversationId: string) {
+  const response = await agentApi.listMessages(conversationId);
+  const state = useAgentStore.getState();
+  if (state.activeConversationId === conversationId && !state.streaming) {
+    useAgentStore.setState({ messages: response.data.data ?? [] });
+  }
+}
 
 function taskKindHint(kind: VideoTaskStatus['kind'], status: string, waitingSec: number) {
   const waiting = `已等待约 ${waitingSec} 秒`;
@@ -392,6 +546,52 @@ function appendTaskResult(existing: string | undefined, result: string) {
   return `${current}\n\n${addition}`;
 }
 
+function appendTerminalTaskResult(
+  messages: AgentMessage[],
+  task: AgentTaskView,
+): AgentMessage[] {
+  if (isActiveTask(task) || !task.result?.trim()) return messages;
+  return messages.map((message) => {
+    const linkedByCard = message.metadata?.taskCards
+      ?.some((card) => card.taskId === task.taskId) ?? false;
+    const linkedByAnchor = !!task.anchorMessageId && message.id === task.anchorMessageId;
+    if (message.role !== 'assistant' || (!linkedByCard && !linkedByAnchor)) return message;
+    const startMarker = `[//]: # (async-task:${task.taskId}:start)`;
+    const endMarker = `[//]: # (async-task:${task.taskId}:end)`;
+    const block = `${startMarker}\n${task.result.trim()}\n${endMarker}`;
+    const start = message.content.indexOf(startMarker);
+    const end = message.content.indexOf(endMarker, Math.max(0, start));
+    const content = start >= 0 && end >= start
+      ? `${message.content.slice(0, start)}${block}${message.content.slice(end + endMarker.length)}`
+      : appendTaskResult(message.content, block);
+    return content === message.content ? message : { ...message, content };
+  });
+}
+
+function attachTaskCard(
+  conversationId: string,
+  assistantId: string,
+  task: Pick<AgentTaskView, 'taskId' | 'title' | 'kind'>,
+) {
+  useAgentStore.setState((state) => {
+    if (state.activeConversationId !== conversationId) return {};
+    return {
+      messages: state.messages.map((message) => {
+        if (message.id !== assistantId) return message;
+        const existing = message.metadata?.taskCards ?? [];
+        const taskCards = [
+          ...existing.filter((item) => item.taskId !== task.taskId),
+          { taskId: task.taskId, title: task.title, kind: task.kind },
+        ];
+        return {
+          ...message,
+          metadata: { ...message.metadata, taskCards },
+        };
+      }),
+    };
+  });
+}
+
 /** UnifiedLoop 异步任务：收到 task_accepted 后独立轮询到终态。 */
 function beginUnifiedVideoPolling(
   taskId: string,
@@ -405,6 +605,10 @@ function beginUnifiedVideoPolling(
   const myToken = ++videoPollToken;
   let waitingSec = 0;
   useAgentStore.setState({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
+  void agentApi.getTask(taskId).then((response) => {
+    useAgentStore.getState().upsertTask(response.data.data, { notifyIfTerminal: true });
+    attachTaskCard(conversationId, assistantId, response.data.data);
+  }).catch(() => undefined);
   const timer = setInterval(async () => {
     if (videoPollToken !== myToken || useAgentStore.getState().agentVideoTask?.taskId !== taskId) {
       clearInterval(timer);
@@ -416,6 +620,9 @@ function beginUnifiedVideoPolling(
       const response = await agentApi.getVideoTaskStatus(taskId);
       const task = response.data.data;
       if (task.status === 'completed') {
+        void agentApi.getTask(taskId).then((detail) => {
+          useAgentStore.getState().upsertTask(detail.data.data, { notifyIfTerminal: true });
+        }).catch(() => undefined);
         clearInterval(timer);
         if (videoPollTimer === timer) videoPollTimer = null;
         useAgentStore.setState((state) => {
@@ -435,7 +642,7 @@ function beginUnifiedVideoPolling(
             agentVideoTask: null,
             messages: active ? state.messages.map((message) =>
               message.id === assistantId ? { ...message, content: completedContent } : message) : state.messages,
-            confirmResult: active ? {
+            confirmResult: active && task.kind !== 'long-tool' ? {
               kind: task.kind === 'image-batch' ? 'image' : 'video',
               url: task.url || '',
               urls: task.resultUrls,
@@ -696,6 +903,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   deleteConversation: async (id) => {
     await agentApi.deleteConversation(id);
+    cancelConversationTitleRefresh(id);
     set((s) => {
       const g = { ...s.generating };
       delete g[id];
@@ -749,9 +957,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
-        pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], refImageUrls: [], pickedAssetIds: [],
+        pendingAssistantId: null,
+        confirmResult: null, pendingPicUrls: [], refImageUrls: [], pickedAssetIds: [],
+        taskUnread: { ...s.taskUnread, [id]: 0 },
+        taskFocusId: null,
       };
     });
+    void get().loadTasks(id);
     const res = await agentApi.listMessages(id);
     await get().restoreCanvasMode(id);
     const g = get().generating[id];
@@ -806,6 +1018,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   messages: [],
   streaming: false,
+  editAndResend: async (content, messageId) => {
+    const targetMessageId = messageId;
+    if (!targetMessageId) return;
+    await get().sendMessage(content, { editMessageId: targetMessageId });
+  },
+  interruptAndSend: async (content) => {
+    if (!content.trim()) return;
+    await get().sendMessage(content, { interruptCurrent: true });
+  },
   generating: {},
   waitingHumanInput: null,
       
@@ -815,6 +1036,143 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   workflowHint: '',
   setWorkflowHint: (v) => set({ workflowHint: v }),
   agentVideoTask: null,
+  tasks: {},
+  taskNotices: {},
+  taskUnread: {},
+  taskDrawerId: null,
+  taskFocusId: null,
+  taskStreamConnected: false,
+  upsertTask: (task, options) => set((state) => {
+    const previous = state.tasks[task.taskId];
+    const merged = mergeTask(state.tasks, task, options);
+    const currentMessages = state.activeConversationId === task.conversationId
+      ? appendTerminalTaskResult(state.messages, task)
+      : state.messages;
+    const active = state.activeConversationId === task.conversationId;
+    const plotReady = active
+      && task.kind === 'long-tool'
+      && task.stage === 'plot_diagnosis'
+      && previous?.stage === 'script_optimization';
+    if (plotReady) {
+      window.setTimeout(() => {
+        void refreshConversationMessages(task.conversationId).catch(() => undefined);
+      }, 0);
+    }
+    if (!merged.completedNotice) return { tasks: merged.tasks, messages: currentMessages };
+    if (state.activeConversationId === task.conversationId) {
+      window.setTimeout(() => {
+        void refreshConversationMessages(task.conversationId).catch(() => undefined);
+      }, 0);
+    }
+    const notice: AgentTaskNotice = {
+      taskId: task.taskId,
+      title: task.title,
+      conversationId: task.conversationId,
+      createdAt: new Date().toISOString(),
+      storyboardRunId: storyboardRunIdFromTask(task) || undefined,
+    };
+    return {
+      tasks: merged.tasks,
+      messages: currentMessages,
+      taskNotices: active ? {
+        ...state.taskNotices,
+        [task.conversationId]: [
+          ...(state.taskNotices[task.conversationId] ?? []).filter((item) => item.taskId !== task.taskId),
+          notice,
+        ],
+      } : state.taskNotices,
+      taskUnread: active ? state.taskUnread : {
+        ...state.taskUnread,
+        [task.conversationId]: (state.taskUnread[task.conversationId] ?? 0) + 1,
+      },
+    };
+  }),
+  openTaskDrawer: (taskId) => set({ taskDrawerId: taskId }),
+  closeTaskDrawer: () => set({ taskDrawerId: null }),
+  focusTask: (taskId) => set({ taskFocusId: taskId }),
+  dismissTaskNotice: (conversationId, taskId) => set((state) => ({
+    taskNotices: {
+      ...state.taskNotices,
+      [conversationId]: (state.taskNotices[conversationId] ?? [])
+        .filter((item) => item.taskId !== taskId),
+    },
+  })),
+  loadTasks: async (conversationId) => {
+    const res = await agentApi.listTasks({
+      conversationId: conversationId ?? undefined,
+      status: 'all',
+      page: 1,
+      size: 100,
+    });
+    res.data.data.records.forEach((task) => {
+      const completedRecently = !!task.completedAt
+        && Date.now() - Date.parse(task.completedAt) <= 30 * 60 * 1000;
+      get().upsertTask(task, { notifyIfTerminal: completedRecently });
+    });
+  },
+  startTaskStream: () => {
+    if (taskStreamRunning) return;
+    taskStreamRunning = true;
+    taskStreamAbort = new AbortController();
+    const clearFallback = () => {
+      if (taskFallbackTimer) clearTimeout(taskFallbackTimer);
+      taskFallbackTimer = null;
+    };
+    const scheduleFallback = () => {
+      clearFallback();
+      const hasActive = Object.values(get().tasks).some(isActiveTask);
+      taskFallbackTimer = setTimeout(async () => {
+        await get().loadTasks().catch(() => undefined);
+        if (!taskStreamAbort?.signal.aborted) scheduleFallback();
+      }, hasActive ? 5000 : 30000);
+    };
+    const pump = async () => {
+      const signal = taskStreamAbort?.signal;
+      if (!signal || signal.aborted) return;
+      clearFallback();
+      try {
+        set({ taskStreamConnected: true });
+        await streamTaskEvents((event) => {
+          if (event.type === 'task') {
+            get().upsertTask(event.task);
+          } else {
+            void refreshAfterWakeup(event.message).catch(() => undefined);
+          }
+        }, signal);
+      } catch {
+        // 断线后使用分档轮询对账，并持续尝试恢复 SSE。
+      } finally {
+        set({ taskStreamConnected: false });
+      }
+      if (signal.aborted) return;
+      scheduleFallback();
+      setTimeout(() => void pump(), 3000);
+    };
+    void get().loadTasks().catch(() => undefined);
+    void pump();
+  },
+  stopTaskStream: () => {
+    taskStreamRunning = false;
+    taskStreamAbort?.abort();
+    taskStreamAbort = null;
+    if (taskFallbackTimer) clearTimeout(taskFallbackTimer);
+    taskFallbackTimer = null;
+    set({ taskStreamConnected: false });
+  },
+  cancelTask: async (taskId) => {
+    const res = await agentApi.cancelTask(taskId);
+    get().upsertTask(res.data.data);
+  },
+  retryTask: async (taskId) => {
+    const res = await agentApi.retryTask(taskId);
+    get().upsertTask(res.data.data);
+    set({ taskDrawerId: res.data.data.taskId });
+  },
+  followUpTask: async (taskId, instruction) => {
+    const res = await agentApi.followUpTask(taskId, instruction);
+    get().upsertTask(res.data.data);
+    set({ taskDrawerId: res.data.data.taskId });
+  },
   storyboardVideoQueue: [],
   storyboardImageQueue: [],
   confirmResult: null,
@@ -921,11 +1279,43 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
+    editMessageId?: string;
+    interruptCurrent?: boolean;
   }) => {
+    const editMessageId = opts?.editMessageId;
+    const interruptCurrent = !!opts?.interruptCurrent && get().streaming;
+    const editTargetIndex = editMessageId
+      ? get().messages.findIndex((message) => message.id === editMessageId && message.role === 'user')
+      : -1;
+    if (editMessageId && editTargetIndex < 0) {
+      set({ streamError: '要编辑的消息不存在，请刷新后重试' });
+      return;
+    }
     // 输入禁用条件：(streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan
     // 视频异步任务轮询期间（agentVideoTask 存在）允许继续发送新消息
-    if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan
+    if ((!interruptCurrent && get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan
       || get().canvasBinding || get().canvasExitPending || !content.trim()) return;
+    if (interruptCurrent) {
+      const runningConversationId = get().activeConversationId;
+      const runningAssistantId = get().pendingAssistantId;
+      manualStop = true;
+      streamAbort?.abort();
+      streamAbort = null;
+      if (runningConversationId) void agentApi.interrupt(runningConversationId).catch(() => undefined);
+      set((s) => {
+        const generating = { ...s.generating };
+        if (runningConversationId) delete generating[runningConversationId];
+        return {
+          generating,
+          streaming: false,
+          workflowHint: '',
+          pendingAssistantId: null,
+          messages: runningAssistantId
+            ? s.messages.filter((message) => message.id !== runningAssistantId)
+            : s.messages,
+        };
+      });
+    }
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）。
     // 若视频异步任务仍轮询，先停止旧轮询并告知后端取消在途任务（cancelActiveTasks: true）。
     if (get().agentVideoTask) {
@@ -934,7 +1324,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set({ agentVideoTask: null });
       opts = { ...opts, cancelActiveTasks: true };
     }
-    manualStop = false;
+    if (!interruptCurrent) manualStop = false;
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
@@ -960,7 +1350,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!id) {
       const projectId = useProjectStore.getState().currentProject?.id;
       if (!projectId) { set({ streamError: '请先在左上角选择一个项目' }); return; }
-      await get().createConversation();
+      try {
+        await get().createConversation();
+      } catch {
+        // 建会话失败（网络/后端）在此收口：调用方多为 fire-and-forget，不能让 rejection 外泄
+        set({ streamError: '创建会话失败，请稍后重试' });
+        return;
+      }
       id = get().activeConversationId;
     }
     if (!id) return;
@@ -983,12 +1379,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     set((s) => ({
-      messages: [...s.messages, optimisticUser],
+      messages: editMessageId
+        ? s.messages
+            .slice(0, editTargetIndex + 1)
+            .map((message) => message.id === editMessageId ? { ...message, content } : message)
+        : [...s.messages, optimisticUser],
       streaming: true,
       generating: { ...s.generating, [id]: { hint: '', finished: false } },
       streamError: null,
       waitingHumanInput: null,
-      
     }));
     initialSceneCount = useProjectStore.getState().scenes.length;
 
@@ -1071,8 +1470,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const reasoning = e.reasoning ?? g.reasoningDraft;
       const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
       const suggestedActions = e.suggestedActions;
-      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
-        setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+      const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
+      const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
+      const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
+      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
+        || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
+        setFinalMetadata({
+          kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
+          reasoning,
+          agentTrace,
+          suggestedActions,
+          taskCards,
+          metrics,
+          storyboardReview,
+        });
       }
     };
     /** 从 agent_trace 事件里提取轨迹事件（兼容单条直发 / traceEvent 包装 / agentTrace 数组） */
@@ -1088,11 +1499,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
     let acceptedTaskId: string | null = null;
+    let acceptedTaskKind: string | null = null;
     let receivedCanvasModeRequired = false;
 
     const releaseStream = await reserveStreamSlot(snapshotId);
+    manualStop = false;
     try {
-      await streamChat(id, content, requestPicUrls, (e: SseEvent) => {
+      const handleStreamEvent = (e: SseEvent) => {
         switch (e.type) {
           case 'message':
             // 跨会话守卫：已切走则把增量累积到属主会话 generating（切回恢复），不写当前视图消息
@@ -1206,15 +1619,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             mergeFinalMetadata(e);
             // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
-            if (!acceptedTaskId) finishAssistantReply(snapshotId, assistantId);
+            if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+              finishAssistantReply(snapshotId, assistantId);
+            }
             // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
             if (get().activeConversationId !== snapshotId) break;
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
             if (typeof e.title === 'string' && e.title) {
+              cancelConversationTitleRefresh(snapshotId);
               set((s) => ({
                 conversations: s.conversations.map((c) =>
                   c.id === snapshotId && c.title !== e.title ? { ...c, title: e.title as string } : c),
               }));
+            } else if (get().conversations.some((c) => c.id === snapshotId && c.title === '新对话')) {
+              scheduleConversationTitleRefresh(snapshotId);
             }
             // 分镜数量变化（增加=agent 生成、减少=agent 删除）都刷新分镜列表；
             // agentGeneratedScenes 互斥标志仅在数量增加时置位（删除后应恢复手动输入）
@@ -1233,9 +1651,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             break;
           case 'task_accepted':
             receivedMessageEnd = true;
+            mergeFinalMetadata(e);
             acceptedTaskId = e.taskId ?? '';
+            acceptedTaskKind = e.taskKind ?? null;
             if (acceptedTaskId) {
-              beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+              if (e.taskKind === 'long-tool' || e.taskKind === 'image-batch') {
+                attachTaskCard(snapshotId, assistantId, {
+                  taskId: acceptedTaskId,
+                  title: e.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+                  kind: e.taskKind,
+                });
+                void agentApi.getTask(acceptedTaskId)
+                  .then((res) => {
+                    get().upsertTask(res.data.data);
+                    attachTaskCard(snapshotId, assistantId, res.data.data);
+                  })
+                  .catch(() => undefined);
+              } else {
+                beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+              }
             }
             break;
           case 'confirm_result':
@@ -1300,12 +1734,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             }
             break;
         }
-      }, requestAssetIds, opts?.assetGroupIds, signal, {
-        ...opts,
-        canvasContext,
-        referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
-        referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
-      });
+      };
+      if (editMessageId) {
+        await streamEditedMessage(id, editMessageId, content, handleStreamEvent, signal);
+      } else if (interruptCurrent) {
+        await streamInterruptAndSend(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, signal, {
+          referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
+          referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
+          routingHint: opts?.routingHint,
+          cancelActiveTasks: opts?.cancelActiveTasks,
+          canvasContext,
+        });
+      } else {
+        await streamChat(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, opts?.assetGroupIds, signal, {
+          ...opts,
+          canvasContext,
+          referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
+          referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
+        });
+      }
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
@@ -1313,35 +1760,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     } finally {
       releaseStream();
-      if (acceptedTaskId) return;
-      // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
-      // （已切换会话时旧占位消息已被 selectConversation 整组替换）
-      // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
-      const isThisStream = get().pendingAssistantId === assistantId;
-      const stillSameConversation = get().activeConversationId === snapshotId;
-      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
-      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
-      set((s) => {
-        const g = { ...s.generating };
-        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
-        const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
-        return {
-          generating: g,
-          streaming: generationInProgress(gview),
-          workflowHint: generationHint(gview),
-          ...(isThisStream ? { pendingAssistantId: null } : {}),
-          messages: stillSameConversation
-          ? s.messages.map((m) =>
-              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired
-                ? { ...m, content: failedText }
-                : m,
-            )
-          : s.messages,
-        };
-      });
-      // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
-      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired && !manualStop) {
-        void get().recoverPendingCheckpoint(snapshotId);
+      if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+        // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
+        // （已切换会话时旧占位消息已被 selectConversation 整组替换）
+        // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
+        const isThisStream = get().pendingAssistantId === assistantId;
+        const stillSameConversation = get().activeConversationId === snapshotId;
+        // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
+        const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
+        set((s) => {
+          const g = { ...s.generating };
+          if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
+          const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
+          return {
+            generating: g,
+            streaming: generationInProgress(gview),
+            workflowHint: generationHint(gview),
+            ...(isThisStream ? { pendingAssistantId: null } : {}),
+            messages: stillSameConversation
+            ? s.messages.map((m) =>
+                m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired
+                  ? { ...m, content: failedText }
+                  : m,
+              )
+            : s.messages,
+          };
+        });
+        // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
+        if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired && !manualStop) {
+          void get().recoverPendingCheckpoint(snapshotId);
+        }
       }
     }
     // 不再自动清空参考图和资产ID——用户要求持久化到意图节点消费
@@ -1360,9 +1808,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       : get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
-    const reviewProjectId = actionId === 'review-gen-image'
-      ? useProjectStore.getState().currentProject?.id
-      : undefined;
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）
     manualStop = false;
     streamAbort = new AbortController();
@@ -1505,8 +1950,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const reasoning = e.reasoning ?? g.reasoningDraft;
       const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
       const suggestedActions = e.suggestedActions;
-      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
-        setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+      const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
+      const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
+      const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
+      if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
+        || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
+        setFinalMetadata({
+          kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
+          reasoning,
+          agentTrace,
+          suggestedActions,
+          taskCards,
+          metrics,
+          storyboardReview,
+        });
       }
     };
     const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
@@ -1521,6 +1978,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedMessageEnd = false;
     let receivedHumanInput = false;
     let acceptedTaskId: string | null = null;
+    let acceptedTaskKind: string | null = null;
 
     const releaseStream = await reserveStreamSlot(snapshotId);
     try {
@@ -1614,7 +2072,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             mergeFinalMetadata(e);
             // I5：后端已把消息里的签名 URL 本地化，用完整文本覆盖占位气泡；正文完成后立即结束“对话中”状态。
             if (typeof e.content === 'string' && e.content) updateAssistantFull(e.content);
-            if (!acceptedTaskId) finishAssistantReply(snapshotId, assistantId);
+            if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+              finishAssistantReply(snapshotId, assistantId);
+            }
             // 跨会话守卫：后续 title/sceneCount/queue 刷新仅在当前查看原会话时执行。
             if (get().activeConversationId !== snapshotId) break;
             // 首条消息异步 AI 重命名标题：后端在 message_end 一次性携带新 title（仅本轮），就地更新会话列表
@@ -1642,8 +2102,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           case 'task_accepted':
             receivedMessageEnd = true;
             acceptedTaskId = e.taskId ?? '';
+            acceptedTaskKind = e.taskKind ?? null;
             if (acceptedTaskId) {
-              beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+              if (e.taskKind === 'long-tool' || e.taskKind === 'image-batch') {
+                attachTaskCard(snapshotId, assistantId, {
+                  taskId: acceptedTaskId,
+                  title: e.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+                  kind: e.taskKind,
+                });
+                void agentApi.getTask(acceptedTaskId)
+                  .then((res) => {
+                    get().upsertTask(res.data.data);
+                    attachTaskCard(snapshotId, assistantId, res.data.data);
+                  })
+                  .catch(() => undefined);
+              } else {
+                beginUnifiedVideoPolling(acceptedTaskId, snapshotId, assistantId, e.taskKind);
+              }
             }
             break;
           case 'confirm_result':
@@ -1721,38 +2196,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     } finally {
       releaseStream();
-      if (acceptedTaskId) return;
-      // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
-      // （已切换会话时旧占位消息已被 selectConversation 整组替换）
-      // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
-      const isThisStream = get().pendingAssistantId === assistantId;
-      const stillSameConversation = get().activeConversationId === snapshotId;
-      // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
-      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
-      set((s) => {
-        const g = { ...s.generating };
-        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
-        const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
-        return {
-          generating: g,
-          streaming: generationInProgress(gview),
-          workflowHint: generationHint(gview),
-          ...(isThisStream ? { pendingAssistantId: null } : {}),
-          messages: stillSameConversation
-          ? s.messages.map((m) =>
-              m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
-                ? { ...m, content: failedText }
-                : m,
-            )
-          : s.messages,
-        };
-      });
-      if (reviewProjectId) {
-        await refreshAfterReviewImageGeneration(reviewProjectId);
-      }
-      // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
-      if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
-        void get().recoverPendingCheckpoint(snapshotId);
+      if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
+        // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
+        // （已切换会话时旧占位消息已被 selectConversation 整组替换）
+        // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
+        const isThisStream = get().pendingAssistantId === assistantId;
+        const stillSameConversation = get().activeConversationId === snapshotId;
+        // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
+        const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
+        set((s) => {
+          const g = { ...s.generating };
+          if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
+          const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
+          return {
+            generating: g,
+            streaming: generationInProgress(gview),
+            workflowHint: generationHint(gview),
+            ...(isThisStream ? { pendingAssistantId: null } : {}),
+            messages: stillSameConversation
+            ? s.messages.map((m) =>
+                m.id === assistantId && !m.content && !receivedMessageEnd && !receivedHumanInput
+                  ? { ...m, content: failedText }
+                  : m,
+              )
+            : s.messages,
+          };
+        });
+        // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
+        if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
+          void get().recoverPendingCheckpoint(snapshotId);
+        }
       }
     }
   },
@@ -1896,8 +2369,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         const reasoning = e.reasoning ?? g.reasoningDraft;
         const agentTrace = e.agentTrace ?? (g.traceDraft && g.traceDraft.length > 0 ? g.traceDraft : undefined);
         const suggestedActions = e.suggestedActions;
-        if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions) {
-          setFinalMetadata({ kind: 'assistant-reply', reasoning, agentTrace, suggestedActions });
+        const taskCards = e.taskCards ?? g.assistantMessageMetadata?.taskCards;
+        const metrics = e.metrics ?? g.assistantMessageMetadata?.metrics;
+        const storyboardReview = e.storyboardReview ?? g.assistantMessageMetadata?.storyboardReview;
+        if (reasoning || (agentTrace && agentTrace.length > 0) || suggestedActions
+          || (taskCards && taskCards.length > 0) || metrics || storyboardReview) {
+          setFinalMetadata({
+            kind: storyboardReview ? 'storyboard-review' : 'assistant-reply',
+            reasoning,
+            agentTrace,
+            suggestedActions,
+            taskCards,
+            metrics,
+            storyboardReview,
+          });
         }
       };
       const collectTraceEvents = (e: SseEvent): AgentTraceEvent[] => {
@@ -2034,9 +2519,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               finishAssistantReply(snapshotId, assistantId);
               if (get().activeConversationId !== snapshotId) break;
               if (e.title) {
+                cancelConversationTitleRefresh(snapshotId);
                 set((s) => ({
                   conversations: s.conversations.map((c) => c.id === id && c.title !== e.title ? { ...c, title: e.title! } : c),
                 }));
+              } else if (get().conversations.some((c) => c.id === snapshotId && c.title === '新对话')) {
+                scheduleConversationTitleRefresh(snapshotId);
               }
               if (typeof e.sceneCount === 'number' && e.sceneCount >= 0) {
                 const proj = useProjectStore.getState().currentProject;
@@ -2115,6 +2603,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         taskKind === 'image-batch' ? '批量生图中...' : taskKind === 'long-tool' ? '后台任务处理中...' : '视频生成中...');
       // 任务中心：任务开始，暴露进行中状态（completed/failed 清空）
       set({ agentVideoTask: { taskId, status: 'queued', waitingSec: 0 } });
+      void agentApi.getTask(taskId).then((response) => {
+        useAgentStore.getState().upsertTask(response.data.data, { notifyIfTerminal: true });
+        attachTaskCard(snapshotId, assistantId, response.data.data);
+      }).catch(() => undefined);
       const myToken = ++videoPollToken;
       const timer = setInterval(async () => {
         if (acceptedTaskId === null) { clearInterval(timer); videoPollTimer = null; return; }
@@ -2125,6 +2617,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           const res = await agentApi.getVideoTaskStatus(taskId);
           const t: VideoTaskStatus = res.data.data;
           if (t.status === 'completed') {
+            void agentApi.getTask(taskId).then((detail) => {
+              useAgentStore.getState().upsertTask(detail.data.data, { notifyIfTerminal: true });
+            }).catch(() => undefined);
             clearInterval(timer); videoPollTimer = null;
             receivedResult = true;
             updateAssistantFull(appendTaskResult(
@@ -2140,7 +2635,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 workflowHint: generationHint(gview),
                 pendingAssistantId: null,
                 agentVideoTask: null,
-                confirmResult: {
+                confirmResult: t.kind === 'long-tool' ? s.confirmResult : {
                   kind: t.kind === 'image-batch' ? 'image' : 'video',
                   url: t.url || '',
                   urls: t.resultUrls,
@@ -2250,34 +2745,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 异步视频任务已受理：保持 streaming（轮询 completed 时关闭），占位气泡不补写
       if (acceptedTaskId) {
         if (!get().streaming) set({ streaming: true });
-        return;
+      } else {
+        // 未受理（异常/失败）：该会话不在生成，删除 generating + 按 active 会话重置视图
+        const failedText = manualStop ? '（已停止）' : (get().streamError ? '（生成失败）' : '（未收到回复）');
+        set((s) => {
+          const g = { ...s.generating };
+          if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
+          const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
+          return {
+            generating: g,
+            streaming: generationInProgress(gview),
+            workflowHint: generationHint(gview),
+            pendingAssistantId: null,
+            messages: stillSameConversation
+            ? s.messages.map((m) =>
+                m.id === assistantId && !m.content && !receivedResult
+                  ? { ...m, content: failedText }
+                  : m,
+              )
+            : s.messages,
+          };
+        });
       }
-      // 未受理（异常/失败）：该会话不在生成，删除 generating + 按 active 会话重置视图
-      const failedText = manualStop ? '（已停止）' : (get().streamError ? '（生成失败）' : '（未收到回复）');
-      set((s) => {
-        const g = { ...s.generating };
-        if (g[snapshotId]?.assistantId === assistantId) delete g[snapshotId];
-        const gview = s.activeConversationId ? g[s.activeConversationId] : undefined;
-        return {
-          generating: g,
-          streaming: generationInProgress(gview),
-          workflowHint: generationHint(gview),
-          pendingAssistantId: null,
-          messages: stillSameConversation
-          ? s.messages.map((m) =>
-              m.id === assistantId && !m.content && !receivedResult
-                ? { ...m, content: failedText }
-                : m,
-            )
-          : s.messages,
-        };
-      });
     }
   },
 
   /** 停止当前会话生成（「停止生成」按钮）：中断 SSE 流（打字机停）+ 后端协作式取消 + 复位视图 */
   stopGeneration: () => {
     const id = get().activeConversationId;
+    const pendingAssistantId = get().pendingAssistantId;
     manualStop = true;
     // 中断当前 SSE fetch（若有）：consumeSse 循环检测 signal.aborted 会立即跳出 → 触发 sendMessage 等的 finally 清理
     streamAbort?.abort();
@@ -2292,7 +2788,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const g = { ...s.generating };
       if (id) delete g[id];
       const gview = id && s.activeConversationId ? g[s.activeConversationId] : undefined;
-      return { generating: g, streaming: generationInProgress(gview), workflowHint: generationHint(gview) };
+      return {
+        generating: g,
+        streaming: generationInProgress(gview),
+        workflowHint: generationHint(gview),
+        ...(pendingAssistantId ? {
+          pendingAssistantId: null,
+          messages: s.messages.filter((message) => message.id !== pendingAssistantId),
+        } : {}),
+      };
     });
   },
 
@@ -2456,7 +2960,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     clearCanvasEditContext();
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
-       pendingAssistantId: null, confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
+       pendingAssistantId: null,
+       confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
        canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false });
   },
 

@@ -2,6 +2,8 @@ package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.ai.agent.human.HumanInputRequest;
+import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -31,20 +33,25 @@ public class AgentTools {
 
     private final AgentGenerationService generationService;
     private final AgentConversationMapper conversationMapper;
+    private final ToolExecutionTemplate toolExecutionTemplate;
 
     @Tool(description = "把确认后的分镜方案批量写入项目（每个元素含 sceneNumber/scriptContent/imagePrompt/videoPrompt/negativePrompt/cameraMovement/shotType/soundDesign）")
     @McpTool(name = "writeScenes", description = "把确认后的分镜方案批量写入项目")
     public Map<String, Object> writeScenes(
             @ToolParam(description = "项目 ID") @McpToolParam(description = "项目 ID") String projectId,
             @ToolParam(description = "分镜列表") @McpToolParam(description = "分镜列表") List<AgentSceneItem> scenes) {
-        try {
-            int count = generationService.writeScript(projectId, scenes);
-            log.info("AgentTools.writeScenes: projectId={} count={}", projectId, count);
-            return Map.of("ok", true, "count", count);
-        } catch (Exception e) {
-            log.error("AgentTools.writeScenes 失败: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("分镜写入失败：" + e.getMessage());
-        }
+        Map<String, Object> input = Map.of("projectId", projectId == null ? "" : projectId,
+                "scenes", scenes == null ? List.of() : scenes);
+        return toolExecutionTemplate.execute("writeScenes", "WRITE", "SPRING_AI", input, () -> {
+            try {
+                int count = generationService.writeScript(projectId, scenes);
+                log.info("AgentTools.writeScenes: projectId={} count={}", projectId, count);
+                return Map.of("ok", true, "count", count);
+            } catch (Exception e) {
+                log.error("AgentTools.writeScenes 失败: {}", e.getMessage(), e);
+                throw new IllegalArgumentException("分镜写入失败：" + e.getMessage());
+            }
+        });
     }
 
     @Tool(description = "覆盖写分镜：清空项目现有分镜后批量写入新分镜（删除与写入同一事务）")
@@ -52,14 +59,18 @@ public class AgentTools {
     public Map<String, Object> replaceScenes(
             @ToolParam(description = "项目 ID") @McpToolParam(description = "项目 ID") String projectId,
             @ToolParam(description = "分镜列表") @McpToolParam(description = "分镜列表") List<AgentSceneItem> scenes) {
-        try {
-            int count = generationService.replaceScript(projectId, scenes);
-            log.info("AgentTools.replaceScenes: projectId={} count={}", projectId, count);
-            return Map.of("ok", true, "count", count);
-        } catch (Exception e) {
-            log.error("AgentTools.replaceScenes 失败: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("分镜覆盖写入失败：" + e.getMessage());
-        }
+        Map<String, Object> input = Map.of("projectId", projectId == null ? "" : projectId,
+                "scenes", scenes == null ? List.of() : scenes);
+        return toolExecutionTemplate.execute("replaceScenes", "WRITE", "SPRING_AI", input, () -> {
+            try {
+                int count = generationService.replaceScript(projectId, scenes);
+                log.info("AgentTools.replaceScenes: projectId={} count={}", projectId, count);
+                return Map.of("ok", true, "count", count);
+            } catch (Exception e) {
+                log.error("AgentTools.replaceScenes 失败: {}", e.getMessage(), e);
+                throw new IllegalArgumentException("分镜覆盖写入失败：" + e.getMessage());
+            }
+        });
     }
 
     /**
@@ -72,14 +83,20 @@ public class AgentTools {
     public Map<String, Object> replaceSpecificScenes(
             @ToolParam(description = "项目 ID") @McpToolParam(description = "项目 ID") String projectId,
             @ToolParam(description = "分镜列表（只包含想更新的分镜）") @McpToolParam(description = "分镜列表") List<AgentSceneItem> scenes) {
-        try {
-            int count = generationService.updateScenesByNumber(projectId, scenes);
-            log.info("AgentTools.replaceSpecificScenes: projectId={} count={}", projectId, count);
-            return Map.of("ok", true, "count", count);
-        } catch (Exception e) {
-            log.error("AgentTools.replaceSpecificScenes 失败: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("分镜部分替换失败：" + e.getMessage());
-        }
+        Map<String, Object> input = Map.of("projectId", projectId == null ? "" : projectId,
+                "scenes", scenes == null ? List.of() : scenes);
+        return toolExecutionTemplate.execute(
+                "replaceSpecificScenes", "WRITE", "SPRING_AI", input, () -> {
+                    try {
+                        int count = generationService.updateScenesByNumber(projectId, scenes);
+                        log.info("AgentTools.replaceSpecificScenes: projectId={} count={}",
+                                projectId, count);
+                        return Map.of("ok", true, "count", count);
+                    } catch (Exception e) {
+                        log.error("AgentTools.replaceSpecificScenes 失败: {}", e.getMessage(), e);
+                        throw new IllegalArgumentException("分镜部分替换失败：" + e.getMessage());
+                    }
+                });
     }
 
     @Tool(description = "生成或完善图片（提供 picUrls 时基于这些图改图，多张参考图均作源图），支持多张（n>1），结果落库到会话产出素材")
@@ -92,32 +109,39 @@ public class AgentTools {
             @ToolParam(description = "图片尺寸如 1024x1024（可空，默认配置）") @McpToolParam(description = "图片尺寸（可空）", required = false) String size,
             @ToolParam(description = "图片质量（可空，默认配置）") @McpToolParam(description = "图片质量（可空）", required = false) String quality,
             @ToolParam(description = "生成数量（可空，默认 1）") @McpToolParam(description = "生成数量（可空）", required = false) String n) {
-        try {
-            AgentConversation conv = conversationMapper.selectById(conversationId);
-            if (conv == null) {
-                throw new IllegalArgumentException("会话不存在：" + conversationId);
+        Map<String, Object> input = new java.util.LinkedHashMap<>();
+        input.put("conversationId", conversationId);
+        input.put("prompt", prompt);
+        input.put("picUrls", picUrls == null ? List.of() : picUrls);
+        input.put("model", model == null ? "" : model);
+        return toolExecutionTemplate.execute("refineImage", "MEDIA_IMAGE", "SPRING_AI", input, () -> {
+            try {
+                AgentConversation conv = conversationMapper.selectById(conversationId);
+                if (conv == null) {
+                    throw new IllegalArgumentException("会话不存在：" + conversationId);
+                }
+                String mode = (picUrls != null && !picUrls.isEmpty()) ? "edit" : null;
+                Integer nInt = null;
+                if (n != null && !n.isBlank()) {
+                    try { nInt = Integer.parseInt(n.trim()); } catch (NumberFormatException ignored) { }
+                }
+                Map<String, Object> result = generationService.generateImage(
+                        conv, null, prompt, model, size, quality, nInt, mode,
+                        (picUrls == null || picUrls.isEmpty()) ? List.of() : picUrls, null);
+                @SuppressWarnings("unchecked")
+                List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
+                if (urls.isEmpty()) {
+                    throw new IllegalArgumentException("图片生成失败，请稍后重试");
+                }
+                return Map.of("ok", true, "imageUrls", urls,
+                        "assetIds", result.getOrDefault("assetIds", List.of()));
+            } catch (IllegalArgumentException e) {
+                throw e;
+            } catch (Exception e) {
+                log.error("AgentTools.refineImage 失败: {}", e.getMessage(), e);
+                throw new IllegalArgumentException("图片生成失败：" + e.getMessage());
             }
-            String mode = (picUrls != null && !picUrls.isEmpty()) ? "edit" : null;
-            Integer nInt = null;
-            if (n != null && !n.isBlank()) {
-                try { nInt = Integer.parseInt(n.trim()); } catch (NumberFormatException ignored) { }
-            }
-            Map<String, Object> result = generationService.generateImage(
-                    conv, null, prompt, model, size, quality, nInt, mode,
-                    (picUrls == null || picUrls.isEmpty()) ? List.of() : picUrls, null);
-            @SuppressWarnings("unchecked")
-            List<String> urls = (List<String>) result.getOrDefault("imageUrls", List.of());
-            if (urls.isEmpty()) {
-                throw new IllegalArgumentException("图片生成失败，请稍后重试");
-            }
-            return Map.of("ok", true, "imageUrls", urls,
-                    "assetIds", result.getOrDefault("assetIds", List.of()));
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("AgentTools.refineImage 失败: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("图片生成失败：" + e.getMessage());
-        }
+        });
     }
 
     @Tool(description = "生成一段视频（提供 picUrls 时基于这些图生成，多张参考图均投喂），同步等待生成完成，结果落库到会话产出素材")
@@ -130,31 +154,39 @@ public class AgentTools {
             @ToolParam(description = "参考图 URL 列表（可空，多张投喂）") @McpToolParam(description = "参考图 URL 列表（可空）", required = false) List<String> picUrls,
             @ToolParam(description = "模型名（可空，默认 MiniMax-H3）") @McpToolParam(description = "模型名（可空）", required = false) String model,
             @ToolParam(description = "分辨率（可空，默认配置档）") @McpToolParam(description = "分辨率（可空）", required = false) String resolution) {
-        try {
-            AgentConversation conv = conversationMapper.selectById(conversationId);
-            if (conv == null) {
-                throw new IllegalArgumentException("会话不存在：" + conversationId);
+        Map<String, Object> input = new java.util.LinkedHashMap<>();
+        input.put("conversationId", conversationId);
+        input.put("prompt", prompt);
+        input.put("picUrls", picUrls == null ? List.of() : picUrls);
+        input.put("model", model == null ? "" : model);
+        return toolExecutionTemplate.execute("generateVideo", "MEDIA_VIDEO", "SPRING_AI", input, () -> {
+            try {
+                AgentConversation conv = conversationMapper.selectById(conversationId);
+                if (conv == null) {
+                    throw new IllegalArgumentException("会话不存在：" + conversationId);
+                }
+                VideoGenerationPolicy.requireDirectAllowed(duration, prompt);
+                String taskId = generationService.createVideoTask(
+                        conv, null, prompt, model, resolution, null, aspectRatio,
+                        duration, null,
+                        (picUrls == null || picUrls.isEmpty()) ? List.of() : picUrls,
+                        null);
+                if (taskId == null || taskId.isBlank()) {
+                    throw new IllegalArgumentException("视频任务创建失败，请稍后重试");
+                }
+                Map<String, String> poll = generationService.pollVideoTask(taskId);
+                String status = poll.get("status");
+                if ("completed".equals(status)) {
+                    return Map.of("ok", true, "videoUrl", poll.getOrDefault("videoUrl", ""));
+                }
+                throw new IllegalArgumentException(poll.getOrDefault("error", "视频生成失败：" + status));
+            } catch (IllegalArgumentException e) {
+                throw e;
+            } catch (Exception e) {
+                log.error("AgentTools.generateVideo 失败: {}", e.getMessage(), e);
+                throw new IllegalArgumentException("视频生成失败：" + e.getMessage());
             }
-            String taskId = generationService.createVideoTask(
-                    conv, null, prompt, model, resolution, null, aspectRatio,
-                    duration, null,
-                    (picUrls == null || picUrls.isEmpty()) ? List.of() : picUrls,
-                    null);
-            if (taskId == null || taskId.isBlank()) {
-                throw new IllegalArgumentException("视频任务创建失败，请稍后重试");
-            }
-            Map<String, String> poll = generationService.pollVideoTask(taskId);
-            String status = poll.get("status");
-            if ("completed".equals(status)) {
-                return Map.of("ok", true, "videoUrl", poll.getOrDefault("videoUrl", ""));
-            }
-            throw new IllegalArgumentException(poll.getOrDefault("error", "视频生成失败：" + status));
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("AgentTools.generateVideo 失败: {}", e.getMessage(), e);
-            throw new IllegalArgumentException("视频生成失败：" + e.getMessage());
-        }
+        });
     }
 
     @Tool(
@@ -166,9 +198,16 @@ public class AgentTools {
             @ToolParam(description = "给用户看的简短问题") String prompt,
             @ToolParam(description = "可点击选项：{title:显示名称, value:内部参数, id:可选来源ID}") List<Map<String, Object>> options,
             @ToolParam(description = "是否允许自定义输入，默认 false") Boolean allowCustom) {
-        HumanInputRequest request = HumanInputRequest.fromToolCall(prompt, options, allowCustom);
-        log.info("AgentTools.requestHumanInput: options={} allowCustom={}", request.options().size(), request.allowCustom());
-        return request.toToolResult();
+        Map<String, Object> input = Map.of("prompt", prompt == null ? "" : prompt,
+                "options", options == null ? List.of() : options,
+                "allowCustom", Boolean.TRUE.equals(allowCustom));
+        return toolExecutionTemplate.execute("moon_request_human_input",
+                "HUMAN_INPUT", "SPRING_AI", input, () -> {
+                    HumanInputRequest request = HumanInputRequest.fromToolCall(prompt, options, allowCustom);
+                    log.info("AgentTools.requestHumanInput: options={} allowCustom={}",
+                            request.options().size(), request.allowCustom());
+                    return request.toToolResult();
+                });
     }
 
     /**
@@ -179,7 +218,9 @@ public class AgentTools {
             returnDirect = true)
     public String testEcho(
             @ToolParam(description = "上下文文本（取其第一句话拼接返回）") String context) {
-        return "测试无效，略略略。用户第一句话：" + firstSentence(context);
+        return toolExecutionTemplate.execute("testEcho", "READ", "SPRING_AI",
+                Map.of("context", context == null ? "" : context),
+                () -> "测试无效，略略略。用户第一句话：" + firstSentence(context));
     }
 
     /** 取文本第一个句子（中文/英文句末标点切分）；无标点则整段返回。 */

@@ -60,7 +60,6 @@ public class AisplitIntentHandler implements IntentHandler {
     private final AgentAiConfigProperties agentConfig;
     private final AssetMatchingService assetMatchingService;
     private final StoryboardPortfolioService portfolioService;
-    private final SceneReviewCardService sceneReviewCardService;
     private final StoryboardAutoImageService storyboardAutoImageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /** 并行 LLM 步骤专用：互不依赖的调用放虚拟线程并发，避免整条分镜链串行卡住。 */
@@ -864,7 +863,7 @@ public class AisplitIntentHandler implements IntentHandler {
             return msg;
         }
 
-        // 分镜写库成功后直接打开完整审查卡；不走 handoff，避免历史版本中的审查自循环。
+        // 分镜写库成功后只返回文本结果；图片/视频操作统一由当前 AgentScope 工具发起。
         List<Scene> allScenes = storyboardClient.getProjectScenes(request.getConversation().getProjectId());
         if (count > 0) {
             try {
@@ -881,8 +880,11 @@ public class AisplitIntentHandler implements IntentHandler {
                 log.warn("分镜自动配图入队失败，跳过: {}", e.getMessage());
             }
         }
-        String msg = "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**，已打开分镜审查结果。";
-        return sceneReviewCardService.openReview(request, allScenes, msg);
+        String msg = "✅ 分镜方案已确认，已生成 **" + count + " 个分镜**。";
+        support.sendMessage(request, msg);
+        support.sendEvent(request, "message_end",
+                Map.of("messageId", "", "sceneCount", totalScenes, "content", msg));
+        return msg;
     }
 
     /** 不写库收尾：message + message_end（sceneCount=-1，前端不触发分镜列表刷新） */

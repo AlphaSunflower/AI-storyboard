@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
@@ -81,6 +82,10 @@ public interface AgentOrchestrator {
      * 兼容入口：{@link #resume} 为 {@code resumeTurn(...).content()} 的薄包装。
      */
     AgentTurnResult resumeTurn(AgentConversation conversation, String formToken, String action, String customText, Map<String, String> params, java.util.List<String> assetIds, String routingHint, SseEmitter emitter);
+
+    /** 恢复已经完成租约抢占的 checkpoint；供统一恢复协调器调用。 */
+    AgentTurnResult resumeClaimed(AgentConversation conversation, CheckpointClaim claim,
+                                  SseEmitter emitter);
 
     /**
      * HITL 续流入口：画布模式上下文必须原样携带，禁止在确认过程中掉回全局意图链。

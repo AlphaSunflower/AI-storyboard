@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
+import com.moon.moonagent.ai.agent.AgentTurnResult;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -95,6 +96,9 @@ public interface AgentChatService {
      */
     AgentMessage sendMessage(String userId, String conversationId, String content);
 
+    /** Persist the assistant message produced by a background wakeup turn. */
+    AgentMessage persistWakeupResult(AgentConversation conversation, AgentTurnResult turn);
+
     /**
      * 流式发送消息：user 消息独立事务提交 → 编排（Spring AI 状态机）→ SSE 事件转发到 SseEmitter。
      * HITL 暂停 → 转发 human_input 事件 → 结束流（等表单提交 resume）。
@@ -105,7 +109,7 @@ public interface AgentChatService {
     /**
      * 流式发送消息（带显式路由提示）：
      * 
-     * @param routingHint 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-scene-review）
+     * @param routingHint 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-storyboard）
      */
     void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls, java.util.List<String> assetIds, SseEmitter emitter, String routingHint);
 
@@ -120,6 +124,24 @@ public interface AgentChatService {
     void streamMessage(String userId, String conversationId, String content, java.util.List<String> picUrls,
                        java.util.List<String> assetIds, SseEmitter emitter, String routingHint,
                        boolean cancelActiveTasks, CanvasSessionContext canvasContext);
+
+    /**
+     * 编辑最后一轮用户消息并覆盖重发：
+     * 校验目标必须是最后一条 user message → 回退 AgentScope 最后一轮上下文 →
+     * 事务更新目标消息并删除其后的旧回复 → 使用原输入快照重新编排。
+     */
+    void editAndResend(String userId, String conversationId, String messageId,
+                       String content, SseEmitter emitter);
+
+    /**
+     * 打断当前生成并发送下一条消息：
+     * 置位 interrupt → 等待旧编排安全释放会话锁 → 落库新消息 → 启动新 SSE 编排。
+     */
+    void interruptAndStream(String userId, String conversationId, String content,
+                            java.util.List<String> picUrls, java.util.List<String> assetIds,
+                            SseEmitter emitter, String routingHint, boolean cancelActiveTasks,
+                            CanvasSessionContext canvasContext, java.util.List<String> referenceVideos,
+                            java.util.List<String> referenceAudios);
 
     /** 流式发送消息（项目库资产组解析后的多模态参考素材）。 */
     default void streamMessage(String userId, String conversationId, String content,

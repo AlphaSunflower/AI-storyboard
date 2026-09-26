@@ -42,8 +42,6 @@ class AisplitIntentHandlerAutoImageTest {
     @Mock
     private StoryboardPortfolioService portfolioService;
     @Mock
-    private SceneReviewCardService sceneReviewCardService;
-    @Mock
     private StoryboardAutoImageService storyboardAutoImageService;
 
     @Test
@@ -73,21 +71,19 @@ class AisplitIntentHandlerAutoImageTest {
         when(support.parsePlanAssetMatches("[]")).thenReturn(List.of());
         when(support.planListField("[]", "sceneBindings")).thenReturn(List.of());
         when(support.getSessionAssets("conversation-1")).thenReturn(List.of());
-        when(sceneReviewCardService.openReview(
-                org.mockito.ArgumentMatchers.eq(request),
-                org.mockito.ArgumentMatchers.eq(List.of(persisted)),
-                anyString()))
-                .thenReturn("review-opened");
-
         AisplitIntentHandler handler = new AisplitIntentHandler(
                 support, scriptGenerationService, generationService, storyboardClient,
-                agentConfig, assetMatchingService, portfolioService, sceneReviewCardService,
-                storyboardAutoImageService);
+                agentConfig, assetMatchingService, portfolioService, storyboardAutoImageService);
 
         String result = handler.resume(request, checkpoint);
 
-        assertEquals("review-opened", result);
+        assertEquals("✅ 分镜方案已确认，已生成 **1 个分镜**。", result);
         verify(storyboardAutoImageService)
                 .enqueueMissingMaterialImages("conversation-1", "project-1", List.of(1));
+        verify(support).sendMessage(request, result);
+        verify(support).sendEvent(
+                request,
+                "message_end",
+                Map.of("messageId", "", "sceneCount", 1L, "content", result));
     }
 }

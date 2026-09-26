@@ -72,12 +72,33 @@ storyboard:
 # 上传根目录：monorepo 本地指向主后端 uploads（文件共享，前端统一经主后端 /api/files/** 读取）；生产配共享存储
 ai:
   upload-root: ${UPLOAD_ROOT:../AIStoryboardBackend/uploads}
+  storyboard:
+    production-v2:
+      enabled: ${STORYBOARD_PRODUCTION_V2_ENABLED:true}
+      model-mode: ${STORYBOARD_PRODUCTION_V2_MODEL_MODE:live}
+      fast-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_FAST_TIMEOUT:120}
+      repair-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_REPAIR_TIMEOUT:90}
   storyboard-internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}   # 主后端地址：参考素材(/api/files/**) 本地缺失时经此拉取
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
+    human-input-enabled: ${AGENT_HUMAN_INPUT_ENABLED:false}
+    tool-audit:
+      enabled: ${AGENT_TOOL_AUDIT_ENABLED:true}
+      ui-enabled: ${AGENT_TOOL_AUDIT_UI_ENABLED:true}
+      retention-days: ${AGENT_TOOL_AUDIT_RETENTION_DAYS:90}
+      cleanup-batch-size: ${AGENT_TOOL_AUDIT_CLEANUP_BATCH_SIZE:500}
+    recovery:
+      # legacy: 旧 @Scheduled 恢复入口；coordinator: 统一租约协调器。
+      mode: ${AGENT_RECOVERY_MODE:coordinator}
+      scan-delay: ${AGENT_RECOVERY_SCAN_DELAY:5s}
+      max-parallel: ${AGENT_RECOVERY_MAX_PARALLEL:4}
+      lease-duration: ${AGENT_RECOVERY_LEASE_DURATION:120s}
+      max-attempts: ${AGENT_RECOVERY_MAX_ATTEMPTS:5}
+      base-backoff: ${AGENT_RECOVERY_BASE_BACKOFF:5s}
+      max-backoff: ${AGENT_RECOVERY_MAX_BACKOFF:5m}
     agentscope:
       enabled: ${AGENTSCOPE_ENABLED:false}
       model: ${AGENTSCOPE_MODEL:}
@@ -99,6 +120,16 @@ ai:
       async-enabled: ${AGENTSCOPE_ASYNC_ENABLED:true}
       async-tool-timeout: ${AGENTSCOPE_ASYNC_TOOL_TIMEOUT:90s}
       batch-confirm-threshold: ${AGENTSCOPE_BATCH_CONFIRM_THRESHOLD:4}
+      image-batch-concurrency: ${AGENTSCOPE_IMAGE_BATCH_CONCURRENCY:3}
+      wakeup-enabled: ${AGENTSCOPE_WAKEUP_ENABLED:true}
+      wakeup-dir: ${AGENTSCOPE_WAKEUP_DIR:}
+      wakeup-max-retries: ${AGENTSCOPE_WAKEUP_MAX_RETRIES:5}
+      wakeup-retry-delay: ${AGENTSCOPE_WAKEUP_RETRY_DELAY:2s}
+      preflight:
+        enabled: ${AGENTSCOPE_PREFLIGHT_ENABLED:true}
+        timeout: ${AGENTSCOPE_PREFLIGHT_TIMEOUT:20s}
+        reference-confidence-threshold: ${AGENTSCOPE_PREFLIGHT_REFERENCE_CONFIDENCE:0.65}
+        max-repairs: ${AGENTSCOPE_PREFLIGHT_MAX_REPAIRS:1}
     # 新建会话默认启用运行时任务 DAG；关闭后新会话回退 LEGACY，旧会话始终保持原引擎。
     dynamic-plan:
       enabled: ${DYNAMIC_TASK_PLAN_ENABLED:true}
@@ -114,15 +145,13 @@ ai:
     skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.6-pro}
     max-parallel-agents: ${AGENT_MAX_PARALLEL_AGENTS:4}
     intent-timeout-seconds: 60
+    title-model: ${AGENT_TITLE_MODEL:mimo-v2.6-pro}
+    title-timeout-seconds: ${AGENT_TITLE_TIMEOUT_SECONDS:12}
+    title-max-attempts: ${AGENT_TITLE_MAX_ATTEMPTS:2}
     # 长剧本分批生成可能持续十余分钟；该值控制 MVC SSE 连接生命周期
     sse-timeout-seconds: 14400
     history-context-max-chars: 10000
     history-message-max-chars: 2000
-    # 自动审查链：链首意图写库成功后自动 handoff 给 scene-review 出「分镜审查」卡（暴露缺图缺视频/补图补视频）。
-    # 空数组=关闭（默认，行为与现状一致）；示例 [aisplit] 开启分镜写库后自动审查。
-    auto-review-chains:
-      - aisplit
-
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
   image-request-timeout: 900
   image-edit-timeout: 900

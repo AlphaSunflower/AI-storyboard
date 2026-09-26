@@ -172,12 +172,12 @@ public class AssetClient {
     }
 
     public AssetSummary createAsset(CreateAssetRequest request, String idempotencyKey, String correlationId) {
-        return post("/api/library/assets", request, idempotencyKey, correlationId, new ParameterizedTypeReference<>() {});
+        return post("/api/library/assets", request, idempotencyKey, correlationId, request.ownerUserId(), new ParameterizedTypeReference<>() {});
     }
 
-    public AssetSummary updateAsset(String assetId, UpdateAssetRequest request, long expectedVersion, String correlationId) {
+    public AssetSummary updateAsset(String assetId, UpdateAssetRequest request, long expectedVersion, String correlationId, String actingUserId) {
         return exchange("PUT", "/api/library/assets/{id}", uri -> uri.path("/api/library/assets/{id}").build(assetId),
-                request, "asset-update:" + assetId + ":" + expectedVersion, correlationId, new ParameterizedTypeReference<>() {});
+                request, "asset-update:" + assetId + ":" + expectedVersion, correlationId, actingUserId, new ParameterizedTypeReference<>() {});
     }
 
     public void linkProject(String assetId, LinkProjectRequest request, String correlationId) {
@@ -187,13 +187,13 @@ public class AssetClient {
 
     public AssetSummary promote(String assetId, PromoteRequest request, String correlationId) {
         return exchange("POST", "/api/library/assets/{id}/promote", uri -> uri.path("/api/library/assets/{id}/promote").build(assetId),
-                request, "asset-promote:" + assetId + ":" + request.expectedVersion(), correlationId, new ParameterizedTypeReference<>() {});
+                request, "asset-promote:" + assetId + ":" + request.expectedVersion(), correlationId, request.actorUserId(), new ParameterizedTypeReference<>() {});
     }
 
     public void trash(String assetId, String actorUserId, long expectedVersion, String correlationId) {
         exchange("DELETE", "/api/library/assets/{id}", uri -> uri.path("/api/library/assets/{id}")
                         .queryParam("actorUserId", actorUserId).queryParam("expectedVersion", expectedVersion).build(assetId),
-                null, "asset-trash:" + assetId + ":" + expectedVersion, correlationId, new ParameterizedTypeReference<ApiEnvelope<Void>>() {});
+                null, "asset-trash:" + assetId + ":" + expectedVersion, correlationId, actorUserId, new ParameterizedTypeReference<ApiEnvelope<Void>>() {});
     }
 
     public AssetSummary restore(String assetId, String actorUserId, String correlationId) {
@@ -208,20 +208,20 @@ public class AssetClient {
                 new ParameterizedTypeReference<ApiEnvelope<Void>>() {});
     }
 
-    public AssetContracts.MediaRef addAssetMedia(String assetId, Resource resource, String correlationId) {
+    public AssetContracts.MediaRef addAssetMedia(String assetId, Resource resource, String correlationId, String actingUserId) {
         MultipartBodyBuilder body = new MultipartBodyBuilder();
         body.part("file", resource);
         return exchange("POST", "/api/library/assets/{id}/media",
                 uri -> uri.path("/api/library/assets/{id}/media").build(assetId),
                 body.build(), "asset-media:" + assetId + ":" + resource.getFilename(),
-                correlationId, null, new ParameterizedTypeReference<>() {});
+                correlationId, actingUserId, new ParameterizedTypeReference<>() {});
     }
 
-    public void deleteAssetMedia(String assetId, String mediaId, String correlationId) {
+    public void deleteAssetMedia(String assetId, String mediaId, String correlationId, String actingUserId) {
         exchange("DELETE", "/api/library/assets/{assetId}/media/{mediaId}",
                 uri -> uri.path("/api/library/assets/{assetId}/media/{mediaId}").build(assetId, mediaId),
                 null, "asset-media-delete:" + assetId + ":" + mediaId,
-                correlationId, null, new ParameterizedTypeReference<ApiEnvelope<Void>>() {});
+                correlationId, actingUserId, new ParameterizedTypeReference<ApiEnvelope<Void>>() {});
     }
 
     public TagRef createTag(CreateTagRequest request, String correlationId) {

@@ -52,10 +52,33 @@ public class InternalApiController {
         return ApiResponse.ok("ok");
     }
 
+    /** 事务内全量替换项目分镜，返回按输入顺序生成的新 sceneId。 */
+    @PostMapping("/scenes/project/{projectId}/replace")
+    public ApiResponse<List<String>> replaceProjectScenes(
+            @PathVariable String projectId,
+            @RequestBody List<SceneFull> scenes) {
+        return ApiResponse.ok(internalApiService.replaceProjectScenes(projectId, scenes));
+    }
+
+    /** 事务内追加项目分镜，保留现有分镜并从最大 sceneNumber 后连续编号。 */
+    @PostMapping("/scenes/project/{projectId}/append")
+    public ApiResponse<List<String>> appendProjectScenes(
+            @PathVariable String projectId,
+            @RequestBody List<SceneFull> scenes) {
+        return ApiResponse.ok(internalApiService.appendProjectScenes(projectId, scenes));
+    }
+
     /** 清空项目分镜 */
     @DeleteMapping("/scenes/project/{projectId}")
     public ApiResponse<String> deleteProjectScenes(@PathVariable String projectId) {
         internalApiService.deleteProjectScenes(projectId);
+        return ApiResponse.ok("ok");
+    }
+
+    /** 删除单个项目分镜并重排剩余编号。 */
+    @DeleteMapping("/scenes/{sceneId}")
+    public ApiResponse<String> deleteScene(@PathVariable String sceneId) {
+        internalApiService.deleteScene(sceneId);
         return ApiResponse.ok("ok");
     }
 

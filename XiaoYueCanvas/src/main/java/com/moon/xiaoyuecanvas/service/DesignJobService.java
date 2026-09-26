@@ -7,6 +7,12 @@ import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.ai.video.ReferenceImageRole;
 import com.moon.moonagent.ai.storyboard.StoryboardPlanningService;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardProductionRequest;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardRunSnapshot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
@@ -31,9 +37,10 @@ import com.storyboard.common.generation.GenerationRecordTypes;
 import com.storyboard.common.generation.GenerationRecordUpdate;
 import com.storyboard.common.generation.GenerationRecordWriter;
 import com.storyboard.common.generation.GenerationReference;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -63,7 +70,6 @@ import java.util.concurrent.locks.ReentrantLock;
  * </ul>
  */
 @Service
-@RequiredArgsConstructor
 public class DesignJobService {
 
     private static final Logger log = LoggerFactory.getLogger(DesignJobService.class);
@@ -79,17 +85,69 @@ public class DesignJobService {
     private final AgentConversationService agentConversationService;
     private final DesignAssistantCapability designAssistantCapability;
     private final StoryboardPlanningService storyboardPlanningService;
+    private final StoryboardProductionService storyboardProductionService;
     private final ProjectService projectService;
     private final ImageGenerationService imageGenerationService;
     private final VideoGenerationService videoGenerationService;
     private final GenerationRecordWriter generationRecordWriter;
+
+    @Value("${ai.storyboard.production-v2.enabled:true}")
+    private boolean storyboardProductionV2Enabled = true;
 
     /** jobId -> 当前 SSE 发射器（订阅后置；重连替换）。 */
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
     /** jobId -> 事件追加/重放锁，保证 snapshot 与实时事件之间没有游标缺口。 */
     private final Map<String, ReentrantLock> jobLocks = new ConcurrentHashMap<>();
 
-    private static final List<CapabilityDescriptor> CAPABILITIES = List.of(
+    @Autowired
+    public DesignJobService(CanvasJobMapper canvasJobMapper,
+                            CanvasJobRepository canvasJobRepository,
+                            AgentAssetMapper agentAssetMapper,
+                            CanvasAssetService canvasAssetService,
+                            AgentConversationMapper agentConversationMapper,
+                            AgentConversationService agentConversationService,
+                            DesignAssistantCapability designAssistantCapability,
+                            StoryboardPlanningService storyboardPlanningService,
+                            StoryboardProductionService storyboardProductionService,
+                            ProjectService projectService,
+                            ImageGenerationService imageGenerationService,
+                            VideoGenerationService videoGenerationService,
+                            GenerationRecordWriter generationRecordWriter) {
+        this.canvasJobMapper = canvasJobMapper;
+        this.canvasJobRepository = canvasJobRepository;
+        this.agentAssetMapper = agentAssetMapper;
+        this.canvasAssetService = canvasAssetService;
+        this.agentConversationMapper = agentConversationMapper;
+        this.agentConversationService = agentConversationService;
+        this.designAssistantCapability = designAssistantCapability;
+        this.storyboardPlanningService = storyboardPlanningService;
+        this.storyboardProductionService = storyboardProductionService;
+        this.projectService = projectService;
+        this.imageGenerationService = imageGenerationService;
+        this.videoGenerationService = videoGenerationService;
+        this.generationRecordWriter = generationRecordWriter;
+    }
+
+    /** Compatibility constructor for tests and callers created before staged storyboard production. */
+    public DesignJobService(CanvasJobMapper canvasJobMapper,
+                            CanvasJobRepository canvasJobRepository,
+                            AgentAssetMapper agentAssetMapper,
+                            CanvasAssetService canvasAssetService,
+                            AgentConversationMapper agentConversationMapper,
+                            AgentConversationService agentConversationService,
+                            DesignAssistantCapability designAssistantCapability,
+                            StoryboardPlanningService storyboardPlanningService,
+                            ProjectService projectService,
+                            ImageGenerationService imageGenerationService,
+                            VideoGenerationService videoGenerationService,
+                            GenerationRecordWriter generationRecordWriter) {
+        this(canvasJobMapper, canvasJobRepository, agentAssetMapper, canvasAssetService,
+                agentConversationMapper, agentConversationService, designAssistantCapability,
+                storyboardPlanningService, null, projectService, imageGenerationService,
+                videoGenerationService, generationRecordWriter);
+    }
+
+    private static final List<CapabilityDescriptor> BASE_CAPABILITIES = List.of(
             new CapabilityDescriptor("agent.request", "设计助理请求", "remote", true),
             new CapabilityDescriptor("storyboard.plan", "分镜规划", "remote", true),
             new CapabilityDescriptor("image.generate", "生成图片", "remote", true),
@@ -100,7 +158,11 @@ public class DesignJobService {
     // ─────────────────────────── 对外 ───────────────────────────
 
     public List<CapabilityDescriptor> capabilities() {
-        return CAPABILITIES;
+        if (!storyboardProductionV2Enabled) return BASE_CAPABILITIES;
+        List<CapabilityDescriptor> capabilities = new ArrayList<>(BASE_CAPABILITIES);
+        capabilities.add(new CapabilityDescriptor("storyboard.outline", "剧情与伪分镜", "remote", true));
+        capabilities.add(new CapabilityDescriptor("storyboard.finalize", "生成正式分镜", "remote", true));
+        return List.copyOf(capabilities);
     }
 
     /** 提交作业：幂等（clientRequestId）+ 会话归属校验 + 落库。 */
@@ -295,6 +357,8 @@ public class DesignJobService {
             switch (job.getCapabilityId()) {
                 case "agent.request" -> handleAsk(job);
                 case "storyboard.plan" -> handleStoryboardPlan(job);
+                case "storyboard.outline" -> handleStoryboardOutline(job);
+                case "storyboard.finalize" -> handleStoryboardFinalize(job);
                 case "image.generate", "image.redraw" -> handleImage(job, owner);
                 case "video.generate" -> handleVideo(job, owner);
                 default -> throw new BusinessException(40001, "未知能力: " + job.getCapabilityId());
@@ -406,6 +470,120 @@ public class DesignJobService {
         eventData.put("shots", shots);
         eventData.put("planVersion", StoryboardPlanningService.PLAN_VERSION);
         recordAndPublish(job.getId(), "storyboard.created", eventData);
+    }
+
+    void handleStoryboardOutline(CanvasJob job) {
+        requireStoryboardProductionV2();
+        Map<String, Object> params = JsonUtil.parse(job.getParams());
+        String script = extractPrompt(job);
+        StoryboardRunSnapshot snapshot = storyboardProductionService.start(new StoryboardProductionRequest(
+                job.getUserId(), job.getProjectId(), job.getConversationId(),
+                stringValue(canvasValue(params, "canvasId")), script,
+                str(params, "creationType"), str(params, "requestedShotCount"),
+                storyboardAssetRefs(job, params), stringList(params, "roleHints")));
+
+        Map<String, Object> ready = new LinkedHashMap<>();
+        ready.put("jobId", job.getId());
+        ready.put("runId", snapshot.runId());
+        ready.put("stage", snapshot.stage().name());
+        ready.put("assessment", snapshot.assessment());
+        ready.put("optimizedScript", snapshot.selectedScript());
+        ready.put("expansionScript", snapshot.expansionScript());
+        ready.put("roles", snapshot.roles());
+        recordAndPublish(job.getId(), "storyboard.outline.ready", ready);
+
+        Map<String, Object> preview = new LinkedHashMap<>(ready);
+        preview.put("pseudoShots", snapshot.pseudoShots());
+        preview.put("storyBible", snapshot.storyBible());
+        recordAndPublish(job.getId(), "storyboard.preview", preview);
+    }
+
+    void handleStoryboardFinalize(CanvasJob job) {
+        requireStoryboardProductionV2();
+        Map<String, Object> params = JsonUtil.parse(job.getParams());
+        String runId = str(params, "runId");
+        if (runId == null || runId.isBlank()) {
+            throw new BusinessException(40001, "runId 不能为空");
+        }
+        StoryboardRunSnapshot current = storyboardProductionService.getOwned(
+                runId, job.getUserId(), job.getProjectId());
+        String decision = str(params, "decision");
+        if (current.stage() == Stage.PLOT_REVIEW) {
+            StoryboardRunSnapshot preview = storyboardProductionService.approve(
+                    runId, new Approval(Stage.PLOT_REVIEW,
+                            decision == null || decision.isBlank() ? "APPROVE" : decision,
+                            str(params, "instruction"), List.of(), List.of()));
+            Map<String, Object> previewData = new LinkedHashMap<>();
+            previewData.put("jobId", job.getId());
+            previewData.put("runId", runId);
+            previewData.put("stage", preview.stage().name());
+            previewData.put("optimizedScript", preview.selectedScript());
+            previewData.put("expansionScript", preview.expansionScript());
+            previewData.put("assessment", preview.assessment());
+            previewData.put("roles", preview.roles());
+            previewData.put("storyBible", preview.storyBible());
+            previewData.put("pseudoShots", preview.pseudoShots());
+            recordAndPublish(job.getId(), "storyboard.preview", previewData);
+            return;
+        }
+        if (current.stage() != Stage.PSEUDO_REVIEW) {
+            throw new BusinessException(40901, "当前分镜阶段不可确认: " + current.stage());
+        }
+        StoryboardRunSnapshot snapshot = storyboardProductionService.approve(
+                runId, new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()));
+        if (snapshot.finalShots().isEmpty()) {
+            throw new BusinessException(50201, snapshot.error().isBlank() ? "正式分镜生成失败" : snapshot.error());
+        }
+        Map<String, Object> eventData = new LinkedHashMap<>();
+        eventData.put("jobId", job.getId());
+        eventData.put("runId", runId);
+        eventData.put("shots", snapshot.finalShots());
+        eventData.put("planVersion", StoryboardPlanningService.PLAN_VERSION);
+        eventData.put("partial", !snapshot.error().isBlank());
+        if (!snapshot.error().isBlank()) eventData.put("warning", snapshot.error());
+        recordAndPublish(job.getId(), "storyboard.created", eventData);
+    }
+
+    private List<AssetRef> storyboardAssetRefs(CanvasJob job, Map<String, Object> params) {
+        List<AssetRef> refs = new ArrayList<>();
+        List<String> sourceIds = JsonUtil.parseList(job.getSourceAssetIds());
+        for (String assetId : sourceIds) {
+            AgentAsset asset = agentAssetMapper.selectById(assetId);
+            if (asset == null) continue;
+            refs.add(new AssetRef(asset.getId(),
+                    asset.getType() == null ? "image" : asset.getType(),
+                    asset.getUrl() == null ? "" : asset.getUrl(),
+                    asset.getPurpose() == null ? "" : asset.getPurpose()));
+        }
+        List<String> referenceImages = stringList(params, "referenceImages");
+        List<Map<String, Object>> catalog = mapList(params.get("referenceCatalog"));
+        for (int index = 0; index < referenceImages.size(); index++) {
+            Map<String, Object> item = index < catalog.size() ? catalog.get(index) : Map.of();
+            String assetId = stringValue(item.get("assetId"));
+            if (assetId == null) assetId = "reference-" + (index + 1);
+            refs.add(new AssetRef(assetId, "image", referenceImages.get(index), ""));
+        }
+        return refs.stream().collect(java.util.stream.Collectors.toMap(
+                        AssetRef::assetId, item -> item, (left, right) -> left, LinkedHashMap::new))
+                .values().stream().toList();
+    }
+
+    private static List<Map<String, Object>> mapList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) continue;
+            Map<String, Object> converted = new LinkedHashMap<>();
+            map.forEach((key, entry) -> converted.put(String.valueOf(key), entry));
+            result.add(converted);
+        }
+        return result;
+    }
+
+    private void requireStoryboardProductionV2() {
+        if (!storyboardProductionV2Enabled) {
+            throw new BusinessException(40001, "分镜生产 v2 未启用");
+        }
     }
 
     void handleImage(CanvasJob job, String owner) {

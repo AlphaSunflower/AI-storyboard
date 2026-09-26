@@ -25,4 +25,9 @@ class AgentAiConfigPropertiesTest {
     void defaultMaxParallelAgentsIsFour() {
         assertThat(new AgentAiConfigProperties().getMaxParallelAgents()).isEqualTo(4);
     }
+
+    @Test
+    void humanInputIsDisabledByDefault() {
+        assertThat(new AgentAiConfigProperties().isHumanInputEnabled()).isFalse();
+    }
 }

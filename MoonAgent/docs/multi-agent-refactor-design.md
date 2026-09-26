@@ -21,7 +21,7 @@
 | 剧本/分镜师 | `intent-aisplit` | `AisplitIntentHandler` | 已存在 |
 | 视觉设计师 | `intent-pic` | `PicIntentHandler` | 已存在 |
 | 视频导演 | `intent-video` | `VideoIntentHandler` | 已存在 |
-| 内容审查/修复员 | `intent-scene-review` | `SceneReviewIntentHandler` | 已存在 |
+| 内容审查/修复员 | AgentScope storyboard tools | `AgentScopeStoryboardTools` | 已迁移 |
 | 通用管家 | `intent-other` | `OtherSpecialist`（显式 `SpecialistAgent`） | 已存在 |
 | Supervisor | —（编制逻辑，非独立角色） | `PlanGraph` 入口分流 + `IntentRecognitionService` | 已存在（只做单选路由） |
 
@@ -82,7 +82,7 @@
 ### 4.3 Supervisor 职责沉淀
 
 - 现 `PlanGraph` 的 `entry → intent_recognize → intent_clarify → resume_route` 就是 Supervisor 的骨架，**不新建类**。
-- 增量：在确定「链首专家」后，显式声明该链的**可移交序列**（如 `intent-aisplit → intent-scene-review`，`intent-pic → intent-scene-review`），让「哪一步上审查」成为配置而非散落在各 handler。
+- 增量：在确定「链首专家」后，显式声明该链的**可移交序列**，让「哪一步上审查」成为配置而非散落在各 handler。
 
 ### 4.4 明确不做的事
 
@@ -97,8 +97,8 @@
 
 ## 六、审查/修复开关
 
-- `intent-scene-review` 不宜每轮自动跑（每次多一次 LLM + 上下文搬运）。
-- 建议配置 `ai.agent.auto-review-chains`（默认空）：仅对列出的链（如 `aisplit`）在关键节点（写库前）自动上审查；其余靠人工触发（现有 review-action 卡片语义保留）。
+- 分镜媒体操作统一由 AgentScope 工具按需执行，避免每轮额外跑一次 LLM 和上下文搬运。
+- 不再配置自动审查链；查看分镜使用 `list_project_storyboard`，补图使用 `generate_storyboard_images`。
 - 开关由 Supervisor（4.3）读取，命中则插入 `node_scene_review`。
 
 ## 七、变更清单（文件级）
@@ -108,7 +108,7 @@
 | `PlanGraph.java` | handler 节点消费 `SpecialistResult.needsHandoff()`；新增接力条件边；`SpecialistContext.previousResult` 喂 `handoffState` | 主要 |
 | `HandlerDelegatingSpecialist.java` | 支持返回 `handoff`（默认仍 `done`） | 小 |
 | `SpecialistContext.java` / `SpecialistResult.java` | 字段已在，无需改（或仅加注释） | 0 |
-| `*.yml` | 新增 `ai.agent.auto-review-chains`（审查开关） | 小 |
+| `*.yml` | 移除已废弃的分镜自动审查开关 | 小 |
 | 6 个 `IntentHandler` | **不改** | 0 |
 
 ## 八、风险
@@ -122,7 +122,7 @@
 ## 九、实施次序（建议）
 
 1. 先做 **4.1**（PlanGraph 消费 handoff + 接力条件边 + previousResult 喂入）——这是让"链"真正通电的唯一核心改动，且默认 `done` 不影响现有行为。
-2. 再开 **4.3**（supervisor 定链 + 审查开关配置），选一条链（如 `aisplit → scene-review`）验证。
+2. 再验证 AgentScope 分镜查询与批量补图链路。
 3. 最后按需加 **4.2**（特定专家声明移交），默认仍单专家闭环。
 
 ## 十、验证

@@ -33,12 +33,21 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
     public TaskPlanDraft synthesize(TaskPlanningRequest request,
                                      Map<String, CapabilityDescriptor> capabilities,
                                      List<String> validationErrors) {
+        return synthesize(request, capabilities, validationErrors, null);
+    }
+
+    @Override
+    public TaskPlanDraft synthesize(TaskPlanningRequest request,
+                                    Map<String, CapabilityDescriptor> capabilities,
+                                    List<String> validationErrors,
+                                    com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace) {
         try {
             String capabilityJson = JSON.writeValueAsString(capabilities.values());
             String errorText = validationErrors == null || validationErrors.isEmpty()
                     ? "none"
                     : String.join("; ", validationErrors);
-            String raw = chatClient.prompt()
+            if (trace != null) trace.beginModelCall();
+            var response = chatClient.prompt()
                     .options(OpenAiChatOptions.builder()
                             .model(gatewayModelService.getDefaultTextModel()))
                     .system(systemPrompt())
@@ -49,7 +58,11 @@ public class LlmTaskPlanSynthesizer implements TaskPlanSynthesizer {
                             Previous validation errors: %s
                             """.formatted(request.goal(), request.preferredCapability(), capabilityJson, errorText))
                     .call()
-                    .content();
+                    .chatResponse();
+            if (trace != null) trace.recordUsage(response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             TaskPlanDraft draft = converter.convert(raw);
             if (draft != null && !draft.nodes().isEmpty()) {
                 return draft;

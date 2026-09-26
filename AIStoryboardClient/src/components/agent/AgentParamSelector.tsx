@@ -18,7 +18,7 @@ interface Props {
   keyPrefix?: string;
   /** 初始参数（键带前缀，如 videoResolution/imageModel）：优先于模型默认/推荐，用于回填分镜已存配置 */
   initialValue?: Record<string, string>;
-  /** 静默模式（SceneReviewCard 用）：仅在用户真正改动时上报，不做默认预选；打开/切换图视不发保存请求 */
+  /** 静默模式：仅在用户真正改动时上报，不做默认预选；打开/切换图视不发保存请求 */
   silent?: boolean;
 }
 
@@ -46,7 +46,7 @@ interface SpecParam {
   fields?: SpecParam[];
 }
 
-/** 小写参数键 → 驼峰（如 size → Size, aspectRatio → AspectRatio），与后端字段/SceneReviewCard.buildPayload 对齐 */
+/** 小写参数键 → 驼峰（如 size → Size, aspectRatio → AspectRatio），与后端字段命名对齐 */
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }

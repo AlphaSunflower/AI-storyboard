@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { EmbeddedAppWindow } from './EmbeddedAppWindow';
 import { useAgentStore } from '../../../stores/agentStore';
 import {
-  buildSceneReviewPrompt,
+  buildSceneInspectPrompt,
   isCanvasModeReadyMessage,
   isCanvasModeStatusMessage,
   isStoryboardReferenceMessage,
@@ -15,18 +15,26 @@ import type { ChatAppsController } from './useChatApps';
 export function ChatAppsHost({
   apps,
   currentProjectId,
+  docked,
+  splitMaxWidth,
+  expandedSplitMaxWidth,
   sidebarCollapsed,
+  sidebarCollapseWidth,
   onCollapseSidebar,
-  expandedWidthBonus,
+  onRequestDock,
   onCanvasModeStatus,
   onCanvasModeReady,
   canvasInteractionLocked = false,
 }: {
   apps: ChatAppsController;
   currentProjectId?: string;
+  docked: boolean;
+  splitMaxWidth: number;
+  expandedSplitMaxWidth: number;
   sidebarCollapsed: boolean;
+  sidebarCollapseWidth: number;
   onCollapseSidebar: () => void;
-  expandedWidthBonus: number;
+  onRequestDock: () => void;
   onCanvasModeStatus?: (message: CanvasModeStatusMessage) => void;
   onCanvasModeReady?: (message: CanvasModeReadyMessage) => void;
   canvasInteractionLocked?: boolean;
@@ -39,8 +47,8 @@ export function ChatAppsHost({
       if (event.origin === window.location.origin && isStoryboardReferenceMessage(event.data)) {
         if (!currentProjectId || event.data.projectId !== currentProjectId) return;
         void useAgentStore.getState().sendMessage(
-          buildSceneReviewPrompt(event.data.scenes),
-          { routingHint: 'intent-scene-review' },
+          buildSceneInspectPrompt(event.data.scenes),
+          { routingHint: 'intent-storyboard' },
         );
         return;
       }
@@ -83,9 +91,13 @@ export function ChatAppsHost({
       onSelectTab={apps.select}
       onCloseTab={apps.close}
       onCloseWindow={apps.closeAll}
+      docked={docked}
+      splitMaxWidth={splitMaxWidth}
+      expandedSplitMaxWidth={expandedSplitMaxWidth}
       sidebarCollapsed={sidebarCollapsed}
+      sidebarCollapseWidth={sidebarCollapseWidth}
       onCollapseSidebar={onCollapseSidebar}
-      expandedWidthBonus={expandedWidthBonus}
+      onRequestDock={onRequestDock}
       onLayoutChange={apps.setLayout}
     />
   );

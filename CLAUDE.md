@@ -358,11 +358,11 @@ Frontend `EditorPage` detects URL params `?token=...&refresh=...&userId=...&name
 ### 首条消息异步 AI 重命名标题
 
 - **触发**：`AgentChatService.maybeScheduleTitleRename`（streamMessage + sendMessage 双路径，**必须在 user 消息落库前调用**——落库后 selectCount 已 +1，"首条"判定 count==0 永远不成立，线上实测踩坑）。三重判定：该消息是会话第一条消息（insert 前 count==0）+ 标题仍为默认值「新对话」+ `titleScheduled` 并发去重成功
-- **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞编排主流程；任务体全 try-catch，失败仅 `log.warn`，标题保持「新对话」，对话零影响
-- **生成**：`ConversationTitleService`（新建）调 Laozhang chat completions（`baseUrlVision`，超时 30s），模型固定 `gemini-3.5-flash-lite`（**实测**：老张网关对 preview 系模型的一切思考参数均不透传/拒绝，无法关思考；flash-lite 默认零思考 token，即"不思考模式"），请求体显式带 `thinking_level: minimal`（flash-lite 接受，语义自文档化）
-- **落库（并发坑）**：编排线程持有同一 `AgentConversation` 实体并整实体 updateById，标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带 `.eq(title, "新对话")` 原子条件——整实体更新会把对方刚写的新字段冲掉
-- **一次性推送**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end`（含 workflow_finished 恢复流）发送时 `remove` 取走并附 `title` 字段；**只推一次**（取走即删），不做轮询/持续推送；极端时序（标题未生成完流已结束）该轮不推送，前端下次拉取会话列表自然可见
-- **前端**：`agentStore.ts` 两个 `message_end` 分支（sendMessage / submitHumanInput）收到 `e.title` 就地更新 `conversations` 列表（守卫 `c.title !== e.title` 防重复 set）；`SseEvent.title` 类型已存在，零类型改动
+- **异步**：`CompletableFuture.runAsync(..., agentExecutor)`（虚拟线程），不阻塞编排主流程；任务体全 try-catch，对话零影响。先立即写入首句兜底标题，AI 成功后再条件替换，因此模型超时/空内容/无路由也不会永久停在「新对话」
+- **生成**：`ConversationTitleService` 使用 `ai.agent.title-model` 显式模型（默认 `mimo-v2.6-pro`，可按环境覆盖；留空才回退网关默认文本模型），单次超时由 `ai.agent.title-timeout-seconds` 控制，显式传 `thinking_level: minimal` 避免推理内容占满输出并拖慢/掏空标题。默认网关文本模型可能被后台随时切换，不能作为标题稳定性的隐式依赖
+- **落库（并发坑）**：编排线程持有同一 `AgentConversation` 实体并整实体 updateById，标题线程**必须**用 `LambdaUpdateWrapper` 只 set title/updatedAt 两列，并带预期旧标题的原子条件（首句兜底从「新对话」更新，AI 标题从兜底值更新）——既防覆盖用户手动重命名，也防整实体更新冲掉新字段
+- **推送与补齐**：落库成功后新标题暂存 `renamedTitleByConversation`，`messageEndPayload` 在 `message_end` 附 `title` 一次性下发；若标题晚于流结束，`agentStore.ts` 在首条消息未收到 `e.title` 时按 1.2s/3s/7s/15s/30s 拉取会话详情，覆盖首句兜底与后续 AI 标题后自动停止
+- **AgentScope**：其 `AgentResultEvent` 只给最终 `Msg`，`Msg.name` 是代理名；`AgentState` / `SessionInfo` 没有会话标题字段，因此当前标题生成不依赖 AgentScope，也不能直接从首轮回复结果读取现成标题
 
 ### 提示词优化（/api/agent/prompt/optimize）
 

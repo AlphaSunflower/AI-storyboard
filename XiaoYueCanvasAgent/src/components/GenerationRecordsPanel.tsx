@@ -37,6 +37,8 @@ const ACTION_LABEL: Record<string, string> = {
   'image.redraw': '图片重绘',
   'video.generate': '生成视频',
   'storyboard.plan': '分镜规划',
+  'storyboard.outline': '剧情与伪分镜',
+  'storyboard.finalize': '正式分镜生成',
   'storyboardGrid': '分镜画面生成',
   'agent.request': '设计助理生成',
   generate: '生成',

@@ -9,6 +9,7 @@ import java.util.Map;
 public class AgentScopeInteractionTools {
 
     public static final String REQUEST_HUMAN_INPUT = "request_human_input";
+    public static final String CHOOSE_STORYBOARD_COMMIT = "choose_storyboard_commit_mode";
 
     public AgentScopeTool tool() {
         return new AgentScopeTool(
@@ -29,5 +30,17 @@ public class AgentScopeInteractionTools {
             Boolean allowCustom,
             AgentScopeRunContext context) {
         return "";
+    }
+
+    public AgentScopeTool storyboardCommitTool() {
+        return new AgentScopeTool(
+                CHOOSE_STORYBOARD_COMMIT,
+                "Ask the user how to write a generated storyboard when the project already "
+                        + "contains scenes. The backend fixes the options to append, overwrite or delete.",
+                AgentScopeTool.schema(Map.of(
+                        "existing_scene_count", Map.of("type", "integer")),
+                        List.of("existing_scene_count")),
+                false, true, true,
+                (input, param) -> "");
     }
 }

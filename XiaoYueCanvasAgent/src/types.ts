@@ -40,6 +40,30 @@ export interface StoryboardVideoConfig {
   duration?: number;
 }
 
+export interface StoryboardPseudoShot {
+  shotId: string;
+  segmentId: string;
+  shotOrdinal: number;
+  narrativePurpose: string;
+  characters: string[];
+  location: string;
+  time: string;
+  conflict: string;
+  action: string;
+  emotion: string;
+  continuity: string[];
+  sourceExcerpt: string[];
+  referenceAssetIds: string[];
+}
+
+export interface StoryboardPlotAssessment {
+  complete: boolean;
+  missingElements?: string[];
+  risks?: string[];
+  summary?: string;
+  expansionPlan?: string;
+}
+
 /** 分镜节点中的一帧，支持行内上传参考图片/资产、修改提示词与参数、标记视频生成状态。 */
 export interface StoryboardFrame {
   img?: string;
@@ -214,6 +238,13 @@ export interface MediaNodeData extends Record<string, unknown> {
   referenceAssetIds?: string[];
   useReferenceImages?: boolean;
   shots?: import('./canvas/storyboardPlan').StoryboardShotPlan[];
+  productionRunId?: string;
+  productionStage?: string;
+  productionAssessment?: StoryboardPlotAssessment;
+  productionRoles?: Array<{ id: string; label: string; kind: string; instructions?: string }>;
+  pseudoShots?: StoryboardPseudoShot[];
+  optimizedScript?: string;
+  expandedScript?: string;
   // ── 分镜生成（storyboardGen）字段──
   rows?: number;
   cols?: number;
@@ -432,6 +463,25 @@ export type JobEvent = ({ jobId: string; eventId?: string } & (
   | { type: 'agent.message'; message: string; messageId?: string; delta?: boolean }
   | { type: 'agent.tool_call'; toolCall: AgentToolCall }
   | { type: 'agent.tool_result'; toolResult: AgentToolResult }
+  | {
+    type: 'storyboard.outline.ready';
+    runId: string;
+    stage: string;
+    optimizedScript?: string;
+    expansionScript?: string;
+    assessment?: StoryboardPlotAssessment;
+    roles?: Array<{ id: string; label: string; kind: string; instructions?: string }>;
+  }
+  | {
+    type: 'storyboard.preview';
+    runId: string;
+    stage: string;
+    pseudoShots: StoryboardPseudoShot[];
+    optimizedScript?: string;
+    expansionScript?: string;
+    assessment?: StoryboardPlotAssessment;
+    roles?: Array<{ id: string; label: string; kind: string; instructions?: string }>;
+  }
   | { type: 'storyboard.created'; shots: import('./canvas/storyboardPlan').StoryboardShotPlan[]; planVersion: number }
   | { type: 'asset.created'; asset: JobAssetDescriptor }
   | { type: 'job.completed' }

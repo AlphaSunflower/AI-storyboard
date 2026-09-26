@@ -38,6 +38,24 @@ public class AgentCheckpoint {
     private String status;
     /** 过期时间（创建 + 30min，对齐原 FORM_SNAPSHOT_TTL_MS） */
     private OffsetDateTime expirationTime;
+    /** AgentScope 会话标识；v3 固定为 conversation_id。 */
+    @TableField(exist = false)
+    private String runtimeSessionId;
+    /** AgentScope 可恢复回复标识。 */
+    @TableField(exist = false)
+    private String runtimeReplyId;
+    /** 触发暂停的工具调用标识。 */
+    @TableField(exist = false)
+    private String runtimeToolCallId;
+    /** 触发暂停的工具名。 */
+    @TableField(exist = false)
+    private String runtimeToolName;
+    /** 权限确认包含的完整工具调用列表。 */
+    @TableField(exist = false)
+    private String runtimeToolCallsJson;
+    /** 用户提交的续跑命令（action/customText/params/assetIds/routingHint 等）。 */
+    @TableField(exist = false)
+    private String resumePayload;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
 }

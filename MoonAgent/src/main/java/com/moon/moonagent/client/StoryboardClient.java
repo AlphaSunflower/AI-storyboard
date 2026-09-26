@@ -75,6 +75,13 @@ public class StoryboardClient {
         return sceneCache.get(projectId, this::fetchProjectScenes);
     }
 
+    /** 绕过 30 秒缓存读取项目分镜，供写库策略等必须基于最新状态的场景使用。 */
+    public List<Scene> getProjectScenesFresh(String projectId) {
+        List<Scene> scenes = fetchProjectScenes(projectId);
+        sceneCache.put(projectId, scenes);
+        return scenes;
+    }
+
     private List<Scene> fetchProjectScenes(String projectId) {
         String url = baseUrl + "/api/internal/projects/" + projectId + "/scenes";
         var resp = restTemplate.exchange(url, HttpMethod.GET,
@@ -105,6 +112,55 @@ public class StoryboardClient {
             sceneCache.invalidate(projectId);
         } catch (ResourceAccessException e) {
             log.error("StoryboardClient.deleteProjectScenes: 主后端不可用 {}", e.getMessage());
+            throw new RuntimeException("主后端不可用，请稍后重试", e);
+        }
+    }
+
+    /** 事务内全量替换项目分镜，返回与输入顺序一致的新 sceneId。 */
+    public List<String> replaceProjectScenes(String projectId, List<Scene> scenes) {
+        String url = baseUrl + "/api/internal/scenes/project/" + projectId + "/replace";
+        try {
+            var resp = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    new HttpEntity<>(scenes == null ? List.of() : scenes, headers()),
+                    new ParameterizedTypeReference<ApiResponse<List<String>>>() {});
+            sceneCache.invalidate(projectId);
+            return resp.getBody() == null || resp.getBody().data() == null
+                    ? List.of() : resp.getBody().data();
+        } catch (ResourceAccessException e) {
+            log.error("StoryboardClient.replaceProjectScenes: 主后端不可用 {}", e.getMessage());
+            throw new RuntimeException("主后端不可用，请稍后重试", e);
+        }
+    }
+
+    /** 事务内追加项目分镜，保留现有分镜和素材关联，返回与输入顺序一致的新 sceneId。 */
+    public List<String> appendProjectScenes(String projectId, List<Scene> scenes) {
+        String url = baseUrl + "/api/internal/scenes/project/" + projectId + "/append";
+        try {
+            var resp = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    new HttpEntity<>(scenes == null ? List.of() : scenes, headers()),
+                    new ParameterizedTypeReference<ApiResponse<List<String>>>() {});
+            sceneCache.invalidate(projectId);
+            return resp.getBody() == null || resp.getBody().data() == null
+                    ? List.of() : resp.getBody().data();
+        } catch (ResourceAccessException e) {
+            log.error("StoryboardClient.appendProjectScenes: 主后端不可用 {}", e.getMessage());
+            throw new RuntimeException("主后端不可用，请稍后重试", e);
+        }
+    }
+
+    /** 删除单个项目分镜并清理项目缓存。 */
+    public void deleteScene(String sceneId, String projectId) {
+        String url = baseUrl + "/api/internal/scenes/" + sceneId;
+        try {
+            restTemplate.exchange(url, HttpMethod.DELETE,
+                    new HttpEntity<>(headers()), String.class);
+            if (projectId != null && !projectId.isBlank()) sceneCache.invalidate(projectId);
+        } catch (ResourceAccessException e) {
+            log.error("StoryboardClient.deleteScene: 主后端不可用 {}", e.getMessage());
             throw new RuntimeException("主后端不可用，请稍后重试", e);
         }
     }

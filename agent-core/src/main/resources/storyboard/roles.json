@@ -1,0 +1,72 @@
+[
+  {
+    "id": "screenwriter",
+    "label": "编剧",
+    "kind": "CREATIVE",
+    "instructions": "强化人物动机、因果关系、冲突推进与情绪弧光，避免工具人。",
+    "keywords": []
+  },
+  {
+    "id": "director",
+    "label": "导演",
+    "kind": "CREATIVE",
+    "instructions": "确保叙事可拍、镜头连续、视觉节奏可执行。",
+    "keywords": []
+  },
+  {
+    "id": "continuity-editor",
+    "label": "连续性编辑",
+    "kind": "CREATIVE",
+    "instructions": "检查跨段人物、时间线、道具、空间和伏笔一致性。",
+    "keywords": []
+  },
+  {
+    "id": "medical-expert",
+    "label": "医疗顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验诊断、急救、手术、用药、医疗沟通和医院流程的专业性。",
+    "keywords": ["医生", "医院", "手术", "急诊", "护士", "病人", "医疗"]
+  },
+  {
+    "id": "legal-expert",
+    "label": "法律顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验法律程序、证据链、律师职责、合同与庭审行为的专业性。",
+    "keywords": ["律师", "法院", "法官", "庭审", "合同", "警察局", "案件"]
+  },
+  {
+    "id": "law-enforcement-expert",
+    "label": "警务顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验执法程序、现场处置、证据保全和警务协作的专业性。",
+    "keywords": ["警察", "刑警", "警局", "报警", "执法", "嫌疑人", "现场勘查"]
+  },
+  {
+    "id": "engineering-expert",
+    "label": "工程顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验工程流程、设备操作、安全规范和风险处置的专业性。",
+    "keywords": ["工程师", "工厂", "设备", "机房", "施工", "维修", "技术员"]
+  },
+  {
+    "id": "education-expert",
+    "label": "教育顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验教师、学生、课堂、校园治理和教学沟通的专业性。",
+    "keywords": ["教师", "老师", "学生", "学校", "课堂", "班主任", "校园"]
+  },
+  {
+    "id": "business-expert",
+    "label": "商业顾问",
+    "kind": "DOMAIN",
+    "instructions": "校验公司治理、岗位职责、商业决策、财务和职场沟通的专业性。",
+    "keywords": ["公司", "董事长", "总裁", "经理", "投资", "融资", "财务", "职场"]
+  },
+  {
+    "id": "domain-expert",
+    "label": "领域专家",
+    "kind": "DOMAIN",
+    "instructions": "根据剧情职业校验专业行为、术语、流程和现实约束；不确定时明确保留。",
+    "keywords": []
+  }
+]

@@ -21,11 +21,26 @@ public class AgentAsyncTask {
     private String toolName;
     private String kind;
     private String status;
+    private String title;
+    private String stage;
+    private Integer progress;
     private String requestJson;
     private String resultJson;
+    private String resultSummary;
     private String assetIdsJson;
     private String resultUrlsJson;
     private String messageId;
+    private String anchorMessageId;
+    private String parentTaskId;
+    private Long version;
+    private Boolean cancelRequested;
+    private OffsetDateTime contextConsumedAt;
+    private String wakeupStatus;
+    private OffsetDateTime wakeupEnqueuedAt;
+    private OffsetDateTime wakeupConsumedAt;
+    private String wakeupMessageId;
+    private String wakeupError;
+    private Integer wakeupAttempts;
     private String error;
     private String idempotencyKey;
     @TableField(fill = FieldFill.INSERT)

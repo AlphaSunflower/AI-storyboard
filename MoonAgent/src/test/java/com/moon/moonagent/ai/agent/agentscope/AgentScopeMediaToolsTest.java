@@ -15,6 +15,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -92,6 +93,91 @@ class AgentScopeMediaToolsTest {
         assertThat(result).containsEntry("taskId", "task-1").containsEntry("status", "queued");
         verify(support).startVideoGenerationAsyncWithRole(any(), eq("镜头推进"), eq("8"),
                 eq("16:9"), any(), eq(List.of()), any());
+    }
+
+    @Test
+    void videoToolRejectsRequestsLongerThanFifteenSeconds() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "生成一个两分钟的视频", List.of(), null);
+        AgentScopeRunContext context = new AgentScopeRunContext(
+                conversation, request, null, new AgentScopeTurnState());
+
+        assertThatThrownBy(() -> tools.generateVideo(
+                "别墅漫游", List.of(), List.of(), "1080p", "16:9", "8", context))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("15 秒")
+                .hasMessageContaining("分镜");
+        verify(support, never()).startVideoGenerationAsyncWithRole(
+                any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void storyboardShotKeepsItsOwnFifteenSecondLimitUnderLongOriginalRequest() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        when(support.startStoryboardShotVideoGenerationAsyncWithRole(
+                any(), eq("首个镜头"), eq("15"), eq("16:9"), any(), eq(List.of()), any()))
+                .thenReturn("shot-task-1");
+        AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "生成一个两分钟的视频", List.of(), null);
+        AgentScopeRunContext context = new AgentScopeRunContext(
+                conversation, request, null, new AgentScopeTurnState());
+
+        Map<String, Object> result = tools.generateVideoForStoryboard(
+                "首个镜头", List.of(), List.of(), "1080p", "16:9", "15", context);
+
+        assertThat(result).containsEntry("taskId", "shot-task-1");
+        verify(support).startStoryboardShotVideoGenerationAsyncWithRole(
+                any(), eq("首个镜头"), eq("15"), eq("16:9"), any(), eq(List.of()), any());
+        verify(support, never()).startVideoGenerationAsyncWithRole(
+                any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void genericVideoToolCannotBypassAnActiveStoryboardWorkflow() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        turnState.markStoryboardRequested();
+
+        assertThatThrownBy(() -> tools.generateVideo(
+                "镜头推进", List.of(), List.of(), "1080p", "16:9", "8",
+                context(turnState)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("分镜");
+        verify(support, never()).startVideoGenerationAsyncWithRole(
+                any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void genericImageToolCannotBypassAnActiveStoryboardWorkflow() {
+        AgentGenerationService generation = mock(AgentGenerationService.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        AgentScopeImageTools tools = new AgentScopeImageTools(
+                generation, assets, assetGroups, asyncTasks, new AgentScopeProperties());
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        turnState.markStoryboardRequested();
+
+        assertThatThrownBy(() -> tools.generateImage(
+                "建立镜头", List.of(), List.of(), "1K", "high", "1",
+                context(turnState)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("分镜");
+        verify(generation, never()).generateImage(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

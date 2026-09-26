@@ -13,6 +13,7 @@ import com.moon.moonagent.entity.StoryboardVideoQueue;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.StoryboardVideoQueueMapper;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
 import lombok.RequiredArgsConstructor;
@@ -193,7 +194,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         } catch (Exception e) {
             log.warn("[分镜视频队列] 资产参考图聚合失败: {}", e.getMessage());
         }
-        // 分镜已挂载的参考图（SceneReviewCard/Agent 自动挂载）按 role 追加，且【优先】：
+        // 分镜已挂载的参考图（Agent 自动挂载）按 role 追加，且【优先】：
         // 先加入带 role 的图（FIRST_LAST_FRAME → 首帧/尾帧），避免被随后纯 REFERENCE 的资产/用户图
         // 按 URL 去重挤掉，否则 2 张资产图会退化成「一张 REFERENCE」，模型只读到首张。
         List<ReferenceImage> combined = new ArrayList<>();
@@ -229,10 +230,12 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
 
         String taskId;
         try {
+            String duration = row.getDuration() == null ? null : String.valueOf(row.getDuration());
+            VideoGenerationPolicy.requireStoryboardShotAllowed(duration);
             taskId = generationService.createVideoTaskWithRole(
                     conversation, row.getSceneId(), prompt, row.getModel(), row.getResolution(),
                     row.getSize(), row.getAspectRatio(),
-                    row.getDuration() == null ? null : String.valueOf(row.getDuration()),
+                    duration,
                     row.getNegativePrompt(), refImages, sourceImageUrl, referenceVideos, false);
         } catch (Exception e) {
             failRow(row, e.getMessage() != null ? e.getMessage() : "视频任务创建失败");

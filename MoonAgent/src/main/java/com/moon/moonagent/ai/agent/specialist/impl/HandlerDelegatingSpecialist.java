@@ -4,6 +4,8 @@ import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.IntentHandler;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.audit.AgentInvocationContext;
+import com.moon.moonagent.ai.agent.audit.AgentInvocationContextHolder;
 import com.moon.moonagent.ai.agent.specialist.SpecialistAgent;
 import com.moon.moonagent.ai.agent.specialist.SpecialistContext;
 import com.moon.moonagent.ai.agent.specialist.SpecialistResult;
@@ -54,21 +56,24 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
             request.setTrace(trace);
 
             String lastMessage;
-            if (context.action() != null && !context.action().isBlank()) {
-                log.info("Agent[{}] 续流(resume): action={} cpAction={} 会话={}", handler.intentType(), context.action(), context.cpAction(), context.conversation().getId());
-                // resume 路径
-                request.setAction(context.action());
-                request.setCustomText(context.customText() != null ? context.customText() : "");
-                request.setParams(context.params() != null ? context.params() : java.util.Map.of());
-                request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
-                AgentCheckpoint cp = new AgentCheckpoint();
-                cp.setAction(context.cpAction());
-                cp.setPlan(context.cpPlan());
-                lastMessage = handler.resume(request, cp);
-            } else {
-                log.info("Agent[{}] 处理(handle): 会话={}", handler.intentType(), context.conversation().getId());
-                request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
-                lastMessage = handler.handle(request);
+            try (AgentInvocationContextHolder.Scope ignored =
+                         AgentInvocationContextHolder.open(invocationContext(context))) {
+                if (context.action() != null && !context.action().isBlank()) {
+                    log.info("Agent[{}] 续流(resume): action={} cpAction={} 会话={}", handler.intentType(), context.action(), context.cpAction(), context.conversation().getId());
+                    // resume 路径
+                    request.setAction(context.action());
+                    request.setCustomText(context.customText() != null ? context.customText() : "");
+                    request.setParams(context.params() != null ? context.params() : java.util.Map.of());
+                    request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
+                    AgentCheckpoint cp = new AgentCheckpoint();
+                    cp.setAction(context.cpAction());
+                    cp.setPlan(context.cpPlan());
+                    lastMessage = handler.resume(request, cp);
+                } else {
+                    log.info("Agent[{}] 处理(handle): 会话={}", handler.intentType(), context.conversation().getId());
+                    request.setAssetIds(context.assetIds() != null ? context.assetIds() : java.util.List.of());
+                    lastMessage = handler.handle(request);
+                }
             }
 
             // 4.3 移交通电：handler 在 request 上声明了移交目标 → 转 SpecialistResult.handoff（默认 done 保持现状）
@@ -126,5 +131,18 @@ public class HandlerDelegatingSpecialist implements SpecialistAgent {
         trace.setHitlMessageId(request.getHitlMessageId());
         trace.setSuggestedActions(request.getSuggestedActions());
         trace.reasoning(request.getReasoning());
+    }
+
+    private static AgentInvocationContext invocationContext(SpecialistContext context) {
+        return new AgentInvocationContext(
+                context.conversation() == null ? "" : context.conversation().getUserId(),
+                context.conversation() == null ? "" : context.conversation().getId(),
+                context.conversation() == null ? "" : context.conversation().getProjectId(),
+                "", "", "", "",
+                context.cpAction() == null ? "" : context.cpAction(),
+                "", "",
+                context.skill() == null ? "" : context.skill().version(),
+                "",
+                context.conversation() == null ? "" : context.conversation().getEngineVersion());
     }
 }

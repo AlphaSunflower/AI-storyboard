@@ -21,6 +21,7 @@ import com.moon.moonagent.ai.agent.PlanField;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.ai.agent.AssetRelevanceResult;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.config.PromptResolver;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -354,11 +356,16 @@ public class AgentOrchestratorSupport {
     /** 安静调用（非流式、不转发 message 字段）：供修复重试用 */
     private String callQuiet(String systemPrompt, String userContent, OrchestrationRequest req) {
         try {
-            return planClient().prompt().options(planOptions())
+            beginModelCall(req);
+            ChatResponse response = planClient().prompt().options(planOptions())
                     .system(systemPrompt)
                     .user(userContent)
                     .call()
-                    .content();
+                    .chatResponse();
+            recordUsage(req, response);
+            return response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : "";
         } catch (Exception e) {
             log.warn("修复重试 LLM 调用失败: {}", e.getMessage());
             return "";
@@ -389,8 +396,7 @@ public class AgentOrchestratorSupport {
                 new GatePrompt("intent-aisplit", "storyboard-plan", "orchestrator/storyboard-plan"),
                 new GatePrompt("intent-aisplit", "scene-params-recommend", "orchestrator/scene-params-recommend"),
                 new GatePrompt("intent-pic", "plan", "orchestrator/image-plan"),
-                new GatePrompt("intent-video", "plan", "orchestrator/video-plan"),
-                new GatePrompt("intent-scene-review", "scene-review", "services/scene-review"));
+                new GatePrompt("intent-video", "plan", "orchestrator/video-plan"));
     }
 
     /**
@@ -421,12 +427,14 @@ public class AgentOrchestratorSupport {
         String raw = "";
         try {
             checkInterrupted(req);
+            beginModelCall(req);
             ChatResponse response = planClient().prompt()
                     .options(planOptions())
                     .system(systemPrompt)
                     .user(userContent)
                     .call()
                     .chatResponse();
+            recordUsage(req, response);
             checkInterrupted(req);
             AssistantMessage output = response != null && response.getResult() != null
                     ? response.getResult().getOutput() : null;
@@ -493,11 +501,18 @@ public class AgentOrchestratorSupport {
     /** 无参考图文生图：LLM 生成图片提示词（瞬态失败重试 1 次；强制中文输出——方案卡片直接展示给用户） */
     public String callImagePrompt(String content, OrchestrationRequest req) {
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
-                .system(prompt(req, "image-prompt", "orchestrator/image-prompt", null))
-                .user(content)
-                .call()
-                .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt().options(planOptions())
+                        .system(prompt(req, "image-prompt", "orchestrator/image-prompt", null))
+                        .user(content)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             return raw != null && !raw.isBlank() ? raw.trim() : content;
         } catch (Exception e) {
             log.warn("图片提示词 LLM 调用失败: {}", e.getMessage());
@@ -518,12 +533,16 @@ public class AgentOrchestratorSupport {
                                 String fallbackReason) {
         OffsetDateTime started = OffsetDateTime.now();
         try {
-            ChatResponse response = retryTransient(() -> planClient().prompt()
-                    .options(planOptions())
-                    .system(systemPrompt)
-                    .user(userContent)
-                    .call()
-                    .chatResponse());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt()
+                        .options(planOptions())
+                        .system(systemPrompt)
+                        .user(userContent)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
             AssistantMessage output = response != null && response.getResult() != null
                     ? response.getResult().getOutput() : null;
             String raw = output == null ? "" : (output.getText() == null ? "" : output.getText());
@@ -569,11 +588,18 @@ public class AgentOrchestratorSupport {
         String systemPrompt = prompt(req, "image-prompt-with-params", "orchestrator/image-prompt-with-params",
                 Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
-                    .system(systemPrompt)
-                    .user(content)
-                    .call()
-                    .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt().options(planOptions())
+                        .system(systemPrompt)
+                        .user(content)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             // 解析 JSON：prompt 必须有，params/reasons 可选（LLM 未按格式输出时兜底空 Map）
             ImagePlanResult result = new BeanOutputConverter<>(ImagePlanResult.class).convert(raw);
             if (result == null || result.prompt() == null || result.prompt().isBlank()) {
@@ -599,11 +625,18 @@ public class AgentOrchestratorSupport {
      */
     public ImageClarifyResult callImageClarify(String content, OrchestrationRequest req) {
         try {
-            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
-                .system(prompt(req, "image-clarify", "orchestrator/image-clarify", null))
-                .user(content)
-                .call()
-                .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt().options(planOptions())
+                        .system(prompt(req, "image-clarify", "orchestrator/image-clarify", null))
+                        .user(content)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             ImageClarifyResult r = new BeanOutputConverter<>(ImageClarifyResult.class).convert(raw);
             if (r == null) return new ImageClarifyResult(1, "", List.of());
             return new ImageClarifyResult(r.type(),
@@ -645,12 +678,19 @@ public class AgentOrchestratorSupport {
         try {
             String sourceNote = hasSource
                     ? prompt(req, "pic-refine-options-source-note", "orchestrator/pic-refine-options-source-note", null) : "";
-            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
-                .system(prompt(req, "pic-refine-options", "orchestrator/pic-refine-options",
-                    Map.of("hasSourceNote", sourceNote)))
-                .user("当前图片方案：" + basePrompt)
-                .call()
-                .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt().options(planOptions())
+                        .system(prompt(req, "pic-refine-options", "orchestrator/pic-refine-options",
+                                Map.of("hasSourceNote", sourceNote)))
+                        .user("当前图片方案：" + basePrompt)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             PicRefineOptionsResult result = new BeanOutputConverter<>(PicRefineOptionsResult.class).convert(raw);
             if (result.options() == null || result.options().isEmpty()) {
                 return fallbackPicRefineOptions();
@@ -681,11 +721,18 @@ public class AgentOrchestratorSupport {
             boolean withParams = modelOptionsText != null && !modelOptionsText.isBlank();
             String system = prompt(req, "video-plan", "orchestrator/video-plan",
                     Map.of("modelOptionsText", withParams ? modelOptionsText : ""));
-            String raw = retryTransient(() -> planClient().prompt().options(planOptions())
-                .system(system)
-                .user(content)
-                .call()
-                .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return planClient().prompt().options(planOptions())
+                        .system(system)
+                        .user(content)
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             VideoPlanResult plan = new BeanOutputConverter<>(VideoPlanResult.class).convert(raw);
             // 兜底：params/reasons 缺失（LLM 未按要求输出）→ 空 Map，行为与现状一致
             return new VideoPlanResult(plan.message(), plan.duration(),
@@ -830,13 +877,20 @@ public class AgentOrchestratorSupport {
         try {
             String imageOpts = buildModelOptionsText("image");
             String videoOpts = buildModelOptionsText("video");
-            String raw = retryTransient(() -> recommendClient().prompt().options(recommendOptions())
-                .system(prompt(req, "scene-params-recommend", "orchestrator/scene-params-recommend", null))
-                .user("剧本：\n" + script
-                    + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
-                    + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
-                .call()
-                .content());
+            ChatResponse response = retryTransient(() -> {
+                beginModelCall(req);
+                return recommendClient().prompt().options(recommendOptions())
+                        .system(prompt(req, "scene-params-recommend", "orchestrator/scene-params-recommend", null))
+                        .user("剧本：\n" + script
+                                + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
+                                + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
+                        .call()
+                        .chatResponse();
+            });
+            recordUsage(req, response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             RecommendedParams r = new BeanOutputConverter<>(RecommendedParams.class).convert(raw);
             if (r == null) return new SceneParamsRecommendation(imageModels, videoModels, Map.of(), Map.of());
             Map<String, String> recommended = new java.util.LinkedHashMap<>();
@@ -890,6 +944,20 @@ public class AgentOrchestratorSupport {
                                    List<Map<String, Object>> imageModels,
                                    List<Map<String, Object>> videoModels,
                                    List<Map<String, Object>> assets) {
+        return createCheckpoint(conversation, action, planPayload, step, formContent, actions,
+                models, recommended, reasons, imageModels, videoModels, assets, null);
+    }
+
+    public String createCheckpoint(AgentConversation conversation, String action,
+                                   List<Map<String, Object>> planPayload, String step,
+                                   String formContent, List<Map<String, Object>> actions,
+                                   List<Map<String, Object>> models,
+                                   Map<String, String> recommended,
+                                   Map<String, String> reasons,
+                                   List<Map<String, Object>> imageModels,
+                                   List<Map<String, Object>> videoModels,
+                                   List<Map<String, Object>> assets,
+                                   Consumer<AgentCheckpoint> customizer) {
         AgentCheckpoint cp = new AgentCheckpoint();
         cp.setConversationId(conversation.getId());
         OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
@@ -918,7 +986,12 @@ public class AgentOrchestratorSupport {
         } catch (Exception e) {
             log.warn("checkpoint plan 序列化失败: {}", e.getMessage());
         }
+        if (customizer != null) customizer.accept(cp);
         checkpointMapper.insert(cp);
+        if (cp.getRuntimeSessionId() != null || cp.getRuntimeReplyId() != null
+                || cp.getRuntimeToolCallId() != null || cp.getResumePayload() != null) {
+            checkpointMapper.updateRuntimeRef(cp);
+        }
         log.info("AgentOrchestrator: checkpoint 已落库 conversationId={} formToken={} action={}",
             conversation.getId(), cp.getFormToken(), action);
         return cp.getFormToken();
@@ -930,7 +1003,12 @@ public class AgentOrchestratorSupport {
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan) {
-        return runHITLStage(req, workflowTitle, plan, false);
+        return runHITLStage(req, workflowTitle, plan, false, null);
+    }
+
+    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan,
+                               Consumer<AgentCheckpoint> customizer) {
+        return runHITLStage(req, workflowTitle, plan, false, customizer);
     }
 
     /**
@@ -942,6 +1020,11 @@ public class AgentOrchestratorSupport {
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
     public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan, boolean skipMessage) {
+        return runHITLStage(req, workflowTitle, plan, skipMessage, null);
+    }
+
+    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan,
+                               boolean skipMessage, Consumer<AgentCheckpoint> customizer) {
         checkInterrupted(req); // 打断：不再弹出确认卡片/落库 checkpoint
         if (workflowTitle != null) {
             sendWorkflowEvent(req, "hitl_plan", workflowTitle, "node_started");
@@ -952,7 +1035,7 @@ public class AgentOrchestratorSupport {
         String formToken = createCheckpoint(req.getConversation(), plan.action(),
                 enrichMaterialContext(req, plan.planPayload()), STEP_EXECUTE,
                 plan.planText(), plan.actions(), plan.models(), plan.recommended(), plan.reasons(),
-                plan.imageModels(), plan.videoModels(), plan.assets());
+                plan.imageModels(), plan.videoModels(), plan.assets(), customizer);
         // 落库 assistant HITL 卡片消息（metadata 保留 kind/formContent/actions/formToken/expirationTime）
         String hitlMessageId = persistHitlCard(req, plan, formToken);
         if (hitlMessageId != null && !hitlMessageId.isBlank()) {
@@ -1528,6 +1611,8 @@ public class AgentOrchestratorSupport {
         String resolution = params.getOrDefault("resolution", null);
         String effDuration = params.getOrDefault("duration", duration);
         String effAspectRatio = params.getOrDefault("aspectRatio", aspectRatio);
+        VideoGenerationPolicy.requireDirectAllowed(
+                effDuration, req == null ? null : req.getContent());
         List<com.moon.moonagent.ai.video.ReferenceImage> roleImages =
                 (referenceImages == null ? List.<String>of() : referenceImages).stream()
                         .map(com.moon.moonagent.ai.video.ReferenceImage::ofReference)
@@ -1613,12 +1698,44 @@ public class AgentOrchestratorSupport {
                                                     java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
                                                     java.util.List<String> referenceVideos,
                                                     Map<String, String> params) {
+        return startVideoGenerationAsyncWithRoleInternal(
+                req, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, false);
+    }
+
+    /** 已进入分镜流程的单镜视频：允许原剧情总时长超过 15 秒，但本镜仍不得超过 15 秒。 */
+    public String startStoryboardShotVideoGenerationAsyncWithRole(
+            OrchestrationRequest req,
+            String prompt,
+            String duration,
+            String aspectRatio,
+            java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
+            java.util.List<String> referenceVideos,
+            Map<String, String> params) {
+        return startVideoGenerationAsyncWithRoleInternal(
+                req, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, true);
+    }
+
+    private String startVideoGenerationAsyncWithRoleInternal(
+            OrchestrationRequest req,
+            String prompt,
+            String duration,
+            String aspectRatio,
+            java.util.List<com.moon.moonagent.ai.video.ReferenceImage> referenceImages,
+            java.util.List<String> referenceVideos,
+            Map<String, String> params,
+            boolean storyboardShot) {
         checkInterrupted(req);
         Map<String, String> p = params == null ? Map.of() : params;
         String model = p.getOrDefault("model", null);
         String resolution = p.getOrDefault("resolution", null);
         String effDuration = p.getOrDefault("duration", duration);
         String effAspectRatio = p.getOrDefault("aspectRatio", aspectRatio);
+        if (storyboardShot) {
+            VideoGenerationPolicy.requireStoryboardShotAllowed(effDuration);
+        } else {
+            VideoGenerationPolicy.requireDirectAllowed(
+                    effDuration, req == null ? null : req.getContent());
+        }
         String taskId = generationService.createVideoTaskWithRole(
                 req.getConversation(), null, prompt, model, resolution, null,
                 effAspectRatio, effDuration, null,
@@ -2050,6 +2167,10 @@ public class AgentOrchestratorSupport {
             }
             data = enriched;
         }
+        if (("message_end".equals(eventName) || "task_accepted".equals(eventName))
+                && req.getTrace() != null) {
+            data = req.getTrace().enrichTerminalEvent(data);
+        }
         if ("message".equals(eventName) && data.get("content") != null) {
             req.setLastMessage(String.valueOf(data.get("content")));
         }
@@ -2057,6 +2178,23 @@ public class AgentOrchestratorSupport {
             req.getEmitter().send(SseEmitter.event().name(eventName).data(sseJson(data)));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
+        }
+    }
+
+    /** 标记一次模型调用开始；失败且无 usage 时仍计入 modelCalls。 */
+    public void beginModelCall(OrchestrationRequest req) {
+        if (req != null && req.getTrace() != null) req.getTrace().beginModelCall();
+    }
+
+    /** 记录 Spring AI 响应 usage；同一次调用只应在拿到最终响应后调用一次。 */
+    public void recordUsage(OrchestrationRequest req, ChatResponse response) {
+        if (req != null && req.getTrace() != null) req.getTrace().recordUsage(response);
+    }
+
+    /** 记录另一套模型运行时的 usage。 */
+    public void recordUsage(OrchestrationRequest req, long inputTokens, long outputTokens, long cachedInputTokens) {
+        if (req != null && req.getTrace() != null) {
+            req.getTrace().recordUsage(inputTokens, outputTokens, cachedInputTokens);
         }
     }
 

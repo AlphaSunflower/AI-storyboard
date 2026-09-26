@@ -49,6 +49,16 @@ final class AgentScopeTool extends ToolBase {
         });
     }
 
+    AgentScopeTool withHandler(Handler next) {
+        return new AgentScopeTool(
+                getName(), getDescription(), getParameters(),
+                isReadOnly(), isConcurrencySafe(), isExternalTool(), next);
+    }
+
+    Object invoke(Map<String, Object> input, ToolCallParam param) {
+        return handler.call(input == null ? Map.of() : input, param);
+    }
+
     static Map<String, Object> schema(Map<String, Object> properties, List<String> required) {
         return Map.of(
                 "type", "object",
@@ -66,4 +76,5 @@ final class AgentScopeTool extends ToolBase {
             return String.valueOf(value);
         }
     }
+
 }

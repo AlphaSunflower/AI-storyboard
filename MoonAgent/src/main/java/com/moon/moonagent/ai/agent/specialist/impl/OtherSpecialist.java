@@ -84,15 +84,19 @@ public class OtherSpecialist implements SpecialistAgent {
             request.setTrace(context.trace());
             StringBuilder answerBuffer = new StringBuilder();
             Map<String, Object> responseMetadata = Map.of();
+            ChatResponse lastResponse = null;
+            support.beginModelCall(request);
             for (ChatResponse chunk : getClient().prompt()
                     .options(OpenAiChatOptions.builder()
                             .model(model)
-                            .timeout(Duration.ofSeconds(60)))
+                            .timeout(Duration.ofSeconds(60))
+                            .streamUsage(true))
                     .system("你是 Moon 智能体，一个专业的分镜创作助手。用中文回答，简洁友好。")
                     .messages(buildUserMessage(history + "\n用户: " + context.userMessage(), context.picUrls()))
                     .stream()
                     .chatResponse()
                     .toIterable()) {
+                lastResponse = chunk;
                 AssistantMessage output = chunk == null || chunk.getResult() == null
                         ? null : chunk.getResult().getOutput();
                 String delta = output == null || output.getText() == null ? "" : output.getText();
@@ -104,6 +108,7 @@ public class OtherSpecialist implements SpecialistAgent {
                     responseMetadata = output.getMetadata();
                 }
             }
+            support.recordUsage(request, lastResponse);
             String answer = answerBuffer.toString();
             Long durationMs = Duration.between(start, OffsetDateTime.now()).toMillis();
 

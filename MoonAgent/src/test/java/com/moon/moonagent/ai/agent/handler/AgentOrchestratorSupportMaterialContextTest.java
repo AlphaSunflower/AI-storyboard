@@ -4,6 +4,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -169,6 +170,34 @@ class AgentOrchestratorSupportMaterialContextTest {
         assertThat(scenes).hasSize(2);
         assertThat(scenes.get(0).duration()).isEqualTo(10);
         assertThat(scenes.get(1).duration()).isEqualTo(12);
+    }
+
+    @Test
+    void messageEndEventIncludesTurnMetrics() throws Exception {
+        SseEmitter emitter = mock(SseEmitter.class);
+        AgentOrchestratorSupport support = new AgentOrchestratorSupport(
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null);
+        OrchestrationRequest request = new OrchestrationRequest(
+                new AgentConversation(), "hello", List.of(), emitter);
+        AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+        request.setTrace(trace);
+        trace.beginModelCall();
+        trace.recordUsage(50, 25, 10);
+
+        support.sendEvent(request, "message_end", Map.of("content", "done"));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
+        verify(emitter).send(captor.capture());
+        String json = captor.getValue().build().stream()
+                .map(item -> String.valueOf(item.getData()))
+                .filter(value -> value.startsWith("{"))
+                .findFirst()
+                .orElseThrow();
+        var metrics = new ObjectMapper().readTree(json).path("metrics");
+        assertThat(metrics.path("totalTokens").asLong()).isEqualTo(75L);
+        assertThat(metrics.path("complete").asBoolean()).isTrue();
+        assertThat(metrics.path("durationMs").asLong()).isGreaterThanOrEqualTo(0L);
     }
 
     private static AgentMessage message(String role, String content) {

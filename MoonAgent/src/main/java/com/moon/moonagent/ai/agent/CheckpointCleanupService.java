@@ -28,7 +28,7 @@ public class CheckpointCleanupService {
     public void cleanup() {
         OffsetDateTime cutoff = OffsetDateTime.now().minusDays(RETENTION_DAYS);
         int deleted = checkpointMapper.delete(new LambdaQueryWrapper<AgentCheckpoint>()
-                .in(AgentCheckpoint::getStatus, "used", "expired")
+                .in(AgentCheckpoint::getStatus, "used", "expired", "failed")
                 .lt(AgentCheckpoint::getExpirationTime, cutoff));
         if (deleted > 0) {
             log.info("清理过期 checkpoint: {} 条（保留 {} 天）", deleted, RETENTION_DAYS);

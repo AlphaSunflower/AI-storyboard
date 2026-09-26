@@ -117,7 +117,7 @@ public class DynamicTaskEngine {
                                          AgentTraceAccumulator trace,
                                          AgentLoopRun run) {
         TaskPlan plan = planner.plan(new TaskPlanningRequest(
-                        conversation.getId(), goal, preferredCapability, 20, 3, 2),
+                        conversation.getId(), goal, preferredCapability, 20, 3, 2, trace),
                 capabilities.descriptors());
         plan = planStore.save(plan);
         return continuePlan(conversation, request, trace, run, plan);
@@ -549,6 +549,10 @@ public class DynamicTaskEngine {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (request != null) metadata.putAll(request.getTurnMetadata());
         if (trace != null) metadata.putAll(trace.getTurnMetadata());
+        if (trace != null) {
+            metadata.put("metrics", trace.turnMetrics());
+            metadata.put("_terminalEventSent", trace.isTerminalEventSent());
+        }
         AgentReasoningSnapshot reasoning = request != null ? request.getReasoning() : null;
         if (reasoning == null && trace != null) reasoning = trace.getReasoning();
         if (reasoning != null) metadata.put("reasoning", reasoning);

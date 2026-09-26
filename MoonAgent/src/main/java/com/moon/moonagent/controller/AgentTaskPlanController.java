@@ -1,7 +1,6 @@
 package com.moon.moonagent.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentChatService;
@@ -12,6 +11,7 @@ import com.moon.moonagent.ai.agent.orchestration.TaskPlanActionService;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanPlanner;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanStore;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanningRequest;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
 import com.moon.moonagent.dto.request.AgentTaskPlanActionRequest;
 import com.moon.moonagent.dto.response.AgentTaskPlanView;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -50,6 +50,7 @@ public class AgentTaskPlanController {
     private final TaskPlanScheduler scheduler;
     private final DynamicTaskEngine dynamicTaskEngine;
     private final AgentCheckpointMapper checkpointMapper;
+    private final CheckpointResumeService checkpointResumeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @GetMapping("/{id}/plans/active")
@@ -150,10 +151,7 @@ public class AgentTaskPlanController {
     }
 
     private void expirePendingCheckpoints(String conversationId) {
-        checkpointMapper.update(null, new UpdateWrapper<AgentCheckpoint>()
-                .eq("conversation_id", conversationId)
-                .eq("status", "pending")
-                .set("status", "expired"));
+        checkpointResumeService.expirePending(conversationId);
     }
 
     private String checkpointResumeAction(AgentCheckpoint checkpoint, String requestedAction) {

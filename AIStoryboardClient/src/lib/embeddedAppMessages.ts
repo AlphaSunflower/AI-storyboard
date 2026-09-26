@@ -93,7 +93,7 @@ export function isCanvasModeControlMessage(value: unknown): value is CanvasModeC
     && typeof message.locked === 'boolean';
 }
 
-export function buildSceneReviewPrompt(scenes: EmbeddedSceneReference[]): string {
+export function buildSceneInspectPrompt(scenes: EmbeddedSceneReference[]): string {
   const sceneRefs = scenes.map((scene) => `分镜${scene.sceneNumber}`).join('、');
-  return `请审查 ${sceneRefs}`;
+  return `请查看${sceneRefs}`;
 }

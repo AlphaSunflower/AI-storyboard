@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -59,5 +60,33 @@ public class ConversationLock {
     /** 释放锁并移除条目（语义同 release，Redis 无内存条目需清理） */
     public void releaseAndRemove(String conversationId) {
         release(conversationId);
+    }
+
+    /**
+     * 在指定时间内轮询获取会话锁。用于“打断并发送”：先置打断标志，
+     * 再等待旧编排安全收尾并原子接管锁。
+     */
+    public boolean acquireWithTimeout(String conversationId, Duration timeout) {
+        long deadline = System.nanoTime() + Math.max(0L, timeout.toNanos());
+        do {
+            if (tryAcquire(conversationId)) return true;
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        } while (System.nanoTime() < deadline);
+        return false;
+    }
+
+    /** Read-only lock probe used by wakeup scheduling and diagnostics. */
+    public boolean isLocked(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return false;
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(PREFIX + conversationId));
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

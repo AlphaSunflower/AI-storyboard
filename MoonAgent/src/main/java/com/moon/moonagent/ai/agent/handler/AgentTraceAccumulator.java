@@ -2,9 +2,12 @@ package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.AgentTraceEvent;
+import com.moon.moonagent.ai.agent.AgentTurnMetrics;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
@@ -37,8 +40,10 @@ public class AgentTraceAccumulator {
     private volatile AgentReasoningSnapshot reasoning;
     private volatile Map<String, Object> turnMetadata = Map.of();
     private volatile boolean hitlPaused;
+    private volatile boolean terminalEventSent;
     private volatile String hitlMessageId = "";
     private volatile List<SuggestedAction> suggestedActions = List.of();
+    private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
 
     public AgentTraceAccumulator(OrchestrationRequest request) {
         this.request = request;
@@ -144,6 +149,42 @@ public class AgentTraceAccumulator {
 
     public OffsetDateTime getStartedAt() {
         return startedAt;
+    }
+
+    /** 发起一次模型调用；调用失败但未返回 usage 时也会计入分母。 */
+    public void beginModelCall() {
+        usage.beginCall();
+    }
+
+    /** 记录 Spring AI 非流式或流式最终响应的 usage。 */
+    public void recordUsage(ChatResponse response) {
+        Usage value = response == null || response.getMetadata() == null
+                ? null : response.getMetadata().getUsage();
+        usage.recordUsage(value);
+    }
+
+    /** 记录已经提取出的 usage，供非 Spring AI 运行时复用。 */
+    public void recordUsage(long inputTokens, long outputTokens, long cachedInputTokens) {
+        usage.recordUsage(inputTokens, outputTokens, cachedInputTokens);
+    }
+
+    /** 当前执行段的不可变指标快照。 */
+    public AgentTurnMetrics turnMetrics() {
+        long durationMs = Duration.between(startedAt, OffsetDateTime.now()).toMillis();
+        return usage.snapshot(durationMs);
+    }
+
+    /** 给终态 SSE payload 注入统一指标；重复调用不会重复累计。 */
+    public Map<String, Object> enrichTerminalEvent(Map<String, Object> payload) {
+        terminalEventSent = true;
+        Map<String, Object> enriched = new java.util.LinkedHashMap<>(
+                payload == null ? Map.of() : payload);
+        enriched.putIfAbsent("metrics", turnMetrics());
+        return enriched;
+    }
+
+    public boolean isTerminalEventSent() {
+        return terminalEventSent;
     }
 
     /** 处理完成：以 route_change 语义汇总所有事件（供调用方落库 metadata）。 */

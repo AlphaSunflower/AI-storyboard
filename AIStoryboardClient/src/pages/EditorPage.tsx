@@ -6,8 +6,6 @@ import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { ToastContainer } from '../components/common/Toast';
-import { AgentFab } from '../components/agent/AgentFab';
-import { MoonAgentWindow } from '../components/agent/MoonAgentWindow';
 import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
 import { MobileSceneList } from '../components/editor/MobileSceneList';
@@ -260,13 +258,9 @@ export function EditorPage() {
         <PreviewPanel />
       </div>
 
-      {/* 子窗口内不展示 Moon 智能体和生成中心，避免与外部应用窗口重复。 */}
+      {/* 子窗口内不展示生成中心，避免与外部应用窗口重复。 */}
       {!embedded && (
-        <>
-          <AgentFab />
-          <MoonAgentWindow />
-          <GenerationCenterPanel />
-        </>
+        <GenerationCenterPanel />
       )}
     </div>
   );

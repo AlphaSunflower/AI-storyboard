@@ -69,6 +69,17 @@ export interface AgentReasoning {
   source: string;
 }
 
+/** 一条助手回复对应后端执行段的模型用量与耗时。 */
+export interface AgentTurnMetrics {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
+  durationMs: number;
+  modelCalls: number;
+  complete: boolean;
+}
+
 /** 智能体交接轨迹事件（agent_trace / message_end 下发） */
 export interface AgentTraceEvent {
   id: string;
@@ -125,11 +136,21 @@ export interface AgentMessageVideoPlan {
 
 /** 消息元数据 */
 export interface AgentMessageMetadata {
-  kind: 'hitl' | 'assistant-reply' | 'video-plan';
+  kind?: 'hitl' | 'assistant-reply' | 'video-plan' | 'storyboard-review';
+  messageInput?: {
+    picUrls?: string[];
+    referenceVideos?: string[];
+    referenceAudios?: string[];
+    assetIds?: string[];
+    routingHint?: string;
+  };
   hitl?: AgentMessageHitl;
   videoPlan?: AgentMessageVideoPlan;
+  storyboardReview?: StoryboardReviewRef;
+  taskCards?: AgentTaskCardRef[];
   pending?: boolean;
   reasoning?: AgentReasoning;
+  metrics?: AgentTurnMetrics;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
   orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
@@ -138,6 +159,163 @@ export interface AgentMessageMetadata {
   loopRunId?: string;
   traceId?: string;
 }
+
+export interface ToolInvocationView {
+  id: string;
+  traceId?: string | null;
+  loopRunId?: string | null;
+  loopStepId?: string | null;
+  taskId?: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
+  toolCallId?: string | null;
+  toolName: string;
+  toolKind?: string | null;
+  source: string;
+  status: string;
+  attempt?: number | null;
+  inputHash?: string | null;
+  inputSummary?: string | null;
+  outputHash?: string | null;
+  outputSummary?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  externalActionKey?: string | null;
+  providerTaskId?: string | null;
+  resultAssetIds: string[];
+  expectedReferenceCount?: number | null;
+  resolvedReferenceCount?: number | null;
+  appliedReferenceCount?: number | null;
+  skillVersion?: string | null;
+  model?: string | null;
+  engineVersion?: string | null;
+  startedAt: string;
+  completedAt?: string | null;
+  durationMs?: number | null;
+}
+
+export interface ToolInvocationPage {
+  records: ToolInvocationView[];
+  nextCursor: string | null;
+  limit: number;
+}
+
+export interface ToolAuditConfig {
+  enabled: boolean;
+  uiEnabled: boolean;
+  retentionDays: number;
+}
+
+export interface AgentTaskCardRef {
+  taskId: string;
+  title: string;
+  kind: string;
+}
+
+export interface StoryboardPseudoShot {
+  shotId: string;
+  segmentId: string;
+  shotOrdinal: number;
+  narrativePurpose: string;
+  characters: string[];
+  location: string;
+  time: string;
+  conflict: string;
+  action: string;
+  emotion: string;
+  continuity: string[];
+  sourceExcerpt: string[];
+  referenceAssetIds: string[];
+}
+
+export interface StoryboardFinalShot {
+  shotId: string;
+  segmentId: string;
+  shotOrdinal: number;
+  sceneDescription: string;
+  shotType: string;
+  cameraMovement: string;
+  durationSeconds: number;
+  imagePrompt: string;
+  videoPrompt: string;
+  negativePrompt: string;
+  referenceHints: string[];
+}
+
+export interface StoryboardReviewRef {
+  runId: string;
+  stage: 'PLOT_REVIEW' | 'PSEUDO_REVIEW' | 'FINALIZING' | 'FINAL_REVIEW' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  version: number;
+  pending?: boolean;
+}
+
+export interface AgentStoryboardRun {
+  runId: string;
+  conversationId: string;
+  stage: StoryboardReviewRef['stage'];
+  version: number;
+  originalScript: string;
+  selectedScript: string;
+  expansionScript: string;
+  pseudoShots: StoryboardPseudoShot[];
+  finalShots: StoryboardFinalShot[];
+  error: string;
+}
+
+export interface AgentTaskSlotView {
+  index: number;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  prompt: string;
+  url: string;
+  assetId: string;
+  error: string;
+  completedAt?: string | null;
+}
+
+export interface AgentTaskView {
+  taskId: string;
+  conversationId: string;
+  projectId: string;
+  title: string;
+  toolName: string;
+  kind: string;
+  status: 'waiting_parent' | 'queued' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'partial' | 'failed';
+  stage: string;
+  progress: number | null;
+  resultSummary: string;
+  error: string;
+  parentTaskId: string;
+  anchorMessageId: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  assetIds: string[];
+  resultUrls: string[];
+  slots: AgentTaskSlotView[];
+  result: string;
+  canCancel: boolean;
+  canRetry: boolean;
+  canFollowUp: boolean;
+}
+
+export interface AgentTaskPage {
+  records: AgentTaskView[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface AgentWakeupMessage {
+  taskId: string;
+  conversationId: string;
+  messageId: string;
+}
+
+export type AgentRealtimeEvent =
+  | { type: 'task'; task: AgentTaskView }
+  | { type: 'wakeup_message'; message: AgentWakeupMessage };
 
 export interface AgentMessage {
   id: string;
@@ -239,7 +417,7 @@ export interface AssetOption {
   type: string; // character / prop / scene
   image?: string; // 主图路径（/api/files/...）
   imageUrls?: string[];
-  // ── 分镜审查卡片（SceneReviewCard）扩展：结构化分镜项 ──
+  // ── 分镜选项扩展：结构化分镜项 ──
   sceneNumber?: number;
   scriptContent?: string;
   hasImage?: boolean;
@@ -296,8 +474,11 @@ export interface SseEvent {
   assets?: AssetOption[];
   // reasoning / agentTrace / suggestedActions（reasoning_delta / agent_trace / message_end）
   reasoning?: AgentReasoning;
+  metrics?: AgentTurnMetrics;
   agentTrace?: SseTraceEvent[];
   suggestedActions?: SuggestedAction[];
+  taskCards?: AgentTaskCardRef[];
+  storyboardReview?: StoryboardReviewRef;
   // reasoning_delta 增量字段
   summary?: string;
   details?: string;
@@ -508,6 +689,55 @@ export const agentApi = {
   getVideoTaskStatus: (taskId: string) =>
     client.get<{ data: VideoTaskStatus }>(`/agent/tasks/${taskId}`),
 
+  listTasks: (params?: {
+    conversationId?: string;
+    projectId?: string;
+    status?: 'active' | 'terminal' | 'all' | AgentTaskView['status'];
+    page?: number;
+    size?: number;
+  }) => client.get<{ data: AgentTaskPage }>('/agent/tasks', { params }),
+
+  getTask: (taskId: string) =>
+    client.get<{ data: AgentTaskView }>(`/agent/tasks/${taskId}`),
+
+  getStoryboardRun: (runId: string) =>
+    client.get<{ data: AgentStoryboardRun }>(`/agent/storyboards/runs/${runId}`),
+
+  saveStoryboardDraft: (
+    runId: string,
+    data: {
+      expectedVersion: number;
+      pseudoShots: StoryboardPseudoShot[];
+      finalShots: StoryboardFinalShot[];
+    },
+  ) =>
+    client.put<{ data: AgentStoryboardRun }>(`/agent/storyboards/runs/${runId}/draft`, data),
+
+  approveStoryboard: (runId: string, data: { stage: string; decision?: string }) =>
+    client.post<{ data: { taskId: string; stage: string } }>(
+      `/agent/storyboards/runs/${runId}/approve`,
+      data,
+    ),
+
+  getToolAuditConfig: () =>
+    client.get<{ data: ToolAuditConfig }>('/agent/tool-audit/config'),
+
+  listToolInvocations: (params: {
+    taskId?: string;
+    conversationId?: string;
+    cursor?: string;
+    limit?: number;
+  }) => client.get<{ data: ToolInvocationPage }>('/agent/tool-invocations', { params }),
+
+  cancelTask: (taskId: string) =>
+    client.post<{ data: AgentTaskView }>(`/agent/tasks/${taskId}/cancel`),
+
+  retryTask: (taskId: string) =>
+    client.post<{ data: AgentTaskView }>(`/agent/tasks/${taskId}/retry`),
+
+  followUpTask: (taskId: string, instruction: string) =>
+    client.post<{ data: AgentTaskView }>(`/agent/tasks/${taskId}/followups`, { instruction }),
+
   // 分镜视频批量生成队列
   enqueueStoryboardVideos: (data: { conversationId?: string; projectId?: string; items: StoryboardVideoEnqueueItem[] }) =>
     client.post<{ data: StoryboardVideoQueueItem[] }>('/agent/storyboards/video/queue', data),
@@ -650,6 +880,62 @@ export async function streamChat(
   await consumeSse(res, onEvent, signal);
 }
 
+/** 编辑最后一轮用户消息并覆盖重发。 */
+export async function streamEditedMessage(
+  conversationId: string,
+  messageId: string,
+  content: string,
+  onEvent: (e: SseEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('accessToken') ?? '';
+  const res = await fetch(
+    `${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/${messageId}/edit-and-resend`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ content }),
+      signal,
+    },
+  );
+  await consumeSse(res, onEvent, signal);
+}
+
+/** 打断当前生成，并把本轮输入作为下一条消息发送。 */
+export async function streamInterruptAndSend(
+  conversationId: string,
+  content: string,
+  picUrls: string[],
+  onEvent: (e: SseEvent) => void,
+  assetIds?: string[],
+  signal?: AbortSignal,
+  opts?: {
+    referenceVideos?: string[];
+    referenceAudios?: string[];
+    routingHint?: string;
+    cancelActiveTasks?: boolean;
+    canvasContext?: CanvasEditContext;
+  },
+): Promise<void> {
+  const token = localStorage.getItem('accessToken') ?? '';
+  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/interrupt-and-send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      content,
+      picUrls: picUrls ?? [],
+      assetIds: assetIds ?? [],
+      referenceVideos: opts?.referenceVideos ?? [],
+      referenceAudios: opts?.referenceAudios ?? [],
+      routingHint: opts?.routingHint,
+      cancelActiveTasks: opts?.cancelActiveTasks,
+      canvasContext: opts?.canvasContext,
+    }),
+    signal,
+  });
+  await consumeSse(res, onEvent, signal);
+}
+
 /** HITL 表单提交并续流 */
 export async function submitForm(
   conversationId: string,
@@ -683,6 +969,16 @@ export async function submitForm(
 
 /** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
 async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void> {
+  await consumeSseData<SseEvent>(res, (eventName, data) => {
+    onEvent({ ...data, type: eventName } as SseEvent);
+  }, signal);
+}
+
+async function consumeSseData<T>(
+  res: Response,
+  onEvent: (eventName: string, data: T) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.json()).message ?? ''; } catch { /* ignore */ }
@@ -707,13 +1003,42 @@ async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?
         if (!dataLine) continue;
         const eventName = eventLine ? eventLine.slice(6).trim() : '';
         try {
-          const data = JSON.parse(dataLine.slice(5).trim()) as SseEvent;
-          // 注意展开顺序：data 在前、type 在后（TS2783：避免 SseEvent.type 覆盖 event: 行解析结果）
-          onEvent({ ...data, type: eventName } as SseEvent);
+          const data = JSON.parse(dataLine.slice(5).trim()) as T;
+          onEvent(eventName, data);
         } catch { /* 忽略坏帧 */ }
       }
     }
   } finally {
     reader.releaseLock();
   }
+}
+
+export async function streamTaskEvents(
+  onEvent: (event: AgentRealtimeEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('accessToken') ?? '';
+  const res = await fetch(`${BACKEND_URL}/api/agent/tasks/events`, {
+    headers: {
+      Accept: 'text/event-stream',
+      Authorization: `Bearer ${token}`,
+    },
+    signal,
+  });
+  await consumeSseData<{ task?: AgentTaskView } & AgentWakeupMessage>(
+    res,
+    (eventName, data) => {
+      if (eventName === 'snapshot' && data?.task) {
+        onEvent({ type: 'task', task: data.task });
+      } else if (eventName === 'wakeup_message' && data?.conversationId && data?.messageId) {
+        onEvent({
+          type: 'wakeup_message',
+          message: {
+            taskId: data.taskId,
+            conversationId: data.conversationId,
+            messageId: data.messageId,
+          },
+        });
+      }
+  }, signal);
 }

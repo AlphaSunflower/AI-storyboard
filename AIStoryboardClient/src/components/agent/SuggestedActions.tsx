@@ -1,7 +1,7 @@
 import { useAgentStore } from '../../stores/agentStore';
 import type { SuggestedAction } from '../../api/agent';
 
-/** 建议动作按钮：点击后以 routingHint 重新发送给智能体（如「审查分镜」→ intent-scene-review）。 */
+/** 建议动作按钮：点击后以 routingHint 重新发送给智能体。 */
 export function SuggestedActions({ actions }: { actions?: SuggestedAction[] }) {
   const sendMessage = useAgentStore((s) => s.sendMessage);
   if (!actions || actions.length === 0) return null;

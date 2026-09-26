@@ -20,6 +20,8 @@ const actionLabel: Record<string, string> = {
   'image.redraw': '图片重绘',
   'video.generate': '生成视频',
   'storyboard.plan': '分镜规划',
+  'storyboard.outline': '剧情与伪分镜',
+  'storyboard.finalize': '正式分镜生成',
   'agent.request': '设计助理',
 };
 

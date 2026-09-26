@@ -1,0 +1,314 @@
+package com.moon.moonagent.ai.agent.agentscope;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moon.moonagent.ai.agent.audit.AgentInvocationContext;
+import com.moon.moonagent.ai.agent.audit.AgentInvocationContextHolder;
+import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
+import com.moon.moonagent.ai.agent.audit.ToolInvocationContext;
+import com.moon.moonagent.ai.agent.audit.ToolInvocationLedger;
+import com.moon.moonagent.ai.agent.audit.ToolInvocationScope;
+import com.moon.moonagent.ai.agent.audit.ToolInvocationScopeHolder;
+import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.entity.AgentToolInvocation;
+import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.tool.ToolBase;
+import io.agentscope.core.tool.ToolCallParam;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
+
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+
+@Component
+@RequiredArgsConstructor
+public class AgentScopeToolPipeline {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private static final Map<String, ToolPolicy> POLICIES = Map.ofEntries(
+            Map.entry(AgentScopeImageTools.GENERATE_IMAGE,
+                    new ToolPolicy("MEDIA_IMAGE", "media-image", true, false)),
+            Map.entry(AgentScopeImageTools.GENERATE_IMAGE_BATCH,
+                    new ToolPolicy("MEDIA_IMAGE_BATCH", "media-image-batch", true, false)),
+            Map.entry(AgentScopeVideoTools.GENERATE_VIDEO,
+                    new ToolPolicy("MEDIA_VIDEO", "media-video", true, false)),
+            Map.entry(AgentScopeStoryboardTools.START_STORYBOARD,
+                    new ToolPolicy("LONG_TOOL", "storyboard-start", false, false)),
+            Map.entry(AgentScopeStoryboardTools.REVISE_STORYBOARD,
+                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-revise", false, false)),
+            Map.entry(AgentScopeStoryboardTools.APPROVE_STORYBOARD,
+                    new ToolPolicy("LONG_TOOL", "storyboard-approve", false, false)),
+            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGE,
+                    new ToolPolicy("MEDIA_IMAGE", "storyboard-image", false, false)),
+            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO,
+                    new ToolPolicy("MEDIA_VIDEO", "storyboard-video", false, false)),
+            Map.entry(AgentScopeStoryboardTools.UPSERT_STORYBOARD_SHOT,
+                    new ToolPolicy("STORYBOARD_WRITE", "", false, false)),
+            Map.entry(AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,
+                    new ToolPolicy("READ", "", false, true)),
+            Map.entry(AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD,
+                    new ToolPolicy("READ", "", false, true)),
+            Map.entry(AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT,
+                    new ToolPolicy("STORYBOARD_WRITE", "", false, false)),
+            Map.entry(AgentScopeStoryboardTools.DELETE_STORYBOARD_DRAFT_SHOT,
+                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-draft-delete", false, false)),
+            Map.entry(AgentScopeStoryboardTools.REORDER_STORYBOARD_DRAFT,
+                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-draft-reorder", false, false)),
+            Map.entry(AgentScopeStoryboardTools.DELETE_PROJECT_STORYBOARD_SHOT,
+                    new ToolPolicy("STORYBOARD_DELETE", "storyboard-project-delete", false, false)),
+            Map.entry(AgentScopeStoryboardTools.CLEAR_PROJECT_STORYBOARD,
+                    new ToolPolicy("STORYBOARD_DELETE", "storyboard-project-clear", false, false)),
+            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES,
+                    new ToolPolicy("MEDIA_IMAGE_BATCH", "storyboard-image-batch", false, false)),
+            Map.entry("refineImage",
+                    new ToolPolicy("MEDIA_IMAGE", "", false, false)));
+
+    private final ToolInvocationLedger ledger;
+    private final ToolExecutionTemplate executionTemplate;
+    private final MediaToolPreflightService preflight;
+
+    public AgentScopeTool wrap(AgentScopeTool tool) {
+        AgentScopeTool original = tool;
+        return tool.withHandler((input, param) -> executeMap(original, input, param));
+    }
+
+    public ToolBase wrapGeneric(ToolBase tool) {
+        return new AuditedToolBase(tool, this);
+    }
+
+    Map<String, Object> executeMap(AgentScopeTool tool,
+                                   Map<String, Object> input,
+                                   ToolCallParam param) {
+        ToolInvocationContext context = context(tool, input, param);
+        AgentToolInvocation record = ledger.start(context, input);
+        long started = System.nanoTime();
+        try (ToolInvocationScopeHolder.Scope ignored =
+                     ToolInvocationScopeHolder.open(new ToolInvocationScope(
+                             record, context, OffsetDateTime.now()))) {
+            Supplier<Map<String, Object>> invocation = () -> asMap(tool.invoke(input, param));
+            Supplier<Map<String, Object>> guarded = preflightFor(tool).contains("preflight")
+                    ? () -> preflight.guard(tool.getName(), input, param,
+                    effective -> externalAction(tool, context, effective, param, invocation))
+                    : () -> externalAction(tool, context, input, param, invocation);
+            Map<String, Object> output = guarded.get();
+            finish(record, context, input, output, null, started);
+            return output;
+        } catch (RuntimeException e) {
+            finish(record, context, input, null, e, started);
+            throw e;
+        }
+    }
+
+    Mono<ToolBaseResult> executeGeneric(ToolBase tool,
+                                        ToolCallParam param,
+                                        Mono<ToolBaseResult> invocation) {
+        ToolInvocationContext context = context(tool.getName(), param, param.getInput());
+        AgentToolInvocation record = ledger.start(context, param.getInput());
+        long started = System.nanoTime();
+        try (ToolInvocationScopeHolder.Scope ignored =
+                     ToolInvocationScopeHolder.open(new ToolInvocationScope(
+                             record, context, OffsetDateTime.now()))) {
+            return invocation
+                    .doOnSuccess(result -> finish(record, context, param.getInput(),
+                            result == null ? null : result.auditValue(), null, started))
+                    .doOnError(error -> finish(record, context, param.getInput(),
+                            null, error, started));
+        } catch (RuntimeException e) {
+            finish(record, context, param.getInput(), null, e, started);
+            throw e;
+        }
+    }
+
+    private Map<String, Object> externalAction(AgentScopeTool tool,
+                                               ToolInvocationContext context,
+                                               Map<String, Object> input,
+                                               ToolCallParam param,
+                                               Supplier<Map<String, Object>> invocation) {
+        String actionType = policy(tool).actionType();
+        AgentScopeRunContext runContext = context(param);
+        if (actionType.isBlank() || runContext == null
+                || runContext.externalActions() == null
+                || runContext.checkpointId() == null
+                || runContext.checkpointId().isBlank()) {
+            return invocation.get();
+        }
+        String toolCallId = toolCallId(param);
+        Map<String, Object> result = runContext.externalActions().executeOnce(
+                context.getConversationId(),
+                runContext.checkpointId(),
+                toolCallId,
+                tool.getName(),
+                actionType,
+                input,
+                invocation);
+        Map<String, Object> audited = new LinkedHashMap<>(result == null ? Map.of() : result);
+        audited.putIfAbsent("externalActionKey",
+                runContext.checkpointId() + ":" + toolCallId + ":" + tool.getName());
+        return audited;
+    }
+
+    private void finish(AgentToolInvocation record,
+                        ToolInvocationContext context,
+                        Object input,
+                        Object output,
+                        Throwable error,
+                        long started) {
+        executionTemplate.finish(record, context, input, output, error, started);
+    }
+
+    private ToolInvocationContext context(AgentScopeTool tool,
+                                          Map<String, Object> input,
+                                          ToolCallParam param) {
+        return context(tool.getName(), param, input);
+    }
+
+    private ToolInvocationContext context(String toolName,
+                                          ToolCallParam param,
+                                          Map<String, Object> input) {
+        AgentScopeRunContext runContext = context(param);
+        AgentConversation conversation = runContext == null ? null : runContext.conversation();
+        AgentInvocationContext base = AgentInvocationContextHolder.current();
+        ToolPolicy policy = policy(toolName, false);
+        return ToolInvocationContext.builder()
+                .invocationKey(invocationKey(runContext, toolName, param))
+                .traceId(base.traceId())
+                .loopRunId(base.loopRunId())
+                .loopStepId(base.loopStepId())
+                .taskId(first(base.taskId(), value(input, "taskId"), value(input, "task_id")))
+                .conversationId(first(base.conversationId(),
+                        conversation == null ? "" : conversation.getId(),
+                        value(input, "conversationId")))
+                .userId(first(base.userId(), conversation == null ? "" : conversation.getUserId()))
+                .projectId(first(base.projectId(),
+                        conversation == null ? "" : conversation.getProjectId(),
+                        value(input, "projectId"), value(input, "project_id")))
+                .toolCallId(toolCallId(param))
+                .toolName(toolName)
+                .toolKind(policy.toolKind())
+                .source("AGENT_SCOPE")
+                .skillVersion(base.skillVersion())
+                .model(base.model())
+                .engineVersion(first(base.engineVersion(),
+                        conversation == null ? "" : conversation.getEngineVersion()))
+                .build();
+    }
+
+    private static String invocationKey(AgentScopeRunContext runContext,
+                                        String toolName,
+                                        ToolCallParam param) {
+        String checkpointId = runContext == null ? "" : runContext.checkpointId();
+        String toolCallId = toolCallId(param);
+        if (checkpointId != null && !checkpointId.isBlank()
+                && toolCallId != null && !toolCallId.isBlank()) {
+            return checkpointId + ":" + toolCallId + ":" + toolName;
+        }
+        return "";
+    }
+
+    private static ToolPolicy policy(AgentScopeTool tool) {
+        return policy(tool.getName(), tool.isReadOnly());
+    }
+
+    private static ToolPolicy policy(String toolName, boolean readOnly) {
+        return POLICIES.getOrDefault(toolName,
+                new ToolPolicy(readOnly ? "READ" : "WRITE", "", false, readOnly));
+    }
+
+    private java.util.Set<String> preflightFor(AgentScopeTool tool) {
+        return policy(tool).preflight() && preflight.appliesTo(tool.getName())
+                ? java.util.Set.of("preflight") : java.util.Set.of();
+    }
+
+    static AgentScopeRunContext context(ToolCallParam param) {
+        return param == null || param.getRuntimeContext() == null
+                ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    private static String toolCallId(ToolCallParam param) {
+        return param == null || param.getToolUseBlock() == null
+                ? "" : param.getToolUseBlock().getId();
+    }
+
+    private static String value(Map<String, Object> values, String key) {
+        Object value = values == null ? null : values.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String first(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            map.forEach((key, item) -> out.put(String.valueOf(key), item));
+            return out;
+        }
+        return Map.of("ok", true, "result", value == null ? "" : value);
+    }
+
+    private record ToolPolicy(
+            String toolKind,
+            String actionType,
+            boolean preflight,
+            boolean readOnly
+    ) {
+    }
+
+    record ToolBaseResult(Object value, Object auditValue) {
+    }
+
+    private static Object auditValue(ToolResultBlock block) {
+        if (block == null || block.getOutput().isEmpty()) return null;
+        Object first = block.getOutput().getFirst();
+        if (!(first instanceof TextBlock textBlock)) return null;
+        String text = textBlock.getText();
+        if (text == null || text.isBlank()) return null;
+        try {
+            return JSON.readValue(text, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    static final class AuditedToolBase extends ToolBase {
+        private final ToolBase delegate;
+        private final AgentScopeToolPipeline pipeline;
+
+        AuditedToolBase(ToolBase delegate, AgentScopeToolPipeline pipeline) {
+            super(builder(delegate));
+            this.delegate = delegate;
+            this.pipeline = pipeline;
+        }
+
+        private static ToolBase.Builder builder(ToolBase delegate) {
+            ToolBase.Builder builder = ToolBase.builder()
+                    .name(delegate.getName())
+                    .description(delegate.getDescription())
+                    .inputSchema(delegate.getParameters())
+                    .readOnly(delegate.isReadOnly())
+                    .concurrencySafe(delegate.isConcurrencySafe())
+                    .externalTool(delegate.isExternalTool())
+                    .stateInjected(delegate.isStateInjected());
+            if (delegate.isMcp()) builder.mcp(delegate.getMcpName());
+            return builder;
+        }
+
+        @Override
+        public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return pipeline.executeGeneric(delegate, param, delegate.callAsync(param)
+                    .map(block -> new ToolBaseResult(block, auditValue(block))))
+                    .map(result -> (ToolResultBlock) result.value());
+        }
+    }
+}

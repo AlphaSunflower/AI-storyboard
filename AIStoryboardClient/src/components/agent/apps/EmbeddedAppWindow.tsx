@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
 import { isEmbeddedAppReadyMessage } from '../../../lib/embeddedAppMessages';
+import { CHAT_DOCK_MIN_APP_WIDTH } from '../chatDockLayout';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
@@ -24,15 +25,18 @@ interface EmbeddedAppWindowProps {
   onSelectTab: (key: EmbeddedAppDescriptor['key']) => void;
   onCloseTab: (key: EmbeddedAppDescriptor['key']) => void;
   onCloseWindow: () => void;
+  docked: boolean;
+  splitMaxWidth: number;
+  expandedSplitMaxWidth: number;
   sidebarCollapsed: boolean;
+  sidebarCollapseWidth: number;
   onCollapseSidebar: () => void;
-  expandedWidthBonus: number;
+  onRequestDock: () => void;
   onLayoutChange: (layout: { width: number; height: number; fullscreen: boolean }) => void;
 }
 
 const DEFAULT_WIDTH = 420;
-const MIN_WIDTH = 360;
-const MAX_WIDTH = 760;
+const MIN_WIDTH = CHAT_DOCK_MIN_APP_WIDTH;
 const MIN_HEIGHT = 420;
 const CLOSE_ANIMATION_MS = 300;
 
@@ -53,12 +57,19 @@ export function EmbeddedAppWindow({
   onSelectTab,
   onCloseTab,
   onCloseWindow,
+  docked,
+  splitMaxWidth,
+  expandedSplitMaxWidth,
   sidebarCollapsed,
+  sidebarCollapseWidth,
   onCollapseSidebar,
-  expandedWidthBonus,
+  onRequestDock,
   onLayoutChange,
 }: EmbeddedAppWindowProps) {
-  const [width, setWidth] = useState(() => activeKey === 'library' ? 620 : DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() => Math.max(
+    MIN_WIDTH,
+    Math.min(activeKey === 'library' ? 620 : DEFAULT_WIDTH, splitMaxWidth),
+  ));
   const [height, setHeight] = useState(defaultHeight);
   const [fullscreen, setFullscreen] = useState(false);
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
@@ -74,6 +85,11 @@ export function EmbeddedAppWindow({
   useEffect(() => {
     onLayoutChange({ width, height, fullscreen });
   }, [fullscreen, height, onLayoutChange, width]);
+
+  useEffect(() => {
+    if (docked) return;
+    setWidth((current) => Math.min(splitMaxWidth, Math.max(MIN_WIDTH, current)));
+  }, [docked, splitMaxWidth]);
 
   useEffect(() => {
     const onResize = () => {
@@ -106,39 +122,54 @@ export function EmbeddedAppWindow({
     return () => window.removeEventListener('message', onMessage);
   }, [tabs]);
 
-  const startResize = (event: React.MouseEvent) => {
+  const startResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
+    const resizeTarget = event.currentTarget;
+    const pointerId = event.pointerId;
+    resizeTarget.setPointerCapture?.(pointerId);
     const startX = event.clientX;
     const startY = event.clientY;
     const startWidth = width;
     const startHeight = height;
-    let allowExpandedWidth = sidebarCollapsed;
+    let allowSidebarCollapse = !sidebarCollapsed;
+    let allowDockedWidth = docked;
+    let maxSplitWidth = sidebarCollapsed ? expandedSplitMaxWidth : splitMaxWidth;
     document.body.style.cursor = 'nesw-resize';
     document.body.style.userSelect = 'none';
 
-    const onMove = (moveEvent: MouseEvent) => {
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
       const requestedWidth = startWidth + startX - moveEvent.clientX;
-      if (!allowExpandedWidth && requestedWidth > MAX_WIDTH) {
-        allowExpandedWidth = true;
+      if (allowSidebarCollapse && requestedWidth >= sidebarCollapseWidth) {
+        allowSidebarCollapse = false;
+        maxSplitWidth = expandedSplitMaxWidth;
         onCollapseSidebar();
       }
-      const maxWidth = allowExpandedWidth
-        ? Math.max(MAX_WIDTH, Math.min(MAX_WIDTH + Math.max(0, expandedWidthBonus), window.innerWidth - 48))
-        : MAX_WIDTH;
+      if (!allowDockedWidth && requestedWidth > maxSplitWidth) {
+        allowDockedWidth = true;
+        onRequestDock();
+      }
+      const maxWidth = allowDockedWidth
+        ? Math.max(MIN_WIDTH, window.innerWidth - 32)
+        : maxSplitWidth;
       setWidth(Math.min(maxWidth, Math.max(MIN_WIDTH, requestedWidth)));
       setHeight(Math.min(
         Math.max(MIN_HEIGHT, window.innerHeight - 32),
         Math.max(MIN_HEIGHT, startHeight + moveEvent.clientY - startY),
       ));
     };
-    const onUp = () => {
+    const onUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      resizeTarget.releasePointerCapture?.(pointerId);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
   };
 
   const openActiveInBrowser = () => {
@@ -258,7 +289,7 @@ export function EmbeddedAppWindow({
         <button
           type="button"
           className="embedded-app-window__resize"
-          onMouseDown={startResize}
+          onPointerDown={startResize}
           title="拖拽调整窗口大小"
           aria-label="拖拽调整窗口大小"
         >

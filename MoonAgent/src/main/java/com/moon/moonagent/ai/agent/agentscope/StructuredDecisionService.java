@@ -17,6 +17,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -116,6 +117,47 @@ public class StructuredDecisionService {
                 new AgentScopeStructuredModels.RiskDecision("DIRECT", "fallback", ""));
     }
 
+    public AgentScopeStructuredModels.MediaActionReview reviewMediaAction(
+            String toolName, JsonNode input, String turnContext,
+            List<SessionAssetRef> referenceCandidates) {
+        ObjectNode schema = objectSchema();
+        ObjectNode props = schema.putObject("properties");
+        props.putObject("decision").put("type", "string")
+                .putArray("enum").add("EXECUTE").add("REPAIR").add("ASK").add("REJECT");
+        props.putObject("repairedInput").put("type", "object")
+                .put("additionalProperties", true);
+        props.putObject("question").put("type", "string");
+        props.putObject("confidence").put("type", "number");
+        props.putObject("reasons").put("type", "array").put("items", textSchema());
+        required(schema, "decision", "repairedInput", "question", "confidence", "reasons");
+        String inputJson;
+        String candidatesJson;
+        try {
+            inputJson = json.writeValueAsString(input == null ? json.createObjectNode() : input);
+            candidatesJson = json.writeValueAsString(
+                    referenceCandidates == null ? List.of() : referenceCandidates);
+        } catch (Exception e) {
+            inputJson = String.valueOf(input);
+            candidatesJson = String.valueOf(referenceCandidates);
+        }
+        JsonNode result = structuredCall("""
+                Review one media-tool invocation before it can cause external side effects.
+                Return EXECUTE only when the input is directly safe to run.
+                Return REPAIR with a complete corrected tool input when the intent is clear.
+                Return ASK only for genuine ambiguity and provide one focused question.
+                Return REJECT only for unsafe or explicitly invalid requests.
+                Never invent an asset id that is not present in reference candidates.
+                tool: %s
+                input: %s
+                turn context: %s
+                reference candidates: %s
+                """.formatted(toolName, inputJson, turnContext, candidatesJson),
+                schema, properties.getPreflight().getTimeout());
+        return convert(result, AgentScopeStructuredModels.MediaActionReview.class,
+                new AgentScopeStructuredModels.MediaActionReview(
+                        "EXECUTE", Map.of(), "", 0.0, List.of("fallback")));
+    }
+
     public AgentScopeStructuredModels.SubagentResult parseSubagentResult(String response) {
         if (response == null || response.isBlank()) {
             return new AgentScopeStructuredModels.SubagentResult("", List.of(), List.of());
@@ -135,6 +177,10 @@ public class StructuredDecisionService {
     }
 
     private JsonNode structuredCall(String prompt, JsonNode schema) {
+        return structuredCall(prompt, schema, CALL_TIMEOUT);
+    }
+
+    private JsonNode structuredCall(String prompt, JsonNode schema, Duration timeout) {
         if (!properties.isStructuredOutputEnabled() || agent == null) {
             return json.createObjectNode();
         }
@@ -143,7 +189,7 @@ public class StructuredDecisionService {
                     .sessionId("structured-" + UUID.randomUUID())
                     .build();
             var result = agent.call(List.of(new UserMessage(prompt)), schema, context)
-                    .block(CALL_TIMEOUT);
+                    .block(timeout == null ? CALL_TIMEOUT : timeout);
             if (result == null || !result.hasStructuredData()) return json.createObjectNode();
             return json.valueToTree(result.getStructuredData(true));
         } catch (Exception e) {

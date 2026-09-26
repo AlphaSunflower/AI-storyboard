@@ -16,4 +16,7 @@ public interface ProjectMapper extends BaseMapper<Project> {
 
     @Select("SELECT * FROM public.projects WHERE user_id = #{userId} AND status = 'draft' ORDER BY updated_at DESC LIMIT 1")
     Project findLatestDraft(@Param("userId") String userId);
+
+    @Select("SELECT * FROM public.projects WHERE id = #{id} FOR UPDATE")
+    Project lockById(@Param("id") String id);
 }

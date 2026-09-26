@@ -2,11 +2,14 @@ package com.moon.moonagent.ai.agent.impl;
 
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
-import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.ai.agent.AgentOrchestrator;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
+import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
+import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.orchestration.UnifiedAgentLoop;
@@ -17,7 +20,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -31,7 +33,7 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorImpl.class);
 
     private final UnifiedAgentLoop unifiedAgentLoop;
-    private final AgentCheckpointMapper checkpointMapper;
+    private final CheckpointResumeService checkpointResumeService;
     private final AgentOrchestratorSupport support;
 
     @Override
@@ -106,57 +108,35 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
                                       String customText, Map<String, String> params,
                                       java.util.List<String> assetIds, String routingHint,
                                       CanvasSessionContext canvasContext, SseEmitter emitter) {
-        OrchestrationRequest request = new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
-        request.setParams(params == null ? Map.of() : params);
-        request.setAssetIds(assetIds == null ? java.util.List.of() : assetIds);
-        request.setAction(action == null ? "" : action);
-        request.setCustomText(customText == null ? "" : customText);
-        request.setRoutingHint(routingHint);
-        request.setCanvasContext(canvasContext);
+        ResumeCommand command = ResumeCommand.of(
+                action, customText, params, assetIds, routingHint, canvasContext);
         try {
-            AgentCheckpoint cp = checkpointMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCheckpoint>()
-                    .eq(AgentCheckpoint::getFormToken, formToken)
-                    .eq(AgentCheckpoint::getConversationId, conversation.getId())
-                    .last("LIMIT 1"));
-            if (cp == null) {
-                support.sendEvent(request, "error", Map.of("code", "40401", "message", "确认信息不存在或已失效，请重新发起"));
-                return AgentTurnResult.done("");
-            }
-            if (!"pending".equals(cp.getStatus()) || cp.getExpirationTime() == null
-                    || cp.getExpirationTime().isBefore(OffsetDateTime.now())) {
-                support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已过期，请重新发起"));
-                return AgentTurnResult.done("");
-            }
+            CheckpointClaim claim =
+                    checkpointResumeService.claim(conversation.getId(), formToken, command);
+            return resumeClaimed(conversation, claim, emitter);
+        } catch (CheckpointResumeException e) {
+            OrchestrationRequest errorRequest =
+                    new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
+            support.sendEvent(errorRequest, "error",
+                    Map.of("code", String.valueOf(e.code()), "message", e.getMessage()));
+            return AgentTurnResult.done("");
+        }
+    }
+
+    @Override
+    public AgentTurnResult resumeClaimed(AgentConversation conversation, CheckpointClaim claim,
+                                         SseEmitter emitter) {
+        AgentCheckpoint cp = claim.checkpoint();
+        ResumeCommand command = claim.command();
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "", java.util.List.of(), emitter);
+        request.setParams(command.params());
+        request.setAssetIds(command.assetIds());
+        request.setAction(command.action());
+        request.setCustomText(command.customText());
+        request.setRoutingHint(command.routingHint());
+        request.setCanvasContext(command.canvasContext());
+        try {
             boolean agentScopeOwner = "AGENTSCOPE".equalsIgnoreCase(cp.getOwnerEngine());
-            OrchestrationMode owner = OrchestrationMode.from(cp.getOwnerEngine());
-            if (!agentScopeOwner && owner != OrchestrationMode.UNIFIED_LOOP) {
-                support.sendEvent(request, "error",
-                        Map.of("code", "40903", "message", "旧版检查点已停用，请重新发起请求"));
-                return AgentTurnResult.done("");
-            }
-            if (agentScopeOwner && (cp.getStateSchemaVersion() == null
-                    || cp.getStateSchemaVersion() != 2)) {
-                support.sendEvent(request, "error",
-                        Map.of("code", "40902", "message", "AgentScope 检查点版本不兼容，请重新发起"));
-                return AgentTurnResult.done("");
-            }
-            if (!agentScopeOwner && owner == OrchestrationMode.UNIFIED_LOOP
-                    && (cp.getStateSchemaVersion() == null || cp.getStateSchemaVersion() != 1)) {
-                support.sendEvent(request, "error",
-                        Map.of("code", "40902", "message", "编排检查点版本不兼容，请重新发起"));
-                return AgentTurnResult.done("");
-            }
-            // 一次性消费：status → used（原子条件防并发重放）
-            int updated = checkpointMapper.update(null,
-                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentCheckpoint>()
-                    .eq("id", cp.getId())
-                    .eq("status", "pending")
-                    .set("status", "used"));
-            if (updated == 0) {
-                support.sendEvent(request, "error", Map.of("code", "40001", "message", "确认已被使用，请重新发起"));
-                return AgentTurnResult.done("");
-            }
 
             // P4：从 checkpoint.plan 恢复会话级内存计数（regenCount/clarifyCount/sessionAssets）——
             // 重启后 resume 上限判定与资产接力不丢（_regenCount/_clarifyCount/_sessionAssets 私有键）
@@ -173,19 +153,29 @@ public class AgentOrchestratorImpl implements AgentOrchestrator {
             }
 
             AgentTurnResult result;
-            result = unifiedAgentLoop.resumeTurn(conversation, cp, action, customText, params,
-                    request.getAssetIds(), routingHint, canvasContext, emitter);
+            result = unifiedAgentLoop.resumeTurn(conversation, cp, command.action(), command.customText(),
+                    command.params(), request.getAssetIds(), command.routingHint(),
+                    request.getCanvasContext(), emitter);
             result = withEngineMetadata(result, OrchestrationMode.UNIFIED_LOOP);
             if (agentScopeOwner) result = withCheckpointOwner(result, "AGENTSCOPE");
+            checkpointResumeService.complete(claim);
             log.info("AgentOrchestrator({}).resumeTurn: conversationId={} cpAction={} action={} routingHint={} hitlPaused={} 完成",
-                    owner, conversation.getId(), cp.getAction(), action, routingHint, result.hitlPaused());
+                    agentScopeOwner ? "AGENTSCOPE" : "UNIFIED_LOOP",
+                    conversation.getId(), cp.getAction(), command.action(),
+                    command.routingHint(), result.hitlPaused());
             return result;
         } catch (AgentInterruptException e) {
             log.info("AgentOrchestrator.resumeTurn 被用户打断: conversationId={}", conversation.getId());
-            return AgentTurnResult.done("");
+            checkpointResumeService.retry(claim, "用户打断");
+            throw new CheckpointResumeException(40904, "确认处理已中断，请稍后重试");
+        } catch (CheckpointResumeException e) {
+            checkpointResumeService.retry(claim, e.getMessage());
+            throw e;
         } catch (Exception e) {
             log.error("AgentOrchestrator.resumeTurn 失败: conversationId={}, error={}", conversation.getId(), e.getMessage(), e);
-            return AgentTurnResult.done(support.sendFriendlyError(request, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再试一次。"));
+            checkpointResumeService.retry(claim, e.getMessage());
+            throw new CheckpointResumeException(50001,
+                    e.getMessage() == null ? "确认恢复失败，请稍后重试" : e.getMessage());
         }
     }
 

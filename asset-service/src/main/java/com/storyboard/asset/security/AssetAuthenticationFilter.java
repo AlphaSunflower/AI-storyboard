@@ -42,9 +42,9 @@ public class AssetAuthenticationFilter extends OncePerRequestFilter {
         String internalToken = request.getHeader("X-Internal-Token");
         String internalUser = request.getHeader("X-User-Id");
         if (internalToken != null && !properties.internalToken().isBlank()
-                && internalToken.equals(properties.internalToken())
-                && internalUser != null && !internalUser.isBlank()) {
-            authenticate(internalUser, "internal");
+                && internalToken.equals(properties.internalToken())) {
+            String user = (internalUser != null && !internalUser.isBlank()) ? internalUser : "internal";
+            authenticate(user, "internal");
             chain.doFilter(request, response);
             return;
         }

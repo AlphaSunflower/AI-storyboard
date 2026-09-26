@@ -1,6 +1,7 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
+import com.moon.moonagent.dto.request.AgentEditMessageRequest;
 import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
@@ -297,6 +298,38 @@ public class AgentConversationController {
         return emitter;
     }
 
+    /** 编辑最后一轮用户消息并覆盖重发（SSE）。 */
+    @PostMapping(value = "/conversations/{id}/messages/{messageId}/edit-and-resend",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter editAndResend(Authentication auth, @PathVariable String id,
+                                    @PathVariable String messageId,
+                                    @Valid @RequestBody AgentEditMessageRequest request) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = createSseEmitter();
+        chatService.editAndResend(auth.getName(), id, messageId, request.content(), emitter);
+        return emitter;
+    }
+
+    /** 打断当前生成并把下一条消息作为新轮发送（SSE）。 */
+    @PostMapping(value = "/conversations/{id}/messages/interrupt-and-send",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter interruptAndSend(Authentication auth, @PathVariable String id,
+                                       @Valid @RequestBody AgentSendMessageRequest request) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = createSseEmitter();
+        chatService.interruptAndStream(
+                auth.getName(), id, request.content(),
+                picUrls(request),
+                request.assetIds() == null ? java.util.List.of() : request.assetIds(),
+                emitter,
+                request.routingHint(),
+                Boolean.TRUE.equals(request.cancelActiveTasks()),
+                request.canvasContext(),
+                request.referenceVideos() == null ? java.util.List.of() : request.referenceVideos(),
+                request.referenceAudios() == null ? java.util.List.of() : request.referenceAudios());
+        return emitter;
+    }
+
     /** HITL 表单提交并续流（SSE） */
     @PostMapping(value = "/conversations/{id}/form/submit", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter submitForm(Authentication auth, @PathVariable String id,
@@ -331,7 +364,7 @@ public class AgentConversationController {
     }
 
     /** 视频异步任务状态（前端轮询：task_accepted 后 5s 间隔 GET，取 status/url/error） */
-    @GetMapping("/tasks/{taskId}")
+    @GetMapping("/legacy-tasks/{taskId}")
     public ApiResponse<Map<String, Object>> getVideoTaskStatus(Authentication auth, @PathVariable String taskId) {
         return ApiResponse.ok(chatService.getVideoTaskStatus(auth.getName(), taskId));
     }

@@ -32,6 +32,10 @@ public interface IntentRecognitionService {
      */
     IntentResult recognize(String query, List<AgentMessage> recentMessages);
 
+    /** 识别意图并把本轮网关调用记入执行段指标；旧调用方可继续使用两参数重载。 */
+    IntentResult recognize(String query, List<AgentMessage> recentMessages,
+                           com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace);
+
     /**
      * 仅规则前置匹配（不调 LLM）：返回首个命中的意图类型；未命中返回 null。
      * 供上下文意图延续用（对历史消息做轻量规则判定，避免递归调 LLM）。

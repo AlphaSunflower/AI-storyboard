@@ -19,6 +19,8 @@ public final class SceneDurationPlanner {
     private static final Pattern MINUTE_SECOND = Pattern.compile(
             "(\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百]+)\\s*(?:分钟|分(?!镜))"
                     + "\\s*(\\d+)\\s*秒");
+    private static final Pattern MINUTE_HALF = Pattern.compile(
+            "(\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百]+)\\s*(?:分钟|分(?!镜))\\s*半");
     private static final Pattern MINUTE = Pattern.compile(
             "(\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百]+)\\s*(?:分钟|分(?!镜)|min(?:ute)?s?)",
             Pattern.CASE_INSENSITIVE);
@@ -34,6 +36,8 @@ public final class SceneDurationPlanner {
         if (text == null || text.isBlank()) return null;
         Integer minuteSecond = lastMatchSeconds(MINUTE_SECOND, text, true);
         if (minuteSecond != null) return minuteSecond;
+        Integer minuteHalf = lastHalfMinuteSeconds(text);
+        if (minuteHalf != null) return minuteHalf;
         Integer minute = lastMatchSeconds(MINUTE, text, false);
         if (minute != null) return minute;
         return lastMatchSeconds(SECOND, text, false);
@@ -99,6 +103,18 @@ public final class SceneDurationPlanner {
             } else {
                 result = first;
             }
+        }
+        return result;
+    }
+
+    private static Integer lastHalfMinuteSeconds(String text) {
+        Matcher matcher = MINUTE_HALF.matcher(text);
+        Integer result = null;
+        while (matcher.find()) {
+            String prefix = text.substring(Math.max(0, matcher.start() - 8), matcher.start());
+            if (PER_SHOT.matcher(prefix).find()) continue;
+            int minutes = parseNumber(matcher.group(1));
+            if (minutes > 0) result = minutes * 60 + 30;
         }
         return result;
     }

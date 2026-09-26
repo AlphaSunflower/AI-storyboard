@@ -52,4 +52,11 @@ public interface AgentAnswerService {
      * 正文仍按 {@code message} 增量发送，推理按 {@code reasoning_delta} 增量发送。
      */
     AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl, SseEmitter emitter);
+
+    /**
+     * 同 {@link #streamAnswerWithResult}，同时把模型 usage 记入当前轮次指标。
+     */
+    AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl,
+                                             SseEmitter emitter,
+                                             com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace);
 }

@@ -21,6 +21,10 @@ import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeMediaRuntime;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
+import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
+import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
 import com.moon.moonagent.ai.agent.canvas.CanvasModeIntentPolicy;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
@@ -55,6 +59,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -95,6 +100,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final com.moon.moonagent.ai.agent.AgentOrchestrator orchestrator;
     private final com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport orchestratorSupport;
     private final com.moon.moonagent.mapper.AgentCheckpointMapper checkpointMapper;
+    private final CheckpointResumeService checkpointResumeService;
     private final com.moon.moonagent.ai.agent.ConversationLock conversationLock;
     private final com.moon.moonagent.ai.agent.AgentAnswerService answerService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -533,6 +539,11 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
     }
 
+    @Override
+    public AgentMessage persistWakeupResult(AgentConversation conversation, AgentTurnResult turn) {
+        return persistAssistant(conversation, turn);
+    }
+
     /** blocking 编排：直接走主回答服务（intent-other 语义；前端实际走 streamMessage SSE，此路为通用入口） */
     private String runBlocking(AgentConversation conversation, String content) {
         try {
@@ -595,54 +606,156 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        // 清除上一轮遗留的打断标志（新一轮编排启动即恢复正常流；/interrupt 端点可能在上轮收尾后置位）
-        orchestratorSupport.clearInterrupt(conversationId);
+        // 1. user 消息独立事务立即提交
+        persistUserMessage(conversation, content, picUrls, assetIds, routingHint,
+                referenceVideos, referenceAudios);
+        dispatchStreamTurn(conversation, content, picUrls, assetIds, routingHint, cancelActiveTasks,
+                effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
+    }
 
-        // 图改图参考图兜底：按会话记录最近一次 picUrls（本条带图则更新，不带图则清空，
-        // 严格限定在"带图的当轮"内生效，防跨轮误用）
+    @Override
+    public void interruptAndStream(String userId, String conversationId, String content,
+                                   List<String> picUrls, List<String> assetIds,
+                                   SseEmitter emitter, String routingHint, boolean cancelActiveTasks,
+                                   CanvasSessionContext canvasContext,
+                                   List<String> referenceVideos, List<String> referenceAudios) {
+        if (content == null || content.isBlank()) {
+            sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
+            emitter.complete();
+            return;
+        }
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
+        log.info("[Agent 打断并发送] conversationId={}", conversationId);
+
+        CompletableFuture.runAsync(() -> {
+            boolean lockAcquired = false;
+            try {
+                orchestratorSupport.interrupt(conversationId);
+                lockAcquired = conversationLock.acquireWithTimeout(conversationId, Duration.ofSeconds(15));
+                if (!lockAcquired) {
+                    sendEvent(emitter, "error",
+                            Map.of("code", "40901", "message", "当前对话停止超时，请稍后重试"));
+                    emitter.complete();
+                    return;
+                }
+                CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, canvasContext);
+                persistUserMessage(conversation, content, picUrls, assetIds, routingHint,
+                        referenceVideos, referenceAudios);
+                dispatchStreamTurn(conversation, content, picUrls, assetIds, routingHint,
+                        cancelActiveTasks, effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
+                lockAcquired = false;
+            } catch (Exception e) {
+                log.error("打断并发送失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
+                sendFriendlyError(emitter, e.getMessage(), "打断失败，请稍后重试。");
+                try { emitter.complete(); } catch (Exception ignore) { }
+            } finally {
+                if (lockAcquired) conversationLock.release(conversationId);
+            }
+        }, agentExecutor);
+    }
+
+    @Override
+    public void editAndResend(String userId, String conversationId, String messageId,
+                              String content, SseEmitter emitter) {
+        if (content == null || content.isBlank()) {
+            sendEvent(emitter, "error", Map.of("code", "40001", "message", "消息内容不能为空"));
+            emitter.complete();
+            return;
+        }
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
+        List<AgentMessage> messages = listMessages(conversationId);
+        int targetIndex = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if (messageId.equals(messages.get(i).getId())) {
+                targetIndex = i;
+                break;
+            }
+        }
+        if (targetIndex < 0 || !"user".equals(messages.get(targetIndex).getRole())) {
+            throw new BusinessException(40001, "只能编辑最后一条用户消息");
+        }
+        for (int i = targetIndex + 1; i < messages.size(); i++) {
+            if ("user".equals(messages.get(i).getRole())) {
+                throw new BusinessException(40001, "只能编辑最后一条用户消息");
+            }
+        }
+        AgentMessage target = messages.get(targetIndex);
+        Map<String, Object> input = messageInput(target);
+        List<String> picUrls = stringList(input.get("picUrls"));
+        List<String> assetIds = stringList(input.get("assetIds"));
+        List<String> referenceVideos = stringList(input.get("referenceVideos"));
+        List<String> referenceAudios = stringList(input.get("referenceAudios"));
+        String routingHint = input.get("routingHint") == null ? null : String.valueOf(input.get("routingHint"));
+        CanvasSessionContext effectiveCanvasContext = resolveCanvasContext(conversation, null);
+
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendEvent(emitter, "error", Map.of("code", "40901", "message", "当前对话正在处理中，请稍候"));
+            emitter.complete();
+            return;
+        }
+        try {
+            checkpointResumeService.expirePending(conversationId);
+            if (agentScopeMediaRuntime != null) {
+                agentScopeMediaRuntime.rewindLastTurn(userId, conversationId, target.getContent());
+            }
+            List<String> laterMessageIds = messages.subList(targetIndex + 1, messages.size()).stream()
+                    .map(AgentMessage::getId)
+                    .toList();
+            transactionTemplate().executeWithoutResult(tx -> {
+                target.setContent(content);
+                messageMapper.updateById(target);
+                if (!laterMessageIds.isEmpty()) messageMapper.deleteBatchIds(laterMessageIds);
+                conversationMapper.updateById(conversation);
+            });
+            dispatchStreamTurn(conversation, content, picUrls, assetIds, routingHint, false,
+                    effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
+        } catch (Exception e) {
+            conversationLock.release(conversationId);
+            log.error("编辑并重发失败: conversationId={}, messageId={}, error={}",
+                    conversationId, messageId, e.getMessage(), e);
+            sendFriendlyError(emitter, e.getMessage(), "修改失败，请稍后重试。");
+            emitter.complete();
+        }
+    }
+
+    private void dispatchStreamTurn(AgentConversation conversation, String content,
+                                    List<String> picUrls, List<String> assetIds,
+                                    String routingHint, boolean cancelActiveTasks,
+                                    CanvasSessionContext canvasContext,
+                                    List<String> referenceVideos, List<String> referenceAudios,
+                                    SseEmitter emitter) {
+        String conversationId = conversation.getId();
+        orchestratorSupport.clearInterrupt(conversationId);
         if (picUrls != null && !picUrls.isEmpty()) {
             lastPicUrlByConversation.put(conversationId, picUrls);
-            // 首会话上传时无 convId → agent_assets.conversation_id=null；本条消息带上这些 url 即逐张认领归属（仅改未归属资产，防误抢其他会话）
-            for (String url : picUrls) {
-                if (url == null || url.isBlank()) continue;
-                assetMapper.update(null,
-                        new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentAsset>()
-                                .eq(AgentAsset::getUrl, url)
-                                .isNull(AgentAsset::getConversationId)
-                                .set(AgentAsset::getConversationId, conversationId));
+            if (assetMapper != null) {
+                for (String url : picUrls) {
+                    if (url == null || url.isBlank()) continue;
+                    assetMapper.update(null,
+                            new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentAsset>()
+                                    .eq(AgentAsset::getUrl, url)
+                                    .isNull(AgentAsset::getConversationId)
+                                    .set(AgentAsset::getConversationId, conversationId));
+                }
             }
         } else {
             lastPicUrlByConversation.remove(conversationId);
         }
 
-        // I1：注册 SseEmitter 断开/超时/异常回调——客户端断开只置取消标志（停止发给已断开的 emitter）。
-        // 刷新/切走是「断开」而非「用户主动停止」，不能触发会话 interrupt；
-        // 真正的「停止生成」由 /interrupt 端点显式置位，避免刷新把长任务误停并落「已停止生成」。
         AtomicBoolean cancel = new AtomicBoolean(false);
         Runnable interruptTrap = () -> cancel.set(true);
         emitter.onCompletion(interruptTrap);
         emitter.onTimeout(interruptTrap);
         emitter.onError(ignored -> interruptTrap.run());
 
-        // 1. user 消息独立事务立即提交
-        AgentMessage userMessage = new AgentMessage();
-        userMessage.setConversationId(conversationId);
-        userMessage.setRole("user");
-        userMessage.setContent(content);
-
-        // 1.5 首条消息异步 AI 重命名标题（不阻塞主流程；结果随本轮 message_end 一次性推送）。
-        // 注意：必须在 user 消息落库【前】判定"首条"——落库后 selectCount 已 +1，判定永远不成立
-        maybeScheduleTitleRename(conversation, content);
-
-        transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
-
-        // 2. 异步走编排（Spring AI 应用层状态机；SseEmitter 需异步写，否则阻塞 Controller 返回）
         CompletableFuture.runAsync(() -> {
             try {
-                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds, routingHint,
-                        cancelActiveTasks, effectiveCanvasContext, referenceVideos, referenceAudios, emitter);
-                // 编排产生的最后一条 message 落库 assistant 消息（刷新后历史可见）；
-                // HITL 暂停已由 runHITLStage 落库 assistant 消息，不重复插入，仅补全 trace/reasoning 到该行 metadata
+                AgentTurnResult turn = orchestrator.runTurn(conversation, content, picUrls, assetIds,
+                        routingHint, cancelActiveTasks, canvasContext, referenceVideos, referenceAudios, emitter);
+                throwIfInterrupted(conversationId);
+                sendFallbackTerminalEvent(turn, emitter);
                 if (turn != null) {
                     if (turn.hitlPaused()) {
                         persistTurnMetadata(conversation.getId(), turn.messageId(), turn);
@@ -651,10 +764,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     }
                 }
             } catch (AgentInterruptException e) {
-                // 用户主动打断：不补发错误、不落库被截断的回答，静默收尾（锁在 finally 释放）
                 log.info("Agent 编排被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
-                // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) {
                     log.debug("SSE 已取消，忽略编排异常: conversationId={}", conversationId);
                     return;
@@ -663,11 +774,50 @@ public class AgentChatServiceImpl implements AgentChatService {
                 sendFriendlyError(emitter, e.getMessage(), "服务暂时出了点问题，请稍后重试或换个说法再问我一次。");
                 emitter.complete();
             } finally {
-                // 先释放会话锁再 complete：前端收到 EOF 时锁已释放，防下一条消息立即撞锁（竞态 40901）
                 conversationLock.release(conversationId);
                 try { emitter.complete(); } catch (Exception ignore) { }
             }
         }, agentExecutor);
+    }
+
+    private Map<String, Object> messageInputMetadata(List<String> picUrls, List<String> assetIds,
+                                                     String routingHint, List<String> referenceVideos,
+                                                     List<String> referenceAudios) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        if (picUrls != null && !picUrls.isEmpty()) input.put("picUrls", picUrls);
+        if (assetIds != null && !assetIds.isEmpty()) input.put("assetIds", assetIds);
+        if (referenceVideos != null && !referenceVideos.isEmpty()) input.put("referenceVideos", referenceVideos);
+        if (referenceAudios != null && !referenceAudios.isEmpty()) input.put("referenceAudios", referenceAudios);
+        if (routingHint != null && !routingHint.isBlank()) input.put("routingHint", routingHint);
+        return Map.of("messageInput", input);
+    }
+
+    private void persistUserMessage(AgentConversation conversation, String content,
+                                    List<String> picUrls, List<String> assetIds,
+                                    String routingHint, List<String> referenceVideos,
+                                    List<String> referenceAudios) {
+        AgentMessage userMessage = new AgentMessage();
+        userMessage.setConversationId(conversation.getId());
+        userMessage.setRole("user");
+        userMessage.setContent(content);
+        userMessage.setMetadata(messageInputMetadata(picUrls, assetIds, routingHint,
+                referenceVideos, referenceAudios));
+        maybeScheduleTitleRename(conversation, content);
+        transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
+    }
+
+    private Map<String, Object> messageInput(AgentMessage message) {
+        if (message.getMetadata() == null) return Map.of();
+        Object raw = message.getMetadata().get("messageInput");
+        if (!(raw instanceof Map<?, ?> map)) return Map.of();
+        Map<String, Object> result = new LinkedHashMap<>();
+        map.forEach((key, value) -> result.put(String.valueOf(key), value));
+        return result;
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream().map(String::valueOf).toList();
     }
 
 
@@ -687,6 +837,34 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.send(SseEmitter.event().name(eventName).data(com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport.sseJson(data)));
         } catch (Exception e) {
             log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
+        }
+    }
+
+    /** AgentScope / 异步任务可能只返回 turn、不主动发终态事件；此处统一补齐且不覆盖已有事件。 */
+    private void sendFallbackTerminalEvent(AgentTurnResult turn, SseEmitter emitter) {
+        if (turn == null || turn.hitlPaused()
+                || (turn.metadata() != null
+                    && Boolean.TRUE.equals(turn.metadata().get("_terminalEventSent")))
+                || turn.content() == null || turn.content().isBlank()) {
+            return;
+        }
+        Map<String, Object> payload = new java.util.LinkedHashMap<>(
+                turn.metadata() == null ? Map.of() : turn.metadata());
+        payload.remove("_terminalEventSent");
+        payload.put("messageId", turn.messageId() == null ? "" : turn.messageId());
+        payload.put("sceneCount", -1L);
+        payload.put("content", turn.content());
+        sendEvent(emitter, "message_end", payload);
+    }
+
+    /**
+     * Terminal barrier: cancellation can arrive after the orchestration returns but before its
+     * terminal event and assistant message are committed. Re-check here so a stopped turn cannot
+     * reappear in conversation history.
+     */
+    private void throwIfInterrupted(String conversationId) {
+        if (orchestratorSupport.isInterrupted(conversationId)) {
+            throw new AgentInterruptException();
         }
     }
 
@@ -736,9 +914,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     /**
      * 落库 assistant 消息带结构化 metadata（trace/reasoning/suggestedActions/hitl 等）。
      */
-    private void persistAssistant(AgentConversation conversation, String content, Map<String, Object> metadata) {
-        if (content == null || content.isBlank()) return;
-        transactionTemplate().executeWithoutResult(tx -> {
+    private AgentMessage persistAssistant(AgentConversation conversation, String content, Map<String, Object> metadata) {
+        if (content == null || content.isBlank()) return null;
+        return transactionTemplate().execute(tx -> {
             AgentMessage assistantMessage = new AgentMessage();
             assistantMessage.setConversationId(conversation.getId());
             assistantMessage.setRole("assistant");
@@ -746,6 +924,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             if (metadata != null && !metadata.isEmpty()) assistantMessage.setMetadata(metadata);
             messageMapper.insert(assistantMessage);
             conversationMapper.updateById(conversation); // 触发 updatedAt fill
+            return assistantMessage;
         });
     }
 
@@ -753,18 +932,32 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 按 AgentTurnResult 落库 assistant 消息：content + metadata（含 trace/reasoning/suggestedActions/hitl）。
      * hitlPaused=true 时由 runHITLStage 已落库，调用方应在调用前跳过（本方法防御性跳过）。
      */
-    private void persistAssistant(AgentConversation conversation, AgentTurnResult turn) {
-        if (turn == null) return;
+    private AgentMessage persistAssistant(AgentConversation conversation, AgentTurnResult turn) {
+        if (turn == null) return null;
         if (turn.hitlPaused()) {
             log.info("persistAssistant 跳过 HITL 暂停消息（runHITLStage 已落库）: conversationId={}", conversation.getId());
-            return;
+            return null;
         }
         Map<String, Object> metadata = new java.util.LinkedHashMap<>();
         if (turn.metadata() != null) metadata.putAll(turn.metadata());
+        metadata.remove("_terminalEventSent");
         if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("agentTrace", turn.agentTrace());
         if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
         if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
-        persistAssistant(conversation, turn.content(), metadata);
+        AgentMessage saved = persistAssistant(conversation, turn.content(), metadata);
+        if (saved != null && metadata.get("taskCards") instanceof List<?> cards) {
+            List<Map<String, Object>> taskCards = cards.stream()
+                    .filter(Map.class::isInstance)
+                    .map(card -> {
+                        Map<?, ?> raw = (Map<?, ?>) card;
+                        Map<String, Object> normalized = new java.util.LinkedHashMap<>();
+                        raw.forEach((key, value) -> normalized.put(String.valueOf(key), value));
+                        return normalized;
+                    })
+                    .toList();
+            agentScopeAsyncTaskService.bindAnchorMessages(saved.getId(), taskCards);
+        }
+        return saved;
     }
 
     /** 将 turn 的 trace/reasoning/suggestedActions 合并进已落库消息的 metadata（按 messageId；供 HITL 卡补全）。 */
@@ -776,6 +969,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 if (msg == null) return;
                 Map<String, Object> metadata = msg.getMetadata() == null
                         ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(msg.getMetadata());
+                metadata.remove("_terminalEventSent");
                 if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("agentTrace", turn.agentTrace());
                 if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
                 if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
@@ -834,30 +1028,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         emitter.onTimeout(interruptTrap);
         emitter.onError(ignored -> interruptTrap.run());
         CompletableFuture.runAsync(() -> {
+            CheckpointClaim claim = null;
             try {
                 // checkpoint 驱动（替代内存 videoPlanSnapshots）：planToken 即 checkpoint formToken，
                 // plan JSON 存 {message, duration, source}；校验归属/未过期后一次性消费
-                com.moon.moonagent.entity.AgentCheckpoint cp = checkpointMapper.selectOne(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.moon.moonagent.entity.AgentCheckpoint>()
-                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getFormToken, planToken)
-                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getConversationId, conversationId)
-                        .last("LIMIT 1"));
-                if (cp == null || !"pending".equals(cp.getStatus()) || cp.getExpirationTime() == null
-                        || cp.getExpirationTime().isBefore(OffsetDateTime.now())) {
-                    log.warn("图生视频方案 checkpoint 无效或已过期: conversationId={}, planToken={}", conversationId, planToken);
-                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "视频方案已过期，请重新上传图片生成"));
-                    return;
-                }
-                // 一次性消费（status pending→used 原子条件，防重放）
-                int updated = checkpointMapper.update(null,
-                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<com.moon.moonagent.entity.AgentCheckpoint>()
-                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getId, cp.getId())
-                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getStatus, "pending")
-                        .set(com.moon.moonagent.entity.AgentCheckpoint::getStatus, "used"));
-                if (updated == 0) {
-                    sendEvent(emitter, "error", Map.of("code", "40001", "message", "视频方案已被使用，请重新发起"));
-                    return;
-                }
+                claim = checkpointResumeService.claim(conversationId, planToken,
+                        new ResumeCommand("generate_video", "", Map.of(), List.of(), "", ""));
+                AgentCheckpoint cp = claim.checkpoint();
                 // 解析 plan JSON：{message, duration, picUrls|source}（兼容 items 数组包裹：{items:[{...}]}）
                 String message = "";
                 String duration = null;
@@ -878,6 +1055,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     }
                 }
                 if (message.isBlank()) {
+                    checkpointResumeService.fail(claim, "视频方案内容缺失");
                     sendEvent(emitter, "error", Map.of("code", "40001", "message", "视频方案内容缺失，请重新上传图片生成"));
                     return;
                 }
@@ -921,6 +1099,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                         new AgentOrchestratorSupport.StagePlan(
                             planText.toString(), "video-role-select",
                             planPayload, "human_input", actions));
+                    checkpointResumeService.complete(claim);
 
                     log.info("参考图 role 选择 HITL 卡片已发送: conversationId={}", conversationId);
                     return; // 结束本轮，等待用户选择后 resume
@@ -932,14 +1111,22 @@ public class AgentChatServiceImpl implements AgentChatService {
                         new com.moon.moonagent.ai.agent.handler.OrchestrationRequest(
                                 conversation, "", picUrls, emitter),
                         message, duration, null, picUrls);
+                checkpointResumeService.complete(claim);
                 log.info("图生视频任务已受理: conversationId={}, duration={}", conversationId, duration);
+            } catch (CheckpointResumeException e) {
+                log.warn("图生视频方案 checkpoint 无效: conversationId={}, planToken={}, error={}",
+                        conversationId, planToken, e.getMessage());
+                sendEvent(emitter, "error",
+                        Map.of("code", String.valueOf(e.code()), "message", e.getMessage()));
             } catch (AgentInterruptException e) {
                 // 用户主动打断：不补发错误，静默收尾（锁在 finally 释放）
                 log.info("图生视频被用户打断: conversationId={}", conversationId);
+                if (claim != null) checkpointResumeService.retry(claim, "用户打断");
             } catch (Exception e) {
                 // I1：客户端已断开时不再补发 error/complete（emitter 已被容器关闭）
                 if (cancel.get()) return;
                 log.error("图生视频生成失败: conversationId={}, error={}", conversationId, e.getMessage(), e);
+                if (claim != null) checkpointResumeService.retry(claim, e.getMessage());
                 sendFriendlyError(emitter, e.getMessage(), "视频生成暂时失败了，请稍后重试。");
             } finally {
                 // 先释放会话锁再 complete（防 EOF 竞态：前端收到 task_accepted 后立即轮询/再发消息）
@@ -999,6 +1186,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 // 否则刷新后 HITL 结果从对话中消失（产出素材里却有）
                 AgentTurnResult turn = orchestrator.resumeTurn(conversation, formToken, action, customText, params,
                         assetIds, routingHint, effectiveCanvasContext, emitter);
+                throwIfInterrupted(conversationId);
+                sendFallbackTerminalEvent(turn, emitter);
                 if (turn != null) {
                     if (turn.hitlPaused()) {
                         // 再次 HITL 暂停：runHITLStage 已落库新 assistant 消息，不重复插入
@@ -1168,11 +1357,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     @Override
     public void skipPendingCheckpoints(String userId, String conversationId) {
         getOwnedConversation(userId, conversationId);
-        int updated = checkpointMapper.update(null,
-                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AgentCheckpoint>()
-                        .eq("conversation_id", conversationId)
-                        .eq("status", "pending")
-                        .set("status", "expired"));
+        int updated = checkpointResumeService.expirePending(conversationId);
         log.info("Agent 跳过待处理确认: conversationId={}, expiredCount={}", conversationId, updated);
     }
 

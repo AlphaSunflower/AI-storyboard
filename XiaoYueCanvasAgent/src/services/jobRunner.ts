@@ -670,7 +670,9 @@ export const submitScriptDrafting = async (
   const canvas = useCanvasStore.getState();
   const projectId = canvas.projectId ?? 'local-project';
   const capabilities = await jobAdapter.getCapabilities(opts.signal);
-  const capability = capabilities.find((item) => item.id === 'storyboard.plan');
+  const useStagedOutline = capabilities.some((item) => item.id === 'storyboard.outline' && item.available);
+  const effectiveCapabilityId = useStagedOutline ? 'storyboard.outline' : 'storyboard.plan';
+  const capability = capabilities.find((item) => item.id === effectiveCapabilityId);
   if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置分镜规划执行服务');
 
   const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
@@ -727,7 +729,7 @@ export const submitScriptDrafting = async (
       producerNodeId: targetNodeId,
       generationRecordId: generationRecord.id,
       requestSnapshot: {
-        capabilityId: 'storyboard.plan',
+        capabilityId: effectiveCapabilityId,
         sourceAssetIds,
         params: {
           prompt: text,
@@ -749,7 +751,7 @@ export const submitScriptDrafting = async (
     ({ jobId } = await jobAdapter.submit({
       clientRequestId: createId(),
       conversationId,
-      capabilityId: 'storyboard.plan',
+      capabilityId: effectiveCapabilityId,
       sourceAssetIds,
       context: { projectId, nodeIds: canvas.nodes.map((node) => node.id), selectedNodeId: targetNodeId },
       params: {
@@ -784,7 +786,7 @@ export const submitScriptDrafting = async (
   });
   persistQueue('running', jobId);
 
-  useAgentStore.getState().putJob(projectId, { id: jobId, prompt: `生成分镜：${text.slice(0, 24)}…`, sourceNodeId: targetNodeId, capabilityId: 'storyboard.plan', status: 'queued', progress: 0, createdAt: Date.now() });
+  useAgentStore.getState().putJob(projectId, { id: jobId, prompt: `生成分镜：${text.slice(0, 24)}…`, sourceNodeId: targetNodeId, capabilityId: effectiveCapabilityId, status: 'queued', progress: 0, createdAt: Date.now() });
 
   jobAdapter.subscribe(jobId, (event) => {
     if (event.type === 'job.failed') {
@@ -821,6 +823,26 @@ export const submitScriptDrafting = async (
       const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
       useCanvasStore.getState().updateGenerationRecord({ ...current, status: 'running', queueStatus: 'running', progress });
       useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true, progressPercent: Math.round(progress * 100) });
+    } else if (event.type === 'storyboard.outline.ready') {
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionRunId: event.runId,
+        productionStage: event.stage,
+        optimizedScript: event.optimizedScript,
+        expandedScript: event.expansionScript,
+        productionAssessment: event.assessment,
+        productionRoles: event.roles,
+      });
+      useAgentStore.getState().updateJob(projectId, jobId, { status: 'receiving' });
+    } else if (event.type === 'storyboard.preview') {
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionRunId: event.runId,
+        productionStage: event.stage,
+        optimizedScript: event.optimizedScript,
+        expandedScript: event.expansionScript,
+        productionAssessment: event.assessment,
+        productionRoles: event.roles,
+        pseudoShots: event.pseudoShots,
+      });
     } else if (event.type === 'storyboard.created') {
       const state = useCanvasStore.getState();
       const target = state.nodes.find((node) => node.id === targetNodeId);
@@ -861,6 +883,106 @@ export const submitScriptDrafting = async (
     }
   });
 
+  return jobId;
+};
+
+export const submitStoryboardFinalize = async (
+  runId: string,
+  targetNodeId: string,
+  onFeedback: (message: string) => void,
+  decision = 'APPROVE',
+) => {
+  if (!runId) throw new Error('伪分镜尚未生成');
+  const canvas = useCanvasStore.getState();
+  const projectId = canvas.projectId ?? 'local-project';
+  const capabilities = await jobAdapter.getCapabilities();
+  const capability = capabilities.find((item) => item.id === 'storyboard.finalize');
+  if (!capability?.available) throw new Error(capability?.unavailableReason ?? '未配置正式分镜生成服务');
+  const conversationId = useAgentStore.getState().ensureSession(projectId).conversationId;
+  const generationRecord: GenerationRecord = {
+    id: `generation-${createId()}`,
+    producerNodeId: targetNodeId,
+    actionId: 'finalize',
+    attempt: 1,
+    status: 'queued',
+    progress: 0,
+    queueStatus: 'pending_submit',
+    materializationStatus: 'pending',
+    materializedAssetIds: [],
+    resultNodeIds: [],
+    sources: [],
+    prompt: runId,
+    effectivePrompt: runId,
+    params: { runId, decision },
+    startedAt: Date.now(),
+  };
+  useCanvasStore.getState().appendGenerationRecord(generationRecord);
+  const { jobId } = await jobAdapter.submit({
+    clientRequestId: createId(),
+    conversationId,
+    capabilityId: 'storyboard.finalize',
+    sourceAssetIds: [],
+    context: { projectId, nodeIds: canvas.nodes.map((node) => node.id), selectedNodeId: targetNodeId },
+    params: { runId, decision },
+  });
+  useCanvasStore.getState().updateGenerationRecord({
+    ...generationRecord,
+    jobId,
+    status: 'running',
+    queueStatus: 'running',
+  });
+  useCanvasStore.getState().updateNode(targetNodeId, {
+    productionStage: 'FINALIZING',
+    isGenerating: true,
+    generationStartedAt: Date.now(),
+    progressPercent: 0,
+  });
+  useAgentStore.getState().putJob(projectId, {
+    id: jobId,
+    prompt: '生成正式分镜',
+    sourceNodeId: targetNodeId,
+    capabilityId: 'storyboard.finalize',
+    status: 'queued',
+    progress: 0,
+    createdAt: Date.now(),
+  });
+  jobAdapter.subscribe(jobId, (event) => {
+    if (event.type === 'storyboard.created') {
+      useCanvasStore.getState().applyStoryboardPlan(targetNodeId, event.shots);
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionStage: 'COMPLETED',
+        isGenerating: false,
+        progressPercent: 0,
+      });
+      void requestAutoLayout([targetNodeId]);
+    } else if (event.type === 'storyboard.preview') {
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionRunId: event.runId,
+        productionStage: event.stage,
+        optimizedScript: event.optimizedScript,
+        expandedScript: event.expansionScript,
+        pseudoShots: event.pseudoShots,
+        isGenerating: false,
+        progressPercent: 0,
+      });
+    } else if (event.type === 'job.failed') {
+      onFeedback(event.message);
+      useCanvasStore.getState().updateNode(targetNodeId, { productionStage: 'FAILED', isGenerating: false });
+    } else if (event.type === 'job.completed') {
+      const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
+      useCanvasStore.getState().updateGenerationRecord({
+        ...current,
+        status: 'completed',
+        queueStatus: 'terminal',
+        progress: 1,
+        materializationStatus: 'completed',
+        completedAt: Date.now(),
+      });
+      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+    } else if (event.type === 'job.cancelled') {
+      useCanvasStore.getState().updateNode(targetNodeId, { productionStage: 'CANCELLED', isGenerating: false });
+    }
+  });
   return jobId;
 };
 

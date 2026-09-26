@@ -1,6 +1,8 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public final class AgentScopeStructuredModels {
 
@@ -39,6 +41,22 @@ public final class AgentScopeStructuredModels {
             String reason,
             String question
     ) {
+    }
+
+    public record MediaActionReview(
+            String decision,
+            Map<String, Object> repairedInput,
+            String question,
+            double confidence,
+            List<String> reasons
+    ) {
+        public MediaActionReview {
+            decision = decision == null ? "EXECUTE" : decision.trim().toUpperCase();
+            repairedInput = repairedInput == null
+                    ? Map.of() : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(repairedInput));
+            question = question == null ? "" : question.trim();
+            reasons = reasons == null ? List.of() : List.copyOf(reasons);
+        }
     }
 
     public record SubagentResult(

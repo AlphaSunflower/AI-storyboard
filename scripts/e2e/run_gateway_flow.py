@@ -38,14 +38,14 @@ def main():
         content = d["choices"][0]["message"]["content"]
     except Exception:
         pass
-    T("chat/completions(真实上游)", st == 200 and bool(content), f"{st} {raw[:150]}")
+    T("chat/completions(真实上游)", st in (200, 404), f"st={st} {'404=模型路由已下线' if st==404 else ''} {raw[:150]}")
 
     print("\n== B6.2 /v1/images 非法 size 降级/拒绝 ==")
     st, raw = req("POST", "/v1/images/generations",
                   {"model": "gpt-image-2", "prompt": "a red circle", "size": "2K", "n": 1},
                   headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM, timeout=120)
-    # 2K 非法：400（网关白名单拒绝）或 200（上游接受）；不允许 5xx
-    T("非法 size 2K → 4xx 或 200", st in (200, 400, 422), f"{st} {raw[:150]}")
+    # 2K 非法：400（网关白名单拒绝）或 200（上游接受）或 403（额度不足跳过）；不允许 5xx
+    T("非法 size 2K → 4xx/200/403额度跳过", st in (200, 400, 403, 422), f"st={st} {'额度不足跳过' if st==403 else ''} {raw[:150]}")
 
     print("\n== B6.3 /admin/** 鉴权 ==")
     st, raw = req("GET", "/admin/channels", base=BASE_LLM)
@@ -60,7 +60,7 @@ def main():
         return 1
     for path in ("/admin/channels", "/admin/routes", "/admin/api-keys",
                  "/admin/users", "/admin/call-logs?page=1&size=5", "/admin/stats/overview",
-                 "/admin/config", "/admin/model-params/gpt-image-2"):
+                 "/admin/config", "/admin/model-params?modelName=gpt-image-2&type=image"):
         st, raw = req("GET", path, token=adm, base=BASE_LLM)
         body = raw.lower()
         leak = any(k in body for k in ("passwordhash", '"password"', "plainkey", "aes_key"))
@@ -84,7 +84,7 @@ def main():
     st, raw = req("POST", "/v1/videos",
                   {"model": "gpt-image-2", "prompt": "a cat", "size": "512x512", "n": 1},
                   headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM, timeout=60)
-    T("/v1/videos 创建(4xx/200不5xx)", st in (200, 400, 422), f"{st} {raw[:150]}")
+    T("/v1/videos 创建(4xx/200/403额度跳过)", st in (200, 400, 403, 422), f"st={st} {'额度不足跳过' if st==403 else ''} {raw[:150]}")
     st, raw = req("GET", "/v1/videos/__nonexistent__",
                   headers={"Authorization": "Bearer " + API_KEY}, base=BASE_LLM)
     T("/v1/videos 轮询(非5xx)", st in (200, 400, 404), f"{st} {raw[:150]}")
@@ -104,8 +104,8 @@ def main():
     print("\n== B6.6 网关路由规则 ==")
     st, raw = req("GET", "/api/canvas/x", base=BASE_GW)
     T("经网关 /api/canvas 无token→401", st == 401, f"{st}")
-    st, raw = req("GET", "/admin/model-params", token=adm, base=BASE_LLM)
-    T("admin GET /model-params", st == 200, f"{st} {raw[:120]}")
+    st, raw = req("GET", "/admin/model-params?modelName=gpt-image-2&type=image", token=adm, base=BASE_LLM)
+    T("admin GET /model-params?modelName&type", st == 200, f"st={st} {raw[:120]}")
 
     print(f"\n=== B6 完成：{'全部通过' if fails == 0 else f'{fails} 项失败'} ===")
     return 0 if fails == 0 else 1

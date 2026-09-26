@@ -159,7 +159,7 @@ com/moon/moonagent/
 │   └── memory/         # ConversationLock / CheckpointCleanupService
 └── MoonAgentApplication.java
 resources/
-├── skills/        # 所有 SKILL.md（aisplit/pic/video/scene-review/delete/other）
+├── skills/        # 所有 SKILL.md（storyboard/aisplit/pic/video/delete/other）
 └── prompts/       # 提示词模板（orchestrator/script/services）
 ```
 

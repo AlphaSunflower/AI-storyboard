@@ -119,6 +119,66 @@ class UnifiedAgentLoopMediaRoutingTest {
         verify(aigcGatewaySpecialist, never()).execute(anyString(), any());
     }
 
+    @Test
+    void enabledAgentScopeTakesStoryboardTurnsBeforeLegacyAisplitHandler() {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        when(agentScopeMediaRuntime.enabled()).thenReturn(true);
+        when(agentScopeMediaRuntime.runTurn(any(), any(), any()))
+                .thenReturn(AgentTurnResult.done("plot-review"));
+
+        UnifiedAgentLoop loop = loopWithGatewayEnabled(false);
+        ReflectionTestUtils.setField(loop, "agentScopeMediaRuntime", agentScopeMediaRuntime);
+        AgentTurnResult result = loop.runTurn(
+                conversation, "根据这个完整剧情生成分镜", List.of(), List.of(),
+                "intent-aisplit", false, null, List.of(), List.of(), emitter);
+
+        org.assertj.core.api.Assertions.assertThat(result.content()).isEqualTo("plot-review");
+        verify(agentScopeMediaRuntime).runTurn(any(), any(), any());
+        verify(specialist, never()).execute(any());
+    }
+
+    @Test
+    void enabledAgentScopeTakesDedicatedStoryboardIntentBeforeGenericSkill() {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        when(agentScopeMediaRuntime.enabled()).thenReturn(true);
+        when(agentScopeMediaRuntime.runTurn(any(), any(), any()))
+                .thenReturn(AgentTurnResult.done("storyboard-started"));
+
+        UnifiedAgentLoop loop = loopWithGatewayEnabled(false);
+        ReflectionTestUtils.setField(loop, "agentScopeMediaRuntime", agentScopeMediaRuntime);
+        AgentTurnResult result = loop.runTurn(
+                conversation, "生成一个两分钟的别墅视频", List.of(), List.of(),
+                "intent-storyboard", false, null, List.of(), List.of(), emitter);
+
+        org.assertj.core.api.Assertions.assertThat(result.content()).isEqualTo("storyboard-started");
+        verify(agentScopeMediaRuntime).runTurn(any(), any(), any());
+        verify(specialist, never()).execute(any());
+    }
+
+    @Test
+    void legacySceneReviewCheckpointEndsWithMigrationMessageInsteadOfOpeningOldCard() {
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setAction("review-action");
+        checkpoint.setPlan("[]");
+
+        AgentTurnResult result = loopWithGatewayEnabled(false).resumeTurn(
+                conversation, checkpoint, "review-gen-image", "", Map.of(), List.of(), "",
+                null, emitter);
+
+        org.assertj.core.api.Assertions.assertThat(result.content())
+                .contains("旧分镜审查流程已停用")
+                .contains("生成分镜图片");
+        org.assertj.core.api.Assertions.assertThat(result.hitlPaused()).isFalse();
+        verify(specialist, never()).execute(any());
+    }
+
     private AgentTurnResult runMediaTurn(AgentConversation conversation, boolean gatewayEnabled) {
         return loopWithGatewayEnabled(gatewayEnabled).runTurn(
                 conversation, "把这张图卡通化", List.of("http://localhost/a.png"),

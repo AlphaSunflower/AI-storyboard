@@ -47,6 +47,10 @@ mybatis-plus:
 # 上传根目录：复用主后端 uploads（文件共享，前端经主后端 /api/files/** 或本文 /assets/{id} 读取）
 ai:
   upload-root: ${UPLOAD_ROOT:../AIStoryboardBackend/uploads}
+  storyboard:
+    production-v2:
+      enabled: ${STORYBOARD_PRODUCTION_V2_ENABLED:true}
+      model-mode: ${STORYBOARD_PRODUCTION_V2_MODEL_MODE:live}
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}

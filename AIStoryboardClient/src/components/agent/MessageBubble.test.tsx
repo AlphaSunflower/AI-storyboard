@@ -96,4 +96,186 @@ describe('MessageBubble project library import', () => {
       }),
     );
   });
+
+  it('renders exact token and duration metrics for completed assistant messages', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="回复完成"
+        metadata={{
+          kind: 'assistant-reply',
+          metrics: {
+            inputTokens: 1000,
+            outputTokens: 234,
+            cachedInputTokens: 120,
+            totalTokens: 1234,
+            durationMs: 8420,
+            modelCalls: 2,
+            complete: true,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('1,234 tokens')).toBeTruthy();
+    expect(screen.getByText('8.4s').parentElement?.getAttribute('title')).toContain(
+      '输入 1,000 · 输出 234 · 缓存 120',
+    );
+  });
+
+  it('marks partial usage as a lower bound', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="部分指标"
+        metadata={{
+          kind: 'assistant-reply',
+          metrics: {
+            inputTokens: 90,
+            outputTokens: 10,
+            cachedInputTokens: 0,
+            totalTokens: 100,
+            durationMs: 600,
+            modelCalls: 2,
+            complete: false,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('≥ 100 tokens').parentElement?.getAttribute('title'))
+      .toContain('部分模型未返回用量');
+  });
+
+  it('renders duration without token text when usage is unavailable', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="仅耗时"
+        metadata={{
+          kind: 'assistant-reply',
+          metrics: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cachedInputTokens: 0,
+            totalTokens: 0,
+            durationMs: 350,
+            modelCalls: 0,
+            complete: false,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByText(/tokens/)).toBeNull();
+    expect(screen.getByText('350ms')).toBeTruthy();
+  });
+
+  it('renders markdown tables with dedicated chat styling', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content={'| 项目 | 设计 |\n| --- | --- |\n| 风格 | 现代轻奢 |'}
+      />,
+    );
+
+    const table = screen.getByRole('table');
+    expect(table.closest('.chat-markdown-table-wrap')).toBeTruthy();
+  });
+
+  it('repairs strong markers adjacent to Chinese text', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="如果你对**风格（如改成新中式）、场景（海边 or 山谷）**有不同想法"
+      />,
+    );
+
+    expect(screen.getByText('风格（如改成新中式）、场景（海边 or 山谷）').tagName).toBe('STRONG');
+  });
+
+  it('collapses four or more generated images into one batch receipt', () => {
+    const openGenerationCenter = vi.fn();
+    const images = Array.from(
+      { length: 6 },
+      (_, index) => `![分镜 ${index + 1}](/api/files/images/scene-${index + 1}.png)`,
+    ).join('\n');
+    const { container } = render(
+      <MessageBubble
+        role="assistant"
+        content={`已补齐缺图分镜。\n已生成 6 张图片\n${images}\n//# (async-task:batch-1:end)`}
+        onOpenGenerationCenter={openGenerationCenter}
+      />,
+    );
+
+    expect(screen.getByText('本批图片已生成')).toBeTruthy();
+    expect(screen.getByText('共 6 张，集中到生成中心查看')).toBeTruthy();
+    expect(screen.queryByText('已生成 6 张图片')).toBeNull();
+    expect(screen.queryByText(/async-task/)).toBeNull();
+    expect(container.querySelectorAll('.chat-image-batch__cover img')).toHaveLength(4);
+    expect(container.querySelector('.chat-image-batch__more')?.textContent).toBe('+2');
+
+    fireEvent.click(screen.getByRole('button', { name: '查看全部 6 张生成图片' }));
+    expect(openGenerationCenter).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps small image groups inline', () => {
+    const images = Array.from(
+      { length: 3 },
+      (_, index) => `![分镜 ${index + 1}](/api/files/images/scene-${index + 1}.png)`,
+    ).join('\n');
+    render(<MessageBubble role="assistant" content={images} />);
+
+    expect(screen.queryByText('本批图片已生成')).toBeNull();
+    expect(screen.getAllByRole('img')).toHaveLength(3);
+  });
+
+  it('keeps legacy messages without metrics unchanged', () => {
+    render(<MessageBubble role="assistant" content="旧消息" />);
+
+    expect(screen.queryByText(/tokens/)).toBeNull();
+    expect(screen.queryByText(/\d+(?:\.\d+)?(?:ms|s)/)).toBeNull();
+  });
+
+  it('shows edit next to copy for an editable user message', () => {
+    const onEdit = vi.fn();
+    render(
+      <MessageBubble
+        role="user"
+        content="需要修改的问题"
+        editable
+        onEdit={onEdit}
+      />,
+    );
+
+    const copy = screen.getByTitle('复制内容');
+    const edit = screen.getByTitle('编辑消息');
+    expect(copy.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(edit);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('edits the user message in place and submits the revised text', async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MessageBubble
+        messageId="message-1"
+        role="user"
+        content="原始内容"
+        editable
+        onEditMessage={submit}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('编辑消息'));
+    const editor = screen.getByLabelText('编辑消息内容');
+    fireEvent.change(editor, { target: { value: '修改后的内容' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalledWith('message-1', '修改后的内容');
+    });
+    expect(screen.queryByLabelText('编辑消息内容')).toBeNull();
+  });
 });

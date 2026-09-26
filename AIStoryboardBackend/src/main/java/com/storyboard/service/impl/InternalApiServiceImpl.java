@@ -26,9 +26,12 @@ import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.service.InternalApiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 内部 API 业务实现 — 承接 /api/internal/** 全部数据访问（原 InternalApiController 直操 Mapper 逻辑下沉）。
@@ -108,9 +111,59 @@ public class InternalApiServiceImpl implements InternalApiService {
     }
 
     @Override
+    @Transactional
+    public List<String> replaceProjectScenes(String projectId, List<SceneFull> scenes) {
+        deleteProjectScenes(projectId);
+        if (scenes == null || scenes.isEmpty()) return List.of();
+        List<SceneFull> normalized = normalizeScenes(projectId, scenes, 1);
+        List<String> sceneIds = normalized.stream().map(SceneFull::id).toList();
+        batchInsertScenes(normalized);
+        return sceneIds;
+    }
+
+    @Override
+    @Transactional
+    public List<String> appendProjectScenes(String projectId, List<SceneFull> scenes) {
+        if (projectMapper.lockById(projectId) == null) {
+            throw new BusinessException(40401, "项目不存在");
+        }
+        if (scenes == null || scenes.isEmpty()) return List.of();
+        int maxSceneNumber = sceneMapper.selectList(new LambdaQueryWrapper<Scene>()
+                        .eq(Scene::getProjectId, projectId)
+                        .orderByDesc(Scene::getSceneNumber)
+                        .last("LIMIT 1"))
+                .stream()
+                .map(Scene::getSceneNumber)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(0);
+        List<SceneFull> normalized = normalizeScenes(projectId, scenes, maxSceneNumber + 1);
+        List<String> sceneIds = normalized.stream().map(SceneFull::id).toList();
+        batchInsertScenes(normalized);
+        return sceneIds;
+    }
+
+    @Override
     public void deleteProjectScenes(String projectId) {
         // scene_prompts.scene_id FK ON DELETE CASCADE，删 scenes 即级联删明细
         sceneMapper.delete(new LambdaQueryWrapper<Scene>().eq(Scene::getProjectId, projectId));
+    }
+
+    @Override
+    @Transactional
+    public void deleteScene(String sceneId) {
+        Scene scene = sceneMapper.selectById(sceneId);
+        if (scene == null) throw new BusinessException(40401, "场景不存在");
+        sceneMapper.deleteById(sceneId);
+        List<Scene> remaining = sceneMapper.selectList(new LambdaQueryWrapper<Scene>()
+                .eq(Scene::getProjectId, scene.getProjectId())
+                .orderByAsc(Scene::getSceneNumber));
+        for (int index = 0; index < remaining.size(); index++) {
+            Scene item = remaining.get(index);
+            if (item.getSceneNumber() != null && item.getSceneNumber() == index + 1) continue;
+            item.setSceneNumber(index + 1);
+            sceneMapper.updateById(item);
+        }
     }
 
     @Override
@@ -249,6 +302,28 @@ public class InternalApiServiceImpl implements InternalApiService {
 
     private void putParam(LambdaUpdateWrapper<ScenePrompt> uw, SFunction<ScenePrompt, ?> col, String v) {
         if (v != null && !v.isBlank()) uw.set(col, v.trim());
+    }
+
+    private static List<SceneFull> normalizeScenes(
+            String projectId, List<SceneFull> scenes, int startSceneNumber) {
+        List<SceneFull> normalized = new ArrayList<>(scenes.size());
+        for (int index = 0; index < scenes.size(); index++) {
+            SceneFull source = scenes.get(index);
+            String id = source.id() == null || source.id().isBlank()
+                    ? UUID.randomUUID().toString() : source.id();
+            normalized.add(new SceneFull(
+                    id, projectId, source.conversationId(), startSceneNumber + index,
+                    source.scriptContent(), source.imagePrompt(), source.videoPrompt(),
+                    source.negativePrompt(), source.cameraMovement(), source.shotType(),
+                    source.soundDesign(), source.aiModel(), source.videoResolution(),
+                    source.duration(), source.imageUrl(), source.videoUrl(),
+                    source.imageStatus(), source.videoStatus(), source.imageTaskId(),
+                    source.videoTaskId(), source.imageUrls(), source.imageModel(),
+                    source.imageSize(), source.imageQuality(), source.imageN(),
+                    source.videoModel(), source.videoAspectRatio(),
+                    source.createdAt(), source.updatedAt()));
+        }
+        return List.copyOf(normalized);
     }
 
     @Override

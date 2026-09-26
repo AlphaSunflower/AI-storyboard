@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
@@ -142,10 +143,16 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
         String newId = null;
         String taskId = null;
         if ("video".equals(failed.getType())) {
+            String duration = strVal(params.get("duration"));
+            if (failed.getSceneId() == null || failed.getSceneId().isBlank()) {
+                VideoGenerationPolicy.requireDirectAllowed(duration, failed.getPrompt());
+            } else {
+                VideoGenerationPolicy.requireStoryboardShotAllowed(duration);
+            }
             taskId = generationService.createVideoTask(
                     conv, failed.getSceneId(), failed.getPrompt(), failed.getModel(),
                     strVal(params.get("resolution")), strVal(params.get("size")),
-                    strVal(params.get("aspectRatio")), strVal(params.get("duration")),
+                    strVal(params.get("aspectRatio")), duration,
                     strVal(params.get("negativePrompt")), refImages, sourceUrl);
             if (taskId != null && !taskId.isBlank()) {
                 AgentAsset newRecord = assetMapper.selectOne(

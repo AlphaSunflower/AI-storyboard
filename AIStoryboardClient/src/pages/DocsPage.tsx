@@ -1149,7 +1149,7 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">界面总览</div>
             <h2 className="docs-section__title">一个三栏工作台</h2>
             <p className="docs-section__lead">
-              整个编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，右下角还有两个悬浮球：<Zap size={12} strokeWidth={1.8}  /> 任务中心与 <Moon size={12} strokeWidth={1.8}  /> Moon 智能体。
+              整个编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，右下角保留 <Zap size={12} strokeWidth={1.8}  /> 生成中心；Moon 智能体集中在 /chat 独立对话页。
             </p>
           </div>
           <div className="docs-split">
@@ -1158,7 +1158,7 @@ export function DocsPage() {
                 { name: '左侧 · 剧本输入', desc: '创作类型、剧本 / 描述、参考图上传、生图 / 生视频 / 理解模型，以及历史项目。' },
                 { name: '中间 · 分镜列表', desc: 'AI 拆解出的分镜镜头，点击切换，可增删镜头。' },
                 { name: '右侧 · 预览', desc: '查看剧本、填写提示词、调整参数、生成图片与视频。' },
-                { name: '右下角 · 两个悬浮球', desc: <><Zap size={12} strokeWidth={1.8}  /> 任务中心聚合进行中的生成任务；<Moon size={12} strokeWidth={1.8}  /> 打开 Moon 智能体抽屉。</> },
+                { name: '右下角 · 生成中心', desc: <><Zap size={12} strokeWidth={1.8}  /> 聚合进行中的生成任务；Moon 智能体请前往 /chat。</> },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1232,10 +1232,9 @@ export function DocsPage() {
                   </div>
                 </div>
 
-                {/* 右下角悬浮球 */}
+                {/* 右下角生成中心 */}
                 <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}><Zap size={12} strokeWidth={1.8} /></span>
-                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(204,120,92,0.45)' }}><Moon size={12} strokeWidth={1.8} /></span>
                 </div>
               </div>
             </MockWindow>
@@ -1604,7 +1603,7 @@ export function DocsPage() {
             <p className="docs-section__lead">
               Moon 采用「计划模式」：先理解你的需求 → 给出方案并预选参数 → 弹确认卡片由你拍板 → 确认后才执行，不确认不执行。
               分镜、图片、视频都能生成，图生图 / 文生图 / 图生视频 / 文生视频、清空分镜、人工介入、继续完善，全在这里。
-              在 /editor 右下角可随时召唤 Moon；也可进入 /chat 独立对话页：支持全文+标题搜索（侧栏放大镜）、Markdown 渲染、
+              进入 /chat 独立对话页即可使用 Moon：支持全文+标题搜索（侧栏放大镜）、Markdown 渲染、
               输入框聚焦光晕、以及右上角「应用」悬浮窗（画布 / 分镜编辑器 / 使用文档）。
             </p>
           </div>

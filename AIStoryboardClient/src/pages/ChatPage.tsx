@@ -3,18 +3,28 @@ import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
+import { AgentTaskCompletionNotices } from '../components/agent/AgentTaskCompletionNotices';
+import { AgentTaskDrawer } from '../components/agent/AgentTaskDrawer';
 
 
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
-import { isSceneReview } from '../components/agent/SceneReviewCard';
-import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
+import { GenerationCenterPanel, type GenerationCenterTab } from '../components/agent/GenerationCenterPanel';
 import { ChatAppActions } from '../components/agent/apps/ChatAppActions';
 import { ChatAppsHost } from '../components/agent/apps/ChatAppsHost';
+import { ChatAppsProvider } from '../components/agent/apps/ChatAppsContext';
 import { useChatApps } from '../components/agent/apps/useChatApps';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
+import { ChatDockShell, type ChatDockPresentation } from '../components/agent/ChatDockShell';
+import {
+  resolveChatDockMode,
+  resolveChatSidebarCollapseWidth,
+  resolveChatSplitMaxWidth,
+  shouldRestoreAutoCollapsedSidebar,
+  type ChatDockMode,
+} from '../components/agent/chatDockLayout';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
@@ -71,14 +81,22 @@ export function ChatPage() {
   const {
     messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     confirmResult, conversations, activeConversationId,
-    renameConversation,
+    renameConversation, editAndResend,
   } = useAgentStore();
+  const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
+  const conversationReadOnly = activeConversation?.status === 'archived'
+    || (activeConversation?.orchestrationMode != null
+      && activeConversation.orchestrationMode !== 'UNIFIED_LOOP');
+  const canEditLastTurn = !conversationReadOnly && !streaming && !waitingHumanInput && !waitingVideoPlan
+    && !canvasBinding && !canvasExitPending;
   const chatApps = useChatApps(currentProject);
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
+  const [generationCenterTab, setGenerationCenterTab] = useState<GenerationCenterTab>('active');
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -86,22 +104,40 @@ export function ChatPage() {
   const [convWidth, setConvWidth] = useState(240);
   const [convResizing, setConvResizing] = useState(false);
   const [collapsed, setCollapsed] = useState(false); // 侧栏收起：仅显示图标 rail
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [dockMode, setDockMode] = useState<ChatDockMode>('split');
+  const [dockPresentation, setDockPresentation] = useState<ChatDockPresentation>('pill');
+  const [dockRequested, setDockRequested] = useState(false);
+  const autoCollapsedSidebarRef = useRef(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
   const [embed, setEmbed] = useState(false);             // iframe 紧凑模式（画布执行服务小窗）
   const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const mobileScrollRef = useRef<HTMLDivElement>(null);
+  const desktopScrollRef = useRef<HTMLDivElement>(null);
+  /** 手机/桌面两套布局同时挂载（display 切换），滚动容器必须按当前可见分支取——
+   *  共用一个 ref 只指向最后挂载的桌面容器，手机端自动滚底/回到最新会全部失效 */
+  const activeScrollEl = () => (isMobile && !embed ? mobileScrollRef : desktopScrollRef).current;
   const chatMainRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadedRef = useRef(false);
-  const [sceneReviewPanelWidth, setSceneReviewPanelWidth] = useState(0);
-  const [sceneReviewCollapsed, setSceneReviewCollapsed] = useState(false);
   const railProjectBtnRef = useRef<HTMLButtonElement>(null);
   const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
   const requestedCanvasContextRef = useRef(parseCanvasEditContext(window.location.search));
 
+  useEffect(() => {
+    useAgentStore.getState().startTaskStream();
+    return () => useAgentStore.getState().stopTaskStream();
+  }, []);
+
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', updateViewportWidth);
+    return () => window.removeEventListener('resize', updateViewportWidth);
+  }, []);
+
   // 回到最新消息（对话上翻较多时，消息中间出现向下按钮）
   const scrollToBottom = () => {
-    const el = scrollRef.current;
+    const el = activeScrollEl();
     setShowScrollDown(false);
     nearBottomRef.current = true;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
@@ -279,21 +315,11 @@ export function ChatPage() {
 
   // 新消息自动滚底（近底才跟随）
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = activeScrollEl();
     if (el && nearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
-
-  // 自动审查属于关键节点：即使上翻了历史消息，也把新展开的审查卡带入视口。
-  useEffect(() => {
-    if (!waitingHumanInput || !isSceneReview(waitingHumanInput)) return;
-    const id = window.requestAnimationFrame(() => {
-      const el = scrollRef.current;
-      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [waitingHumanInput]);
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
   const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
@@ -322,38 +348,90 @@ export function ChatPage() {
 
   // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
   const showMobile = isMobile && !embed;
-  const sceneReviewOpen = Boolean(waitingHumanInput && isSceneReview(waitingHumanInput));
-  const sceneReviewDetached = sceneReviewOpen && !sceneReviewCollapsed && !showMobile && !embed && !chatApps.hasTabs;
+  const referenceSidebarWidth = collapsed ? 48 : convWidth;
+  const nextDockMode = resolveChatDockMode({
+    previousMode: dockMode,
+    appOpen: chatApps.hasTabs,
+    mobile: showMobile,
+    fullscreen: chatApps.layout.fullscreen,
+    viewportWidth,
+    appWidth: chatApps.layout.width,
+    sidebarWidth: referenceSidebarWidth,
+    requestedDock: dockRequested,
+  });
+  const splitMaxWidth = resolveChatSplitMaxWidth({
+    viewportWidth,
+    sidebarWidth: collapsed ? 48 : convWidth,
+  });
+  const expandedSplitMaxWidth = resolveChatSplitMaxWidth({
+    viewportWidth,
+    sidebarWidth: 48,
+  });
+  const sidebarCollapseWidth = resolveChatSidebarCollapseWidth({
+    viewportWidth,
+    sidebarWidth: convWidth,
+  });
+  const restoreAutoCollapsedSidebar = shouldRestoreAutoCollapsedSidebar({
+    autoCollapsed: autoCollapsedSidebarRef.current,
+    appOpen: chatApps.hasTabs && !showMobile,
+    docked: dockMode === 'docked',
+    appWidth: chatApps.layout.width,
+    collapseAtWidth: sidebarCollapseWidth,
+  });
 
-  useEffect(() => {
-    setSceneReviewCollapsed(false);
-  }, [waitingHumanInput?.formToken]);
+  const handleAutoCollapseSidebar = useCallback(() => {
+    if (collapsed) return;
+    autoCollapsedSidebarRef.current = true;
+    setCollapsed(true);
+  }, [collapsed]);
 
-  // 无子窗口时审查结果像应用子窗一样从右侧弹入；子窗口出现后回到对话流。
+  const handleManualExpandSidebar = useCallback(() => {
+    autoCollapsedSidebarRef.current = false;
+    setCollapsed(false);
+  }, []);
+
+  const handleManualCollapseSidebar = useCallback(() => {
+    autoCollapsedSidebarRef.current = false;
+    setCollapsed(true);
+  }, []);
+
+  const openGenerationCenter = useCallback((tab: GenerationCenterTab = 'active') => {
+    setGenerationCenterTab(tab);
+    setGenerationCenterOpen(true);
+  }, []);
+
   useLayoutEffect(() => {
-    const main = chatMainRef.current;
-    if (!sceneReviewDetached || !main) {
-      setSceneReviewPanelWidth(0);
-      return;
+    if (!chatApps.hasTabs || showMobile || collapsed) return;
+    if (chatApps.layout.width >= sidebarCollapseWidth) {
+      autoCollapsedSidebarRef.current = true;
+      setCollapsed(true);
+    }
+  }, [chatApps.hasTabs, chatApps.layout.width, collapsed, showMobile, sidebarCollapseWidth]);
+
+  useLayoutEffect(() => {
+    if (!restoreAutoCollapsedSidebar) return;
+    autoCollapsedSidebarRef.current = false;
+    setCollapsed(false);
+  }, [restoreAutoCollapsedSidebar]);
+
+  useLayoutEffect(() => {
+    if (nextDockMode === dockMode) return;
+
+    if (nextDockMode === 'docked') {
+      setDockPresentation('pill');
+    } else {
+      setDockRequested(false);
+      setDockPresentation('pill');
     }
 
-    const updatePanelWidth = () => {
-      const mainRect = main.getBoundingClientRect();
-      if (mainRect.width <= 0) return;
-      setSceneReviewPanelWidth(Math.min(680, Math.max(460, Math.round(mainRect.width * 0.42))));
-    };
+    setDockMode(nextDockMode);
+  }, [dockMode, nextDockMode]);
 
-    updatePanelWidth();
-    const observer = new ResizeObserver(updatePanelWidth);
-    observer.observe(main);
-    window.addEventListener('resize', updatePanelWidth);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updatePanelWidth);
-    };
-  }, [collapsed, convWidth, sceneReviewDetached]);
+  const handleRequestDock = useCallback(() => {
+    setDockRequested(true);
+  }, []);
 
-  const desktopRightReserve = sceneReviewDetached ? sceneReviewPanelWidth + 48 : contentRightReserve;
+  const desktopRightReserve = dockMode === 'docked' ? 0 : contentRightReserve;
 
   // 手机端：选择会话后自动关闭侧栏
   const handleMobileSelectConversation = (id: string) => {
@@ -398,6 +476,7 @@ export function ChatPage() {
   }, []);
 
   return (
+    <ChatAppsProvider open={chatApps.open}>
     <>
     {/* 页面氛围光晕（fixed 覆盖手机/桌面两分支，pointer-events none） */}
     {!canvasTechActive && <AmbientGlow />}
@@ -405,7 +484,7 @@ export function ChatPage() {
       <div
       className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
       data-canvas-mode={canvasTechActive ? 'true' : undefined}
-      style={{ height: '100vh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
+      style={{ height: '100dvh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
     >
         <CanvasTechAtmosphere active={canvasTechActive} />
         {/* 顶部导航栏 */}
@@ -483,7 +562,7 @@ export function ChatPage() {
           <>
             {/* 消息列 */}
             <div
-              ref={scrollRef}
+              ref={mobileScrollRef}
               onScroll={handleThreadScroll}
               onWheel={handleThreadWheel}
               className="chat-thread-scroll"
@@ -497,15 +576,20 @@ export function ChatPage() {
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
+                      messageId={m.id}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}
                       variant="deepseek"
                       createdAt={m.createdAt}
+                      editable={canEditLastTurn && m.id === lastUserMessageId}
+                      onEditMessage={(messageId, nextContent) => editAndResend(nextContent, messageId)}
                       streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+                      onOpenGenerationCenter={() => openGenerationCenter('image')}
                     />
                   </div>
                 ))}
+                <AgentTaskCompletionNotices conversationId={activeConversationId} />
                 {streaming && !waitingHumanInput && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -554,7 +638,7 @@ export function ChatPage() {
     <div
       className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
       data-canvas-mode={canvasTechActive ? 'true' : undefined}
-      style={{ height: '100vh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
+      style={{ height: '100dvh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
     >
       <CanvasTechAtmosphere active={canvasTechActive} />
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
@@ -571,7 +655,7 @@ export function ChatPage() {
             >
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                 <button
-                  onClick={() => setCollapsed(false)}
+                  onClick={handleManualExpandSidebar}
                   title="展开侧边栏"
                   style={railIconBtn}
                   className="chat-icon-button"
@@ -648,7 +732,7 @@ export function ChatPage() {
                         </span>
                       </button>
                       <button
-                        onClick={() => setCollapsed(true)}
+                        onClick={handleManualCollapseSidebar}
                         title="收起侧边栏"
                         aria-expanded={!collapsed}
                         className="chat-icon-button"
@@ -799,11 +883,23 @@ export function ChatPage() {
           position: 'relative',
         }}
       >
+        <ChatDockShell
+          active={dockMode === 'docked'}
+          presentation={dockPresentation}
+          title={currentTitle}
+          streaming={streaming}
+          onOpen={() => setDockPresentation('open')}
+          onCollapse={() => setDockPresentation('pill')}
+          onHide={() => setDockPresentation('hidden')}
+          onRestore={() => setDockPresentation('pill')}
+          onShowHistory={() => setDockPresentation('history')}
+          onCollapseHistory={() => setDockPresentation('open')}
+        >
         {isEmpty ? (
           /* 首次对话 hero：名称居中 + 输入卡居中（DeepSeek harness 空态） */
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 28,
+            alignItems: 'center', justifyContent: dockMode === 'docked' ? 'flex-end' : 'center', gap: 28,
             paddingLeft: 16,
             paddingRight: !embed ? desktopRightReserve + 16 : 16,
             transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -820,17 +916,22 @@ export function ChatPage() {
                 <CanvasModeExitButton />
               </div>
             )}
-            <LiveOrb
-              variant="webgl"
-              colors={["#1D4E89", "#81C3D7", "#D9E8F5"]}
-              size={120}
-            />
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} /></div>
-              <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
-            </div>
+            {dockMode !== 'docked' && (
+              <>
+                <LiveOrb
+                  variant="webgl"
+                  colors={["#1D4E89", "#81C3D7", "#D9E8F5"]}
+                  size={120}
+                />
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} /></div>
+                  <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
+                </div>
+              </>
+            )}
             <ChatComposer />
             {/* 快捷提示 chips */}
+            {dockMode !== 'docked' && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: DS.maxContent, padding: '0 16px' }}>
               {['帮我设计一个科幻分镜', '生成一张概念海报', '优化现有分镜脚本', '制作短视频方案'].map((t) => (
                 <button
@@ -848,13 +949,14 @@ export function ChatPage() {
                 >{t}</button>
               ))}
             </div>
+            )}
           </div>
         ) : (
           <>
             {/* 头部：会话名称 + 操作（embed 小窗内收紧字号与留白） */}
             <div style={{
               padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+              display: dockMode === 'docked' ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
               paddingRight: !embed ? desktopRightReserve + 16 : 12,
               transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
@@ -903,7 +1005,7 @@ export function ChatPage() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {embed && canvasEditContext && <CanvasModeExitButton />}
-                {!embed && (
+                {!embed && dockMode !== 'docked' && (
                   <ChatAppActions
                     onOpen={chatApps.open}
                     canvasPhase={canvasPhase}
@@ -916,13 +1018,14 @@ export function ChatPage() {
 
             {/* 消息列：748px 居中 */}
             <div
-              ref={scrollRef}
+              ref={desktopScrollRef}
               onScroll={handleThreadScroll}
               onWheel={handleThreadWheel}
               className="chat-thread-scroll"
               style={{
                 flex: 1,
                 minHeight: 0,
+                display: dockMode === 'docked' && dockPresentation === 'open' ? 'none' : 'block',
                 overflowY: 'auto',
                 overflowX: 'hidden',
                 background: 'white',
@@ -938,15 +1041,20 @@ export function ChatPage() {
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
+                      messageId={m.id}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}
                       variant="deepseek"
                       createdAt={m.createdAt}
+                      editable={canEditLastTurn && m.id === lastUserMessageId}
+                      onEditMessage={(messageId, nextContent) => editAndResend(nextContent, messageId)}
                       streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+                      onOpenGenerationCenter={() => openGenerationCenter('image')}
                     />
                   </div>
                 ))}
+                <AgentTaskCompletionNotices conversationId={activeConversationId} />
                 {streaming && !waitingHumanInput && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -965,19 +1073,7 @@ export function ChatPage() {
                   </div>
                 )}
                 
-                {waitingHumanInput && !sceneReviewDetached && (
-                  sceneReviewOpen ? (
-                    <div className="chat-scene-review-inline">
-                      <HitlPromptCard
-                        info={waitingHumanInput}
-                        sceneReviewCollapsed={sceneReviewCollapsed}
-                        onSceneReviewCollapsedChange={setSceneReviewCollapsed}
-                      />
-                    </div>
-                  ) : (
-                    <HitlPromptCard info={waitingHumanInput} />
-                  )
-                )}
+                {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
                 {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
@@ -1010,7 +1106,7 @@ export function ChatPage() {
             </div>
           </>
         )}
-        {scrollDownPresence.mounted && !isEmpty && (
+        {scrollDownPresence.mounted && !isEmpty && !(dockMode === 'docked' && dockPresentation === 'open') && (
           <button
             onClick={scrollToBottom}
             title="跳到最后一个消息"
@@ -1031,36 +1127,31 @@ export function ChatPage() {
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
           ><ArrowDown size={16} strokeWidth={2} /></button>
         )}
-        {sceneReviewDetached && waitingHumanInput && (
-          <div
-            className="chat-scene-review-panel"
-            style={{ width: sceneReviewPanelWidth || 420 }}
-          >
-            <HitlPromptCard
-              info={waitingHumanInput}
-              fillHeight
-              sceneReviewCollapsed={sceneReviewCollapsed}
-              onSceneReviewCollapsedChange={setSceneReviewCollapsed}
-            />
-          </div>
-        )}
+        </ChatDockShell>
       </div>
 
       <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       {!embed && !chatApps.layout.fullscreen && (
         <GenerationCenterPanel
+          open={generationCenterOpen}
+          defaultTab={generationCenterTab}
           onOpenChange={setGenerationCenterOpen}
-          bottom={appWindowOpen || sceneReviewDetached ? 20 : 104}
+          bottom={appWindowOpen ? 20 : 104}
           onOpenRecords={() => setRecordsOpen(true)}
+          taskConversationId={activeConversationId}
         />
       )}
       {!embed && (
         <ChatAppsHost
           apps={chatApps}
           currentProjectId={currentProject?.id}
+          docked={dockMode === 'docked'}
+          splitMaxWidth={splitMaxWidth}
+          expandedSplitMaxWidth={expandedSplitMaxWidth}
           sidebarCollapsed={collapsed}
-          onCollapseSidebar={() => setCollapsed(true)}
-          expandedWidthBonus={convWidth + 6}
+          sidebarCollapseWidth={sidebarCollapseWidth}
+          onCollapseSidebar={handleAutoCollapseSidebar}
+          onRequestDock={handleRequestDock}
           onCanvasModeStatus={handleCanvasModeStatus}
           onCanvasModeReady={handleCanvasModeReady}
           canvasInteractionLocked={canvasPhase === 'exit_pending' || streaming}
@@ -1068,12 +1159,14 @@ export function ChatPage() {
       )}
     </div>
     <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
+    <AgentTaskDrawer />
     <ConversationSearchModal
       open={searchOpen}
       onClose={() => setSearchOpen(false)}
       onSelectConversation={(id) => { void useAgentStore.getState().selectConversation(id); }}
     />
     </>
+    </ChatAppsProvider>
   );
 }
 

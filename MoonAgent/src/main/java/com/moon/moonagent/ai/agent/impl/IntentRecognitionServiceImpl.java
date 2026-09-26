@@ -2,10 +2,12 @@ package com.moon.moonagent.ai.agent.impl;
 
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.IntentResult;
+import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.entity.AgentMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -126,6 +128,9 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     public String ruleMatch(String text) {
         if (text == null || text.isBlank()) return null;
         String q = text.trim();
+        if (VideoGenerationPolicy.requiresStoryboard(null, q)) {
+            return "intent-storyboard";
+        }
         for (Map.Entry<String, Pattern> rule : ruleTable) {
             if (rule.getValue().matcher(q).find()) {
                 return rule.getKey();
@@ -139,9 +144,19 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
      * 解析顺序：JSON {type, confidence} → 兼容裸标识符（无置信度按 0.5）→ 白名单校验 → 兜底。
      */
     public IntentResult recognize(String query, List<AgentMessage> recentMessages) {
+        return recognize(query, recentMessages, null);
+    }
+
+    @Override
+    public IntentResult recognize(String query, List<AgentMessage> recentMessages,
+                                  com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace) {
         // 0) 规则前置：强关键词命中直接路由（免一次 LLM 调用，置信度 1.0）
         if (query != null && !query.isBlank()) {
             String q = query.trim();
+            if (VideoGenerationPolicy.requiresStoryboard(null, q)) {
+                log.info("长视频请求强制进入分镜流程: query={}", q);
+                return IntentResult.rule("intent-storyboard");
+            }
             for (Map.Entry<String, Pattern> rule : ruleTable) {
                 if (rule.getValue().matcher(q).find()) {
                     log.info("意图识别规则命中: type={} query={}", rule.getKey(), q);
@@ -154,11 +169,18 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
             String truncated = query != null && query.length() > 500
                     ? query.substring(0, 500) : query;
             // 瞬态失败重试 1 次（LLM 调用幂等；识别失败本就兜底，多一次重试降低误判概率）
-            String raw = retryTransient(() -> chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
-                    .system(buildPrompt(recentMessages))
-                    .user(truncated)
-                    .call()
-                    .content());
+            ChatResponse response = retryTransient(() -> {
+                if (trace != null) trace.beginModelCall();
+                return chatClient().prompt().options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
+                        .system(buildPrompt(recentMessages))
+                        .user(truncated)
+                        .call()
+                        .chatResponse();
+            });
+            if (trace != null) trace.recordUsage(response);
+            String raw = response != null && response.getResult() != null
+                    && response.getResult().getOutput() != null
+                    ? response.getResult().getOutput().getText() : null;
             if (raw != null && !raw.isBlank()) {
                 // 1) JSON {type, confidence}
                 java.util.regex.Matcher m = INTENT_JSON.matcher(raw);

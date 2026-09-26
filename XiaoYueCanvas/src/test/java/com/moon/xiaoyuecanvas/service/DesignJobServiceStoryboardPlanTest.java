@@ -2,6 +2,13 @@ package com.moon.xiaoyuecanvas.service;
 
 import com.moon.moonagent.ai.storyboard.StoryboardPlanningService;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryBible;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardRunSnapshot;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.xiaoyuecanvas.entity.CanvasJob;
@@ -103,6 +110,73 @@ class DesignJobServiceStoryboardPlanTest {
 
         assertTrue(service.capabilities().stream()
                 .anyMatch(capability -> "storyboard.plan".equals(capability.id())));
+        assertTrue(service.capabilities().stream()
+                .anyMatch(capability -> "storyboard.outline".equals(capability.id())));
+        assertTrue(service.capabilities().stream()
+                .anyMatch(capability -> "storyboard.finalize".equals(capability.id())));
+    }
+
+    @Test
+    void stagedOutlinePublishesReviewWithoutCreatingFinalShots() {
+        CanvasJobRepository repository = mock(CanvasJobRepository.class);
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        StoryboardRunSnapshot snapshot = new StoryboardRunSnapshot(
+                "run-1", Stage.PLOT_REVIEW, 1, "script text", "optimized script",
+                "expanded script",
+                new PlotAssessment(false, List.of("结局"), List.of(), "missing ending", "补充结局"),
+                StoryBible.empty(), List.of(), List.of(),
+                List.of(new PseudoShot("shot-1", "segment-1", 1, "发现", List.of(),
+                        "医院", "夜", "冲突", "行动", "紧张", List.of(), List.of(), List.of())),
+                List.of(), "");
+        when(production.start(any())).thenReturn(snapshot);
+
+        DesignJobService service = new DesignJobService(
+                null, repository, mock(AgentAssetMapper.class), null, null, null,
+                null, mock(StoryboardPlanningService.class), production, null, null, null,
+                mock(GenerationRecordWriter.class));
+        CanvasJob job = job();
+        job.setCapabilityId("storyboard.outline");
+
+        service.handleStoryboardOutline(job);
+
+        verify(repository).appendEvent(eq("job-1"), eq("storyboard.outline.ready"), anyMap());
+        verify(repository).appendEvent(eq("job-1"), eq("storyboard.preview"), anyMap());
+        verify(repository, never()).appendEvent(eq("job-1"), eq("storyboard.created"), anyMap());
+    }
+
+    @Test
+    void finalizePublishesCreatedOnlyAfterPseudoApproval() {
+        CanvasJobRepository repository = mock(CanvasJobRepository.class);
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        StoryboardRunSnapshot snapshot = new StoryboardRunSnapshot(
+                "run-1", Stage.COMPLETED, 3, "script text", "optimized script",
+                "",
+                new PlotAssessment(true, List.of(), List.of(), "", ""),
+                StoryBible.empty(), List.of(), List.of(), List.of(), List.of(shot()), "");
+        StoryboardRunSnapshot current = new StoryboardRunSnapshot(
+                "run-1", Stage.PSEUDO_REVIEW, 2, "script text", "optimized script",
+                "", new PlotAssessment(true, List.of(), List.of(), "", ""),
+                StoryBible.empty(), List.of(), List.of(),
+                List.of(new PseudoShot("shot-1", "segment-1", 1, "目的", List.of(),
+                        "地点", "时间", "冲突", "行动", "情绪", List.of(), List.of(), List.of())),
+                List.of(), "");
+        when(production.getOwned("run-1", "user-1", "project-1")).thenReturn(current);
+        when(production.approve(eq("run-1"), any(Approval.class))).thenReturn(snapshot);
+
+        DesignJobService service = new DesignJobService(
+                null, repository, mock(AgentAssetMapper.class), null, null, null,
+                null, mock(StoryboardPlanningService.class), production, null, null, null,
+                mock(GenerationRecordWriter.class));
+        CanvasJob job = job();
+        job.setCapabilityId("storyboard.finalize");
+        job.setParams(JsonUtil.toJson(Map.of("prompt", "script text", "runId", "run-1")));
+
+        service.handleStoryboardFinalize(job);
+
+        ArgumentCaptor<Map<String, Object>> payloadCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(repository).appendEvent(eq("job-1"), eq("storyboard.created"), payloadCaptor.capture());
+        assertEquals("run-1", payloadCaptor.getValue().get("runId"));
+        assertEquals(List.of(shot()), payloadCaptor.getValue().get("shots"));
     }
 
     @Test
@@ -131,7 +205,7 @@ class DesignJobServiceStoryboardPlanTest {
                                             GenerationRecordWriter writer,
                                             StoryboardPlanningService planner) {
         return new DesignJobService(
-                null, repository, assetMapper, null, null, null, null, planner,
+                null, repository, assetMapper, null, null, null, null, planner, mock(StoryboardProductionService.class),
                 null, null, null, writer);
     }
 

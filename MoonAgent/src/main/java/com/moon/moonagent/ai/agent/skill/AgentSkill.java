@@ -27,8 +27,8 @@ import java.util.Map;
  * @param tools     声明式工具清单（AgentTools @Tool 名）
  * @param limits    行为上限（max_clarify_rounds / max_regenerate_rounds 等）
  * @param triggers  路由触发正则/关键词（有序，priority 升序先查——delete 须先于 aisplit 的「分镜」）
- * @param priority  触发优先级（数字越小越先匹配；当前 delete=10/scene-review=20/aisplit=30/video=40/pic=50）
- * @param menuOrder 澄清菜单显示顺序（数字越小越靠前；当前 aisplit=10/pic=20/video=30/scene-review=40/delete=50/other=60）
+ * @param priority  触发优先级（数字越小越先匹配；当前 delete=10/storyboard=20/aisplit=30/video=40/pic=50）
+ * @param menuOrder 澄清菜单显示顺序（数字越小越靠前；当前 aisplit=10/pic=20/video=30/storyboard=40/delete=50/other=60）
  * @param hitlManifest HITL 卡按钮清单（[{id, title}]；LLM 声明卡的 id 必须落在该清单内，保留 resume 路由确定性）
  * @param nodePrompts markdown body 按 {@code ### 步骤id} 分段的知识提示词（由 {@link #systemPrompt()} 消费，
  *                    供无 handler 的 {@code GenericSkillSpecialist} 作为系统提示词；有 handler 的能力仍走 PromptConfig）
@@ -51,7 +51,8 @@ public record AgentSkill(
         List<String> flow,
         EvaluationMode evaluationMode,
         HitlPolicy defaultHitlPolicy,
-        boolean async
+        boolean async,
+        String version
 ) {
 
     public AgentSkill(
@@ -71,12 +72,13 @@ public record AgentSkill(
     ) {
         this(intentType, name, description, label, modelRole, tools, limits, triggers,
                 priority, menuOrder, hitlManifest, nodePrompts, flow,
-                EvaluationMode.HYBRID, HitlPolicy.NONE, false);
+                EvaluationMode.HYBRID, HitlPolicy.NONE, false, "1.0");
     }
 
     public AgentSkill {
         evaluationMode = evaluationMode == null ? EvaluationMode.HYBRID : evaluationMode;
         defaultHitlPolicy = defaultHitlPolicy == null ? HitlPolicy.NONE : defaultHitlPolicy;
+        version = version == null || version.isBlank() ? "1.0" : version.trim();
     }
 
     /** 意图前缀：Skill name 与 intentType 的映射规则（handler.intentType() = "intent-" + name） */
@@ -108,7 +110,8 @@ public record AgentSkill(
                 toStrList(frontmatter.get("flow")),
                 evaluationMode(frontmatter.get("evaluation_mode")),
                 hitlPolicy(frontmatter.get("default_hitl_policy")),
-                boolVal(frontmatter.get("async")));
+                boolVal(frontmatter.get("async")),
+                str(frontmatter.get("version")));
     }
 
     /** 澄清菜单最终 id（与 handler.intentType() 对齐，resume/clarify 共用） */

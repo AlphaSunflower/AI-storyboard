@@ -133,7 +133,19 @@ export class HttpJobAdapter implements JobAdapter {
     const base = `${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/events`;
     const url = token ? `${base}?access_token=${encodeURIComponent(token)}` : base;
     const source = new EventSource(url);
-    const eventTypes: JobEvent['type'][] = ['job.queued', 'job.started', 'job.progress', 'agent.message', 'storyboard.created', 'asset.created', 'job.completed', 'job.failed', 'job.cancelled'];
+    const eventTypes: JobEvent['type'][] = [
+      'job.queued',
+      'job.started',
+      'job.progress',
+      'agent.message',
+      'storyboard.outline.ready',
+      'storyboard.preview',
+      'storyboard.created',
+      'asset.created',
+      'job.completed',
+      'job.failed',
+      'job.cancelled',
+    ];
     const listeners = eventTypes.map((type) => {
       const handler = (event: MessageEvent<string>) => {
         const parsed = normalizeEvent(event.data, jobId, type, event.lastEventId);

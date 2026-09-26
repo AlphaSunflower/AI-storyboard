@@ -1,6 +1,8 @@
 package com.moon.moonagent.ai.agent.skill;
 
 import com.moon.moonagent.ai.agent.AgentTools;
+import com.moon.moonagent.ai.agent.audit.AuditedToolCallback;
+import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -36,6 +38,7 @@ public class SkillExpander {
     private final AgentTools agentTools;
     private final SkillManager skillManager;
     private final ObjectProvider<ToolCallbackProvider> toolCallbackProviders;
+    private final ToolExecutionTemplate toolExecutionTemplate;
 
     /** 工具名 → ToolCallback（启动时由 AgentTools 扫描生成） */
     private volatile Map<String, ToolCallback> toolByName = Map.of();
@@ -56,7 +59,8 @@ public class SkillExpander {
             try {
                 for (ToolCallback callback : provider.getToolCallbacks()) {
                     String name = callback.getToolDefinition().name();
-                    ToolCallback previous = map.putIfAbsent(name, callback);
+                    ToolCallback previous = map.putIfAbsent(
+                            name, new AuditedToolCallback(callback, toolExecutionTemplate));
                     if (previous == null) log.info("[SkillExpander] 发现 MCP 工具: {}", name);
                 }
             } catch (Exception e) {

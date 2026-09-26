@@ -52,6 +52,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
   const {
     conversations, activeConversationId, selectConversation,
     newConversation, renameConversation, setConversationStatus, deleteConversation,
+    taskUnread,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -284,6 +285,18 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                       }}>
                         {c.title}
                       </div>
+                      {!!taskUnread[c.id] && (
+                        <span
+                          title="后台任务已完成"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
+                            background: '#22a06b', color: 'white', fontSize: 10, fontWeight: 700,
+                          }}
+                        >
+                          {taskUnread[c.id]}
+                        </span>
+                      )}
                       {!multiSelect && (
                         <span style={{
                           display: 'inline-flex', flexShrink: 0,

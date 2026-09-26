@@ -7,6 +7,7 @@ import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.IntentRecognitionService;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
@@ -123,6 +124,7 @@ class AgentChatServiceImplOrchestrationModeTest {
                 mock(com.moon.moonagent.ai.agent.AgentOrchestrator.class),
                 mock(AgentOrchestratorSupport.class),
                 mock(AgentCheckpointMapper.class),
+                mock(CheckpointResumeService.class),
                 mock(ConversationLock.class),
                 mock(AgentAnswerService.class),
                 mock(PlatformTransactionManager.class));

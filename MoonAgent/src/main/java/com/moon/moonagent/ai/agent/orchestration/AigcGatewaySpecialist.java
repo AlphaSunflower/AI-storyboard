@@ -319,18 +319,27 @@ public class AigcGatewaySpecialist {
             }
         }, Math.max(1, mediaPlanSlowNoticeSeconds), TimeUnit.SECONDS);
         try {
-            for (String chunk : getClient().prompt()
+            support.beginModelCall(request);
+            ChatResponse lastResponse = null;
+            for (ChatResponse response : getClient().prompt()
                     .options(OpenAiChatOptions.builder().model(model)
+                            .streamUsage(true)
                             .timeout(Duration.ofSeconds(Math.max(
                                     mediaPlanSlowNoticeSeconds + 1, mediaPlanTimeoutSeconds))))
                     .system(system)
                     .messages(buildUserMessage(input, sources, vision))
                     .stream()
-                    .content()
+                    .chatResponse()
                     .toIterable()) {
+                lastResponse = response;
+                String chunk = response == null || response.getResult() == null
+                        || response.getResult().getOutput() == null
+                        ? "" : response.getResult().getOutput().getText();
+                if (chunk == null) chunk = "";
                 raw.append(chunk);
                 emitDisplayDelta(request, raw.toString(), cursor, false);
             }
+            support.recordUsage(request, lastResponse);
             emitDisplayDelta(request, raw.toString(), cursor, true);
             Map<String, Object> parsed = parsePlan(betweenMarkers(
                     raw.toString(), PLAN_JSON_START, PLAN_JSON_END));
@@ -683,12 +692,16 @@ public class AigcGatewaySpecialist {
             return;
         }
         try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("taskId", result.taskId());
+            payload.put("taskKind", "video");
+            payload.put("status", result.status());
+            payload.put("message", "视频任务已受理，正在排队生成…");
+            if (context.trace() != null) {
+                payload = context.trace().enrichTerminalEvent(payload);
+            }
             context.emitter().send(SseEmitter.event().name("task_accepted")
-                    .data(AgentOrchestratorSupport.sseJson(Map.of(
-                            "taskId", result.taskId(),
-                            "taskKind", "video",
-                            "status", result.status(),
-                            "message", "视频任务已受理，正在排队生成…"))));
+                    .data(AgentOrchestratorSupport.sseJson(payload)));
         } catch (Exception e) {
             log.debug("AIGC video task_accepted SSE send failed: {}", e.getMessage());
         }
@@ -756,11 +769,15 @@ public class AigcGatewaySpecialist {
     private void emit(SpecialistContext context, String answer) {
         if (context.emitter() == null) return;
         try {
+            Map<String, Object> endPayload = Map.of(
+                    "messageId", "", "sceneCount", -1L, "content", answer);
+            if (context.trace() != null) {
+                endPayload = context.trace().enrichTerminalEvent(endPayload);
+            }
             context.emitter().send(SseEmitter.event().name("message")
                     .data(AgentOrchestratorSupport.sseJson(Map.of("content", answer))));
             context.emitter().send(SseEmitter.event().name("message_end")
-                    .data(AgentOrchestratorSupport.sseJson(Map.of(
-                            "messageId", "", "sceneCount", -1L, "content", answer))));
+                    .data(AgentOrchestratorSupport.sseJson(endPayload)));
         } catch (Exception e) {
             log.debug("AIGC media SSE send failed: {}", e.getMessage());
         }

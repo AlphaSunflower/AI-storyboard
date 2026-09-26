@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
@@ -12,8 +13,10 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -25,7 +28,8 @@ class AgentScopeCheckpointServiceTest {
     void externalInputPauseCreatesOwnedCheckpointAndResolvesCustomText() {
         AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any())).thenReturn("token-1");
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("token-1");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setId("cp-1");
         persisted.setFormToken("token-1");
@@ -48,15 +52,25 @@ class AgentScopeCheckpointServiceTest {
         String token = service.pauseForExternalInput(request, "reply-1", call);
 
         assertThat(token).isEqualTo("token-1");
-        verify(mapper).update(any(), any());
         ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
+                ArgumentCaptor.forClass(Consumer.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("id"))
                 .containsExactly("option-0", "custom");
+        AgentCheckpoint created = new AgentCheckpoint();
+        customizer.getValue().accept(created);
+        assertThat(created.getOwnerEngine()).isEqualTo("AGENTSCOPE");
+        assertThat(created.getStateSchemaVersion()).isEqualTo(3);
+        assertThat(created.getRuntimeReplyId()).isEqualTo("reply-1");
+        assertThat(created.getRuntimeToolCallId()).isEqualTo("call-1");
 
         AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setRuntimeToolCallId("call-1");
+        checkpoint.setRuntimeToolName(AgentScopeInteractionTools.REQUEST_HUMAN_INPUT);
         checkpoint.setPlan("""
                 {"items":[{"toolCallId":"call-1","toolName":"request_human_input",
                 "options":[{"title":"写实","value":"realistic"}]}]}
@@ -68,10 +82,109 @@ class AgentScopeCheckpointServiceTest {
     }
 
     @Test
+    void storyboardCommitOptionsUseReadableFallbackTitles() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("token-append-overwrite");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("token-append-overwrite");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-storyboard")
+                .name(AgentScopeInteractionTools.REQUEST_HUMAN_INPUT)
+                .input(Map.of(
+                        "prompt", "新的分镜要怎么写入？",
+                        "options", List.of(
+                                Map.of("value", "append"),
+                                Map.of("value", "overwrite"))))
+                .build();
+
+        service.pauseForExternalInput(request, "reply-storyboard", call);
+
+        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("title"))
+                .containsExactly("追加分镜", "覆盖分镜");
+    }
+
+    @Test
+    void storyboardCommitCardUsesFixedAppendOverwriteDeleteChoices() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("token-storyboard-commit");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("token-storyboard-commit");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-storyboard-commit")
+                .name(AgentScopeInteractionTools.CHOOSE_STORYBOARD_COMMIT)
+                .input(Map.of("existing_scene_count", 16))
+                .build();
+
+        service.pauseForStoryboardCommit(request, "reply-storyboard", call, 16);
+
+        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
+                ArgumentCaptor.forClass(Consumer.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
+        assertThat(stage.getValue().planText()).contains("已有 16 个分镜");
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("id"))
+                .containsExactly("append", "overwrite", "delete");
+        AgentCheckpoint created = new AgentCheckpoint();
+        customizer.getValue().accept(created);
+        assertThat(created.getRuntimeToolName())
+                .isEqualTo(AgentScopeInteractionTools.CHOOSE_STORYBOARD_COMMIT);
+
+        created.setRuntimeToolCallId("call-storyboard-commit");
+        created.setRuntimeToolName(AgentScopeInteractionTools.CHOOSE_STORYBOARD_COMMIT);
+        created.setPlan("""
+                {"items":[{"kind":"storyboard-commit"}]}
+                """);
+        AgentScopeCheckpointService.ResumeValue value =
+                service.resolve(created, "delete", "");
+        assertThat(value.text()).isEqualTo("delete");
+    }
+
+    @Test
+    void externalInputDoesNotGuessRuntimeReferenceFromPlanJson() {
+        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setPlan("""
+                {"items":[{"toolCallId":"call-from-plan","toolName":"request_human_input"}]}
+                """);
+
+        assertThatThrownBy(() -> service.resolve(checkpoint, "custom", "继续"))
+                .isInstanceOf(CheckpointResumeException.class)
+                .hasMessageContaining("运行态引用缺失");
+    }
+
+    @Test
     void confirmationUsesChineseToolLabelsAndMarksAgentScopeOwner() {
         AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any())).thenReturn("card text");
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("card text");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setId("cp-2");
         persisted.setFormToken("token-2");
@@ -92,13 +205,23 @@ class AgentScopeCheckpointServiceTest {
         assertThat(token).isEqualTo("token-2");
         ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
+                ArgumentCaptor.forClass(Consumer.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().planText())
                 .contains("批量生成图片")
                 .doesNotContain(AgentScopeImageTools.GENERATE_IMAGE_BATCH);
-        ArgumentCaptor<UpdateWrapper<AgentCheckpoint>> update =
-                ArgumentCaptor.forClass(UpdateWrapper.class);
-        verify(mapper).update(any(), update.capture());
-        assertThat(update.getValue().getSqlSet()).contains("owner_engine");
+        AgentCheckpoint created = new AgentCheckpoint();
+        customizer.getValue().accept(created);
+        assertThat(created.getOwnerEngine()).isEqualTo("AGENTSCOPE");
+        assertThat(created.getStateSchemaVersion()).isEqualTo(3);
+        assertThat(created.getRuntimeToolName()).isEqualTo(AgentScopeImageTools.GENERATE_IMAGE_BATCH);
+        assertThat(created.getRuntimeToolCallsJson())
+                .contains("\"id\":\"call-2\"")
+                .contains("\"name\":\"generate_image_batch\"");
+        assertThat(service.permissionToolCalls(created))
+                .extracting(ToolUseBlock::getId)
+                .containsExactly("call-2");
     }
 }

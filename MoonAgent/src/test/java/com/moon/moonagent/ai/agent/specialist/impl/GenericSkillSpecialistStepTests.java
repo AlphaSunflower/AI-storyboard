@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.specialist.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.skill.AgentSkill;
@@ -54,6 +55,7 @@ class GenericSkillSpecialistStepTests {
     private ChatClient.StreamResponseSpec streamSpec;
     private AgentOrchestratorSupport support;
     private SkillExpander skillExpander;
+    private AgentAiConfigProperties agentConfig;
     private GenericSkillSpecialist specialist;
 
     @BeforeEach
@@ -65,6 +67,8 @@ class GenericSkillSpecialistStepTests {
         streamSpec = mock(ChatClient.StreamResponseSpec.class);
         support = mock(AgentOrchestratorSupport.class);
         skillExpander = mock(SkillExpander.class);
+        agentConfig = new AgentAiConfigProperties();
+        agentConfig.setHumanInputEnabled(true);
 
         GatewayModelService gateway = mock(GatewayModelService.class);
         when(gateway.getDefaultTextModel()).thenReturn("model");
@@ -74,7 +78,7 @@ class GenericSkillSpecialistStepTests {
                 builder, gateway,
                 mock(AgentMessageMapper.class), mock(com.moon.moonagent.mapper.AgentAssetMapper.class),
                 mock(FileStorageService.class),
-                skillExpander, mock(SkillManager.class), support);
+                skillExpander, mock(SkillManager.class), support, agentConfig);
 
         when(builder.defaultAdvisors(any(Advisor[].class))).thenReturn(builder);
         when(builder.build()).thenReturn(client);

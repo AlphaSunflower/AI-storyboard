@@ -97,6 +97,19 @@ public class SessionAssetService {
                 .toList();
     }
 
+    public Set<String> existingAssetIds(String conversationId, List<String> assetIds) {
+        if (conversationId == null || conversationId.isBlank()
+                || assetIds == null || assetIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> ids = new HashSet<>(assetIds);
+        List<AgentAsset> rows = assetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
+                .eq(AgentAsset::getConversationId, conversationId)
+                .in(AgentAsset::getId, ids));
+        if (rows == null || rows.isEmpty()) return Set.of();
+        return rows.stream().map(AgentAsset::getId).collect(java.util.stream.Collectors.toSet());
+    }
+
     private int normalizeLimit(int requested) {
         int upper = Math.max(1, properties.getAssetSearchLimit());
         return requested <= 0 ? upper : Math.min(requested, upper);

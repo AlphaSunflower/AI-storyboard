@@ -30,10 +30,15 @@ public class TaskPlanPlanner {
     }
 
     public TaskPlan plan(TaskPlanningRequest request, Map<String, CapabilityDescriptor> capabilities) {
+        return plan(request, capabilities, request.trace());
+    }
+
+    public TaskPlan plan(TaskPlanningRequest request, Map<String, CapabilityDescriptor> capabilities,
+                         com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace) {
         TaskPlan first;
         try {
             first = fromDraft(request, ensureMediaPipeline(
-                    synthesizer.synthesize(request, capabilities, List.of()), request, capabilities), capabilities);
+                    synthesize(request, capabilities, List.of(), trace), request, capabilities), capabilities);
         } catch (RuntimeException e) {
             TaskPlan deterministic = deterministicMediaPlan(request, capabilities);
             if (deterministic != null) return deterministic;
@@ -47,7 +52,7 @@ public class TaskPlanPlanner {
         TaskPlan repaired;
         try {
             repaired = fromDraft(request, ensureMediaPipeline(
-                    synthesizer.synthesize(request, capabilities, firstResult.errors()),
+                    synthesize(request, capabilities, firstResult.errors(), trace),
                     request, capabilities), capabilities);
         } catch (RuntimeException e) {
             TaskPlan deterministic = deterministicMediaPlan(request, capabilities);
@@ -62,6 +67,15 @@ public class TaskPlanPlanner {
         TaskPlan deterministic = deterministicMediaPlan(request, capabilities);
         if (deterministic != null) return deterministic;
         return fallback(request, capabilities, repairedResult.errors());
+    }
+
+    private TaskPlanDraft synthesize(TaskPlanningRequest request,
+                                     Map<String, CapabilityDescriptor> capabilities,
+                                     List<String> errors,
+                                     com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace) {
+        return trace == null
+                ? synthesizer.synthesize(request, capabilities, errors)
+                : synthesizer.synthesize(request, capabilities, errors, trace);
     }
 
     private static TaskPlan fromDraft(TaskPlanningRequest request, TaskPlanDraft draft,

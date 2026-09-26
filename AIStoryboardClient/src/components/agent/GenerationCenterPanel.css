@@ -125,6 +125,78 @@
   color: var(--color-primary);
 }
 
+.generation-center__agent-entry {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 8px 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(204, 120, 92, 0.22);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-primary) 5%, white);
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.generation-center__agent-entry:hover,
+.generation-center__agent-entry.is-active {
+  border-color: rgba(204, 120, 92, 0.48);
+  background: color-mix(in srgb, var(--color-primary) 8%, white);
+}
+
+.generation-center__agent-entry-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: rgba(204, 120, 92, 0.12);
+  color: var(--color-primary);
+}
+
+.generation-center__agent-entry-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.generation-center__agent-entry-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.generation-center__agent-entry-copy small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-center__agent-entry b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(204, 120, 92, 0.12);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 18px;
+  text-align: center;
+}
+
+.generation-center__agent-entry > svg {
+  color: var(--color-muted-soft);
+  transition: transform 0.15s ease;
+}
+
+.generation-center__agent-entry > svg.is-expanded {
+  transform: rotate(90deg);
+}
+
 .generation-center__tabs {
   flex-shrink: 0;
   display: grid;
@@ -238,6 +310,10 @@
 
 .generation-center__row-icon.is-completed {
   color: rgb(15, 150, 80);
+}
+
+.generation-center__row-icon.is-partial {
+  color: rgb(196, 123, 22);
 }
 
 .generation-center__row-icon.is-failed,
@@ -397,4 +473,16 @@
   .generation-center__row-icon .is-spinning {
     animation: none;
   }
+}
+.generation-center__row.is-clickable {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.generation-center__row.is-clickable:hover {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }

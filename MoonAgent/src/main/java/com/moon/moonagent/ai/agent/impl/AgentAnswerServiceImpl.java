@@ -77,18 +77,27 @@ public class AgentAnswerServiceImpl implements AgentAnswerService {
 
     @Override
     public AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl, SseEmitter emitter) {
+        return streamAnswerWithResult(conversation, content, picUrl, emitter, null);
+    }
+
+    @Override
+    public AgentAnswerResult streamAnswerWithResult(AgentConversation conversation, String content, String picUrl,
+                                                    SseEmitter emitter,
+                                                    com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator trace) {
         StringBuilder sb = new StringBuilder();
         String reasonText = "";
         OffsetDateTime start = OffsetDateTime.now();
         try {
             // Spring AI 2.0 的流式 chatResponse 在 OpenAI SDK chunk 转换时会丢掉
             // reasoning_content，因此这里取非流式响应，保留模型真实思考内容后一次转发。
+            if (trace != null) trace.beginModelCall();
             ChatResponse response = chatClient().prompt()
                     .options(OpenAiChatOptions.builder().model(gatewayModelService.getDefaultTextModel()))
                     .system(promptConfig.get("services/agent-answer"))
                     .messages(buildUserMessage("对话历史：\n" + buildHistory(conversation.getId()) + "\n\n用户最新消息：\n" + content, picUrl))
                     .call()
                     .chatResponse();
+            if (trace != null) trace.recordUsage(response);
             AssistantMessage output = response != null && response.getResult() != null
                     ? response.getResult().getOutput() : null;
             String chunk = output != null ? output.getText() : null;

@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.skill;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.AgentTools;
+import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.ai.agent.human.HumanInputRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 
 /**
  * SkillExpander 单元测试 —— 声明即扩展的工具桥：
@@ -38,9 +42,13 @@ class SkillExpanderTests {
         skillLoader.loadAll(); // 包内可见，手动加载 resources/skills
         skillManager = new SkillManager(skillLoader);
 
+        ToolExecutionTemplate executionTemplate = mock(ToolExecutionTemplate.class);
+        when(executionTemplate.execute(anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         agentTools = new AgentTools(
                 mock(AgentGenerationService.class),
-                mock(AgentConversationMapper.class));
+                mock(AgentConversationMapper.class),
+                executionTemplate);
 
         ToolCallbackProvider canvasProvider = mock(ToolCallbackProvider.class);
         ToolCallback[] canvasCallbacks = List.of(
@@ -67,7 +75,7 @@ class SkillExpanderTests {
         ObjectProvider<ToolCallbackProvider> providers = mock(ObjectProvider.class);
         when(providers.orderedStream()).thenReturn(Stream.of(canvasProvider));
 
-        skillExpander = new SkillExpander(agentTools, skillManager, providers);
+        skillExpander = new SkillExpander(agentTools, skillManager, providers, executionTemplate);
         skillExpander.init(); // 包内可见，手动触发索引
     }
 
@@ -148,6 +156,12 @@ class SkillExpanderTests {
         assertTrue(skill.isPresent(), "test 技能应被 SkillLoader 加载");
         assertFalse(skill.get().flow().isEmpty(), "test 技能应声明 flow 多步澄清流程");
         assertEquals("clarify_style", skill.get().flow().getFirst(), "flow 首步应为 clarify_style");
+    }
+
+    @Test
+    void legacySceneReviewSkillIsNoLongerLoaded() {
+        assertTrue(skillManager.byIntent("intent-scene-review").isEmpty(),
+                "旧分镜审查链路应从静态技能目录彻底移除");
     }
 
     @Test

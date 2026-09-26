@@ -6,6 +6,7 @@ import com.moon.moonagent.ai.agent.orchestration.DynamicTaskEngine;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanActionService;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanPlanner;
 import com.moon.moonagent.ai.agent.orchestration.TaskPlanStore;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
 import com.moon.moonagent.dto.request.AgentTaskPlanActionRequest;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
@@ -46,6 +47,7 @@ class AgentTaskPlanControllerTest {
         AgentCapabilityRegistry capabilities = mock(AgentCapabilityRegistry.class);
         DynamicTaskEngine engine = mock(DynamicTaskEngine.class);
         AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        CheckpointResumeService checkpointResumeService = mock(CheckpointResumeService.class);
         AgentConversation conversation = conversation();
         TaskPlan waiting = plan(TaskNodeState.WAITING_HUMAN, TaskPlanState.WAITING_HUMAN, "old");
         AgentCheckpoint checkpoint = new AgentCheckpoint();
@@ -60,7 +62,8 @@ class AgentTaskPlanControllerTest {
         when(planStore.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(checkpointMapper.selectOne(any())).thenReturn(checkpoint);
         AgentTaskPlanController controller = controller(
-                chatService, planStore, planner, capabilities, engine, checkpointMapper);
+                chatService, planStore, planner, capabilities, engine,
+                checkpointMapper, checkpointResumeService);
 
         controller.action(auth(), "conversation-1", "plan-1",
                 new AgentTaskPlanActionRequest("approve"));
@@ -79,6 +82,7 @@ class AgentTaskPlanControllerTest {
         AgentCapabilityRegistry capabilities = mock(AgentCapabilityRegistry.class);
         DynamicTaskEngine engine = mock(DynamicTaskEngine.class);
         AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        CheckpointResumeService checkpointResumeService = mock(CheckpointResumeService.class);
         AgentConversation conversation = conversation();
         TaskPlan failed = plan(TaskNodeState.FAILED, TaskPlanState.FAILED, "old");
         when(chatService.getOwnedConversation("user-1", "conversation-1")).thenReturn(conversation);
@@ -86,7 +90,8 @@ class AgentTaskPlanControllerTest {
         when(planStore.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(checkpointMapper.selectOne(any())).thenReturn(null);
         AgentTaskPlanController controller = controller(
-                chatService, planStore, planner, capabilities, engine, checkpointMapper);
+                chatService, planStore, planner, capabilities, engine,
+                checkpointMapper, checkpointResumeService);
 
         controller.action(auth(), "conversation-1", "plan-1",
                 new AgentTaskPlanActionRequest("retry"));
@@ -105,6 +110,7 @@ class AgentTaskPlanControllerTest {
         AgentCapabilityRegistry capabilities = mock(AgentCapabilityRegistry.class);
         DynamicTaskEngine engine = mock(DynamicTaskEngine.class);
         AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        CheckpointResumeService checkpointResumeService = mock(CheckpointResumeService.class);
         AgentConversation conversation = conversation();
         TaskPlan failed = plan(TaskNodeState.FAILED, TaskPlanState.FAILED, "old");
         TaskPlan fresh = new TaskPlan(
@@ -119,7 +125,8 @@ class AgentTaskPlanControllerTest {
         when(planner.plan(any(), any())).thenReturn(fresh);
         when(capabilities.descriptors()).thenReturn(Map.of());
         AgentTaskPlanController controller = controller(
-                chatService, planStore, planner, capabilities, engine, checkpointMapper);
+                chatService, planStore, planner, capabilities, engine,
+                checkpointMapper, checkpointResumeService);
 
         controller.action(auth(), "conversation-1", "plan-1",
                 new AgentTaskPlanActionRequest("replan"));
@@ -138,9 +145,11 @@ class AgentTaskPlanControllerTest {
                                                        TaskPlanPlanner planner,
                                                        AgentCapabilityRegistry capabilities,
                                                        DynamicTaskEngine engine,
-                                                       AgentCheckpointMapper checkpointMapper) {
+                                                       AgentCheckpointMapper checkpointMapper,
+                                                       CheckpointResumeService checkpointResumeService) {
         return new AgentTaskPlanController(chatService, planStore, new TaskPlanActionService(),
-                planner, capabilities, new TaskPlanScheduler(), engine, checkpointMapper);
+                planner, capabilities, new TaskPlanScheduler(), engine, checkpointMapper,
+                checkpointResumeService);
     }
 
     private static Authentication auth() {

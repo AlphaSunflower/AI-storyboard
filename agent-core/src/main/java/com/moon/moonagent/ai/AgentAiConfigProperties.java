@@ -45,6 +45,15 @@ public class AgentAiConfigProperties {
     /** 轻量意图判定超时（秒）：例如取消意图判断，超时按不取消处理。 */
     private int intentTimeoutSeconds = 60;
 
+    /** 会话标题模型；留空时回退网关默认文本模型。 */
+    private String titleModel = "mimo-v2.6-pro";
+
+    /** 会话标题模型单次调用超时（秒）。 */
+    private int titleTimeoutSeconds = 12;
+
+    /** 会话标题 AI 生成最大尝试次数；失败时始终保留首句兜底标题。 */
+    private int titleMaxAttempts = 2;
+
     /**
      * SSE 异步连接最长存活时间（秒）：覆盖长剧本分批生成全过程。
      * 该值只控制 Spring MVC 异步请求生命周期，不替代 Spring AI 单次模型调用超时。
@@ -63,8 +72,8 @@ public class AgentAiConfigProperties {
     private int historyMessageMaxChars = 2_000;
 
     /**
-     * 自动审查链：链首意图（如 aisplit）写库成功后自动 handoff 给 intent-scene-review 出审查卡。
-     * 空=关闭（默认，行为与现状一致）；示例 {@code [aisplit]}。
+     * 是否允许模型主动请求人工补充信息。
+     * 默认关闭：长视频/分镜链路需要持续自动执行，不能停在确认卡或选项卡。
      */
-    private java.util.List<String> autoReviewChains = java.util.List.of();
+    private boolean humanInputEnabled = false;
 }

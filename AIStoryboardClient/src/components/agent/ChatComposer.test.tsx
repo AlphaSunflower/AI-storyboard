@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentApi } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
@@ -72,5 +72,15 @@ describe('ChatComposer project library drops', () => {
     await waitFor(() => {
       expect(attach).toHaveBeenCalledWith('conversation-1', 'group-1');
     });
+  });
+
+  it('offers interrupt-and-send while the agent is streaming', () => {
+    useAgentStore.setState({ streaming: true });
+    render(<ChatComposer />);
+
+    const input = screen.getByPlaceholderText('可输入新指令打断当前生成…');
+    fireEvent.change(input, { target: { value: '改成新的方向' } });
+
+    expect(screen.getByRole('button', { name: '停止并发送' })).toBeTruthy();
   });
 });

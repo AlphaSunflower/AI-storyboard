@@ -52,6 +52,9 @@ import java.util.UUID;
 public class UnifiedAgentLoop {
 
     private static final Logger log = LoggerFactory.getLogger(UnifiedAgentLoop.class);
+    private static final String LEGACY_SCENE_REVIEW_MESSAGE =
+            "旧分镜审查流程已停用。请直接说“生成分镜图片”或“把所有分镜图片生成出来”，"
+                    + "系统会使用当前工具检查缺图并创建批量生图任务。";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MAX_STEPS = 6;
 
@@ -144,6 +147,11 @@ public class UnifiedAgentLoop {
         AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
         trace.setTurnMetadata(runtimeMetadata());
         request.setTrace(trace);
+
+        if ("review-action".equals(checkpoint.getAction())
+                || "intent-scene-review".equals(plannedIntent(checkpoint.getPlan()))) {
+            return buildTurnResult(request, trace, LEGACY_SCENE_REVIEW_MESSAGE);
+        }
 
         String intent = resolveCheckpointIntent(checkpoint, canvasContext);
         ChainType chain = resolveChain(intent, canvasContext);
@@ -247,7 +255,10 @@ public class UnifiedAgentLoop {
                 || canvasContext != null) {
             return false;
         }
-        if (!"intent-pic".equals(intent) && !"intent-video".equals(intent)) return false;
+        if (!"intent-pic".equals(intent)
+                && !"intent-video".equals(intent)
+                && !"intent-aisplit".equals(intent)
+                && !"intent-storyboard".equals(intent)) return false;
         return dynamicTaskEngine == null || !dynamicTaskEngine.hasActivePlan(conversation.getId());
     }
 
@@ -263,7 +274,7 @@ public class UnifiedAgentLoop {
                         .eq(AgentMessage::getConversationId, conversation.getId())
                         .orderByDesc(AgentMessage::getCreatedAt)
                         .last("LIMIT " + IntentRecognitionService.HISTORY_LIMIT)).reversed();
-        IntentResult recognized = intentRecognitionService.recognize(content, recent);
+        IntentResult recognized = intentRecognitionService.recognize(content, recent, trace);
         if (trace != null) {
             trace.add("intent_recognize", "unified-loop", "意图识别",
                     "识别为 " + recognized.type(), "", recognized.type(), "node_completed");
@@ -286,7 +297,6 @@ public class UnifiedAgentLoop {
             case "generate_image", "pic-option", "pic-clarify", "prompt-source", "refine" -> "intent-pic";
             case "generate_video", "video-opinion", "video-clarify", "video-source", "video-role-select" -> "intent-video";
             case "delete-confirm" -> "intent-delete";
-            case "review-action" -> "intent-scene-review";
             default -> action.startsWith("skill-") ? "intent-test" : IntentRecognitionService.FALLBACK_TYPE;
         };
     }
@@ -313,7 +323,7 @@ public class UnifiedAgentLoop {
         if (intent.startsWith("intent-canvas")) return ChainType.CANVAS;
         return switch (intent) {
             case "intent-pic", "intent-video" -> ChainType.AIGC;
-            case "intent-aisplit", "intent-scene-review", "intent-delete" -> ChainType.STORYBOARD;
+            case "intent-aisplit", "intent-delete" -> ChainType.STORYBOARD;
             default -> null;
         };
     }
@@ -329,6 +339,10 @@ public class UnifiedAgentLoop {
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (request != null) metadata.putAll(request.getTurnMetadata());
         if (trace != null) metadata.putAll(trace.getTurnMetadata());
+        if (trace != null) {
+            metadata.put("metrics", trace.turnMetrics());
+            metadata.put("_terminalEventSent", trace.isTerminalEventSent());
+        }
         AgentReasoningSnapshot reasoning = request != null ? request.getReasoning() : null;
         if (reasoning == null && trace != null) reasoning = trace.getReasoning();
         if (reasoning != null) metadata.put("reasoning", reasoning);

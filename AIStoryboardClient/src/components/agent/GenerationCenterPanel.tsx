@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
-import { Check, CircleStop, Film, History, Images, LayoutList, ListTodo, LoaderCircle, X } from 'lucide-react';
-import { useAgentStore } from '../../stores/agentStore';
+import { Check, ChevronRight, CircleAlert, CircleStop, Film, History, Images, LayoutList, ListTodo, LoaderCircle, X } from 'lucide-react';
+import { isActiveTask, taskStatusLabel, useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { agentApi, type GenerationRecord } from '../../api/agent';
 import { useDragSnap } from '../../hooks/useDragSnap';
@@ -14,7 +14,7 @@ import { getAgentAssetCounts, type AssetsTab } from './assetBrowserModel';
 import { partitionImageQueueTasks } from './generationCenterImageTasks';
 import './GenerationCenterPanel.css';
 
-type GenerationCenterTab = 'active' | AssetsTab;
+export type GenerationCenterTab = 'active' | 'tasks' | AssetsTab;
 
 const STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
@@ -31,16 +31,24 @@ const ACTIVE_STATUSES = new Set(['queued', 'running']);
  */
 export function GenerationCenterPanel({
   onOpenChange,
+  open: controlledOpen,
+  defaultTab = 'active',
   bottom = 104,
   onOpenRecords,
+  taskConversationId,
 }: {
   onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  defaultTab?: GenerationCenterTab;
   bottom?: number;
   onOpenRecords?: () => void;
+  /** 传入时会话内只展示该会话的智能体任务；传 null 表示当前没有会话。省略时保持项目范围。 */
+  taskConversationId?: string | null;
 }) {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<GenerationCenterTab>('active');
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const [tab, setTab] = useState<GenerationCenterTab>(defaultTab);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -53,10 +61,18 @@ export function GenerationCenterPanel({
   const assets = useAgentStore((state) => state.assets);
   const loadAssets = useAgentStore((state) => state.loadAssets);
   const activeConversationId = useAgentStore((state) => state.activeConversationId);
+  const agentTasksMap = useAgentStore((state) => state.tasks);
+  const openTaskDrawer = useAgentStore((state) => state.openTaskDrawer);
   const projectId = useProjectStore((state) => state.currentProject?.id);
   const scenes = useProjectStore((state) => state.scenes);
   const generatingImage = useProjectStore((state) => state.generatingImage);
   const [activeGenerations, setActiveGenerations] = useState<GenerationRecord[]>([]);
+
+  const setOpen = useCallback((next: boolean | ((value: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next;
+    if (controlledOpen === undefined) setInternalOpen(resolved);
+    onOpenChange?.(resolved);
+  }, [controlledOpen, onOpenChange, open]);
 
   const drag = useDragSnap(() => {
     if (projectId) {
@@ -84,13 +100,18 @@ export function GenerationCenterPanel({
       error: null,
     }));
   const activeGenerationImage = [...activeRecordImage, ...activeDirectImage];
-  const activeCount = activeVideo.length + activeRecordVideo.length + activeImage.length + activeGenerationImage.length;
+  const allAgentTasks = Object.values(agentTasksMap).filter((task) =>
+    taskConversationId === undefined || task.conversationId === taskConversationId);
+  const activeAgentTasks = allAgentTasks.filter(isActiveTask);
+  const generationActiveCount = activeVideo.length + activeRecordVideo.length
+    + activeImage.length + activeGenerationImage.length;
+  const activeCount = generationActiveCount + activeAgentTasks.length;
   const isGenerating = activeCount > 0;
   const assetCounts = getAgentAssetCounts(assets);
 
   useEffect(() => {
-    onOpenChange?.(open);
-  }, [onOpenChange, open]);
+    if (open) setTab(defaultTab);
+  }, [defaultTab, open]);
 
   useEffect(() => {
     if (!projectId) {
@@ -134,7 +155,7 @@ export function GenerationCenterPanel({
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   useGSAP(() => {
     if (!open || !panelRef.current) return;
@@ -174,7 +195,7 @@ export function GenerationCenterPanel({
   }, [activeCount, projectId, refetch, refetchImage]);
 
   const tabs: { key: GenerationCenterTab; label: string; icon: React.ReactNode; count: number }[] = [
-    { key: 'active', label: '生成中', icon: <ListTodo size={13} strokeWidth={1.9} />, count: activeCount },
+    { key: 'active', label: '生成中', icon: <ListTodo size={13} strokeWidth={1.9} />, count: generationActiveCount },
     { key: 'image', label: '图片', icon: <Images size={13} strokeWidth={1.9} />, count: assetCounts.image },
     { key: 'video', label: '视频', icon: <Film size={13} strokeWidth={1.9} />, count: assetCounts.video },
     {
@@ -229,6 +250,30 @@ export function GenerationCenterPanel({
             </button>
           </div>
 
+          <button
+            type="button"
+            className={`generation-center__agent-entry${tab === 'tasks' ? ' is-active' : ''}`}
+            aria-expanded={tab === 'tasks'}
+            onClick={() => setTab((current) => current === 'tasks' ? 'active' : 'tasks')}
+          >
+            <span className="generation-center__agent-entry-icon">
+              <ListTodo size={15} strokeWidth={1.9} />
+            </span>
+            <span className="generation-center__agent-entry-copy">
+              <strong>智能体任务</strong>
+              <small>
+                {activeAgentTasks.length > 0
+                  ? `${activeAgentTasks.length} 个任务进行中`
+                  : '查看后台任务与结果'}
+              </small>
+            </span>
+            <b>{allAgentTasks.length}</b>
+            <ChevronRight
+              size={14}
+              className={tab === 'tasks' ? 'is-expanded' : undefined}
+            />
+          </button>
+
           <div className="generation-center__tabs" role="tablist" aria-label="生成中心视图">
             {tabs.map((item) => (
               <button
@@ -249,13 +294,19 @@ export function GenerationCenterPanel({
           {tab === 'active' ? (
             <div ref={rowsRef} className="generation-center__active-list">
               {activeVideo.length === 0 && activeRecordVideo.length === 0
-                && activeImage.length === 0 && activeGenerationImage.length === 0 ? (
+                && activeImage.length === 0 && activeGenerationImage.length === 0
+                && activeAgentTasks.length === 0 ? (
                 <div className="generation-center__empty">
                   <strong>当前没有进行中的任务</strong>
                   <span>新任务开始后会自动出现在这里</span>
                 </div>
               ) : (
                 <>
+                  {activeAgentTasks.length > 0 && <SectionLabel>智能体任务</SectionLabel>}
+                  {activeAgentTasks
+                    .slice()
+                    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+                    .map((task) => renderAgentTaskRow(task, openTaskDrawer))}
                   {(activeVideo.length > 0 || activeRecordVideo.length > 0) && <SectionLabel>视频生成</SectionLabel>}
                   {activeVideo.map((task) => renderRow(task, '视频', scenes, cancel))}
                   {activeRecordVideo.map((record) => renderRow({
@@ -281,6 +332,17 @@ export function GenerationCenterPanel({
                 </>
               )}
             </div>
+          ) : tab === 'tasks' ? (
+            <div ref={rowsRef} className="generation-center__active-list">
+              {allAgentTasks.length === 0 ? (
+                <div className="generation-center__empty">
+                  <strong>暂无智能体任务</strong>
+                  <span>分镜、批量生成等后台任务会显示在这里</span>
+                </div>
+              ) : allAgentTasks
+                .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+                .map((task) => renderAgentTaskRow(task, openTaskDrawer))}
+            </div>
           ) : (
             <div className="generation-center__assets">
               <AgentAssetBrowser
@@ -294,6 +356,40 @@ export function GenerationCenterPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function renderAgentTaskRow(
+  task: import('../../api/agent').AgentTaskView,
+  onOpen: (taskId: string) => void,
+) {
+  const active = isActiveTask(task);
+  return (
+    <button
+      key={`agent-${task.taskId}`}
+      type="button"
+      className="generation-center__row is-clickable"
+      onClick={() => onOpen(task.taskId)}
+    >
+      <span className={`generation-center__row-icon is-${task.status}`}>
+        {task.status === 'completed' ? <Check size={14} />
+          : task.status === 'partial' ? <CircleAlert size={14} />
+          : task.status === 'failed' || task.status === 'cancelled' ? <X size={14} />
+            : <LoaderCircle size={14} className={active ? 'is-spinning' : undefined} />}
+      </span>
+      <div className="generation-center__row-copy">
+        <div>
+          <strong>{task.title}</strong>
+          <small>{taskStatusLabel(task)}</small>
+        </div>
+        <span className="generation-center__progress">
+          <i style={{ width: `${Math.max(3, task.progress ?? 0)}%` }} />
+        </span>
+        {task.resultSummary && <small>{task.resultSummary}</small>}
+        {task.error && <small className="generation-center__error">{task.error}</small>}
+      </div>
+      <span className="generation-center__locked">查看</span>
+    </button>
   );
 }
 

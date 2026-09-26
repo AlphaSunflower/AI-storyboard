@@ -17,6 +17,8 @@ public class AgentScopeSessionTools {
     public static final String LIST_SESSION_ASSETS = "list_session_assets";
     public static final String RESOLVE_REFERENCE_ASSETS = "resolve_reference_assets";
     public static final String GET_TASK_STATUS = "get_generation_task_status";
+    public static final String LIST_CONVERSATION_TASKS = "list_conversation_tasks";
+    public static final String GET_AGENT_TASK = "get_agent_task";
 
     private final SessionAssetService sessionAssets;
     private final AgentAssetMapper assetMapper;
@@ -54,6 +56,22 @@ public class AgentScopeSessionTools {
                                 "task_id", Map.of("type", "string")), List.of("task_id")),
                         true, true, false,
                         (input, param) -> getGenerationTaskStatus(
+                                string(input.get("task_id")), context(param))),
+                new AgentScopeTool(
+                        LIST_CONVERSATION_TASKS,
+                        "List background tasks for the current conversation, including status and stage.",
+                        AgentScopeTool.schema(Map.of(
+                                "status", Map.of("type", "string")), List.of()),
+                        true, true, false,
+                        (input, param) -> listConversationTasks(
+                                string(input.get("status")), context(param))),
+                new AgentScopeTool(
+                        GET_AGENT_TASK,
+                        "Get details and result summary for one background task in the current conversation.",
+                        AgentScopeTool.schema(Map.of(
+                                "task_id", Map.of("type", "string")), List.of("task_id")),
+                        true, true, false,
+                        (input, param) -> getAgentTask(
                                 string(input.get("task_id")), context(param))));
     }
 
@@ -100,6 +118,20 @@ public class AgentScopeSessionTools {
                 "status", asset.getStatus() == null ? "unknown" : asset.getStatus(),
                 "url", asset.getUrl() == null ? "" : asset.getUrl(),
                 "error", asset.getError() == null ? "" : asset.getError());
+    }
+
+    public List<com.moon.moonagent.ai.agent.task.AgentTaskView> listConversationTasks(
+            String status,
+            AgentScopeRunContext context) {
+        var conversation = requireConversation(context);
+        return asyncTasks.listTaskViews(
+                conversation.getUserId(), conversation.getId(), conversation.getProjectId(), status, 50);
+    }
+
+    public com.moon.moonagent.ai.agent.task.AgentTaskView getAgentTask(
+            String taskId,
+            AgentScopeRunContext context) {
+        return asyncTasks.getConversationTask(requireConversation(context).getId(), taskId);
     }
 
     static com.moon.moonagent.entity.AgentConversation requireConversation(AgentScopeRunContext context) {

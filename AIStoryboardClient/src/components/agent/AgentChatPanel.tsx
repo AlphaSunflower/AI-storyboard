@@ -4,11 +4,11 @@ import { MicButton } from './MicButton';
 import { sttStream } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { assetApi, type Asset } from '../../api/assets';
 import { assetUrl } from '../../config';
 import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
-import { SceneReviewCard } from './SceneReviewCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { DynamicTaskPlanPanel } from './DynamicTaskPlanPanel';
@@ -22,7 +22,7 @@ import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, editAndResend, interruptAndSend, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask, canvasBinding } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -53,6 +53,7 @@ export function AgentChatPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const projectId = useProjectStore((s) => s.currentProject?.id);
+  useAutoGrowTextarea(inputRef, text);
 
   // 新消息自动滚底（M9：仅当用户处于近底位置时跟随）
   useEffect(() => {
@@ -75,6 +76,10 @@ export function AgentChatPanel() {
   const readOnly = currentConversation?.status === 'archived'
     || (currentConversation?.orchestrationMode != null
       && currentConversation.orchestrationMode !== 'UNIFIED_LOOP');
+  const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+  const attachLocked = readOnly;
+  const canInterruptSend = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan
+    && !canvasBinding;
 
   // 新的 HITL 卡片默认折叠，保证下方输入框始终可见
   useEffect(() => {
@@ -93,8 +98,13 @@ export function AgentChatPanel() {
 
   const handleSend = () => {
     const content = text.trim();
-    if (!content || readOnly || (streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan) return;
+    if (!content || readOnly || ((streaming && !agentVideoTask) && !canInterruptSend)
+      || waitingHumanInput || waitingVideoPlan) return;
     setText('');
+    if (canInterruptSend) {
+      void interruptAndSend(content);
+      return;
+    }
     sendMessage(content, { assetIds: pickedAssetIds });
   };
 
@@ -262,10 +272,14 @@ export function AgentChatPanel() {
         {messages.map((m) => (
           <MessageBubble
             key={m.id}
+            messageId={m.id}
             role={m.role}
             content={m.content}
             createdAt={m.createdAt}
             metadata={m.metadata}
+            editable={!readOnly && !streaming && !waitingHumanInput && !waitingVideoPlan
+              && m.id === lastUserMessageId}
+            onEditMessage={(messageId, nextContent) => editAndResend(nextContent, messageId)}
             streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
           />
         ))}
@@ -312,15 +326,11 @@ export function AgentChatPanel() {
           maxHeight: 'min(46vh, 520px)', overflowY: 'auto', overflowX: 'hidden',
           scrollbarWidth: 'thin',
         }}>
-          {waitingHumanInput.assets?.some((a) => a.type === 'scene' && (a.sceneNumber !== undefined || a.videoStatus !== undefined || a.scriptContent !== undefined)) ? (
-            <SceneReviewCard info={waitingHumanInput} startExpanded />
-          ) : (
-            <HumanInputCard
-              info={waitingHumanInput}
-              collapsed={hitlCollapsed}
-              onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
-            />
-          )}
+          <HumanInputCard
+            info={waitingHumanInput}
+            collapsed={hitlCollapsed}
+            onToggleCollapse={() => setHitlCollapsed(!hitlCollapsed)}
+          />
         </div>
       )}
 
@@ -366,14 +376,14 @@ export function AgentChatPanel() {
           <div style={{ position: 'relative' }}>
             <button
               ref={menuBtnRef}
-              onClick={readOnly ? undefined : openMenu}
-              disabled={readOnly}
+              onClick={attachLocked ? undefined : openMenu}
+              disabled={attachLocked}
               title="上传"
               onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(38,49,72,0.06)'; el.style.borderColor = 'var(--color-primary)'; }}
               onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'var(--color-canvas)'; el.style.borderColor = 'var(--color-hairline)'; }}
-              style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: readOnly ? 'not-allowed' : 'pointer', opacity: readOnly ? 0.45 : 1, fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: 42, height: 42, border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)', background: 'var(--color-canvas)', cursor: attachLocked ? 'not-allowed' : 'pointer', opacity: attachLocked ? 0.45 : 1, fontSize: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >{/** DeepSeek 风格上传图标：圆圈+加号 */}<svg  width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5" /><line x1="10" y1="6" x2="10" y2="14" /><line x1="6" y1="10" x2="14" y2="10" /></svg></button>
-            <input ref={fileRef} type="file" accept="image/*" multiple hidden disabled={readOnly} onChange={handleFile} />
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden disabled={attachLocked} onChange={handleFile} />
             {/* 下拉菜单：portal 到 body */}
             {menuOpen && menuPos && createPortal(
               <div ref={menuRef} style={{
@@ -400,13 +410,14 @@ export function AgentChatPanel() {
               if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={readOnly ? '该会话已归档' : waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '智能体正在回复…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
-            disabled={readOnly || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan}
+            placeholder={readOnly ? '该会话已归档' : waitingHumanInput || waitingVideoPlan ? '请先完成上方确认' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+            disabled={readOnly || ((streaming && !agentVideoTask) && !canInterruptSend) || !!waitingHumanInput || !!waitingVideoPlan}
             rows={2}
             style={{
               flex: 1, padding: '12px 14px', border: '1px solid var(--color-hairline)',
               borderRadius: 'var(--rounded-md)', fontSize: 15, lineHeight: 1.6, color: 'var(--color-ink)',
               resize: 'none', outline: 'none', background: 'var(--color-canvas)',
+              boxSizing: 'border-box', overflowY: 'hidden', scrollbarWidth: 'thin',
             }}
           />
           {/* 右侧：图片携带徽标 + 麦克风 + 发送 */}
@@ -426,7 +437,7 @@ export function AgentChatPanel() {
               onToggle={handleMicToggle}
               onPcm={handlePcm}
               // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
-              disabled={readOnly || ((streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
+              disabled={attachLocked || ((streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan) && !recording}
             />
             <SpecularButton
               size="sm"
@@ -438,10 +449,10 @@ export function AgentChatPanel() {
               baseColor="#ffffff"
               intensity={1}
               thickness={1.2}
-              disabled={readOnly || recording || (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
+              disabled={readOnly || recording || ((streaming && !agentVideoTask) && !canInterruptSend) || !!waitingHumanInput || !!waitingVideoPlan || !text.trim()}
               onClick={handleSend}
             >
-              发送
+              {canInterruptSend ? '停止并发送' : '发送'}
             </SpecularButton>
           </div>
           </div>

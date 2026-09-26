@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import io.agentscope.core.message.ToolUseBlock;
@@ -43,8 +44,8 @@ public class AgentScopeCheckpointService {
             Map<String, Object> option = options.get(i);
             Map<String, Object> action = new LinkedHashMap<>();
             action.put("id", "option-" + i);
-            action.put("title", stringValue(option.get("title")).isBlank()
-                    ? "选项" + (i + 1) : stringValue(option.get("title")));
+            String title = stringValue(option.get("title"));
+            action.put("title", title.isBlank() ? fallbackOptionTitle(option.get("value"), i) : title);
             if (!stringValue(option.get("description")).isBlank()) {
                 action.put("description", stringValue(option.get("description")));
             }
@@ -63,8 +64,16 @@ public class AgentScopeCheckpointService {
 
         support.runHITLStage(request, null,
                 new AgentOrchestratorSupport.StagePlan(
-                        prompt, "agentscope-reply", List.of(payload), "human_input", actions));
-        return markLatestCheckpointOwned(request.getConversation().getId());
+                        prompt, "agentscope-reply", List.of(payload), "human_input", actions),
+                checkpoint -> {
+                    checkpoint.setOwnerEngine("AGENTSCOPE");
+                    checkpoint.setStateSchemaVersion(3);
+                    checkpoint.setRuntimeSessionId(request.getConversation().getId());
+                    checkpoint.setRuntimeReplyId(replyId);
+                    checkpoint.setRuntimeToolCallId(toolCall.getId());
+                    checkpoint.setRuntimeToolName(toolCall.getName());
+                });
+        return latestPendingToken(request.getConversation().getId());
     }
 
     public String pauseForConfirmation(OrchestrationRequest request, String replyId,
@@ -90,23 +99,61 @@ public class AgentScopeCheckpointService {
         payload.put("toolCalls", calls);
         support.runHITLStage(request, null,
                 new AgentOrchestratorSupport.StagePlan(
-                        prompt, "agentscope-confirm", List.of(payload), "human_input", actions));
-        return markLatestCheckpointOwned(request.getConversation().getId());
+                        prompt, "agentscope-confirm", List.of(payload), "human_input", actions),
+                checkpoint -> {
+                    checkpoint.setOwnerEngine("AGENTSCOPE");
+                    checkpoint.setStateSchemaVersion(3);
+                    checkpoint.setRuntimeSessionId(request.getConversation().getId());
+                    checkpoint.setRuntimeReplyId(replyId);
+                    checkpoint.setRuntimeToolCallsJson(writeJson(calls));
+                    if (!toolCalls.isEmpty()) {
+                        checkpoint.setRuntimeToolCallId(toolCalls.getFirst().getId());
+                        checkpoint.setRuntimeToolName(toolCalls.getFirst().getName());
+                    }
+                });
+        return latestPendingToken(request.getConversation().getId());
     }
 
-    private String markLatestCheckpointOwned(String conversationId) {
+    public String pauseForStoryboardCommit(OrchestrationRequest request, String replyId,
+                                           ToolUseBlock toolCall, int existingSceneCount) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("kind", "storyboard-commit");
+        payload.put("replyId", replyId);
+        payload.put("toolCallId", toolCall.getId());
+        payload.put("toolName", toolCall.getName());
+        payload.put("existingSceneCount", Math.max(0, existingSceneCount));
+        List<Map<String, Object>> actions = List.of(
+                Map.of("id", "append", "title", "追加到末尾",
+                        "description", "保留现有分镜，把新分镜接在后面"),
+                Map.of("id", "overwrite", "title", "覆盖全部分镜",
+                        "description", "删除现有分镜及其素材关联，再写入新分镜"),
+                Map.of("id", "delete", "title", "删除全部分镜",
+                        "description", "只删除现有分镜，本次不写入新分镜"));
+        support.runHITLStage(request, null,
+                new AgentOrchestratorSupport.StagePlan(
+                        "当前项目已有 " + existingSceneCount
+                                + " 个分镜。本次生成结果要怎么处理？",
+                        "storyboard-commit", List.of(payload), "human_input", actions),
+                checkpoint -> {
+                    checkpoint.setOwnerEngine("AGENTSCOPE");
+                    checkpoint.setStateSchemaVersion(3);
+                    checkpoint.setRuntimeSessionId(request.getConversation().getId());
+                    checkpoint.setRuntimeReplyId(replyId);
+                    checkpoint.setRuntimeToolCallId(toolCall.getId());
+                    checkpoint.setRuntimeToolName(toolCall.getName());
+                });
+        return latestPendingToken(request.getConversation().getId());
+    }
+
+    private String latestPendingToken(String conversationId) {
         AgentCheckpoint checkpoint = checkpointMapper.selectOne(
                 new LambdaQueryWrapper<AgentCheckpoint>()
                         .eq(AgentCheckpoint::getConversationId, conversationId)
                         .eq(AgentCheckpoint::getStatus, "pending")
                         .orderByDesc(AgentCheckpoint::getCreatedAt)
                         .last("LIMIT 1"));
-        if (checkpoint == null || checkpoint.getFormToken() == null) return "";
-        checkpointMapper.update(null, new UpdateWrapper<AgentCheckpoint>()
-                .eq("id", checkpoint.getId())
-                .set("owner_engine", "AGENTSCOPE")
-                .set("state_schema_version", 2));
-        return checkpoint.getFormToken();
+        return checkpoint == null || checkpoint.getFormToken() == null
+                ? "" : checkpoint.getFormToken();
     }
 
     public ResumeValue resolve(AgentCheckpoint checkpoint, String action, String customText) {
@@ -118,8 +165,17 @@ public class AgentScopeCheckpointService {
             boolean approved = "approve".equals(action);
             return new ResumeValue(kind, "", "", approved ? "approved" : "rejected", approved);
         }
-        String toolCallId = stringValue(item.get("toolCallId"));
-        String toolName = stringValue(item.get("toolName"));
+        String toolCallId = stringValue(checkpoint.getRuntimeToolCallId());
+        String toolName = stringValue(checkpoint.getRuntimeToolName());
+        if (toolCallId.isBlank() || toolName.isBlank()) {
+            throw new CheckpointResumeException(40902,
+                    "AgentScope 运行态引用缺失，请重新发起");
+        }
+        if ("storyboard-commit".equals(kind)) {
+            String choice = action == null ? "" : action.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!List.of("append", "overwrite", "delete").contains(choice)) choice = "append";
+            return new ResumeValue(kind, toolCallId, toolName, choice, true);
+        }
         String value = customText == null ? "" : customText.trim();
         if (value.isBlank() && action != null && action.startsWith("option-")) {
             try {
@@ -141,10 +197,19 @@ public class AgentScopeCheckpointService {
     }
 
     public List<ToolUseBlock> permissionToolCalls(AgentCheckpoint checkpoint) {
-        Map<String, Object> item = firstItem(parse(
-                checkpoint == null ? null : checkpoint.getPlan()));
-        Object raw = item.get("toolCalls");
-        if (!(raw instanceof List<?> list)) return List.of();
+        if (checkpoint == null || checkpoint.getRuntimeToolCallsJson() == null
+                || checkpoint.getRuntimeToolCallsJson().isBlank()) {
+            throw new CheckpointResumeException(40902,
+                    "AgentScope 权限运行态缺失，请重新发起");
+        }
+        List<?> list;
+        try {
+            list = JSON.readValue(checkpoint.getRuntimeToolCallsJson(),
+                    new TypeReference<List<Object>>() {});
+        } catch (Exception e) {
+            throw new CheckpointResumeException(40902,
+                    "AgentScope 权限运行态无法解析，请重新发起");
+        }
         List<ToolUseBlock> calls = new ArrayList<>();
         for (Object value : list) {
             if (!(value instanceof Map<?, ?> map)) continue;
@@ -199,6 +264,15 @@ public class AgentScopeCheckpointService {
         return out;
     }
 
+    private static String fallbackOptionTitle(Object rawValue, int index) {
+        String value = stringValue(rawValue).trim().toLowerCase();
+        return switch (value) {
+            case "append" -> "追加分镜";
+            case "overwrite", "replace" -> "覆盖分镜";
+            default -> "选项" + (index + 1);
+        };
+    }
+
     private static Map<String, Object> parse(String raw) {
         if (raw == null || raw.isBlank()) return Map.of();
         try {
@@ -211,6 +285,14 @@ public class AgentScopeCheckpointService {
 
     private static String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String writeJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new CheckpointResumeException(40902, "AgentScope 运行态保存失败，请重新发起");
+        }
     }
 
     public record ResumeValue(String kind, String toolCallId, String toolName,

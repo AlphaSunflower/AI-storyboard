@@ -26,8 +26,6 @@ public class RouteChangeService {
             Map.entry("生成分镜", "intent-aisplit"),
             Map.entry("改成图片", "intent-pic"),
             Map.entry("改成视频", "intent-video"),
-            Map.entry("审查分镜", "intent-scene-review"),
-            Map.entry("我要审查", "intent-scene-review"),
             Map.entry("不是视频", "intent-pic"),
             Map.entry("不是图片", "intent-video")
     );
@@ -51,7 +49,7 @@ public class RouteChangeService {
     public String detectTargetIntent(String customText) {
         if (customText == null || customText.isBlank()) return null;
         String text = customText.trim();
-        // 切到...：后续跟分镜/故事板/图片/视频/审查
+        // 切到...：后续跟分镜/故事板/图片/视频
         String ct = cutTo(text);
         if (ct != null) return ct;
         for (Map.Entry<String, String> e : PHRASE_TO_INTENT) {
@@ -76,7 +74,6 @@ public class RouteChangeService {
         if (rest.contains("分镜") || rest.contains("故事板")) return "intent-aisplit";
         if (rest.contains("图片") || rest.contains("图")) return "intent-pic";
         if (rest.contains("视频")) return "intent-video";
-        if (rest.contains("审查")) return "intent-scene-review";
         return null;
     }
 }

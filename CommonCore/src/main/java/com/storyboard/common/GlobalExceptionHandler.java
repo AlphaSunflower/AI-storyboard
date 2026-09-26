@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
@@ -121,6 +122,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
     public void handleClientAbort(IOException e) {
         log.debug("客户端中断请求（连接已断开）: {}", e.getMessage());
+    }
+
+    /**
+     * SSE/DeferredResult 超时后响应类型仍是 text/event-stream，不能再用 JSON 异常体写入。
+     * 这里静默结束，避免关闭服务或代理断开时产生二次 HttpMessageNotWritableException。
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public void handleAsyncTimeout(AsyncRequestTimeoutException e) {
+        log.debug("异步请求已超时: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

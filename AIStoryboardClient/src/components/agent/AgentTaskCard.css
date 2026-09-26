@@ -1,0 +1,175 @@
+.agent-task-card {
+  width: min(100%, 560px);
+  margin: 8px 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+}
+
+.agent-task-card__main {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: start;
+  width: 100%;
+  padding: 11px 12px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-task-card__main:hover {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+
+.agent-task-card__icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--color-primary);
+}
+
+.agent-task-card.is-completed .agent-task-card__icon {
+  color: #22a06b;
+}
+
+.agent-task-card.is-partial .agent-task-card__icon {
+  color: #c47b16;
+}
+
+.agent-task-card.is-failed .agent-task-card__icon,
+.agent-task-card.is-cancelled .agent-task-card__icon {
+  color: #d14b4b;
+}
+
+.agent-task-card__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-task-card__copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-task-card__copy span {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.agent-task-card__copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--color-muted-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.agent-task-card__version {
+  color: var(--color-muted-soft);
+  font-size: 10px;
+}
+
+.agent-task-card__progress {
+  height: 2px;
+  margin: 0 12px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.agent-task-card__progress span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 240ms ease;
+}
+
+.agent-task-card__actions {
+  display: flex;
+  gap: 6px;
+  padding: 7px 10px 9px;
+}
+
+.agent-task-card__actions button,
+.agent-task-card__followup button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-task-card__actions button:hover,
+.agent-task-card__followup button:hover {
+  color: var(--color-ink);
+}
+
+.agent-task-card__followup {
+  display: grid;
+  gap: 7px;
+  padding: 0 10px 10px;
+}
+
+.agent-task-card__followup textarea {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.agent-task-card__followup > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.agent-task-card__followup button.is-primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: white;
+}
+
+.agent-task-card__followup button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.agent-task-card.is-missing {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 10px 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+@keyframes agent-task-spin {
+  to { transform: rotate(360deg); }
+}
+
+.agent-task-card .is-spinning {
+  animation: agent-task-spin 1s linear infinite;
+}
