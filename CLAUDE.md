@@ -350,7 +350,8 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 | `agent_assets` | conversation_id（**可空**=未归属）、type（**image/video/reference**）、url、task_id、status | Agent 生成的图/视频 + 用户上传的参考图 |
 | `agent_checkpoints` | conversation_id（CASCADE）、action、form_token（一次性）、plan（方案 JSON 文本）、step、status（pending/used/expired）、expiration_time | HITL 确认点（V4 migration，替代原内存 Map 快照） |
 
-> **Migration 手动执行**：项目未引入 Flyway，`db/migration/V*.sql` 为留档，需 psql 手动应用（V2 会话表 → V3 资产 url 可空 → V4 checkpoints → V5 删 dify 列）
+> **Migration 手动执行**：项目未引入 Flyway，`db/migration/V*.sql` 为留档，需 psql 手动应用。
+> AgentScope turn 协议依赖 **V39**：`agent_turns`、`agent_turn_events`、事件序号唯一约束和旧状态归档。
 
 ### 端点（全部 JWT 鉴权，`/api/agent/**` 不在 SecurityConfig 白名单）
 

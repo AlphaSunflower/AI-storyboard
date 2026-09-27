@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -151,6 +152,42 @@ class AgentChatServiceImplTurnTest {
                 (Map<String, Object>) userMessage.getMetadata().get("messageInput");
         assertThat(input.get("picUrls")).isEqualTo(List.of("/api/files/images/ref.png"));
         assertThat(input.get("assetIds")).isEqualTo(List.of("asset-1"));
+    }
+
+    @Test
+    void turnCreationFailureReturnsAnErrorEnvelopeWithoutPersistingUserContent()
+            throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
+        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(runtime.enabled()).thenReturn(true);
+        when(support.friendlyErrorText(any(), any())).thenReturn("运行时暂不可用");
+        when(turnStore.start(any(), any())).thenThrow(
+                new IllegalStateException("agent_turns missing"));
+
+        AgentChatServiceImpl service = service(
+                conversationMapper, messageMapper, support,
+                mock(CheckpointResumeService.class), lock, transactionManager);
+        inject(service, "agentScopeMediaRuntime", runtime);
+        inject(service, "turnEventStore", turnStore);
+        inject(service, "agentScopeEventMapper", mock(AgentScopeEventMapper.class));
+
+        service.streamAgentScopeTurn(
+                "user-1", "conversation-1", "会失败的问题", List.of(),
+                List.of(), null, null, null, List.of(), List.of(), emitter);
+
+        verify(emitter, timeout(2_000).atLeastOnce())
+                .send(any(SseEmitter.SseEventBuilder.class));
+        verify(messageMapper, never()).insert(any(AgentMessage.class));
+        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
     }
 
     private static AgentChatServiceImpl service(

@@ -785,6 +785,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             com.moon.moonagent.entity.AgentTurnEntity turn = null;
             try {
                 bootstrapAgentScopeSession(userId, conversation);
+                turn = turnEventStore.start(conversation, content);
                 String effectiveContent = content;
                 List<String> effectivePicUrls = picUrls == null ? List.of() : picUrls;
                 List<String> effectiveAssetIds = assetIds == null ? List.of() : assetIds;
@@ -807,7 +808,6 @@ public class AgentChatServiceImpl implements AgentChatService {
                     persistUserMessage(conversation, content, effectivePicUrls, effectiveAssetIds,
                             effectiveRoutingHint, effectiveReferenceVideos, effectiveReferenceAudios);
                 }
-                turn = turnEventStore.start(conversation, effectiveContent);
                 Map<String, Object> started = new LinkedHashMap<>();
                 started.put("turnId", turn.getId());
                 started.put("conversationId", conversationId);
@@ -843,6 +843,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
                     sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
                             Map.of("code", "50001", "message", friendlyRuntimeError(e))));
+                } else {
+                    sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
                 }
                 log.error("AgentScope turn 失败: conversationId={}, error={}",
                         conversationId, e.getMessage(), e);
@@ -933,6 +935,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
                     sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
                             Map.of("code", "50001", "message", friendlyRuntimeError(e))));
+                } else {
+                    sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
                 }
                 log.error("AgentScope resume 失败: conversationId={}, error={}",
                         conversationId, e.getMessage(), e);
