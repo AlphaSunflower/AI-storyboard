@@ -158,7 +158,6 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 }
             }
             for (String tool : List.of(
-                    "generate_image_batch",
                     "start_storyboard_production",
                     "generate_storyboard_images",
                     "delete_storyboard_draft_shot",

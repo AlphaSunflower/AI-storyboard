@@ -905,8 +905,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                 sendRuntimeEnvelope(emitter,
                         turnEventStore.append(turn.getId(), "turn_started", started));
 
+                String turnInput = priorTurn.getInputText() == null
+                        ? "" : priorTurn.getInputText();
                 OrchestrationRequest request = new OrchestrationRequest(
-                        conversation, "", List.of(), emitter);
+                        conversation, turnInput, List.of(), emitter);
                 request.setAction(action == null ? "" : action);
                 request.setCustomText(customText == null ? "" : customText);
                 request.setParams(params == null ? Map.of() : params);

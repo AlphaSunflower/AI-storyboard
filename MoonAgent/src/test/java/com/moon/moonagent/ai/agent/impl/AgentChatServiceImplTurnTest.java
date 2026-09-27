@@ -8,11 +8,14 @@ import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.agentscope.MoonAgentRuntime;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
+import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
+import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
 import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentTurnEntity;
 import com.moon.moonagent.mapper.AgentAssetMapper;
@@ -188,6 +191,64 @@ class AgentChatServiceImplTurnTest {
                 .send(any(SseEmitter.SseEventBuilder.class));
         verify(messageMapper, never()).insert(any(AgentMessage.class));
         verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
+    }
+
+    @Test
+    void resumeKeepsTheOriginalTurnInputForPreflight() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        AgentScopeEventMapper eventMapper = mock(AgentScopeEventMapper.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        CheckpointResumeService checkpoints = mock(CheckpointResumeService.class);
+        ArgumentCaptor<com.moon.moonagent.ai.agent.handler.OrchestrationRequest> requestCaptor =
+                ArgumentCaptor.forClass(com.moon.moonagent.ai.agent.handler.OrchestrationRequest.class);
+
+        AgentTurnEntity originalTurn = new AgentTurnEntity();
+        originalTurn.setId("turn-1");
+        originalTurn.setConversationId("conversation-1");
+        originalTurn.setStatus("waiting_user");
+        originalTurn.setInputText("为80㎡两居室生成4张室内设计效果图");
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setAction("agentscope-confirm");
+        checkpoint.setPlan("{\"items\":[{\"kind\":\"permission\"}]}");
+        CheckpointClaim claim = new CheckpointClaim(
+                checkpoint,
+                ResumeCommand.of("approve", "", Map.of(), List.of(), "", null),
+                "lease-1");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(runtime.enabled()).thenReturn(true);
+        when(support.isInterrupted("conversation-1")).thenReturn(false);
+        when(turnStore.find("turn-1")).thenReturn(originalTurn);
+        when(turnStore.resume("turn-1")).thenReturn(originalTurn);
+        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
+                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
+                .thenReturn(claim);
+        when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new AgentTurnResult("已完成", Map.of(), List.of(), null,
+                        List.of(), false, ""));
+
+        AgentChatServiceImpl service = service(
+                conversationMapper, messageMapper, support, checkpoints, lock, transactionManager);
+        inject(service, "agentScopeMediaRuntime", runtime);
+        inject(service, "turnEventStore", turnStore);
+        inject(service, "agentScopeEventMapper", eventMapper);
+
+        service.resumeAgentScopeTurn(
+                "user-1", "conversation-1", "turn-1", "token-1", "approve",
+                "", Map.of(), List.of(), null, mock(SseEmitter.class));
+
+        verify(runtime, timeout(2_000)).resumeTurn(
+                any(), any(), requestCaptor.capture(), any(), any(), any(), any());
+        assertThat(requestCaptor.getValue().getContent())
+                .isEqualTo("为80㎡两居室生成4张室内设计效果图");
     }
 
     private static AgentChatServiceImpl service(
