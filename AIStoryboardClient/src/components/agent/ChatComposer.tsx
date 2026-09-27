@@ -89,8 +89,7 @@ export function ChatComposer() {
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const archived = activeConversation?.status === 'archived';
-  const legacyOrchestration = activeConversation?.orchestrationMode != null
-    && activeConversation.orchestrationMode !== 'UNIFIED_LOOP';
+  const legacyOrchestration = activeConversation?.orchestrationMode === 'LEGACY';
   const readOnly = archived || legacyOrchestration;
   /** 只读原因不同提示分开：旧编排会话并未归档，不能一律说「已归档」 */
   const readOnlyHint = archived

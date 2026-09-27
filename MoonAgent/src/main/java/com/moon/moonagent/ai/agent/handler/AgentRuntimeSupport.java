@@ -925,8 +925,7 @@ public class AgentRuntimeSupport {
         AgentCheckpoint cp = new AgentCheckpoint();
         cp.setConversationId(conversation.getId());
         OrchestrationMode mode = OrchestrationMode.from(conversation.getOrchestrationMode());
-        cp.setOwnerEngine(mode == OrchestrationMode.UNIFIED_LOOP
-                ? OrchestrationMode.UNIFIED_LOOP.name() : OrchestrationMode.LEGACY.name());
+        cp.setOwnerEngine(mode.name());
         cp.setStateSchemaVersion(1);
         cp.setAction(action);
         cp.setFormToken(UUID.randomUUID().toString());

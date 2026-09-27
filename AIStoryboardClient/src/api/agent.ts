@@ -10,7 +10,7 @@ export interface AgentConversation {
   title: string;
   status: 'active' | 'archived';
   canvasContext?: CanvasEditContext | null;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   debugComparisonEnabled?: boolean;
   createdAt: string;
@@ -119,7 +119,7 @@ export interface AgentMessageMetadata {
   metrics?: AgentTurnMetrics;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   checkpointOwner?: string;
   loopRunId?: string;

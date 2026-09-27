@@ -74,8 +74,7 @@ export function AgentChatPanel() {
   const currentConversation = conversations.find((c) => c.id === activeConversationId);
   const currentTitle = currentConversation?.title ?? '未选择对话';
   const readOnly = currentConversation?.status === 'archived'
-    || (currentConversation?.orchestrationMode != null
-      && currentConversation.orchestrationMode !== 'UNIFIED_LOOP');
+    || currentConversation?.orchestrationMode === 'LEGACY';
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   const attachLocked = readOnly;
   const canInterruptSend = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan

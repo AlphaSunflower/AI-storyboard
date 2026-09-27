@@ -544,7 +544,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             metadata.put("metrics", trace.turnMetrics());
             metadata.put("_terminalEventSent", trace.isTerminalEventSent());
         }
-        metadata.put("orchestrationMode", "UNIFIED_LOOP");
+        metadata.put("orchestrationMode", "AGENTSCOPE");
         metadata.put("checkpointOwner", "AGENTSCOPE");
         metadata.put("agentRuntime", "agentscope-java-2.0.3");
         List<com.moon.moonagent.ai.agent.AgentTraceEvent> events =
