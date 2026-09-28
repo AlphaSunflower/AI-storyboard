@@ -467,13 +467,13 @@ public class LibraryRepository {
                 .update() == 1;
     }
 
-    public boolean markPurgePending(String userId, String assetId) {
+    public boolean markPurgePending(String assetId) {
         return client.sql("""
                         UPDATE asset.library_assets
                         SET status = 'PURGE_PENDING', version = version + 1, updated_at = now()
-                        WHERE id = :id AND owner_user_id = :userId AND status = 'TRASHED'
+                        WHERE id = :id AND status = 'TRASHED'
                         """)
-                .param("id", assetId).param("userId", userId)
+                .param("id", assetId)
                 .update() == 1;
     }
 
@@ -1676,7 +1676,8 @@ public class LibraryRepository {
             String userId,
             AssetScope scope,
             String projectId,
-            Collection<String> folderIds
+            Collection<String> folderIds,
+            int retentionDays
     ) {
         List<String> normalized = folderIds == null ? List.of() : folderIds.stream().distinct().toList();
         if (normalized.isEmpty()) return;
@@ -1684,7 +1685,7 @@ public class LibraryRepository {
                         UPDATE asset.library_assets a
                         SET status = 'TRASHED',
                             deleted_at = now(),
-                            purge_after = now() + interval '7 days',
+                            purge_after = now() + make_interval(days => :retentionDays),
                             version = version + 1,
                             updated_at = now()
                         WHERE a.owner_user_id = :userId
@@ -1703,6 +1704,7 @@ public class LibraryRepository {
                 .param("scope", scope.name())
                 .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
                 .param("folderIds", normalized)
+                .param("retentionDays", retentionDays)
                 .update();
     }
 

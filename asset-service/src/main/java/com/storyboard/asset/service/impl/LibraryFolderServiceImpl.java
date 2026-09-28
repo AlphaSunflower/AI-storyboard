@@ -10,6 +10,7 @@ import com.storyboard.asset.client.AssetContracts.LibraryFolderNode;
 import com.storyboard.asset.client.AssetContracts.MoveAssetsToFolderRequest;
 import com.storyboard.asset.client.AssetContracts.MoveFolderRequest;
 import com.storyboard.asset.client.AssetContracts.UpdateFolderRequest;
+import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.service.LibraryFolderService;
 import com.storyboard.asset.service.AssetCatalogService;
@@ -29,15 +30,18 @@ public class LibraryFolderServiceImpl implements LibraryFolderService {
     private final LibraryRepository repository;
     private final ProjectAccessPort projectAccess;
     private final AssetCatalogService catalogService;
+    private final StorageProperties properties;
 
     public LibraryFolderServiceImpl(
             LibraryRepository repository,
             ProjectAccessPort projectAccess,
-            AssetCatalogService catalogService
+            AssetCatalogService catalogService,
+            StorageProperties properties
     ) {
         this.repository = repository;
         this.projectAccess = projectAccess;
         this.catalogService = catalogService;
+        this.properties = properties;
     }
 
     @Override
@@ -96,7 +100,8 @@ public class LibraryFolderServiceImpl implements LibraryFolderService {
         }
         List<String> folderIds = repository.listFolderTreeIds(userId, folderId);
         if (folderIds.isEmpty()) throw new BusinessException(40401, "目录不存在");
-        repository.trashAssetsInFolders(userId, folder.scope(), folder.ownerProjectId(), folderIds);
+        repository.trashAssetsInFolders(
+                userId, folder.scope(), folder.ownerProjectId(), folderIds, properties.trashRetentionDays());
         repository.deleteAssetFolderMappingsForFolders(userId, folderIds);
         for (String id : folderIds) repository.deleteFolderRow(userId, id);
     }

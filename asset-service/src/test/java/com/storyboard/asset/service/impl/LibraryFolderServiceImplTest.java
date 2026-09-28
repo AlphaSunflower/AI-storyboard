@@ -6,6 +6,7 @@ import com.storyboard.asset.client.AssetContracts.CopyFoldersRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MoveAssetsToFolderRequest;
 import com.storyboard.asset.client.AssetContracts.MoveFolderRequest;
+import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.ProjectAccessPort;
@@ -36,7 +37,9 @@ class LibraryFolderServiceImplTest {
         repository = mock(LibraryRepository.class);
         projectAccess = mock(ProjectAccessPort.class);
         catalogService = mock(AssetCatalogService.class);
-        service = new LibraryFolderServiceImpl(repository, projectAccess, catalogService);
+        service = new LibraryFolderServiceImpl(
+                repository, projectAccess, catalogService,
+                new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
     }
 
     @Test
@@ -153,7 +156,7 @@ class LibraryFolderServiceImplTest {
         service.delete("u1", "folder-1", 4);
 
         verify(repository).trashAssetsInFolders(
-                "u1", AssetScope.PROJECT, "p1", List.of("folder-child", "folder-1"));
+                "u1", AssetScope.PROJECT, "p1", List.of("folder-child", "folder-1"), 3);
         verify(repository).deleteAssetFolderMappingsForFolders(
                 "u1", List.of("folder-child", "folder-1"));
         verify(repository).deleteFolderRow("u1", "folder-child");
