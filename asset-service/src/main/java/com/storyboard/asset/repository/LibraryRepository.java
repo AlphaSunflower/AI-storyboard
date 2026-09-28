@@ -498,6 +498,62 @@ public class LibraryRepository {
         return count != null && count > 0;
     }
 
+    static final String REFERENCED_OBJECT_KEYS_SQL = """
+            SELECT DISTINCT b.object_key AS key
+            FROM asset.library_media m
+            JOIN asset.library_blobs b ON b.id = m.blob_id
+            JOIN asset.library_assets a ON a.id = m.asset_id
+            WHERE b.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            UNION
+            SELECT DISTINCT b.object_key AS key
+            FROM asset.library_group_items gi
+            JOIN asset.library_media m ON m.id = gi.media_id
+            JOIN asset.library_blobs b ON b.id = m.blob_id
+            JOIN asset.library_groups g ON g.id = gi.group_id
+            JOIN asset.library_assets a ON a.id = g.asset_id
+            WHERE b.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            UNION
+            SELECT DISTINCT si.object_key AS key
+            FROM asset.library_group_snapshot_items si
+            JOIN asset.library_group_snapshots s ON s.id = si.snapshot_id
+            JOIN asset.library_groups g ON g.id = s.group_id
+            JOIN asset.library_assets a ON a.id = g.asset_id
+            WHERE si.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            """;
+
+    static final String ACTIVE_UPLOAD_SESSION_KEYS_SQL = """
+            SELECT DISTINCT object_key AS key
+            FROM asset.library_upload_sessions
+            WHERE object_key IN (:keys)
+              AND status = 'CREATED'
+              AND expires_at > now()
+            """;
+
+    public Set<String> referencedObjectKeys(Collection<String> objectKeys) {
+        List<String> keys = normalizeObjectKeys(objectKeys);
+        if (keys.isEmpty()) return Set.of();
+        return new LinkedHashSet<>(client.sql(REFERENCED_OBJECT_KEYS_SQL)
+                .param("keys", keys)
+                .query(String.class)
+                .list());
+    }
+
+    public Set<String> activeUploadSessionObjectKeys(Collection<String> objectKeys) {
+        List<String> keys = normalizeObjectKeys(objectKeys);
+        if (keys.isEmpty()) return Set.of();
+        return new LinkedHashSet<>(client.sql(ACTIVE_UPLOAD_SESSION_KEYS_SQL)
+                .param("keys", keys)
+                .query(String.class)
+                .list());
+    }
+
+    private static List<String> normalizeObjectKeys(Collection<String> objectKeys) {
+        return objectKeys == null ? List.of() : objectKeys.stream()
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
+    }
+
     public boolean objectKeyHasReferences(String objectKey) {
         Boolean referenced = client.sql("""
                         SELECT EXISTS (
