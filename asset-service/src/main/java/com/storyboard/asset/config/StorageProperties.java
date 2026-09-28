@@ -11,8 +11,16 @@ public record StorageProperties(
         String region,
         long uploadPartSizeBytes,
         int uploadSessionTtlHours,
-        int signedUrlTtlMinutes
+        int signedUrlTtlMinutes,
+        int trashRetentionDays,
+        boolean orphanScanEnabled,
+        int orphanScanIntervalHours,
+        int orphanScanGraceHours
 ) {
+    public static final int DEFAULT_TRASH_RETENTION_DAYS = 3;
+    public static final int DEFAULT_ORPHAN_SCAN_INTERVAL_HOURS = 6;
+    public static final int DEFAULT_ORPHAN_SCAN_GRACE_HOURS = 24;
+
     public StorageProperties {
         endpoint = endpoint == null ? "http://localhost:9000" : endpoint;
         accessKey = accessKey == null ? "minioadmin" : accessKey;
@@ -22,5 +30,9 @@ public record StorageProperties(
         uploadPartSizeBytes = uploadPartSizeBytes <= 0 ? 8L * 1024 * 1024 : uploadPartSizeBytes;
         uploadSessionTtlHours = uploadSessionTtlHours <= 0 ? 24 : uploadSessionTtlHours;
         signedUrlTtlMinutes = signedUrlTtlMinutes <= 0 ? 15 : signedUrlTtlMinutes;
+        trashRetentionDays = trashRetentionDays <= 0 ? DEFAULT_TRASH_RETENTION_DAYS : trashRetentionDays;
+        orphanScanIntervalHours =
+                orphanScanIntervalHours <= 0 ? DEFAULT_ORPHAN_SCAN_INTERVAL_HOURS : orphanScanIntervalHours;
+        orphanScanGraceHours = orphanScanGraceHours <= 0 ? DEFAULT_ORPHAN_SCAN_GRACE_HOURS : orphanScanGraceHours;
     }
 }

@@ -19,7 +19,7 @@ class MinioObjectStorageTest {
     private static StorageProperties properties() {
         return new StorageProperties(
                 "http://localhost:9000", "minioadmin", "minioadmin123", "storyboard", "us-east-1",
-                0, 0, 0);
+                0, 0, 0, 0, false, 0, 0);
     }
 
     @Test

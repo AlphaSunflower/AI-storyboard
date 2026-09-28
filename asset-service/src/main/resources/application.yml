@@ -50,6 +50,10 @@ storyboard:
     upload-part-size-bytes: 8388608
     upload-session-ttl-hours: 24
     signed-url-ttl-minutes: 15
+    trash-retention-days: ${STORYBOARD_TRASH_RETENTION_DAYS:3}
+    orphan-scan-enabled: ${STORYBOARD_ORPHAN_SCAN_ENABLED:false}
+    orphan-scan-interval-hours: ${STORYBOARD_ORPHAN_SCAN_INTERVAL_HOURS:6}
+    orphan-scan-grace-hours: ${STORYBOARD_ORPHAN_SCAN_GRACE_HOURS:24}
 
 jwt:
   access-secret: ${JWT_ACCESS_SECRET:}
