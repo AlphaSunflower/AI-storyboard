@@ -5,6 +5,7 @@ import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
+import com.storyboard.asset.domain.ObjectKeys;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.service.LegacyAiAssetMigrationService;
 import com.storyboard.asset.storage.ObjectStorage;
@@ -73,7 +74,7 @@ public class LegacyAiAssetMigrationServiceImpl implements LegacyAiAssetMigration
                             rs.getString("text"), rs.getInt("sort_order")))
                     .list();
             for (LegacyImage image : images) {
-                String objectKey = objectKey(image.url());
+                String objectKey = ObjectKeys.fromUrl(image.url());
                 if (objectKey == null) continue;
                 long size = 0;
                 try {
@@ -111,17 +112,6 @@ public class LegacyAiAssetMigrationServiceImpl implements LegacyAiAssetMigration
             case "scene" -> AiAssetKind.SCENE;
             default -> null;
         };
-    }
-
-    private static String objectKey(String url) {
-        if (url == null || url.isBlank()) return null;
-        String clean = url;
-        int query = clean.indexOf('?');
-        if (query >= 0) clean = clean.substring(0, query);
-        int marker = clean.indexOf("/api/files/");
-        if (marker >= 0) return clean.substring(marker + "/api/files/".length());
-        if (clean.startsWith("images/") || clean.startsWith("videos/") || clean.startsWith("audios/")) return clean;
-        return null;
     }
 
     private static String mimeType(String url) {
