@@ -352,7 +352,8 @@ public class AgentScopeStoryboardTools {
                                     || requestedNumbers.contains(scene.getSceneNumber()))
                             .toList();
                     boolean overwrite = Boolean.TRUE.equals(input.get("overwrite"));
-                    if (overwrite && !Boolean.TRUE.equals(input.get("confirmed"))) {
+                    if (overwrite && !Boolean.TRUE.equals(input.get("confirmed"))
+                            && !confirmationBypassed(context)) {
                         return Map.of(
                                 "ok", false,
                                 "needsConfirmation", true,
@@ -1080,6 +1081,11 @@ public class AgentScopeStoryboardTools {
     private static AgentScopeRunContext context(io.agentscope.core.tool.ToolCallParam param) {
         return param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    private static boolean confirmationBypassed(AgentScopeRunContext context) {
+        return context != null
+                && MediaToolPreflightService.skipClarification(context.request());
     }
 
     private static String toolCallId(io.agentscope.core.tool.ToolCallParam param) {

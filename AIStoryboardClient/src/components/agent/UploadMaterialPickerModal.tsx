@@ -4,7 +4,8 @@ import { Clapperboard, FolderOpen, Library, Package, X } from 'lucide-react';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onAssetGroup: () => void;
+  /** 传入时展示「关联资产组」独立入口；/chat 已合并进项目库素材，不传该属性。 */
+  onAssetGroup?: () => void;
   onProjectLibrary: () => void;
   onProjectOutput: () => void;
   onScene: () => void;
@@ -41,16 +42,20 @@ export function UploadMaterialPickerModal({
           </button>
         </header>
         <div style={body}>
-          <Option
-            icon={<Package size={18} />}
-            title="关联资产组"
-            description="从项目库选择人物、道具、场景等资产组"
-            onClick={() => choose(onAssetGroup)}
-          />
+          {onAssetGroup && (
+            <Option
+              icon={<Package size={18} />}
+              title="关联资产组"
+              description="从项目库选择人物、道具、场景等资产组"
+              onClick={() => choose(onAssetGroup)}
+            />
+          )}
           <Option
             icon={<Library size={18} />}
             title="项目库素材"
-            description="选择项目库文件或文件夹，也可直接上传入库"
+            description={onAssetGroup
+              ? '选择项目库文件或文件夹，也可直接上传入库'
+              : '选择项目库素材或关联资产组，也可直接上传入库'}
             onClick={() => choose(onProjectLibrary)}
           />
           <Option

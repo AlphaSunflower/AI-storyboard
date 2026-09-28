@@ -62,6 +62,15 @@ public class AgentTurnEventStore {
         return turnId == null || turnId.isBlank() ? null : turnMapper.selectById(turnId);
     }
 
+    public AgentTurnEntity findActive(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) return null;
+        return turnMapper.selectOne(new LambdaQueryWrapper<AgentTurnEntity>()
+                .eq(AgentTurnEntity::getConversationId, conversationId)
+                .in(AgentTurnEntity::getStatus, List.of("running", "waiting_user"))
+                .orderByDesc(AgentTurnEntity::getStartedAt)
+                .last("LIMIT 1"));
+    }
+
     public AgentTurnEntity resume(String turnId) {
         AgentTurnEntity turn = find(turnId);
         if (turn == null) return null;

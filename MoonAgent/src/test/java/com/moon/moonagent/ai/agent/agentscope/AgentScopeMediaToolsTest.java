@@ -78,6 +78,38 @@ class AgentScopeMediaToolsTest {
     }
 
     @Test
+    void approvedPlanBatchIgnoresTheInternalConfirmationThreshold() {
+        AgentGenerationService generation = mock(AgentGenerationService.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        AgentScopeProperties properties = new AgentScopeProperties();
+        properties.setBatchConfirmThreshold(2);
+        when(assets.urlsByIds("c1", List.of())).thenReturn(List.of());
+        when(asyncTasks.startBatchImageTask(any(), any(), any(), any(), any(), any(), eq(6),
+                eq(false), any(), any(), any(), any(), any())).thenReturn("batch-approved");
+        AgentScopeImageTools tools = new AgentScopeImageTools(
+                generation, assets, assetGroups, asyncTasks, properties);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setUserId("u1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "生成六张篮球图", List.of(), null);
+        request.setAction("approve");
+        request.setCheckpointAction("agentscope-confirm");
+
+        Map<String, Object> result = tools.generateImageBatch(
+                "篮球海报",
+                List.of("1", "2", "3", "4", "5", "6"),
+                List.of(), List.of(), "1K", "high", "6", false,
+                "", "", "", "",
+                new AgentScopeRunContext(conversation, request, null, new AgentScopeTurnState()));
+
+        assertThat(result).containsEntry("taskId", "batch-approved")
+                .containsEntry("count", 6);
+    }
+
+    @Test
     void videoToolCreatesAsyncTaskAndReturnsTaskIdWithoutPolling() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);

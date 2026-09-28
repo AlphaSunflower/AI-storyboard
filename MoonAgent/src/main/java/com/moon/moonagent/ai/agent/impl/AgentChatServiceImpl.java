@@ -15,9 +15,11 @@ import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.MoonAgentRuntime;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
 import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
@@ -185,6 +187,12 @@ public class AgentChatServiceImpl implements AgentChatService {
     @Override
     public AgentConversation createConversation(String userId, String projectId, String title,
                                                 String orchestrationMode) {
+        return createConversation(userId, projectId, title, orchestrationMode, null);
+    }
+
+    @Override
+    public AgentConversation createConversation(String userId, String projectId, String title,
+                                                String orchestrationMode, String approvalMode) {
         var project = storyboardClient.getProject(projectId);
         if (project == null) throw new BusinessException(40401, "项目不存在");
         if (!userId.equals(project.get("userId"))) throw new BusinessException(40301, "无权为该项目创建对话");
@@ -198,6 +206,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         conversation.setOrchestrationMode(mode.name());
         conversation.setEngineVersion(mode.engineVersion());
         conversation.setDebugComparisonEnabled(false);
+        conversation.setApprovalMode(AgentApprovalMode.from(approvalMode).name());
         conversationMapper.insert(conversation);
         return conversation;
     }
@@ -346,6 +355,25 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @Override
+    public AgentConversation updateApprovalMode(String userId, String conversationId,
+                                                String approvalMode) {
+        AgentApprovalMode mode = AgentApprovalMode.require(approvalMode);
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
+        if (!conversationLock.tryAcquire(conversationId)) {
+            throw new BusinessException(40901, "当前对话正在处理中，暂时不能切换审批模式");
+        }
+        try {
+            conversation.setApprovalMode(mode.name());
+            conversation.setUpdatedAt(OffsetDateTime.now());
+            conversationMapper.updateById(conversation);
+            return conversation;
+        } finally {
+            conversationLock.release(conversationId);
+        }
+    }
+
+    @Override
     public void deleteAsset(String userId, String assetId) {
         AgentAsset asset = assetMapper.selectById(assetId);
         if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
@@ -423,9 +451,6 @@ public class AgentChatServiceImpl implements AgentChatService {
             requireWritable(getOwnedConversation(userId, conversationId));
         }
         String mediaType = referenceMediaType(file.getContentType());
-        if (mediaType.isBlank()) {
-            throw new com.storyboard.common.BusinessException(40001, "仅支持上传图片、视频或音频文件");
-        }
         String url = fileStorageService.saveUploadedReference(mediaType, file);
 
         // 落库 agent_assets（type=reference）
@@ -439,15 +464,6 @@ public class AgentChatServiceImpl implements AgentChatService {
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
 
-        // 参考图消息落库（conversationId 非空时）：上传的参考图作为 user 消息进入对话记录，
-        // 前端对话窗口可见（MessageBubble 渲染层支持裸图片 URL），刷新后记录仍在
-        if (conversationId != null && !conversationId.isBlank()) {
-            AgentMessage refMsg = new AgentMessage();
-            refMsg.setConversationId(conversationId);
-            refMsg.setRole("user");
-            refMsg.setContent(url);
-            messageMapper.insert(refMsg);
-        }
         return url;
     }
 
@@ -487,11 +503,11 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     static String referenceMediaType(String contentType) {
-        if (contentType == null) return "";
+        if (contentType == null || contentType.isBlank()) return "file";
         if (contentType.startsWith("image/")) return "image";
         if (contentType.startsWith("video/") || contentType.contains("quicktime")) return "video";
         if (contentType.startsWith("audio/")) return "audio";
-        return "";
+        return "file";
     }
 
     @Override
@@ -504,7 +520,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                                          List<String> requestedPicUrls, List<String> requestedAssetIds,
                                          String requestedRoutingHint,
                                          List<String> requestedReferenceVideos,
-                                         List<String> requestedReferenceAudios) {
+                                         List<String> requestedReferenceAudios,
+                                         List<AgentAttachmentRequest> requestedAttachments) {
         List<AgentMessage> messages = listMessages(conversation.getId());
         int targetIndex = -1;
         for (int i = 0; i < messages.size(); i++) {
@@ -536,6 +553,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                 requestedReferenceAudios == null || requestedReferenceAudios.isEmpty()
                         ? stringList(previousInput.get("referenceAudios"))
                         : requestedReferenceAudios;
+        List<AgentAttachmentRequest> attachments =
+                requestedAttachments == null || requestedAttachments.isEmpty()
+                        ? attachmentList(previousInput.get("attachments"))
+                        : requestedAttachments;
         String routingHint = requestedRoutingHint == null || requestedRoutingHint.isBlank()
                 ? (previousInput.get("routingHint") == null
                         ? null : String.valueOf(previousInput.get("routingHint")))
@@ -552,7 +573,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         transactionTemplate().executeWithoutResult(tx -> {
             target.setContent(content);
             target.setMetadata(messageInputMetadata(
-                    picUrls, assetIds, routingHint, referenceVideos, referenceAudios));
+                    picUrls, assetIds, routingHint, referenceVideos, referenceAudios, attachments));
             messageMapper.updateById(target);
             if (!laterMessageIds.isEmpty()) {
                 messageMapper.deleteBatchIds(laterMessageIds);
@@ -570,12 +591,14 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private Map<String, Object> messageInputMetadata(List<String> picUrls, List<String> assetIds,
                                                      String routingHint, List<String> referenceVideos,
-                                                     List<String> referenceAudios) {
+                                                     List<String> referenceAudios,
+                                                     List<AgentAttachmentRequest> attachments) {
         Map<String, Object> input = new LinkedHashMap<>();
         if (picUrls != null && !picUrls.isEmpty()) input.put("picUrls", picUrls);
         if (assetIds != null && !assetIds.isEmpty()) input.put("assetIds", assetIds);
         if (referenceVideos != null && !referenceVideos.isEmpty()) input.put("referenceVideos", referenceVideos);
         if (referenceAudios != null && !referenceAudios.isEmpty()) input.put("referenceAudios", referenceAudios);
+        if (attachments != null && !attachments.isEmpty()) input.put("attachments", attachments);
         if (routingHint != null && !routingHint.isBlank()) input.put("routingHint", routingHint);
         return Map.of("messageInput", input);
     }
@@ -583,13 +606,14 @@ public class AgentChatServiceImpl implements AgentChatService {
     private void persistUserMessage(AgentConversation conversation, String content,
                                     List<String> picUrls, List<String> assetIds,
                                     String routingHint, List<String> referenceVideos,
-                                    List<String> referenceAudios) {
+                                    List<String> referenceAudios,
+                                    List<AgentAttachmentRequest> attachments) {
         AgentMessage userMessage = new AgentMessage();
         userMessage.setConversationId(conversation.getId());
         userMessage.setRole("user");
         userMessage.setContent(content);
         userMessage.setMetadata(messageInputMetadata(picUrls, assetIds, routingHint,
-                referenceVideos, referenceAudios));
+                referenceVideos, referenceAudios, attachments));
         maybeScheduleTitleRename(conversation, content);
         transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
     }
@@ -606,6 +630,31 @@ public class AgentChatServiceImpl implements AgentChatService {
     private List<String> stringList(Object value) {
         if (!(value instanceof List<?> list)) return List.of();
         return list.stream().map(String::valueOf).toList();
+    }
+
+    private List<AgentAttachmentRequest> attachmentList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream()
+                .filter(Map.class::isInstance)
+                .map(item -> {
+                    Map<?, ?> map = (Map<?, ?>) item;
+                    Object size = map.get("sizeBytes");
+                    Long sizeBytes = size instanceof Number number ? number.longValue() : null;
+                    return new AgentAttachmentRequest(
+                            attachmentString(map, "url", ""),
+                            attachmentString(map, "name", "未命名文件"),
+                            attachmentString(map, "mimeType", ""),
+                            sizeBytes,
+                            attachmentString(map, "kind", "file"));
+                })
+                .filter(item -> item.url() != null && !item.url().isBlank())
+                .toList();
+    }
+
+    private String attachmentString(Map<?, ?> map, String key, String fallback) {
+        Object value = map.get(key);
+        return value == null || String.valueOf(value).isBlank()
+                ? fallback : String.valueOf(value);
     }
 
 
@@ -757,9 +806,22 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      CanvasSessionContext canvasContext,
                                      List<String> referenceVideos, List<String> referenceAudios,
                                      SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                List.of(), emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     List<AgentAttachmentRequest> attachments,
+                                     SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                true, emitter);
+                attachments, true, emitter);
     }
 
     private void streamAgentScopeTurnInternal(String userId, String conversationId, String content,
@@ -767,6 +829,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                               String routingHint, String editMessageId,
                                               CanvasSessionContext canvasContext,
                                               List<String> referenceVideos, List<String> referenceAudios,
+                                              List<AgentAttachmentRequest> attachments,
                                               boolean persistUser, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         if (!requireAgentScope(emitter)) {
@@ -793,11 +856,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                         referenceVideos == null ? List.of() : referenceVideos;
                 List<String> effectiveReferenceAudios =
                         referenceAudios == null ? List.of() : referenceAudios;
+                List<AgentAttachmentRequest> effectiveAttachments =
+                        attachments == null ? List.of() : attachments;
                 String effectiveRoutingHint = routingHint;
                 if (editMessageId != null && !editMessageId.isBlank()) {
                     EditedTurn edited = prepareEditedTurn(
                             userId, conversation, editMessageId, content, effectivePicUrls, assetIds,
-                            routingHint, effectiveReferenceVideos, effectiveReferenceAudios);
+                            routingHint, effectiveReferenceVideos, effectiveReferenceAudios,
+                            effectiveAttachments);
                     effectiveContent = edited.content();
                     effectivePicUrls = edited.picUrls();
                     effectiveAssetIds = edited.assetIds();
@@ -806,7 +872,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     effectiveRoutingHint = edited.routingHint();
                 } else if (persistUser) {
                     persistUserMessage(conversation, content, effectivePicUrls, effectiveAssetIds,
-                            effectiveRoutingHint, effectiveReferenceVideos, effectiveReferenceAudios);
+                            effectiveRoutingHint, effectiveReferenceVideos, effectiveReferenceAudios,
+                            effectiveAttachments);
                 }
                 Map<String, Object> started = new LinkedHashMap<>();
                 started.put("turnId", turn.getId());
@@ -959,6 +1026,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 && agentScopeMediaRuntime.enabled());
         status.put("runtime", agentScopeMediaRuntime == null
                 ? "classpath" : agentScopeMediaRuntime.assetStatus());
+        status.put("approvalMode", AgentApprovalMode.from(conversation.getApprovalMode()).name());
         status.put("turnProtocol", "agentscope-envelope-v1");
         if (agentScopeMediaRuntime != null && agentScopeMediaRuntime.enabled()) {
             status.put("assets", agentScopeMediaRuntime.assetStatus());
@@ -966,6 +1034,19 @@ public class AgentChatServiceImpl implements AgentChatService {
         boolean locked = !conversationLock.tryAcquire(conversationId);
         status.put("locked", locked);
         if (!locked) conversationLock.release(conversationId);
+        if (turnEventStore != null) {
+            com.moon.moonagent.entity.AgentTurnEntity activeTurn =
+                    turnEventStore.findActive(conversationId);
+            if (activeTurn != null) {
+                Map<String, Object> turn = new LinkedHashMap<>();
+                turn.put("turnId", activeTurn.getId());
+                turn.put("status", activeTurn.getStatus());
+                turn.put("lastSequence", activeTurn.getLastSequence());
+                turn.put("inputText", activeTurn.getInputText());
+                turn.put("startedAt", activeTurn.getStartedAt());
+                status.put("activeTurn", turn);
+            }
+        }
         return status;
     }
 

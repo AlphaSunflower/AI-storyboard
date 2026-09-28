@@ -1,8 +1,10 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.dto.request.AgentEditMessageRequest;
 import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
+import com.moon.moonagent.dto.request.AgentApprovalModeUpdateRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
 import com.moon.moonagent.dto.request.AgentSendMessageRequest;
@@ -67,7 +69,8 @@ public class AgentConversationController {
     public ApiResponse<AgentConversationVO> createConversation(
             Authentication auth, @Valid @RequestBody AgentCreateConversationRequest request) {
         return ApiResponse.ok(toVO(chatService.createConversation(
-                auth.getName(), request.projectId(), request.title(), request.orchestrationMode())));
+                auth.getName(), request.projectId(), request.title(),
+                request.orchestrationMode(), request.approvalMode())));
     }
 
     /** 当前用户的项目会话列表（updated_at 倒序） */
@@ -181,16 +184,22 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.listAssets(id, page, size));
     }
 
-    /** 上传参考素材（图片/视频/音频）：存对应 MinIO 目录 → 返回 URL → 落库 agent_assets(type=reference) */
+    /** 上传对话附件：保存到 MinIO → 落库 agent_assets(type=reference)，返回可持久化的文件元数据。 */
     @PostMapping("/upload")
-    public ApiResponse<Map<String, String>> uploadImage(
+    public ApiResponse<Map<String, Object>> uploadImage(
               Authentication auth,
               @RequestParam("file") MultipartFile file,
               @RequestParam(required = false) String conversationId,
               @RequestParam(required = false) String purpose,
               @RequestParam(required = false) String kind) {
         String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file, purpose, kind);
-        return ApiResponse.ok(Map.of("url", url));
+        return ApiResponse.ok(Map.of(
+                "url", url,
+                "name", file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
+                        ? "未命名文件" : file.getOriginalFilename(),
+                "mimeType", file.getContentType() == null ? "" : file.getContentType(),
+                "sizeBytes", file.getSize()
+        ));
     }
 
     /** 提示词优化：草稿 → 优化后的专业提示词（LLM 自判类型；≥6 字符；不落库、不关联会话） */
@@ -236,10 +245,17 @@ public class AgentConversationController {
         }
         ResolvedTurnMedia media = resolveTurnMedia(auth, id, request);
         SseEmitter emitter = createSseEmitter();
-        chatService.streamAgentScopeTurn(
-                auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
-                request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
-                media.audioUrls(), emitter);
+        if (request.attachments() != null && !request.attachments().isEmpty()) {
+            chatService.streamAgentScopeTurn(
+                    auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
+                    request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
+                    media.audioUrls(), request.attachments(), emitter);
+        } else {
+            chatService.streamAgentScopeTurn(
+                    auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
+                    request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
+                    media.audioUrls(), emitter);
+        }
         return emitter;
     }
 
@@ -372,6 +388,16 @@ public class AgentConversationController {
                 auth.getName(), id, request.title(), request.status())));
     }
 
+    /** 更新会话级 AgentScope 审批模式；运行中的 turn 不允许切换。 */
+    @PatchMapping("/conversations/{id}/approval-mode")
+    public ApiResponse<AgentConversationVO> updateApprovalMode(
+            Authentication auth,
+            @PathVariable String id,
+            @Valid @RequestBody AgentApprovalModeUpdateRequest request) {
+        return ApiResponse.ok(toVO(chatService.updateApprovalMode(
+                auth.getName(), id, request.approvalMode())));
+    }
+
     /** 删除资产（仅限归属本人会话；未归属资产拒绝） */
     @DeleteMapping("/assets/{id}")
     public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
@@ -447,6 +473,7 @@ public class AgentConversationController {
                 c.getOrchestrationMode() == null ? "AGENTSCOPE" : c.getOrchestrationMode(),
                 c.getEngineVersion() == null ? "agentscope-java-2.0.3" : c.getEngineVersion(),
                 c.getDebugComparisonEnabled() == null || c.getDebugComparisonEnabled(),
+                c.getApprovalMode() == null ? "PLAN_APPROVAL" : c.getApprovalMode(),
                 c.getCreatedAt(), c.getUpdatedAt());
     }
 

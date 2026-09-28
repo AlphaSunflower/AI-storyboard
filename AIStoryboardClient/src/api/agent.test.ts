@@ -106,4 +106,27 @@ describe('streamChat', () => {
       title: '新对话',
     });
   });
+
+  it('sends approvalMode when creating a conversation with an explicit policy', async () => {
+    const post = vi.spyOn(client, 'post').mockResolvedValue({ data: { data: {} } });
+
+    await agentApi.createConversation('project-1', '新对话', 'FULL_ACCESS');
+
+    expect(post).toHaveBeenCalledWith('/agent/conversations', {
+      projectId: 'project-1',
+      title: '新对话',
+      approvalMode: 'FULL_ACCESS',
+    });
+  });
+
+  it('updates approval mode through the dedicated endpoint', async () => {
+    const patch = vi.spyOn(client, 'patch').mockResolvedValue({ data: { data: {} } });
+
+    await agentApi.updateApprovalMode('conversation-1', 'REQUEST_APPROVAL');
+
+    expect(patch).toHaveBeenCalledWith(
+      '/agent/conversations/conversation-1/approval-mode',
+      { approvalMode: 'REQUEST_APPROVAL' },
+    );
+  });
 });

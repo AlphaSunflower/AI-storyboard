@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent;
 
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
@@ -28,6 +29,10 @@ public interface AgentChatService {
 
     /** 创建会话并锁定编排引擎；已有会话不得中途切换。 */
     AgentConversation createConversation(String userId, String projectId, String title, String orchestrationMode);
+
+    /** 创建会话并同时锁定编排引擎与会话级审批模式。 */
+    AgentConversation createConversation(String userId, String projectId, String title,
+                                         String orchestrationMode, String approvalMode);
 
     /**
      * 校验会话归属，返回会话。
@@ -63,6 +68,12 @@ public interface AgentChatService {
      * 更新后手动刷新 updatedAt 保证列表置顶）。
      */
     AgentConversation updateConversation(String userId, String conversationId, String title, String status);
+
+    /**
+     * 更新会话级审批模式。运行中的 turn 持有会话锁时拒绝切换，
+     * 保证新模式从下一轮开始生效。
+     */
+    AgentConversation updateApprovalMode(String userId, String conversationId, String approvalMode);
 
     /** 删除资产（仅限归属本人会话的资产；未归属资产拒绝 40401）。 */
     void deleteAsset(String userId, String assetId);
@@ -129,6 +140,15 @@ public interface AgentChatService {
                               String routingHint, String editMessageId,
                               CanvasSessionContext canvasContext,
                               List<String> referenceVideos, List<String> referenceAudios,
+                              SseEmitter emitter);
+
+    /** Same as {@link #streamAgentScopeTurn} with persisted attachment metadata. */
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              List<AgentAttachmentRequest> attachments,
                               SseEmitter emitter);
 
     /** Resume an AgentScope HITL checkpoint and continue the turn stream. */

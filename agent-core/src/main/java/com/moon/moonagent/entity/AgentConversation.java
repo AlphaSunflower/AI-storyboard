@@ -22,6 +22,8 @@ public class AgentConversation {
     private String engineVersion;
     /** 用户端是否显示新旧编排对比开关。 */
     private Boolean debugComparisonEnabled;
+    /** 会话级 AgentScope 审批模式：PLAN_APPROVAL / REQUEST_APPROVAL / FULL_ACCESS。 */
+    private String approvalMode;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

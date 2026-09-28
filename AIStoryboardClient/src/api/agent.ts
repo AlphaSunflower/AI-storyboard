@@ -3,6 +3,10 @@ import { BACKEND_URL } from '../config';
 import type { GatewayModelOption } from './ai';
 import type { CanvasEditContext } from '../lib/canvasEditMode';
 
+export type AgentApprovalMode = 'PLAN_APPROVAL' | 'REQUEST_APPROVAL' | 'FULL_ACCESS';
+
+export const DEFAULT_AGENT_APPROVAL_MODE: AgentApprovalMode = 'PLAN_APPROVAL';
+
 export interface AgentConversation {
   id: string;
   userId: string;
@@ -13,6 +17,7 @@ export interface AgentConversation {
   orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   debugComparisonEnabled?: boolean;
+  approvalMode?: AgentApprovalMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +30,31 @@ export interface ConversationAssetGroupBinding {
   target: string;
   stale: boolean;
   media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string }>;
+}
+
+export type AgentAttachmentKind = 'image' | 'video' | 'audio' | 'file';
+
+export interface AgentAttachment {
+  url: string;
+  name: string;
+  mimeType: string;
+  sizeBytes?: number;
+  kind: AgentAttachmentKind;
+  source?: 'upload' | 'library';
+}
+
+export interface AgentActiveTurn {
+  turnId: string;
+  status: 'running' | 'waiting_user';
+  lastSequence: number;
+  inputText?: string;
+  startedAt?: string;
+}
+
+export interface AgentRuntimeStatus {
+  conversationId: string;
+  locked?: boolean;
+  activeTurn?: AgentActiveTurn;
 }
 
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
@@ -107,6 +137,7 @@ export interface AgentMessageMetadata {
     picUrls?: string[];
     referenceVideos?: string[];
     referenceAudios?: string[];
+    attachments?: AgentAttachment[];
     assetIds?: string[];
     routingHint?: string;
   };
@@ -561,14 +592,25 @@ export const agentApi = {
   removeConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
 
-  createConversation: (projectId: string, title?: string) =>
+  createConversation: (
+    projectId: string,
+    title?: string,
+    approvalMode?: AgentApprovalMode,
+  ) =>
     client.post<{ data: AgentConversation }>('/agent/conversations', {
       projectId,
       title,
+      ...(approvalMode ? { approvalMode } : {}),
     }),
 
   updateConversation: (id: string, data: { title?: string; status?: string }) =>
     client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}`, data),
+
+  updateApprovalMode: (id: string, approvalMode: AgentApprovalMode) =>
+    client.patch<{ data: AgentConversation }>(
+      `/agent/conversations/${id}/approval-mode`,
+      { approvalMode },
+    ),
 
   deleteConversation: (id: string) =>
     client.delete(`/agent/conversations/${id}`),
@@ -623,10 +665,18 @@ export const agentApi = {
     if (conversationId) form.append('conversationId', conversationId);
     if (purpose?.trim()) form.append('purpose', purpose.trim());
     if (kind) form.append('kind', kind);
-    return client.post<{ data: { url: string } }>('/agent/upload', form, {
+    return client.post<{ data: {
+      url: string;
+      name?: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    } }>('/agent/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  getRuntimeStatus: (conversationId: string) =>
+    client.get<{ data: AgentRuntimeStatus }>(`/agent/conversations/${conversationId}/runtime`),
 
   // 满意完成：清空会话图片上下文（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>
@@ -807,6 +857,7 @@ export async function streamChat(
     cancelActiveTasks?: boolean;
     editMessageId?: string;
     canvasContext?: CanvasEditContext;
+    attachments?: AgentAttachment[];
   },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
@@ -821,6 +872,7 @@ export async function streamChat(
       assetGroupSnapshotIds: opts?.assetGroupSnapshotIds ?? [],
       referenceVideos: opts?.referenceVideos ?? [],
       referenceAudios: opts?.referenceAudios ?? [],
+      attachments: opts?.attachments ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
       editMessageId: opts?.editMessageId,

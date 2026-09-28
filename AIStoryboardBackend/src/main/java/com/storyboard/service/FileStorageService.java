@@ -29,8 +29,8 @@ public interface FileStorageService {
     String saveUploadedImage(MultipartFile file);
 
     /**
-     * 保存分镜参考素材（image→images，video→videos，audio→audios）。
-     * @return relative path like /api/files/images|videos|audios/xxx
+     * 保存对话/分镜附件（image→images，video→videos，audio→audios，其他→files）。
+     * @return relative path like /api/files/images|videos|audios|files/xxx
      */
     String saveUploadedReference(String type, MultipartFile file);
 
@@ -49,6 +49,9 @@ public interface FileStorageService {
     /** 读取音频字节；MinIO 对象不存在返回 null。 */
     byte[] readAudio(String filename);
 
+    /** 读取通用文件字节；MinIO 对象不存在返回 null。 */
+    byte[] readFile(String filename);
+
     /** 删除图片对象（best-effort：不存在/失败不抛）。 */
     void deleteImage(String filename);
 
@@ -57,6 +60,9 @@ public interface FileStorageService {
 
     /** 删除音频对象（best-effort：不存在/失败不抛）。 */
     void deleteAudio(String filename);
+
+    /** 删除通用文件对象（best-effort）。 */
+    void deleteFile(String filename);
 
     /** Infer Content-Type from filename extension. */
     static String contentType(String filename) {

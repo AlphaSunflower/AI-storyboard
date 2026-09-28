@@ -43,6 +43,11 @@ public class FileController {
         return serve(fileStorageService.readAudio(filename), filename);
     }
 
+    @GetMapping("/files/{filename}")
+    public ResponseEntity<Resource> getFile(@PathVariable String filename) {
+        return serve(fileStorageService.readFile(filename), filename);
+    }
+
     /** 对象不存在返回 404；存在则以推断的 Content-Type 返回对象字节。 */
     private ResponseEntity<Resource> serve(byte[] bytes, String filename) {
         if (bytes == null) {

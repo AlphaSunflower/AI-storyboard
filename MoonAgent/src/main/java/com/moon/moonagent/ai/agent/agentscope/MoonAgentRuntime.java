@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
@@ -16,6 +17,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
+import com.moon.moonagent.service.FileStorageService;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
@@ -28,6 +30,9 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.AssistantMessage;
+import io.agentscope.core.message.Base64Source;
+import io.agentscope.core.message.ContentBlock;
+import io.agentscope.core.message.ImageBlock;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
@@ -57,6 +62,13 @@ import org.springframework.stereotype.Component;
 import javax.sql.DataSource;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Base64;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -104,6 +116,14 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentSkillRepository skillRepository;
     private final GlobalPromptRepository globalPromptRepository;
     private final NacosMcpMetadataRepository mcpMetadataRepository;
+    private final FileStorageService fileStorageService;
+
+    @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
+    private String assetServiceBaseUrl;
+
+    private final HttpClient attachmentHttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 
     private volatile HarnessAgent agent;
     private volatile AgentStateStore stateStore;
@@ -119,58 +139,6 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             Model model = modelProvider.withFallback();
             stateStore = new PostgresAgentStateStore(
                     dataSource, properties.getStateSchema(), properties.getStateTable(), false);
-            PermissionContextState.Builder permissions = PermissionContextState.builder()
-                    .mode(PermissionMode.DEFAULT);
-            for (String tool : List.of(
-                    "list_session_assets",
-                    "resolve_reference_assets",
-                    "get_generation_task_status",
-                    "list_conversation_tasks",
-                    "get_agent_task",
-                    "list_asset_groups",
-                    "build_media_spec",
-                    "assess_generation_risk",
-                    "task_list",
-                    "task_output",
-                    "wait_async_results",
-                    "agent_list",
-                    "revise_storyboard_production",
-                    "approve_storyboard_production",
-                    "generate_storyboard_image",
-                    "generate_storyboard_video",
-                    "upsert_storyboard_shot",
-                    "list_storyboard_draft",
-                    "list_project_storyboard",
-                    "reorder_storyboard_draft",
-                    "load_skill_through_path",
-                    "reset_equipped_tools")) {
-                permissions.addAllowRule(tool, new PermissionRule(
-                        tool, null, PermissionBehavior.ALLOW, "MoonAgentReadOnlyPolicy"));
-            }
-            for (String tool : List.of(
-                    "generate_image", "generate_video", "refineImage")) {
-                if (properties.isDirectMediaGeneration()) {
-                    permissions.addAllowRule(tool, new PermissionRule(
-                            tool, null, PermissionBehavior.ALLOW, "MoonAgentMediaPolicy"));
-                } else {
-                    permissions.addAskRule(tool, new PermissionRule(
-                            tool, null, PermissionBehavior.ASK, "MoonAgentMediaPolicy"));
-                }
-            }
-            for (String tool : List.of(
-                    "start_storyboard_production",
-                    "generate_storyboard_images",
-                    "delete_storyboard_draft_shot",
-                    "delete_project_storyboard_shot",
-                    "clear_project_storyboard",
-                    "canvas_delete_nodes",
-                    "canvas_delete_edges",
-                    "canvas_execute_node",
-                    "canvas_execute_graph",
-                    "canvas_cancel_execution")) {
-                permissions.addAskRule(tool, new PermissionRule(
-                        tool, null, PermissionBehavior.ASK, "MoonAgentMutationPolicy"));
-            }
             Path workspace = resolveWorkspace();
             try {
                 Files.createDirectories(workspace);
@@ -192,7 +160,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             "canvas-run", "general"))
                     .enableMetaTool(true)
                     .enablePendingToolRecovery(true)
-                    .permissionContext(permissions.build())
+                    .permissionContext(permissionContext(AgentApprovalMode.PLAN_APPROVAL))
                     .middlewares(List.of(
                             new TurnContextMiddleware(),
                             new MediaProgressMiddleware(),
@@ -301,15 +269,109 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                    AgentTraceAccumulator trace, Consumer<AgentEvent> observer) {
         if (!enabled()) return null;
         String input = request.getContent() == null ? "" : request.getContent();
-        if (request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
-            input += "\n\n本轮用户附加图片 URL：" + request.getPicUrls();
-        }
         String taskContext = asyncTasks.consumeUnreadContext(conversation.getId());
         if (!taskContext.isBlank()) {
             input = taskContext + "\n\n本轮用户消息：\n" + input;
         }
-        Msg message = UserMessage.builder().textContent(input).build();
+        Msg message = buildUserMessage(input, request.getPicUrls());
         return stream(conversation, request, trace, List.of(message), null, observer);
+    }
+
+    private Msg buildUserMessage(String input, List<String> imageUrls) {
+        List<String> urls = imageUrls == null ? List.of() : imageUrls.stream()
+                .filter(url -> url != null && !url.isBlank())
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
+        if (urls.isEmpty()) return UserMessage.builder().textContent(input).build();
+
+        List<ContentBlock> content = new ArrayList<>();
+        content.add(TextBlock.builder().text(input).build());
+        int attached = 0;
+        for (String url : urls) {
+            try {
+                AttachmentBytes image = readAttachmentImage(url);
+                if (image == null) continue;
+                content.add(ImageBlock.builder()
+                        .source(Base64Source.builder()
+                                .mediaType(image.mimeType())
+                                .data(Base64.getEncoder().encodeToString(image.bytes()))
+                                .build())
+                        .build());
+                attached++;
+            } catch (Exception error) {
+                log.warn("[AgentScope] failed to attach image url={}: {}", url, error.getMessage());
+            }
+        }
+        if (attached > 0) {
+            content.set(0, TextBlock.builder()
+                    .text("本轮用户附加了 " + attached + " 张图片，请直接查看图片内容，不要调用 web_fetch。\n\n" + input)
+                    .build());
+        } else {
+            content.add(TextBlock.builder()
+                    .text("\n\n本轮附带图片链接（服务端未能转为图片内容）：" + urls)
+                    .build());
+        }
+        return UserMessage.builder().content(content).build();
+    }
+
+    private AttachmentBytes readAttachmentImage(String url) throws Exception {
+        String value = url.trim();
+        if (value.startsWith("data:image/")) {
+            int comma = value.indexOf(',');
+            int semicolon = value.indexOf(';');
+            if (comma < 0 || semicolon < 0 || semicolon > comma) return null;
+            return new AttachmentBytes(
+                    value.substring(5, semicolon),
+                    Base64.getDecoder().decode(value.substring(comma + 1)));
+        }
+        if (value.startsWith("/api/files/")) {
+            String filename = value.substring(value.lastIndexOf('/') + 1);
+            byte[] bytes = value.startsWith("/api/files/images/")
+                    ? fileStorageService.readImage(filename)
+                    : value.startsWith("/api/files/files/")
+                    ? fileStorageService.readFile(filename)
+                    : null;
+            return imageBytes(bytes, filename);
+        }
+        String absolute = value.startsWith("/") && assetServiceBaseUrl != null
+                ? assetServiceBaseUrl.replaceAll("/+$", "") + value
+                : value;
+        if (!absolute.startsWith("http://") && !absolute.startsWith("https://")) return null;
+        HttpResponse<byte[]> response = attachmentHttpClient.send(
+                HttpRequest.newBuilder(URI.create(absolute))
+                        .timeout(Duration.ofSeconds(30))
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) return null;
+        return imageBytes(response.body(), absolute);
+    }
+
+    private static AttachmentBytes imageBytes(byte[] bytes, String source) {
+        if (bytes == null || bytes.length == 0 || bytes.length > 20 * 1024 * 1024) return null;
+        String mime = detectImageMime(bytes);
+        if (mime == null) {
+            String lower = source == null ? "" : source.toLowerCase();
+            if (lower.endsWith(".png")) mime = "image/png";
+            else if (lower.endsWith(".webp")) mime = "image/webp";
+            else if (lower.endsWith(".gif")) mime = "image/gif";
+            else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) mime = "image/jpeg";
+        }
+        return mime == null ? null : new AttachmentBytes(mime, bytes);
+    }
+
+    private static String detectImageMime(byte[] bytes) {
+        if (bytes.length >= 8 && bytes[0] == (byte) 0x89 && bytes[1] == 'P'
+                && bytes[2] == 'N' && bytes[3] == 'G') return "image/png";
+        if (bytes.length >= 3 && bytes[0] == (byte) 0xff && bytes[1] == (byte) 0xd8) return "image/jpeg";
+        if (bytes.length >= 6 && bytes[0] == 'G' && bytes[1] == 'I' && bytes[2] == 'F') return "image/gif";
+        if (bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I'
+                && bytes[2] == 'F' && bytes[3] == 'F') return "image/webp";
+        return null;
+    }
+
+    private record AttachmentBytes(String mimeType, byte[] bytes) {
     }
 
     public AgentTurnResult runWakeup(AgentConversation conversation) {
@@ -380,6 +442,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
                                    AgentTraceAccumulator trace, List<Msg> messages,
                                    String checkpointId, Consumer<AgentEvent> observer) {
+        applyPermissionContext(conversation);
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
@@ -492,6 +555,62 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             request.setTurnMetadata(metadata);
         }
         return turnResult(request, trace, content, paused);
+    }
+
+    void applyPermissionContext(AgentConversation conversation) {
+        if (agent == null || conversation == null) return;
+        AgentApprovalMode mode = AgentApprovalMode.from(conversation.getApprovalMode());
+        agent.getDelegate().replacePermissionContext(
+                conversation.getUserId(), conversation.getId(), permissionContext(mode));
+    }
+
+    static PermissionContextState permissionContext(AgentApprovalMode mode) {
+        AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
+        PermissionContextState.Builder permissions = PermissionContextState.builder()
+                .mode(effective == AgentApprovalMode.FULL_ACCESS
+                        ? PermissionMode.BYPASS : PermissionMode.DEFAULT);
+        for (String tool : List.of(
+                "list_session_assets",
+                "resolve_reference_assets",
+                "get_generation_task_status",
+                "list_conversation_tasks",
+                "get_agent_task",
+                "list_asset_groups",
+                "build_media_spec",
+                "assess_generation_risk",
+                "task_list",
+                "task_output",
+                "wait_async_results",
+                "agent_list",
+                "list_storyboard_draft",
+                "list_project_storyboard",
+                "load_skill_through_path",
+                "reset_equipped_tools")) {
+            permissions.addAllowRule(tool, new PermissionRule(
+                    tool, null, PermissionBehavior.ALLOW, "MoonAgentReadOnlyPolicy"));
+        }
+        for (String tool : List.of(
+                "generate_image",
+                "generate_image_batch",
+                "refineImage",
+                "generate_video",
+                "generate_storyboard_image",
+                "generate_storyboard_video",
+                "generate_storyboard_images",
+                "start_storyboard_production",
+                "update_project_storyboard_shot",
+                "delete_storyboard_draft_shot",
+                "delete_project_storyboard_shot",
+                "clear_project_storyboard",
+                "canvas_delete_nodes",
+                "canvas_delete_edges",
+                "canvas_execute_node",
+                "canvas_execute_graph",
+                "canvas_cancel_execution")) {
+            permissions.addAskRule(tool, new PermissionRule(
+                    tool, null, PermissionBehavior.ASK, "MoonAgentHighRiskPolicy"));
+        }
+        return permissions.build();
     }
 
     static AgentScopeTurnState.ReferenceInputMode classifyReferenceInput(

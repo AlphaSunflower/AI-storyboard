@@ -4,11 +4,14 @@ import {
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type AgentTurnEventEnvelope, type AgentScopeEvent,
   type AgentTurnMetrics, type VideoTaskStatus, type AssetOption,
+  type AgentApprovalMode,
   type AgentTaskView,
   type AgentWakeupMessage,
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
+  type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
+  DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
@@ -59,6 +62,65 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item) => typeof item === 'string' && item.length > 0)
     : [];
+}
+
+const PENDING_ATTACHMENTS_KEY = 'moon.agent.pendingAttachments';
+
+function pendingAttachmentsKey(conversationId?: string | null) {
+  return `${PENDING_ATTACHMENTS_KEY}.${conversationId || 'draft'}`;
+}
+
+function isAgentAttachment(value: unknown): value is AgentAttachment {
+  const item = asRecord(value);
+  return !!item
+    && typeof item.url === 'string'
+    && typeof item.name === 'string'
+    && ['image', 'video', 'audio', 'file'].includes(String(item.kind));
+}
+
+function readPendingAttachments(conversationId?: string | null): AgentAttachment[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(pendingAttachmentsKey(conversationId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(isAgentAttachment) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPendingAttachments(conversationId: string | null | undefined, attachments: AgentAttachment[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = pendingAttachmentsKey(conversationId);
+    if (attachments.length === 0) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify(attachments));
+  } catch {
+    // Storage can be unavailable in private mode; the in-memory state still works.
+  }
+}
+
+function attachmentsFromMessages(messages: AgentMessage[]): AgentAttachment[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const attachments = messages[index].metadata?.messageInput?.attachments;
+    if (attachments?.length) return attachments.filter(isAgentAttachment);
+  }
+  return [];
+}
+
+function pendingMediaFromAttachments(attachments: AgentAttachment[]) {
+  return {
+    refImageUrls: attachments.filter((item) => item.kind === 'image').map((item) => item.url),
+    pickedReferenceVideos: attachments.filter((item) => item.kind === 'video').map((item) => item.url),
+    pickedReferenceAudios: attachments.filter((item) => item.kind === 'audio').map((item) => item.url),
+  };
+}
+
+function attachmentKind(file: File): AgentAttachmentKind {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('video/') || file.type.includes('quicktime')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  return 'file';
 }
 
 function deepFindRecordWith(value: unknown, predicate: (record: Record<string, unknown>) => boolean): Record<string, unknown> | null {
@@ -379,12 +441,18 @@ interface AgentState {
   // 会话
   conversations: AgentConversation[];
   activeConversationId: string | null;
+  /** 新会话草稿模式；已有会话以 AgentConversation.approvalMode 为准。 */
+  pendingApprovalMode: AgentApprovalMode;
   loadingConversations: boolean;
   loadConversations: () => Promise<void>;
   /** 新建对话：仅重置本地为空白草稿（不落库、不进列表）。真正建会话在首次发送消息时由 sendMessage 自动完成。 */
   newConversation: () => void;
   /** 真正创建并落库一个会话（sendMessage 首次发送时自动调用）：POST 后端 + 插到列表头 + 选中。 */
   createConversation: () => Promise<void>;
+  setApprovalMode: (
+    mode: AgentApprovalMode,
+    options?: { confirmedFullAccess?: boolean },
+  ) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationStatus: (id: string, status: 'active' | 'archived') => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -437,6 +505,11 @@ interface AgentState {
   setRefImageUrls: (v: string[]) => void;
   addRefImageUrls: (urls: string[]) => void;
   removeRefImageUrl: (index: number) => void;
+  pendingAttachments: AgentAttachment[];
+  setPendingAttachments: (attachments: AgentAttachment[]) => void;
+  addPendingAttachments: (attachments: AgentAttachment[]) => void;
+  removePendingAttachment: (url: string) => void;
+  clearPendingAttachments: () => void;
   uploadRefImage: (file: File, purpose?: string, kind?: 'reference' | 'asset') => Promise<void>;
   uploadRefImages: (files: File[], purposes?: string[], kinds?: Array<'reference' | 'asset'>) => Promise<void>;
   addLocalUserMessage: (content: string) => void;
@@ -474,6 +547,7 @@ interface AgentState {
     cancelActiveTasks?: boolean;
     editMessageId?: string;
     interruptCurrent?: boolean;
+    attachments?: AgentAttachment[];
   }) => Promise<void>;
   submitHumanInput: (
     actionId: string,
@@ -835,6 +909,108 @@ async function reconnectTurnThenRecover(conversationId: string) {
     }
   }
   await useAgentStore.getState().recoverPendingCheckpoint(conversationId);
+}
+
+function reconnectDelay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * A page refresh drops the browser SSE connection, but the backend turn keeps
+ * running and records every sequenced event. Rebuild the generating bubble from
+ * the persisted turn and poll event replay until a terminal envelope arrives.
+ */
+async function restorePersistedTurn(conversationId: string) {
+  let active: AgentActiveTurn | undefined;
+  try {
+    const response = await agentApi.getRuntimeStatus(conversationId);
+    active = response.data.data.activeTurn;
+  } catch {
+    return;
+  }
+  if (!active || active.status !== 'running') return;
+  if (useAgentStore.getState().activeConversationId !== conversationId) return;
+  if (useAgentStore.getState().generating[conversationId]?.finished === false) return;
+
+  const assistantId = `restored-assistant-${active.turnId}`;
+  useAgentStore.setState((state) => {
+    if (state.activeConversationId !== conversationId) return state;
+    const messages = state.messages.filter((message) => message.id !== assistantId);
+    return {
+      streaming: true,
+      pendingAssistantId: assistantId,
+      workflowHint: 'AgentScope 正在处理',
+      generating: {
+        ...state.generating,
+        [conversationId]: {
+          hint: 'AgentScope 正在处理',
+          turnId: active.turnId,
+          assistantId,
+          assistantContent: '',
+          finished: false,
+        },
+      },
+      messages: [...messages, {
+        id: assistantId,
+        conversationId,
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    };
+  });
+
+  let afterSeq = 0;
+  let terminal: AgentTurnEventEnvelope['type'] | null = null;
+  let pollCount = 0;
+  while (useAgentStore.getState().activeConversationId === conversationId) {
+    let events: AgentTurnEventEnvelope[] = [];
+    try {
+      const response = await agentApi.listTurnEvents(conversationId, active.turnId, afterSeq);
+      events = response.data.data ?? [];
+    } catch {
+      await reconnectDelay(1500);
+      continue;
+    }
+    for (const envelope of events) {
+      applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      afterSeq = Math.max(afterSeq, envelope.seq);
+      if (envelope.type === 'turn_completed'
+          || envelope.type === 'turn_failed'
+          || envelope.type === 'turn_paused') {
+        terminal = envelope.type;
+      }
+    }
+    if (terminal) break;
+    pollCount += 1;
+    if (pollCount % 5 === 0) {
+      try {
+        const latest = await agentApi.getRuntimeStatus(conversationId);
+        const status = latest.data.data.activeTurn?.status;
+        if (!status || status === 'waiting_user') break;
+      } catch {
+        // Keep replaying; a transient status failure should not abort recovery.
+      }
+    }
+    await reconnectDelay(1000);
+  }
+
+  if (terminal === 'turn_completed') finishAssistantReply(conversationId, assistantId);
+  useAgentStore.setState((state) => {
+    const generating = { ...state.generating };
+    if (generating[conversationId]?.assistantId === assistantId) delete generating[conversationId];
+    const view = state.activeConversationId ? generating[state.activeConversationId] : undefined;
+    return {
+      generating,
+      streaming: generationInProgress(view),
+      workflowHint: generationHint(view),
+      ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
+    };
+  });
+  if (terminal === 'turn_completed'
+      && useAgentStore.getState().activeConversationId === conversationId) {
+    await refreshConversationMessages(conversationId);
+  }
 }
 
 type AgentScopeTaskAccepted = {
@@ -1528,6 +1704,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   conversations: [],
   activeConversationId: null,
+  pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
   loadingConversations: false,
   loadConversations: async () => {
     const projectId = useProjectStore.getState().currentProject?.id;
@@ -1548,6 +1725,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     clearCanvasEditContext();
     set({
       activeConversationId: null,
+      pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
       canvasEditContext: null,
       canvasBinding: null,
       canvasBindingStatus: '',
@@ -1562,6 +1740,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       confirmResult: null,
       pendingPicUrls: [],
       refImageUrls: [],
+      pendingAttachments: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
       workflowHint: '',
       generating: {},
     });
@@ -1570,10 +1751,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   createConversation: async () => {
     const projectId = useProjectStore.getState().currentProject?.id;
     if (!projectId) return;
-    const res = await agentApi.createConversation(projectId, '新对话');
+    const res = await agentApi.createConversation(
+      projectId,
+      '新对话',
+      get().pendingApprovalMode,
+    );
     const conv = res.data.data;
     set((s) => ({ conversations: [conv, ...s.conversations] }));
     await get().selectConversation(conv.id);
+  },
+
+  setApprovalMode: async (mode, options) => {
+    if (get().streaming || get().waitingHumanInput || get().waitingVideoPlan
+        || get().canvasBinding || get().canvasExitPending) return;
+    if (mode === 'FULL_ACCESS' && !options?.confirmedFullAccess) return;
+    const id = get().activeConversationId;
+    if (!id) {
+      set({ pendingApprovalMode: mode, streamError: null });
+      return;
+    }
+    try {
+      const res = await agentApi.updateApprovalMode(id, mode);
+      const updated = res.data.data;
+      set((s) => ({
+        pendingApprovalMode: mode,
+        conversations: s.conversations.map((conversation) =>
+          conversation.id === id ? updated : conversation),
+        streamError: null,
+      }));
+    } catch (error) {
+      set({
+        streamError: error instanceof Error ? error.message : '切换审批模式失败，请重试',
+      });
+    }
   },
 
   renameConversation: async (id, title) => {
@@ -1607,6 +1817,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
         activeConversationId: active,
+        pendingApprovalMode: isActive ? DEFAULT_AGENT_APPROVAL_MODE : s.pendingApprovalMode,
         generating: g,
         streaming: generationInProgress(gview),
         workflowHint: generationHint(gview),
@@ -1641,6 +1852,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const g = s.generating[id];
       return {
         activeConversationId: id,
+        pendingApprovalMode: s.conversations.find((conversation) => conversation.id === id)
+          ?.approvalMode ?? DEFAULT_AGENT_APPROVAL_MODE,
         messages: [],
         streaming: generationInProgress(g),
         workflowHint: generationHint(g),
@@ -1649,7 +1862,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
         pendingAssistantId: null,
-        confirmResult: null, pendingPicUrls: [], refImageUrls: [], pickedAssetIds: [],
+        confirmResult: null, pendingPicUrls: [], refImageUrls: [], pendingAttachments: [],
+        pickedReferenceVideos: [], pickedReferenceAudios: [], pickedAssetIds: [],
         taskUnread: { ...s.taskUnread, [id]: 0 },
         taskFocusId: null,
       };
@@ -1659,9 +1873,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     await get().restoreCanvasMode(id);
     const g = get().generating[id];
     const base = res.data.data ?? [];
-    set({ messages: g?.assistantId
-      ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
-      : base });
+    const savedAttachments = readPendingAttachments(id);
+    const restoredAttachments = savedAttachments.length
+      ? savedAttachments
+      : attachmentsFromMessages(base);
+    set({
+      messages: g?.assistantId
+        ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
+        : base,
+      pendingAttachments: restoredAttachments,
+      ...pendingMediaFromAttachments(restoredAttachments),
+    });
+    void restorePersistedTurn(id);
     const conv = get().conversations.find((c) => c.id === id);
     if (conv) {
       initialSceneCount = useProjectStore.getState().scenes.length;
@@ -1873,7 +2096,42 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   refImageUrls: [],
   setRefImageUrls: (v) => set({ refImageUrls: v }),
   addRefImageUrls: (urls) => set((s) => ({ refImageUrls: [...new Set([...s.refImageUrls, ...urls])] })),
-  removeRefImageUrl: (index) => set((s) => ({ refImageUrls: s.refImageUrls.filter((_, i) => i !== index) })),
+  removeRefImageUrl: (index) => set((s) => {
+    const removed = s.refImageUrls[index];
+    return {
+      refImageUrls: s.refImageUrls.filter((_, i) => i !== index),
+      pendingAttachments: removed
+        ? s.pendingAttachments.filter((item) => item.url !== removed)
+        : s.pendingAttachments,
+    };
+  }),
+  pendingAttachments: readPendingAttachments(null),
+  setPendingAttachments: (attachments) => set((s) => {
+    const next = attachments.filter(isAgentAttachment);
+    persistPendingAttachments(s.activeConversationId, next);
+    return { pendingAttachments: next, ...pendingMediaFromAttachments(next) };
+  }),
+  addPendingAttachments: (attachments) => set((s) => {
+    const map = new Map(s.pendingAttachments.map((item) => [item.url, item]));
+    attachments.filter(isAgentAttachment).forEach((item) => map.set(item.url, item));
+    const next = [...map.values()];
+    persistPendingAttachments(s.activeConversationId, next);
+    return { pendingAttachments: next, ...pendingMediaFromAttachments(next) };
+  }),
+  removePendingAttachment: (url) => set((s) => {
+    const next = s.pendingAttachments.filter((item) => item.url !== url);
+    persistPendingAttachments(s.activeConversationId, next);
+    return { pendingAttachments: next, ...pendingMediaFromAttachments(next) };
+  }),
+  clearPendingAttachments: () => set((s) => {
+    persistPendingAttachments(s.activeConversationId, []);
+    return {
+      pendingAttachments: [],
+      refImageUrls: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+    };
+  }),
 
   pickedAssetIds: [],
   addPickedAssetId: (id) => set((s) => ({ pickedAssetIds: [...new Set([...s.pickedAssetIds, id])] })),
@@ -1886,41 +2144,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     pickedReferenceVideos: [...new Set(videos)],
     pickedReferenceAudios: [...new Set(audios)],
   }),
-  clearPickedReferenceMedia: () => set({ pickedReferenceVideos: [], pickedReferenceAudios: [] }),
+  clearPickedReferenceMedia: () => set((s) => ({
+    pickedReferenceVideos: [],
+    pickedReferenceAudios: [],
+    pendingAttachments: s.pendingAttachments.filter((item) => item.kind === 'image' || item.kind === 'file'),
+  })),
 
   uploadRefImage: async (file, purpose?, kind?) => {
     const res = await agentApi.uploadImage(file, get().activeConversationId ?? undefined, purpose, kind);
-    const url = res.data.data.url;
-    const mediaKind: AgentMediaRef['kind'] = file.type.startsWith('video/')
-      ? 'video'
-      : file.type.startsWith('audio/') ? 'audio'
-      : file.type.startsWith('image/') ? 'image' : 'file';
+    const payload = res.data.data;
+    const url = payload.url;
+    const mediaKind = attachmentKind(file);
+    const canvasKind: AgentMediaRef['kind'] = mediaKind;
     const absoluteUrl = (() => {
       try { return new URL(url, window.location.origin).toString(); } catch { return url; }
     })();
-    if (mediaKind === 'image' && !get().canvasEditContext) {
-      set((s) => ({ refImageUrls: [...s.refImageUrls, url] }));
-    }
     get().addCanvasMediaRefs([{
-      kind: mediaKind,
+      kind: canvasKind,
       url: absoluteUrl,
       name: file.name,
-      mimeType: file.type || undefined,
+      mimeType: payload.mimeType || file.type || undefined,
       source: 'upload',
     }]);
-    // 参考图消息显示到对话窗口（与后端 upload 端点落库的 user 消息对齐，刷新后仍在）。
-    // 首会话（未选会话，cid 为空）也 push——后端 upload 未归属，但此时可见；首条消息发出去后
-    // 后端 streamMessage 会把该 url 的未归属资产认领到新会话（见 AgentChatServiceImpl）。
-    const cid = get().activeConversationId;
-    const refMsg: AgentMessage = {
-      id: `tmp-ref-${Date.now()}`,
-      conversationId: cid ?? '',
-      role: 'user',
-      content: url,
-      
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, refMsg] }));
+    get().addPendingAttachments([{
+      url,
+      name: payload.name || file.name || '未命名文件',
+      mimeType: payload.mimeType || file.type || 'application/octet-stream',
+      sizeBytes: payload.sizeBytes ?? file.size,
+      kind: mediaKind,
+      source: 'upload',
+    }]);
   },
   uploadRefImages: async (files, purposes, kinds) => {
     for (let i = 0; i < files.length; i++) {
@@ -1972,6 +2225,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     cancelActiveTasks?: boolean;
     editMessageId?: string;
     interruptCurrent?: boolean;
+    attachments?: AgentAttachment[];
   }) => {
     const editMessageId = opts?.editMessageId;
     const interruptCurrent = !!opts?.interruptCurrent && get().streaming;
@@ -2028,6 +2282,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const refBefore = get().refImageUrls.map((u) => u);
     const referenceVideosBefore = get().pickedReferenceVideos.map((u) => u);
     const referenceAudiosBefore = get().pickedReferenceAudios.map((u) => u);
+    const attachmentsBefore = get().pendingAttachments.map((item) => ({ ...item }));
     // 同样的坑：createConversation → selectConversation 会清空 pickedAssetIds，必须先快照
     const assetIdsBefore = get().pickedAssetIds.map((id) => id);
     const requestPicUrls = (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
@@ -2036,6 +2291,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const requestAssetIds = opts?.assetIds && opts.assetIds.length > 0 ? opts.assetIds
       : assetIdsBefore.length > 0 ? assetIdsBefore
       : get().pickedAssetIds;
+    const requestAttachments = opts?.attachments && opts.attachments.length > 0
+      ? opts.attachments
+      : attachmentsBefore;
+    const requestReferenceVideos = opts?.referenceVideos ?? referenceVideosBefore;
+    const requestReferenceAudios = opts?.referenceAudios ?? referenceAudiosBefore;
     const canvasContext = buildCanvasRequestContext(get().canvasEditContext, {
       picUrls: requestPicUrls,
       assetIds: requestAssetIds,
@@ -2056,10 +2316,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id = get().activeConversationId;
     }
     if (!id) return;
-    // 首会话：selectConversation 已重置 messages，把参考图消息插回（保持对话窗可见）
-    if (refBefore.length > 0 && get().messages.length === 0) {
-      set({ messages: refBefore.map((u, i) => ({ id: `tmp-ref-${Date.now()}-${i}`, conversationId: id, role: 'user' as const, content: u, createdAt: new Date().toISOString() })) });
-    }
+    persistPendingAttachments(id, attachmentsBefore);
     // 继续完善参考图：点"继续完善"后暂存的 PicUrls，随本条用户消息发送并消费（只带一次，
     // 避免后续普通消息也误带图片导致误判 pic-refine 意图）
     const pendingPic = get().pendingPicUrls;
@@ -2071,14 +2328,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       conversationId: id,
       role: 'user',
       content,
-
+      metadata: {
+        messageInput: {
+          ...(requestPicUrls.length > 0 ? { picUrls: requestPicUrls } : {}),
+          ...(requestReferenceVideos.length > 0 ? { referenceVideos: requestReferenceVideos } : {}),
+          ...(requestReferenceAudios.length > 0 ? { referenceAudios: requestReferenceAudios } : {}),
+          ...(requestAssetIds.length > 0 ? { assetIds: requestAssetIds } : {}),
+          ...(requestAttachments.length > 0 ? { attachments: requestAttachments } : {}),
+          ...(opts?.routingHint ? { routingHint: opts.routingHint } : {}),
+        },
+      },
       createdAt: new Date().toISOString(),
     };
     set((s) => ({
       messages: editMessageId
         ? s.messages
             .slice(0, editTargetIndex + 1)
-            .map((message) => message.id === editMessageId ? { ...message, content } : message)
+            .map((message) => message.id === editMessageId
+              ? { ...message, content, metadata: optimisticUser.metadata }
+              : message)
         : [...s.messages, optimisticUser],
       streaming: true,
       generating: { ...s.generating, [id]: { hint: '', finished: false } },
@@ -2204,8 +2472,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         ...opts,
         editMessageId,
         canvasContext,
-        referenceVideos: opts?.referenceVideos ?? referenceVideosBefore,
-        referenceAudios: opts?.referenceAudios ?? referenceAudiosBefore,
+        referenceVideos: requestReferenceVideos,
+        referenceAudios: requestReferenceAudios,
+        attachments: requestAttachments,
       });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
@@ -2975,7 +3244,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     videoPollToken += 1;
     clearCanvasEditContext();
     set({ messages: [], generating: {}, timelineByConversation: {}, streaming: false, waitingHumanInput: null,
+       pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
+       pendingAttachments: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
        pendingAssistantId: null,
        confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
        canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false });

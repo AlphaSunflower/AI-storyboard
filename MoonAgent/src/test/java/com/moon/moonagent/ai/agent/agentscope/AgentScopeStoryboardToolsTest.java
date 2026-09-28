@@ -333,6 +333,37 @@ class AgentScopeStoryboardToolsTest {
     }
 
     @Test
+    void approvedPlanCanOverwriteStoryboardImagesWithoutASecondConfirmation() {
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        Scene existing = scene("scene-1", 1, "第一镜");
+        existing.setImageUrl("/api/files/images/existing.png");
+        when(storyboardClient.getProjectScenes("project-1")).thenReturn(List.of(existing));
+        when(storyboardClient.getSceneReferences("scene-1")).thenReturn(List.of());
+        when(asyncTasks.startStoryboardImageTask(any(), any(), eq(true), anyString()))
+                .thenReturn("task-overwrite");
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                mock(StoryboardProductionService.class),
+                asyncTasks,
+                mock(SessionAssetService.class),
+                mock(AgentScopeImageTools.class),
+                mock(AgentScopeVideoTools.class),
+                storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES)
+                .invoke(Map.of("overwrite", true), param("project-1", true));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> queued = (Map<String, Object>) result.get("result");
+        assertThat(queued)
+                .containsEntry("ok", true)
+                .containsEntry("queued", true)
+                .containsEntry("taskId", "task-overwrite");
+    }
+
+    @Test
     void listProjectStoryboardReportsImageAndVideoCounts() {
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         Scene scene = scene("scene-1", 1, "分镜一");
@@ -422,13 +453,23 @@ class AgentScopeStoryboardToolsTest {
     }
 
     private static ToolCallParam param(String projectId) {
+        return param(projectId, false);
+    }
+
+    private static ToolCallParam param(String projectId, boolean approvedPermissionResume) {
         AgentConversation conversation = new AgentConversation();
         conversation.setId("conversation-1");
         conversation.setUserId("user-1");
         conversation.setProjectId(projectId);
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "生成分镜", List.of(), null);
+        if (approvedPermissionResume) {
+            request.setAction("approve");
+            request.setCheckpointAction("agentscope-confirm");
+        }
         AgentScopeRunContext runContext = new AgentScopeRunContext(
                 conversation,
-                new OrchestrationRequest(conversation, "生成分镜", List.of(), null),
+                request,
                 null,
                 new AgentScopeTurnState());
         RuntimeContext runtime = RuntimeContext.builder()

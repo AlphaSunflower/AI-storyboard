@@ -87,6 +87,9 @@ public class FileStorageServiceImpl implements FileStorageService {
                 }
                 targetType = "audios"; urlPrefix = config.getAudioUrlPrefix(); allowedExts = ALLOWED_AUDIO_EXTENSIONS;
             }
+            case "file" -> {
+                targetType = "files"; urlPrefix = "/api/files/files/"; allowedExts = Set.of();
+            }
             default -> {
                 if (contentType == null || !contentType.startsWith("image/")) {
                     throw new BusinessException(40001, "仅支持上传图片文件");
@@ -97,12 +100,17 @@ public class FileStorageServiceImpl implements FileStorageService {
         String extension = switch (t) {
             case "video" -> "mp4";
             case "audio" -> "mp3";
+            case "file" -> "bin";
             default -> "png";
         };
         String original = file.getOriginalFilename();
         if (original != null && original.contains(".")) {
             String raw = original.substring(original.lastIndexOf('.') + 1).toLowerCase();
-            if (allowedExts.contains(raw)) extension = raw;
+            if ("file".equals(t)) {
+                if (raw.matches("[a-z0-9]{1,12}")) extension = raw;
+            } else if (allowedExts.contains(raw)) {
+                extension = raw;
+            }
         }
         try {
             byte[] bytes = file.getBytes();
@@ -226,6 +234,11 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     @Override
+    public byte[] readFile(String filename) {
+        return minioStorage.get(minioStorage.key("files", filename));
+    }
+
+    @Override
     public void deleteImage(String filename) {
         minioStorage.delete(minioStorage.key("images", filename));
     }
@@ -238,5 +251,10 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Override
     public void deleteAudio(String filename) {
         minioStorage.delete(minioStorage.key("audios", filename));
+    }
+
+    @Override
+    public void deleteFile(String filename) {
+        minioStorage.delete(minioStorage.key("files", filename));
     }
 }

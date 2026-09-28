@@ -11,6 +11,7 @@ public record AgentSendMessageRequest(
     List<String> picUrls,   // 多图参考 URL 列表
     List<String> referenceVideos, // 本轮项目库/上传参考视频
     List<String> referenceAudios, // 本轮项目库/上传参考音频
+    List<AgentAttachmentRequest> attachments, // 附件元数据（名称/MIME/大小；用于对话内文件行与刷新恢复）
     List<String> assetIds,  // 从资产库选中的资产 id（非空=用户已投资产，编排直接进方案不走资产弹窗）
     List<String> assetGroupIds, // 项目库资产组 id（仅用于回写结果与路由标记）
     List<String> assetGroupSnapshotIds, // 项目库资产组快照 id（服务端读取签名媒体）

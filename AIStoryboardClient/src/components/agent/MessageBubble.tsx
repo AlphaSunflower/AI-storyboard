@@ -3,10 +3,13 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronRight, Download, ImagePlus, Images, Library, LoaderCircle, Pencil } from 'lucide-react';
+import {
+  ChevronRight, Download, FileAudio, FileText, FileVideo,
+  ImagePlus, Images, Library, LoaderCircle, Pencil, Play,
+} from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
-import type { AgentMessageMetadata } from '../../api/agent';
+import type { AgentAttachment, AgentMessageMetadata } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { ReasoningPanel } from './ReasoningPanel';
@@ -42,6 +45,176 @@ function extractMessageMedia(content: string): MessageMedia[] {
     found.set(match[1], { url: match[1], type: 'IMAGE' });
   }
   return Array.from(found.values());
+}
+
+function fileNameFromUrl(url: string, fallback: string): string {
+  try {
+    const path = new URL(url, window.location.origin).pathname;
+    const name = decodeURIComponent(path.split('/').filter(Boolean).at(-1) || '');
+    return name || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function standaloneAttachmentContent(content: string): AgentAttachment | null {
+  const value = content.trim();
+  if (!value || /\s/.test(value)) return null;
+  const isLibraryMedia = /^\/?api\/library\/media\/[^/]+\/content(?:\?.*)?$/i.test(value);
+  const isImageFile = /\/api\/files\/images\/[^/?#]+(?:\?.*)?$/i.test(value)
+    || /\.(?:png|jpe?g|gif|webp)(?:\?.*)?$/i.test(value);
+  if (!isLibraryMedia && !isImageFile) return null;
+  return {
+    url: value,
+    name: isLibraryMedia ? '项目库图片' : fileNameFromUrl(value, '对话图片'),
+    mimeType: 'image/*',
+    kind: 'image',
+    source: isLibraryMedia ? 'library' : 'upload',
+  };
+}
+
+function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachment[] {
+  const input = metadata?.messageInput;
+  if (!input) return [];
+  if (input.attachments?.length) return input.attachments;
+  return [
+    ...(input.picUrls ?? []).map((url, index) => ({
+      url,
+      name: fileNameFromUrl(url, `图片 ${index + 1}`),
+      mimeType: 'image/*',
+      kind: 'image' as const,
+      source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+    })),
+    ...(input.referenceVideos ?? []).map((url, index) => ({
+      url,
+      name: fileNameFromUrl(url, `视频 ${index + 1}`),
+      mimeType: 'video/*',
+      kind: 'video' as const,
+      source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+    })),
+    ...(input.referenceAudios ?? []).map((url, index) => ({
+      url,
+      name: fileNameFromUrl(url, `音频 ${index + 1}`),
+      mimeType: 'audio/*',
+      kind: 'audio' as const,
+      source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+    })),
+  ];
+}
+
+function FileSize({ value }: { value?: number }) {
+  if (!value || value <= 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return <small style={{ color: 'var(--color-muted)', flexShrink: 0 }}>{size.toFixed(unit === 0 ? 0 : 1)} {units[unit]}</small>;
+}
+
+function VideoAttachmentThumbnail({
+  url,
+  label,
+  onPreview,
+}: {
+  url: string;
+  label: string;
+  onPreview: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <FileVideo size={15} />;
+  return (
+    <button
+      type="button"
+      onClick={onPreview}
+      aria-label={`预览 ${label}`}
+      style={{
+        position: 'relative', width: 30, height: 30, padding: 0,
+        border: 'none', borderRadius: 7, overflow: 'hidden',
+        background: 'rgb(24,28,36)', cursor: 'zoom-in', flexShrink: 0,
+      }}
+    >
+      <video
+        src={assetUrl(url)}
+        muted
+        playsInline
+        preload="metadata"
+        onError={() => setFailed(true)}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      />
+      <span style={{
+        position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
+        color: 'white', background: 'rgba(15,17,21,0.24)',
+      }}>
+        <Play size={13} fill="currentColor" />
+      </span>
+    </button>
+  );
+}
+
+function MessageAttachmentStrip({
+  attachments,
+  onPreview,
+}: {
+  attachments: AgentAttachment[];
+  onPreview: (attachment: AgentAttachment) => void;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div
+      className="chat-message-attachments"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%',
+        overflowX: 'auto', padding: '2px 0 6px', scrollbarWidth: 'thin',
+      }}
+    >
+      {attachments.map((attachment, index) => {
+        const label = attachment.name || `附件 ${index + 1}`;
+        const icon = attachment.kind === 'audio'
+            ? <FileAudio size={15} />
+            : attachment.kind === 'file'
+              ? <FileText size={15} />
+              : null;
+        return (
+          <span
+            key={`${attachment.url}-${index}`}
+            title={label}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto',
+              maxWidth: 220, height: 38,
+              padding: attachment.kind === 'image' || attachment.kind === 'video' ? 3 : '0 9px',
+              border: '1px solid rgba(65,118,230,0.14)', borderRadius: 9,
+              background: 'rgba(255,255,255,0.72)', color: 'rgb(65,118,230)',
+              fontSize: 12, overflow: 'hidden',
+            }}
+          >
+            {attachment.kind === 'image' ? (
+              <button
+                type="button"
+                onClick={() => onPreview(attachment)}
+                aria-label={`预览 ${label}`}
+                style={{ width: 30, height: 30, padding: 0, border: 'none', borderRadius: 7, overflow: 'hidden', background: 'transparent', cursor: 'zoom-in', flexShrink: 0 }}
+              >
+                <img src={assetUrl(attachment.url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              </button>
+            ) : attachment.kind === 'video' ? (
+              <VideoAttachmentThumbnail
+                url={attachment.url}
+                label={label}
+                onPreview={() => onPreview(attachment)}
+              />
+            ) : icon}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgb(55,60,70)' }}>
+              {label}
+            </span>
+            <FileSize value={attachment.sizeBytes} />
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function isStandaloneImageUrl(value: string): boolean {
@@ -559,6 +732,11 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
   const currentProject = useProjectStore((state) => state.currentProject);
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
+  const openPreview = (url: string, type: 'image' | 'video' = 'image') => {
+    setPreviewType(type);
+    setPreviewUrl(url);
+  };
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(content);
@@ -578,6 +756,13 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
   const editRef = useRef<HTMLTextAreaElement>(null);
   const displayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
   const messageMedia = extractMessageMedia(displayContent);
+  const legacyAttachment = isUser ? standaloneAttachmentContent(displayContent) : null;
+  const userAttachments = isUser
+    ? (messageInputAttachments(metadata).length > 0
+        ? messageInputAttachments(metadata)
+        : legacyAttachment ? [legacyAttachment] : [])
+    : [];
+  const userTextContent = legacyAttachment ? '' : displayContent;
   const generatedImages = messageMedia.filter((item) => item.type === 'IMAGE');
   const imageBatch = !isUser && generatedImages.length >= IMAGE_BATCH_THRESHOLD ? generatedImages : null;
   const renderedContent = imageBatch ? stripBatchImageMarkdown(displayContent) : displayContent;
@@ -837,7 +1022,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
               >{editSaving ? '发送中…' : '发送'}</button>
             </div>
           </div>
-        ) : displayContent ? (
+        ) : (displayContent || userAttachments.length > 0) ? (
           <span className="chat-live-text">
             {role === 'assistant'
               ? (
@@ -845,7 +1030,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
                   {renderedContent && (
                     <MarkdownContent
                       content={renderedContent}
-                      onImgClick={setPreviewUrl}
+                      onImgClick={(url) => openPreview(url, 'image')}
                       onImportMedia={(media) => void handleImportMedia([media])}
                       importDisabled={importDisabled}
                       importing={projectImportState === 'importing'}
@@ -861,14 +1046,25 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
                   )}
                 </>
               )
-              : renderContent(
-                  displayContent,
-                  setPreviewUrl,
-                  (media) => void handleImportMedia([media]),
-                  importDisabled,
-                  projectImportState === 'importing',
-                  currentProject?.id,
-                )}
+              : (
+                <>
+                  <MessageAttachmentStrip
+                    attachments={userAttachments}
+                    onPreview={(attachment) => openPreview(
+                      attachment.url,
+                      attachment.kind === 'video' ? 'video' : 'image',
+                    )}
+                  />
+                  {userTextContent && renderContent(
+                    userTextContent,
+                    (url) => openPreview(url, 'image'),
+                    (media) => void handleImportMedia([media]),
+                    importDisabled,
+                    projectImportState === 'importing',
+                    currentProject?.id,
+                  )}
+                </>
+              )}
           </span>
         ) : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
@@ -994,7 +1190,11 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
         </div>
       )}
     </div>
-    <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+    <ImagePreviewModal
+      url={previewUrl}
+      type={previewType}
+      onClose={() => setPreviewUrl(null)}
+    />
     </>
   );
 }

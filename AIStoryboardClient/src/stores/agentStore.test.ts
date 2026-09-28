@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentApi, type AgentConversation, type AgentTaskView } from '../api/agent';
+import {
+  DEFAULT_AGENT_APPROVAL_MODE,
+  agentApi,
+  type AgentConversation,
+  type AgentTaskView,
+} from '../api/agent';
 import {
   AgentTurnEventSequencer,
   applyAgentTurnEnvelope,
@@ -63,8 +68,98 @@ describe('agentStore createConversation', () => {
 
     await useAgentStore.getState().createConversation();
 
-    expect(createConversation).toHaveBeenCalledWith('project-1', '新对话');
+    expect(createConversation).toHaveBeenCalledWith(
+      'project-1',
+      '新对话',
+      DEFAULT_AGENT_APPROVAL_MODE,
+    );
     expect(selectConversation).toHaveBeenCalledWith('conversation-1');
+  });
+});
+
+describe('agentStore approval mode', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      conversations: [],
+      pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
+      streaming: false,
+    });
+  });
+
+  it('updates the active conversation approval mode', async () => {
+    const conversation: AgentConversation = {
+      id: 'conversation-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '方案会话',
+      status: 'active',
+      approvalMode: 'PLAN_APPROVAL',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    useAgentStore.setState({
+      activeConversationId: conversation.id,
+      conversations: [conversation],
+      pendingApprovalMode: 'PLAN_APPROVAL',
+    });
+    const update = vi.spyOn(agentApi, 'updateApprovalMode').mockResolvedValue({
+      data: { data: { ...conversation, approvalMode: 'REQUEST_APPROVAL' } },
+    } as never);
+
+    await useAgentStore.getState().setApprovalMode('REQUEST_APPROVAL');
+
+    expect(update).toHaveBeenCalledWith('conversation-1', 'REQUEST_APPROVAL');
+    expect(useAgentStore.getState().pendingApprovalMode).toBe('REQUEST_APPROVAL');
+    expect(useAgentStore.getState().conversations[0]?.approvalMode).toBe('REQUEST_APPROVAL');
+  });
+
+  it('requires explicit confirmation before enabling full access', async () => {
+    const conversation: AgentConversation = {
+      id: 'conversation-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '审批会话',
+      status: 'active',
+      approvalMode: 'PLAN_APPROVAL',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    useAgentStore.setState({
+      activeConversationId: conversation.id,
+      conversations: [conversation],
+      pendingApprovalMode: 'PLAN_APPROVAL',
+    });
+    const update = vi.spyOn(agentApi, 'updateApprovalMode').mockResolvedValue({
+      data: { data: { ...conversation, approvalMode: 'FULL_ACCESS' } },
+    } as never);
+
+    await useAgentStore.getState().setApprovalMode('FULL_ACCESS');
+
+    expect(update).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().pendingApprovalMode).toBe('PLAN_APPROVAL');
+
+    await useAgentStore.getState().setApprovalMode('FULL_ACCESS', {
+      confirmedFullAccess: true,
+    });
+
+    expect(update).toHaveBeenCalledWith('conversation-1', 'FULL_ACCESS');
+    expect(useAgentStore.getState().pendingApprovalMode).toBe('FULL_ACCESS');
+  });
+
+  it('does not switch while a turn is running', async () => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      pendingApprovalMode: 'PLAN_APPROVAL',
+      streaming: true,
+    });
+    const update = vi.spyOn(agentApi, 'updateApprovalMode');
+
+    await useAgentStore.getState().setApprovalMode('REQUEST_APPROVAL');
+
+    expect(update).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().pendingApprovalMode).toBe('PLAN_APPROVAL');
   });
 });
 
@@ -254,6 +349,10 @@ describe('agentStore message metrics', () => {
       streaming: false,
       generating: {},
       pendingAssistantId: null,
+      pendingAttachments: [],
+      refImageUrls: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
     });
     useProjectStore.setState({ currentProject: null });
   });
@@ -298,6 +397,48 @@ describe('agentStore message metrics', () => {
     await useAgentStore.getState().sendMessage('测试指标');
 
     expect(useAgentStore.getState().messages.at(-1)?.metadata?.metrics).toEqual(metrics);
+  });
+
+  it('keeps attachment metadata on the optimistic user message and send request', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '这是海报' }),
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const attachments = [{
+      url: '/api/files/images/reference.png',
+      name: 'reference.png',
+      mimeType: 'image/png',
+      kind: 'image' as const,
+      source: 'upload' as const,
+    }, {
+      url: '/api/files/videos/clip.mp4',
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+      kind: 'video' as const,
+      source: 'upload' as const,
+    }];
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      streaming: false,
+      generating: {},
+      pendingAttachments: attachments,
+      refImageUrls: ['/api/files/images/reference.png'],
+      pickedReferenceVideos: ['/api/files/videos/clip.mp4'],
+      pickedReferenceAudios: [],
+    });
+
+    await useAgentStore.getState().sendMessage('这是什么');
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.attachments).toEqual(attachments);
+    expect(useAgentStore.getState().messages.find((message) => message.role === 'user')?.metadata?.messageInput?.attachments)
+      .toEqual(attachments);
   });
 });
 

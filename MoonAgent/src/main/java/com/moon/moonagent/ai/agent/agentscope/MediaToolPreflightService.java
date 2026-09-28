@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -60,6 +61,11 @@ public class MediaToolPreflightService {
         }
         long started = System.nanoTime();
         Map<String, Object> original = input == null ? Map.of() : new LinkedHashMap<>(input);
+        if (skipClarification(context.request())) {
+            String decision = fullAccess(context.request()) ? "BYPASS" : "APPROVED";
+            return execute(toolName, "auto-approved", original,
+                    invocation, context, started, decision, List.of());
+        }
         String requestText = safe(context.request().getContent());
         Trigger trigger = trigger(toolName, original, context, requestText);
         List<String> issues = deterministicIssues(toolName, original, context);
@@ -358,6 +364,23 @@ public class MediaToolPreflightService {
     private static AgentScopeRunContext context(ToolCallParam param) {
         return param == null || param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    static boolean approvedPermissionResume(OrchestrationRequest request) {
+        return request != null
+                && "approve".equals(request.getAction())
+                && "agentscope-confirm".equals(request.getCheckpointAction());
+    }
+
+    static boolean skipClarification(OrchestrationRequest request) {
+        return approvedPermissionResume(request) || fullAccess(request);
+    }
+
+    static boolean fullAccess(OrchestrationRequest request) {
+        return request != null
+                && request.getConversation() != null
+                && AgentApprovalMode.from(request.getConversation().getApprovalMode())
+                == AgentApprovalMode.FULL_ACCESS;
     }
 
     private record Trigger(String name, boolean referenceResolution) {
