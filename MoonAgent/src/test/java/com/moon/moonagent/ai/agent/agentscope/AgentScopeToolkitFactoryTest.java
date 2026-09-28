@@ -1,6 +1,5 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
@@ -11,35 +10,23 @@ import java.util.Map;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentScopeToolkitFactoryTest {
 
     @Test
-    void humanInputToolIsNotRegisteredWhileDisabled() {
-        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
-        AgentScopeToolkitFactory factory = factory(interaction, false);
-
-        factory.create();
-
-        verify(interaction, never()).tool();
-    }
-
-    @Test
-    void humanInputToolIsRegisteredWhenExplicitlyEnabled() {
+    void humanInputToolIsAlwaysRegisteredForPreflight() {
         AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
         when(interaction.tool()).thenReturn(tool("request_human_input"));
-        AgentScopeToolkitFactory factory = factory(interaction, true);
+        AgentScopeToolkitFactory factory = factory(interaction);
 
         factory.create();
 
         verify(interaction).tool();
     }
 
-    private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction,
-                                                    boolean humanInputEnabled) {
+    private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction) {
         AgentScopeSessionTools session = mock(AgentScopeSessionTools.class);
         AgentScopeStructuredTools structured = mock(AgentScopeStructuredTools.class);
         AgentScopeAssetGroupTools assetGroups = mock(AgentScopeAssetGroupTools.class);
@@ -48,9 +35,6 @@ class AgentScopeToolkitFactoryTest {
         AgentScopeStoryboardTools storyboards = mock(AgentScopeStoryboardTools.class);
         AgentScopeToolPipeline pipeline = mock(AgentScopeToolPipeline.class);
         SkillExpander expander = mock(SkillExpander.class);
-        AgentAiConfigProperties config = new AgentAiConfigProperties();
-        config.setHumanInputEnabled(humanInputEnabled);
-
         when(session.tools()).thenReturn(List.of());
         when(structured.tools()).thenReturn(List.of());
         when(assetGroups.tool()).thenReturn(tool("list_asset_groups"));
@@ -65,7 +49,7 @@ class AgentScopeToolkitFactoryTest {
 
         return new AgentScopeToolkitFactory(
                 session, interaction, structured, assetGroups, images, videos,
-                storyboards, pipeline, expander, config);
+                storyboards, pipeline, expander);
     }
 
     private static AgentScopeTool tool(String name) {

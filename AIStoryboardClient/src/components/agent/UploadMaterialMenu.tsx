@@ -1,13 +1,13 @@
-import { Image as ImageIcon, Paperclip } from 'lucide-react';
+import { FileUp, Paperclip } from 'lucide-react';
 
 interface Props {
-  onLocalImage: () => void;
+  onLocalFile: () => void;
   onMaterialPicker: () => void;
   onClose: () => void;
 }
 
 export function UploadMaterialMenu({
-  onLocalImage,
+  onLocalFile,
   onMaterialPicker,
   onClose,
 }: Props) {
@@ -32,13 +32,13 @@ export function UploadMaterialMenu({
       <button
         type="button"
         className="chat-plus-menu__item"
-        onClick={() => choose(onLocalImage)}
+        onClick={() => choose(onLocalFile)}
         style={{ ...menuItem, '--item-index': 1 } as React.CSSProperties}
         onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
-        <ImageIcon size={16} strokeWidth={2} />
-        <span>上传图片</span>
+        <FileUp size={16} strokeWidth={2} />
+        <span>上传文件</span>
       </button>
     </div>
   );

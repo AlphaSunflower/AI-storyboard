@@ -6,5 +6,6 @@ import jakarta.validation.constraints.NotBlank;
 public record AgentCreateConversationRequest(
     @NotBlank(message = "项目ID不能为空") String projectId,
     String title,
-    String orchestrationMode
+    String orchestrationMode,
+    String approvalMode
 ) {}

@@ -1,6 +1,11 @@
-# MoonAgent 多智能体化改造设计文档
+# MoonAgent 多智能体化改造设计文档（历史归档）
 
-> 状态：待评审（2026-08-25）
+> **状态：已废弃（2026-09-26）。** 本文描述的 PlanGraph、Specialist、
+> IntentHandler 和 Supervisor 接力方案不再是运行路径。当前唯一架构是
+> AgentScope `MoonAgentRuntime`，权威说明见
+> `docs/superpowers/specs/2026-09-26-agentscope-architecture.md`。本文只保留设计演进背景。
+
+> 历史状态：待评审（2026-08-25）
 > 范围：MoonAgent `ai/agent` 编排层 —— 把「意图单选路由」升级为「Supervisor 定链 + 专家接力管线」
 > 结论先行：**方向成立，但不用新建 6 个 agent。** 6 个角色已全部作为 `IntentHandler` / `SpecialistAgent` 存在，且移交接口（`SpecialistResult.handoff` / `SpecialistContext.previousResult`）已在接口层定义好。真正缺的是「移交通电」与「Supervisor 编链」，改动集中在 PlanGraph 图构建 + 上下文传递，核心 handler 零改动。
 

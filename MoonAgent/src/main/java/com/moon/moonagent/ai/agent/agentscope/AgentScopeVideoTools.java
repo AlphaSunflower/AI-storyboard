@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.entity.AgentConversation;
@@ -16,7 +16,7 @@ public class AgentScopeVideoTools {
 
     public static final String GENERATE_VIDEO = "generate_video";
 
-    private final AgentOrchestratorSupport support;
+    private final AgentRuntimeSupport support;
     private final SessionAssetService sessionAssets;
 
     public AgentScopeTool tool() {

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { assetUrl } from '../../config';
 
 /**
@@ -30,18 +31,23 @@ export function ImagePreviewModal({
   }, [url, onClose]);
 
   if (!url) return null;
-  return (
+  return createPortal(
     <div
+      role="dialog"
+      aria-label="图片预览"
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
+        position: 'fixed', inset: 0, zIndex: 4000,
         background: 'rgba(20,20,19,0.78)', backdropFilter: 'blur(2px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         cursor: 'zoom-out',
       }}
     >
       <button
-        onClick={onClose}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
         aria-label="关闭预览"
         style={{
           position: 'absolute', top: 16, right: 16,
@@ -74,6 +80,7 @@ export function ImagePreviewModal({
           }}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

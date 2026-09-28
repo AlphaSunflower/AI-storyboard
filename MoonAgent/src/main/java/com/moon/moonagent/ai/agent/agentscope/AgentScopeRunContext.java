@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.ExternalActionLedgerService;
@@ -12,14 +12,14 @@ import com.moon.moonagent.entity.AgentConversation;
 public record AgentScopeRunContext(
         AgentConversation conversation,
         OrchestrationRequest request,
-        AgentOrchestratorSupport support,
+        AgentRuntimeSupport support,
         AgentScopeTurnState turnState,
         String checkpointId,
         ExternalActionLedgerService externalActions
 ) {
     public AgentScopeRunContext(AgentConversation conversation,
                                 OrchestrationRequest request,
-                                AgentOrchestratorSupport support,
+                                AgentRuntimeSupport support,
                                 AgentScopeTurnState turnState) {
         this(conversation, request, support, turnState, null, null);
     }

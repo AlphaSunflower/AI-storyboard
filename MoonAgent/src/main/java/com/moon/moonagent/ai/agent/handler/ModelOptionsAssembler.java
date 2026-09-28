@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 模型选项组装（原 {@link AgentOrchestratorSupport} 迁出）：网关模型列表 / LLM 选参用的人类可读选项文本。
+ * 模型选项组装：网关模型列表 / LLM 选参用的人类可读选项文本。
  * 仅依赖 {@link GatewayModelService} 与 JSON 解析，无 SSE / checkpooint / 会话状态耦合。
  */
 @Component

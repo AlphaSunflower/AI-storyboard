@@ -5,7 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -23,10 +24,10 @@ public class AgentScopeCheckpointService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final AgentOrchestratorSupport support;
+    private final AgentRuntimeSupport support;
     private final AgentCheckpointMapper checkpointMapper;
 
-    public AgentScopeCheckpointService(AgentOrchestratorSupport support,
+    public AgentScopeCheckpointService(AgentRuntimeSupport support,
                                        AgentCheckpointMapper checkpointMapper) {
         this.support = support;
         this.checkpointMapper = checkpointMapper;
@@ -63,7 +64,7 @@ public class AgentScopeCheckpointService {
         payload.put("allowCustom", allowCustom);
 
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-reply", List.of(payload), "human_input", actions),
                 checkpoint -> {
                     checkpoint.setOwnerEngine("AGENTSCOPE");
@@ -79,26 +80,31 @@ public class AgentScopeCheckpointService {
     public String pauseForConfirmation(OrchestrationRequest request, String replyId,
                                        List<ToolUseBlock> toolCalls) {
         List<Map<String, Object>> calls = new ArrayList<>();
-        List<String> names = new ArrayList<>();
         for (ToolUseBlock call : toolCalls) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", call.getId());
             item.put("name", call.getName());
             item.put("input", call.getInput() == null ? Map.of() : call.getInput());
             calls.add(item);
-            names.add(call.getName());
         }
-        List<String> displayNames = names.stream().map(AgentScopeToolLabels::displayName).toList();
-        String prompt = "是否允许执行高风险操作：“" + String.join("”“", displayNames) + "”？";
-        List<Map<String, Object>> actions = List.of(
-                Map.of("id", "approve", "title", "允许执行"),
-                Map.of("id", "reject", "title", "拒绝"));
+        AgentApprovalMode mode = AgentApprovalMode.from(
+                request == null || request.getConversation() == null
+                        ? null : request.getConversation().getApprovalMode());
+        String prompt = confirmationPrompt(mode, toolCalls);
+        List<Map<String, Object>> actions = mode == AgentApprovalMode.PLAN_APPROVAL
+                ? List.of(
+                        Map.of("id", "approve", "title", planApproveTitle(toolCalls)),
+                        Map.of("id", "reject", "title", "取消"))
+                : List.of(
+                        Map.of("id", "approve", "title", "允许执行"),
+                        Map.of("id", "reject", "title", "拒绝"));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("kind", "permission");
+        payload.put("approvalMode", mode.name());
         payload.put("replyId", replyId);
         payload.put("toolCalls", calls);
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-confirm", List.of(payload), "human_input", actions),
                 checkpoint -> {
                     checkpoint.setOwnerEngine("AGENTSCOPE");
@@ -112,6 +118,140 @@ public class AgentScopeCheckpointService {
                     }
                 });
         return latestPendingToken(request.getConversation().getId());
+    }
+
+    static String confirmationPrompt(AgentApprovalMode mode, List<ToolUseBlock> toolCalls) {
+        AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
+        String heading = effective == AgentApprovalMode.PLAN_APPROVAL
+                ? (hasGenerationTool(toolCalls) ? "生成方案待确认" : "执行方案待确认")
+                : "请求批准";
+        String intro = effective == AgentApprovalMode.PLAN_APPROVAL
+                ? "请确认以下执行方案。批准后仅执行本次列出的操作；方案之外的新操作仍需单独确认。"
+                : "以下高风险操作需要你明确授权后才会执行。";
+        StringBuilder summary = new StringBuilder();
+        for (ToolUseBlock call : toolCalls == null ? List.<ToolUseBlock>of() : toolCalls) {
+            if (summary.length() > 0) summary.append("\n\n");
+            summary.append(summarizeToolCall(call));
+        }
+        if (summary.length() == 0) summary.append("• 未提供可执行方案");
+        return heading + "\n\n" + intro + "\n\n" + summary;
+    }
+
+    private static String planApproveTitle(List<ToolUseBlock> toolCalls) {
+        return hasGenerationTool(toolCalls) ? "按方案生成" : "按方案执行";
+    }
+
+    private static boolean hasGenerationTool(List<ToolUseBlock> toolCalls) {
+        if (toolCalls == null) return false;
+        return toolCalls.stream()
+                .map(ToolUseBlock::getName)
+                .anyMatch(name -> name != null && name.contains("generate"));
+    }
+
+    private static String summarizeToolCall(ToolUseBlock call) {
+        String toolName = call == null ? "" : call.getName();
+        Map<String, Object> input = call == null || call.getInput() == null
+                ? Map.of() : call.getInput();
+        String displayName = AgentScopeToolLabels.displayName(toolName);
+        List<String> lines = switch (toolName) {
+            case AgentScopeImageTools.GENERATE_IMAGE -> imageSummary(input, false);
+            case AgentScopeImageTools.GENERATE_IMAGE_BATCH -> imageSummary(input, true);
+            case AgentScopeVideoTools.GENERATE_VIDEO -> videoSummary(input);
+            default -> genericSummary(toolName, input);
+        };
+        StringBuilder out = new StringBuilder("• ").append(displayName);
+        for (String line : lines) {
+            out.append("\n  - ").append(line);
+        }
+        return out.toString();
+    }
+
+    private static List<String> imageSummary(Map<String, Object> input, boolean batch) {
+        List<String> lines = new ArrayList<>();
+        List<String> prompts = stringList(input.get("prompts"));
+        int count = batch
+                ? (prompts.isEmpty() ? positiveInt(input.get("n"), 2) : prompts.size())
+                : positiveInt(input.get("n"), 1);
+        lines.add("数量：" + count + " 张");
+        lines.add("模型：" + valueOr(input.get("model"), "系统默认"));
+        lines.add("尺寸：" + valueOr(input.get("size"), "自动"));
+        lines.add("质量：" + valueOr(input.get("quality"), "自动"));
+        int references = stringList(input.get("source_asset_ids")).size()
+                + stringList(input.get("source_urls")).size();
+        lines.add("参考素材：" + references + " 项");
+        if (batch && !prompts.isEmpty()) {
+            lines.add("逐条提示词：");
+            for (int i = 0; i < prompts.size(); i++) {
+                lines.add("  " + (i + 1) + ". " + truncate(prompts.get(i), 220));
+            }
+        } else {
+            lines.add("提示词：" + truncate(stringValue(input.get("prompt")), 320));
+        }
+        if (batch && Boolean.TRUE.equals(input.get("follow_up_video"))) {
+            lines.add("后续视频：" + truncate(valueOr(input.get("video_prompt"), "使用生成图继续"), 180)
+                    + "（" + valueOr(input.get("video_duration"), "自动")
+                    + " / " + valueOr(input.get("video_aspect_ratio"), "自动")
+                    + " / " + valueOr(input.get("video_resolution"), "自动") + "）");
+        }
+        return lines;
+    }
+
+    private static List<String> videoSummary(Map<String, Object> input) {
+        List<String> lines = new ArrayList<>();
+        lines.add("模型：" + valueOr(input.get("model"), "系统默认"));
+        lines.add("时长：" + valueOr(input.get("duration"), "自动") + " 秒");
+        lines.add("画幅：" + valueOr(input.get("aspect_ratio"), "自动"));
+        lines.add("分辨率：" + valueOr(input.get("resolution"), "自动"));
+        int references = stringList(input.get("reference_asset_ids")).size()
+                + stringList(input.get("reference_urls")).size();
+        lines.add("参考图：" + references + " 张");
+        lines.add("提示词：" + truncate(stringValue(input.get("prompt")), 320));
+        return lines;
+    }
+
+    private static List<String> genericSummary(String toolName, Map<String, Object> input) {
+        List<String> lines = new ArrayList<>();
+        for (String key : List.of(
+                "scene_id", "shot_id", "sceneId", "shotId", "count", "n",
+                "mode", "overwrite", "confirmed", "reason")) {
+            Object value = input.get(key);
+            if (value == null || stringValue(value).isBlank()) continue;
+            lines.add(key + "：" + truncate(stringValue(value), 180));
+        }
+        if (lines.isEmpty()) {
+            lines.add(toolName == null || toolName.isBlank()
+                    ? "将执行一项高风险操作。"
+                    : "将执行 " + AgentScopeToolLabels.displayName(toolName) + "。");
+        }
+        return lines;
+    }
+
+    private static int positiveInt(Object value, int fallback) {
+        if (value instanceof Number number) return Math.max(1, number.intValue());
+        try {
+            return Math.max(1, Integer.parseInt(stringValue(value)));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static String valueOr(Object value, String fallback) {
+        String text = stringValue(value);
+        return text.isBlank() ? fallback : text;
+    }
+
+    private static String truncate(String value, int maxLength) {
+        String text = value == null ? "" : value.trim();
+        if (text.length() <= maxLength) return text;
+        return text.substring(0, Math.max(0, maxLength - 1)) + "…";
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream()
+                .filter(item -> item != null && !String.valueOf(item).isBlank())
+                .map(String::valueOf)
+                .toList();
     }
 
     public String pauseForStoryboardCommit(OrchestrationRequest request, String replyId,
@@ -130,7 +270,7 @@ public class AgentScopeCheckpointService {
                 Map.of("id", "delete", "title", "删除全部分镜",
                         "description", "只删除现有分镜，本次不写入新分镜"));
         support.runHITLStage(request, null,
-                new AgentOrchestratorSupport.StagePlan(
+                new AgentRuntimeSupport.StagePlan(
                         "当前项目已有 " + existingSceneCount
                                 + " 个分镜。本次生成结果要怎么处理？",
                         "storyboard-commit", List.of(payload), "human_input", actions),

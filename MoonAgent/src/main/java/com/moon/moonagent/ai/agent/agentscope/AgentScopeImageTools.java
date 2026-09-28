@@ -238,7 +238,8 @@ public class AgentScopeImageTools {
             String videoAspectRatio,
             String videoResolution,
             AgentScopeRunContext context) {
-        if (properties.isDirectMediaGeneration()
+        if (!confirmationBypassed(context)
+                && properties.isDirectMediaGeneration()
                 && count > properties.getBatchConfirmThreshold()) {
             return Map.of(
                     "ok", false,
@@ -334,6 +335,11 @@ public class AgentScopeImageTools {
     private static AgentScopeRunContext context(io.agentscope.core.tool.ToolCallParam param) {
         return param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    private static boolean confirmationBypassed(AgentScopeRunContext context) {
+        return context != null
+                && MediaToolPreflightService.skipClarification(context.request());
     }
 
 }

@@ -12,7 +12,7 @@ import com.moon.moonagent.ai.agent.task.AgentTaskSlotView;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
 import com.moon.moonagent.ai.agent.task.AgentWakeupMessage;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
@@ -65,7 +65,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final AgentConversationMapper conversationMapper;
     private final AgentMessageMapper messageMapper;
     private final AgentGenerationService generationService;
-    private final AgentOrchestratorSupport support;
+    private final AgentRuntimeSupport support;
     private final AgentScopeProperties properties;
     private final StoryboardProductionService storyboardProductionService;
     private final AgentTaskEventHub taskEvents;

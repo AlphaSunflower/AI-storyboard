@@ -1,12 +1,14 @@
 ---
 name: storyboard
-description: 用户要求生成、优化或确认完整剧情与分镜时使用
-label: 剧情与分镜
-version: "1.0"
-model_role: text
-triggers:
-  - '分镜|故事板|剧本'
-priority: 20
+description: 当用户要求生成、优化、查看、审查、修改或删除完整剧情与分镜时使用
+license: Apache-2.0
+metadata:
+  moon:
+    label: 剧情与分镜
+    model_role: text
+    version: "1.0"
+    priority: 20
+allowed-tools: start_storyboard_production revise_storyboard_production approve_storyboard_production choose_storyboard_commit_mode generate_storyboard_image generate_storyboard_video generate_storyboard_images upsert_storyboard_shot delete_storyboard_draft_shot reorder_storyboard_draft list_storyboard_draft list_project_storyboard update_project_storyboard_shot delete_project_storyboard_shot clear_project_storyboard request_human_input
 ---
 
 # 分镜生产

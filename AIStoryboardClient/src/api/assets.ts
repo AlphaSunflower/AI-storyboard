@@ -39,6 +39,9 @@ export interface SceneMaterialReferenceInput {
   role: 'REFERENCE';
   sourceType: SceneMaterialSource;
   sourceId: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
   /** 项目库媒体引用；生成时由后端换取当前有效地址。 */
   mediaId?: string;
   sourceConversationId?: string | null;

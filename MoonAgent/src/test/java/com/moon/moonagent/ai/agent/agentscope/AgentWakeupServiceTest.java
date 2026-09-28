@@ -80,7 +80,7 @@ class AgentWakeupServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
-        AgentScopeMediaRuntime mediaRuntime = mock(AgentScopeMediaRuntime.class);
+        MoonAgentRuntime mediaRuntime = mock(MoonAgentRuntime.class);
         AgentChatService chatService = mock(AgentChatService.class);
         AgentTaskEventHub taskEvents = mock(AgentTaskEventHub.class);
         AgentConversation conversation = new AgentConversation();
@@ -122,7 +122,7 @@ class AgentWakeupServiceTest {
         private final AgentConversationMapper conversationMapper;
         private final AgentMessageMapper messageMapper;
         private final ConversationLock conversationLock;
-        private final AgentScopeMediaRuntime mediaRuntime;
+        private final MoonAgentRuntime mediaRuntime;
         private final AgentChatService chatService;
         private final AgentTaskEventHub taskEvents;
         private final AgentConversation conversation;
@@ -137,7 +137,7 @@ class AgentWakeupServiceTest {
                 AgentConversationMapper conversationMapper,
                 AgentMessageMapper messageMapper,
                 ConversationLock conversationLock,
-                AgentScopeMediaRuntime mediaRuntime,
+                MoonAgentRuntime mediaRuntime,
                 AgentChatService chatService,
                 AgentTaskEventHub taskEvents,
                 AgentConversation conversation) {

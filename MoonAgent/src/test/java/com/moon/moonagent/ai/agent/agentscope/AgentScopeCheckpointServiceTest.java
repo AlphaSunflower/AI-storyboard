@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -26,7 +27,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void externalInputPauseCreatesOwnedCheckpointAndResolvesCustomText() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-1");
@@ -52,8 +53,8 @@ class AgentScopeCheckpointServiceTest {
         String token = service.pauseForExternalInput(request, "reply-1", call);
 
         assertThat(token).isEqualTo("token-1");
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
@@ -83,7 +84,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void storyboardCommitOptionsUseReadableFallbackTitles() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-append-overwrite");
@@ -108,8 +109,8 @@ class AgentScopeCheckpointServiceTest {
 
         service.pauseForExternalInput(request, "reply-storyboard", call);
 
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("title"))
@@ -118,7 +119,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void storyboardCommitCardUsesFixedAppendOverwriteDeleteChoices() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("token-storyboard-commit");
@@ -139,8 +140,8 @@ class AgentScopeCheckpointServiceTest {
 
         service.pauseForStoryboardCommit(request, "reply-storyboard", call, 16);
 
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
@@ -166,7 +167,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void externalInputDoesNotGuessRuntimeReferenceFromPlanJson() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
         AgentCheckpoint checkpoint = new AgentCheckpoint();
@@ -181,7 +182,7 @@ class AgentScopeCheckpointServiceTest {
 
     @Test
     void confirmationUsesChineseToolLabelsAndMarksAgentScopeOwner() {
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
                 .thenReturn("card text");
@@ -203,15 +204,19 @@ class AgentScopeCheckpointServiceTest {
         String token = service.pauseForConfirmation(request, "reply-2", List.of(call));
 
         assertThat(token).isEqualTo("token-2");
-        ArgumentCaptor<AgentOrchestratorSupport.StagePlan> stage =
-                ArgumentCaptor.forClass(AgentOrchestratorSupport.StagePlan.class);
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
         verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().planText())
+                .contains("生成方案待确认")
                 .contains("批量生成图片")
                 .doesNotContain(AgentScopeImageTools.GENERATE_IMAGE_BATCH);
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("title"))
+                .containsExactly("按方案生成", "取消");
         AgentCheckpoint created = new AgentCheckpoint();
         customizer.getValue().accept(created);
         assertThat(created.getOwnerEngine()).isEqualTo("AGENTSCOPE");
@@ -223,5 +228,91 @@ class AgentScopeCheckpointServiceTest {
         assertThat(service.permissionToolCalls(created))
                 .extracting(ToolUseBlock::getId)
                 .containsExactly("call-2");
+    }
+
+    @Test
+    void planApprovalShowsGenerationDetailsAndTruncatesLongPrompts() {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("plan-token");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("plan-token");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setApprovalMode(AgentApprovalMode.PLAN_APPROVAL.name());
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "", List.of(), null);
+        String longPrompt = "雨夜街头".repeat(120);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-plan")
+                .name(AgentScopeImageTools.GENERATE_IMAGE_BATCH)
+                .input(Map.of(
+                        "prompt", "篮球海报",
+                        "prompts", List.of("运球特写", longPrompt, "终场庆祝"),
+                        "source_asset_ids", List.of("a1", "a2"),
+                        "size", "2K",
+                        "quality", "high"))
+                .build();
+
+        service.pauseForConfirmation(request, "reply-plan", List.of(call));
+
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        assertThat(stage.getValue().planText())
+                .contains("生成方案待确认")
+                .contains("数量：3 张")
+                .contains("尺寸：2K")
+                .contains("质量：high")
+                .contains("参考素材：2 项")
+                .contains("1. 运球特写")
+                .doesNotContain(longPrompt);
+    }
+
+    @Test
+    void requestApprovalUsesPerActionWording() {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("request-token");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("request-token");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setApprovalMode(AgentApprovalMode.REQUEST_APPROVAL.name());
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-request")
+                .name(AgentScopeVideoTools.GENERATE_VIDEO)
+                .input(Map.of(
+                        "prompt", "镜头缓慢推进",
+                        "duration", "8",
+                        "aspect_ratio", "16:9",
+                        "resolution", "1080p"))
+                .build();
+
+        service.pauseForConfirmation(request, "reply-request", List.of(call));
+
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        assertThat(stage.getValue().planText())
+                .contains("请求批准")
+                .contains("生成视频")
+                .contains("时长：8 秒")
+                .contains("画幅：16:9")
+                .contains("分辨率：1080p")
+                .contains("提示词：镜头缓慢推进");
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("title"))
+                .containsExactly("允许执行", "拒绝");
     }
 }

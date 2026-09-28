@@ -278,4 +278,36 @@ describe('MessageBubble project library import', () => {
     });
     expect(screen.queryByLabelText('编辑消息内容')).toBeNull();
   });
+
+  it('renders image and video attachments with working previews on user messages', () => {
+    render(
+      <MessageBubble
+        role="user"
+        content="这是什么"
+        metadata={{
+          messageInput: {
+            attachments: [{
+              url: '/api/files/images/reference.png',
+              name: 'reference.png',
+              mimeType: 'image/png',
+              kind: 'image',
+              source: 'upload',
+            }, {
+              url: '/api/files/videos/clip.mp4',
+              name: 'clip.mp4',
+              mimeType: 'video/mp4',
+              kind: 'video',
+              source: 'upload',
+            }],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '预览 reference.png' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '预览 clip.mp4' }));
+
+    const dialog = screen.getByRole('dialog', { name: '图片预览' });
+    expect(dialog.querySelector('video')).toBeTruthy();
+  });
 });

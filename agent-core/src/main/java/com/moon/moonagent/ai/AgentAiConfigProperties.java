@@ -71,9 +71,4 @@ public class AgentAiConfigProperties {
      */
     private int historyMessageMaxChars = 2_000;
 
-    /**
-     * 是否允许模型主动请求人工补充信息。
-     * 默认关闭：长视频/分镜链路需要持续自动执行，不能停在确认卡或选项卡。
-     */
-    private boolean humanInputEnabled = false;
 }

@@ -11,7 +11,7 @@ class AgentScopeResumeMessageTest {
 
     @Test
     void externalToolResumeUsesToolRoleForToolResultBlock() {
-        Msg message = AgentScopeMediaRuntime.resumeMessage(
+        Msg message = MoonAgentRuntime.resumeMessage(
                 new AgentScopeCheckpointService.ResumeValue(
                         "external", "call-1", "request_human_input", "append", true));
 

@@ -15,7 +15,7 @@ class AgentScopeReferenceInputTest {
         OrchestrationRequest request = request(
                 List.of("/api/files/images/uploaded-a.png"), List.of());
 
-        assertThat(AgentScopeMediaRuntime.classifyReferenceInput(request, false))
+        assertThat(MoonAgentRuntime.classifyReferenceInput(request, false))
                 .isEqualTo(AgentScopeTurnState.ReferenceInputMode.UPLOAD_ONLY);
     }
 
@@ -24,7 +24,7 @@ class AgentScopeReferenceInputTest {
         OrchestrationRequest request = request(
                 List.of("/api/library/media/media-a/content"), List.of("asset-a"));
 
-        assertThat(AgentScopeMediaRuntime.classifyReferenceInput(request, false))
+        assertThat(MoonAgentRuntime.classifyReferenceInput(request, false))
                 .isEqualTo(AgentScopeTurnState.ReferenceInputMode.ASSET_ONLY);
     }
 
@@ -33,7 +33,7 @@ class AgentScopeReferenceInputTest {
         OrchestrationRequest request = request(
                 List.of("/api/files/images/uploaded-a.png"), List.of());
 
-        assertThat(AgentScopeMediaRuntime.classifyReferenceInput(request, true))
+        assertThat(MoonAgentRuntime.classifyReferenceInput(request, true))
                 .isEqualTo(AgentScopeTurnState.ReferenceInputMode.MIXED);
     }
 
@@ -45,7 +45,7 @@ class AgentScopeReferenceInputTest {
                         "/api/files/images/uploaded-a.png"),
                 List.of());
 
-        assertThat(AgentScopeMediaRuntime.classifyReferenceInput(request, false))
+        assertThat(MoonAgentRuntime.classifyReferenceInput(request, false))
                 .isEqualTo(AgentScopeTurnState.ReferenceInputMode.MIXED);
     }
 

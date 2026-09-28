@@ -11,6 +11,7 @@ import {
 } from '../../api/library';
 import type { SceneMaterialReferenceInput } from '../../api/assets';
 import { assetUrl } from '../../config';
+import { AssetGroupPickerPanel } from './AssetGroupPickerPanel';
 
 interface Candidate {
   asset: LibraryAsset;
@@ -25,6 +26,12 @@ interface FolderLocation {
 }
 
 type TypeFilter = 'all' | 'image' | 'video' | 'audio';
+type PickerTab = 'material' | 'groups';
+
+export interface ProjectLibraryAssetGroupsConfig {
+  selectedIds: string[];
+  onConfirm: (groupIds: string[]) => void | Promise<void>;
+}
 
 interface Props {
   open: boolean;
@@ -34,11 +41,17 @@ interface Props {
   purpose?: 'image' | 'video';
   selected?: SceneMaterialReferenceInput[];
   maxSelectable?: number;
+  /**
+   * 传入后启用顶层「素材 / 资产组」页签，并在统一确认时先保存资产组绑定。
+   * 未传入时保持原有纯素材选择器外观与行为（编辑器 PreviewPanel 等场景）。
+   */
+  assetGroups?: ProjectLibraryAssetGroupsConfig;
   onClose: () => void;
   onConfirm: (references: SceneMaterialReferenceInput[]) => void | Promise<void>;
 }
 
 const EMPTY_REFS: SceneMaterialReferenceInput[] = [];
+const EMPTY_GROUP_IDS: string[] = [];
 
 export function ProjectLibraryPickerModal({
   open,
@@ -48,25 +61,35 @@ export function ProjectLibraryPickerModal({
   purpose,
   selected = EMPTY_REFS,
   maxSelectable,
+  assetGroups,
   onClose,
   onConfirm,
 }: Props) {
+  const [activeTab, setActiveTab] = useState<PickerTab>('material');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [projectFolders, setProjectFolders] = useState<LibraryFolderNode[]>([]);
   const [globalFolders, setGlobalFolders] = useState<LibraryFolderNode[]>([]);
   const [path, setPath] = useState<FolderLocation[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selection, setSelection] = useState<Map<string, SceneMaterialReferenceInput>>(new Map());
+  const [groupSelection, setGroupSelection] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const selectedKey = selected.map((item) => item.mediaId ?? item.url).join('\u0000');
+  const groupSelectedIds = assetGroups?.selectedIds ?? EMPTY_GROUP_IDS;
+  const assetGroupsKey = groupSelectedIds.join('\u0000');
   const currentFolder = path.at(-1) ?? null;
   const effectiveTypes = allowedTypes?.length ? allowedTypes : [type];
   const activeType = typeFilter !== 'all' && effectiveTypes.includes(typeFilter)
     ? typeFilter
     : null;
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveTab('material');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,6 +102,12 @@ export function ProjectLibraryPickerModal({
     ));
     setError('');
   }, [open, selectedKey]);
+
+  // 资产组选中态以当前绑定初始化，并在外部绑定变化（稳定 key）时重新同步，避免普通重渲染重置用户选择。
+  useEffect(() => {
+    if (!open) return;
+    setGroupSelection(new Set(groupSelectedIds));
+  }, [open, assetGroupsKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -187,6 +216,14 @@ export function ProjectLibraryPickerModal({
     });
   };
 
+  const toggleGroup = (groupId: string) => {
+    setGroupSelection((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  };
+
   const openFolder = (folder: LibraryFolderNode) => {
     setPath((current) => [...current, {
       id: folder.id,
@@ -249,6 +286,11 @@ export function ProjectLibraryPickerModal({
     setSaving(true);
     setError('');
     try {
+      // 先保存资产组绑定，再提交本轮素材；两步语义互相独立，故不共享事务。
+      // 若资产组已成功而素材失败，重试时差量逻辑保证不会重复绑定。
+      if (assetGroups) {
+        await assetGroups.onConfirm([...groupSelection]);
+      }
       await onConfirm([...selection.values()]);
       onClose();
     } catch (err) {
@@ -257,6 +299,8 @@ export function ProjectLibraryPickerModal({
       setSaving(false);
     }
   };
+
+  const showGroups = !!assetGroups && activeTab === 'groups';
 
   return createPortal(
     <div style={overlay} onPointerDown={(event) => {
@@ -267,7 +311,9 @@ export function ProjectLibraryPickerModal({
           <div>
             <strong style={{ fontSize: 16 }}>项目库素材</strong>
             <div style={{ marginTop: 3, fontSize: 12, color: 'var(--color-muted)' }}>
-              文件夹优先展示，双击文件夹进入，再选择其中的素材
+              {assetGroups
+                ? '选择素材加入本次对话，或关联、解绑资产组'
+                : '文件夹优先展示，双击文件夹进入，再选择其中的素材'}
             </div>
           </div>
           <button type="button" onClick={onClose} disabled={saving || uploading} style={iconButton} aria-label="关闭">
@@ -275,119 +321,170 @@ export function ProjectLibraryPickerModal({
           </button>
         </header>
 
-        <div style={toolbar}>
-          <FilterButton active={typeFilter === 'all'} label="全部" onClick={() => setTypeFilter('all')} />
-          {effectiveTypes.includes('image') && (
-            <FilterButton active={typeFilter === 'image'} label="图片" onClick={() => setTypeFilter('image')} />
-          )}
-          {effectiveTypes.includes('video') && (
-            <FilterButton active={typeFilter === 'video'} label="视频" onClick={() => setTypeFilter('video')} />
-          )}
-          {effectiveTypes.includes('audio') && (
-            <FilterButton active={typeFilter === 'audio'} label="音频" onClick={() => setTypeFilter('audio')} />
-          )}
-          <label style={{ ...uploadButton, marginLeft: 'auto', opacity: uploading ? 0.65 : 1 }}>
-            {uploading ? <LoaderCircle size={14} className="is-spinning" /> : <Upload size={14} />}
-            {uploading ? '上传中…' : '上传到项目库'}
-            <input
-              type="file"
-              hidden
-              multiple
-              accept={ACCEPT[activeType ?? 'all']}
-              disabled={uploading}
-              onChange={(event) => {
-                void upload(event.target.files);
-                event.target.value = '';
-              }}
+        {assetGroups && (
+          <div role="tablist" aria-label="项目库来源" style={tabStrip}>
+            <button
+              type="button"
+              role="tab"
+              id="project-library-tab-material"
+              aria-selected={activeTab === 'material'}
+              aria-controls="project-library-tabpanel"
+              onClick={() => setActiveTab('material')}
+              style={tabButton(activeTab === 'material')}
+            >
+              素材
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="project-library-tab-groups"
+              aria-selected={activeTab === 'groups'}
+              aria-controls="project-library-tabpanel"
+              onClick={() => setActiveTab('groups')}
+              style={tabButton(activeTab === 'groups')}
+            >
+              资产组
+            </button>
+          </div>
+        )}
+
+        <div
+          id="project-library-tabpanel"
+          role={assetGroups ? 'tabpanel' : undefined}
+          aria-labelledby={assetGroups
+            ? (activeTab === 'material' ? 'project-library-tab-material' : 'project-library-tab-groups')
+            : undefined}
+          style={tabPanel}
+        >
+          {showGroups ? (
+            <AssetGroupPickerPanel
+              projectId={projectId}
+              selectedIds={[...groupSelection]}
+              onToggle={toggleGroup}
             />
-          </label>
-        </div>
-
-        <div style={breadcrumbs}>
-          <button type="button" onClick={() => setPath([])} disabled={path.length === 0}>
-            <Folder size={14} /> 项目库
-          </button>
-          {path.map((folder, index) => (
-            <span key={`${folder.scope}:${folder.id}`}>
-              <ChevronLeft size={12} />
-              <button type="button" onClick={() => setPath((current) => current.slice(0, index + 1))}>
-                {folder.scope === 'GLOBAL' && <Globe2 size={11} />}
-                {folder.name}
-              </button>
-            </span>
-          ))}
-        </div>
-
-        <div style={body}>
-          {loading ? (
-            <div style={empty}><LoaderCircle className="is-spinning" size={18} /> 正在加载素材…</div>
           ) : (
             <>
-              {childFolders.length > 0 && (
-                <section>
-                  <div style={sectionTitle}>文件夹 · 双击打开</div>
-                  <div style={folderGrid}>
-                    {childFolders.map((folder) => (
-                      <button
-                        key={`${folder.scope}:${folder.id}`}
-                        type="button"
-                        onDoubleClick={() => openFolder(folder)}
-                        style={folderCard}
-                        title="双击打开"
-                      >
-                        <Folder size={30} strokeWidth={1.5} />
-                        <strong style={ellipsis}>{folder.name}</strong>
-                        <small>{folder.descendantAssetCount} 项</small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              <section style={{ marginTop: childFolders.length ? 18 : 0 }}>
-                <div style={sectionTitle}>素材 · {visible.length} 项</div>
-                {visible.length === 0 ? (
-                  <div style={empty}>当前文件夹暂无{activeType ? TYPE_LABEL[activeType] : '素材'}</div>
-                ) : (
-                  <div style={grid}>
-                    {visible.map((candidate) => {
-                      const active = selection.has(candidate.media.id);
-                      const preview = candidate.media.type === 'VIDEO' ? null : candidate.media.contentUrl || candidate.media.url;
-                      return (
-                        <button
-                          key={candidate.media.id}
-                          type="button"
-                          onClick={() => toggle(candidate)}
-                          style={card(active)}
-                        >
-                          <div style={mediaBox}>
-                            {candidate.media.type === 'VIDEO'
-                              ? <video src={assetUrl(candidate.media.contentUrl || candidate.media.url)} muted style={mediaStyle} />
-                              : candidate.media.type === 'AUDIO'
-                                ? <audio src={assetUrl(candidate.media.contentUrl || candidate.media.url)} controls style={mediaStyle} />
-                                : <img src={assetUrl(preview ?? '')} alt="" style={mediaStyle} />}
-                          </div>
-                          <div style={{ padding: '7px 8px', minWidth: 0 }}>
-                            <strong style={ellipsis}>{candidate.media.fileName || candidate.asset.name}</strong>
-                            <small style={assetMeta}>
-                              {candidate.asset.scope === 'GLOBAL' && <Globe2 size={10} />}
-                              {candidate.asset.name}
-                            </small>
-                          </div>
-                          {active && <span style={check}><Check size={12} /></span>}
-                        </button>
-                      );
-                    })}
-                  </div>
+              <div style={toolbar}>
+                <FilterButton active={typeFilter === 'all'} label="全部" onClick={() => setTypeFilter('all')} />
+                {effectiveTypes.includes('image') && (
+                  <FilterButton active={typeFilter === 'image'} label="图片" onClick={() => setTypeFilter('image')} />
                 )}
-              </section>
+                {effectiveTypes.includes('video') && (
+                  <FilterButton active={typeFilter === 'video'} label="视频" onClick={() => setTypeFilter('video')} />
+                )}
+                {effectiveTypes.includes('audio') && (
+                  <FilterButton active={typeFilter === 'audio'} label="音频" onClick={() => setTypeFilter('audio')} />
+                )}
+                <label style={{ ...uploadButton, marginLeft: 'auto', opacity: uploading ? 0.65 : 1 }}>
+                  {uploading ? <LoaderCircle size={14} className="is-spinning" /> : <Upload size={14} />}
+                  {uploading ? '上传中…' : '上传到项目库'}
+                  <input
+                    type="file"
+                    hidden
+                    multiple
+                    accept={ACCEPT[activeType ?? 'all']}
+                    disabled={uploading}
+                    onChange={(event) => {
+                      void upload(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div style={breadcrumbs}>
+                <button type="button" onClick={() => setPath([])} disabled={path.length === 0}>
+                  <Folder size={14} /> 项目库
+                </button>
+                {path.map((folder, index) => (
+                  <span key={`${folder.scope}:${folder.id}`}>
+                    <ChevronLeft size={12} />
+                    <button type="button" onClick={() => setPath((current) => current.slice(0, index + 1))}>
+                      {folder.scope === 'GLOBAL' && <Globe2 size={11} />}
+                      {folder.name}
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              <div style={body}>
+                {loading ? (
+                  <div style={empty}><LoaderCircle className="is-spinning" size={18} /> 正在加载素材…</div>
+                ) : (
+                  <>
+                    {childFolders.length > 0 && (
+                      <section>
+                        <div style={sectionTitle}>文件夹 · 双击打开</div>
+                        <div style={folderGrid}>
+                          {childFolders.map((folder) => (
+                            <button
+                              key={`${folder.scope}:${folder.id}`}
+                              type="button"
+                              onDoubleClick={() => openFolder(folder)}
+                              style={folderCard}
+                              title="双击打开"
+                            >
+                              <Folder size={30} strokeWidth={1.5} />
+                              <strong style={ellipsis}>{folder.name}</strong>
+                              <small>{folder.descendantAssetCount} 项</small>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    <section style={{ marginTop: childFolders.length ? 18 : 0 }}>
+                      <div style={sectionTitle}>素材 · {visible.length} 项</div>
+                      {visible.length === 0 ? (
+                        <div style={empty}>当前文件夹暂无{activeType ? TYPE_LABEL[activeType] : '素材'}</div>
+                      ) : (
+                        <div style={grid}>
+                          {visible.map((candidate) => {
+                            const active = selection.has(candidate.media.id);
+                            const preview = candidate.media.type === 'VIDEO' ? null : candidate.media.contentUrl || candidate.media.url;
+                            return (
+                              <button
+                                key={candidate.media.id}
+                                type="button"
+                                onClick={() => toggle(candidate)}
+                                style={card(active)}
+                              >
+                                <div style={mediaBox}>
+                                  {candidate.media.type === 'VIDEO'
+                                    ? <video src={assetUrl(candidate.media.contentUrl || candidate.media.url)} muted style={mediaStyle} />
+                                    : candidate.media.type === 'AUDIO'
+                                      ? <audio src={assetUrl(candidate.media.contentUrl || candidate.media.url)} controls style={mediaStyle} />
+                                      : <img src={assetUrl(preview ?? '')} alt="" style={mediaStyle} />}
+                                </div>
+                                <div style={{ padding: '7px 8px', minWidth: 0 }}>
+                                  <strong style={ellipsis}>{candidate.media.fileName || candidate.asset.name}</strong>
+                                  <small style={assetMeta}>
+                                    {candidate.asset.scope === 'GLOBAL' && <Globe2 size={10} />}
+                                    {candidate.asset.name}
+                                  </small>
+                                </div>
+                                {active && <span style={check}><Check size={12} /></span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  </>
+                )}
+              </div>
             </>
           )}
-          {error && <div style={{ color: 'var(--color-error)', fontSize: 12, marginTop: 10 }}>{error}</div>}
+
+          {error && <div style={errorBar}>{error}</div>}
         </div>
 
         <footer style={footer}>
-          <span style={{ fontSize: 12, color: 'var(--color-muted)' }}>已选 {selection.size} 项</span>
+          <span style={{ fontSize: 12, color: 'var(--color-muted)' }}>
+            {assetGroups
+              ? `已选 ${selection.size} 项素材 · ${groupSelection.size} 个资产组`
+              : `已选 ${selection.size} 项`}
+          </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" onClick={onClose} disabled={saving || uploading} style={ghostButton}>取消</button>
             <button type="button" onClick={() => void confirm()} disabled={saving || uploading} style={primaryButton}>
@@ -411,6 +508,9 @@ function toReference(candidate: Candidate, purpose?: 'image' | 'video'): SceneMa
     sourceType: 'library_asset',
     sourceId: candidate.asset.id,
     mediaId: candidate.media.id,
+    fileName: candidate.media.fileName || candidate.asset.name,
+    mimeType: candidate.media.mimeType,
+    sizeBytes: candidate.media.sizeBytes,
   };
 }
 
@@ -439,6 +539,12 @@ const dialog: React.CSSProperties = {
 const header: React.CSSProperties = {
   padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   borderBottom: '1px solid var(--color-hairline)',
+};
+const tabStrip: React.CSSProperties = {
+  display: 'flex', gap: 4, padding: '10px 18px 0',
+};
+const tabPanel: React.CSSProperties = {
+  flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
 };
 const toolbar: React.CSSProperties = {
   padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8,
@@ -478,6 +584,10 @@ const check: React.CSSProperties = {
   position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10,
   display: 'grid', placeItems: 'center', color: 'white', background: 'var(--color-primary)',
 };
+const errorBar: React.CSSProperties = {
+  padding: '8px 18px', borderTop: '1px solid var(--color-hairline)',
+  color: 'var(--color-error)', fontSize: 12,
+};
 const footer: React.CSSProperties = {
   padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   borderTop: '1px solid var(--color-hairline)',
@@ -502,6 +612,12 @@ const scopeButton = (active: boolean): React.CSSProperties => ({
   padding: '6px 12px', borderRadius: 8, border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
   background: active ? 'var(--color-primary)' : 'white', color: active ? 'white' : 'var(--color-muted)',
   fontSize: 12, cursor: 'pointer',
+});
+// 顶层「素材 / 资产组」页签：与筛选 pill 区分，使用下划线式 tablist 语义。
+const tabButton = (active: boolean): React.CSSProperties => ({
+  padding: '7px 2px', marginRight: 18, border: 'none', borderBottom: `2px solid ${active ? 'var(--color-primary)' : 'transparent'}`,
+  background: 'transparent', color: active ? 'var(--color-primary)' : 'var(--color-muted)',
+  fontSize: 13, fontWeight: active ? 600 : 500, cursor: 'pointer',
 });
 const card = (active: boolean): React.CSSProperties => ({
   position: 'relative', padding: 0, overflow: 'hidden', border: `1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,

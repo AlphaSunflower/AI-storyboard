@@ -1,6 +1,5 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -26,7 +25,6 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeStoryboardTools storyboardTools;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
-    private final AgentAiConfigProperties agentConfig;
 
     public AgentScopeToolkitFactory(AgentScopeSessionTools sessionTools,
                                     AgentScopeInteractionTools interactionTools,
@@ -36,8 +34,7 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeVideoTools videoTools,
                                     AgentScopeStoryboardTools storyboardTools,
                                     AgentScopeToolPipeline toolPipeline,
-                                    SkillExpander skillExpander,
-                                    AgentAiConfigProperties agentConfig) {
+                                    SkillExpander skillExpander) {
         this.sessionTools = sessionTools;
         this.interactionTools = interactionTools;
         this.structuredTools = structuredTools;
@@ -47,25 +44,27 @@ public class AgentScopeToolkitFactory {
         this.storyboardTools = storyboardTools;
         this.toolPipeline = toolPipeline;
         this.skillExpander = skillExpander;
-        this.agentConfig = agentConfig;
     }
 
     public Toolkit create() {
         Toolkit toolkit = new Toolkit();
 
-        // Read-only discovery stays available before a skill is activated. Human input can be
-        // disabled temporarily so long-running media/storyboard work cannot stop on a card.
+        // Read-only discovery stays available before a skill is activated. The human-input tool
+        // is always registered because preflight clarifications are part of the turn protocol.
         sessionTools.tools().forEach(tool -> register(toolkit, tool));
         structuredTools.tools().forEach(tool -> register(toolkit, tool));
         register(toolkit, assetGroupTools.tool());
         register(toolkit, interactionTools.storyboardCommitTool());
-        if (agentConfig.isHumanInputEnabled()) {
-            register(toolkit, interactionTools.tool());
-        }
+        register(toolkit, interactionTools.tool());
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
+        ToolCallback[] canvasCallbacks = skillExpander.toolCallbacksByPrefix("canvas_");
+        if (canvasCallbacks == null) canvasCallbacks = new ToolCallback[0];
+        for (ToolCallback canvasTool : canvasCallbacks) {
+            register(toolkit, toolPipeline.wrapGeneric(new SpringAiToolAdapter(canvasTool)));
+        }
 
         toolkit.createSkillToolGroup(
-                IMAGE_TOOLS, "Image generation and reference-edit tools", false, "pic");
+                IMAGE_TOOLS, "Image generation and reference-edit tools", false, "image");
         toolkit.registration()
                 .agentTool(toolPipeline.wrap(imageTools.tool()))
                 .group(IMAGE_TOOLS).apply();
@@ -90,5 +89,9 @@ public class AgentScopeToolkitFactory {
 
     private void register(Toolkit toolkit, AgentScopeTool tool) {
         toolkit.registerAgentTool(toolPipeline.wrap(tool));
+    }
+
+    private void register(Toolkit toolkit, io.agentscope.core.tool.AgentTool tool) {
+        toolkit.registerAgentTool(tool);
     }
 }

@@ -33,15 +33,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 class SkillExpanderTests {
 
     private SkillExpander skillExpander;
-    private SkillManager skillManager;
     private AgentTools agentTools;
 
     @BeforeEach
     void setup() {
-        SkillLoader skillLoader = new SkillLoader();
-        skillLoader.loadAll(); // 包内可见，手动加载 resources/skills
-        skillManager = new SkillManager(skillLoader);
-
         ToolExecutionTemplate executionTemplate = mock(ToolExecutionTemplate.class);
         when(executionTemplate.execute(anyString(), anyString(), anyString(), any(), any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
@@ -75,7 +70,7 @@ class SkillExpanderTests {
         ObjectProvider<ToolCallbackProvider> providers = mock(ObjectProvider.class);
         when(providers.orderedStream()).thenReturn(Stream.of(canvasProvider));
 
-        skillExpander = new SkillExpander(agentTools, skillManager, providers, executionTemplate);
+        skillExpander = new SkillExpander(agentTools, providers, executionTemplate);
         skillExpander.init(); // 包内可见，手动触发索引
     }
 
@@ -87,8 +82,12 @@ class SkillExpanderTests {
         assertTrue(names.contains("replaceSpecificScenes"), "应索引到 replaceSpecificScenes");
         assertTrue(names.contains("refineImage"), "应索引到 refineImage");
         assertTrue(names.contains("generateVideo"), "应索引到 generateVideo");
-        assertTrue(names.contains("testEcho"), "应索引到新增的 testEcho");
         assertTrue(names.contains("moon_request_human_input"), "应索引到人工介入工具");
+    }
+
+    @Test
+    void removedTestEchoToolIsNotIndexed() {
+        assertFalse(skillExpander.allToolNames().contains("testEcho"));
     }
 
     @Test
@@ -109,22 +108,6 @@ class SkillExpanderTests {
     void emptyOrNullInputReturnsEmpty() {
         assertEquals(0, skillExpander.toolCallbacks(List.of()).length);
         assertEquals(0, skillExpander.toolCallbacks(null).length);
-    }
-
-    @Test
-    void everySkillDeclaredToolResolves() {
-        // 本地工具必须可解析；Canvas 和媒体 MCP 是外部服务，单测环境允许未启动。
-        for (AgentSkill skill : skillManager.all()) {
-            if (skill.tools() == null || skill.tools().isEmpty()) continue;
-            java.util.List<String> missing = skill.tools().stream()
-                    .filter(tool -> !skillExpander.hasTool(tool))
-                    .toList();
-            assertTrue(missing.isEmpty() || missing.stream().allMatch(tool ->
-                            tool.startsWith("canvas_")
-                                    || "generate_image".equals(tool)
-                                    || "generate_video".equals(tool)),
-                    "技能 " + skill.name() + " 存在不可解析的本地工具：" + missing);
-        }
     }
 
     @Test
@@ -150,43 +133,4 @@ class SkillExpanderTests {
         assertEquals("项目一 / 画布一", request.options().getFirst().get("title"));
     }
 
-    @Test
-    void testSkillLoadedWithMultiStepFlow() {
-        var skill = skillManager.byIntent("intent-test");
-        assertTrue(skill.isPresent(), "test 技能应被 SkillLoader 加载");
-        assertFalse(skill.get().flow().isEmpty(), "test 技能应声明 flow 多步澄清流程");
-        assertEquals("clarify_style", skill.get().flow().getFirst(), "flow 首步应为 clarify_style");
-    }
-
-    @Test
-    void legacySceneReviewSkillIsNoLongerLoaded() {
-        assertTrue(skillManager.byIntent("intent-scene-review").isEmpty(),
-                "旧分镜审查链路应从静态技能目录彻底移除");
-    }
-
-    @Test
-    void canvasSkillsDescribeMediaRelayAndAutomaticRepair() {
-        String design = skillManager.get("canvas-design").orElseThrow().systemPrompt();
-        String run = skillManager.get("canvas-run").orElseThrow().systemPrompt();
-
-        assertTrue(design.contains("结果槽"));
-        assertTrue(design.contains("中间占位"));
-        assertTrue(design.contains("输出口"));
-        assertTrue(design.contains("canvas_get_node_model_config"));
-        assertTrue(design.contains("canvas_set_node_model_config"));
-        assertTrue(run.contains("执行前"));
-        assertTrue(run.contains("自动补齐"));
-        assertTrue(run.contains("canvas_set_node_model_config"));
-    }
-
-    @Test
-    void testEchoReturnsConcatenatedFirstSentence() {
-        String result = agentTools.testEcho("测试一下这个功能好不好？后面是废话。");
-        assertEquals("测试无效，略略略。用户第一句话：测试一下这个功能好不好？", result);
-    }
-
-    @Test
-    void testEchoWithoutPunctuationUsesWholeText() {
-        assertEquals("测试无效，略略略。用户第一句话：测试", agentTools.testEcho("测试"));
-    }
 }

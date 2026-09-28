@@ -1,5 +1,10 @@
 # 分镜多智能体并行设计
 
+> **架构状态（2026-09-26）：已被取代。** 本文早于 AgentScope 全量迁移；其中
+> Spring AI Alibaba Graph Core / StateGraph 编排方案仅供历史参考，不再是 MoonAgent
+> 目标架构。权威说明见
+> [`2026-09-26-agentscope-architecture.md`](2026-09-26-agentscope-architecture.md)。
+
 ## 目标
 
 把现有 MoonAgent 分镜链从“单模型串行处理材质、骨架、分镜、绑定、审查”升级为运行时多智能体并行架构。
@@ -144,7 +149,7 @@ worker / synthesizer 的职责边界。它们适合作为实现参考，但不�
 
 ### Spring AI Alibaba Agent Framework
 
-当前仓库已经使用 `spring-ai-alibaba-graph-core:2.0.0-M1.1`。同版本的
+迁移方案形成时仓库曾使用 `spring-ai-alibaba-graph-core:2.0.0-M1.1`。同版本的
 `spring-ai-alibaba-agent-framework:2.0.0-M1.1` 提供：
 
 - `SequentialAgent`: 固定的串行阶段，可直接承载骨架阶段。

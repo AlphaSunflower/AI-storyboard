@@ -331,6 +331,52 @@
   animation-delay: calc(var(--item-index, 0) * 36ms);
 }
 
+.approval-mode-option {
+  background: transparent;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.approval-mode-option:hover,
+.approval-mode-option:focus-visible {
+  background: rgba(65, 118, 230, 0.06);
+}
+
+.approval-mode-option.is-selected {
+  background: rgba(65, 118, 230, 0.08);
+}
+
+.approval-mode-option.is-selected:hover,
+.approval-mode-option.is-selected:focus-visible {
+  background: rgba(65, 118, 230, 0.11);
+}
+
+.approval-mode-option:focus-visible {
+  outline: 2px solid rgba(65, 118, 230, 0.45);
+  outline-offset: -2px;
+}
+
+.approval-mode-option.is-full-access {
+  background: transparent;
+  box-shadow: none;
+}
+
+.approval-mode-option.is-full-access:hover,
+.approval-mode-option.is-full-access:focus-visible {
+  background: rgba(249, 115, 22, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(234, 88, 12, 0.28);
+}
+
+.approval-mode-option.is-full-access.is-selected {
+  background: rgba(249, 115, 22, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(234, 88, 12, 0.28);
+}
+
+.approval-mode-option.is-full-access:focus-visible {
+  outline-color: rgba(234, 88, 12, 0.48);
+}
+
 .generation-center__trigger.is-dragging {
   cursor: grabbing;
   box-shadow: 0 16px 38px rgba(15, 17, 21, 0.18);

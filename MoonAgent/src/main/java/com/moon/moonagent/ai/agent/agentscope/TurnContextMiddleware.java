@@ -26,7 +26,8 @@ final class TurnContextMiddleware implements MiddlewareBase {
                         "Asset handling: call list_asset_groups first and use its file contentUrl values. "
                                 + "Do not describe the asset group as a user-uploaded image.");
                 case UPLOAD_ONLY -> lines.add(
-                        "Upload handling: use the attached image URLs directly; do not call "
+                        "Upload handling: attached images are already supplied as native image content. "
+                                + "Inspect them directly and do not call web_fetch or "
                                 + "list_asset_groups or ask for asset groups.");
                 case MIXED -> lines.add(
                         "Mixed handling: call list_asset_groups for asset metadata, keep uploaded image URLs, "
@@ -36,7 +37,8 @@ final class TurnContextMiddleware implements MiddlewareBase {
             }
         }
         if (request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
-            lines.add("Current turn attached image URLs: " + request.getPicUrls());
+            lines.add("Current turn attached image count: " + request.getPicUrls().size()
+                    + ". The image bytes are already attached to the user message.");
         }
         if (request.getAssetIds() != null && !request.getAssetIds().isEmpty()) {
             lines.add("Current turn selected asset IDs: " + request.getAssetIds());

@@ -17,6 +17,7 @@
         <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
         <agentscope.version>2.0.3</agentscope.version>
+        <nacos.client.version>3.2.1-2026.03.30</nacos.client.version>
         <spring-cloud.version>2025.1.0</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
@@ -42,6 +43,14 @@
                 <version>${agentscope.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- AgentScope 2.0.3 Nacos extensions use the Nacos 3.2.1 AI APIs.
+                 Pin the client family so Spring Cloud Alibaba's older 3.1.1 does
+                 not win Maven mediation and break prompt/skill calls at runtime. -->
+            <dependency>
+                <groupId>com.alibaba.nacos</groupId>
+                <artifactId>nacos-client</artifactId>
+                <version>${nacos.client.version}</version>
             </dependency>
             <!-- AgentScope pins an older MCP SDK. MoonAgent owns the MCP transport and
                  adapts Spring AI ToolCallbacks into AgentScope tools, so keep the whole
@@ -136,21 +145,7 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
-        <!-- StateGraph 工作流引擎（PlanGraph 编排重构，2026-08-21 P0 spike 验证 2.0.0-M1.1） -->
-        <dependency>
-            <groupId>com.alibaba.cloud.ai</groupId>
-            <artifactId>spring-ai-alibaba-graph-core</artifactId>
-            <version>2.0.0-M1.1</version>
-            <exclusions>
-                <!-- graph-core 传递 0.14.0，与 Spring AI MCP 2.0.0 不兼容 -->
-                <exclusion>
-                    <groupId>io.modelcontextprotocol.sdk</groupId>
-                    <artifactId>mcp</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <!-- MCP SDK 2.0.0（Spring AI MCP starters 需要；graph-core 的 0.14.0 已排除） -->
+        <!-- MCP SDK 2.0.0（Spring AI MCP starters 需要） -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp</artifactId>
@@ -184,6 +179,14 @@
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-nacos-skill</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-nacos-prompt</artifactId>
         </dependency>
 
         <!-- Nacos 服务发现 -->
@@ -272,12 +275,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>com.storyboard</groupId>
-            <artifactId>common-core</artifactId>
-            <version>0.1.0</version>
-            <scope>compile</scope>
         </dependency>
     </dependencies>
     <build>

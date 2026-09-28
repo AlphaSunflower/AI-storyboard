@@ -9,7 +9,7 @@ import java.time.OffsetDateTime;
  * @param id             事件 id（UUID 字符串）
  * @param phase          阶段（intent_recognize / specialist_execute / handoff / route_change / hitl / tool_call ...）
  * @param agent          Moon 主代理（固定 "moon"）
- * @param specialist     子智能体意图（如 intent-aisplit；无则空）
+ * @param specialist     工具或子智能体标签（无则空，字段名保留前端兼容）
  * @param status         node_started | node_completed | route_changed | ...
  * @param title          可读标题（如「意图识别」「生成分镜」）
  * @param summary        摘要（可用 LLM 转中文；不暴露原始 prompt）

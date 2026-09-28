@@ -2,7 +2,7 @@ package com.moon.moonagent.controller;
 
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
 import com.moon.moonagent.ai.agent.AgentChatService;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
 import com.storyboard.common.ApiResponse;
@@ -78,7 +78,7 @@ public class AgentTaskController {
                     .forEach(task -> {
                         try {
                             emitter.send(SseEmitter.event().name("snapshot")
-                                    .data(AgentOrchestratorSupport.sseJson(Map.of("task", task))));
+                                    .data(AgentRuntimeSupport.sseJson(Map.of("task", task))));
                         } catch (Exception ignored) {
                             // 单次首包失败由前端轮询兜底。
                         }

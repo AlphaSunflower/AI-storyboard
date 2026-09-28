@@ -5,11 +5,15 @@ import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
-import { AssetGroupPickerModal } from '../library/AssetGroupPickerModal';
 import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
 import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
-import { agentApi, sttStream, type ConversationAssetGroupBinding } from '../../api/agent';
-import { Paperclip } from 'lucide-react';
+import {
+  DEFAULT_AGENT_APPROVAL_MODE,
+  agentApi,
+  sttStream,
+  type ConversationAssetGroupBinding,
+} from '../../api/agent';
+import { FileText, Paperclip } from 'lucide-react';
 import { Image as ImageIcon, PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
@@ -19,6 +23,8 @@ import { buildSceneInspectPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference }
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
+import { ApprovalModeSelector } from './ApprovalModeSelector';
+import { ImagePreviewModal } from './ImagePreviewModal';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   parseProjectLibraryDragPayload,
@@ -53,6 +59,7 @@ export function ChatComposer() {
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
     addRefImageUrls, setRefImageUrls,
+    pendingAttachments, addPendingAttachments, removePendingAttachment,
     pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
     pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia, clearPickedReferenceMedia,
     canvasEditContext,
@@ -61,11 +68,14 @@ export function ChatComposer() {
     canvasExitPending,
     removeCanvasMediaRef,
     moveCanvasMediaRef,
+    pendingApprovalMode,
+    setApprovalMode,
   } = useAgentStore();
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [canvasMediaOpen, setCanvasMediaOpen] = useState(false);
   const [uploadDrafts, setUploadDrafts] = useState<Array<{
@@ -89,8 +99,8 @@ export function ChatComposer() {
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const archived = activeConversation?.status === 'archived';
-  const legacyOrchestration = activeConversation?.orchestrationMode != null
-    && activeConversation.orchestrationMode !== 'UNIFIED_LOOP';
+  const legacyOrchestration = activeConversation?.orchestrationMode === 'LEGACY';
+  const approvalMode = activeConversation?.approvalMode ?? pendingApprovalMode ?? DEFAULT_AGENT_APPROVAL_MODE;
   const readOnly = archived || legacyOrchestration;
   /** 只读原因不同提示分开：旧编排会话并未归档，不能一律说「已归档」 */
   const readOnlyHint = archived
@@ -160,7 +170,6 @@ export function ChatComposer() {
   const [assetSelected, setAssetSelected] = useState<Set<string>>(new Set());
   const [assetError, setAssetError] = useState('');
   const [pendingGroup, setPendingGroup] = useState<import('../../api/library').AssetGroupSnapshot | null>(null);
-  const [assetGroupOpen, setAssetGroupOpen] = useState(false);
   const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
   const [boundGroups, setBoundGroups] = useState<ConversationAssetGroupBinding[]>([]);
 
@@ -222,6 +231,7 @@ export function ChatComposer() {
   const canInterruptSend = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan
     && !canvasBinding && !canvasExitPending;
   const attachLocked = readOnly;
+  const fileAttachments = pendingAttachments.filter((attachment) => attachment.kind === 'file');
 
   const handleSend = () => {
     const content = text.trim();
@@ -278,7 +288,7 @@ export function ChatComposer() {
       );
     } catch {
       // 失败保留草稿弹窗与文字，用户可直接重试（原 alert 打断且无处看原因）
-      setUploadError('图片上传失败，请重试');
+      setUploadError('文件上传失败，请重试');
       return;
     }
     closeUploadDrafts();
@@ -336,7 +346,7 @@ export function ChatComposer() {
         }
       } catch { /* 无效拖拽数据按普通文件拖拽处理 */ }
     }
-    const files = Array.from(e.dataTransfer.files ?? []).filter((file) => file.type.startsWith('image/'));
+    const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length > 0) void uploadRefImages(files);
   }, [readOnly, sendMessage, uploadRefImages]);
 
@@ -429,7 +439,13 @@ export function ChatComposer() {
       }
       if (payload.mediaType === 'IMAGE') {
         addRefImageUrls([payload.url]);
-        addLocalUserMessage(`已添加项目库图片：${payload.name}`);
+        addPendingAttachments([{
+          url: payload.url,
+          name: payload.name,
+          mimeType: 'image/*',
+          kind: 'image',
+          source: 'library',
+        }]);
         return;
       }
       if (payload.mediaType === 'VIDEO') {
@@ -437,14 +453,26 @@ export function ChatComposer() {
           [...new Set([...pickedReferenceVideos, payload.url])],
           pickedReferenceAudios,
         );
-        addLocalUserMessage(`已添加项目库视频：${payload.name}`);
+        addPendingAttachments([{
+          url: payload.url,
+          name: payload.name,
+          mimeType: 'video/*',
+          kind: 'video',
+          source: 'library',
+        }]);
         return;
       }
       setPickedReferenceMedia(
         pickedReferenceVideos,
         [...new Set([...pickedReferenceAudios, payload.url])],
       );
-      addLocalUserMessage(`已添加项目库音频：${payload.name}`);
+      addPendingAttachments([{
+        url: payload.url,
+        name: payload.name,
+        mimeType: 'audio/*',
+        kind: 'audio',
+        source: 'library',
+      }]);
     } catch (error) {
       addLocalUserMessage(error instanceof Error ? `项目库素材添加失败：${error.message}` : '项目库素材添加失败');
     }
@@ -487,7 +515,7 @@ export function ChatComposer() {
     }}>
       {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
         || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
-        || pendingGroup || boundGroups.length > 0) && (
+        || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           padding: '8px 12px', borderRadius: 12, background: DS.hover,
@@ -573,6 +601,20 @@ export function ChatComposer() {
               >×</button>
             </span>
           )}
+          {fileAttachments.length > 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '5px 8px', borderRadius: 8, background: 'white',
+              color: DS.textSecondary, fontSize: 12,
+            }}>
+              <FileText size={14} strokeWidth={2} style={{ color: DS.brand }} />
+              文件 {fileAttachments.length} 个
+              <button
+                onClick={() => fileAttachments.forEach((attachment) => removePendingAttachment(attachment.url))}
+                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
+              >×</button>
+            </span>
+          )}
           {(canvasEditContext?.mediaRefs.length ?? 0) > 0 && (
             <button onClick={() => setCanvasMediaOpen(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -593,9 +635,9 @@ export function ChatComposer() {
                 opacity: readOnly ? 0.45 : 1,
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
-            ><ImageIcon size={12} strokeWidth={2} /> 加素材</button>
+            ><Paperclip size={12} strokeWidth={2} /> 加文件</button>
             <button
-              onClick={readOnly ? undefined : handleAssetOpen}
+              onClick={readOnly ? undefined : () => setProjectLibraryOpen(true)}
               disabled={readOnly}
               style={{
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
@@ -662,39 +704,47 @@ export function ChatComposer() {
         }}
       />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ position: 'relative' }}>
-          <button
-            ref={menuBtnRef}
-            onClick={attachLocked ? undefined : openMenu}
-            disabled={attachLocked}
-            title="上传"
-            className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
-            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
-            style={{
-              width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
-              fontSize: 17, cursor: attachLocked ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              opacity: attachLocked ? 0.45 : 1,
-            }}
-          >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
-          <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden disabled={attachLocked} onChange={handleFile} />
-          {/* 下拉菜单：portal 到 body */}
-          {menuPresence.mounted && menuPos && createPortal(
-            <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
-              position: 'fixed', top: menuPos.top, left: menuPos.left,
-              background: 'white', border: `1px solid ${DS.border}`,
-              borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-              padding: 4, zIndex: 1000, minWidth: 140,
-            }}>
-              <UploadMaterialMenu
-                onClose={() => setMenuOpen(false)}
-                onLocalImage={() => fileRef.current?.click()}
-                onMaterialPicker={() => setMaterialPickerOpen(true)}
-              />
-            </div>,
-            document.body,
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <ApprovalModeSelector
+            mode={approvalMode}
+            disabled={readOnly || streaming || !!waitingHumanInput || !!waitingVideoPlan
+              || !!canvasBinding || canvasExitPending}
+            onChange={(mode, options) => { void setApprovalMode(mode, options); }}
+          />
+          <div style={{ position: 'relative' }}>
+            <button
+              ref={menuBtnRef}
+              onClick={attachLocked ? undefined : openMenu}
+              disabled={attachLocked}
+              title="上传"
+              className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
+              onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+              style={{
+                width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
+                fontSize: 17, cursor: attachLocked ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                opacity: attachLocked ? 0.45 : 1,
+              }}
+            >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
+            <input ref={fileRef} type="file" multiple hidden disabled={attachLocked} onChange={handleFile} />
+            {/* 下拉菜单：portal 到 body */}
+            {menuPresence.mounted && menuPos && createPortal(
+              <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
+                position: 'fixed', top: menuPos.top, left: menuPos.left,
+                background: 'white', border: `1px solid ${DS.border}`,
+                borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                padding: 4, zIndex: 1000, minWidth: 140,
+              }}>
+                <UploadMaterialMenu
+                  onClose={() => setMenuOpen(false)}
+                  onLocalFile={() => fileRef.current?.click()}
+                  onMaterialPicker={() => setMaterialPickerOpen(true)}
+                />
+              </div>,
+              document.body,
+            )}
+          </div>
         </div>
         {/* 右侧：麦克风 + 发送，紧贴排列 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
@@ -745,17 +795,9 @@ export function ChatComposer() {
       <UploadMaterialPickerModal
         open={materialPickerOpen}
         onClose={() => setMaterialPickerOpen(false)}
-        onAssetGroup={() => setAssetGroupOpen(true)}
         onProjectLibrary={() => setProjectLibraryOpen(true)}
         onProjectOutput={() => setOutputOpen(true)}
         onScene={() => setSceneModalOpen(true)}
-      />
-      <AssetGroupPickerModal
-        open={assetGroupOpen}
-        projectId={projectId}
-        selectedIds={boundGroups.map((binding) => binding.groupId)}
-        onClose={() => setAssetGroupOpen(false)}
-        onConfirm={handleAssetGroupConfirm}
       />
       <ProjectLibraryPickerModal
         open={projectLibraryOpen}
@@ -763,13 +805,20 @@ export function ChatComposer() {
         type="image"
         allowedTypes={['image', 'video', 'audio']}
         purpose="image"
+        assetGroups={{
+          selectedIds: boundGroups.map((binding) => binding.groupId),
+          onConfirm: handleAssetGroupConfirm,
+        }}
         onClose={() => setProjectLibraryOpen(false)}
         onConfirm={async (references) => {
-          addRefImageUrls(references.filter((reference) => reference.type === 'image').map((reference) => reference.url));
-          setPickedReferenceMedia(
-            references.filter((reference) => reference.type === 'video').map((reference) => reference.url),
-            references.filter((reference) => reference.type === 'audio').map((reference) => reference.url),
-          );
+          addPendingAttachments(references.map((reference) => ({
+            url: reference.url,
+            name: reference.fileName || `${reference.type} 素材`,
+            mimeType: reference.mimeType || `${reference.type}/*`,
+            sizeBytes: reference.sizeBytes,
+            kind: reference.type,
+            source: 'library' as const,
+          })));
         }}
       />
 
@@ -779,7 +828,13 @@ export function ChatComposer() {
         existingUrls={refImageUrls}
         remaining={Math.max(0, 10 - refImageUrls.length)}
         onClose={() => setOutputOpen(false)}
-        onConfirm={async (references) => addRefImageUrls(references.map((reference) => reference.url))}
+        onConfirm={async (references) => addPendingAttachments(references.map((reference, index) => ({
+          url: reference.url,
+          name: reference.fileName || `项目图片 ${index + 1}`,
+          mimeType: reference.type === 'video' ? 'video/*' : 'image/*',
+          kind: reference.type,
+          source: 'library' as const,
+        })))}
       />
 
       {/* 参考图列表弹窗：指定移除单张（2026-08-28 用户反馈：不再一键清空，改为逐张指定移除） */}
@@ -794,8 +849,17 @@ export function ChatComposer() {
             <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {refImageUrls.map((u, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', borderRadius: 12, background: DS.hover }}>
-                  <img src={u} alt={`参考图 ${i + 1}`} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: DS.textCaption, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>图 {i + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewUrl(u)}
+                    aria-label={`放大预览第 ${i + 1} 张参考图`}
+                    style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in', flexShrink: 0 }}
+                  >
+                    <img src={u} alt={`参考图 ${i + 1}`} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
+                  </button>
+                  <span style={{ fontSize: 12, color: DS.textCaption, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {pendingAttachments.find((attachment) => attachment.url === u)?.name || `图 ${i + 1}`}
+                  </span>
                   <button
                     onClick={() => removeRefImageUrl(i)}
                     style={{ border: 'none', background: 'none', color: '#d9534f', cursor: 'pointer', fontSize: 19, lineHeight: 1 }}
@@ -914,9 +978,9 @@ export function ChatComposer() {
             width: 520, maxWidth: '92vw', background: 'white', borderRadius: 16, padding: 18,
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>上传参考图 · 写清每张是干什么的</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>上传附件 · 写清每个文件是干什么的</div>
             <div style={{ fontSize: 12, color: DS.textCaption, lineHeight: 1.5 }}>
-              这里是参考图；资产请在「上传资产」里选择。用途会作为 H3 参考素材说明绑定到生成（例如：人物参考（锁脸）/ 场景参考 / 风格参考）。
+              图片会作为参考图参与识别与生成，其他文件会作为对话附件保留。资产请在「加资产」里选择。
             </div>
             <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {uploadDrafts.map((d, i) => (
@@ -934,7 +998,7 @@ export function ChatComposer() {
                     <input
                       value={d.purpose}
                       onChange={(e) => setUploadDrafts((prev) => prev.map((x, idx) => idx === i ? { ...x, purpose: e.target.value } : x))}
-                      placeholder="这张图是干什么的？（可留空，智能体会看图识别）"
+                      placeholder="这个文件是干什么的？（可留空，图片会自动识别）"
                       style={{
                         width: '100%', border: `1px solid ${DS.border}`, borderRadius: 8, padding: '7px 10px',
                         fontSize: 13, color: DS.ink, outline: 'none', background: 'white', boxSizing: 'border-box',
@@ -953,7 +1017,7 @@ export function ChatComposer() {
               <button onClick={handleUploadConfirm} style={{
                 padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
                 fontSize: 14, cursor: 'pointer',
-              }}>上传 {uploadDrafts.length} 项</button>
+              }}>上传 {uploadDrafts.length} 个文件</button>
             </div>
           </div>
         </div>,
@@ -1005,6 +1069,7 @@ export function ChatComposer() {
         </div>,
         document.body
       )}
+      <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </div>
     {/* 底部免责声明（位于输入框卡片下方） */}
     <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.4, marginTop: 8 }}>

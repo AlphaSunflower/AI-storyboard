@@ -35,6 +35,7 @@ public class AgentConversationServiceImpl implements AgentConversationService {
         conv.setProjectId(projectId);
         conv.setTitle("新对话");
         conv.setStatus("active");
+        conv.setApprovalMode("PLAN_APPROVAL");
         conversationMapper.insert(conv);
         return conv;
     }

@@ -24,7 +24,7 @@ class VideoGenerationPolicyGuardTest {
     @Test
     void genericVideoEntryRejectsLongOriginalRequestBeforeCreatingTask() {
         AgentGenerationService generation = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = support(generation);
+        AgentRuntimeSupport support = support(generation);
         AgentConversation conversation = conversation();
         OrchestrationRequest request = new OrchestrationRequest(
                 conversation, "生成一个两分钟的视频", List.of(), mock(SseEmitter.class));
@@ -45,7 +45,7 @@ class VideoGenerationPolicyGuardTest {
                 any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), anyBoolean()))
                 .thenThrow(new RuntimeException("created-past-policy"));
-        AgentOrchestratorSupport support = support(generation);
+        AgentRuntimeSupport support = support(generation);
         AgentConversation conversation = conversation();
         OrchestrationRequest request = new OrchestrationRequest(
                 conversation, "生成一个两分钟的视频", List.of(), mock(SseEmitter.class));
@@ -61,12 +61,12 @@ class VideoGenerationPolicyGuardTest {
         verify(generation, never()).pollVideoTask(any());
     }
 
-    private static AgentOrchestratorSupport support(AgentGenerationService generation) {
+    private static AgentRuntimeSupport support(AgentGenerationService generation) {
         AgentSessionState sessionState = mock(AgentSessionState.class);
         when(sessionState.isInterrupted(any())).thenReturn(false);
-        return new AgentOrchestratorSupport(
+        return new AgentRuntimeSupport(
                 null, null, new AgentAiConfigProperties(), generation, null, null, null,
-                null, null, null, null, sessionState, null);
+                null, null, null, sessionState, null);
     }
 
     private static AgentConversation conversation() {

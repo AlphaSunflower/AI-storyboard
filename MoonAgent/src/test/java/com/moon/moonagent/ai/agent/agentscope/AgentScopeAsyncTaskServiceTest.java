@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
-import com.moon.moonagent.ai.agent.handler.AgentOrchestratorSupport;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
@@ -58,7 +58,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
@@ -134,7 +134,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
@@ -231,7 +231,7 @@ class AgentScopeAsyncTaskServiceTest {
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, mock(AgentGenerationService.class),
-                mock(AgentOrchestratorSupport.class), new AgentScopeProperties(), productionService,
+                mock(AgentRuntimeSupport.class), new AgentScopeProperties(), productionService,
                 new AgentTaskEventHub(), mock(AgentScopeMessageBus.class));
 
         AgentConversation conversation = new AgentConversation();
@@ -295,7 +295,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeProperties properties = new AgentScopeProperties();
         AgentScopeMessageBus messageBus = mock(AgentScopeMessageBus.class);
@@ -399,7 +399,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -448,7 +448,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -481,7 +481,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -518,7 +518,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -546,7 +546,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -590,7 +590,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -652,7 +652,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,
@@ -716,7 +716,7 @@ class AgentScopeAsyncTaskServiceTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentGenerationService generationService = mock(AgentGenerationService.class);
-        AgentOrchestratorSupport support = mock(AgentOrchestratorSupport.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         StoryboardProductionService productionService = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
                 taskMapper, conversationMapper, messageMapper, generationService,

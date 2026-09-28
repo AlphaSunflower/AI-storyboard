@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  *
  * <p>安全约束：轨迹数据只包含阶段/意图/状态等元信息，<b>不暴露原始 prompt</b>。
- * 数据统一使用 {@link AgentOrchestratorSupport#sseJson} 序列化。
+ * 数据统一使用 {@link AgentRuntimeSupport#sseJson} 序列化。
  */
 public class AgentTraceAccumulator {
 
@@ -203,7 +203,7 @@ public class AgentTraceAccumulator {
             SseEmitter emitter = request.getEmitter();
             if (emitter != null) {
                 emitter.send(SseEmitter.event().name("agent_trace")
-                        .data(AgentOrchestratorSupport.sseJson(Map.of("traceEvent", event))));
+                        .data(AgentRuntimeSupport.sseJson(Map.of("traceEvent", event))));
             }
         } catch (Exception e) {
             log.debug("agent_trace 发送失败（前端可能已断开）: {}",

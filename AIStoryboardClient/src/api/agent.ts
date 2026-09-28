@@ -3,6 +3,10 @@ import { BACKEND_URL } from '../config';
 import type { GatewayModelOption } from './ai';
 import type { CanvasEditContext } from '../lib/canvasEditMode';
 
+export type AgentApprovalMode = 'PLAN_APPROVAL' | 'REQUEST_APPROVAL' | 'FULL_ACCESS';
+
+export const DEFAULT_AGENT_APPROVAL_MODE: AgentApprovalMode = 'PLAN_APPROVAL';
+
 export interface AgentConversation {
   id: string;
   userId: string;
@@ -10,9 +14,10 @@ export interface AgentConversation {
   title: string;
   status: 'active' | 'archived';
   canvasContext?: CanvasEditContext | null;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   debugComparisonEnabled?: boolean;
+  approvalMode?: AgentApprovalMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,38 +32,29 @@ export interface ConversationAssetGroupBinding {
   media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string }>;
 }
 
-export type AgentTaskPlanAction = 'approve' | 'reject' | 'retry' | 'replan' | 'cancel' | 'resume';
+export type AgentAttachmentKind = 'image' | 'video' | 'audio' | 'file';
 
-export interface AgentTaskPlanNode {
-  nodeId: string;
-  capabilityKey: string;
-  title: string;
-  state: string;
-  attemptCount: number;
-  dependencies: string[];
-  hitlPolicy: string;
-  evaluationMode: string;
-  qualityCriteria: string;
-  outputSummary: string | null;
-  asyncTaskId: string | null;
-  error: string | null;
+export interface AgentAttachment {
+  url: string;
+  name: string;
+  mimeType: string;
+  sizeBytes?: number;
+  kind: AgentAttachmentKind;
+  source?: 'upload' | 'library';
 }
 
-export interface AgentTaskPlanEdge {
-  fromNodeId: string;
-  toNodeId: string;
+export interface AgentActiveTurn {
+  turnId: string;
+  status: 'running' | 'waiting_user';
+  lastSequence: number;
+  inputText?: string;
+  startedAt?: string;
 }
 
-export interface AgentTaskPlanView {
-  planId: string;
+export interface AgentRuntimeStatus {
   conversationId: string;
-  goal: string;
-  state: string;
-  version: number;
-  replanCount: number;
-  error: string | null;
-  nodes: AgentTaskPlanNode[];
-  edges: AgentTaskPlanEdge[];
+  locked?: boolean;
+  activeTurn?: AgentActiveTurn;
 }
 
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
@@ -141,6 +137,7 @@ export interface AgentMessageMetadata {
     picUrls?: string[];
     referenceVideos?: string[];
     referenceAudios?: string[];
+    attachments?: AgentAttachment[];
     assetIds?: string[];
     routingHint?: string;
   };
@@ -153,7 +150,7 @@ export interface AgentMessageMetadata {
   metrics?: AgentTurnMetrics;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
+  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   checkpointOwner?: string;
   loopRunId?: string;
@@ -436,70 +433,54 @@ export interface AssetOption {
   negativePrompt?: string;
 }
 
-export interface SseEvent {
-  type: 'message' | 'workflow' | 'human_input' | 'message_end' | 'confirm_result' | 'video_plan' | 'task_accepted' | 'error' | 'reasoning_delta' | 'agent_trace' | 'canvas_mode_required';
-  content?: string;
-  /** workflow 阶段稳定标识（如 intent_recognize / generate_storyboard） */
-  stage?: string;
-  title?: string;
-  status?: string;
-  formToken?: string;
-  taskId?: string;
-  taskKind?: 'video' | 'image-batch' | 'long-tool';
-  formContent?: string;
-  actions?: { id: string; title: string }[];
-  expirationTime?: number | string;
-  // 卡片模型/参数选项（后端下发网关模型列表，含各模型参数能力；无配置时缺失）
-  models?: GatewayModelOption[];
-  // aisplit 分镜确认卡片：图片/视频两组模型列表（分区参数选择器用）
-  imageModels?: GatewayModelOption[];
-  videoModels?: GatewayModelOption[];
-  // LLM 推荐的生成参数值与推荐理由（video 链方案生成时输出）
-  recommended?: Record<string, string>;
-  reasons?: Record<string, string>;
-  messageId?: string;
-  sceneCount?: number;
-  // confirm_result 事件字段（生成结果看图确认卡片）
-  kind?: 'script' | 'image' | 'video';
-  url?: string;
-  assetId?: string;
-  // confirm_result 多图结果（n>1 时后端下发）
-  urls?: string[];
-  assetIds?: string[];
-  // video_plan 事件字段（图生视频方案确认卡片）
-  planToken?: string;
-  duration?: number;
-  picUrl?: string;
-  // 资产选择卡片（human_input 事件带 assets 时渲染勾选列表）
-  assets?: AssetOption[];
-  // reasoning / agentTrace / suggestedActions（reasoning_delta / agent_trace / message_end）
-  reasoning?: AgentReasoning;
-  metrics?: AgentTurnMetrics;
-  agentTrace?: SseTraceEvent[];
-  suggestedActions?: SuggestedAction[];
-  taskCards?: AgentTaskCardRef[];
-  storyboardReview?: StoryboardReviewRef;
-  // reasoning_delta 增量字段
-  summary?: string;
-  details?: string;
-  durationMs?: number;
-  source?: string;
-  // agent_trace 单条事件（后端可能直接下发事件对象，也可能包在 traceEvent 中）
-  traceEvent?: AgentTraceEvent;
-  // /messages/stream 请求可选参数（后端可能透传/回显）
-  routingHint?: string;
-  cancelActiveTasks?: boolean;
-  orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP';
-  engineVersion?: string;
-  checkpointOwner?: string;
-  loopRunId?: string;
-  traceId?: string;
-  conversationId?: string;
-  projectId?: string;
-  requestedIntent?: string;
-  picUrls?: string[];
-  code?: string;
-  message?: string;
+export type AgentTurnEventType =
+  | 'turn_started'
+  | 'agent_event'
+  | 'turn_paused'
+  | 'turn_completed'
+  | 'turn_failed';
+
+/** Native AgentScope event carried inside an `agent_event` payload. */
+export interface AgentScopeEvent {
+  eventType: string;
+  data: Record<string, unknown>;
+}
+
+/** Sequenced transport unit for one AgentScope turn. */
+export interface AgentTurnEventEnvelope {
+  turnId: string;
+  seq: number;
+  type: AgentTurnEventType;
+  payload: Record<string, unknown>;
+}
+
+const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
+  'turn_started',
+  'agent_event',
+  'turn_paused',
+  'turn_completed',
+  'turn_failed',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Parse and validate one SSE JSON payload as an AgentScope turn envelope. */
+export function parseAgentTurnEnvelope(raw: unknown): AgentTurnEventEnvelope | null {
+  if (!isRecord(raw)) return null;
+  const turnId = typeof raw.turnId === 'string' ? raw.turnId : '';
+  const seq = typeof raw.seq === 'number' ? raw.seq : Number.NaN;
+  const type = typeof raw.type === 'string' ? raw.type : '';
+  if (!turnId || !Number.isInteger(seq) || seq < 1 || !AGENT_TURN_EVENT_TYPES.has(type as AgentTurnEventType)) {
+    return null;
+  }
+  return {
+    turnId,
+    seq,
+    type: type as AgentTurnEventType,
+    payload: isRecord(raw.payload) ? raw.payload : {},
+  };
 }
 
 /** 视频异步任务状态（GET /api/agent/tasks/{taskId} 轮询结果） */
@@ -611,14 +592,25 @@ export const agentApi = {
   removeConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
 
-  createConversation: (projectId: string, title?: string) =>
+  createConversation: (
+    projectId: string,
+    title?: string,
+    approvalMode?: AgentApprovalMode,
+  ) =>
     client.post<{ data: AgentConversation }>('/agent/conversations', {
       projectId,
       title,
+      ...(approvalMode ? { approvalMode } : {}),
     }),
 
   updateConversation: (id: string, data: { title?: string; status?: string }) =>
     client.patch<{ data: AgentConversation }>(`/agent/conversations/${id}`, data),
+
+  updateApprovalMode: (id: string, approvalMode: AgentApprovalMode) =>
+    client.patch<{ data: AgentConversation }>(
+      `/agent/conversations/${id}/approval-mode`,
+      { approvalMode },
+    ),
 
   deleteConversation: (id: string) =>
     client.delete(`/agent/conversations/${id}`),
@@ -633,13 +625,10 @@ export const agentApi = {
   listAssets: (id: string, page = 1, size = 20) =>
     client.get<{ data: AgentPage<AgentAsset> }>(`/agent/conversations/${id}/assets`, { params: { page, size } }),
 
-  getActiveTaskPlan: (conversationId: string) =>
-    client.get<{ data: AgentTaskPlanView | null }>(`/agent/conversations/${conversationId}/plans/active`),
-
-  actOnTaskPlan: (conversationId: string, planId: string, action: AgentTaskPlanAction) =>
-    client.post<{ data: AgentTaskPlanView }>(
-      `/agent/conversations/${conversationId}/plans/${planId}/actions`,
-      { action },
+  listTurnEvents: (conversationId: string, turnId: string, afterSeq = 0) =>
+    client.get<{ data: AgentTurnEventEnvelope[] }>(
+      `/agent/conversations/${conversationId}/turns/${turnId}/events`,
+      { params: { afterSeq } },
     ),
 
   deleteAsset: (assetId: string) =>
@@ -676,10 +665,18 @@ export const agentApi = {
     if (conversationId) form.append('conversationId', conversationId);
     if (purpose?.trim()) form.append('purpose', purpose.trim());
     if (kind) form.append('kind', kind);
-    return client.post<{ data: { url: string } }>('/agent/upload', form, {
+    return client.post<{ data: {
+      url: string;
+      name?: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    } }>('/agent/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  getRuntimeStatus: (conversationId: string) =>
+    client.get<{ data: AgentRuntimeStatus }>(`/agent/conversations/${conversationId}/runtime`),
 
   // 满意完成：清空会话图片上下文（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>
@@ -768,8 +765,10 @@ export const agentApi = {
     client.post<{ data: null }>(`/agent/conversations/${conversationId}/canvas-mode/exit`),
 
   // 打断当前会话的生成（「停止生成」按钮触发）：后端置位会话级 interrupt 标志 → 编排协作式取消
-  interrupt: (conversationId: string) =>
-    client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
+  interruptTurn: (conversationId: string, turnId: string) =>
+    client.post<{ data: boolean }>(
+      `/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/interrupt`,
+    ),
 };
 
 /**
@@ -841,12 +840,12 @@ export function sttStream(onPartial: (text: string) => void, onFinal: (text: str
   };
 }
 
-/** 流式发送消息。onEvent 收到裁剪后的 SseEvent。返回 Promise（流结束/出错时 resolve） */
+/** Stream one AgentScope turn as sequenced envelopes. */
 export async function streamChat(
   conversationId: string,
   content: string,
   picUrls: string[],
-  onEvent: (e: SseEvent) => void,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
   assetIds?: string[],
   assetGroupIds?: string[],
   signal?: AbortSignal,
@@ -856,11 +855,13 @@ export async function streamChat(
     referenceAudios?: string[];
     routingHint?: string;
     cancelActiveTasks?: boolean;
+    editMessageId?: string;
     canvasContext?: CanvasEditContext;
+    attachments?: AgentAttachment[];
   },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/stream`, {
+  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -871,64 +872,10 @@ export async function streamChat(
       assetGroupSnapshotIds: opts?.assetGroupSnapshotIds ?? [],
       referenceVideos: opts?.referenceVideos ?? [],
       referenceAudios: opts?.referenceAudios ?? [],
+      attachments: opts?.attachments ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
-      canvasContext: opts?.canvasContext,
-    }),
-    signal,
-  });
-  await consumeSse(res, onEvent, signal);
-}
-
-/** 编辑最后一轮用户消息并覆盖重发。 */
-export async function streamEditedMessage(
-  conversationId: string,
-  messageId: string,
-  content: string,
-  onEvent: (e: SseEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(
-    `${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/${messageId}/edit-and-resend`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ content }),
-      signal,
-    },
-  );
-  await consumeSse(res, onEvent, signal);
-}
-
-/** 打断当前生成，并把本轮输入作为下一条消息发送。 */
-export async function streamInterruptAndSend(
-  conversationId: string,
-  content: string,
-  picUrls: string[],
-  onEvent: (e: SseEvent) => void,
-  assetIds?: string[],
-  signal?: AbortSignal,
-  opts?: {
-    referenceVideos?: string[];
-    referenceAudios?: string[];
-    routingHint?: string;
-    cancelActiveTasks?: boolean;
-    canvasContext?: CanvasEditContext;
-  },
-): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/messages/interrupt-and-send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      content,
-      picUrls: picUrls ?? [],
-      assetIds: assetIds ?? [],
-      referenceVideos: opts?.referenceVideos ?? [],
-      referenceAudios: opts?.referenceAudios ?? [],
-      routingHint: opts?.routingHint,
-      cancelActiveTasks: opts?.cancelActiveTasks,
+      editMessageId: opts?.editMessageId,
       canvasContext: opts?.canvasContext,
     }),
     signal,
@@ -939,10 +886,11 @@ export async function streamInterruptAndSend(
 /** HITL 表单提交并续流 */
 export async function submitForm(
   conversationId: string,
+  turnId: string,
   formToken: string,
   taskId: string,
   action: string,
-  onEvent: (e: SseEvent) => void,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
   customText?: string,
   params?: Record<string, string>,
   assetIds?: string[],
@@ -950,27 +898,35 @@ export async function submitForm(
   opts?: { canvasContext?: CanvasEditContext },
 ): Promise<void> {
   const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/form/submit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      formToken,
-      taskId,
-      action,
-      content: customText ?? '',
-      params: params ?? {},
-      assetIds: assetIds ?? [],
-      canvasContext: opts?.canvasContext,
-    }),
-    signal,
-  });
+  const res = await fetch(
+    `${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/resume/stream`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        formToken,
+        taskId,
+        action,
+        content: customText ?? '',
+        params: params ?? {},
+        assetIds: assetIds ?? [],
+        canvasContext: opts?.canvasContext,
+      }),
+      signal,
+    },
+  );
   await consumeSse(res, onEvent, signal);
 }
 
-/** 通用 SSE 读取：逐行解析 event:/data: {...}，断行缓冲 */
-async function consumeSse(res: Response, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void> {
-  await consumeSseData<SseEvent>(res, (eventName, data) => {
-    onEvent({ ...data, type: eventName } as SseEvent);
+/** Read typed turn-envelope payloads; the SSE event name is transport metadata. */
+async function consumeSse(
+  res: Response,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await consumeSseData<unknown>(res, (_eventName, data) => {
+    const envelope = parseAgentTurnEnvelope(data);
+    if (envelope) onEvent(envelope);
   }, signal);
 }
 

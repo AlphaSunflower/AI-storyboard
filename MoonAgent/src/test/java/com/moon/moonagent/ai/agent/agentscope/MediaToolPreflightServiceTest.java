@@ -114,6 +114,44 @@ class MediaToolPreflightServiceTest {
         assertThat(result).containsEntry("preflightDecision", "FAIL_OPEN");
     }
 
+    @Test
+    void approvedPermissionResumeSkipsPreflightAndExecutesApprovedCall() {
+        StructuredDecisionService decisions = mock(StructuredDecisionService.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        MediaToolPreflightService service = service(decisions, assets);
+        Map<String, Object> input = Map.of("prompt", "继续完善刚才那张图");
+
+        Map<String, Object> result = service.guard(
+                AgentScopeImageTools.GENERATE_IMAGE, input,
+                param("继续完善刚才那张图", input, true),
+                ignored -> Map.of("ok", true, "imageUrls", List.of("/approved.png")));
+
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("preflightDecision", "APPROVED");
+        verify(decisions, never()).reviewMediaAction(anyString(), any(), anyString(), anyList());
+        verify(decisions, never()).selectReferences(anyString(), anyList());
+    }
+
+    @Test
+    void fullAccessSkipsClarificationEvenForAmbiguousReferenceRequests() {
+        StructuredDecisionService decisions = mock(StructuredDecisionService.class);
+        SessionAssetService assets = mock(SessionAssetService.class);
+        MediaToolPreflightService service = service(decisions, assets);
+        Map<String, Object> input = Map.of("prompt", "继续完善刚才那张图");
+
+        Map<String, Object> result = service.guard(
+                AgentScopeImageTools.GENERATE_IMAGE, input,
+                param("继续完善刚才那张图", input, null, "FULL_ACCESS"),
+                ignored -> Map.of("ok", true, "imageUrls", List.of("/full-access.png")));
+
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("preflightDecision", "BYPASS");
+        verify(decisions, never()).reviewMediaAction(anyString(), any(), anyString(), anyList());
+        verify(decisions, never()).selectReferences(anyString(), anyList());
+    }
+
     private static MediaToolPreflightService service(
             StructuredDecisionService decisions, SessionAssetService assets) {
         return new MediaToolPreflightService(
@@ -121,11 +159,26 @@ class MediaToolPreflightServiceTest {
     }
 
     private static ToolCallParam param(String requestText, Map<String, Object> input) {
+        return param(requestText, input, false, null);
+    }
+
+    private static ToolCallParam param(String requestText, Map<String, Object> input,
+                                       boolean approvedPermissionResume) {
+        return param(requestText, input, approvedPermissionResume, null);
+    }
+
+    private static ToolCallParam param(String requestText, Map<String, Object> input,
+                                       Boolean approvedPermissionResume, String approvalMode) {
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");
         conversation.setUserId("u1");
+        if (approvalMode != null) conversation.setApprovalMode(approvalMode);
         OrchestrationRequest request = new OrchestrationRequest(
                 conversation, requestText, List.of(), null);
+        if (Boolean.TRUE.equals(approvedPermissionResume)) {
+            request.setAction("approve");
+            request.setCheckpointAction("agentscope-confirm");
+        }
         AgentScopeRunContext runContext = new AgentScopeRunContext(
                 conversation, request, null, new AgentScopeTurnState());
         RuntimeContext runtime = RuntimeContext.builder()

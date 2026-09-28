@@ -18,6 +18,7 @@ public record AgentConversationVO(
     String orchestrationMode,
     String engineVersion,
     Boolean debugComparisonEnabled,
+    String approvalMode,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt
 ) {}

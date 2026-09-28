@@ -14,7 +14,7 @@ interface Props {
   recommended?: Record<string, string>;
   reasons?: Record<string, string>;
   onParamsChange: (params: Record<string, string>) => void;
-  /** 推荐/提交键前缀（aisplit 分镜卡片图片/视频分区用，如 "image"/"video"；默认 '' 零回归） */
+  /** 推荐/提交键前缀（storyboard 分镜卡片图片/视频分区用，如 "image"/"video"；默认 '' 零回归） */
   keyPrefix?: string;
   /** 初始参数（键带前缀，如 videoResolution/imageModel）：优先于模型默认/推荐，用于回填分镜已存配置 */
   initialValue?: Record<string, string>;

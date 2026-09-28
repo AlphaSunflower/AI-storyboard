@@ -86,8 +86,7 @@ export function ChatPage() {
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const conversationReadOnly = activeConversation?.status === 'archived'
-    || (activeConversation?.orchestrationMode != null
-      && activeConversation.orchestrationMode !== 'UNIFIED_LOOP');
+    || activeConversation?.orchestrationMode === 'LEGACY';
   const canEditLastTurn = !conversationReadOnly && !streaming && !waitingHumanInput && !waitingVideoPlan
     && !canvasBinding && !canvasExitPending;
   const chatApps = useChatApps(currentProject);
