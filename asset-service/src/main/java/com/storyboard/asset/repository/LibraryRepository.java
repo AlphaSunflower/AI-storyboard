@@ -554,42 +554,6 @@ public class LibraryRepository {
                 .toList();
     }
 
-    public boolean objectKeyHasReferences(String objectKey) {
-        Boolean referenced = client.sql("""
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM asset.library_media m
-                            JOIN asset.library_blobs b ON b.id = m.blob_id
-                            JOIN asset.library_assets a ON a.id = m.asset_id
-                            WHERE b.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM asset.library_group_items gi
-                            JOIN asset.library_media m ON m.id = gi.media_id
-                            JOIN asset.library_blobs b ON b.id = m.blob_id
-                            JOIN asset.library_groups g ON g.id = gi.group_id
-                            JOIN asset.library_assets a ON a.id = g.asset_id
-                            WHERE b.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM asset.library_group_snapshot_items si
-                            JOIN asset.library_group_snapshots s ON s.id = si.snapshot_id
-                            JOIN asset.library_groups g ON g.id = s.group_id
-                            JOIN asset.library_assets a ON a.id = g.asset_id
-                            WHERE si.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        """)
-                .param("objectKey", objectKey)
-                .query(Boolean.class)
-                .single();
-        return Boolean.TRUE.equals(referenced);
-    }
-
     public void markPurgeBlocked(String assetId) {
         client.sql("""
                         UPDATE asset.library_assets
