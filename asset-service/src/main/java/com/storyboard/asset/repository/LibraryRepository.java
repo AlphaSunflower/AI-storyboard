@@ -564,6 +564,22 @@ public class LibraryRepository {
                 .param("assetId", assetId).update();
     }
 
+    /** 在事务内锁定到期未清理的回收站资产；调用方须在同一事务里完成清理，否则行锁提前释放。 */
+    public List<String> claimDueTrashAssets(int limit) {
+        return client.sql("""
+                        SELECT id FROM asset.library_assets
+                        WHERE status = 'TRASHED'
+                          AND purge_after IS NOT NULL
+                          AND purge_after <= now()
+                        ORDER BY purge_after
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT :limit
+                        """)
+                .param("limit", limit)
+                .query(String.class)
+                .list();
+    }
+
     public String upsertBlob(
             String objectKey,
             String sha256,
