@@ -96,6 +96,21 @@ class StoryboardProductionServiceImplTest {
     }
 
     @Test
+    void explicitRequestedShotCountUsesSingleGlobalPlanAndCapsOutput() {
+        Fixture fixture = fixture();
+
+        StoryboardRunSnapshot snapshot = fixture.service.startAutoStoryboard(
+                request("完整展示脚本", "6"), (stage, value) -> {
+                });
+
+        assertThat(snapshot.pseudoShots()).hasSize(6);
+        assertThat(snapshot.finalShots()).hasSize(6);
+        assertThat(fixture.model.segmentCalls).hasValue(0);
+        assertThat(fixture.model.pseudoPlanCalls).hasValue(1);
+        assertThat(fixture.model.lastRequestedShotCount).isEqualTo("6");
+    }
+
+    @Test
     void requiresPlotReviewBeforePseudoReview() {
         Fixture fixture = fixture();
         StoryboardRunSnapshot snapshot = fixture.service.start(request("完整剧情：主角发现真相并作出选择。"));
@@ -171,6 +186,111 @@ class StoryboardProductionServiceImplTest {
 
         assertThat(retried.shotId()).isEqualTo("shot-2");
         assertThat(fixture.service.get(partial.runId()).stage()).isEqualTo(Stage.FINAL_REVIEW);
+    }
+
+    @Test
+    void approvingAnAlreadyPassedStageIsIdempotent() {
+        Fixture fixture = fixture();
+        StoryboardRunSnapshot plot = fixture.service.start(request("完整剧情：主角发现真相并作出选择。"));
+        StoryboardRunSnapshot pseudo = fixture.service.approve(plot.runId(),
+                new Approval(Stage.PLOT_REVIEW, "APPLY_EXPANSION", "", List.of(), List.of()));
+
+        // 旧卡片重复点击「确认剧情」：目标阶段已推进过，按幂等返回当前快照而不是失败
+        StoryboardRunSnapshot again = fixture.service.approve(pseudo.runId(),
+                new Approval(Stage.PLOT_REVIEW, "APPROVE", "", List.of(), List.of()));
+
+        assertThat(again.stage()).isEqualTo(Stage.PSEUDO_REVIEW);
+        assertThat(again.version()).isEqualTo(pseudo.version());
+        assertThat(fixture.model.finalCalls).hasValue(0);
+    }
+
+    @Test
+    void retryingIncompleteFinalShotsRegeneratesOnlyMissingShots() {
+        Fixture fixture = fixture();
+        fixture.model.failShotId.set("shot-2");
+        StoryboardRunSnapshot plot = fixture.service.start(request("完整剧情：主角发现真相并作出选择。"));
+        StoryboardRunSnapshot pseudo = fixture.service.approve(plot.runId(),
+                new Approval(Stage.PLOT_REVIEW, "APPLY_EXPANSION", "", List.of(), List.of()));
+        StoryboardRunSnapshot partial = fixture.service.approve(pseudo.runId(),
+                new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()));
+        assertThat(partial.stage()).isEqualTo(Stage.FINALIZING);
+
+        fixture.model.failShotId.set("");
+        StoryboardRunSnapshot resumed = fixture.service.retryIncompleteFinalShots(partial.runId());
+
+        assertThat(resumed.stage()).isEqualTo(Stage.FINAL_REVIEW);
+        assertThat(resumed.finalShots()).extracting(StoryboardShot::shotId)
+                .containsExactlyInAnyOrder("shot-1", "shot-2");
+        assertThat(fixture.model.finalCalls).hasValue(3);
+    }
+
+    @Test
+    void crossSegmentShotIdsStayUniqueSoProjectMappingCanComplete() {
+        Fixture fixture = fixture();
+        fixture.model.crossSegmentIdCollision.set(true);
+        StoryboardRunSnapshot plot = fixture.service.start(request("完整剧情：主角发现真相并作出选择。"));
+        StoryboardRunSnapshot pseudo = fixture.service.approve(plot.runId(),
+                new Approval(Stage.PLOT_REVIEW, "APPLY_EXPANSION", "", List.of(), List.of()));
+
+        assertThat(pseudo.pseudoShots()).hasSize(4);
+        assertThat(pseudo.pseudoShots()).extracting(PseudoShot::shotId).doesNotHaveDuplicates();
+
+        StoryboardRunSnapshot finalReview = fixture.service.approve(pseudo.runId(),
+                new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()));
+        assertThat(finalReview.finalShots()).hasSize(4);
+        assertThat(finalReview.finalShots()).extracting(StoryboardShot::shotId).doesNotHaveDuplicates();
+
+        Map<String, String> mapping = new LinkedHashMap<>();
+        int index = 0;
+        for (StoryboardShot shot : finalReview.finalShots()) {
+            mapping.put(shot.shotId(), "scene-" + (++index));
+        }
+        StoryboardRunSnapshot completed = fixture.service.markCompleted(
+                finalReview.runId(), "user-1", "project-1", mapping);
+
+        assertThat(completed.stage()).isEqualTo(Stage.COMPLETED);
+        assertThat(fixture.service.publishedSceneIds(completed.runId()))
+                .containsExactlyInAnyOrderElementsOf(mapping.values());
+    }
+
+    @Test
+    void committingLegacyRunWithDuplicateShotIdsNoLongerFailsOnMapping() {
+        Fixture fixture = fixture();
+        StoryboardShot first = new StoryboardShot(
+                "S01", "segment-1", 1, "画面一", "中景", "推近", 3, "图", "视", "", List.of());
+        StoryboardShot duplicate = new StoryboardShot(
+                "S01", "segment-3", 2, "画面二", "近景", "横移", 3, "图", "视", "", List.of());
+        fixture.store.insert(new RunState(
+                "run-legacy", "user-1", "project-1", "conversation-1", "canvas-1",
+                "原始剧情", "剧情稿", "", Stage.FINAL_REVIEW, 3,
+                new PlotAssessment(false, List.of(), List.of(), "", ""), StoryBible.empty(),
+                List.of(), List.of(), List.of(), List.of(first, duplicate),
+                "", OffsetDateTime.now(), OffsetDateTime.now()));
+
+        StoryboardRunSnapshot completed = fixture.service.markCompleted(
+                "run-legacy", "user-1", "project-1", Map.of("S01", "scene-1"));
+
+        assertThat(completed.stage()).isEqualTo(Stage.COMPLETED);
+        assertThat(completed.finalShots()).hasSize(1);
+        assertThat(fixture.service.publishedSceneIds("run-legacy")).containsExactly("scene-1");
+    }
+
+    @Test
+    void publishedSceneIdsListMappedProjectScenesOnce() {
+        Fixture fixture = fixture();
+        StoryboardRunSnapshot plot = fixture.service.start(request("完整剧情：主角发现真相并作出选择。"));
+        StoryboardRunSnapshot pseudo = fixture.service.approve(plot.runId(),
+                new Approval(Stage.PLOT_REVIEW, "APPLY_EXPANSION", "", List.of(), List.of()));
+        StoryboardRunSnapshot finalReview = fixture.service.approve(pseudo.runId(),
+                new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()));
+
+        assertThat(fixture.service.publishedSceneIds(finalReview.runId())).isEmpty();
+
+        fixture.service.markCompleted(finalReview.runId(), "user-1", "project-1",
+                Map.of("shot-1", "scene-1", "shot-2", "scene-2"));
+
+        assertThat(fixture.service.publishedSceneIds(finalReview.runId()))
+                .containsExactlyInAnyOrder("scene-1", "scene-2");
     }
 
     @Test
@@ -259,9 +379,13 @@ class StoryboardProductionServiceImplTest {
     }
 
     private static StoryboardProductionRequest request(String script) {
+        return request(script, "");
+    }
+
+    private static StoryboardProductionRequest request(String script, String requestedShotCount) {
         return new StoryboardProductionRequest(
                 "user-1", "project-1", "conversation-1", "canvas-1",
-                script, "movie", "", List.of(), List.of());
+                script, "movie", requestedShotCount, List.of(), List.of());
     }
 
     private record Fixture(FakeModelClient model, InMemoryStore store,
@@ -272,11 +396,15 @@ class StoryboardProductionServiceImplTest {
         private final AtomicInteger finalCalls = new AtomicInteger();
         private final AtomicInteger optimizeCalls = new AtomicInteger();
         private final AtomicInteger repairCalls = new AtomicInteger();
+        private final AtomicInteger segmentCalls = new AtomicInteger();
+        private final AtomicInteger pseudoPlanCalls = new AtomicInteger();
         private final AtomicBoolean assessmentComplete = new AtomicBoolean(false);
         private final AtomicReference<String> failShotId = new AtomicReference<>("");
+        private final AtomicBoolean crossSegmentIdCollision = new AtomicBoolean(false);
         private String lastSegmentScript = "";
         private String lastAssessedScript = "";
         private String lastRepairScript = "";
+        private String lastRequestedShotCount = "";
 
         @Override
         public PlotAssessment assessPlot(StoryboardProductionRequest request, List<AssetRef> assets) {
@@ -313,7 +441,13 @@ class StoryboardProductionServiceImplTest {
 
         @Override
         public List<StoryboardSegment> segmentStory(String script, StoryBible storyBible) {
+            segmentCalls.incrementAndGet();
             lastSegmentScript = script;
+            if (crossSegmentIdCollision.get()) {
+                return List.of(
+                        new StoryboardSegment("segment-1", 1, "第一段", script, ""),
+                        new StoryboardSegment("segment-3", 2, "第三段", script, ""));
+            }
             return List.of(new StoryboardSegment("segment-1", 1, "第一段", script, ""));
         }
 
@@ -323,6 +457,28 @@ class StoryboardProductionServiceImplTest {
                                                 StoryBible storyBible,
                                                 List<RoleProfile> roles,
                                                 List<AssetRef> assets) {
+            pseudoPlanCalls.incrementAndGet();
+            lastRequestedShotCount = request.requestedShotCount();
+            if (!request.requestedShotCount().isBlank()) {
+                List<PseudoShot> requested = new ArrayList<>();
+                for (int index = 1; index <= 12; index++) {
+                    requested.add(new PseudoShot(
+                            "shot-" + index, "segment-1", index,
+                            "目的" + index, List.of("主角"), "场景", "时间", "冲突",
+                            "动作" + index, "情绪", List.of(), List.of("原文"), List.of()));
+                }
+                return requested;
+            }
+            // 复现线上问题：每个分段各自从 S01 编号，跨分段 shotId 冲突
+            if (crossSegmentIdCollision.get()) {
+                return List.of(
+                        new PseudoShot("S01", segment.segmentId(), 1, "发现", List.of("主角"),
+                                "医院", "夜", "真相", "发现真相", "震惊",
+                                List.of(), List.of("原文一"), List.of()),
+                        new PseudoShot("S02", segment.segmentId(), 2, "选择", List.of("主角"),
+                                "医院", "夜", "代价", "作出选择", "紧张",
+                                List.of(), List.of("原文二"), List.of()));
+            }
             return List.of(
                     new PseudoShot("shot-2", "segment-1", 2, "选择", List.of("主角"),
                             "医院", "夜", "代价", "作出选择", "紧张",

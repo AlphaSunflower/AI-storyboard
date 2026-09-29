@@ -15,6 +15,12 @@ public interface StoryboardProductionService {
 
     StoryboardRunSnapshot start(StoryboardProductionRequest request);
 
+    /** 带进度/流式回调的启动（默认忽略回调，兼容旧实现）。 */
+    default StoryboardRunSnapshot start(StoryboardProductionRequest request,
+                                       StoryboardProgressListener listener) {
+        return start(request);
+    }
+
     StoryboardRunSnapshot startAutoStoryboard(StoryboardProductionRequest request,
                                               StoryboardProgressListener progressListener);
 
@@ -26,9 +32,25 @@ public interface StoryboardProductionService {
 
     StoryboardRunSnapshot revise(String runId, Stage targetStage, String instruction, String shotId);
 
+    default StoryboardRunSnapshot revise(String runId, Stage targetStage, String instruction, String shotId,
+                                        StoryboardProgressListener listener) {
+        return revise(runId, targetStage, instruction, shotId);
+    }
+
     StoryboardRunSnapshot approve(String runId, Approval approval);
 
+    /** 带过程回调的确认（默认忽略回调，兼容旧实现）。 */
+    default StoryboardRunSnapshot approve(String runId, Approval approval,
+                                         StoryboardProgressListener listener) {
+        return approve(runId, approval);
+    }
+
     StoryboardRunSnapshot approveToFinal(String runId, Approval plotApproval);
+
+    default StoryboardRunSnapshot approveToFinal(String runId, Approval plotApproval,
+                                                StoryboardProgressListener listener) {
+        return approveToFinal(runId, plotApproval);
+    }
 
     StoryboardRunSnapshot replaceDraft(
             String runId,
@@ -47,6 +69,16 @@ public interface StoryboardProductionService {
     StoryboardRunSnapshot upsertShot(String runId, PseudoShot shot);
 
     StoryboardShot retryShot(String runId, String shotId);
+
+    StoryboardRunSnapshot retryIncompleteFinalShots(String runId);
+
+    default StoryboardRunSnapshot retryIncompleteFinalShots(String runId,
+                                                           StoryboardProgressListener listener) {
+        return retryIncompleteFinalShots(runId);
+    }
+
+    /** 该运行已写入项目的分镜 sceneId（去重，按写入顺序）。 */
+    List<String> publishedSceneIds(String runId);
 
     ShotReferenceResolution referenceAssetIds(String runId, String shotId);
 

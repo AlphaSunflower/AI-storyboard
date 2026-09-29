@@ -154,7 +154,8 @@ class AgentScopeMediaToolsTest {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         SessionAssetService assets = mock(SessionAssetService.class);
         when(support.startStoryboardShotVideoGenerationAsyncWithRole(
-                any(), eq("首个镜头"), eq("15"), eq("16:9"), any(), eq(List.of()), any()))
+                any(), eq("scene-3"), eq("首个镜头"), eq("15"), eq("16:9"),
+                any(), eq(List.of()), any()))
                 .thenReturn("shot-task-1");
         AgentScopeVideoTools tools = new AgentScopeVideoTools(support, assets);
         AgentConversation conversation = new AgentConversation();
@@ -166,11 +167,12 @@ class AgentScopeMediaToolsTest {
                 conversation, request, null, new AgentScopeTurnState());
 
         Map<String, Object> result = tools.generateVideoForStoryboard(
-                "首个镜头", List.of(), List.of(), "1080p", "16:9", "15", context);
+                "首个镜头", List.of(), "1080p", "16:9", "15", "scene-3", context);
 
         assertThat(result).containsEntry("taskId", "shot-task-1");
         verify(support).startStoryboardShotVideoGenerationAsyncWithRole(
-                any(), eq("首个镜头"), eq("15"), eq("16:9"), any(), eq(List.of()), any());
+                any(), eq("scene-3"), eq("首个镜头"), eq("15"), eq("16:9"),
+                any(), eq(List.of()), any());
         verify(support, never()).startVideoGenerationAsyncWithRole(
                 any(), any(), any(), any(), any(), any(), any());
     }

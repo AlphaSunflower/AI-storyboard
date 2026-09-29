@@ -103,8 +103,8 @@ class AgentScopeCheckpointServiceTest {
                 .input(Map.of(
                         "prompt", "新的分镜要怎么写入？",
                         "options", List.of(
-                                Map.of("value", "append"),
-                                Map.of("value", "overwrite"))))
+                                Map.of("label", "追加到末尾"),
+                                Map.of("text", "覆盖全部分镜"))))
                 .build();
 
         service.pauseForExternalInput(request, "reply-storyboard", call);
@@ -114,7 +114,7 @@ class AgentScopeCheckpointServiceTest {
         verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("title"))
-                .containsExactly("追加分镜", "覆盖分镜");
+                .containsExactly("追加到末尾", "覆盖全部分镜");
     }
 
     @Test
@@ -163,6 +163,40 @@ class AgentScopeCheckpointServiceTest {
         AgentScopeCheckpointService.ResumeValue value =
                 service.resolve(created, "delete", "");
         assertThat(value.text()).isEqualTo("delete");
+    }
+
+    @Test
+    void genericHumanInputForStoryboardCommitIsUpgradedToFixedChoices() {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("token-storyboard-upgrade");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("token-storyboard-upgrade");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-generic-storyboard")
+                .name(AgentScopeInteractionTools.REQUEST_HUMAN_INPUT)
+                .input(Map.of(
+                        "prompt", "确认清理方案：项目中有 31 条分镜（含两轮生成叠加），您希望如何处理？",
+                        "options", List.of(Map.of(), Map.of(), Map.of())))
+                .build();
+
+        service.pauseForExternalInput(request, "reply-generic-storyboard", call);
+
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        assertThat(stage.getValue().planText()).contains("已有 31 个分镜");
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("title"))
+                .containsExactly("追加到末尾", "覆盖全部分镜", "删除全部分镜");
     }
 
     @Test

@@ -51,7 +51,8 @@ class VideoGenerationPolicyGuardTest {
                 conversation, "生成一个两分钟的视频", List.of(), mock(SseEmitter.class));
 
         assertThatThrownBy(() -> support.startStoryboardShotVideoGenerationAsyncWithRole(
-                request, "首个镜头", "15", "16:9", List.of(), List.of(), Map.of()))
+                request, "scene-1", "首个镜头", "15", "16:9",
+                List.of(), List.of(), Map.of()))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("created-past-policy");
 

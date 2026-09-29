@@ -281,6 +281,7 @@ public final class StoryboardProductionModels {
             String conversationId,
             String canvasId,
             String originalScript,
+            String requestedShotCount,
             String selectedScript,
             String expansionScript,
             Stage stage,
@@ -296,10 +297,37 @@ public final class StoryboardProductionModels {
             OffsetDateTime updatedAt
     ) {
         public RunState {
+            requestedShotCount = text(requestedShotCount);
             roles = roles == null ? List.of() : List.copyOf(roles);
             assets = assets == null ? List.of() : List.copyOf(assets);
             pseudoShots = pseudoShots == null ? List.of() : List.copyOf(pseudoShots);
             finalShots = finalShots == null ? List.of() : List.copyOf(finalShots);
+        }
+
+        public RunState(
+                String runId,
+                String userId,
+                String projectId,
+                String conversationId,
+                String canvasId,
+                String originalScript,
+                String selectedScript,
+                String expansionScript,
+                Stage stage,
+                int version,
+                PlotAssessment assessment,
+                StoryBible storyBible,
+                List<RoleProfile> roles,
+                List<AssetRef> assets,
+                List<PseudoShot> pseudoShots,
+                List<StoryboardShot> finalShots,
+                String error,
+                OffsetDateTime createdAt,
+                OffsetDateTime updatedAt
+        ) {
+            this(runId, userId, projectId, conversationId, canvasId, originalScript, "",
+                    selectedScript, expansionScript, stage, version, assessment, storyBible,
+                    roles, assets, pseudoShots, finalShots, error, createdAt, updatedAt);
         }
 
         public StoryboardRunSnapshot snapshot() {

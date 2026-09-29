@@ -224,6 +224,40 @@ class AgentScopeAsyncTaskServiceTest {
     }
 
     @Test
+    void storyboardRetryDiscardsScenesWrittenByPreviousRun() {
+        AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentGenerationService generationService = mock(AgentGenerationService.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        StoryboardProductionService productionService = mock(StoryboardProductionService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
+                taskMapper, conversationMapper, messageMapper, generationService,
+                support, new AgentScopeProperties(), productionService,
+                new AgentTaskEventHub(), mock(AgentScopeMessageBus.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "storyboardClient", storyboardClient);
+
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        when(productionService.publishedSceneIds("run-old"))
+                .thenReturn(List.of("scene-1", "scene-2"));
+        when(productionService.publishedSceneIds("run-new"))
+                .thenReturn(List.of("scene-2", "scene-3"));
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                service, "discardPreviousPublishedScenes", conversation, "run-old", "run-new");
+
+        // 只清掉上一次写入、本次没有重写的分镜，避免把同一份分镜追加两遍
+        verify(storyboardClient).deleteScene("scene-1", "project-1");
+        verify(storyboardClient, never()).deleteScene("scene-2", "project-1");
+        verify(storyboardClient, never()).deleteScene("scene-3", "project-1");
+    }
+
+    @Test
     void plotReviewTaskStopsBeforeStoryboardDesign() throws Exception {
         AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
@@ -268,7 +302,7 @@ class AgentScopeAsyncTaskServiceTest {
                 "原始需求", "优化后的完整剧情", "",
                 new PlotAssessment(false, List.of(), List.of(), "已优化", ""),
                 StoryBible.empty(), List.of(), List.of(), List.of(), List.of(), "");
-        when(productionService.start(any())).thenReturn(plotReview);
+        when(productionService.start(any(), any())).thenReturn(plotReview);
 
         service.startPlotReviewStoryboardTask(
                 conversation,
@@ -279,9 +313,11 @@ class AgentScopeAsyncTaskServiceTest {
                 StoryboardCommitMode.APPEND);
 
         awaitStatus(persisted, "completed");
-        verify(productionService).start(any());
+        verify(productionService).start(any(), any());
         verify(productionService, never()).startAutoStoryboard(any(), any());
-        assertThat(message.getValue().getContent()).contains("PLOT_REVIEW");
+        assertThat(message.getValue().getContent())
+                .contains("剧情稿", "优化后的完整剧情")
+                .doesNotContain("分镜诊断完成", "缺口", "风险", "run_id", "PLOT_REVIEW");
         assertThat(message.getValue().getMetadata())
                 .containsEntry("kind", "storyboard-review");
         assertThat(((Map<?, ?>) message.getValue().getMetadata().get("storyboardReview"))
@@ -790,6 +826,94 @@ class AgentScopeAsyncTaskServiceTest {
         assertThat(stored.get().getResultJson())
                 .contains("\"status\":\"failed\"")
                 .contains("审核失败");
+    }
+
+    @Test
+    void revisionTaskIsQueuedAndCompletesThroughAsyncRunner() throws Exception {
+        AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        StoryboardProductionService productionService = mock(StoryboardProductionService.class);
+        AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
+                taskMapper, conversationMapper, messageMapper, mock(AgentGenerationService.class),
+                mock(AgentRuntimeSupport.class), new AgentScopeProperties(), productionService,
+                new AgentTaskEventHub(), mock(AgentScopeMessageBus.class));
+
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        when(taskMapper.selectOne(any())).thenReturn(null);
+
+        AtomicReference<AgentAsyncTask> persisted = new AtomicReference<>();
+        when(taskMapper.insert(any(AgentAsyncTask.class))).thenAnswer(invocation -> {
+            AgentAsyncTask task = invocation.getArgument(0);
+            task.setId("revision-1");
+            persisted.set(task);
+            return 1;
+        });
+        when(taskMapper.selectById("revision-1")).thenAnswer(invocation -> persisted.get());
+        when(taskMapper.update(isNull(), any(UpdateWrapper.class))).thenAnswer(invocation -> {
+            AgentAsyncTask task = persisted.get();
+            @SuppressWarnings("unchecked")
+            UpdateWrapper<AgentAsyncTask> wrapper = invocation.getArgument(1);
+            if (wrapper.getParamNameValuePairs().containsValue("running")) task.setStatus("running");
+            if (wrapper.getParamNameValuePairs().containsValue("completed")) {
+                task.setStatus("completed");
+                task.setStage("waiting_review");
+            }
+            return 1;
+        });
+        when(messageMapper.insert(any(AgentMessage.class))).thenAnswer(invocation -> {
+            AgentMessage message = invocation.getArgument(0);
+            message.setId("message-1");
+            return 1;
+        });
+
+        StoryboardRunSnapshot revised = new StoryboardRunSnapshot(
+                "run-1", "conversation-1", Stage.PLOT_REVIEW, 2,
+                "原始剧情", "修订后的剧情", "",
+                new PlotAssessment(false, List.of(), List.of(), "已修订", ""),
+                StoryBible.empty(), List.of(), List.of(), List.of(), List.of(), "");
+        when(productionService.revise(
+                eq("run-1"), eq(Stage.PLOT_REVIEW), eq("不要出现人物"), eq(""), any()))
+                .thenReturn(revised);
+
+        String taskId = service.startStoryboardRevisionTask(
+                conversation, "run-1", "PLOT_REVIEW", "不要出现人物", "", "call-1");
+
+        assertThat(taskId).isEqualTo("revision-1");
+        awaitStatus(persisted, "completed");
+        assertThat(persisted.get().getToolName())
+                .isEqualTo(AgentScopeStoryboardTools.REVISE_STORYBOARD);
+        assertThat(persisted.get().getTitle()).isEqualTo("修订分镜");
+        verify(productionService).revise(
+                eq("run-1"), eq(Stage.PLOT_REVIEW), eq("不要出现人物"), eq(""), any());
+    }
+
+    @Test
+    void recoveryScanIncludesQueuedRevisionTasks() {
+        AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
+        AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
+                taskMapper, mock(AgentConversationMapper.class), mock(AgentMessageMapper.class),
+                mock(AgentGenerationService.class), mock(AgentRuntimeSupport.class),
+                new AgentScopeProperties(), mock(StoryboardProductionService.class),
+                new AgentTaskEventHub(), mock(AgentScopeMessageBus.class));
+        AgentAsyncTask revision = new AgentAsyncTask();
+        revision.setId("revision-queued");
+        revision.setConversationId("conversation-1");
+        revision.setKind("long-tool");
+        revision.setToolName(AgentScopeStoryboardTools.REVISE_STORYBOARD);
+        revision.setStatus("queued");
+        when(taskMapper.selectList(any()))
+                .thenReturn(List.of(), List.of(), List.of(revision), List.of(), List.of());
+
+        var candidates = service.findCandidates(OffsetDateTime.now(), 20);
+
+        assertThat(candidates)
+                .extracting(candidate -> candidate.resourceId())
+                .contains("revision-queued");
     }
 
     private static void awaitStatus(AtomicReference<AgentAsyncTask> taskRef, String status)

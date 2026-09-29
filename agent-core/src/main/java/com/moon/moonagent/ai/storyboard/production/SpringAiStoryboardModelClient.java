@@ -18,12 +18,15 @@ import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.St
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardSegment;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,9 +38,12 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
+    private static final Logger log = LoggerFactory.getLogger(SpringAiStoryboardModelClient.class);
+
     private final ChatClient.Builder chatClientBuilder;
     private final GatewayModelService gatewayModelService;
     private final AgentAiConfigProperties agentConfig;
+    private final NormalizedChatStreamClient normalizedStreamClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private volatile ChatClient client;
 
@@ -52,6 +58,12 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
     @Override
     public PlotAssessment assessPlot(StoryboardProductionRequest request, List<AssetRef> assets) {
+        return assessPlot(request, assets, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public PlotAssessment assessPlot(StoryboardProductionRequest request, List<AssetRef> assets,
+                                     StoryboardStreamSink sink) {
         String system = """
                 你是剧情完整性审查员。判断剧情是否具备主角目标、阻碍或冲突、因果推进、
                 以及结局或明确续接点。只输出 JSON：
@@ -67,7 +79,10 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
                 可用资产：
                 %s
-                """.formatted(request.originalScript(), assetsText(assets)));
+                """.formatted(request.originalScript(), assetsText(assets)),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "plot_diagnosis", sink,
+                field("summary", "诊断结论"), field("expansionPlan", "修正建议"));
         return new PlotAssessment(
                 root.path("complete").asBoolean(false),
                 strings(root.path("missingElements")),
@@ -80,19 +95,14 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
     @Override
     public OptimizationResult optimizeScript(StoryboardProductionRequest request, PlotAssessment assessment,
                                              List<RoleProfile> roles, List<AssetRef> assets, String feedback) {
-        String system = """
-                你是影视剧本总编。按指定专业角色共同优化剧情：
-                保持用户核心设定和主线；补足人物动机、矛盾、因果、情绪弧光；
-                删除只推动情节的工具人行为；职业行为必须符合相应专业流程。
-                如果用户要求建筑、产品、空间、风景等展示，或明确不要剧情，
-                则生成完整展示脚本：明确空间/产品动线、镜头顺序、视觉重点、节奏和收束，
-                不得虚构人物冲突或无必要的叙事角色。
-                只输出 JSON：
-                {"optimizedScript":"保留原意并优化后的完整剧本",
-                 "expansionScript":"仅在剧情不完整时给出扩写版本，否则为空",
-                 "storyBible":{"logline":"","characters":[],"relationships":[],"worldRules":[],
-                 "timeline":[],"continuity":[],"visualStyle":[]}}。
-                """;
+        return optimizeScript(request, assessment, roles, assets, feedback, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public OptimizationResult optimizeScript(StoryboardProductionRequest request, PlotAssessment assessment,
+                                             List<RoleProfile> roles, List<AssetRef> assets, String feedback,
+                                             StoryboardStreamSink sink) {
+        String system = scriptOptimizeSystemPrompt();
         String user = """
                 原始剧情：
                 %s
@@ -115,7 +125,9 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 assetsText(assets),
                 feedback == null ? "" : feedback);
         JsonNode root = callJson(system, user,
-                gatewayModelService.getDefaultTextModel(), 120);
+                gatewayModelService.getDefaultTextModel(), 120, "script_optimization", sink,
+                field("optimizedScript", "优化后的剧情"),
+                field("expansionScript", "扩写剧情"));
         return new OptimizationResult(
                 root.path("optimizedScript").asText(""),
                 root.path("expansionScript").asText(""),
@@ -123,21 +135,44 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
         );
     }
 
+    /**
+     * Plot/storyboard script prompt. The optimized script is rendered directly in
+     * the chat and canvas storyboard views, so it must be standard Markdown.
+     */
+    static String scriptOptimizeSystemPrompt() {
+        return """
+                你是影视剧本总编。按指定专业角色共同优化剧情：
+                保持用户核心设定和主线；补足人物动机、矛盾、因果、情绪弧光；
+                删除只推动情节的工具人行为；职业行为必须符合相应专业流程。
+                如果用户要求建筑、产品、空间、风景等展示，或明确不要剧情，
+                则生成完整展示脚本：明确空间/产品动线、镜头顺序、视觉重点、节奏和收束，
+                不得虚构人物冲突或无必要的叙事角色。
+                只输出 JSON：
+                {"optimizedScript":"保留原意并优化后的完整剧本",
+                 "expansionScript":"仅在剧情不完整时给出扩写版本，否则为空",
+                 "storyBible":{"logline":"","characters":[],"relationships":[],"worldRules":[],
+                 "timeline":[],"continuity":[],"visualStyle":[]}}。
+                optimizedScript 与 expansionScript 必须是标准 Markdown 文本；
+                字符串内换行使用 \\n 转义，不要输出代码块标记。
+                """
+                + StoryboardMarkdownSpec.SPEC;
+    }
+
     @Override
     public ScriptRepairResult repairScript(StoryboardProductionRequest request,
                                            PlotAssessment assessment,
                                            List<RoleProfile> roles,
                                            List<AssetRef> assets) {
-        String system = """
-                你是影视剧本修稿师。只修复诊断中确认的具体问题，不扩写整篇剧情，不改变未涉及内容。
-                每条修改必须包含一段在原文中只出现一次的原句，并用替换句修复对应问题。
-                建筑、产品、空间、风景展示脚本不得通过补人物冲突来修复问题。
-                只输出 JSON：
-                {"changes":[{"issue":"","originalText":"","replacement":"","reason":""}],
-                 "storyBible":{"logline":"","characters":[],"relationships":[],"worldRules":[],
-                 "timeline":[],"continuity":[],"visualStyle":[]}}。
-                如果某项风险无需修改文本，不要为它虚构修改。
-                """;
+        return repairScript(request, assessment, roles, assets, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public ScriptRepairResult repairScript(StoryboardProductionRequest request,
+                                           PlotAssessment assessment,
+                                           List<RoleProfile> roles,
+                                           List<AssetRef> assets,
+                                           StoryboardStreamSink sink) {
+        String system = scriptRepairSystemPrompt();
         String user = """
                 原始剧情：
                 %s
@@ -156,7 +191,9 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 rolesText(roles),
                 assetsText(assets));
         JsonNode root = callJson(system, user,
-                gatewayModelService.getDefaultTextModel(), repairTimeoutSeconds);
+                gatewayModelService.getDefaultTextModel(), repairTimeoutSeconds,
+                "script_repair", sink,
+                field("replacement", "修订内容"), field("reason", "修订原因"));
         List<ScriptChange> changes = new ArrayList<>();
         JsonNode changeNodes = root.path("changes");
         if (changeNodes.isArray()) {
@@ -174,15 +211,43 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 changes);
     }
 
+    /**
+     * Repair prompt: replacements are spliced back into the Markdown script, so
+     * they must keep the existing structure instead of inventing new syntax.
+     */
+    static String scriptRepairSystemPrompt() {
+        return """
+                你是影视剧本修稿师。只修复诊断中确认的具体问题，不扩写整篇剧情，不改变未涉及内容。
+                每条修改必须包含一段在原文中只出现一次的原句，并用替换句修复对应问题。
+                建筑、产品、空间、风景展示脚本不得通过补人物冲突来修复问题。
+                替换句必须保持原剧本的 Markdown 结构：不新增或删除标题、列表、表格与分割线，
+                表格内的替换保持列与行对齐，不要引入原文没有的 Markdown 语法块。
+                只输出 JSON：
+                {"changes":[{"issue":"","originalText":"","replacement":"","reason":""}],
+                 "storyBible":{"logline":"","characters":[],"relationships":[],"worldRules":[],
+                 "timeline":[],"continuity":[],"visualStyle":[]}}。
+                如果某项风险无需修改文本，不要为它虚构修改。
+                """;
+    }
+
     @Override
     public List<StoryboardSegment> segmentStory(String script, StoryBible storyBible) {
+        return segmentStory(script, storyBible, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public List<StoryboardSegment> segmentStory(String script, StoryBible storyBible,
+                                                StoryboardStreamSink sink) {
         String system = """
                 你是长剧情分段规划器。按幕、场或完整叙事单元切分，不按单句机械切分。
                 每个 segment 必须覆盖连续且不重叠的原文，并给出边界摘要。
                 只输出 JSON：{"segments":[{"segmentId":"segment-1","ordinal":1,
                 "title":"","sourceText":"","boundarySummary":""}]}。
                 """;
-        JsonNode root = callJson(system, "剧本：\n" + script + "\n\nStoryBible：\n" + objectJson(storyBible));
+        JsonNode root = callJson(system, "剧本：\n" + script + "\n\nStoryBible：\n" + objectJson(storyBible),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "story_segmentation", sink,
+                field("title", "分段标题"), field("boundarySummary", "分段说明"));
         List<StoryboardSegment> segments = new ArrayList<>();
         JsonNode array = root.path("segments");
         if (array.isArray()) {
@@ -207,8 +272,21 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
     @Override
     public List<PseudoShot> planPseudoShots(StoryboardProductionRequest request, StoryboardSegment segment,
                                             StoryBible storyBible, List<RoleProfile> roles, List<AssetRef> assets) {
+        return planPseudoShots(request, segment, storyBible, roles, assets, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public List<PseudoShot> planPseudoShots(StoryboardProductionRequest request,
+                                            StoryboardSegment segment,
+                                            StoryBible storyBible,
+                                            List<RoleProfile> roles,
+                                            List<AssetRef> assets,
+                                            StoryboardStreamSink sink) {
         String system = """
                 你是结构化伪分镜师。按叙事节拍写出可确认的镜头，不生成图片/视频参数。
+                如果用户指定目标总镜头数，必须严格按该总数输出，不得按分段分别复制该数量。
+                shotId 必须全局唯一：使用「<当前分段id>-shotNN」形式（例如 segment-2-shot03），
+                禁止各分段自行从 S01 重新编号；segmentId 必须回填当前分段 id，shotOrdinal 从 1 递增。
                 严格证据绑定资产：只有在剧情明确出现、用户明确指定或专业角色指出必要时，
                 才把对应资产 ID 放入 referenceAssetIds；不确定必须为空。
                 只输出 JSON：{"shots":[{"shotId":"","segmentId":"","shotOrdinal":1,
@@ -223,6 +301,9 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 当前分段：
                 %s
 
+                目标总镜头数：
+                %s
+
                 StoryBible：
                 %s
 
@@ -231,14 +312,30 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
                 可用资产：
                 %s
-                """.formatted(scriptContext(request, segment), objectJson(segment), objectJson(storyBible),
-                rolesText(roles), assetsText(assets)));
+                """.formatted(scriptContext(request, segment), objectJson(segment),
+                request.requestedShotCount().isBlank()
+                        ? "未指定，按叙事节拍决定"
+                        : request.requestedShotCount() + "（所有分段合计，必须严格遵守）",
+                objectJson(storyBible), rolesText(roles), assetsText(assets)),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "pseudo_planning", sink,
+                field("narrativePurpose", "叙事目的"), field("action", "动作"),
+                field("conflict", "冲突"), field("emotion", "情绪"));
         return parsePseudoShots(root.path("shots"));
     }
 
     @Override
     public List<PseudoShot> revisePseudoShots(List<PseudoShot> shots, String instruction, String shotId,
                                               StoryBible storyBible, List<AssetRef> assets) {
+        return revisePseudoShots(shots, instruction, shotId, storyBible, assets,
+                StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public List<PseudoShot> revisePseudoShots(List<PseudoShot> shots, String instruction,
+                                              String shotId, StoryBible storyBible,
+                                              List<AssetRef> assets,
+                                              StoryboardStreamSink sink) {
         String system = """
                 你是结构化伪分镜修稿器。只修改用户指定的内容，保持未指定镜头和稳定编号不变。
                 严格保持资产证据绑定；不确定时清空 referenceAssetIds。
@@ -260,12 +357,21 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 可用资产：
                 %s
                 """.formatted(objectJson(shots), instruction, shotId == null ? "" : shotId,
-                objectJson(storyBible), assetsText(assets)));
+                objectJson(storyBible), assetsText(assets)),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "pseudo_planning", sink,
+                field("narrativePurpose", "叙事目的"), field("action", "动作"),
+                field("conflict", "冲突"), field("emotion", "情绪"));
         return parsePseudoShots(root.path("shots"));
     }
 
     @Override
     public StoryboardShot generateShot(ShotGenerationRequest request) {
+        return generateShot(request, StoryboardStreamSink.NOOP);
+    }
+
+    @Override
+    public StoryboardShot generateShot(ShotGenerationRequest request, StoryboardStreamSink sink) {
         PseudoShot pseudo = request.pseudoShot();
         String system = """
                 你是专业分镜师和视频导演。只把一个已确认的伪分镜扩写为一个正式镜头。
@@ -287,7 +393,10 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
                 资产引用标记必须只在 referenceHints 中使用；不得使用未绑定资产。
                 """.formatted(objectJson(pseudo), objectJson(request.storyBible()),
-                assetsForPseudo(request.assets(), pseudo)));
+                assetsForPseudo(request.assets(), pseudo)),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "final_generation", sink,
+                field("sceneDescription", "画面"), field("cameraMovement", "运镜"));
         int duration = root.path("durationSeconds").asInt(3);
         if (duration <= 0) duration = 3;
         return new StoryboardShot(
@@ -311,6 +420,18 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
     private JsonNode callJson(String system, String user, String model, int timeoutSeconds) {
         String raw = invokeModel(system, user, model, timeoutSeconds);
+        return parseJsonOrThrow(system, user, model, timeoutSeconds, raw);
+    }
+
+    /** Streaming version with stage-specific, user-readable JSON field extraction. */
+    private JsonNode callJson(String system, String user, String model, int timeoutSeconds,
+                              String stage, StoryboardStreamSink sink, StreamField... fields) {
+        String raw = invokeModel(system, user, model, timeoutSeconds, stage, sink, fields);
+        return parseJsonOrThrow(system, user, model, timeoutSeconds, raw);
+    }
+
+    private JsonNode parseJsonOrThrow(String system, String user, String model,
+                                      int timeoutSeconds, String raw) {
         String json = extractJsonObject(raw);
         try {
             return objectMapper.readTree(json);
@@ -352,6 +473,70 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
             throw new BusinessException(50201, "storyboard production model returned empty content");
         }
         return raw;
+    }
+
+    /**
+     * Uses the gateway normalized stream so both visible content and
+     * reasoning_content can be delivered without Spring AI dropping metadata.
+     */
+    private String invokeModel(String system, String user, String model, int timeoutSeconds,
+                               String stage, StoryboardStreamSink sink, StreamField... fields) {
+        if (sink == null || sink == StoryboardStreamSink.NOOP || stage == null || stage.isBlank()) {
+            return invokeModel(system, user, model, timeoutSeconds);
+        }
+        int seconds = Math.max(1, timeoutSeconds);
+        StringBuilder raw = new StringBuilder();
+        List<JsonFieldStreamExtractor> extractors = new ArrayList<>();
+        for (StreamField field : fields == null ? new StreamField[0] : fields) {
+            extractors.add(new JsonFieldStreamExtractor(field.jsonName(), field.label()));
+        }
+        try {
+            NormalizedChatStreamClient.StreamResult result = normalizedStreamClient.stream(
+                    model, system, user, seconds,
+                    chunk -> {
+                        raw.append(chunk);
+                        if (extractors.isEmpty()) return;
+                        StringBuilder visible = new StringBuilder();
+                        for (JsonFieldStreamExtractor extractor : extractors) {
+                            visible.append(extractor.accept(chunk));
+                        }
+                        if (!visible.isEmpty()) sink.onDelta(stage, visible.toString());
+                    },
+                    thinking -> sink.onThinking(stage, thinking));
+            if (!result.completed()) {
+                throw new BusinessException(50201,
+                        "storyboard production stream ended before a terminal frame");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(49999, "storyboard production model call interrupted", e);
+        } catch (IOException e) {
+            if (raw.length() > 0) {
+                throw new BusinessException(50201,
+                        "storyboard production stream failed after partial output: " + e.getMessage(), e);
+            }
+            log.warn("normalized storyboard stream failed before output, falling back to blocking: {}",
+                    e.getMessage());
+            return invokeModel(system, user, model, timeoutSeconds);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            if (raw.length() > 0) {
+                throw new BusinessException(50201,
+                        "storyboard production stream failed after partial output: " + e.getMessage(), e);
+            }
+            log.warn("storyboard streaming call failed, falling back to blocking: {}", e.getMessage());
+            return invokeModel(system, user, model, timeoutSeconds);
+        }
+        if (raw.length() == 0) return invokeModel(system, user, model, timeoutSeconds);
+        return raw.toString();
+    }
+
+    private static StreamField field(String jsonName, String label) {
+        return new StreamField(jsonName, label);
+    }
+
+    private record StreamField(String jsonName, String label) {
     }
 
     private ChatClient client() {

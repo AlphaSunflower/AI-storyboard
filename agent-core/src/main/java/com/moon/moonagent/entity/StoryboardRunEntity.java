@@ -20,6 +20,7 @@ public class StoryboardRunEntity {
     private String conversationId;
     private String canvasId;
     private String originalScript;
+    private String requestedShotCount;
     private String selectedScript;
     private String expansionScript;
     private String stage;

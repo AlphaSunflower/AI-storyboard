@@ -25,6 +25,10 @@ public record AgentTaskView(
         List<String> resultUrls,
         List<AgentTaskSlotView> slots,
         String result,
+        String liveText,
+        String liveThinking,
+        String liveStage,
+        OffsetDateTime liveUpdatedAt,
         boolean canCancel,
         boolean canRetry,
         boolean canFollowUp

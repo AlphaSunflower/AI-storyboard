@@ -8,6 +8,7 @@ import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.entity.StoryboardVideoQueue;
+import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.StoryboardVideoQueueMapper;
 import com.moon.moonagent.service.AssetService;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
@@ -106,6 +108,67 @@ class StoryboardVideoQueueServiceImplTest {
         assertTrue(ref.startsWith("["), "带角色参考图应序列化为 JSON 数组，实际=" + ref);
         assertTrue(ref.contains("FIRST_FRAME"));
         assertTrue(ref.contains("u1"));
+    }
+
+    @Test
+    void enqueue_skipsSceneWithActiveQueueRow() {
+        when(queueMapper.selectCount(any())).thenReturn(1L);
+        StoryboardVideoEnqueueRequest request = new StoryboardVideoEnqueueRequest(
+                "conv-1", "proj-1",
+                List.of(new StoryboardVideoEnqueueItem(
+                        "scene-1", "测试提示词", "MiniMax-H3", "1080p", null,
+                        "16:9", 8, null, null, null, null, List.of())));
+
+        List<StoryboardVideoQueue> rows = service.enqueue(request);
+
+        assertTrue(rows.isEmpty());
+        verify(queueMapper, times(0)).insert(any(StoryboardVideoQueue.class));
+    }
+
+    @Test
+    void prepareManagedFrames_usesCurrentAndNextSceneImages() {
+        Scene next = new Scene();
+        next.setId("scene-2");
+        next.setProjectId("proj-1");
+        next.setSceneNumber(2);
+        next.setImageUrl("/api/files/images/next.png");
+        when(storyboardClient.getSceneReferences("scene-1")).thenReturn(List.of());
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conv-1");
+
+        service.prepareManagedFrames(conversation, scene, next);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> frames = ArgumentCaptor.forClass(List.class);
+        verify(storyboardClient).replaceManagedVideoFrames(eq("scene-1"), frames.capture());
+        assertEquals(2, frames.getValue().size());
+        assertEquals("FIRST_FRAME", frames.getValue().get(0).get("role"));
+        assertEquals(scene.getImageUrl(), frames.getValue().get(0).get("url"));
+        assertEquals("LAST_FRAME", frames.getValue().get(1).get("role"));
+        assertEquals(next.getImageUrl(), frames.getValue().get(1).get("url"));
+    }
+
+    @Test
+    void prepareManagedFrames_preservesExplicitUserFrames() {
+        Scene next = new Scene();
+        next.setId("scene-2");
+        next.setProjectId("proj-1");
+        next.setSceneNumber(2);
+        next.setImageUrl("/api/files/images/next.png");
+        when(storyboardClient.getSceneReferences("scene-1")).thenReturn(List.of(
+                Map.of("type", "image", "url", "/upload/first.png",
+                        "role", "FIRST_FRAME", "sourceType", "upload")));
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conv-1");
+
+        service.prepareManagedFrames(conversation, scene, next);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> frames = ArgumentCaptor.forClass(List.class);
+        verify(storyboardClient).replaceManagedVideoFrames(eq("scene-1"), frames.capture());
+        assertEquals(1, frames.getValue().size());
+        assertEquals("LAST_FRAME", frames.getValue().get(0).get("role"));
+        assertEquals(next.getImageUrl(), frames.getValue().get(0).get("url"));
     }
 
     @Test

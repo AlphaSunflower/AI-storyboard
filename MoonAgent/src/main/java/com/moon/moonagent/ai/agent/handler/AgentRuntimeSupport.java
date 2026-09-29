@@ -1662,12 +1662,13 @@ public class AgentRuntimeSupport {
                                                     java.util.List<String> referenceVideos,
                                                     Map<String, String> params) {
         return startVideoGenerationAsyncWithRoleInternal(
-                req, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, false);
+                req, null, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, false);
     }
 
     /** 已进入分镜流程的单镜视频：允许原剧情总时长超过 15 秒，但本镜仍不得超过 15 秒。 */
     public String startStoryboardShotVideoGenerationAsyncWithRole(
             OrchestrationRequest req,
+            String sceneId,
             String prompt,
             String duration,
             String aspectRatio,
@@ -1675,11 +1676,12 @@ public class AgentRuntimeSupport {
             java.util.List<String> referenceVideos,
             Map<String, String> params) {
         return startVideoGenerationAsyncWithRoleInternal(
-                req, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, true);
+                req, sceneId, prompt, duration, aspectRatio, referenceImages, referenceVideos, params, true);
     }
 
     private String startVideoGenerationAsyncWithRoleInternal(
             OrchestrationRequest req,
+            String sceneId,
             String prompt,
             String duration,
             String aspectRatio,
@@ -1700,7 +1702,7 @@ public class AgentRuntimeSupport {
                     effDuration, req == null ? null : req.getContent());
         }
         String taskId = generationService.createVideoTaskWithRole(
-                req.getConversation(), null, prompt, model, resolution, null,
+                req.getConversation(), sceneId, prompt, model, resolution, null,
                 effAspectRatio, effDuration, null,
                 referenceImages == null ? List.of() : referenceImages, null,
                 referenceVideos == null ? List.of() : referenceVideos, true);

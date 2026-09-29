@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.ai.video.ReferenceImageRole;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
@@ -62,6 +63,51 @@ class AgentScopeStoryboardToolsTest {
     }
 
     @Test
+    void existingProjectMarksPendingCommitChoiceForRuntimeFallback() {
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        Scene existing = new Scene();
+        existing.setId("scene-1");
+        existing.setProjectId("project-1");
+        existing.setSceneNumber(1);
+        when(storyboardClient.getProjectScenesFresh("project-1")).thenReturn(List.of(existing));
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                production,
+                mock(AgentScopeAsyncTaskService.class),
+                mock(SessionAssetService.class),
+                mock(AgentScopeImageTools.class),
+                mock(AgentScopeVideoTools.class),
+                storyboardClient);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        AgentScopeRunContext runContext = new AgentScopeRunContext(
+                conversation,
+                new OrchestrationRequest(conversation, "生成分镜", List.of(), null),
+                null,
+                turnState);
+        RuntimeContext runtime = RuntimeContext.builder()
+                .sessionId("conversation-1")
+                .put(AgentScopeRunContext.class, runContext)
+                .build();
+        ToolCallParam param = ToolCallParam.builder()
+                .toolUseBlock(ToolUseBlock.builder()
+                        .id("call-1")
+                        .name(AgentScopeStoryboardTools.START_STORYBOARD)
+                        .input(Map.of("prompt", "生成分镜"))
+                        .build())
+                .input(Map.of("prompt", "生成分镜"))
+                .runtimeContext(runtime)
+                .build();
+
+        tools.tools().getFirst().invoke(Map.of("prompt", "生成分镜"), param);
+
+        assertThat(turnState.takePendingStoryboardCommitCount()).isEqualTo(1);
+    }
+
+    @Test
     void deleteCommitModeClearsProjectWithoutStartingGeneration() {
         StoryboardProductionService production = mock(StoryboardProductionService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
@@ -105,6 +151,7 @@ class AgentScopeStoryboardToolsTest {
                         AgentScopeStoryboardTools.APPROVE_STORYBOARD,
                         AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGE,
                         AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO,
+                        AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS,
                         AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,
                         AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD,
                         AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT,
@@ -167,36 +214,38 @@ class AgentScopeStoryboardToolsTest {
     }
 
     @Test
-    void storyboardVideoAutomaticallyUsesSingleSceneImageAsFirstFrame() {
+    void storyboardVideoAutomaticallyQueuesBackgroundTask() {
         AgentScopeVideoTools videoTools = mock(AgentScopeVideoTools.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         Scene scene = scene("scene-3", 3, "第三镜");
         scene.setVideoPrompt("镜头运动");
         scene.setImageUrl("/api/files/images/current.png");
         when(storyboardClient.getProjectScenesFresh("project-1")).thenReturn(List.of(scene));
         when(storyboardClient.getSceneReferences("scene-3")).thenReturn(List.of());
-        when(videoTools.generateVideoForStoryboard(
-                anyString(), anyList(), anyString(), anyString(), anyString(), any()))
-                .thenReturn(Map.of("ok", true, "taskId", "video-task-1"));
+        when(asyncTasks.startStoryboardVideoTask(any(), eq(List.of("scene-3")), eq(false), anyString()))
+                .thenReturn("video-task-1");
         AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
                 mock(StoryboardProductionService.class),
-                mock(AgentScopeAsyncTaskService.class),
+                asyncTasks,
                 mock(SessionAssetService.class),
                 mock(AgentScopeImageTools.class),
                 videoTools,
                 storyboardClient);
 
-        tool(tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> envelope = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO)
                 .invoke(Map.of("scene_number", 3), param("project-1"));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<ReferenceImage>> references =
-                ArgumentCaptor.forClass(List.class);
-        verify(videoTools).generateVideoForStoryboard(
-                eq("镜头运动"), references.capture(), anyString(), anyString(), anyString(), any());
-        assertThat(references.getValue())
-                .extracting(ReferenceImage::role)
-                .containsExactly(ReferenceImageRole.FIRST_FRAME);
+        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        assertThat(result)
+                .containsEntry("taskId", "video-task-1")
+                .containsEntry("taskKind", "long-tool");
+        verify(asyncTasks).startStoryboardVideoTask(
+                any(), eq(List.of("scene-3")), eq(false), anyString());
+        verifyNoInteractions(videoTools);
     }
 
     @Test
@@ -210,7 +259,7 @@ class AgentScopeStoryboardToolsTest {
         when(storyboardClient.getSceneReferences("scene-3")).thenReturn(List.of(
                 Map.of("type", "image", "url", "/api/files/images/ref.png")));
         when(videoTools.generateVideoForStoryboard(
-                anyString(), anyList(), anyString(), anyString(), anyString(), any()))
+                anyString(), anyList(), anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(Map.of("ok", true, "taskId", "video-task-1"));
         AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
                 mock(StoryboardProductionService.class),
@@ -232,7 +281,8 @@ class AgentScopeStoryboardToolsTest {
         ArgumentCaptor<List<ReferenceImage>> references =
                 ArgumentCaptor.forClass(List.class);
         verify(videoTools).generateVideoForStoryboard(
-                eq("镜头运动"), references.capture(), eq("720p"), eq("16:9"), eq("6"), any());
+                eq("镜头运动"), references.capture(), eq("720p"), eq("16:9"), eq("6"),
+                eq("scene-3"), any());
         assertThat(references.getValue()).hasSize(2);
         assertThat(references.getValue())
                 .extracting(ReferenceImage::role)
@@ -364,6 +414,41 @@ class AgentScopeStoryboardToolsTest {
     }
 
     @Test
+    void batchVideoToolQueuesOnlyMissingOrFailedScenesByDefault() {
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        Scene completed = scene("scene-1", 1, "已完成");
+        completed.setVideoUrl("/api/files/videos/done.mp4");
+        completed.setVideoStatus("completed");
+        Scene missing = scene("scene-2", 2, "缺视频");
+        missing.setVideoStatus("failed");
+        when(storyboardClient.getProjectScenesFresh("project-1"))
+                .thenReturn(List.of(completed, missing));
+        when(asyncTasks.startStoryboardVideoTask(any(), eq(List.of("scene-2")), eq(false), anyString()))
+                .thenReturn("video-batch-1");
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                mock(StoryboardProductionService.class),
+                asyncTasks,
+                mock(SessionAssetService.class),
+                mock(AgentScopeImageTools.class),
+                mock(AgentScopeVideoTools.class),
+                storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> envelope = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS)
+                .invoke(Map.of(), param("project-1"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("status", "queued")
+                .containsEntry("taskId", "video-batch-1")
+                .containsEntry("count", 1);
+    }
+
+    @Test
     void listProjectStoryboardReportsImageAndVideoCounts() {
         StoryboardClient storyboardClient = mock(StoryboardClient.class);
         Scene scene = scene("scene-1", 1, "分镜一");
@@ -436,6 +521,70 @@ class AgentScopeStoryboardToolsTest {
 
         assertThat(result).containsEntry("ok", false);
         assertThat(turnState.isStoryboardRequested()).isTrue();
+    }
+
+    @Test
+    void reviseStoryboardCreatesAsyncTaskInsteadOfRunningInline() {
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        when(asyncTasks.startStoryboardRevisionTask(
+                any(), eq("run-1"), eq("PLOT_REVIEW"), eq("不要出现人物"), eq(""), eq("call-1")))
+                .thenReturn("task-revision");
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                production,
+                asyncTasks,
+                mock(SessionAssetService.class),
+                mock(AgentScopeImageTools.class),
+                mock(AgentScopeVideoTools.class),
+                mock(StoryboardClient.class));
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "修改分镜", List.of(), null);
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        AgentScopeRunContext runContext = new AgentScopeRunContext(
+                conversation, request, support, turnState);
+        RuntimeContext runtime = RuntimeContext.builder()
+                .sessionId("conversation-1")
+                .put(AgentScopeRunContext.class, runContext)
+                .build();
+        ToolCallParam param = ToolCallParam.builder()
+                .toolUseBlock(ToolUseBlock.builder()
+                        .id("call-1")
+                        .name(AgentScopeStoryboardTools.REVISE_STORYBOARD)
+                        .input(Map.of(
+                                "run_id", "run-1",
+                                "stage", "PLOT_REVIEW",
+                                "instruction", "不要出现人物"))
+                        .build())
+                .input(Map.of(
+                        "run_id", "run-1",
+                        "stage", "PLOT_REVIEW",
+                        "instruction", "不要出现人物"))
+                .runtimeContext(runtime)
+                .build();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> envelope = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.REVISE_STORYBOARD)
+                .invoke(Map.of(
+                        "run_id", "run-1",
+                        "stage", "PLOT_REVIEW",
+                        "instruction", "不要出现人物"), param);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("taskId", "task-revision")
+                .containsEntry("taskKind", "long-tool");
+        assertThat(turnState.taskCards())
+                .extracting(card -> card.get("taskId"))
+                .containsExactly("task-revision");
+        verify(production, never()).revise(any(), any(), any(), any());
     }
 
     private static AgentScopeStoryboardTools tools() {

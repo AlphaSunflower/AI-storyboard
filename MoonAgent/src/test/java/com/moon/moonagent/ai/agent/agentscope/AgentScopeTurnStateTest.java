@@ -49,4 +49,14 @@ class AgentScopeTurnStateTest {
         assertThat(state.referenceInputMode())
                 .isEqualTo(AgentScopeTurnState.ReferenceInputMode.MIXED);
     }
+
+    @Test
+    void consumesPendingStoryboardCommitChoiceOnce() {
+        AgentScopeTurnState state = new AgentScopeTurnState();
+
+        state.markStoryboardCommitPending(31);
+
+        assertThat(state.takePendingStoryboardCommitCount()).isEqualTo(31);
+        assertThat(state.takePendingStoryboardCommitCount()).isNull();
+    }
 }

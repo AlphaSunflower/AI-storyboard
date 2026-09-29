@@ -12,14 +12,41 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class AgentTaskEventHub {
 
     private static final Logger log = LoggerFactory.getLogger(AgentTaskEventHub.class);
     private static final long STREAM_TIMEOUT_MILLIS = Duration.ofMinutes(30).toMillis();
+    /** 心跳间隔：既防代理按空闲超时掐断，也让已死连接在写失败时被及时摘除。 */
+    private static final long HEARTBEAT_INTERVAL_SECONDS = 15L;
 
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> subscribers = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "agent-task-sse-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    public AgentTaskEventHub() {
+        heartbeat.scheduleWithFixedDelay(this::beat,
+                HEARTBEAT_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private void beat() {
+        subscribers.forEach((userId, targets) -> {
+            for (SseEmitter emitter : targets) {
+                try {
+                    emitter.send(SseEmitter.event().comment("ping"));
+                } catch (Exception e) {
+                    drop(userId, emitter, "heartbeat");
+                }
+            }
+        });
+    }
 
     public SseEmitter subscribe(String userId) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
@@ -47,25 +74,55 @@ public class AgentTaskEventHub {
                         .name("snapshot")
                         .data(AgentRuntimeSupport.sseJson(Map.of("task", task))));
             } catch (Exception e) {
-                remove(userId, emitter);
-                log.debug("agent task SSE subscriber removed: userId={}", userId);
+                drop(userId, emitter, "snapshot");
             }
         }
     }
 
     public void publishWakeup(String userId, AgentWakeupMessage message) {
+        send(userId, "wakeup_message", message);
+    }
+
+    /** 任务运行期的实时输出/思考链（任务面板流式展示）。 */
+    public void publishStream(String userId, String taskId, long seq, String stage,
+                              String text, String thinking, boolean done,
+                              java.time.OffsetDateTime updatedAt) {
+        send(userId, "task_stream", Map.of(
+                "taskId", taskId == null ? "" : taskId,
+                "seq", seq,
+                "stage", stage == null ? "" : stage,
+                "text", text == null ? "" : text,
+                "thinking", thinking == null ? "" : thinking,
+                "done", done,
+                "updatedAt", updatedAt == null ? "" : updatedAt.toString()));
+    }
+
+    private void send(String userId, String eventName, Object payload) {
         List<SseEmitter> targets = subscribers.get(userId);
         if (targets == null || targets.isEmpty()) return;
         for (SseEmitter emitter : targets) {
             try {
                 emitter.send(SseEmitter.event()
-                        .name("wakeup_message")
-                        .data(AgentRuntimeSupport.sseJson(message)));
+                        .name(eventName)
+                        .data(AgentRuntimeSupport.sseJson(payload)));
             } catch (Exception e) {
-                remove(userId, emitter);
-                log.debug("agent wakeup SSE subscriber removed: userId={}", userId);
+                drop(userId, emitter, eventName);
             }
         }
+    }
+
+    /**
+     * 发送失败时除了摘掉订阅，还必须关闭响应：
+     * 否则浏览器那条 SSE 会一直挂着（无数据也不报错），前端永远不触发重连，实时输出就此卡死。
+     */
+    private void drop(String userId, SseEmitter emitter, String eventName) {
+        remove(userId, emitter);
+        try {
+            emitter.complete();
+        } catch (Exception ignored) {
+            // 已经关闭的连接无需处理
+        }
+        log.debug("agent task SSE subscriber dropped: userId={}, event={}", userId, eventName);
     }
 
     private void remove(String userId, SseEmitter emitter) {
@@ -77,6 +134,7 @@ public class AgentTaskEventHub {
 
     @PreDestroy
     void close() {
+        heartbeat.shutdownNow();
         subscribers.values().forEach(targets -> targets.forEach(emitter -> {
             try {
                 emitter.complete();

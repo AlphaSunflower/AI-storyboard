@@ -137,6 +137,7 @@ public class JdbcStoryboardRunStore implements StoryboardRunStore {
         entity.setConversationId(state.conversationId());
         entity.setCanvasId(state.canvasId());
         entity.setOriginalScript(state.originalScript());
+        entity.setRequestedShotCount(state.requestedShotCount());
         entity.setSelectedScript(state.selectedScript());
         entity.setExpansionScript(state.expansionScript());
         entity.setStage(state.stage().name());
@@ -161,6 +162,7 @@ public class JdbcStoryboardRunStore implements StoryboardRunStore {
                 entity.getConversationId(),
                 entity.getCanvasId(),
                 entity.getOriginalScript(),
+                entity.getRequestedShotCount(),
                 entity.getSelectedScript(),
                 entity.getExpansionScript(),
                 Stage.valueOf(entity.getStage()),
