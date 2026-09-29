@@ -46,6 +46,7 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!getJobToken());
   const embeddedModeRef = useRef<CanvasEmbeddedMode | null>(parseCanvasEmbeddedMode(window.location.search));
   const embeddedMode = embeddedModeRef.current;
+  const embeddedWindow = new URLSearchParams(window.location.search).get('embedded') === '1';
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -53,8 +54,8 @@ export default function App() {
   const [canvas, setCanvas] = useState<CanvasDocumentV1 | null>(null);
   const [canvases, setCanvases] = useState<CanvasSummary[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [sideView, setSideView] = useState<SideView>('agent');
-  const [sideOpen, setSideOpen] = useState(true);
+  const [sideView, setSideView] = useState<SideView>(embeddedWindow ? 'inspector' : 'agent');
+  const [sideOpen, setSideOpen] = useState(!embeddedWindow && window.innerWidth > 1180);
   const [panelWidth, setPanelWidth] = useState(400); // 执行服务面板宽度（可拖拽）
   const [notice, setNotice] = useState<string | null>(null);
   const [canvasInteractionLocked, setCanvasInteractionLocked] = useState(false);
@@ -274,11 +275,11 @@ export default function App() {
     setCanvas(nextCanvas);
     setCanvases(await listCanvases(projectId));
     setSaveStatus('saved');
-    setSideView(embeddedMode ? 'inspector' : 'agent');
-    setSideOpen(embeddedMode ? false : window.innerWidth > 1180);
+    setSideView(embeddedWindow ? 'inspector' : 'agent');
+    setSideOpen(embeddedWindow ? false : window.innerWidth > 1180);
     setView('canvas');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(projectId)}&canvas=${encodeURIComponent(canvasId)}`);
-  }, [clearAssets, embeddedMode, hydrateMetadata, loadProjectGraph]);
+  }, [clearAssets, embeddedMode, embeddedWindow, hydrateMetadata, loadProjectGraph]);
 
   const newProject = useCallback(async () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -517,6 +518,7 @@ export default function App() {
         projects={projects}
         saveStatus={saveStatus}
         canvasModeLocked={!!embeddedMode}
+        hideAgentButton={embeddedWindow}
         canvasInteractionLocked={canvasInteractionLocked}
         initialViewport={canvas.viewport}
         onProjectTitleChange={(title) => { setProject((current) => { const next = current ? { ...current, title } : current; if (next) void saveProject(next); return next; }); }}
@@ -529,7 +531,7 @@ export default function App() {
         onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名画布失败'))}
         onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error instanceof Error ? error.message : '删除画布失败'))}
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
-        onOpenAgent={() => { setSideView(embeddedMode ? 'inspector' : 'agent'); setSideOpen(true); }}
+        onOpenAgent={() => { setSideView(embeddedWindow ? 'inspector' : 'agent'); setSideOpen(true); }}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}
         onExportProject={() => void exportPackage()}
         isExporting={isExporting}
@@ -556,11 +558,22 @@ export default function App() {
           <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
-          {!embeddedMode && <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>}
+          {!embeddedWindow && <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>}
           <div className="chat-view" hidden={sideView !== 'inspector'}><InspectorPanel /></div>
         </div>
       </aside>
-      {!sideOpen && <button className="reopen-chat" onClick={() => setSideOpen(true)} aria-label="打开执行服务"><MessageCircle size={20} /></button>}
+      {!sideOpen && (
+        <button
+          className="reopen-chat"
+          onClick={() => {
+            if (embeddedWindow) setSideView('inspector');
+            setSideOpen(true);
+          }}
+          aria-label={embeddedWindow ? '打开节点属性' : '打开执行服务'}
+        >
+          {embeddedWindow ? <SlidersHorizontal size={20} /> : <MessageCircle size={20} />}
+        </button>
+      )}
       {notice && <div className="canvas-status-toast app-status-toast" role="status">{notice}</div>}
     </div>
   );
