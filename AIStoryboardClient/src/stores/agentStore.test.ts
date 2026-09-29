@@ -185,6 +185,9 @@ describe('agentStore background tasks', () => {
     resultUrls: [],
     slots: [],
     result: '',
+    liveText: '',
+    liveThinking: '',
+    liveStage: '',
     canCancel: true,
     canRetry: false,
     canFollowUp: true,
@@ -224,6 +227,44 @@ describe('agentStore background tasks', () => {
     }));
 
     expect(useAgentStore.getState().taskNotices['conversation-1']).toBeUndefined();
+  });
+
+  it('refreshes messages when a long task settles without a wakeup event', async () => {
+    vi.useFakeTimers();
+    const listMessages = vi.spyOn(agentApi, 'listMessages')
+      .mockResolvedValue({ data: { data: [] } } as never);
+    useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: false });
+
+    useAgentStore.getState().upsertTask(task({ version: 1 }));
+    useAgentStore.getState().upsertTask(task({
+      version: 2,
+      status: 'completed',
+      stage: 'waiting_review',
+    }));
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(listMessages).toHaveBeenCalledWith('conversation-1');
+    listMessages.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('does not overwrite in-flight streaming messages when a task settles mid-turn', async () => {
+    vi.useFakeTimers();
+    const listMessages = vi.spyOn(agentApi, 'listMessages')
+      .mockResolvedValue({ data: { data: [] } } as never);
+    useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: true });
+
+    useAgentStore.getState().upsertTask(task({ version: 1 }));
+    useAgentStore.getState().upsertTask(task({
+      version: 2,
+      status: 'completed',
+      stage: 'waiting_review',
+    }));
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(listMessages).not.toHaveBeenCalled();
+    listMessages.mockRestore();
+    vi.useRealTimers();
   });
 
   it('stores completion as unread when another conversation is active', () => {
@@ -464,6 +505,9 @@ describe('agentStore detached async tasks', () => {
     resultUrls: [],
     slots: [],
     result: '',
+    liveText: '',
+    liveThinking: '',
+    liveStage: '',
     canCancel: true,
     canRetry: false,
     canFollowUp: false,
@@ -781,6 +825,42 @@ describe('AgentScope turn envelope reduction', () => {
     expect(sequencer.accept(second).map((event) => event.seq)).toEqual([2, 3]);
     expect(sequencer.accept(second)).toEqual([]);
     expect(sequencer.lastSeq('seq-test')).toBe(3);
+  });
+
+  it('keeps the live reasoning summary on finished sentences only', () => {
+    const turnId = 'summary-stable';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'agent_event', { eventType: 'THINKING_BLOCK_DELTA', data: { delta: '先判断技能。' } }, turnId),
+      context,
+    );
+    expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.summary)
+      .toBe('先判断技能。');
+
+    // 流式半句不能顶替摘要，否则标题会显示 “…This maps” 这种残句
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'THINKING_BLOCK_DELTA', data: { delta: 'This maps' } }, turnId),
+      context,
+    );
+    expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.summary)
+      .toBe('先判断技能。');
   });
 
   it('reduces native thinking and text deltas in order', () => {

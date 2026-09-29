@@ -11,6 +11,31 @@ const tabs = [{
 afterEach(cleanup);
 
 describe('EmbeddedAppWindow chat dock resizing', () => {
+  it('reloads the focused app page from the header refresh button', () => {
+    render(
+      <EmbeddedAppWindow
+        tabs={tabs}
+        activeKey="docs"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked={false}
+        splitMaxWidth={400}
+        expandedSplitMaxWidth={500}
+        sidebarCollapsed
+        sidebarCollapseWidth={450}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+    const before = document.querySelector('iframe[data-app-key="docs"]');
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新当前页面' }));
+
+    expect(document.querySelector('iframe[data-app-key="docs"]')).not.toBe(before);
+  });
+
   it('requests docked chat when the user drags beyond the split width', () => {
     const onRequestDock = vi.fn();
     render(

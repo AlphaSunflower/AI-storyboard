@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { libraryApi } from '../api/library';
 import {
@@ -11,7 +12,28 @@ import { useProjectStore } from '../stores/projectStore';
 import { LibraryWorkspacePage } from './LibraryWorkspacePage';
 
 vi.mock('react-d3-tree', () => ({
-  default: () => <div data-testid="library-tree" />,
+  default: ({ data, renderCustomNodeElement }: {
+    data: { id: string; name: string; children?: Array<{ id: string; name: string; children?: unknown[] }> };
+    renderCustomNodeElement: (args: { nodeDatum: {
+      id: string;
+      name: string;
+      children?: unknown[];
+    } }) => ReactNode;
+  }) => {
+    const renderNode = (node: { id: string; name: string; children?: unknown[] }): ReactNode => (
+      <g key={node.id}>
+        {renderCustomNodeElement({ nodeDatum: node })}
+        {(node.children || []).map((child) => renderNode(
+          child as { id: string; name: string; children?: unknown[] },
+        ))}
+      </g>
+    );
+    return (
+      <svg data-testid="library-tree">
+        {renderNode(data)}
+      </svg>
+    );
+  },
 }));
 
 class ResizeObserverMock {
@@ -102,6 +124,107 @@ describe('LibraryWorkspacePage', () => {
 
     await waitFor(() => expect(libraryApi.getFolderTree).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByRole('button', { name: /返回 Moon/ })).toBeNull());
+  });
+
+  it('lists the assets inside an expanded asset group in the tree', async () => {
+    const group = {
+      id: 'group-1',
+      ownerUserId: 'user-1',
+      scope: 'PROJECT' as const,
+      ownerProjectId: 'p1',
+      type: 'GROUP' as const,
+      aiKind: null,
+      name: '主角资产组',
+      description: null,
+      aiDescription: null,
+      manualOverride: false,
+      metadataState: 'NONE' as const,
+      status: 'ACTIVE' as const,
+      coverUrl: null,
+      version: 1,
+      tags: [],
+      projects: [],
+      folderId: null,
+      folderPath: [],
+      sourceType: 'group',
+      sourceId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    const member = {
+      ...group,
+      id: 'asset-1',
+      type: 'IMAGE' as const,
+      name: '角色参考',
+      sourceType: 'upload',
+    };
+    vi.mocked(libraryApi.listAssets).mockImplementation(async (params) => ({
+      data: {
+        code: 0,
+        message: '',
+        data: params.type === 'GROUP'
+          ? { records: [group], total: 1, page: 1, size: 100 }
+          : { records: [], total: 0, page: 1, size: 100 },
+      },
+    } as never));
+    const getGroup = vi.spyOn(libraryApi, 'getGroup').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: {
+          groupId: group.id,
+          name: group.name,
+          description: null,
+          version: 1,
+          media: [{
+            media: {
+              id: 'media-1',
+              blobId: 'blob-1',
+              type: 'IMAGE',
+              url: '/files/images/member.png',
+              contentUrl: '/api/files/images/member.png',
+              objectKey: 'images/member.png',
+              fileName: 'member.png',
+              relativePath: null,
+              mimeType: 'image/png',
+              sizeBytes: 1024,
+              width: 512,
+              height: 512,
+              durationSeconds: null,
+              sortOrder: 0,
+              role: 'REFERENCE',
+              primary: true,
+              constraintText: null,
+            },
+            asset: member,
+            assetId: member.id,
+            assetName: member.name,
+            assetDescription: null,
+            assetVersion: member.version,
+            assetTags: [],
+          }],
+        },
+      },
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '树形视图' }));
+    const groupLabel = await screen.findByText('主角资产组');
+    fireEvent.click(groupLabel.closest('.library-tree-node')!);
+
+    await waitFor(() => {
+      expect(getGroup).toHaveBeenCalledWith('group-1');
+      expect(getGroup).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-library-asset-id="asset-1"] strong')?.textContent)
+        .toBe('角色参考');
+    });
   });
 
   it('opens an asset detail view in narrow windows and returns to the material list', async () => {

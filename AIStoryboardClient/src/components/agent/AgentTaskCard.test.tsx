@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentTaskView } from '../../api/agent';
+import { agentApi, type AgentTaskView } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
 import { AgentTaskCard } from './AgentTaskCard';
 
@@ -16,6 +16,9 @@ const storyboardTask: AgentTaskView = {
   progress: 100,
   resultSummary: '分镜已完成',
   result: '- run_id: `6efa645a-724d-4459-be90-35aac504e323`',
+  liveText: '',
+  liveThinking: '',
+  liveStage: '',
   error: '',
   parentTaskId: '',
   anchorMessageId: 'message-1',
@@ -55,5 +58,34 @@ describe('AgentTaskCard', () => {
 
     expect(openTaskDrawer).toHaveBeenCalledWith(storyboardTask.taskId);
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('hides the plot approval button after a successful confirmation', async () => {
+    const plotReviewTask: AgentTaskView = {
+      ...storyboardTask,
+      status: 'completed',
+      stage: 'waiting_review',
+    };
+    const approve = vi.spyOn(agentApi, 'approveStoryboard')
+      .mockResolvedValue({ data: { data: { taskId: 'task-2', stage: 'PLOT_REVIEW' } } } as never);
+    const openTaskDrawer = vi.fn();
+    useAgentStore.setState({
+      tasks: { [plotReviewTask.taskId]: plotReviewTask },
+      openTaskDrawer,
+      sendMessage: vi.fn(),
+    });
+
+    render(<AgentTaskCard taskId={plotReviewTask.taskId} />);
+    fireEvent.click(screen.getByRole('button', { name: '确认剧情' }));
+
+    await waitFor(() => {
+      expect(approve).toHaveBeenCalledWith('6efa645a-724d-4459-be90-35aac504e323', {
+        stage: 'PLOT_REVIEW',
+        decision: 'APPROVE',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '确认剧情' })).toBeNull();
+    });
   });
 });

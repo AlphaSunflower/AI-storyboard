@@ -109,7 +109,8 @@ export function ChatPage() {
   const [dockRequested, setDockRequested] = useState(false);
   const autoCollapsedSidebarRef = useRef(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
-  const [embed, setEmbed] = useState(false);             // iframe 紧凑模式（画布执行服务小窗）
+  const [embed, setEmbed] = useState(() =>
+    new URLSearchParams(window.location.search).get('embed') === '1'); // iframe 紧凑模式（画布执行服务小窗）
   const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const desktopScrollRef = useRef<HTMLDivElement>(null);
@@ -159,7 +160,7 @@ export function ChatPage() {
     if (distanceToBottom < 220) setShowScrollDown(false);
   };
 
-  const appWindowOpen = chatApps.windowOpen;
+  const appWindowOpen = !embed && chatApps.windowOpen;
   const {
     open: openChatApp,
     tabs: chatAppTabs,
@@ -350,6 +351,7 @@ export function ChatPage() {
   const referenceSidebarWidth = collapsed ? 48 : convWidth;
   const nextDockMode = resolveChatDockMode({
     previousMode: dockMode,
+    embedded: embed,
     appOpen: chatApps.hasTabs,
     mobile: showMobile,
     fullscreen: chatApps.layout.fullscreen,
@@ -400,7 +402,7 @@ export function ChatPage() {
   }, []);
 
   useLayoutEffect(() => {
-    if (!chatApps.hasTabs || showMobile || collapsed) return;
+    if (embed || !chatApps.hasTabs || showMobile || collapsed) return;
     if (chatApps.layout.width >= sidebarCollapseWidth) {
       autoCollapsedSidebarRef.current = true;
       setCollapsed(true);
@@ -883,7 +885,7 @@ export function ChatPage() {
         }}
       >
         <ChatDockShell
-          active={dockMode === 'docked'}
+          active={dockMode === 'docked' && !embed}
           presentation={dockPresentation}
           title={currentTitle}
           streaming={streaming}

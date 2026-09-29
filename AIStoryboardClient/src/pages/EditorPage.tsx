@@ -152,6 +152,7 @@ export function EditorPage() {
         <AmbientGlow />
         <MobileEditorHeader
           showMenu={!embedded}
+          showScript={mobileView === 'list'}
           onMenuClick={() => setSidebarOpen(true)}
           onScript={() => setScriptOpen(true)}
         />

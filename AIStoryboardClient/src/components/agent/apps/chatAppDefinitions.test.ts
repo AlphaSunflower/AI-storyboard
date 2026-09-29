@@ -47,6 +47,7 @@ describe('chat app definitions', () => {
 
     const url = new URL(descriptor!.url);
     expect(url.searchParams.get('token')).toBe('access-token');
+    expect(url.searchParams.get('embedded')).toBe('1');
     expect(url.searchParams.get('userId')).toBe('user-1');
     expect(url.searchParams.get('name')).toBe('测试用户');
     expect(url.hash).toBe('#project=project-1');

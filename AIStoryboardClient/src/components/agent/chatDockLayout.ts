@@ -10,6 +10,7 @@ export const CHAT_SIDEBAR_RESTORE_HYSTERESIS = 64;
 
 interface ResolveChatDockModeInput {
   previousMode: ChatDockMode;
+  embedded: boolean;
   appOpen: boolean;
   mobile: boolean;
   fullscreen: boolean;
@@ -21,6 +22,7 @@ interface ResolveChatDockModeInput {
 
 export function resolveChatDockMode({
   previousMode,
+  embedded,
   appOpen,
   mobile,
   fullscreen,
@@ -29,7 +31,7 @@ export function resolveChatDockMode({
   sidebarWidth,
   requestedDock,
 }: ResolveChatDockModeInput): ChatDockMode {
-  if (!appOpen || mobile) return 'split';
+  if (embedded || !appOpen || mobile) return 'split';
   if (fullscreen) return 'docked';
 
   const availableChatWidth = viewportWidth - sidebarWidth - CHAT_DOCK_APP_GUTTER - appWidth;

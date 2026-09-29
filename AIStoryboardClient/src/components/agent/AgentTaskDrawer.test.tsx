@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentTaskView } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
@@ -34,6 +34,9 @@ const task: AgentTaskView = {
     completedAt: new Date().toISOString(),
   }],
   result: '![生成图片](/one.png)',
+  liveText: '',
+  liveThinking: '',
+  liveStage: '',
   canCancel: false,
   canRetry: false,
   canFollowUp: false,
@@ -42,7 +45,9 @@ const task: AgentTaskView = {
 describe('AgentTaskDrawer', () => {
   afterEach(() => {
     cleanup();
-    useAgentStore.setState({ tasks: {}, taskDrawerId: null });
+    useAgentStore.setState({
+      tasks: {}, taskDrawerId: null, taskStream: {}, taskThinking: {}, taskStreamSeq: {},
+    });
   });
 
   it('labels batch image slots with the target storyboard scene', () => {
@@ -54,5 +59,54 @@ describe('AgentTaskDrawer', () => {
     render(<AgentTaskDrawer />);
 
     expect(screen.getByText(/分镜1/)).toBeTruthy();
+  });
+
+  it('streams live task output while the task is running', () => {
+    useAgentStore.setState({
+      tasks: { [task.taskId]: { ...task, status: 'running', stage: 'script_optimization', progress: 5 } },
+      taskDrawerId: task.taskId,
+      taskStream: { [task.taskId]: '# 剧情稿\n\n正在优化脚本' },
+    });
+
+    render(<AgentTaskDrawer />);
+
+    expect(screen.getByText('实际输出')).toBeTruthy();
+    expect(screen.getByText(/正在优化脚本/)).toBeTruthy();
+  });
+
+  it('restores the persisted live tail after reload', () => {
+    useAgentStore.setState({
+      tasks: {
+        [task.taskId]: {
+          ...task,
+          liveText: '# 剧情稿\n\n刷新后恢复的输出',
+          liveThinking: '刷新后恢复的思考链',
+        },
+      },
+      taskDrawerId: task.taskId,
+      taskStream: {},
+      taskThinking: {},
+    });
+
+    render(<AgentTaskDrawer />);
+
+    expect(screen.getByText(/刷新后恢复的输出/)).toBeTruthy();
+    expect(screen.getByText('刷新后恢复的思考链')).toBeTruthy();
+  });
+
+  it('shows the thinking chain with a show/hide toggle', () => {
+    useAgentStore.setState({
+      tasks: { [task.taskId]: { ...task, status: 'running' } },
+      taskDrawerId: task.taskId,
+      taskThinking: { [task.taskId]: '先判断这是分镜需求。' },
+    });
+
+    render(<AgentTaskDrawer />);
+
+    expect(screen.getByText('思考链')).toBeTruthy();
+    expect(screen.getByText('先判断这是分镜需求。')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /思考链/ }));
+    expect(screen.queryByText('先判断这是分镜需求。')).toBeNull();
   });
 });

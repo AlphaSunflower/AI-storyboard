@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assetApi } from '../../api/assets';
 import { libraryApi } from '../../api/library';
+import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
 import { PreviewPanel } from './PreviewPanel';
 
@@ -102,6 +103,37 @@ describe('PreviewPanel project library import', () => {
         resultUrl: '/api/files/images/storyboard.png',
         mediaType: 'IMAGE',
       }));
+    });
+  });
+
+  it('saves the edited image prompt before generating from the detail panel', async () => {
+    const update = vi.spyOn(sceneApi, 'update').mockResolvedValue({
+      data: {
+        data: {
+          ...useProjectStore.getState().scenes[0],
+          imagePrompt: '新的图片提示词',
+        },
+      },
+    } as never);
+
+    render(<PreviewPanel />);
+    fireEvent.change(screen.getByLabelText('图片提示词'), {
+      target: { value: '新的图片提示词' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '生成图片' }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalledWith('scene-1', { imagePrompt: '新的图片提示词' });
+    });
+    await waitFor(() => {
+      expect(useProjectStore.getState().generateImage).toHaveBeenCalledWith(
+        'scene-1',
+        '新的图片提示词',
+        'image-model',
+        undefined,
+        undefined,
+        undefined,
+      );
     });
   });
 });

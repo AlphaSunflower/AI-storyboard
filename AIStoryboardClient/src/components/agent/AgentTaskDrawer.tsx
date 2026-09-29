@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Activity,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   CircleStop,
   LoaderCircle,
@@ -34,17 +36,32 @@ function displayOrder(slots: AgentTaskSlotView[]): AgentTaskSlotView[] {
 export function AgentTaskDrawer() {
   const taskId = useAgentStore((state) => state.taskDrawerId);
   const task = useAgentStore((state) => state.tasks[taskId ?? '']);
+  const liveStreamText = useAgentStore((state) => state.taskStream[taskId ?? ''] ?? '');
+  const liveThinkingText = useAgentStore((state) => state.taskThinking[taskId ?? ''] ?? '');
+  const streamText = liveStreamText || task?.liveText || '';
+  const thinkingText = liveThinkingText || task?.liveThinking || '';
   const close = useAgentStore((state) => state.closeTaskDrawer);
   const cancelTask = useAgentStore((state) => state.cancelTask);
   const retryTask = useAgentStore((state) => state.retryTask);
   const [view, setView] = useState<'detail' | 'audit'>('detail');
+  const [showOutput, setShowOutput] = useState(true);
+  const [showThinking, setShowThinking] = useState(true);
+  const streamRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setView('detail');
   }, [taskId]);
 
+  // 实时输出持续追加：自动滚到底部，方便盯着模型写
+  useEffect(() => {
+    if (!streamRef.current) return;
+    streamRef.current.scrollTop = streamRef.current.scrollHeight;
+  }, [streamText]);
+
   if (!taskId || !task) return null;
   const slots = displayOrder(task.slots ?? []);
+  const active = task.status === 'queued' || task.status === 'running'
+    || task.status === 'waiting_parent' || task.status === 'cancelling';
 
   return (
     <div className="agent-task-drawer__backdrop" role="presentation" onMouseDown={close}>
@@ -107,6 +124,43 @@ export function AgentTaskDrawer() {
           <section className="agent-task-drawer__error">
             <h3>失败原因</h3>
             <p>{task.error}</p>
+          </section>
+        )}
+
+        {thinkingText && (
+          <section className="agent-task-drawer__thinking">
+            <button
+              type="button"
+              className="agent-task-drawer__stream-head"
+              aria-expanded={showThinking}
+              onClick={() => setShowThinking((value) => !value)}
+            >
+              <h3>思考链</h3>
+              {showThinking ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+            {showThinking && (
+              <div className="agent-task-drawer__stream-body">{thinkingText}</div>
+            )}
+          </section>
+        )}
+
+        {streamText && (
+          <section className="agent-task-drawer__stream">
+            <button
+              type="button"
+              className="agent-task-drawer__stream-head"
+              aria-expanded={showOutput}
+              onClick={() => setShowOutput((value) => !value)}
+            >
+              <h3>实际输出</h3>
+              {showOutput ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+            {showOutput && (
+              <div className="agent-task-drawer__stream-body" ref={streamRef}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamText}</ReactMarkdown>
+                {active && <span className="agent-task-drawer__stream-cursor" aria-hidden="true" />}
+              </div>
+            )}
           </section>
         )}
 
