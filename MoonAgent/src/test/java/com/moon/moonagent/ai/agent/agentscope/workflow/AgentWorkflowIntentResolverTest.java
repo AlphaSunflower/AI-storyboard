@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope.workflow;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeStructuredModels;
 import com.moon.moonagent.ai.agent.agentscope.StructuredDecisionService;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -20,6 +21,7 @@ class AgentWorkflowIntentResolverTest {
                 .thenReturn(new AgentScopeStructuredModels.WorkflowDecision(
                         "", false, false, false, List.of(), List.of(), 0, "fallback"));
         AgentWorkflowIntentResolver resolver = new AgentWorkflowIntentResolver(decisions);
+        ReflectionTestUtils.setField(resolver, "customEnabled", true);
 
         AgentWorkflowModels.Resolution resolution = resolver.resolve("""
                 必须串行执行，不能并行，不能跳阶段。

@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope.workflow;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeStructuredModels;
 import com.moon.moonagent.ai.agent.agentscope.StructuredDecisionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -23,8 +24,16 @@ public class AgentWorkflowIntentResolver {
             "(?m)^\\s*(阶段\\s*[0-9一二三四五六七八九十]+|步骤\\s*[0-9一二三四五六七八九十]+)[：:]?.*$");
     private final StructuredDecisionService decisions;
 
+    @Value("${ai.agent.workflow.custom-enabled:false}")
+    private boolean customEnabled;
+
     public AgentWorkflowModels.Resolution resolve(String prompt) {
         String text = prompt == null ? "" : prompt.trim();
+        if (!customEnabled) {
+            return new AgentWorkflowModels.Resolution(AUTO_SKILL,
+                    new AgentWorkflowModels.Constraint(false, false, false, List.of()),
+                    List.of(), "custom workflow disabled; use standard skill workflow");
+        }
         boolean hasStages = STAGE.matcher(text).find();
         boolean serial = containsAny(text, "必须串行", "不能并行", "不可并行", "顺序执行");
         boolean noSkip = containsAny(text, "不能跳阶段", "不得跳阶段", "禁止跳阶段");
@@ -91,9 +100,8 @@ public class AgentWorkflowIntentResolver {
             String title = title(block, "步骤 " + (index + 1));
             String marker = marker(block, title);
             String tool = toolFor(block, index, blocks.size());
-            int repeatCount = repeatCount(block);
-            if (repeatCount == 1 && requestedCount > 0
-                    && "generate_storyboard_image".equals(tool)) {
+            int repeatCount = repeatable(tool) ? repeatCount(block) : 1;
+            if (repeatCount == 1 && requestedCount > 0 && repeatable(tool)) {
                 repeatCount = requestedCount;
             }
             steps.add(new AgentWorkflowModels.StepSpec(
@@ -162,6 +170,13 @@ public class AgentWorkflowIntentResolver {
             return "start_storyboard_production";
         }
         return index == total - 1 ? "start_storyboard_production" : "list_project_storyboard";
+    }
+
+    private static boolean repeatable(String tool) {
+        return "generate_storyboard_image".equals(tool)
+                || "generate_storyboard_video".equals(tool)
+                || "generate_image".equals(tool)
+                || "generate_video".equals(tool);
     }
 
     private static List<Integer> findExactCounts(String prompt) {

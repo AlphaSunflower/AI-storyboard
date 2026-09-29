@@ -331,6 +331,14 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             String toolCallId,
             StoryboardCommitMode commitMode,
             boolean auto) {
+        AgentAsyncTask active = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getConversationId, conversation.getId())
+                .eq(AgentAsyncTask::getToolName, AgentScopeStoryboardTools.START_STORYBOARD)
+                .in(AgentAsyncTask::getStatus, List.of("queued", "running", "waiting_parent"))
+                .orderByDesc(AgentAsyncTask::getUpdatedAt)
+                .last("LIMIT 1"));
+        if (active != null) return active.getId();
+
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("originalScript", productionRequest.originalScript());
         request.put("creationType", productionRequest.creationType());

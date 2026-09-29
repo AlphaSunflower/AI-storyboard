@@ -89,6 +89,8 @@ ai:
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
+    workflow:
+      custom-enabled: ${AGENT_CUSTOM_WORKFLOW_ENABLED:false}
     tool-audit:
       enabled: ${AGENT_TOOL_AUDIT_ENABLED:true}
       ui-enabled: ${AGENT_TOOL_AUDIT_UI_ENABLED:true}
