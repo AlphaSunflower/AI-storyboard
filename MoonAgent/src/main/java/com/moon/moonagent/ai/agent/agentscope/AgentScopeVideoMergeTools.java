@@ -1,6 +1,8 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.entity.Scene;
+import com.moon.moonagent.client.StoryboardClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -17,6 +19,7 @@ public class AgentScopeVideoMergeTools {
     public static final String MERGE_STORYBOARD_VIDEOS = "merge_storyboard_videos";
 
     private final VideoMergeService mergeService;
+    private final StoryboardClient storyboardClient;
 
     public AgentScopeTool tool() {
         return new AgentScopeTool(
@@ -33,6 +36,22 @@ public class AgentScopeVideoMergeTools {
                     AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
                     List<String> urls = stringList(input.get("source_urls"));
                     Integer expected = integer(input.get("expected_duration_seconds"));
+                    if (urls.isEmpty()) {
+                        List<Scene> scenes = storyboardClient
+                                .getProjectScenesFresh(conversation.getProjectId()).stream()
+                                .filter(scene -> scene.getVideoUrl() != null
+                                        && !scene.getVideoUrl().isBlank())
+                                .sorted(java.util.Comparator.comparingInt(Scene::getSceneNumber))
+                                .toList();
+                        urls = scenes.stream().map(Scene::getVideoUrl).toList();
+                        if (expected == null || expected <= 0) {
+                            expected = scenes.stream()
+                                    .map(Scene::getDuration)
+                                    .filter(value -> value != null && value > 0)
+                                    .mapToInt(Integer::intValue)
+                                    .sum();
+                        }
+                    }
                     String taskId = mergeService.start(
                             conversation.getUserId(), conversation.getId(),
                             conversation.getProjectId(), urls, expected);

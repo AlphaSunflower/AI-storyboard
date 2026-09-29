@@ -23,6 +23,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -87,7 +88,7 @@ public class VideoMergeService {
     private void run(String taskId, List<String> sources, Integer expectedDurationSeconds) {
         Path work = null;
         try {
-            update(taskId, "running", "merge", 5, null, null);
+            update(taskId, "running", "merge", 5, null, null, null);
             work = Files.createTempDirectory("moon-video-merge-");
             List<Path> clips = new ArrayList<>();
             for (int index = 0; index < sources.size(); index++) {
@@ -95,7 +96,7 @@ public class VideoMergeService {
                 Files.write(clip, download(sources.get(index)));
                 clips.add(clip);
                 update(taskId, "running", "merge", 10 + (int) (40.0 * (index + 1) / sources.size()),
-                        null, null);
+                        null, null, null);
             }
             Path list = work.resolve("concat.txt");
             StringBuilder listText = new StringBuilder();
@@ -106,7 +107,7 @@ public class VideoMergeService {
             }
             Files.writeString(list, listText, StandardCharsets.UTF_8);
             Path output = work.resolve("merged.mp4");
-            runProcess(List.of(ffmpegPath, "-y", "-f", "concat", "-safe", "0",
+            runProcess(List.of(ffmpegExecutable(), "-y", "-f", "concat", "-safe", "0",
                     "-i", list.toString(), "-c", "copy", output.toString()));
             double duration = probeDuration(output);
             if (expectedDurationSeconds != null && expectedDurationSeconds > 0
@@ -120,10 +121,10 @@ public class VideoMergeService {
             result.put("url", url);
             result.put("durationSeconds", duration);
             result.put("sourceCount", sources.size());
-            update(taskId, "completed", "completed", 100, url, writeJson(result));
+            update(taskId, "completed", "completed", 100, url, writeJson(result), null);
         } catch (Exception e) {
             log.warn("video merge failed taskId={} error={}", taskId, e.getMessage());
-            update(taskId, "failed", "failed", 100, null, null);
+            update(taskId, "failed", "failed", 100, null, null, rootMessage(e));
         } finally {
             if (work != null) deleteRecursively(work);
         }
@@ -148,7 +149,7 @@ public class VideoMergeService {
 
     private double probeDuration(Path output) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(
-                ffprobePath, "-v", "error", "-show_entries", "format=duration",
+                ffprobeExecutable(), "-v", "error", "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1", output.toString())
                 .redirectErrorStream(true)
                 .start();
@@ -178,7 +179,7 @@ public class VideoMergeService {
     }
 
     private void update(String taskId, String status, String stage, int progress,
-                        String resultUrl, String resultJson) {
+                        String resultUrl, String resultJson, String error) {
         taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
                 .eq("id", taskId)
                 .set("status", status)
@@ -186,10 +187,48 @@ public class VideoMergeService {
                 .set("progress", progress)
                 .set("result_urls_json", resultUrl == null ? null : writeJson(List.of(resultUrl)))
                 .set("result_json", resultJson)
+                .set("error", error == null || error.isBlank() ? null : error)
                 .set("completed_at", "completed".equals(status) || "failed".equals(status)
                         ? OffsetDateTime.now() : null)
                 .set("updated_at", OffsetDateTime.now())
                 .setSql("version = COALESCE(version, 0) + 1"));
+    }
+
+    private String ffmpegExecutable() {
+        return executable(ffmpegPath, "ffmpeg");
+    }
+
+    private String ffprobeExecutable() {
+        return executable(ffprobePath, "ffprobe");
+    }
+
+    private static String executable(String configured, String name) {
+        String executableName = name + (isWindows() ? ".exe" : "");
+        List<Path> candidates = new ArrayList<>();
+        if (configured != null && !configured.isBlank()) candidates.add(Path.of(configured));
+        String home = System.getProperty("user.home");
+        if (home != null && !home.isBlank()) {
+            candidates.add(Path.of(home, ".moon-agent", "tools", "ffmpeg", "bin", executableName));
+        }
+        candidates.add(Path.of(System.getProperty("user.dir"), "tools", "ffmpeg", "bin", executableName));
+        String ffmpegHome = System.getenv("FFMPEG_HOME");
+        if (ffmpegHome != null && !ffmpegHome.isBlank()) {
+            candidates.add(Path.of(ffmpegHome, "bin", executableName));
+        }
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) return candidate.toAbsolutePath().toString();
+        }
+        return configured == null || configured.isBlank() ? executableName : configured;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) current = current.getCause();
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
     private static String filename(String source) {
