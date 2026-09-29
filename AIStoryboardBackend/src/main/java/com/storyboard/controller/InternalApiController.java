@@ -104,6 +104,14 @@ public class InternalApiController {
         return ApiResponse.ok("ok");
     }
 
+    /** Replace system-managed first/last video frames without deleting user uploads. */
+    @PutMapping("/scenes/{sceneId}/managed-video-frames")
+    public ApiResponse<String> replaceManagedVideoFrames(@PathVariable String sceneId,
+                                                         @RequestBody List<SceneReferenceLinkRequest> links) {
+        internalApiService.replaceManagedVideoFrames(sceneId, links);
+        return ApiResponse.ok("ok");
+    }
+
     /** 查场景参考素材（含 role） */
     @GetMapping("/scenes/{sceneId}/references")
     public ApiResponse<List<SceneReferenceResponse>> getSceneReferences(@PathVariable String sceneId) {

@@ -208,11 +208,25 @@ public class InternalApiServiceImpl implements InternalApiService {
             ref.setType(link.type() == null || link.type().isBlank() ? "image" : link.type());
             ref.setPurpose(link.purpose() == null || link.purpose().isBlank() ? "video" : link.purpose());
             ref.setRole(link.role() == null || link.role().isBlank() ? "REFERENCE" : link.role());
+            ref.setSourceType(link.sourceType());
+            ref.setSourceId(link.sourceId());
+            ref.setSourceConversationId(link.sourceConversationId());
             ref.setFileName(link.fileName());
             ref.setFileSize(link.fileSize());
             ref.setSortOrder(sort++);
             sceneReferenceImageMapper.insert(ref);
         }
+    }
+
+    @Override
+    @Transactional
+    public void replaceManagedVideoFrames(String sceneId, List<SceneReferenceLinkRequest> links) {
+        sceneReferenceImageMapper.delete(new LambdaQueryWrapper<SceneReferenceImage>()
+                .eq(SceneReferenceImage::getSceneId, sceneId)
+                .eq(SceneReferenceImage::getPurpose, "video")
+                .eq(SceneReferenceImage::getSourceType, "scene_image")
+                .in(SceneReferenceImage::getRole, List.of("FIRST_FRAME", "LAST_FRAME")));
+        linkSceneReferences(sceneId, links);
     }
 
     @Override

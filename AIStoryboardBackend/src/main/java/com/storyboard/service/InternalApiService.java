@@ -70,4 +70,7 @@ public interface InternalApiService {
 
     /** 按 videoTaskId 查场景（视频异步轮询终态更新用），不存在抛 40401 */
     SceneFull getSceneByVideoTaskId(String videoTaskId);
+
+    /** Replace only system-managed video frame references while preserving user uploads. */
+    void replaceManagedVideoFrames(String sceneId, List<SceneReferenceLinkRequest> links);
 }
