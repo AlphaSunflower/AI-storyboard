@@ -47,6 +47,8 @@ public class AgentScopeToolPipeline {
                     new ToolPolicy("MEDIA_IMAGE", "storyboard-image", false, false)),
             Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO,
                     new ToolPolicy("MEDIA_VIDEO", "storyboard-video", false, false)),
+            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS,
+                    new ToolPolicy("MEDIA_VIDEO_BATCH", "storyboard-video-batch", false, false)),
             Map.entry(AgentScopeStoryboardTools.UPSERT_STORYBOARD_SHOT,
                     new ToolPolicy("STORYBOARD_WRITE", "", false, false)),
             Map.entry(AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.service.FileUploadService;
+import com.llmgateway.service.ChatStreamEventNormalizer;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.ImageEditService;
 import com.llmgateway.service.RouteResult;
@@ -16,6 +17,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -66,6 +69,38 @@ public class OpenAiCompatController {
                 throw new RuntimeException(e); // 客户端断开：中断转发
             }
         }, callId);
+    }
+
+    /**
+     * Normalized NDJSON stream for internal agents. Unlike the raw SSE endpoint,
+     * this preserves non-standard reasoning_content deltas emitted by gateways.
+     */
+    @PostMapping(value = "/chat/completions/stream-events", produces = "application/x-ndjson")
+    public void chatCompletionsEvents(@RequestBody String body,
+                                      @RequestHeader(value = "X-Call-Id", required = false) String callId,
+                                      jakarta.servlet.http.HttpServletResponse response) throws Exception {
+        response.setStatus(200);
+        response.setContentType("application/x-ndjson");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+        jakarta.servlet.ServletOutputStream out = response.getOutputStream();
+        ChatStreamEventNormalizer normalizer = new ChatStreamEventNormalizer(line -> {
+            try {
+                out.write(line.getBytes(StandardCharsets.UTF_8));
+                out.write('\n');
+                out.flush();
+            } catch (IOException exception) {
+                throw new UncheckedIOException(exception);
+            }
+        });
+        try {
+            routingService.streamChat("/chat/completions", withStreamTrue(body),
+                    normalizer::accept, callId);
+            normalizer.complete();
+        } catch (Exception exception) {
+            normalizer.error(exception.getMessage());
+        }
     }
 
     @PostMapping(value = "/images/generations", produces = {
@@ -129,6 +164,15 @@ public class OpenAiCompatController {
         payload.put("message", message == null || message.isBlank() ? "upstream stream failed" : message);
         return ("data: " + objectMapper.writeValueAsString(error) + "\n\n")
                 .getBytes(StandardCharsets.UTF_8);
+    }
+
+    private String withStreamTrue(String body) throws Exception {
+        JsonNode node = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        if (!(node instanceof ObjectNode object)) {
+            throw new IllegalArgumentException("chat request body must be a JSON object");
+        }
+        object.put("stream", true);
+        return objectMapper.writeValueAsString(object);
     }
 
     @PostMapping(value = "/images/edits", produces = MediaType.APPLICATION_JSON_VALUE)

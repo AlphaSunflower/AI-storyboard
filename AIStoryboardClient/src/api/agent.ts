@@ -292,6 +292,10 @@ export interface AgentTaskView {
   resultUrls: string[];
   slots: AgentTaskSlotView[];
   result: string;
+  liveText: string;
+  liveThinking: string;
+  liveStage: string;
+  liveUpdatedAt?: string | null;
   canCancel: boolean;
   canRetry: boolean;
   canFollowUp: boolean;
@@ -312,7 +316,17 @@ export interface AgentWakeupMessage {
 
 export type AgentRealtimeEvent =
   | { type: 'task'; task: AgentTaskView }
-  | { type: 'wakeup_message'; message: AgentWakeupMessage };
+  | { type: 'wakeup_message'; message: AgentWakeupMessage }
+  | {
+      type: 'task_stream';
+      taskId: string;
+      seq: number;
+      stage: string;
+      text: string;
+      thinking: string;
+      done: boolean;
+      updatedAt: string;
+    };
 
 export interface AgentMessage {
   id: string;
@@ -950,10 +964,11 @@ async function consumeSseData<T>(
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
+      // 兼容 \n\n 与 \r\n\r\n 两种帧分隔（代理可能改写行尾）
+      const parts = buffer.split(/\r?\n\r?\n/);
       buffer = parts.pop() ?? '';
       for (const part of parts) {
-        const lines = part.split('\n');
+        const lines = part.split(/\r?\n/);
         const eventLine = lines.find((l) => l.startsWith('event:'));
         const dataLine = lines.find((l) => l.startsWith('data:'));
         if (!dataLine) continue;
@@ -981,7 +996,18 @@ export async function streamTaskEvents(
     },
     signal,
   });
-  await consumeSseData<{ task?: AgentTaskView } & AgentWakeupMessage>(
+  await consumeSseData<
+    { task?: AgentTaskView } & AgentWakeupMessage
+      & {
+        taskId?: string;
+        seq?: number;
+        stage?: string;
+        text?: string;
+        thinking?: string;
+        done?: boolean;
+        updatedAt?: string;
+      }
+  >(
     res,
     (eventName, data) => {
       if (eventName === 'snapshot' && data?.task) {
@@ -994,6 +1020,17 @@ export async function streamTaskEvents(
             conversationId: data.conversationId,
             messageId: data.messageId,
           },
+        });
+      } else if (eventName === 'task_stream' && data?.taskId) {
+        onEvent({
+          type: 'task_stream',
+          taskId: data.taskId,
+          seq: data.seq ?? 0,
+          stage: data.stage ?? '',
+          text: data.text ?? '',
+          thinking: data.thinking ?? '',
+          done: data.done ?? false,
+          updatedAt: data.updatedAt ?? '',
         });
       }
   }, signal);

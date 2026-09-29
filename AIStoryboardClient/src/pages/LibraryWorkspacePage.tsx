@@ -169,6 +169,8 @@ export function LibraryWorkspacePage() {
   const [folderTree, setFolderTree] = useState<LibraryFolderNode[]>([]);
   const [unfiledCount, setUnfiledCount] = useState(0);
   const [groups, setGroups] = useState<LibraryAsset[]>([]);
+  const [groupItemsByGroup, setGroupItemsByGroup] = useState<Record<string, LibraryGroupMediaItem[]>>({});
+  const [loadingGroupIds, setLoadingGroupIds] = useState<Set<string>>(new Set());
   const [assetsByFolder, setAssetsByFolder] = useState<Record<string, LibraryAsset[]>>({});
   const [loadedFolders, setLoadedFolders] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['root', 'folders', 'groups']));
@@ -215,6 +217,7 @@ export function LibraryWorkspacePage() {
   const selectionBaseFolders = useRef<string[]>([]);
   const dragIds = useRef<string[]>([]);
   const draggedFolderId = useRef<string | null>(null);
+  const groupItemsRequest = useRef(new Map<string, Promise<LibraryGroupMediaItem[]>>());
   const upsertTask = useLibraryTaskStore((state) => state.upsertTask);
   const updateTask = useLibraryTaskStore((state) => state.updateTask);
   const addAnalysisTask = useLibraryTaskStore((state) => state.addAnalysisTask);
@@ -318,6 +321,9 @@ export function LibraryWorkspacePage() {
     setDetail(null);
     setActiveGroup(null);
     setGroupMediaItems([]);
+    setGroupItemsByGroup({});
+    setLoadingGroupIds(new Set());
+    groupItemsRequest.current.clear();
     setSelectedGroupMediaId(null);
     setInspectorDismissed(false);
   }, [effectiveProjectId, query, scopeView, selectedTagIds, type]);
@@ -470,13 +476,32 @@ export function LibraryWorkspacePage() {
         meta: `${groups.length} 组`,
         expanded: expanded.has('groups'),
         hasChildren: groups.length > 0,
-        children: expanded.has('groups') ? groups.map((group) => ({
-          id: `group:${group.id}`,
-          kind: 'group',
-          name: group.name,
-          meta: group.scope === 'GLOBAL' ? '全局资产组' : '项目资产组',
-          asset: group,
-        })) : undefined,
+        children: expanded.has('groups') ? groups.map((group) => {
+          const groupId = `group:${group.id}`;
+          const groupExpanded = expanded.has(groupId);
+          const items = groupItemsByGroup[group.id];
+          const groupAssets = items ? groupAssetsForTree(items) : [];
+          const loadingGroup = loadingGroupIds.has(group.id);
+          return {
+            id: groupId,
+            kind: 'group',
+            name: group.name,
+            meta: [
+              group.scope === 'GLOBAL' ? '全局资产组' : '项目资产组',
+              loadingGroup ? '加载中' : items ? `${groupAssets.length} 项资产` : '',
+            ].filter(Boolean).join(' · '),
+            expanded: groupExpanded,
+            hasChildren: items ? groupAssets.length > 0 : true,
+            children: groupExpanded && items ? groupAssets.map(({ asset, mediaCount }) => ({
+              id: `asset:${asset.id}`,
+              kind: 'asset',
+              name: asset.name,
+              meta: mediaCount > 1 ? `${asset.type} · ${mediaCount} 个文件` : asset.type,
+              asset,
+            })) : undefined,
+            asset: group,
+          };
+        }) : undefined,
       },
     ] : undefined,
   }), [
@@ -485,7 +510,9 @@ export function LibraryWorkspacePage() {
     expanded,
     folderNodes,
     folderTree.length,
+    groupItemsByGroup,
     groups,
+    loadingGroupIds,
     loadedFolders,
     scopeView,
     unfiledCount,
@@ -497,7 +524,24 @@ export function LibraryWorkspacePage() {
     [treeData],
   );
 
-  const toggleFolder = (nodeId: string) => {
+  const toggleTreeNode = (nodeId: string) => {
+    if (nodeId.startsWith('group:')) {
+      const groupId = nodeId.slice('group:'.length);
+      const next = new Set(expanded);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+        const group = groups.find((candidate) => candidate.id === groupId);
+        if (group && !groupItemsByGroup[groupId]) {
+          void loadGroupItems(group).catch((err) => {
+            setError(err instanceof Error ? err.message : '加载资产组失败');
+          });
+        }
+      }
+      setExpanded(next);
+      return;
+    }
     const folderId = nodeId.startsWith('folder:')
       ? nodeId.slice('folder:'.length)
       : nodeId === 'unfiled' ? 'UNFILED' : nodeId;
@@ -515,12 +559,40 @@ export function LibraryWorkspacePage() {
     setExpanded(next);
   };
 
-  const loadGroupDetail = async (asset: LibraryAsset) => {
+  const loadGroupItems = async (
+    asset: LibraryAsset,
+    force = false,
+  ): Promise<LibraryGroupMediaItem[]> => {
+    const cached = groupItemsByGroup[asset.id];
+    if (!force && cached) return cached;
+
+    const pending = groupItemsRequest.current.get(asset.id);
+    if (pending) return pending;
+
+    setLoadingGroupIds((current) => new Set(current).add(asset.id));
+    const request = libraryApi.getGroup(asset.id).then((response) => response.data.data.media);
+    groupItemsRequest.current.set(asset.id, request);
+    try {
+      const mediaItems = await request;
+      setGroupItemsByGroup((current) => ({ ...current, [asset.id]: mediaItems }));
+      return mediaItems;
+    } finally {
+      if (groupItemsRequest.current.get(asset.id) === request) {
+        groupItemsRequest.current.delete(asset.id);
+      }
+      setLoadingGroupIds((current) => {
+        const next = new Set(current);
+        next.delete(asset.id);
+        return next;
+      });
+    }
+  };
+
+  const loadGroupDetail = async (asset: LibraryAsset, force = false) => {
     setDetailLoading(true);
     setError('');
     try {
-      const response = await libraryApi.getGroup(asset.id);
-      const mediaItems = response.data.data.media;
+      const mediaItems = await loadGroupItems(asset, force);
       setGroupMediaItems(mediaItems);
       setSelectedGroupMediaId((current) => (
         current && mediaItems.some((item) => item.media.id === current)
@@ -529,7 +601,7 @@ export function LibraryWorkspacePage() {
       ));
       setDetail({
         asset,
-        media: response.data.data.media.map((item) => item.media),
+        media: mediaItems.map((item) => item.media),
         linkedProjects: asset.projects,
       });
     } catch (err) {
@@ -948,7 +1020,7 @@ export function LibraryWorkspacePage() {
           expectedVersion: prompt.groupMedia.assetVersion,
           manualOverride: true,
         });
-        if (activeGroup) await loadGroupDetail(activeGroup);
+        if (activeGroup) await loadGroupDetail(activeGroup, true);
       } else if (prompt.kind === 'create-group') {
         await libraryApi.createGroup({
           scope: queryScope === 'GLOBAL' ? 'GLOBAL' : 'PROJECT',
@@ -1086,7 +1158,7 @@ export function LibraryWorkspacePage() {
         role: item.role,
       }));
       await libraryApi.replaceGroupItems(group.id, groupResponse.data.data.version, items);
-      await loadGroupDetail(group);
+      await loadGroupDetail(group, true);
       await reloadTree();
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入资产组失败');
@@ -1109,7 +1181,7 @@ export function LibraryWorkspacePage() {
           role: entry.media.role,
         }));
       await libraryApi.replaceGroupItems(activeGroup.id, response.data.data.version, remaining);
-      await loadGroupDetail(activeGroup);
+      await loadGroupDetail(activeGroup, true);
       await reloadTree();
     } catch (err) {
       setError(err instanceof Error ? err.message : '移出资产组失败');
@@ -2504,7 +2576,7 @@ export function LibraryWorkspacePage() {
                     current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId]
                   ))}
                   onSetSelection={setSelectedIds}
-                  onToggleFolder={toggleFolder}
+                  onToggleFolder={toggleTreeNode}
                   onLoadMore={(folderId) => void loadFolder(
                     folderId,
                     Math.floor((assetsByFolder[folderId]?.length || 0) / PAGE_SIZE) + 1,
@@ -2882,6 +2954,22 @@ function dedupeAssets(assets: LibraryAsset[]): LibraryAsset[] {
     seen.add(asset.id);
     return true;
   });
+}
+
+function groupAssetsForTree(
+  items: LibraryGroupMediaItem[],
+): Array<{ asset: LibraryAsset; mediaCount: number }> {
+  const byAsset = new Map<string, { asset: LibraryAsset; mediaCount: number }>();
+  items.forEach((item) => {
+    if (!item.asset) return;
+    const current = byAsset.get(item.asset.id);
+    if (current) {
+      current.mediaCount += 1;
+    } else {
+      byAsset.set(item.asset.id, { asset: item.asset, mediaCount: 1 });
+    }
+  });
+  return [...byAsset.values()];
 }
 
 function folderAtPath(

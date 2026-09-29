@@ -35,6 +35,7 @@ public class AgentScopeStoryboardTools {
     public static final String APPROVE_STORYBOARD = "approve_storyboard_production";
     public static final String GENERATE_STORYBOARD_IMAGE = "generate_storyboard_image";
     public static final String GENERATE_STORYBOARD_VIDEO = "generate_storyboard_video";
+    public static final String GENERATE_STORYBOARD_VIDEOS = "generate_storyboard_videos";
     public static final String UPSERT_STORYBOARD_SHOT = "upsert_storyboard_shot";
     public static final String LIST_STORYBOARD_DRAFT = "list_storyboard_draft";
     public static final String LIST_PROJECT_STORYBOARD = "list_project_storyboard";
@@ -63,6 +64,7 @@ public class AgentScopeStoryboardTools {
                 approveTool(),
                 imageTool(),
                 videoTool(),
+                batchVideoTool(),
                 listDraftTool(),
                 listProjectTool(),
                 updateProjectShotTool(),
@@ -382,6 +384,13 @@ public class AgentScopeStoryboardTools {
                                 taskId, "批量生成分镜图片 " + targets.size() + " 张", "image-batch");
                         context.turnState().markMediaStarted("image");
                     }
+                    if (context != null && context.support() != null && context.request() != null) {
+                        context.support().sendEvent(context.request(), "task_accepted", Map.of(
+                                "taskId", taskId,
+                                "taskKind", "image-batch",
+                                "message", "批量生成分镜图片任务已受理，正在生成 "
+                                        + targets.size() + " 张图片"));
+                    }
                     return Map.of("ok", true, "queued", true, "taskId", taskId,
                             "taskKind", "image-batch", "count", targets.size());
                 }));
@@ -428,6 +437,9 @@ public class AgentScopeStoryboardTools {
                                 .trim().toLowerCase(java.util.Locale.ROOT);
                         if ("delete".equals(rawCommitMode) || "删除".equals(rawCommitMode)
                                 || "删除全部".equals(rawCommitMode)) {
+                            if (context != null && context.turnState() != null) {
+                                context.turnState().takePendingStoryboardCommitCount();
+                            }
                             storyboardClient.deleteProjectScenes(conversation.getProjectId());
                             return Map.of(
                                     "ok", true,
@@ -437,6 +449,9 @@ public class AgentScopeStoryboardTools {
                         }
                         StoryboardCommitMode commitMode = commitMode(input.get("commit_mode"));
                         if (existingSceneCount > 0 && commitMode == null) {
+                            if (context != null && context.turnState() != null) {
+                                context.turnState().markStoryboardCommitPending(existingSceneCount);
+                            }
                             return Map.of(
                                     "ok", false,
                                     "needsChoice", true,
@@ -444,6 +459,9 @@ public class AgentScopeStoryboardTools {
                                     "message", "当前项目已有 " + existingSceneCount
                                             + " 个分镜。请调用 choose_storyboard_commit_mode，"
                                             + "让用户选择追加到末尾、覆盖全部分镜或删除全部分镜。");
+                        }
+                        if (context != null && context.turnState() != null) {
+                            context.turnState().takePendingStoryboardCommitCount();
                         }
                         if (commitMode == null) commitMode = StoryboardCommitMode.APPEND;
                         StoryboardProductionRequest request = new StoryboardProductionRequest(
@@ -498,11 +516,40 @@ public class AgentScopeStoryboardTools {
                         "shot_id", Map.of("type", "string")), List.of("run_id", "stage", "instruction")),
                 false, false, false,
                 (input, param) -> guard(() -> {
-                    return productionService.revise(
-                            string(input.get("run_id")),
-                            stage(input.get("stage")),
+                    AgentScopeRunContext context = context(param);
+                    AgentConversation conversation =
+                            AgentScopeSessionTools.requireConversation(context);
+                    String runId = string(input.get("run_id"));
+                    if (runId.isBlank()) {
+                        runId = productionService.getLatestOwned(
+                                conversation.getUserId(),
+                                conversation.getProjectId(),
+                                conversation.getId()).runId();
+                    }
+                    String stage = stage(input.get("stage")).name();
+                    String taskId = asyncTasks.startStoryboardRevisionTask(
+                            conversation,
+                            runId,
+                            stage,
                             string(input.get("instruction")),
-                            string(input.get("shot_id")));
+                            string(input.get("shot_id")),
+                            toolCallId(param));
+                    if (context != null && context.turnState() != null) {
+                        context.turnState().addTaskCard(taskId, "修订分镜", "storyboard");
+                        context.turnState().addText("分镜修订任务已受理，任务 ID：`" + taskId + "`。");
+                    }
+                    if (context != null && context.support() != null && context.request() != null) {
+                        context.support().sendEvent(context.request(), "task_accepted", Map.of(
+                                "taskId", taskId,
+                                "taskKind", "long-tool",
+                                "message", "分镜修订任务已受理，正在按修改要求重做剧情或分镜草稿"));
+                    }
+                    return Map.of(
+                            "ok", true,
+                            "status", "queued",
+                            "taskId", taskId,
+                            "taskKind", "long-tool",
+                            "message", "分镜修订任务已受理");
                 }));
     }
 
@@ -630,6 +677,32 @@ public class AgentScopeStoryboardTools {
                             input, target, conversation);
                     String requestedMode = string(input.get("reference_mode"))
                             .trim().toLowerCase(java.util.Locale.ROOT);
+                    boolean explicitReferences = !requestedMode.isBlank()
+                            || !stringList(input.get("reference_asset_ids")).isEmpty()
+                            || !stringList(input.get("reference_urls")).isEmpty();
+                    if (!explicitReferences) {
+                        String taskId = asyncTasks.startStoryboardVideoTask(
+                                conversation, List.of(target.sceneId()), false, toolCallId(param));
+                        if (context != null && context.turnState() != null) {
+                            context.turnState().addTaskCard(taskId, "生成分镜视频", "long-tool");
+                            context.turnState().addText(
+                                    "分镜视频任务已受理，将在后台自动生成并写回分镜。");
+                        }
+                        if (context != null && context.support() != null && context.request() != null) {
+                            context.support().sendEvent(context.request(), "task_accepted", Map.of(
+                                    "taskId", taskId,
+                                    "taskKind", "long-tool",
+                                    "message", "分镜视频任务已受理，正在后台自动生成"));
+                        }
+                        return Map.of(
+                                "ok", true,
+                                "status", "queued",
+                                "taskId", taskId,
+                                "taskKind", "long-tool",
+                                "sceneId", target.sceneId(),
+                                "sceneNumber", target.sceneNumber(),
+                                "message", "分镜视频任务已受理");
+                    }
                     boolean automatic = requestedMode.isBlank();
                     String referenceMode = automatic
                             ? automaticReferenceMode(availableUrls)
@@ -639,7 +712,8 @@ public class AgentScopeStoryboardTools {
                     Map<String, Object> result = videoTools.generateVideoForStoryboard(
                             nonBlank(string(input.get("prompt")), target.defaultPrompt()),
                             roleImages, string(input.get("resolution")),
-                            string(input.get("aspect_ratio")), string(input.get("duration")), context);
+                            string(input.get("aspect_ratio")), string(input.get("duration")),
+                            target.sceneId(), context);
                     Map<String, Object> out = new LinkedHashMap<>(result);
                     out.put("sceneId", target.sceneId());
                     out.put("sceneNumber", target.sceneNumber());
@@ -653,6 +727,76 @@ public class AgentScopeStoryboardTools {
                             "roles", roleImages.stream().map(image -> image.role().name()).toList()));
                     return out;
                 }));
+    }
+
+    private AgentScopeTool batchVideoTool() {
+        return new AgentScopeTool(
+                GENERATE_STORYBOARD_VIDEOS,
+                "Create one asynchronous batch job for approved project storyboard videos. "
+                        + "By default process only scenes without a completed video. "
+                        + "Set overwrite=true only when the user explicitly asks to regenerate all videos.",
+                AgentScopeTool.schema(Map.of(
+                        "scene_ids", array("string"),
+                        "scene_numbers", array("integer"),
+                        "overwrite", Map.of("type", "boolean")), List.of()),
+                false, false, false,
+                (input, param) -> guard(() -> {
+                    AgentScopeRunContext context = context(param);
+                    AgentConversation conversation =
+                            AgentScopeSessionTools.requireConversation(context);
+                    List<String> requestedIds = stringList(input.get("scene_ids"));
+                    List<Integer> requestedNumbers = integerList(input.get("scene_numbers"));
+                    boolean filtered = !requestedIds.isEmpty() || !requestedNumbers.isEmpty();
+                    boolean overwrite = Boolean.TRUE.equals(input.get("overwrite"));
+                    List<String> targets = storyboardClient
+                            .getProjectScenesFresh(conversation.getProjectId()).stream()
+                            .sorted(java.util.Comparator.comparingInt(Scene::getSceneNumber))
+                            .filter(scene -> !filtered
+                                    || requestedIds.contains(scene.getId())
+                                    || requestedNumbers.contains(scene.getSceneNumber()))
+                            .filter(scene -> overwrite || needsStoryboardVideo(scene))
+                            .map(Scene::getId)
+                            .toList();
+                    if (targets.isEmpty()) {
+                        return Map.of(
+                                "ok", true,
+                                "queued", false,
+                                "count", 0,
+                                "message", overwrite
+                                        ? "没有可重新生成的分镜视频"
+                                        : "所有所选分镜都已有完成视频");
+                    }
+                    String taskId = asyncTasks.startStoryboardVideoTask(
+                            conversation, targets, overwrite, toolCallId(param));
+                    if (context != null && context.turnState() != null) {
+                        context.turnState().addTaskCard(
+                                taskId, "批量生成分镜视频 " + targets.size() + " 个", "long-tool");
+                        context.turnState().addText(
+                                "分镜视频批量任务已受理，共 " + targets.size()
+                                        + " 个分镜，将在后台自动生成。");
+                    }
+                    if (context != null && context.support() != null && context.request() != null) {
+                        context.support().sendEvent(context.request(), "task_accepted", Map.of(
+                                "taskId", taskId,
+                                "taskKind", "long-tool",
+                                "message", "分镜视频批量任务已受理，正在后台自动生成 "
+                                        + targets.size() + " 个视频"));
+                    }
+                    return Map.of(
+                            "ok", true,
+                            "status", "queued",
+                            "taskId", taskId,
+                            "taskKind", "long-tool",
+                            "count", targets.size(),
+                            "message", "分镜视频批量任务已受理");
+                }));
+    }
+
+    private static boolean needsStoryboardVideo(Scene scene) {
+        if (scene == null) return false;
+        if (scene.getVideoUrl() == null || scene.getVideoUrl().isBlank()) return true;
+        String status = string(scene.getVideoStatus()).toLowerCase(java.util.Locale.ROOT);
+        return "failed".equals(status) || "cancelled".equals(status) || "canceled".equals(status);
     }
 
     private static StoryboardShot findShot(StoryboardRunSnapshot run, String shotId) {

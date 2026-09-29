@@ -71,12 +71,12 @@ export function buildChatAppDescriptor(
   const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
     || 'http://localhost:3000';
   const params = new URLSearchParams({ token });
+  params.set('embedded', '1');
   if (userId) params.set('userId', userId);
   if (name) params.set('name', name);
   const canvasMode = options.canvasMode;
   const projectId = canvasMode?.projectId ?? currentProject?.id;
   if (canvasMode) {
-    params.set('embedded', '1');
     params.set('canvasMode', '1');
     params.set('conversationId', canvasMode.conversationId);
     params.set('parentOrigin', canvasMode.parentOrigin);

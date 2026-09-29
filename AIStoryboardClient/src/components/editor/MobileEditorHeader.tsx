@@ -5,10 +5,11 @@ interface MobileEditorHeaderProps {
   onMenuClick: () => void;
   onScript: () => void;
   showMenu?: boolean;
+  showScript?: boolean;
 }
 
 /** 手机端编辑器顶栏：☰ 菜单 | 项目名 | 📝 剧本 */
-export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true }: MobileEditorHeaderProps) {
+export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, showScript = true }: MobileEditorHeaderProps) {
   const currentProject = useProjectStore((s) => s.currentProject);
 
   return (
@@ -47,21 +48,23 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true }: M
       </span>
 
       {/* 右：剧本输入 */}
-      <button
-        onClick={onScript}
-        title="剧本输入"
-        style={{
-          width: 40, height: 40, border: 'none', background: 'transparent',
-          borderRadius: 10, cursor: 'pointer', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          color: DS.ink,
-        }}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-          <path d="M14 2v6h6M12 18v-6M9 15h6" />
-        </svg>
-      </button>
+      {showScript ? (
+        <button
+          onClick={onScript}
+          title="剧本输入"
+          style={{
+            width: 40, height: 40, border: 'none', background: 'transparent',
+            borderRadius: 10, cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            color: DS.ink,
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <path d="M14 2v6h6M12 18v-6M9 15h6" />
+          </svg>
+        </button>
+      ) : <span aria-hidden="true" style={{ width: 40, height: 40, flexShrink: 0 }} />}
     </div>
   );
 }

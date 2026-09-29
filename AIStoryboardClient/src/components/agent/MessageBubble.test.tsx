@@ -194,6 +194,26 @@ describe('MessageBubble project library import', () => {
     expect(screen.getByText('风格（如改成新中式）、场景（海边 or 山谷）').tagName).toBe('STRONG');
   });
 
+  it('renders ==highlight== markers as mark elements and leaves code untouched', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="常规说明 `==保持原样==`，还有 ==最高优先级提醒=="
+      />,
+    );
+
+    expect(screen.getByText('最高优先级提醒').tagName).toBe('MARK');
+    expect(screen.getByText('==保持原样==').tagName).toBe('CODE');
+  });
+
+  it('keeps single newlines as line breaks in markdown content', () => {
+    const { container } = render(
+      <MessageBubble role="assistant" content={'第一行\n第二行'} />,
+    );
+
+    expect(container.querySelector('.chat-markdown br')).toBeTruthy();
+  });
+
   it('collapses four or more generated images into one batch receipt', () => {
     const openGenerationCenter = vi.fn();
     const images = Array.from(

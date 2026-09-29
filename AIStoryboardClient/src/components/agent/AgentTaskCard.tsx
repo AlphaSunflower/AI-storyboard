@@ -23,6 +23,9 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
   const [instruction, setInstruction] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [approvingPlot, setApprovingPlot] = useState(false);
+  // 确认剧情成功后隐藏按钮：旧任务卡片会一直停在 waiting_review，重复点击只会提交过期阶段。
+  const [approvedPlot, setApprovedPlot] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   if (!task) {
     return (
@@ -63,9 +66,21 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
         stage: 'PLOT_REVIEW',
         decision: 'APPROVE',
       });
+      setApprovedPlot(true);
       if (response.data.data.taskId) openTaskDrawer(response.data.data.taskId);
     } finally {
       setApprovingPlot(false);
+    }
+  };
+
+  // 重试会新建一个子任务；不加锁重复点击会并发跑两份，长任务/写库会被执行两次。
+  const doRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await retryTask(task.taskId);
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -99,7 +114,7 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
       )}
 
       <div className="agent-task-card__actions">
-        {plotReviewRunId && (
+        {plotReviewRunId && !approvedPlot && (
           <button
             type="button"
             className="is-primary"
@@ -118,9 +133,14 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
           </button>
         )}
         {task.canRetry && (
-          <button type="button" onClick={() => void retryTask(task.taskId)} title="重试任务">
-            <RotateCcw size={13} />
-            {task.status === 'partial' ? '重试失败项' : '重试'}
+          <button
+            type="button"
+            disabled={retrying}
+            onClick={() => void doRetry()}
+            title="重试任务"
+          >
+            <RotateCcw size={13} className={retrying ? 'is-spinning' : undefined} />
+            {retrying ? '提交中' : task.status === 'partial' ? '重试失败项' : '重试'}
           </button>
         )}
         {task.canFollowUp && (

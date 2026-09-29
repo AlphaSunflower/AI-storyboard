@@ -5,7 +5,11 @@ import com.storyboard.asset.client.AssetContracts.AssetStatus;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateGroupFromAssetsRequest;
+import com.storyboard.asset.client.AssetContracts.MediaRef;
+import com.storyboard.asset.client.AssetContracts.MediaRole;
+import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.client.AssetContracts.MetadataState;
+import com.storyboard.asset.domain.GroupSnapshotExpander;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.ProjectAccessPort;
@@ -85,6 +89,31 @@ class GroupServiceImplTest {
                 "u1", "p1", "错误合集", List.of("g1")
         ), "idem")).isInstanceOf(BusinessException.class)
                 .hasMessageContaining("只允许图片");
+    }
+
+    @Test
+    void groupDetailIncludesFullMemberAssetsForTree() {
+        LibraryRepository.GroupRow group = new LibraryRepository.GroupRow(
+                "g1", "g1", "u1", AssetScope.PROJECT, "p1", 1, "角色合集", null
+        );
+        AssetSummary member = asset("a1");
+        when(repository.findGroup("u1", "g1")).thenReturn(Optional.of(group));
+        when(repository.listGroupItems("u1", "g1")).thenReturn(List.of(
+                new GroupSnapshotExpander.Item(
+                        "m1", "a1", "b1", "object/a1.png", "IMAGE", "REFERENCE", 0
+                )
+        ));
+        when(repository.findMedia("u1", "m1")).thenReturn(Optional.of(new MediaRef(
+                "m1", "b1", MediaType.IMAGE, "/files/images/a1.png", "/api/files/images/a1.png",
+                "object/a1.png", "a1.png", null, "image/png", 1024, 512, 512,
+                null, 0, MediaRole.REFERENCE, true, null
+        )));
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(member));
+
+        var detail = service.get("u1", "g1");
+
+        assertThat(detail.media()).hasSize(1);
+        assertThat(detail.media().getFirst().asset()).isEqualTo(member);
     }
 
     private static AssetSummary asset(String id) {

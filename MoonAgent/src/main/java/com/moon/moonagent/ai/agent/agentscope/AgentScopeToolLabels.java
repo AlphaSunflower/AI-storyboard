@@ -18,6 +18,7 @@ final class AgentScopeToolLabels {
             case AgentScopeStoryboardTools.APPROVE_STORYBOARD -> "确认当前分镜阶段";
             case AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGE -> "生成分镜图片";
             case AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO -> "生成分镜视频";
+            case AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS -> "批量生成分镜视频";
             case AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT -> "查询分镜草稿";
             case AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD -> "查询项目分镜";
             case AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT -> "修改项目分镜参数";

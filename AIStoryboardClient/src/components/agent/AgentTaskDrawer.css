@@ -120,6 +120,8 @@
 
 .agent-task-drawer__error,
 .agent-task-drawer__slots,
+.agent-task-drawer__stream,
+.agent-task-drawer__thinking,
 .agent-task-drawer__result {
   padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
@@ -127,9 +129,65 @@
 
 .agent-task-drawer__error h3,
 .agent-task-drawer__slots h3,
+.agent-task-drawer__stream h3,
+.agent-task-drawer__thinking h3,
 .agent-task-drawer__result h3 {
   margin: 0 0 8px;
   font-size: 12px;
+}
+
+.agent-task-drawer__stream-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-task-drawer__stream-head h3 {
+  margin: 0;
+}
+
+.agent-task-drawer__thinking {
+  background: color-mix(in srgb, var(--color-border) 30%, transparent);
+}
+
+.agent-task-drawer__stream {
+  background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+}
+
+.agent-task-drawer__stream-body {
+  max-height: 34vh;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text);
+  white-space: normal;
+  word-break: break-word;
+}
+
+.agent-task-drawer__stream-body p {
+  margin: 0 0 6px;
+}
+
+.agent-task-drawer__stream-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-primary);
+  animation: agent-task-stream-cursor 1s steps(1) infinite;
+}
+
+@keyframes agent-task-stream-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .agent-task-drawer__error {

@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -93,9 +94,13 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             Exception lastError = null;
             for (Channel channel : candidates) {
                 channelId = channel.getId();
+                AtomicBoolean emitted = new AtomicBoolean(false);
                 try {
                     String apiKey = keyService.decrypt(channel.getApiKey());
-                    routeRegistry.resolve(channel.getType()).stream(path, requestBody, channel, apiKey, sink);
+                    routeRegistry.resolve(channel.getType()).stream(path, requestBody, channel, apiKey, bytes -> {
+                        if (bytes != null && bytes.length > 0) emitted.set(true);
+                        sink.accept(bytes);
+                    });
                     long duration = System.currentTimeMillis() - start;
                     callLogService.log(model, channelId, "success", duration, null, null, null, callId);
                     log.info("流式调用完成: model={}, channel={}, duration={}ms, callId={}",
@@ -108,6 +113,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                                 "client aborted", null, null, callId);
                         log.debug("客户端中断流式转发，停止: channel={}, callId={}", channel.getId(), callId);
                         return;
+                    }
+                    if (emitted.get()) {
+                        callLogService.log(model, channelId, "error",
+                                System.currentTimeMillis() - start,
+                                "stream failed after partial output", null, null, callId);
+                        throw e;
                     }
                     lastError = e;
                     log.warn("流式渠道失败，尝试下一个: channel={}, callId={}, error={}",

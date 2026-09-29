@@ -48,6 +48,147 @@
   background: rgba(204, 120, 92, 0.025);
 }
 
+/* Moon 助手消息 Markdown 排版：标题、列表、引用、分割线、行内代码、代码块、高亮 */
+.chat-markdown {
+  min-width: 0;
+  /* 标准 Markdown 靠空行分块；pre-wrap 会把块间的换行文本节点也渲染成空行，导致整体发松 */
+  white-space: normal;
+}
+
+.chat-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  color: var(--color-ink);
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 18px 0 8px;
+}
+
+.chat-markdown h1 { font-size: 21px; }
+.chat-markdown h2 { font-size: 18px; }
+.chat-markdown h3 { font-size: 16px; }
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 { font-size: 15px; }
+
+.chat-markdown p {
+  margin: 8px 0;
+}
+
+.chat-markdown strong {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.chat-markdown mark {
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  color: var(--color-ink);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.chat-markdown a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+.chat-markdown li {
+  margin: 3px 0;
+}
+
+.chat-markdown li > ul,
+.chat-markdown li > ol {
+  margin: 3px 0;
+}
+
+.chat-markdown li::marker {
+  color: var(--color-muted);
+}
+
+/* GFM 任务列表：去掉项目符号，让复选框对齐 */
+.chat-markdown li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -18px;
+}
+
+.chat-markdown input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0 6px 0 0;
+  vertical-align: -1px;
+  accent-color: var(--color-primary);
+}
+
+.chat-markdown blockquote {
+  margin: 10px 0;
+  padding: 6px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-hairline));
+  background: var(--color-surface-soft);
+  border-radius: 0 8px 8px 0;
+  color: var(--color-muted);
+}
+
+.chat-markdown blockquote > *:first-child {
+  margin-top: 0;
+}
+
+.chat-markdown blockquote > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-hairline);
+  margin: 16px 0;
+}
+
+.chat-markdown code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 0.88em;
+  background: var(--color-surface-soft);
+  color: var(--color-ink);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.chat-markdown pre {
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: var(--color-ink);
+  color: #f4f2ec;
+  border-radius: var(--rounded-lg);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 12.5px;
+}
+
 .chat-image-batch {
   width: min(100%, 470px);
   min-height: 86px;

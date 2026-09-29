@@ -75,8 +75,20 @@ public class AgentScopeVideoTools {
             String aspectRatio,
             String duration,
             AgentScopeRunContext context) {
+        return generateVideoForStoryboard(prompt, referenceImages, resolution,
+                aspectRatio, duration, null, context);
+    }
+
+    Map<String, Object> generateVideoForStoryboard(
+            String prompt,
+            List<ReferenceImage> referenceImages,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            String sceneId,
+            AgentScopeRunContext context) {
         return startVideo(prompt, List.of(), referenceImages, resolution,
-                aspectRatio, duration, context, true);
+                aspectRatio, duration, sceneId, context, true);
     }
 
     private Map<String, Object> generateVideo(
@@ -100,7 +112,7 @@ public class AgentScopeVideoTools {
         }
         return startVideo(prompt, referenceAssetIds,
                 references.stream().map(ReferenceImage::ofReference).toList(),
-                resolution, aspectRatio, duration, context, storyboardScoped);
+                resolution, aspectRatio, duration, null, context, storyboardScoped);
     }
 
     private Map<String, Object> startVideo(
@@ -110,6 +122,7 @@ public class AgentScopeVideoTools {
             String resolution,
             String aspectRatio,
             String duration,
+            String sceneId,
             AgentScopeRunContext context,
             boolean storyboardScoped) {
         AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
@@ -138,7 +151,7 @@ public class AgentScopeVideoTools {
                 ? List.of() : List.copyOf(referenceImages);
         String taskId = storyboardScoped
                 ? support.startStoryboardShotVideoGenerationAsyncWithRole(
-                        context.request(), prompt, duration, aspectRatio, roleImages,
+                        context.request(), sceneId, prompt, duration, aspectRatio, roleImages,
                         java.util.List.of(), params)
                 : support.startVideoGenerationAsyncWithRole(
                         context.request(), prompt, duration, aspectRatio, roleImages,
@@ -150,6 +163,10 @@ public class AgentScopeVideoTools {
             context.turnState().markMediaStarted("video");
             String message = "视频任务已提交，任务 ID：`" + taskId + "`，正在生成中。";
             context.turnState().addText(message);
+            context.turnState().addTaskCard(
+                    taskId,
+                    storyboardScoped ? "生成分镜视频" : "生成视频",
+                    "video");
             if (context.request() != null && context.support() != null) {
                 context.support().sendMessage(context.request(), message + "\n\n");
             }

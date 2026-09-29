@@ -2,6 +2,7 @@ package com.storyboard.asset.storage;
 
 import com.storyboard.asset.config.StorageProperties;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -20,8 +21,11 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.UploadPartRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -30,21 +34,34 @@ import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignReque
 import java.io.InputStream;
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 @Component
 public class MinioObjectStorage implements ObjectStorage {
 
     private final StorageProperties properties;
+    private final S3Client injectedClient;
     private S3Client client;
     private S3Presigner presigner;
 
+    @Autowired
     public MinioObjectStorage(StorageProperties properties) {
+        this(properties, null);
+    }
+
+    MinioObjectStorage(StorageProperties properties, S3Client injectedClient) {
         this.properties = properties;
+        this.injectedClient = injectedClient;
+        this.client = injectedClient;
     }
 
     @PostConstruct
     void init() {
+        if (injectedClient != null) {
+            this.client = injectedClient;
+            return;
+        }
         StaticCredentialsProvider credentials = StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(properties.accessKey(), properties.secretKey()));
         S3Configuration configuration = S3Configuration.builder().pathStyleAccessEnabled(true).build();
@@ -65,6 +82,24 @@ public class MinioObjectStorage implements ObjectStorage {
         } catch (S3Exception e) {
             if (e.statusCode() != 409) throw e;
         }
+    }
+
+    @Override
+    public ObjectPage listObjects(String prefix, String continuationToken, int maxKeys) {
+        ListObjectsV2Request.Builder request = ListObjectsV2Request.builder()
+                .bucket(properties.bucket())
+                .prefix(prefix)
+                .maxKeys(maxKeys);
+        if (continuationToken != null && !continuationToken.isBlank()) {
+            request.continuationToken(continuationToken);
+        }
+        ListObjectsV2Response response = client.listObjectsV2(request.build());
+        List<ObjectSummary> objects = response.contents().stream()
+                .map((S3Object object) -> new ObjectSummary(
+                        object.key(), object.size() == null ? 0L : object.size(), object.lastModified()))
+                .toList();
+        String next = Boolean.TRUE.equals(response.isTruncated()) ? response.nextContinuationToken() : null;
+        return new ObjectPage(objects, next);
     }
 
     @Override

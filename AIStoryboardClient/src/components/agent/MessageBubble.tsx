@@ -22,6 +22,8 @@ import { ContextMenu } from '../common/ContextMenu';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { remarkCjkStrong } from './remarkCjkStrong';
+import { remarkMark } from './remarkMark';
+import { remarkBreaks } from './remarkBreaks';
 import {
   CHAT_MEDIA_DRAG_MIME,
   serializeDragPayload,
@@ -577,9 +579,9 @@ function MarkdownContent({
       return rawImg ? `![图片](${rawImg[0]})` : line;
     }).join('\n');
     nodes.push(
-      <div key={key} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      <div key={key} className="chat-markdown" style={{ wordBreak: 'break-word' }}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkCjkStrong]}
+          remarkPlugins={[remarkGfm, remarkCjkStrong, remarkMark, remarkBreaks]}
           components={{
             table: ({ children }) => (
               <div className="chat-markdown-table-wrap">

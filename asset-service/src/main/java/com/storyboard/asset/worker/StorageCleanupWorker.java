@@ -1,5 +1,6 @@
 package com.storyboard.asset.worker;
 
+import com.storyboard.asset.cleanup.ObjectReferenceGuard;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.storage.ObjectStorage;
 import org.slf4j.Logger;
@@ -16,18 +17,24 @@ public class StorageCleanupWorker {
 
     private final LibraryRepository repository;
     private final ObjectStorage storage;
+    private final ObjectReferenceGuard objectReferenceGuard;
     private final String workerId = "asset-cleanup-" + UUID.randomUUID();
 
-    public StorageCleanupWorker(LibraryRepository repository, ObjectStorage storage) {
+    public StorageCleanupWorker(
+            LibraryRepository repository,
+            ObjectStorage storage,
+            ObjectReferenceGuard objectReferenceGuard
+    ) {
         this.repository = repository;
         this.storage = storage;
+        this.objectReferenceGuard = objectReferenceGuard;
     }
 
     @Scheduled(fixedDelay = 30_000)
     public void run() {
         for (LibraryRepository.CleanupTask task : repository.claimCleanupTasks(workerId, 20)) {
             try {
-                if (repository.objectKeyHasReferences(task.objectKey())) {
+                if (objectReferenceGuard.isReferenced(task.objectKey())) {
                     repository.completeCleanup(task.id());
                     continue;
                 }

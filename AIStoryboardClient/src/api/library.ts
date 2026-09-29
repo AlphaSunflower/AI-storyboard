@@ -82,6 +82,7 @@ export interface LibraryAssetGroupDetail {
 
 export interface LibraryGroupMediaItem {
   media: LibraryMedia;
+  asset: LibraryAsset | null;
   assetId: string | null;
   assetName: string | null;
   assetDescription: string | null;

@@ -5,14 +5,14 @@ import { ChatAppActions } from './ChatAppActions';
 afterEach(cleanup);
 
 describe('ChatAppActions', () => {
-  it('renders canvas, editor, docs, and library as inline actions', () => {
+  it('renders canvas, editor, and library as inline actions', () => {
     const onOpen = vi.fn();
     render(<ChatAppActions onOpen={onOpen} />);
 
     expect(screen.getByRole('button', { name: '画布' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '编辑器' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '使用文档' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '项目库' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '使用文档' })).toBeNull();
     expect(screen.queryByRole('button', { name: '应用' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑器' }));

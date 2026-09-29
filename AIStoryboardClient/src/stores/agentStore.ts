@@ -43,6 +43,16 @@ function appendReasoningDetails(
     : previous + delta;
 }
 
+/**
+ * 实时摘要只取「已经写完的最后一句话」。
+ * 直接取最后一个换行片段会把流式半句（如“…video. This maps”）当成摘要显示在标题上。
+ */
+function reasoningSummaryFrom(details: string, fallback?: string): string {
+  const sentences = (details ?? '').match(/[^。．.!?！？\n]+[。．.!?！？]/g);
+  const last = sentences && sentences.length > 0 ? sentences[sentences.length - 1].trim() : '';
+  return last || fallback || '';
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -291,7 +301,20 @@ async function reserveStreamSlot(conversationId: string): Promise<() => void> {
       streamSettlements.delete(conversationId);
     }
     settle();
+    flushPendingMessageReconcile(conversationId);
   };
+}
+
+/**
+ * 本轮 releaseStream 之后 streaming 标志才落定，所以对账延到下一个宏任务；
+ * 若此时仍在流式（视频等后续轮询），refreshConversationMessages 会再次挂起，不做覆盖。
+ */
+function flushPendingMessageReconcile(conversationId: string) {
+  if (!pendingMessageReconcile.has(conversationId)) return;
+  window.setTimeout(() => {
+    if (!pendingMessageReconcile.delete(conversationId)) return;
+    void refreshConversationMessages(conversationId).catch(() => undefined);
+  }, 0);
 }
 
 function generationInProgress(generation?: GenerationSnapshot): boolean {
@@ -484,6 +507,12 @@ interface AgentState {
   taskDrawerId: string | null;
   taskFocusId: string | null;
   taskStreamConnected: boolean;
+  /** 后台任务运行期的实时输出（key=taskId），由 task_stream 事件推送。 */
+  taskStream: Record<string, string>;
+  /** 后台任务运行期的思考链（key=taskId），由 task_stream 事件推送。 */
+  taskThinking: Record<string, string>;
+  /** 每个任务实时流的最后序号，防止 SSE 重连后旧帧覆盖新帧。 */
+  taskStreamSeq: Record<string, number>;
   startTaskStream: () => void;
   stopTaskStream: () => void;
   loadTasks: (conversationId?: string) => Promise<void>;
@@ -603,6 +632,8 @@ let videoPollToken = 0;
 let taskStreamAbort: AbortController | null = null;
 let taskStreamRunning = false;
 let taskFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+// 流式期间被拦下的消息对账：等本轮结束再补拉，避免刷新整表覆盖正在生成的气泡。
+const pendingMessageReconcile = new Set<string>();
 
 const ACTIVE_TASK_STATUSES = new Set<AgentTaskView['status']>([
   'waiting_parent', 'queued', 'running', 'cancelling',
@@ -614,6 +645,22 @@ function isDetachedAsyncTask(taskKind: string | null | undefined): boolean {
 
 export function isActiveTask(task: AgentTaskView | undefined | null): boolean {
   return !!task && ACTIVE_TASK_STATUSES.has(task.status);
+}
+
+/** 维护任务实时输出：text 为空即移除该任务的条目。 */
+function withTaskStream(
+  stream: Record<string, string>,
+  taskId: string,
+  text: string,
+): Record<string, string> {
+  if (!taskId) return stream;
+  if (!text) {
+    if (!stream[taskId]) return stream;
+    const next = { ...stream };
+    delete next[taskId];
+    return next;
+  }
+  return { ...stream, [taskId]: text };
 }
 
 export function taskStatusLabel(task: AgentTaskView): string {
@@ -682,11 +729,20 @@ async function refreshAfterWakeup(message: AgentWakeupMessage) {
 }
 
 async function refreshConversationMessages(conversationId: string) {
+  const before = useAgentStore.getState();
+  if (before.activeConversationId !== conversationId) return;
+  if (before.streaming) {
+    pendingMessageReconcile.add(conversationId);
+    return;
+  }
   const response = await agentApi.listMessages(conversationId);
   const state = useAgentStore.getState();
-  if (state.activeConversationId === conversationId && !state.streaming) {
-    useAgentStore.setState({ messages: response.data.data ?? [] });
+  if (state.activeConversationId !== conversationId) return;
+  if (state.streaming) {
+    pendingMessageReconcile.add(conversationId);
+    return;
   }
+  useAgentStore.setState({ messages: response.data.data ?? [] });
 }
 
 function taskKindHint(kind: VideoTaskStatus['kind'], status: string, waitingSec: number) {
@@ -1434,9 +1490,10 @@ function applyOneEnvelope(
     const delta = asString(data.delta);
     if (!delta) return;
     const previous = useAgentStore.getState().generating[context.conversationId]?.reasoningDraft;
+    const details = appendReasoningDetails(previous, { details: delta, source: 'agentscope' });
     setLiveReasoning(context, {
-      summary: delta.trim().split('\n').filter(Boolean).at(-1) ?? previous?.summary ?? '',
-      details: appendReasoningDetails(previous, { details: delta, source: 'agentscope' }),
+      summary: reasoningSummaryFrom(details, previous?.summary),
+      details,
       durationMs: previous?.durationMs,
       source: 'agentscope',
     });
@@ -1956,6 +2013,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   taskDrawerId: null,
   taskFocusId: null,
   taskStreamConnected: false,
+  taskStream: {},
+  taskThinking: {},
+  taskStreamSeq: {},
   upsertTask: (task, options) => set((state) => {
     const previous = state.tasks[task.taskId];
     const merged = mergeTask(state.tasks, task, options);
@@ -1967,12 +2027,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       && task.kind === 'long-tool'
       && task.stage === 'plot_diagnosis'
       && previous?.stage === 'script_optimization';
-    if (plotReady) {
+    // 剧情/分镜长任务的正文（剧情稿、分镜结果）在终态才落库；wakeup_message 可能因 SSE 瞬断丢失，
+    // 这里按版本变化对账刷新，配合任务快照重放与兜底轮询，避免必须手动刷新页面才能看到新内容。
+    const longTaskSettled = active
+      && merged.tasks !== state.tasks
+      && task.kind === 'long-tool'
+      && !isActiveTask(task);
+    if (plotReady || longTaskSettled) {
       window.setTimeout(() => {
         void refreshConversationMessages(task.conversationId).catch(() => undefined);
       }, 0);
     }
-    if (!merged.completedNotice) return { tasks: merged.tasks, messages: currentMessages };
+    // 任务快照是刷新/重连后的兜底；已有实时帧时不回退到持久化旧值。
+    const taskStream = state.taskStream[task.taskId]
+      ? state.taskStream
+      : withTaskStream(state.taskStream, task.taskId, task.liveText ?? '');
+    const taskThinking = state.taskThinking[task.taskId]
+      ? state.taskThinking
+      : withTaskStream(state.taskThinking, task.taskId, task.liveThinking ?? '');
+    if (!merged.completedNotice) {
+      return { tasks: merged.tasks, messages: currentMessages, taskStream, taskThinking };
+    }
     if (state.activeConversationId === task.conversationId) {
       window.setTimeout(() => {
         void refreshConversationMessages(task.conversationId).catch(() => undefined);
@@ -1988,6 +2063,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     return {
       tasks: merged.tasks,
       messages: currentMessages,
+      taskStream,
+      taskThinking,
       taskNotices: active ? {
         ...state.taskNotices,
         [task.conversationId]: [
@@ -2044,22 +2121,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const signal = taskStreamAbort?.signal;
       if (!signal || signal.aborted) return;
       clearFallback();
+      // 兜底轮询与 SSE 并行：连接仍在但静默卡死（网关挂住、无错误无事件）时也能对账出新消息。
+      scheduleFallback();
       try {
         set({ taskStreamConnected: true });
         await streamTaskEvents((event) => {
           if (event.type === 'task') {
             get().upsertTask(event.task);
+          } else if (event.type === 'task_stream') {
+            set((state) => {
+              const previousSeq = state.taskStreamSeq[event.taskId] ?? 0;
+              if (event.seq > 0 && event.seq <= previousSeq) return {};
+              return {
+                taskStream: withTaskStream(state.taskStream, event.taskId, event.text),
+                taskThinking: withTaskStream(state.taskThinking, event.taskId, event.thinking),
+                taskStreamSeq: {
+                  ...state.taskStreamSeq,
+                  [event.taskId]: event.seq || previousSeq,
+                },
+              };
+            });
           } else {
             void refreshAfterWakeup(event.message).catch(() => undefined);
           }
         }, signal);
       } catch {
-        // 断线后使用分档轮询对账，并持续尝试恢复 SSE。
+        // 断线后由并行兜底轮询对账，并持续尝试恢复 SSE。
       } finally {
         set({ taskStreamConnected: false });
       }
       if (signal.aborted) return;
-      scheduleFallback();
       setTimeout(() => void pump(), 3000);
     };
     void get().loadTasks().catch(() => undefined);

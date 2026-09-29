@@ -8,7 +8,7 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 20
-allowed-tools: start_storyboard_production revise_storyboard_production approve_storyboard_production choose_storyboard_commit_mode generate_storyboard_image generate_storyboard_video generate_storyboard_images upsert_storyboard_shot delete_storyboard_draft_shot reorder_storyboard_draft list_storyboard_draft list_project_storyboard update_project_storyboard_shot delete_project_storyboard_shot clear_project_storyboard request_human_input
+allowed-tools: start_storyboard_production revise_storyboard_production approve_storyboard_production choose_storyboard_commit_mode generate_storyboard_image generate_storyboard_video generate_storyboard_videos generate_storyboard_images upsert_storyboard_shot delete_storyboard_draft_shot reorder_storyboard_draft list_storyboard_draft list_project_storyboard update_project_storyboard_shot delete_project_storyboard_shot clear_project_storyboard request_human_input
 ---
 
 # 分镜生产
@@ -48,6 +48,12 @@ allowed-tools: start_storyboard_production revise_storyboard_production approve_
 用户明确要求覆盖已有图片时，必须先确认再把 `overwrite=true, confirmed=true` 一起传入。
 
 单独生成分镜图片或视频时，每次只调用对应工具一次并只传一个 `shot_id`。工具只可使用该镜头严格绑定的资产，不得补挂全量素材。
+
+生成视频时必须异步提交，不等待结果，也不得要求用户回复“继续”：
+- 用户指定一个分镜时调用 `generate_storyboard_video`，返回 taskId 后简短说明即可。
+- 用户要求生成全部分镜、剩余分镜或批量生成时调用 `generate_storyboard_videos`，默认只补缺失/失败视频。
+- 只有用户明确要求重新生成全部视频时才传 `overwrite=true`。
+- 首尾帧由后端自动使用当前分镜主图和下一分镜主图；缺图时后台自动补齐，不要逐镜询问。
 
 指定分镜生成视频时由智能体自行判断参考图方案：
 - 没有可用参考图：不传 `reference_mode`，按纯文本生成。

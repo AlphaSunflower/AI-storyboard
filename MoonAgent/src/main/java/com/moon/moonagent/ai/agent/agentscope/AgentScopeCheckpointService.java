@@ -18,11 +18,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class AgentScopeCheckpointService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Pattern STORYBOARD_COUNT = Pattern.compile(
+            "(\\d+)\\s*(?:条|个|张)?\\s*分镜");
 
     private final AgentRuntimeSupport support;
     private final AgentCheckpointMapper checkpointMapper;
@@ -40,13 +44,19 @@ public class AgentScopeCheckpointService {
         if (prompt.isBlank()) prompt = "请补充一个必要信息后继续。";
         boolean allowCustom = Boolean.TRUE.equals(input.get("allow_custom"));
         List<Map<String, Object>> options = optionMaps(input.get("options"));
+        Integer storyboardCount = storyboardCommitSceneCount(prompt, options);
+        if (storyboardCount != null) {
+            return pauseForStoryboardCommit(request, replyId, toolCall, storyboardCount);
+        }
         List<Map<String, Object>> actions = new ArrayList<>();
         for (int i = 0; i < options.size(); i++) {
             Map<String, Object> option = options.get(i);
             Map<String, Object> action = new LinkedHashMap<>();
             action.put("id", "option-" + i);
             String title = stringValue(option.get("title"));
-            action.put("title", title.isBlank() ? fallbackOptionTitle(option.get("value"), i) : title);
+            action.put("title", title.isBlank()
+                    ? fallbackOptionTitle(optionFallbackValue(option), i)
+                    : title);
             if (!stringValue(option.get("description")).isBlank()) {
                 action.put("description", stringValue(option.get("description")));
             }
@@ -405,12 +415,35 @@ public class AgentScopeCheckpointService {
     }
 
     private static String fallbackOptionTitle(Object rawValue, int index) {
-        String value = stringValue(rawValue).trim().toLowerCase();
+        String raw = stringValue(rawValue).trim();
+        String value = raw.toLowerCase();
         return switch (value) {
             case "append" -> "追加分镜";
             case "overwrite", "replace" -> "覆盖分镜";
-            default -> "选项" + (index + 1);
+            default -> raw.isBlank() ? "选项" + (index + 1) : raw;
         };
+    }
+
+    private static Object optionFallbackValue(Map<String, Object> option) {
+        for (String key : List.of("value", "label", "text", "name")) {
+            Object value = option.get(key);
+            if (value != null && !stringValue(value).isBlank()) return value;
+        }
+        return null;
+    }
+
+    private static Integer storyboardCommitSceneCount(
+            String prompt, List<Map<String, Object>> options) {
+        if (prompt == null || options == null || options.size() < 2) return null;
+        String value = prompt.trim();
+        if (!value.contains("分镜")
+                || !(value.contains("处理") || value.contains("清理")
+                || value.contains("写入") || value.contains("追加")
+                || value.contains("覆盖") || value.contains("删除"))) {
+            return null;
+        }
+        Matcher matcher = STORYBOARD_COUNT.matcher(value);
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : null;
     }
 
     private static Map<String, Object> parse(String raw) {

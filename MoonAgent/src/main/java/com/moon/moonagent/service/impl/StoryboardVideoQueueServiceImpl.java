@@ -61,8 +61,16 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         }
         for (StoryboardVideoEnqueueItem item : request.items()) {
             if (item == null || item.sceneId() == null || item.sceneId().isBlank()) continue;
+            String sceneId = item.sceneId().trim();
+            Long active = queueMapper.selectCount(new LambdaQueryWrapper<StoryboardVideoQueue>()
+                    .eq(StoryboardVideoQueue::getSceneId, sceneId)
+                    .in(StoryboardVideoQueue::getStatus, List.of("queued", "running")));
+            if (active != null && active > 0) {
+                log.info("[分镜视频队列] 已有活动任务，跳过重复入队: sceneId={}", sceneId);
+                continue;
+            }
             StoryboardVideoQueue row = new StoryboardVideoQueue();
-            row.setSceneId(item.sceneId().trim());
+            row.setSceneId(sceneId);
             row.setProjectId(request.projectId());
             row.setConversationId(request.conversationId());
             row.setStatus("queued");
@@ -167,6 +175,57 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         } catch (Exception e) {
             log.warn("[分镜视频队列] 读取分镜失败: sceneId={}, error={}", row.getSceneId(), e.getMessage());
         }
+        if (scene == null) {
+            failRow(row, "分镜不存在，无法生成视频");
+            return;
+        }
+
+        List<Scene> orderedScenes = List.of(scene);
+        try {
+            orderedScenes = storyboardClient.getProjectScenesFresh(scene.getProjectId()).stream()
+                    .sorted(java.util.Comparator.comparing(
+                            Scene::getSceneNumber,
+                            java.util.Comparator.nullsLast(Integer::compareTo)))
+                    .toList();
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 读取项目分镜顺序失败: projectId={}, error={}",
+                    scene.getProjectId(), e.getMessage());
+        }
+        int sceneIndex = indexOfScene(orderedScenes, scene.getId());
+        Scene nextScene = sceneIndex >= 0 && sceneIndex + 1 < orderedScenes.size()
+                ? orderedScenes.get(sceneIndex + 1) : null;
+
+        try {
+            ensureSceneImage(conversation, scene);
+        } catch (Exception e) {
+            failRow(row, e.getMessage() == null ? "当前分镜图片生成失败" : e.getMessage());
+            return;
+        }
+        if (nextScene != null) {
+            try {
+                ensureSceneImage(conversation, nextScene);
+            } catch (Exception e) {
+                log.warn("[分镜视频队列] 下一镜图片生成失败，降级仅首帧: sceneId={}, error={}",
+                        nextScene.getId(), e.getMessage());
+            }
+        }
+        try {
+            orderedScenes = storyboardClient.getProjectScenesFresh(scene.getProjectId()).stream()
+                    .sorted(java.util.Comparator.comparing(
+                            Scene::getSceneNumber,
+                            java.util.Comparator.nullsLast(Integer::compareTo)))
+                    .toList();
+            scene = findScene(orderedScenes, scene.getId());
+            if (scene == null) {
+                failRow(row, "分镜不存在，无法生成视频");
+                return;
+            }
+            nextScene = sceneIndex >= 0 && sceneIndex + 1 < orderedScenes.size()
+                    ? orderedScenes.get(sceneIndex + 1) : null;
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 刷新分镜图片失败: sceneId={}, error={}",
+                    scene.getId(), e.getMessage());
+        }
 
         String prompt = row.getPrompt();
         if (prompt == null || prompt.isBlank()) {
@@ -200,6 +259,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         List<ReferenceImage> combined = new ArrayList<>();
         List<Map<String, Object>> sceneRefs = List.of();
         try {
+            prepareManagedFrames(conversation, scene, nextScene);
             sceneRefs = storyboardClient.getSceneReferences(row.getSceneId());
             List<ReferenceImage> roleRefs = mapSceneReferenceImages(sceneRefs);
             for (ReferenceImage ref : roleRefs) {
@@ -374,6 +434,111 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         if (scene == null) return;
         scene.setVideoStatus("failed");
         storyboardClient.updateScene(scene);
+    }
+
+    /**
+     * Ensure the target has a first frame and, when possible, use the next
+     * storyboard's primary image as the last frame. User-provided frame
+     * references always win and are never replaced here.
+     */
+    void prepareManagedFrames(AgentConversation conversation, Scene scene, Scene nextScene) {
+        List<Map<String, Object>> existing;
+        try {
+            existing = storyboardClient.getSceneReferences(scene.getId());
+        } catch (Exception e) {
+            log.warn("[分镜视频队列] 读取已有首尾帧失败: sceneId={}, error={}",
+                    scene.getId(), e.getMessage());
+            existing = List.of();
+        }
+        List<Map<String, Object>> managed = new ArrayList<>();
+        String firstUrl = primaryImageUrl(scene);
+        if (!firstUrl.isBlank() && !hasExplicitFrame(existing, "FIRST_FRAME")) {
+            managed.add(managedFrame(firstUrl, scene.getId(), "FIRST_FRAME"));
+        }
+        String lastUrl = primaryImageUrl(nextScene);
+        if (!lastUrl.isBlank() && !lastUrl.equals(firstUrl)
+                && !hasExplicitFrame(existing, "LAST_FRAME")) {
+            managed.add(managedFrame(lastUrl, nextScene.getId(), "LAST_FRAME"));
+        }
+        try {
+            storyboardClient.replaceManagedVideoFrames(scene.getId(), managed);
+        } catch (Exception e) {
+            throw new IllegalStateException("首尾帧素材写入失败: " + e.getMessage(), e);
+        }
+    }
+
+    private void ensureSceneImage(AgentConversation conversation, Scene scene) {
+        if (scene == null || !primaryImageUrl(scene).isBlank()) return;
+        String prompt = nonBlank(scene.getImagePrompt(), scene.getScriptContent(), "分镜画面");
+        Map<String, Object> generated = generationService.generateImage(
+                conversation,
+                scene.getId(),
+                prompt,
+                scene.getImageModel(),
+                scene.getImageSize(),
+                scene.getImageQuality(),
+                scene.getImageN() == null || scene.getImageN() <= 0 ? 1 : scene.getImageN(),
+                "generate",
+                List.of(),
+                null);
+        if (generated == null || generated.isEmpty()) {
+            throw new IllegalStateException("分镜图片生成失败，无法继续创建视频");
+        }
+    }
+
+    private static boolean hasExplicitFrame(List<Map<String, Object>> refs, String role) {
+        if (refs == null || refs.isEmpty()) return false;
+        return refs.stream().anyMatch(ref -> {
+            if (ref == null || !isType(ref, "image")) return false;
+            String value = ref.get("role") == null ? "" : String.valueOf(ref.get("role"));
+            if (!role.equalsIgnoreCase(value)) return false;
+            String sourceType = ref.get("sourceType") == null ? "" : String.valueOf(ref.get("sourceType"));
+            return !"scene_image".equalsIgnoreCase(sourceType);
+        });
+    }
+
+    private static Map<String, Object> managedFrame(String url, String sourceSceneId, String role) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("url", url);
+        frame.put("type", "image");
+        frame.put("purpose", "video");
+        frame.put("role", role);
+        frame.put("sourceType", "scene_image");
+        frame.put("sourceId", sourceSceneId);
+        return frame;
+    }
+
+    private static int indexOfScene(List<Scene> scenes, String sceneId) {
+        if (scenes == null || sceneId == null) return -1;
+        for (int i = 0; i < scenes.size(); i++) {
+            if (sceneId.equals(scenes.get(i).getId())) return i;
+        }
+        return -1;
+    }
+
+    private static Scene findScene(List<Scene> scenes, String sceneId) {
+        int index = indexOfScene(scenes, sceneId);
+        return index < 0 ? null : scenes.get(index);
+    }
+
+    static String primaryImageUrl(Scene scene) {
+        if (scene == null) return "";
+        if (scene.getImageUrl() != null && !scene.getImageUrl().isBlank()) {
+            return scene.getImageUrl().trim();
+        }
+        if (scene.getImageUrls() != null && !scene.getImageUrls().isBlank()) {
+            return split(scene.getImageUrls()).stream().findFirst().orElse("");
+        }
+        return "";
+    }
+
+    private static String nonBlank(String... values) {
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.isBlank()) return value.trim();
+            }
+        }
+        return "";
     }
 
     private static Integer parseProgress(String raw) {

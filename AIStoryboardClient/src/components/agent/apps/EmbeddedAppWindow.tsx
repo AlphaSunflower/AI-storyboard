@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, X } from 'lucide-react';
+import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, RefreshCw, X } from 'lucide-react';
 import { isEmbeddedAppReadyMessage } from '../../../lib/embeddedAppMessages';
 import { CHAT_DOCK_MIN_APP_WIDTH } from '../chatDockLayout';
 import './EmbeddedAppWindow.css';
@@ -73,6 +73,7 @@ export function EmbeddedAppWindow({
   const [height, setHeight] = useState(defaultHeight);
   const [fullscreen, setFullscreen] = useState(false);
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
+  const [refreshTokens, setRefreshTokens] = useState<Record<string, number>>({});
   const [closingWindow, setClosingWindow] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
@@ -181,6 +182,19 @@ export function EmbeddedAppWindow({
     window.open(target, '_blank', 'noopener,noreferrer');
   };
 
+  const refreshActivePage = () => {
+    if (!activeKey) return;
+    setRefreshTokens((current) => ({
+      ...current,
+      [activeKey]: (current[activeKey] ?? 0) + 1,
+    }));
+    setLoadedUrls((current) => {
+      const next = { ...current };
+      delete next[activeKey];
+      return next;
+    });
+  };
+
   const closeWindowWithParticles = () => {
     if (closingWindow) return;
     setClosingWindow(true);
@@ -232,6 +246,14 @@ export function EmbeddedAppWindow({
         <div className="embedded-app-window__actions">
           <button
             type="button"
+            onClick={refreshActivePage}
+            title="刷新当前页面"
+            aria-label="刷新当前页面"
+          >
+            <RefreshCw size={16} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
             onClick={openActiveInBrowser}
             title="跳转到网页"
             aria-label="跳转到网页"
@@ -271,6 +293,7 @@ export function EmbeddedAppWindow({
                 </div>
               )}
               <iframe
+                key={`${tab.key}:${refreshTokens[tab.key] ?? 0}`}
                 ref={(node) => { frameRefs.current[tab.key] = node; }}
                 src={tab.url}
                 data-app-key={tab.key}

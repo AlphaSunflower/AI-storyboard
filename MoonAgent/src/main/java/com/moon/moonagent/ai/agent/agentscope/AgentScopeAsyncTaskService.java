@@ -17,9 +17,7 @@ import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
-import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
-import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.RoleProfile;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardCommitMode;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardProductionRequest;
@@ -31,9 +29,13 @@ import com.moon.moonagent.entity.AgentAsyncTask;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.Scene;
+import com.moon.moonagent.entity.StoryboardVideoQueue;
+import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
+import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
 import com.moon.moonagent.mapper.AgentAsyncTaskMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.service.StoryboardVideoQueueService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,11 +48,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 @ConditionalOnProperty(prefix = "ai.agent.agentscope", name = "enabled",
@@ -71,9 +77,24 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final AgentTaskEventHub taskEvents;
     private final AgentScopeMessageBus messageBus;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    /** 任务运行期的实时输出缓冲（仅内存，终态清理），供任务面板流式展示。 */
+    private static final int LIVE_STREAM_MAX_CHARS = 8000;
+    private static final long LIVE_STREAM_PUBLISH_INTERVAL_MILLIS = 400L;
+    private static final long LIVE_STREAM_PERSIST_INTERVAL_MILLIS = 1500L;
+    private final Map<String, StringBuilder> liveStreams = new ConcurrentHashMap<>();
+    private final Map<String, StringBuilder> liveThinking = new ConcurrentHashMap<>();
+    private final Map<String, Long> liveStreamPublishedAt = new ConcurrentHashMap<>();
+    private final Map<String, Long> liveStreamPersistedAt = new ConcurrentHashMap<>();
+    private final Map<String, String> liveStages = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> liveSequences = new ConcurrentHashMap<>();
+    /** 任务 → userId：推送实时输出时避免每次都查库。 */
+    private final Map<String, String> liveUserIds = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
     private transient StoryboardClient storyboardClient;
+
+    @Autowired(required = false)
+    private transient StoryboardVideoQueueService storyboardVideoQueueService;
 
     @Override
     public String name() {
@@ -108,18 +129,12 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .forEach(task -> candidates.add(candidate(task)));
         taskMapper.selectList(new LambdaQueryWrapper<AgentAsyncTask>()
                         .eq(AgentAsyncTask::getKind, "long-tool")
-                        .in(AgentAsyncTask::getToolName, List.of(
-                                AgentScopeStoryboardTools.START_STORYBOARD,
-                                AgentScopeStoryboardTools.APPROVE_STORYBOARD))
                         .eq(AgentAsyncTask::getStatus, "queued")
                         .orderByAsc(AgentAsyncTask::getCreatedAt)
                         .last("LIMIT " + Math.max(1, limit)))
                 .forEach(task -> candidates.add(candidate(task)));
         taskMapper.selectList(new LambdaQueryWrapper<AgentAsyncTask>()
                         .eq(AgentAsyncTask::getKind, "long-tool")
-                        .in(AgentAsyncTask::getToolName, List.of(
-                                AgentScopeStoryboardTools.START_STORYBOARD,
-                                AgentScopeStoryboardTools.APPROVE_STORYBOARD))
                         .eq(AgentAsyncTask::getStatus, "running")
                         .lt(AgentAsyncTask::getUpdatedAt, OffsetDateTime.now().minusMinutes(15))
                         .orderByAsc(AgentAsyncTask::getCreatedAt)
@@ -148,16 +163,17 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             return RecoveryOutcome.completed();
         }
         if ("running".equals(task.getStatus())) {
+            if (isStoryboardVideoTool(task.getToolName())) {
+                updateTask(task.getId(), "status", "queued", "stage", "accepted", "progress", 0);
+                submitStoryboardTask(taskMapper.selectById(task.getId()));
+                return RecoveryOutcome.deferred("storyboard video task re-submitted");
+            }
             fail(task.getId(), "服务重启后无法安全确认原任务状态，请重新发起。");
             return RecoveryOutcome.completed();
         }
         if ("queued".equals(task.getStatus())) {
             if ("long-tool".equals(task.getKind())) {
-                if (AgentScopeStoryboardTools.APPROVE_STORYBOARD.equals(task.getToolName())) {
-                    executor.submit(() -> runStoryboardApprovalTask(task.getId()));
-                } else {
-                    executor.submit(() -> runStoryboardStartTask(task.getId()));
-                }
+                submitStoryboardTask(task);
                 return RecoveryOutcome.deferred("storyboard task submitted");
             }
             executor.submit(() -> runBatchImageTask(task.getId()));
@@ -400,6 +416,99 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         return task.getId();
     }
 
+    public String startStoryboardRevisionTask(
+            AgentConversation conversation,
+            String runId,
+            String stage,
+            String instruction,
+            String shotId,
+            String toolCallId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("runId", runId == null ? "" : runId);
+        request.put("stage", stage == null ? "" : stage);
+        request.put("instruction", instruction == null ? "" : instruction);
+        request.put("shotId", shotId == null ? "" : shotId);
+        String requestJson = writeJson(request);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                (conversation.getId() + "|" + toolCallId + "|" + requestJson)
+                        .getBytes(StandardCharsets.UTF_8))
+                .toString();
+        AgentAsyncTask existing = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        if (existing != null) return existing.getId();
+
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeStoryboardTools.REVISE_STORYBOARD);
+        task.setKind("long-tool");
+        task.setStatus("queued");
+        task.setTitle("修订分镜");
+        task.setStage("accepted");
+        task.setProgress(0);
+        task.setRequestJson(requestJson);
+        task.setIdempotencyKey(idempotencyKey);
+        task.setVersion(0L);
+        task.setCancelRequested(false);
+        task.setUpdatedAt(OffsetDateTime.now());
+        taskMapper.insert(task);
+        publish(task.getId());
+        executor.submit(() -> runStoryboardRevisionTask(task.getId()));
+        return task.getId();
+    }
+
+    public String startStoryboardVideoTask(
+            AgentConversation conversation,
+            List<String> sceneIds,
+            boolean overwrite,
+            String toolCallId) {
+        List<String> targets = sceneIds == null ? List.of() : sceneIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (targets.isEmpty()) {
+            throw new IllegalStateException("没有可生成视频的分镜");
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("sceneIds", targets);
+        request.put("overwrite", overwrite);
+        String requestJson = writeJson(request);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                (conversation.getId() + "|" + toolCallId + "|" + requestJson)
+                        .getBytes(StandardCharsets.UTF_8))
+                .toString();
+        AgentAsyncTask existing = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        if (existing != null) return existing.getId();
+
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(targets.size() == 1
+                ? AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO
+                : AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS);
+        task.setKind("long-tool");
+        task.setStatus("queued");
+        task.setTitle(targets.size() == 1 ? "生成分镜视频" : "批量生成分镜视频");
+        task.setStage("accepted");
+        task.setProgress(0);
+        task.setRequestJson(requestJson);
+        task.setIdempotencyKey(idempotencyKey);
+        task.setVersion(0L);
+        task.setCancelRequested(false);
+        task.setUpdatedAt(OffsetDateTime.now());
+        taskMapper.insert(task);
+        publish(task.getId());
+        executor.submit(() -> runStoryboardVideoTask(task.getId()));
+        return task.getId();
+    }
+
     public Map<String, Object> getStatus(String userId, String taskId) {
         AgentTaskView view = getTask(userId, taskId);
         return view == null ? Map.of() : viewMap(view);
@@ -547,6 +656,15 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 retryRequest.put("retryOfTaskId", source.getId());
                 requestJson = writeJson(retryRequest);
                 title = "重试 " + retryIndices.size() + " 张失败图片";
+            }
+        } else if (AgentScopeStoryboardTools.START_STORYBOARD.equals(source.getToolName())) {
+            // 整条分镜重试：带上上一次尝试创建的 run，写入成功后据此清理旧分镜
+            String previousRunId = string(readMap(source.getResultJson()).get("runId"));
+            if (!previousRunId.isBlank()) {
+                Map<String, Object> retryRequest = new LinkedHashMap<>(readMap(source.getRequestJson()));
+                retryRequest.put("previousRunId", previousRunId);
+                retryRequest.put("retryOfTaskId", source.getId());
+                requestJson = writeJson(retryRequest);
             }
         }
         AgentAsyncTask child = new AgentAsyncTask();
@@ -981,25 +1099,17 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     assetRefs(request.get("assets")),
                     stringList(request.get("roleHints")));
             boolean auto = Boolean.TRUE.equals(request.get("auto"));
+            com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener listener =
+                    liveListener(taskId);
             StoryboardRunSnapshot generated = auto
-                    ? storyboardProductionService.startAutoStoryboard(
-                    productionRequest,
-                    new com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener() {
-                        @Override
-                        public void update(String stage, int progress) {
-                            updateTask(taskId, "stage", stage, "progress", progress);
-                        }
-
-                        @Override
-                        public void plotReady(String script) {
-                            persistStoryboardPlotMessage(taskId, script);
-                        }
-                    })
-                    : storyboardProductionService.start(productionRequest);
+                    ? storyboardProductionService.startAutoStoryboard(productionRequest, listener)
+                    : storyboardProductionService.start(productionRequest, listener);
             if (isCancelRequested(taskId)) {
                 cancelRunning(taskId);
                 return;
             }
+            // 记录本次尝试创建的 run：重试时据此回滚上一次已写入的项目分镜，避免重复写入
+            updateTask(taskId, "result_json", writeJson(Map.of("runId", generated.runId())));
             if (!auto) {
                 completeStoryboard(taskId, storyboardReviewContent(generated), generated);
                 return;
@@ -1009,7 +1119,10 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 return;
             }
             StoryboardCommitMode mode = commitMode(string(request.get("commitMode")));
-            StoryboardRunSnapshot snapshot = commitFinalStoryboard(conversation, generated.runId(), mode);
+            StoryboardRunSnapshot snapshot = commitFinalStoryboard(
+                    conversation, generated.runId(), mode, listener);
+            discardPreviousPublishedScenes(
+                    conversation, string(request.get("previousRunId")), snapshot.runId());
             completeStoryboard(taskId, autoStoryboardContent(snapshot, mode), snapshot);
         } catch (Exception e) {
             log.warn("Storyboard start task failed: taskId={}, error={}", taskId, e.getMessage());
@@ -1038,38 +1151,76 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 return;
             }
             StoryboardRunSnapshot snapshot;
+            com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener listener =
+                    liveListener(taskId);
             if (Stage.FINAL_REVIEW.name().equalsIgnoreCase(requestedStage)) {
-                snapshot = commitFinalStoryboard(
-                        conversation,
-                        string(request.get("runId")),
-                        latestStoryboardCommitMode(conversation.getId()));
+                String runId = string(request.get("runId"));
+                // 重复提交入库 / 断点续跑：已完成直接幂等收尾，缺镜头的先自动补跑。
+                Stage actual = storyboardProductionService.get(runId).stage();
+                if (actual == Stage.COMPLETED) {
+                    complete(taskId, "该阶段已确认，无需重复操作。",
+                            List.of(), List.of(), "", false);
+                    return;
+                }
+                if (actual == Stage.FINALIZING) {
+                    snapshot = storyboardProductionService.retryIncompleteFinalShots(runId, listener);
+                    if (snapshot.stage() != Stage.FINAL_REVIEW) {
+                        updateTask(taskId, "progress", 90);
+                        completeStoryboard(taskId, storyboardApprovalContent(snapshot), snapshot);
+                        return;
+                    }
+                } else if (actual != Stage.FINAL_REVIEW) {
+                    throw new IllegalStateException("当前阶段不可提交项目分镜: " + actual);
+                }
+                StoryboardCommitMode commitMode = latestStoryboardCommitMode(conversation.getId());
+                snapshot = commitFinalStoryboard(conversation, runId, commitMode, listener);
                 updateTask(taskId, "progress", 90);
-                completeStoryboard(
-                        taskId,
-                        autoStoryboardContent(snapshot, latestStoryboardCommitMode(conversation.getId())),
-                        snapshot);
+                completeStoryboard(taskId, autoStoryboardContent(snapshot, commitMode), snapshot);
                 return;
             } else {
+                String runId = string(request.get("runId"));
                 Approval approval = new Approval(
-                        stage(string(request.get("stage"))),
+                        stage(requestedStage),
                         string(request.get("decision")),
                         "", List.of(), List.of());
                 if (Stage.PLOT_REVIEW.name().equalsIgnoreCase(requestedStage)) {
-                    snapshot = storyboardProductionService.approveToFinal(
-                            string(request.get("runId")), approval);
+                    // 旧确认卡片重复提交、或服务重启中断后续跑：按运行实际所处阶段继续，而不是直接失败。
+                    Stage actual = storyboardProductionService.get(runId).stage();
+                    if (actual == Stage.PLOT_REVIEW) {
+                        snapshot = storyboardProductionService.approveToFinal(runId, approval, listener);
+                    } else if (actual == Stage.PSEUDO_REVIEW) {
+                        snapshot = storyboardProductionService.approve(runId,
+                                new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()),
+                                listener);
+                    } else if (actual == Stage.FINALIZING) {
+                        snapshot = storyboardProductionService.retryIncompleteFinalShots(runId, listener);
+                    } else if (actual == Stage.FINAL_REVIEW) {
+                        StoryboardCommitMode commitMode =
+                                latestStoryboardCommitMode(conversation.getId());
+                        snapshot = commitFinalStoryboard(conversation, runId, commitMode, listener);
+                        updateTask(taskId, "progress", 90);
+                        completeStoryboard(
+                                taskId, autoStoryboardContent(snapshot, commitMode), snapshot);
+                        return;
+                    } else if (actual == Stage.COMPLETED) {
+                        complete(taskId, "该阶段已确认，无需重复操作。",
+                                List.of(), List.of(), "", false);
+                        return;
+                    } else {
+                        throw new IllegalStateException("当前阶段不可确认: " + actual);
+                    }
                     if (snapshot.stage() == Stage.FINAL_REVIEW) {
                         StoryboardCommitMode commitMode =
                                 latestStoryboardCommitMode(conversation.getId());
                         snapshot = commitFinalStoryboard(
-                                conversation, snapshot.runId(), commitMode);
+                                conversation, snapshot.runId(), commitMode, listener);
                         updateTask(taskId, "progress", 90);
                         completeStoryboard(
                                 taskId, autoStoryboardContent(snapshot, commitMode), snapshot);
                         return;
                     }
                 } else {
-                    snapshot = storyboardProductionService.approve(
-                            string(request.get("runId")), approval);
+                    snapshot = storyboardProductionService.approve(runId, approval, listener);
                 }
             }
             updateTask(taskId, "progress", 90);
@@ -1114,7 +1265,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     runId,
                     targetStage,
                     string(request.get("instruction")),
-                    string(request.get("shotId")));
+                    string(request.get("shotId")),
+                    liveListener(taskId));
             completeStoryboard(taskId,
                     targetStage == Stage.PLOT_REVIEW
                             ? storyboardReviewContent(snapshot) : storyboardApprovalContent(snapshot),
@@ -1147,6 +1299,14 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             AgentConversation conversation,
             String runId,
             StoryboardCommitMode commitMode) {
+        return commitFinalStoryboard(conversation, runId, commitMode, null);
+    }
+
+    private StoryboardRunSnapshot commitFinalStoryboard(
+            AgentConversation conversation,
+            String runId,
+            StoryboardCommitMode commitMode,
+            com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener listener) {
         if (storyboardClient == null) {
             throw new IllegalStateException("主后端分镜写入客户端未启用");
         }
@@ -1155,21 +1315,201 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (current.stage() != Stage.FINAL_REVIEW) {
             throw new IllegalStateException("正式分镜尚不可提交: " + current.stage());
         }
-        List<Scene> scenes = current.finalShots().stream()
+        // 按 shotId 去重：历史运行可能存在跨分段编号冲突，重复项写进项目会造成分镜重影，
+        // 也会让 shotId→sceneId 映射塌缩、触发「项目分镜映射不完整」。
+        var seenShotIds = new java.util.HashSet<String>();
+        List<StoryboardShot> finalShots = current.finalShots().stream()
+                .filter(shot -> seenShotIds.add(shot.shotId()))
+                .toList();
+        List<Scene> scenes = finalShots.stream()
                 .map(shot -> sceneForStoryboard(conversation, shot))
                 .toList();
+        // 该运行此前已写入过项目分镜（如改写剧情后重新确认）：先清掉自己写过的那批，
+        // 否则按「追加」会把同一份分镜写第二遍。
+        List<String> previouslyPublished = storyboardProductionService.publishedSceneIds(runId);
+        for (String sceneId : previouslyPublished) {
+            deleteProjectSceneQuietly(conversation.getProjectId(), sceneId);
+        }
+        if (listener != null) {
+            listener.stream("final_generation", "正在写入项目分镜…\n");
+        }
         List<String> sceneIds = commitMode == StoryboardCommitMode.APPEND
                 ? storyboardClient.appendProjectScenes(conversation.getProjectId(), scenes)
                 : storyboardClient.replaceProjectScenes(conversation.getProjectId(), scenes);
-        if (sceneIds.size() != current.finalShots().size()) {
+        if (sceneIds.size() != finalShots.size()) {
+            // 写入不完整：回滚本次已写入的分镜，避免留下半份、重试时叠加成重复
+            for (String sceneId : sceneIds) {
+                deleteProjectSceneQuietly(conversation.getProjectId(), sceneId);
+            }
             throw new IllegalStateException("项目分镜写入结果不完整");
         }
         Map<String, String> mappings = new LinkedHashMap<>();
-        for (int index = 0; index < current.finalShots().size(); index++) {
-            mappings.put(current.finalShots().get(index).shotId(), sceneIds.get(index));
+        for (int index = 0; index < finalShots.size(); index++) {
+            mappings.put(finalShots.get(index).shotId(), sceneIds.get(index));
         }
-        return storyboardProductionService.markCompleted(
-                current.runId(), conversation.getUserId(), conversation.getProjectId(), mappings);
+        try {
+            StoryboardRunSnapshot completed = storyboardProductionService.markCompleted(
+                    current.runId(), conversation.getUserId(), conversation.getProjectId(), mappings);
+            if (listener != null) {
+                listener.stream("final_generation",
+                        "已写入项目分镜 " + finalShots.size() + " 个。\n");
+            }
+            return completed;
+        } catch (RuntimeException e) {
+            // 分镜已写进项目但运行态标记失败：回滚本次写入，避免重试时叠加成重复分镜
+            for (String sceneId : sceneIds) {
+                deleteProjectSceneQuietly(conversation.getProjectId(), sceneId);
+            }
+            throw e;
+        }
+    }
+
+    private void deleteProjectSceneQuietly(String projectId, String sceneId) {
+        if (sceneId == null || sceneId.isBlank() || storyboardClient == null) return;
+        try {
+            storyboardClient.deleteScene(sceneId, projectId);
+        } catch (Exception e) {
+            log.warn("项目分镜删除失败: projectId={}, sceneId={}, error={}",
+                    projectId, sceneId, e.getMessage());
+        }
+    }
+
+    private void runStoryboardVideoTask(String taskId) {
+        AgentAsyncTask task = taskMapper.selectById(taskId);
+        if (task == null || !"queued".equals(task.getStatus())) return;
+        int claimed = claim(taskId, "video_batch", 5);
+        if (claimed == 0) return;
+        try {
+            if (storyboardVideoQueueService == null || storyboardClient == null) {
+                fail(taskId, "分镜视频队列未启用");
+                return;
+            }
+            AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
+            if (conversation == null) {
+                fail(taskId, "会话不存在");
+                return;
+            }
+            Map<String, Object> request = readMap(task.getRequestJson());
+            List<String> sceneIds = stringList(request.get("sceneIds"));
+            if (sceneIds.isEmpty()) {
+                fail(taskId, "没有可生成视频的分镜");
+                return;
+            }
+            Map<String, Scene> scenesById = new LinkedHashMap<>();
+            for (Scene scene : storyboardClient.getProjectScenesFresh(conversation.getProjectId())) {
+                scenesById.put(scene.getId(), scene);
+            }
+            List<StoryboardVideoEnqueueItem> items = new ArrayList<>();
+            for (String sceneId : sceneIds) {
+                Scene scene = scenesById.get(sceneId);
+                if (scene == null) continue;
+                items.add(new StoryboardVideoEnqueueItem(
+                        scene.getId(),
+                        nonBlank(scene.getVideoPrompt(), scene.getScriptContent(), "分镜视频生成"),
+                        scene.getVideoModel(),
+                        scene.getVideoResolution(),
+                        null,
+                        scene.getVideoAspectRatio(),
+                        scene.getDuration(),
+                        scene.getNegativePrompt(),
+                        null,
+                        null,
+                        null,
+                        List.of()));
+            }
+            if (items.isEmpty()) {
+                fail(taskId, "目标分镜不存在");
+                return;
+            }
+            List<StoryboardVideoQueue> created = storyboardVideoQueueService.enqueue(
+                    new StoryboardVideoEnqueueRequest(
+                            conversation.getId(), conversation.getProjectId(), items));
+            Set<String> targetSceneIds = new java.util.LinkedHashSet<>(sceneIds);
+            Set<String> trackedQueueIds = created.stream()
+                    .map(StoryboardVideoQueue::getId)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            if (trackedQueueIds.isEmpty()) {
+                storyboardVideoQueueService.listByProject(conversation.getProjectId(), null).stream()
+                        .filter(row -> targetSceneIds.contains(row.getSceneId()))
+                        .filter(row -> "queued".equals(row.getStatus()) || "running".equals(row.getStatus()))
+                        .map(StoryboardVideoQueue::getId)
+                        .forEach(trackedQueueIds::add);
+            }
+            if (trackedQueueIds.isEmpty()) {
+                fail(taskId, "目标分镜没有可执行的分镜视频任务");
+                return;
+            }
+            List<String> queueIds = List.copyOf(trackedQueueIds);
+            Map<String, Object> progressResult = new LinkedHashMap<>();
+            progressResult.put("queueIds", queueIds);
+            updateTask(taskId, "result_json", writeJson(progressResult));
+
+            int attempts = 0;
+            while (attempts++ < 8640) {
+                if (isCancelRequested(taskId)) {
+                    for (StoryboardVideoQueue row :
+                            storyboardVideoQueueService.listByProject(conversation.getProjectId(), null)) {
+                        if (targetSceneIds.contains(row.getSceneId())
+                                && ("queued".equals(row.getStatus()) || "running".equals(row.getStatus()))) {
+                            storyboardVideoQueueService.cancel(row.getId());
+                        }
+                    }
+                    cancelRunning(taskId);
+                    return;
+                }
+                List<StoryboardVideoQueue> rows =
+                        storyboardVideoQueueService.listByProject(conversation.getProjectId(), null)
+                                .stream()
+                                .filter(row -> trackedQueueIds.contains(row.getId()))
+                                .toList();
+                long completed = rows.stream().filter(row -> "completed".equals(row.getStatus())).count();
+                long failed = rows.stream()
+                        .filter(row -> "failed".equals(row.getStatus())
+                                || "cancelled".equals(row.getStatus()))
+                        .count();
+                long terminal = completed + failed;
+                int progress = (int) Math.min(95, 5 + terminal * 90 / Math.max(1, trackedQueueIds.size()));
+                updateTask(taskId, "progress", progress,
+                        "result_summary", "已完成 " + terminal + "/" + trackedQueueIds.size() + " 个分镜视频");
+                if (terminal >= trackedQueueIds.size()) {
+                    String content = "分镜视频批量生成完成：成功 " + completed + " 个，失败 "
+                            + failed + " 个。";
+                    if (failed > 0) {
+                        completePartialStoryboard(taskId, content, failed + " 个分镜视频生成失败");
+                    } else {
+                        complete(taskId, content, List.of(), List.of(), "", false, "completed");
+                    }
+                    return;
+                }
+                Thread.sleep(5000);
+            }
+            fail(taskId, "分镜视频批量任务等待超时");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            cancelRunning(taskId);
+        } catch (Exception e) {
+            log.warn("Storyboard video task failed: taskId={}, error={}", taskId, e.getMessage());
+            fail(taskId, e.getMessage() == null ? "分镜视频生成失败" : e.getMessage());
+        }
+    }
+
+    /**
+     * 重试整条分镜生成时，清掉上一次尝试已写入、且本次没有重写的项目分镜，
+     * 让「失败→重试」等价于覆盖重写，而不是把同一份分镜追加两遍。
+     */
+    private void discardPreviousPublishedScenes(
+            AgentConversation conversation, String previousRunId, String currentRunId) {
+        if (previousRunId == null || previousRunId.isBlank() || previousRunId.equals(currentRunId)) {
+            return;
+        }
+        List<String> previous = storyboardProductionService.publishedSceneIds(previousRunId);
+        if (previous.isEmpty()) return;
+        var current = new java.util.HashSet<>(
+                storyboardProductionService.publishedSceneIds(currentRunId));
+        for (String sceneId : previous) {
+            if (current.contains(sceneId)) continue;
+            deleteProjectSceneQuietly(conversation.getProjectId(), sceneId);
+        }
     }
 
     private static StoryboardCommitMode commitMode(String value) {
@@ -1266,6 +1606,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         AgentAsyncTask task = taskMapper.selectById(taskId);
         if (task == null || (!"running".equals(task.getStatus())
                 && !"cancelling".equals(task.getStatus()))) return;
+        Map<String, Object> result = new LinkedHashMap<>(readMap(task.getResultJson()));
+        result.put("content", content);
         taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
                 .eq("id", taskId)
                 .in("status", List.of("running", "cancelling"))
@@ -1274,7 +1616,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("progress", 100)
                 .set("result_summary", error)
                 .set("error", error)
-                .set("result_json", writeJson(Map.of("content", content)))
+                .set("result_json", writeJson(result))
                 .setSql("version = COALESCE(version, 0) + 1")
                 .set("updated_at", OffsetDateTime.now())
                 .set("completed_at", OffsetDateTime.now()));
@@ -1317,6 +1659,10 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         String resultSummary = AgentScopeImageTools.GENERATE_IMAGE_BATCH.equals(task.getToolName())
                 ? "已生成 " + urls.size() + " 张图片"
                 : summarize(content);
+        // 保留运行期间写入的额外字段（如 runId），供失败后重试时回滚旧分镜
+        Map<String, Object> result = new LinkedHashMap<>(readMap(task.getResultJson()));
+        result.put("content", content);
+        result.put("followUpTaskId", followUpTaskId == null ? "" : followUpTaskId);
         taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
                 .eq("id", taskId)
                 .in("status", List.of("running", "cancelling"))
@@ -1324,9 +1670,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("stage", stage)
                 .set("progress", 100)
                 .set("result_summary", resultSummary)
-                .set("result_json", writeJson(Map.of(
-                        "content", content,
-                        "followUpTaskId", followUpTaskId == null ? "" : followUpTaskId)))
+                .set("result_json", writeJson(result))
                 .set("asset_ids_json", writeJson(assetIds))
                 .set("result_urls_json", writeJson(urls))
                 .setSql("version = COALESCE(version, 0) + 1")
@@ -1556,6 +1900,135 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         publish(taskId);
     }
 
+    /** 累积实时输出并按节流推给前端；只保留最近一段，避免长任务吃内存。 */
+    private com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener liveListener(
+            String taskId) {
+        return new com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener() {
+            @Override
+            public void update(String stage, int progress) {
+                if (stage != null && !stage.isBlank()) liveStages.put(taskId, stage);
+                updateTask(taskId, "stage", stage, "progress", progress);
+                persistLiveSnapshot(taskId, false);
+            }
+
+            @Override
+            public void plotReady(String script) {
+                persistStoryboardPlotMessage(taskId, script);
+            }
+
+            @Override
+            public void stream(String stage, String delta) {
+                appendLiveStream(taskId, stage, delta);
+            }
+
+            @Override
+            public void thinking(String stage, String delta) {
+                appendLiveThinking(taskId, stage, delta);
+            }
+        };
+    }
+
+    private void appendLiveStream(String taskId, String stage, String delta) {
+        appendLive(taskId, delta, false);
+    }
+
+    private void appendLiveThinking(String taskId, String stage, String delta) {
+        appendLive(taskId, delta, true);
+    }
+
+    private void appendLive(String taskId, String delta, boolean thinking) {
+        if (taskId == null || taskId.isBlank() || delta == null || delta.isEmpty()) return;
+        try {
+            Map<String, StringBuilder> buffers = thinking ? liveThinking : liveStreams;
+            StringBuilder buffer = buffers.computeIfAbsent(taskId, key -> new StringBuilder());
+            synchronized (buffer) {
+                buffer.append(delta);
+                int overflow = buffer.length() - LIVE_STREAM_MAX_CHARS;
+                if (overflow > 0) buffer.delete(0, overflow);
+            }
+            long now = System.currentTimeMillis();
+            Long publishedAt = liveStreamPublishedAt.get(taskId);
+            if (publishedAt != null && now - publishedAt < LIVE_STREAM_PUBLISH_INTERVAL_MILLIS) return;
+            liveStreamPublishedAt.put(taskId, now);
+            pushLiveStream(taskId);
+            persistLiveSnapshot(taskId, false);
+        } catch (Exception e) {
+            // 实时显示只是附加能力：推送失败绝不能把模型流/生成流程带崩
+            log.debug("任务实时输出推送失败: taskId={}, error={}", taskId, e.getMessage());
+        }
+    }
+
+    private static String currentLive(Map<String, StringBuilder> buffers, String taskId) {
+        StringBuilder buffer = buffers.get(taskId);
+        if (buffer == null) return "";
+        synchronized (buffer) {
+            return buffer.toString();
+        }
+    }
+
+    private void pushLiveStream(String taskId) {
+        pushLiveStream(taskId, false);
+    }
+
+    private void pushLiveStream(String taskId, boolean done) {
+        String userId = liveUserIds.get(taskId);
+        if (userId == null) {
+            AgentAsyncTask task = taskMapper.selectById(taskId);
+            if (task == null) return;
+            userId = task.getUserId();
+            if (userId == null || userId.isBlank()) return;
+            liveUserIds.put(taskId, userId);
+        }
+        long seq = liveSequences.computeIfAbsent(taskId, ignored -> new AtomicLong())
+                .incrementAndGet();
+        taskEvents.publishStream(
+                userId,
+                taskId,
+                seq,
+                liveStages.getOrDefault(taskId, ""),
+                currentLive(liveStreams, taskId),
+                currentLive(liveThinking, taskId),
+                done,
+                OffsetDateTime.now());
+    }
+
+    private void persistLiveSnapshot(String taskId, boolean force) {
+        if (taskId == null || taskId.isBlank()) return;
+        long now = System.currentTimeMillis();
+        Long persistedAt = liveStreamPersistedAt.get(taskId);
+        if (!force && persistedAt != null
+                && now - persistedAt < LIVE_STREAM_PERSIST_INTERVAL_MILLIS) {
+            return;
+        }
+        AgentAsyncTask task = taskMapper.selectById(taskId);
+        if (task == null) return;
+        Map<String, Object> result = new LinkedHashMap<>(readMap(task.getResultJson()));
+        result.put("liveText", currentLive(liveStreams, taskId));
+        result.put("liveThinking", currentLive(liveThinking, taskId));
+        result.put("liveStage", liveStages.getOrDefault(taskId, ""));
+        result.put("liveUpdatedAt", OffsetDateTime.now().toString());
+        result.put("liveDone", isTerminal(task.getStatus()));
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", taskId)
+                .set("result_json", writeJson(result))
+                .set("updated_at", OffsetDateTime.now()));
+        liveStreamPersistedAt.put(taskId, now);
+    }
+
+    /** 任务进入终态：持久化最终尾部并通知前端完成。 */
+    private void clearLiveStream(String taskId) {
+        boolean hadStream = liveStreams.containsKey(taskId) || liveThinking.containsKey(taskId);
+        persistLiveSnapshot(taskId, true);
+        if (hadStream) pushLiveStream(taskId, true);
+        liveStreams.remove(taskId);
+        liveThinking.remove(taskId);
+        liveStreamPublishedAt.remove(taskId);
+        liveStreamPersistedAt.remove(taskId);
+        liveStages.remove(taskId);
+        liveSequences.remove(taskId);
+        liveUserIds.remove(taskId);
+    }
+
     private void publish(String taskId) {
         AgentAsyncTask task = taskMapper.selectById(taskId);
         if (task == null) return;
@@ -1565,6 +2038,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     }
 
     private void releaseChildren(String parentTaskId) {
+        // 只在任务进入终态时调用：顺手清掉实时输出缓冲并通知前端收起
+        clearLiveStream(parentTaskId);
         AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
         if (parent == null) return;
         List<AgentAsyncTask> children = taskMapper.selectList(new LambdaQueryWrapper<AgentAsyncTask>()
@@ -1599,6 +2074,9 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             executor.submit(() -> runStoryboardApprovalTask(task.getId()));
         } else if (AgentScopeStoryboardTools.REVISE_STORYBOARD.equals(task.getToolName())) {
             executor.submit(() -> runStoryboardRevisionTask(task.getId()));
+        } else if (AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO.equals(task.getToolName())
+                || AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS.equals(task.getToolName())) {
+            executor.submit(() -> runStoryboardVideoTask(task.getId()));
         } else {
             fail(task.getId(), "不支持的后台任务类型: " + task.getToolName());
         }
@@ -1677,6 +2155,10 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 urls,
                 slots,
                 string(result.get("content")),
+                string(result.get("liveText")),
+                string(result.get("liveThinking")),
+                string(result.get("liveStage")),
+                offsetDateTime(result.get("liveUpdatedAt")),
                 active || "cancelling".equals(task.getStatus()),
                 "partial".equals(task.getStatus())
                         || "failed".equals(task.getStatus())
@@ -1709,6 +2191,10 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         out.put("url", task.resultUrls().isEmpty() ? "" : task.resultUrls().getFirst());
         out.put("slots", task.slots());
         out.put("result", task.result());
+        out.put("liveText", task.liveText());
+        out.put("liveThinking", task.liveThinking());
+        out.put("liveStage", task.liveStage());
+        out.put("liveUpdatedAt", task.liveUpdatedAt());
         out.put("followUpTaskId", "");
         out.put("messageId", task.anchorMessageId());
         out.put("canCancel", task.canCancel());
@@ -1735,6 +2221,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (AgentScopeStoryboardTools.START_STORYBOARD.equals(task.getToolName())) return "剧情与分镜诊断";
         if (AgentScopeStoryboardTools.APPROVE_STORYBOARD.equals(task.getToolName())) return "生成分镜";
         if (AgentScopeStoryboardTools.REVISE_STORYBOARD.equals(task.getToolName())) return "修订分镜";
+        if (AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO.equals(task.getToolName())) return "生成分镜视频";
+        if (AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS.equals(task.getToolName())) return "批量生成分镜视频";
         if (AgentScopeImageTools.GENERATE_IMAGE_BATCH.equals(task.getToolName())) return "生成图片";
         return "智能体任务";
     }
@@ -1826,40 +2314,19 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     }
 
     private static String storyboardReviewContent(StoryboardRunSnapshot snapshot) {
-        PlotAssessment assessment = snapshot.assessment();
+        String script = snapshot.selectedScript().isBlank()
+                ? snapshot.originalScript() : snapshot.selectedScript();
         StringBuilder content = new StringBuilder();
-        content.append("# 分镜诊断完成\n\n")
-                .append("- run_id: `").append(snapshot.runId()).append("`\n")
-                .append("- 当前阶段: `").append(snapshot.stage()).append("`\n")
-                .append("- 剧情判断: ").append(assessment.complete() ? "完整" : "需要补充").append("\n\n");
-        appendList(content, "缺口", assessment.missingElements());
-        appendList(content, "风险", assessment.risks());
-        if (!assessment.summary().isBlank()) {
-            content.append("## 诊断结论\n\n").append(assessment.summary()).append("\n\n");
-        }
-        if (!assessment.expansionPlan().isBlank()) {
-            content.append("## 建议修正\n\n").append(assessment.expansionPlan()).append("\n\n");
-        }
-        content.append("## 当前剧情稿\n\n")
-                .append(snapshot.selectedScript().isBlank() ? "未返回修正稿。" : snapshot.selectedScript())
-                .append("\n\n");
-        if (!snapshot.expansionScript().isBlank()
-                && !snapshot.expansionScript().equals(snapshot.selectedScript())) {
-            content.append("## 备用完整稿\n\n").append(snapshot.expansionScript()).append("\n\n");
-        }
-        if (!snapshot.roles().isEmpty()) {
-            content.append("## 专业角色匹配\n\n");
-            for (RoleProfile role : snapshot.roles()) {
-                content.append("- ").append(role.label()).append("（`").append(role.id()).append("`）");
-                if (!role.instructions().isBlank()) {
-                    content.append("：").append(role.instructions());
-                }
-                content.append("\n");
-            }
-            content.append("\n");
-        }
-        content.append("请确认是否采用当前剧情稿；确认后继续生成正式分镜。");
+        content.append("# 剧情稿\n\n")
+                .append(script.isBlank() ? "未返回剧情稿。" : script)
+                .append("\n\n---\n\n")
+                .append("请确认是否采用当前剧情稿；确认后继续生成正式分镜。");
         return content.toString();
+    }
+
+    private static boolean isStoryboardVideoTool(String toolName) {
+        return AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO.equals(toolName)
+                || AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS.equals(toolName);
     }
 
     private static String autoStoryboardContent(
@@ -1890,18 +2357,20 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (snapshot.stage() == Stage.PSEUDO_REVIEW) {
             content.append("# 结构化伪分镜已生成\n\n")
                     .append("- run_id: `").append(snapshot.runId()).append("`\n")
-                    .append("- 镜头数: ").append(snapshot.pseudoShots().size()).append("\n\n");
+                    .append("- 镜头数: ").append(snapshot.pseudoShots().size()).append("\n\n")
+                    .append("| 镜号 | 叙事目的 | 人物 | 地点/时间 | 冲突 | 动作 | 情绪 |\n")
+                    .append("| --- | --- | --- | --- | --- | --- | --- |\n");
             for (PseudoShot shot : snapshot.pseudoShots()) {
-                content.append("## ").append(shot.shotId()).append("\n\n")
-                        .append("- 叙事目的: ").append(shot.narrativePurpose()).append("\n")
-                        .append("- 人物: ").append(String.join("、", shot.characters())).append("\n")
-                        .append("- 地点/时间: ").append(shot.location()).append(" / ")
-                        .append(shot.time()).append("\n")
-                        .append("- 冲突: ").append(shot.conflict()).append("\n")
-                        .append("- 动作: ").append(shot.action()).append("\n")
-                        .append("- 情绪: ").append(shot.emotion()).append("\n\n");
+                content.append("| `").append(shot.shotId()).append("` | ")
+                        .append(tableCell(shot.narrativePurpose())).append(" | ")
+                        .append(tableCell(String.join("、", shot.characters()))).append(" | ")
+                        .append(tableCell(shot.location())).append(" / ")
+                        .append(tableCell(shot.time())).append(" | ")
+                        .append(tableCell(shot.conflict())).append(" | ")
+                        .append(tableCell(shot.action())).append(" | ")
+                        .append(tableCell(shot.emotion())).append(" |\n");
             }
-            content.append("请确认伪分镜。确认后再生成正式镜头。");
+            content.append("\n请确认伪分镜。确认后再生成正式镜头。");
             return content.toString();
         }
 
@@ -1909,13 +2378,15 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .append("- run_id: `").append(snapshot.runId()).append("`\n")
                 .append("- 当前阶段: `").append(snapshot.stage()).append("`\n")
                 .append("- 已生成镜头: ").append(snapshot.finalShots().size()).append("/")
-                .append(snapshot.pseudoShots().size()).append("\n\n");
+                .append(snapshot.pseudoShots().size()).append("\n\n")
+                .append("| 镜号 | 画面 | 镜头类型 | 运镜 | 时长(秒) |\n")
+                .append("| --- | --- | --- | --- | --- |\n");
         for (StoryboardShot shot : snapshot.finalShots()) {
-            content.append("- `").append(shot.shotId()).append("`：")
-                    .append(shot.sceneDescription())
-                    .append("，").append(shot.shotType())
-                    .append("，").append(shot.cameraMovement())
-                    .append("，").append(shot.durationSeconds()).append(" 秒\n");
+            content.append("| `").append(shot.shotId()).append("` | ")
+                    .append(tableCell(shot.sceneDescription())).append(" | ")
+                    .append(tableCell(shot.shotType())).append(" | ")
+                    .append(tableCell(shot.cameraMovement())).append(" | ")
+                    .append(shot.durationSeconds()).append(" |\n");
         }
         if (!snapshot.error().isBlank()) {
             content.append("\n## 需要重试\n\n").append(snapshot.error()).append("\n");
@@ -1923,15 +2394,35 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         return content.toString();
     }
 
-    private static void appendList(StringBuilder content, String title, List<String> values) {
-        if (values == null || values.isEmpty()) return;
-        content.append("## ").append(title).append("\n\n");
-        values.forEach(value -> content.append("- ").append(value).append("\n"));
-        content.append("\n");
+    /** Escape a value so it can sit inside a Markdown table cell on one line. */
+    private static String tableCell(String value) {
+        if (value == null) return "";
+        return value.trim()
+                .replace("|", "\\|")
+                .replaceAll("\\s*\\R\\s*", " ");
     }
 
     private static String string(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String nonBlank(String... values) {
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.isBlank()) return value.trim();
+            }
+        }
+        return "";
+    }
+
+    private static OffsetDateTime offsetDateTime(Object value) {
+        String text = string(value);
+        if (text.isBlank()) return null;
+        try {
+            return OffsetDateTime.parse(text);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static Stage stage(String value) {

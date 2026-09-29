@@ -13,12 +13,14 @@ import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.AssetStatus;
 import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
+import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.domain.AssetStatePolicy;
 import com.storyboard.asset.domain.AssetSearchText;
 import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.AssetCatalogService;
+import com.storyboard.asset.service.AssetPurgeService;
 import com.storyboard.asset.service.ProjectAccessPort;
 import com.storyboard.common.BusinessException;
 import org.springframework.stereotype.Service;
@@ -37,15 +39,21 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     private final LibraryRepository repository;
     private final ProjectAccessPort projectAccess;
     private final MediaUrlSigner signer;
+    private final AssetPurgeService purgeService;
+    private final StorageProperties properties;
 
     public AssetCatalogServiceImpl(
             LibraryRepository repository,
             ProjectAccessPort projectAccess,
-            MediaUrlSigner signer
+            MediaUrlSigner signer,
+            AssetPurgeService purgeService,
+            StorageProperties properties
     ) {
         this.repository = repository;
         this.projectAccess = projectAccess;
         this.signer = signer;
+        this.purgeService = purgeService;
+        this.properties = properties;
     }
 
     @Override
@@ -220,7 +228,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     @Transactional
     public AssetSummary trash(String userId, String assetId, long expectedVersion) {
         requireAsset(userId, assetId);
-        boolean updated = repository.trash(userId, assetId, expectedVersion, OffsetDateTime.now().plusDays(7));
+        boolean updated = repository.trash(userId, assetId, expectedVersion, OffsetDateTime.now().plusDays(properties.trashRetentionDays()));
         if (!updated) throw new BusinessException(40901, "资产版本已变化，删除失败");
         return requireAsset(userId, assetId);
     }
@@ -243,16 +251,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         if (!AssetStatePolicy.canPurge(asset.status().name())) {
             throw new BusinessException(40901, "只有回收站资产可以彻底删除");
         }
-        repository.unlinkAllProjects(assetId);
-        if (repository.hasActiveReferences(assetId)) {
-            repository.markPurgeBlocked(assetId);
-            throw new BusinessException(40901, "资产仍被项目引用，已转为待处理状态");
-        }
-        if (!repository.markPurgePending(userId, assetId)) throw new BusinessException(40901, "清理状态已变化");
-        for (MediaRef media : repository.listMedia(assetId)) {
-            repository.createCleanupTask(media.objectKey());
-        }
-        repository.markPurged(assetId);
+        purgeService.purgeManually(assetId);
     }
 
     @Override
@@ -290,7 +289,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     public BulkAssetOperationResult bulkTrash(String userId, Collection<String> assetIds) {
         List<AssetSummary> assets = validateBulkAssets(userId, assetIds);
         List<String> updated = new java.util.ArrayList<>(assets.size());
-        java.time.OffsetDateTime purgeAfter = OffsetDateTime.now().plusDays(7);
+        java.time.OffsetDateTime purgeAfter = OffsetDateTime.now().plusDays(properties.trashRetentionDays());
         for (AssetSummary asset : assets) {
             if (!repository.trash(userId, asset.id(), asset.version(), purgeAfter)) {
                 throw new BusinessException(40901, "资产状态已变化，批量删除已取消");

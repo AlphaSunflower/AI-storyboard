@@ -195,6 +195,7 @@ public class GroupServiceImpl implements GroupService {
                             mediaRef.primary(), mediaRef.constraintText());
                     return new com.storyboard.asset.dto.AssetGroupDetailResponse.AssetGroupMediaItem(
                             signed,
+                            member,
                             item.assetId(),
                             member == null ? null : member.name(),
                             member == null ? null : member.description(),

@@ -8,6 +8,7 @@ import {
 
 const base = {
   previousMode: 'split' as const,
+  embedded: false,
   appOpen: true,
   mobile: false,
   fullscreen: false,
@@ -53,6 +54,16 @@ describe('chat dock layout', () => {
   it('does not dock on mobile or when no app is open', () => {
     expect(resolveChatDockMode({ ...base, mobile: true, appWidth: 640 })).toBe('split');
     expect(resolveChatDockMode({ ...base, appOpen: false, appWidth: 640 })).toBe('split');
+  });
+
+  it('always keeps embedded canvas agents in split layout', () => {
+    expect(resolveChatDockMode({
+      ...base,
+      embedded: true,
+      appWidth: 900,
+      requestedDock: true,
+      fullscreen: true,
+    })).toBe('split');
   });
 });
 

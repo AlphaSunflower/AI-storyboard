@@ -36,6 +36,15 @@ function downloadAsset(url: string, filename: string) {
 }
 
 type PreviewTab = 'image' | 'video';
+type EditableSceneField = 'scriptContent' | 'imagePrompt' | 'videoPrompt';
+type SceneTextDraft = Record<EditableSceneField, string>;
+type FieldSaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+const EMPTY_SCENE_TEXT: SceneTextDraft = {
+  scriptContent: '',
+  imagePrompt: '',
+  videoPrompt: '',
+};
 
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px',
@@ -71,6 +80,22 @@ const btnGhost: React.CSSProperties = {
   color: 'var(--color-primary)',
   cursor: 'pointer',
   fontWeight: 600,
+};
+
+const sceneTextareaStyle: React.CSSProperties = {
+  width: '100%',
+  minHeight: 96,
+  padding: '9px 10px',
+  border: '1px solid var(--color-hairline)',
+  borderRadius: 'var(--rounded-md)',
+  outline: 'none',
+  background: 'var(--color-surface)',
+  color: 'var(--color-body)',
+  fontFamily: 'inherit',
+  fontSize: 13,
+  lineHeight: 1.6,
+  resize: 'vertical',
+  boxSizing: 'border-box',
 };
 
 /** 透明主色描边按钮的悬停态：填充主色 */
@@ -138,6 +163,15 @@ function parseParams(model: { params?: unknown } | undefined): ParamLists {
   return out;
 }
 
+function sceneTextFromScene(scene?: { scriptContent?: string; imagePrompt?: string; videoPrompt?: string }): SceneTextDraft {
+  if (!scene) return EMPTY_SCENE_TEXT;
+  return {
+    scriptContent: scene.scriptContent || '',
+    imagePrompt: scene.imagePrompt || '',
+    videoPrompt: scene.videoPrompt || '',
+  };
+}
+
 export function PreviewPanel() {
   const { scenes, selectedSceneId } = useProjectStore();
   const scene = scenes.find((s) => s.id === selectedSceneId);
@@ -155,6 +189,7 @@ export function PreviewPanel() {
   const generateVideo = useProjectStore((s) => s.generateVideo);
   const pollVideoTask = useProjectStore((s) => s.pollVideoTask);
   const refreshScenes = useProjectStore((s) => s.refreshScenes);
+  const updateSceneInStore = useProjectStore((s) => s.updateSceneInStore);
   const generatingImage = useProjectStore((s) => (selectedSceneId ? !!s.generatingImage[selectedSceneId] : false));
   const generatingVideo = useProjectStore((s) => (selectedSceneId ? !!s.generatingVideo[selectedSceneId] : false));
   const imageModelOptions = useProjectStore((s) => s.imageModelOptions);
@@ -187,6 +222,13 @@ export function PreviewPanel() {
   const [imageDraft, setImageDraft] = useState<Record<string, unknown>>({});
   const [videoDraft, setVideoDraft] = useState<Record<string, unknown>>({});
   const [savingParams, setSavingParams] = useState(false);
+  const [sceneTextDraft, setSceneTextDraft] = useState<SceneTextDraft>(() => sceneTextFromScene(scene));
+  const [fieldSaveState, setFieldSaveState] = useState<Record<EditableSceneField, FieldSaveState>>({
+    scriptContent: 'idle',
+    imagePrompt: 'idle',
+    videoPrompt: 'idle',
+  });
+  const promptSceneIdRef = useRef<string | null>(scene?.id ?? null);
 
   // 切换分镜时拉取该分镜参考素材
   useEffect(() => {
@@ -272,6 +314,17 @@ export function PreviewPanel() {
     setLibraryImportDone(false);
   }, [scene?.id]);
 
+  useEffect(() => {
+    if (!scene || promptSceneIdRef.current === scene.id) return;
+    promptSceneIdRef.current = scene.id;
+    setSceneTextDraft(sceneTextFromScene(scene));
+    setFieldSaveState({
+      scriptContent: 'idle',
+      imagePrompt: 'idle',
+      videoPrompt: 'idle',
+    });
+  }, [scene]);
+
   const handleImportSceneMedia = async (items: Array<{ url: string; type: 'IMAGE' | 'VIDEO' }>) => {
     if (!scene || !currentProject?.id || items.length === 0) return;
     setLibraryImportBusy(true);
@@ -340,6 +393,33 @@ export function PreviewPanel() {
     }
   };
 
+  const persistSceneText = async (field: EditableSceneField): Promise<boolean> => {
+    if (!scene) return false;
+    const value = sceneTextDraft[field].trim();
+    const original = (scene[field] || '').trim();
+    if (value === original) {
+      setFieldSaveState((current) => ({ ...current, [field]: 'saved' }));
+      return true;
+    }
+
+    setFieldSaveState((current) => ({ ...current, [field]: 'saving' }));
+    try {
+      await sceneApi.update(scene.id, { [field]: value });
+      updateSceneInStore(scene.id, { [field]: value });
+      setSceneTextDraft((current) => ({ ...current, [field]: value }));
+      setFieldSaveState((current) => ({ ...current, [field]: 'saved' }));
+      return true;
+    } catch {
+      setFieldSaveState((current) => ({ ...current, [field]: 'error' }));
+      return false;
+    }
+  };
+
+  const updateSceneTextDraft = (field: EditableSceneField, value: string) => {
+    setSceneTextDraft((current) => ({ ...current, [field]: value }));
+    setFieldSaveState((current) => ({ ...current, [field]: 'idle' }));
+  };
+
   // 恢复全局默认：清空本分镜全部参数覆盖（图片+视频），并清空草稿
   const handleClearParams = async () => {
     if (!scene) return;
@@ -350,8 +430,12 @@ export function PreviewPanel() {
 
   const handleGenerateImage = async (mode?: 'edit', source?: string) => {
     if (!scene) return;
-    const prompt = scene.imagePrompt || '';
+    const prompt = sceneTextDraft.imagePrompt.trim();
     if (!prompt.trim()) { alert('请先填写生图提示词'); return; }
+    if (!(await persistSceneText('imagePrompt'))) {
+      alert('提示词保存失败，请重试');
+      return;
+    }
     const useEdit = mode === 'edit';
     const refs: string[] | undefined = useEdit && source === 'ref'
       ? [
@@ -373,8 +457,12 @@ export function PreviewPanel() {
 
   const handleGenerateVideo = async () => {
     if (!scene) return;
-    const prompt = scene.videoPrompt || '';
+    const prompt = sceneTextDraft.videoPrompt.trim();
     if (!prompt.trim()) { alert('请先填写生视频提示词'); return; }
+    if (!(await persistSceneText('videoPrompt'))) {
+      alert('提示词保存失败，请重试');
+      return;
+    }
     // 先保存未保存的参数草稿再生成（保存失败则中止）
     if (!(await commitParams(videoDraft, () => setVideoDraft({})))) return;
     try {
@@ -475,6 +563,14 @@ export function PreviewPanel() {
     });
   };
 
+  const fieldStatusLabel = (field: EditableSceneField): string => {
+    const state = fieldSaveState[field];
+    return state === 'saving' ? '保存中'
+      : state === 'saved' ? '已保存'
+        : state === 'error' ? '保存失败'
+          : '';
+  };
+
   if (!scene) {
     return (
       <div
@@ -511,21 +607,25 @@ export function PreviewPanel() {
       </h2>
 
       {/* Script content */}
-      {scene.scriptContent && (
-        <div
-          style={{
-            padding: 10,
-            borderRadius: 'var(--rounded-md)',
-            background: 'var(--color-canvas)',
-            fontSize: 13,
-            color: 'var(--color-body)',
-            lineHeight: 1.6,
-            marginBottom: 12,
-          }}
-        >
-          {scene.scriptContent}
+      <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+          <label htmlFor="preview-scene-script" style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>分镜描述</label>
+          <span style={{ fontSize: 10, color: fieldSaveState.scriptContent === 'error' ? 'var(--color-error)' : 'var(--color-muted)' }}>{fieldStatusLabel('scriptContent')}</span>
         </div>
-      )}
+        <textarea
+          id="preview-scene-script"
+          value={sceneTextDraft.scriptContent}
+          onChange={(event) => updateSceneTextDraft('scriptContent', event.target.value)}
+          onBlur={(event) => {
+            event.currentTarget.style.borderColor = 'var(--color-hairline)';
+            void persistSceneText('scriptContent');
+          }}
+          onFocus={(event) => { event.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+          placeholder="输入分镜描述..."
+          rows={3}
+          style={sceneTextareaStyle}
+        />
+      </div>
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
@@ -695,18 +795,31 @@ export function PreviewPanel() {
             )}
           </div>
 
-          {/* 图片提示词信息 */}
-          {scene.imagePrompt && (
-            <div style={{ marginBottom: 12, padding: 10, borderRadius: 'var(--rounded-md)', background: 'var(--color-surface-card)', fontSize: 12, lineHeight: 1.6 }}>
-              <strong style={{ color: 'var(--color-muted)' }}>图片提示词：</strong>
-              <p style={{ color: 'var(--color-body)', marginTop: 4, marginBottom: 0 }}>{scene.imagePrompt}</p>
+          {/* 图片提示词编辑 */}
+          <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+              <label htmlFor="preview-image-prompt" style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>图片提示词</label>
+              <span style={{ fontSize: 10, color: fieldSaveState.imagePrompt === 'error' ? 'var(--color-error)' : 'var(--color-muted)' }}>{fieldStatusLabel('imagePrompt')}</span>
             </div>
-          )}
+            <textarea
+              id="preview-image-prompt"
+              value={sceneTextDraft.imagePrompt}
+              onChange={(event) => updateSceneTextDraft('imagePrompt', event.target.value)}
+              onBlur={(event) => {
+                event.currentTarget.style.borderColor = 'var(--color-hairline)';
+                void persistSceneText('imagePrompt');
+              }}
+              onFocus={(event) => { event.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              placeholder="输入图片生成提示词..."
+              rows={4}
+              style={sceneTextareaStyle}
+            />
+          </div>
 
           {/* 生成参数区（只含图片生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片生成参数</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>图片生成参数</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {Object.keys(imageDraft).length > 0 && (
                   <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>
@@ -904,18 +1017,31 @@ export function PreviewPanel() {
             )}
           </div>
 
-          {/* 视频提示词信息 */}
-          {scene.videoPrompt && (
-            <div style={{ marginBottom: 12, padding: 10, borderRadius: 'var(--rounded-md)', background: 'var(--color-surface-card)', fontSize: 12, lineHeight: 1.6 }}>
-              <strong style={{ color: 'var(--color-muted)' }}>视频提示词：</strong>
-              <p style={{ color: 'var(--color-body)', marginTop: 4, marginBottom: 0 }}>{scene.videoPrompt}</p>
+          {/* 视频提示词编辑 */}
+          <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+              <label htmlFor="preview-video-prompt" style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>视频提示词</label>
+              <span style={{ fontSize: 10, color: fieldSaveState.videoPrompt === 'error' ? 'var(--color-error)' : 'var(--color-muted)' }}>{fieldStatusLabel('videoPrompt')}</span>
             </div>
-          )}
+            <textarea
+              id="preview-video-prompt"
+              value={sceneTextDraft.videoPrompt}
+              onChange={(event) => updateSceneTextDraft('videoPrompt', event.target.value)}
+              onBlur={(event) => {
+                event.currentTarget.style.borderColor = 'var(--color-hairline)';
+                void persistSceneText('videoPrompt');
+              }}
+              onFocus={(event) => { event.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              placeholder="输入视频生成提示词..."
+              rows={4}
+              style={sceneTextareaStyle}
+            />
+          </div>
 
           {/* 生成参数区（只含视频生成相关信息） */}
           <div style={{ marginBottom: 12, padding: 12, borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg> 视频生成参数</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-muted)' }}>视频生成参数</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {Object.keys(videoDraft).length > 0 && (
                   <span style={{ fontSize: 11, color: 'var(--color-warning)' }}>● 有未保存改动</span>

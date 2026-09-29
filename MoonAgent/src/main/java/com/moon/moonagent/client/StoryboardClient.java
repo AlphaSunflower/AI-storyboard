@@ -189,6 +189,12 @@ public class StoryboardClient {
         restTemplate.postForEntity(url, new HttpEntity<>(refs, headers()), String.class);
     }
 
+    /** Replace system-managed first/last video frames while preserving user uploads. */
+    public void replaceManagedVideoFrames(String sceneId, List<Map<String, Object>> refs) {
+        String url = baseUrl + "/api/internal/scenes/" + sceneId + "/managed-video-frames";
+        restTemplate.exchange(url, HttpMethod.PUT, new HttpEntity<>(refs, headers()), String.class);
+    }
+
     /** 查场景参考素材（含 url/type/purpose/role，按 sortOrder 升序） */
     public List<Map<String, Object>> getSceneReferences(String sceneId) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId + "/references";

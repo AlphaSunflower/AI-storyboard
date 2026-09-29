@@ -7,9 +7,11 @@ import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
+import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.AssetCatalogService;
+import com.storyboard.asset.service.AssetPurgeService;
 import com.storyboard.asset.service.ProjectAccessPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +42,10 @@ class AssetCatalogServiceImplTest {
     void setUp() {
         repository = mock(LibraryRepository.class);
         projectAccess = mock(ProjectAccessPort.class);
-        service = new AssetCatalogServiceImpl(repository, projectAccess, mock(MediaUrlSigner.class));
+        service = new AssetCatalogServiceImpl(
+                repository, projectAccess, mock(MediaUrlSigner.class),
+                new AssetPurgeService(repository),
+                new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
     }
 
     @Test
@@ -116,12 +121,12 @@ class AssetCatalogServiceImplTest {
         when(repository.findAsset("u1", "a1"))
                 .thenReturn(Optional.of(asset("a1", com.storyboard.asset.client.AssetContracts.AssetStatus.TRASHED)));
         when(repository.hasActiveReferences("a1")).thenReturn(false);
-        when(repository.markPurgePending("u1", "a1")).thenReturn(true);
+        when(repository.markPurgePending("a1")).thenReturn(true);
 
         service.purge("u1", "a1");
 
         verify(repository).unlinkAllProjects("a1");
-        verify(repository).markPurgePending("u1", "a1");
+        verify(repository).markPurgePending("a1");
         verify(repository).markPurged("a1");
     }
 
@@ -135,7 +140,7 @@ class AssetCatalogServiceImplTest {
                 .isInstanceOf(com.storyboard.common.BusinessException.class);
 
         verify(repository).markPurgeBlocked("a1");
-        verify(repository, never()).markPurgePending(anyString(), anyString());
+        verify(repository, never()).markPurgePending(anyString());
         verify(repository, never()).markPurged(anyString());
     }
 

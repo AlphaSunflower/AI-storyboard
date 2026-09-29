@@ -9,5 +9,8 @@ public record SceneReferenceLinkRequest(
         String purpose,
         String role,
         String fileName,
-        Long fileSize
+        Long fileSize,
+        String sourceType,
+        String sourceId,
+        String sourceConversationId
 ) {}

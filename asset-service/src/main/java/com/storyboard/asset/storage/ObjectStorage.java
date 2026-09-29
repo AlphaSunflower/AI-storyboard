@@ -26,6 +26,14 @@ public interface ObjectStorage {
 
     void abortMultipart(String objectKey, String uploadId);
 
+    ObjectPage listObjects(String prefix, String continuationToken, int maxKeys);
+
+    record ObjectSummary(String key, long sizeBytes, java.time.Instant lastModified) {
+    }
+
+    record ObjectPage(java.util.List<ObjectSummary> objects, String nextContinuationToken) {
+    }
+
     record MultipartUpload(String uploadId, String objectKey) {
     }
 

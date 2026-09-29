@@ -467,13 +467,13 @@ public class LibraryRepository {
                 .update() == 1;
     }
 
-    public boolean markPurgePending(String userId, String assetId) {
+    public boolean markPurgePending(String assetId) {
         return client.sql("""
                         UPDATE asset.library_assets
                         SET status = 'PURGE_PENDING', version = version + 1, updated_at = now()
-                        WHERE id = :id AND owner_user_id = :userId AND status = 'TRASHED'
+                        WHERE id = :id AND status = 'TRASHED'
                         """)
-                .param("id", assetId).param("userId", userId)
+                .param("id", assetId)
                 .update() == 1;
     }
 
@@ -498,40 +498,60 @@ public class LibraryRepository {
         return count != null && count > 0;
     }
 
-    public boolean objectKeyHasReferences(String objectKey) {
-        Boolean referenced = client.sql("""
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM asset.library_media m
-                            JOIN asset.library_blobs b ON b.id = m.blob_id
-                            JOIN asset.library_assets a ON a.id = m.asset_id
-                            WHERE b.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM asset.library_group_items gi
-                            JOIN asset.library_media m ON m.id = gi.media_id
-                            JOIN asset.library_blobs b ON b.id = m.blob_id
-                            JOIN asset.library_groups g ON g.id = gi.group_id
-                            JOIN asset.library_assets a ON a.id = g.asset_id
-                            WHERE b.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM asset.library_group_snapshot_items si
-                            JOIN asset.library_group_snapshots s ON s.id = si.snapshot_id
-                            JOIN asset.library_groups g ON g.id = s.group_id
-                            JOIN asset.library_assets a ON a.id = g.asset_id
-                            WHERE si.object_key = :objectKey
-                              AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
-                        )
-                        """)
-                .param("objectKey", objectKey)
-                .query(Boolean.class)
-                .single();
-        return Boolean.TRUE.equals(referenced);
+    static final String REFERENCED_OBJECT_KEYS_SQL = """
+            SELECT DISTINCT b.object_key AS key
+            FROM asset.library_media m
+            JOIN asset.library_blobs b ON b.id = m.blob_id
+            JOIN asset.library_assets a ON a.id = m.asset_id
+            WHERE b.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            UNION
+            SELECT DISTINCT b.object_key AS key
+            FROM asset.library_group_items gi
+            JOIN asset.library_media m ON m.id = gi.media_id
+            JOIN asset.library_blobs b ON b.id = m.blob_id
+            JOIN asset.library_groups g ON g.id = gi.group_id
+            JOIN asset.library_assets a ON a.id = g.asset_id
+            WHERE b.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            UNION
+            SELECT DISTINCT si.object_key AS key
+            FROM asset.library_group_snapshot_items si
+            JOIN asset.library_group_snapshots s ON s.id = si.snapshot_id
+            JOIN asset.library_groups g ON g.id = s.group_id
+            JOIN asset.library_assets a ON a.id = g.asset_id
+            WHERE si.object_key IN (:keys) AND a.status NOT IN ('PURGE_PENDING', 'PURGED')
+            """;
+
+    static final String ACTIVE_UPLOAD_SESSION_KEYS_SQL = """
+            SELECT DISTINCT object_key AS key
+            FROM asset.library_upload_sessions
+            WHERE object_key IN (:keys)
+              AND status = 'CREATED'
+              AND expires_at > now()
+            """;
+
+    public Set<String> referencedObjectKeys(Collection<String> objectKeys) {
+        List<String> keys = normalizeObjectKeys(objectKeys);
+        if (keys.isEmpty()) return Set.of();
+        return new LinkedHashSet<>(client.sql(REFERENCED_OBJECT_KEYS_SQL)
+                .param("keys", keys)
+                .query(String.class)
+                .list());
+    }
+
+    public Set<String> activeUploadSessionObjectKeys(Collection<String> objectKeys) {
+        List<String> keys = normalizeObjectKeys(objectKeys);
+        if (keys.isEmpty()) return Set.of();
+        return new LinkedHashSet<>(client.sql(ACTIVE_UPLOAD_SESSION_KEYS_SQL)
+                .param("keys", keys)
+                .query(String.class)
+                .list());
+    }
+
+    private static List<String> normalizeObjectKeys(Collection<String> objectKeys) {
+        return objectKeys == null ? List.of() : objectKeys.stream()
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
     }
 
     public void markPurgeBlocked(String assetId) {
@@ -542,6 +562,22 @@ public class LibraryRepository {
                         WHERE id = :assetId
                         """)
                 .param("assetId", assetId).update();
+    }
+
+    /** 在事务内锁定到期未清理的回收站资产；调用方须在同一事务里完成清理，否则行锁提前释放。 */
+    public List<String> claimDueTrashAssets(int limit) {
+        return client.sql("""
+                        SELECT id FROM asset.library_assets
+                        WHERE status = 'TRASHED'
+                          AND purge_after IS NOT NULL
+                          AND purge_after <= now()
+                        ORDER BY purge_after
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT :limit
+                        """)
+                .param("limit", limit)
+                .query(String.class)
+                .list();
     }
 
     public String upsertBlob(
@@ -1656,7 +1692,8 @@ public class LibraryRepository {
             String userId,
             AssetScope scope,
             String projectId,
-            Collection<String> folderIds
+            Collection<String> folderIds,
+            int retentionDays
     ) {
         List<String> normalized = folderIds == null ? List.of() : folderIds.stream().distinct().toList();
         if (normalized.isEmpty()) return;
@@ -1664,7 +1701,7 @@ public class LibraryRepository {
                         UPDATE asset.library_assets a
                         SET status = 'TRASHED',
                             deleted_at = now(),
-                            purge_after = now() + interval '7 days',
+                            purge_after = now() + make_interval(days => :retentionDays),
                             version = version + 1,
                             updated_at = now()
                         WHERE a.owner_user_id = :userId
@@ -1683,6 +1720,7 @@ public class LibraryRepository {
                 .param("scope", scope.name())
                 .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
                 .param("folderIds", normalized)
+                .param("retentionDays", retentionDays)
                 .update();
     }
 

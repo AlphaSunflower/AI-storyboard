@@ -27,6 +27,7 @@ final class AgentScopeTurnState {
     private final Set<String> startedMediaTypes = new LinkedHashSet<>();
     private boolean followUpVideoPlanned;
     private boolean storyboardRequested;
+    private Integer pendingStoryboardCommitCount;
     private ReferenceInputMode referenceInputMode = ReferenceInputMode.NONE;
     private final Map<String, Integer> preflightFailures = new HashMap<>();
 
@@ -59,6 +60,13 @@ final class AgentScopeTurnState {
         return List.copyOf(taskCards);
     }
 
+    synchronized boolean hasTaskIds() {
+        return taskCards.stream().anyMatch(card -> {
+            Object taskId = card.get("taskId");
+            return taskId != null && !String.valueOf(taskId).isBlank();
+        });
+    }
+
     synchronized boolean hasStartedMedia(String mediaType) {
         return mediaType != null && startedMediaTypes.contains(mediaType);
     }
@@ -69,6 +77,16 @@ final class AgentScopeTurnState {
 
     synchronized void markStoryboardRequested() {
         storyboardRequested = true;
+    }
+
+    synchronized void markStoryboardCommitPending(int existingSceneCount) {
+        pendingStoryboardCommitCount = Math.max(0, existingSceneCount);
+    }
+
+    synchronized Integer takePendingStoryboardCommitCount() {
+        Integer value = pendingStoryboardCommitCount;
+        pendingStoryboardCommitCount = null;
+        return value;
     }
 
     synchronized void markMediaStarted(String mediaType) {

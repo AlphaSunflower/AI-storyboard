@@ -66,6 +66,7 @@ class AgentTaskControllerTest {
                 "start_storyboard_production", "long-tool", "running",
                 "plot_diagnosis", 20, "", "", "", "message-1", 2L,
                 OffsetDateTime.now(), OffsetDateTime.now(), null,
-                List.of(), List.of(), List.of(), "", true, false, true);
+                List.of(), List.of(), List.of(), "",
+                "", "", "", null, true, false, true);
     }
 }

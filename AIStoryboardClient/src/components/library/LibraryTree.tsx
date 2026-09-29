@@ -180,7 +180,10 @@ export function LibraryTree({
   const renderNode = ({ nodeDatum }: { nodeDatum: RawNodeDatum }) => {
     const node = nodeDatum as LibraryTreeNodeDatum;
     const selected = Boolean(node.asset && selectedSet.has(node.asset.id));
-    const canExpand = node.kind === 'folder' || node.kind === 'system' || node.kind === 'project';
+    const canExpand = node.kind === 'folder'
+      || node.kind === 'system'
+      || node.kind === 'project'
+      || node.kind === 'group';
     return (
       <g>
         <foreignObject width={260} height={76} x={-130} y={-38}>

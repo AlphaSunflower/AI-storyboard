@@ -75,6 +75,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Component
@@ -404,6 +405,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             List<ConfirmResult> results = pendingToolCalls(checkpoint).stream()
                     .map(call -> new ConfirmResult(value.approved(), call))
                     .toList();
+            Set<String> approvedTools = value.approved()
+                    && AgentApprovalMode.PLAN_APPROVAL == AgentApprovalMode.from(
+                    conversation.getApprovalMode())
+                    ? pendingToolCalls(checkpoint).stream().map(ToolUseBlock::getName)
+                    .filter(name -> name != null && !name.isBlank())
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet())
+                    : Set.of();
             Msg resume = Msg.builder()
                     .name("user")
                     .role(MsgRole.USER)
@@ -411,7 +419,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, results))
                     .build();
             return stream(conversation, request, trace, List.of(resume),
-                    checkpoint.getId(), observer);
+                    checkpoint.getId(), observer, approvedTools);
         }
         return stream(conversation, request, trace,
                 List.of(resumeMessage(value)), checkpoint.getId(), observer);
@@ -442,7 +450,14 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
                                    AgentTraceAccumulator trace, List<Msg> messages,
                                    String checkpointId, Consumer<AgentEvent> observer) {
-        applyPermissionContext(conversation);
+        return stream(conversation, request, trace, messages, checkpointId, observer, Set.of());
+    }
+
+    private AgentTurnResult stream(AgentConversation conversation, OrchestrationRequest request,
+                                   AgentTraceAccumulator trace, List<Msg> messages,
+                                   String checkpointId, Consumer<AgentEvent> observer,
+                                   Set<String> preApprovedTools) {
+        applyPermissionContext(conversation, preApprovedTools);
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
@@ -454,6 +469,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 checkpointId, externalActions))
                 .build();
         StringBuilder finalText = new StringBuilder();
+        StringBuilder visibleText = new StringBuilder();
+        AgentTaskClaimGuard claimGuard = new AgentTaskClaimGuard();
         ToolCallStreamGuard textFilter = new ToolCallStreamGuard();
         String resultText = "";
         boolean paused = false;
@@ -492,7 +509,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         }
                         if (!visible.isEmpty()) {
                             finalText.append(visible);
-                            support.sendMessage(request, visible);
+                            String safe = claimGuard.accept(visible);
+                            if (!safe.isEmpty()) {
+                                visibleText.append(safe);
+                                support.sendMessage(request, safe);
+                            }
                         }
                     }
                 } else if (event instanceof AgentResultEvent result) {
@@ -505,7 +526,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             .findFirst()
                             .orElse(null);
                     if (human != null) {
-                        checkpoints.pauseForExternalInput(request, external.getReplyId(), human);
+                        Integer pendingStoryboardCommit =
+                                turnState.takePendingStoryboardCommitCount();
+                        if (pendingStoryboardCommit != null) {
+                            checkpoints.pauseForStoryboardCommit(
+                                    request,
+                                    external.getReplyId(),
+                                    human,
+                                    pendingStoryboardCommit);
+                        } else {
+                            checkpoints.pauseForExternalInput(request, external.getReplyId(), human);
+                        }
                     } else {
                         ToolUseBlock commit = external.getToolCalls().stream()
                                 .filter(call -> AgentScopeInteractionTools.CHOOSE_STORYBOARD_COMMIT
@@ -513,6 +544,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 .findFirst()
                                 .orElse(null);
                         if (commit != null) {
+                            turnState.takePendingStoryboardCommitCount();
                             Map<String, Object> input =
                                     commit.getInput() == null ? Map.of() : commit.getInput();
                             int existing = integer(input.get("existing_scene_count"), 0);
@@ -539,14 +571,55 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         String flushed = textFilter.finish();
         if (!flushed.isEmpty()) {
             finalText.append(flushed);
-            support.sendMessage(request, flushed);
+            String safe = claimGuard.accept(flushed);
+            if (!safe.isEmpty()) {
+                visibleText.append(safe);
+                support.sendMessage(request, safe);
+            }
         }
         if (loopAborted) {
             support.sendFriendlyError(request, "", "模型的这条回复陷入了重复调用，已中止。请重试或换个说法再问一次。");
             return turnResult(request, trace, "模型的这条回复陷入了重复调用，已中止。", paused);
         }
-        String modelText = finalText.isEmpty()
-                ? ToolCallStreamGuard.sanitizeComplete(resultText) : finalText.toString();
+        if (finalText.isEmpty() && resultText != null && !resultText.isBlank()) {
+            String complete = ToolCallStreamGuard.sanitizeComplete(resultText);
+            finalText.append(complete);
+            String safe = claimGuard.accept(complete);
+            if (!safe.isEmpty()) {
+                visibleText.append(safe);
+                support.sendMessage(request, safe);
+            }
+        }
+        if (!paused && claimGuard.hasClaim() && !turnState.hasTaskIds()) {
+            String correction = runTaskClaimCorrection(conversation, request, trace, runtime, turnState);
+            if (turnState.hasTaskIds()) {
+                String held = claimGuard.flushAll();
+                if (!held.isBlank()) {
+                    visibleText.append(held);
+                    support.sendMessage(request, held);
+                }
+                if (correction != null && !correction.isBlank()) {
+                    visibleText.append(correction);
+                    support.sendMessage(request, correction);
+                }
+            } else {
+                String failure = claimGuard.reject();
+                visibleText.append(failure);
+                support.sendMessage(request, failure);
+                if (request != null) {
+                    Map<String, Object> metadata = new LinkedHashMap<>(request.getTurnMetadata());
+                    metadata.put("taskContractViolation", true);
+                    request.setTurnMetadata(metadata);
+                }
+            }
+        } else {
+            String held = claimGuard.flushAll();
+            if (!held.isBlank()) {
+                visibleText.append(held);
+                support.sendMessage(request, held);
+            }
+        }
+        String modelText = visibleText.toString();
         String content = turnState.compose(modelText);
         List<Map<String, Object>> taskCards = turnState.taskCards();
         if (!taskCards.isEmpty() && request != null) {
@@ -557,18 +630,80 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         return turnResult(request, trace, content, paused);
     }
 
+    /**
+     * One bounded correction round for a model claiming an async task without
+     * producing a taskId. The correction text is not streamed until the task
+     * contract is verified.
+     */
+    private String runTaskClaimCorrection(AgentConversation conversation,
+                                          OrchestrationRequest request,
+                                          AgentTraceAccumulator trace,
+                                          RuntimeContext runtime,
+                                          AgentScopeTurnState turnState) {
+        String prompt = """
+                内部校验：你刚才声称任务已经提交或正在执行，但本轮没有创建任何后台任务。
+                如果任务确实尚未创建，请立即调用正确的异步工具；如果当前无法执行，
+                只回答“任务未创建，请重试。”，不得继续说已经提交或正在执行。
+                """;
+        Msg correction = UserMessage.builder().textContent(prompt).build();
+        StringBuilder output = new StringBuilder();
+        try {
+            for (AgentEvent event : agent.streamEvents(List.of(correction), runtime).toIterable()) {
+                support.checkInterrupted(request);
+                if (event instanceof ModelCallStartEvent) {
+                    trace.beginModelCall();
+                } else if (event instanceof ModelCallEndEvent modelEnd) {
+                    io.agentscope.core.model.ChatUsage usage = modelEnd.getUsage();
+                    if (usage != null) {
+                        trace.recordUsage(
+                                usage.getInputTokens(),
+                                usage.getOutputTokens(),
+                                usage.getCachedTokens());
+                    }
+                } else if (event instanceof TextBlockDeltaEvent delta) {
+                    String chunk = delta.getDelta();
+                    if (chunk != null && !chunk.isEmpty()) output.append(chunk);
+                } else if (event instanceof AgentResultEvent result
+                        && output.isEmpty() && result.getResult() != null) {
+                    output.append(result.getResult().getTextContent());
+                } else if (event instanceof RequireExternalExecutionEvent
+                        || event instanceof RequireUserConfirmEvent) {
+                    break;
+                }
+            }
+        } catch (Exception exception) {
+            log.warn("[AgentScope] task contract correction failed conversationId={}: {}",
+                    conversation.getId(), exception.getMessage());
+        }
+        return output.toString().trim();
+    }
+
     void applyPermissionContext(AgentConversation conversation) {
+        applyPermissionContext(conversation, Set.of());
+    }
+
+    void applyPermissionContext(AgentConversation conversation, Set<String> preApprovedTools) {
         if (agent == null || conversation == null) return;
         AgentApprovalMode mode = AgentApprovalMode.from(conversation.getApprovalMode());
         agent.getDelegate().replacePermissionContext(
-                conversation.getUserId(), conversation.getId(), permissionContext(mode));
+                conversation.getUserId(), conversation.getId(),
+                permissionContext(mode, preApprovedTools));
     }
 
     static PermissionContextState permissionContext(AgentApprovalMode mode) {
+        return permissionContext(mode, Set.of());
+    }
+
+    static PermissionContextState permissionContext(AgentApprovalMode mode,
+                                                    Set<String> preApprovedTools) {
         AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
+        Set<String> approved = preApprovedTools == null ? Set.of() : preApprovedTools;
         PermissionContextState.Builder permissions = PermissionContextState.builder()
                 .mode(effective == AgentApprovalMode.FULL_ACCESS
                         ? PermissionMode.BYPASS : PermissionMode.DEFAULT);
+        if (effective == AgentApprovalMode.FULL_ACCESS) {
+            return permissions.build();
+        }
         for (String tool : List.of(
                 "list_session_assets",
                 "resolve_reference_assets",
@@ -589,6 +724,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             permissions.addAllowRule(tool, new PermissionRule(
                     tool, null, PermissionBehavior.ALLOW, "MoonAgentReadOnlyPolicy"));
         }
+        // 编排入口与交互工具直接放行：启动剧情/分镜本身不是高风险操作，
+        // 真正的破坏性动作由「追加/覆盖/删除」提交方式选择卡片单独确认；
+        // request_human_input 的作用就是询问用户，不应再叠加一次权限确认。
+        for (String tool : List.of(
+                "start_storyboard_production",
+                "choose_storyboard_commit_mode",
+                "request_human_input")) {
+            permissions.addAllowRule(tool, new PermissionRule(
+                    tool, null, PermissionBehavior.ALLOW, "MoonAgentAutoApprovePolicy"));
+        }
         for (String tool : List.of(
                 "generate_image",
                 "generate_image_batch",
@@ -596,8 +741,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "generate_video",
                 "generate_storyboard_image",
                 "generate_storyboard_video",
+                "generate_storyboard_videos",
                 "generate_storyboard_images",
-                "start_storyboard_production",
                 "update_project_storyboard_shot",
                 "delete_storyboard_draft_shot",
                 "delete_project_storyboard_shot",
@@ -607,8 +752,15 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_execute_node",
                 "canvas_execute_graph",
                 "canvas_cancel_execution")) {
-            permissions.addAskRule(tool, new PermissionRule(
-                    tool, null, PermissionBehavior.ASK, "MoonAgentHighRiskPolicy"));
+            boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
+                    && approved.contains(tool);
+            if (autoApproved) {
+                permissions.addAllowRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ALLOW, "MoonAgentApprovedPlanPolicy"));
+            } else {
+                permissions.addAskRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ASK, "MoonAgentHighRiskPolicy"));
+            }
         }
         return permissions.build();
     }

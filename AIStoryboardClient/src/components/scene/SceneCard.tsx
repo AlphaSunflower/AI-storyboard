@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, type ReactNode } from 'react';
+import { useState, useRef, type ReactNode } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Pencil, Trash2 } from 'lucide-react';
@@ -82,14 +82,6 @@ export function SceneCard({
 
   // 卡片根节点 ref（删除收起动画用）
   const cardRef = useRef<HTMLDivElement>(null);
-  // 提示词折叠区 ref（A4 展开/收起高度动画用）
-  const promptPanelRef = useRef<HTMLDivElement>(null);
-
-  const [expanded, setExpanded] = useState(false);
-  const [promptTab, setPromptTab] = useState<'script' | 'image' | 'video'>('script');
-  const [imagePrompt, setImagePrompt] = useState(scene.imagePrompt || '');
-  const [videoPrompt, setVideoPrompt] = useState(scene.videoPrompt || '');
-  const [scriptContent, setScriptContent] = useState(scene.scriptContent || '');
   const [isRenaming, setIsRenaming] = useState(false);
   const [sceneLabel, setSceneLabel] = useState(`分镜 ${scene.sceneNumber}`);
   const unreadScenes = useProjectStore((s) => s.unreadScenes);
@@ -127,19 +119,6 @@ export function SceneCard({
     }
   }, { dependencies: [isUnread], scope: cardRef });
 
-  // 提示词修改即存（无本地保存按钮——失焦保存语义）
-  const handlePromptBlur = async (field: 'scriptContent' | 'imagePrompt' | 'videoPrompt') => {
-    const value = (field === 'scriptContent' ? scriptContent : field === 'imagePrompt' ? imagePrompt : videoPrompt).trim();
-    const original = (field === 'scriptContent' ? scene.scriptContent : field === 'imagePrompt' ? scene.imagePrompt : scene.videoPrompt) || '';
-    if (value === original) return;
-    try {
-      await sceneApi.update(scene.id, { [field]: value });
-      updateSceneInStore(scene.id, { [field]: value });
-    } catch {
-      // 保存失败保持原值（下次编辑重新触发）
-    }
-  };
-
   const handleDelete = async () => {
     const el = cardRef.current;
     if (el) {
@@ -162,11 +141,6 @@ export function SceneCard({
     }
   };
 
-  const handleToggleExpand = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpanded(!expanded);
-  };
-
   // A3: 选中弹性脉冲（仅选中瞬间播放一次轻微放大回弹）
   useGSAP(() => {
     if (!isSelected || !cardRef.current) return;
@@ -184,39 +158,6 @@ export function SceneCard({
       }
     );
   }, { dependencies: [isSelected], scope: cardRef });
-
-  // A4: 提示词折叠区展开/收起高度动画
-  useLayoutEffect(() => {
-    const panel = promptPanelRef.current;
-    if (!panel) return;
-    const ctx = gsap.context(() => {
-      if (expanded) {
-        gsap.set(panel, { height: 'auto', opacity: 1, visibility: 'visible' });
-        const target = panel.offsetHeight;
-        gsap.fromTo(
-          panel,
-          { height: 0, opacity: 0 },
-          {
-            height: target,
-            opacity: 1,
-            duration: 0.3,
-            ease: 'power2.out',
-            onComplete: () => {
-              gsap.set(panel, { height: 'auto' });
-            },
-          }
-        );
-      } else {
-        gsap.to(panel, {
-          height: 0,
-          opacity: 0,
-          duration: 0.25,
-          ease: 'power2.in',
-        });
-      }
-    }, panel);
-    return () => ctx.revert();
-  }, [expanded]);
 
   const handleSaveRename = async () => {
     const trimmed = sceneLabel.trim();
@@ -392,96 +333,6 @@ export function SceneCard({
         </div>
       )}
 
-      {/* Expand/collapse toggle */}
-      <button
-        onClick={handleToggleExpand}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          fontSize: 11,
-          color: 'var(--color-primary)',
-          padding: 0,
-          marginBottom: expanded ? 8 : 0,
-        }}
-      >
-        {expanded ? '▲ 收起编辑' : '▼ 编辑描述/提示词'}
-      </button>
-
-      {/* Prompt editor (collapsible) — 常驻 DOM，高度由 gsap 动画控制 */}
-      <div
-        ref={promptPanelRef}
-        style={{
-          overflow: 'hidden',
-          height: 0,
-          visibility: 'hidden',
-          marginBottom: 0,
-        }}
-      >
-        <div style={{ marginBottom: 8 }}>
-          {/* 三个子按钮：注释 / 生成提示词 / 视频提示词，一次只显示一个输入框，避免展开臃肿 */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-            {([
-              { k: 'script' as const, label: '注释' },
-              { k: 'image' as const, label: '生成提示词' },
-              { k: 'video' as const, label: '视频提示词' },
-            ]).map((t) => (
-              <button
-                key={t.k}
-                onClick={(e) => { e.stopPropagation(); setPromptTab(t.k); }}
-                style={{
-                  flex: 1, padding: '5px 6px', fontSize: 11, borderRadius: 'var(--rounded-sm)',
-                  border: promptTab === t.k ? '1px solid var(--color-primary)' : '1px solid var(--color-hairline)',
-                  background: promptTab === t.k ? 'var(--color-primary)' : 'white',
-                  color: promptTab === t.k ? 'white' : 'var(--color-muted)', cursor: 'pointer', fontWeight: 500,
-                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={(e) => { if (promptTab !== t.k) e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = promptTab === t.k ? 'var(--color-primary)' : 'var(--color-hairline)'; }}
-              >{t.label}</button>
-            ))}
-          </div>
-          {promptTab === 'script' && (<>
-            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>注释(跟生图/生视频无关)</label>
-            <textarea
-              value={scriptContent}
-              onChange={(e) => setScriptContent(e.target.value)}
-              onBlur={(e) => { handlePromptBlur('scriptContent'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
-              onClick={(e) => e.stopPropagation()}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-              placeholder="输入分镜描述..."
-              rows={3}
-              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
-            />
-          </>)}
-          {promptTab === 'image' && (<>
-            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>生图提示词</label>
-            <textarea
-              value={imagePrompt}
-              onChange={(e) => setImagePrompt(e.target.value)}
-              onBlur={(e) => { handlePromptBlur('imagePrompt'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
-              onClick={(e) => e.stopPropagation()}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-              placeholder="输入生图提示词..."
-              rows={3}
-              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
-            />
-          </>)}
-          {promptTab === 'video' && (<>
-            <label style={{ fontSize: 10, color: 'var(--color-muted)', display: 'block', marginBottom: 2 }}>生视频提示词</label>
-            <textarea
-              value={videoPrompt}
-              onChange={(e) => setVideoPrompt(e.target.value)}
-              onBlur={(e) => { handlePromptBlur('videoPrompt'); e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
-              onClick={(e) => e.stopPropagation()}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-              placeholder="输入生视频提示词..."
-              rows={3}
-              style={{ width: '100%', fontSize: 11, padding: '6px 8px', borderRadius: 'var(--rounded-sm)', border: '1px solid var(--color-hairline)', resize: 'vertical', marginBottom: 8, boxSizing: 'border-box', fontFamily: 'inherit' }}
-            />
-          </>)}
-        </div>
-      </div>
     </div>
     </ContextMenu>
   );
