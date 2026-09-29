@@ -158,6 +158,57 @@ public class StructuredDecisionService {
                         "EXECUTE", Map.of(), "", 0.0, List.of("fallback")));
     }
 
+    public AgentScopeStructuredModels.WorkflowDecision resolveWorkflow(
+            String userPrompt, String capabilityCatalog) {
+        ObjectNode schema = objectSchema();
+        ObjectNode props = schema.putObject("properties");
+        props.putObject("mode").put("type", "string")
+                .putArray("enum")
+                .add("AUTO_SKILL")
+                .add("USER_DEFINED_WORKFLOW")
+                .add("HYBRID");
+        props.putObject("serial").put("type", "boolean");
+        props.putObject("noSkip").put("type", "boolean");
+        props.putObject("requireMarkers").put("type", "boolean");
+        props.putObject("exactCounts").put("type", "array")
+                .putObject("items").put("type", "integer");
+        ObjectNode steps = props.putObject("steps");
+        steps.put("type", "array");
+        ObjectNode step = steps.putObject("items");
+        step.put("type", "object");
+        step.put("additionalProperties", false);
+        ObjectNode stepProps = step.putObject("properties");
+        stepProps.putObject("key").put("type", "string");
+        stepProps.putObject("title").put("type", "string");
+        stepProps.putObject("toolName").put("type", "string");
+        stepProps.putObject("dependsOn").put("type", "array")
+                .putObject("items").put("type", "string");
+        stepProps.putObject("repeatCount").put("type", "integer");
+        stepProps.putObject("marker").put("type", "string");
+        required(step, "key", "title", "toolName", "dependsOn", "repeatCount", "marker");
+        props.putObject("confidence").put("type", "number");
+        props.putObject("rationale").put("type", "string");
+        required(schema, "mode", "serial", "noSkip", "requireMarkers",
+                "exactCounts", "steps", "confidence", "rationale");
+        JsonNode result = structuredCall("""
+                Decide whether the user requested a custom multi-step workflow.
+                Use AUTO_SKILL for a normal single goal.
+                Use USER_DEFINED_WORKFLOW when the user explicitly defines ordered stages,
+                serial execution, no-skips, stage markers, or step dependencies.
+                Use HYBRID when only part of the process is defined.
+                Compile the user's process into executable steps without inventing extra user stages.
+                Choose toolName only from the capability catalog.
+                Preserve exact counts, ordering, markers, and dependencies.
+                user prompt:
+                %s
+                capability catalog:
+                %s
+                """.formatted(userPrompt, capabilityCatalog), schema);
+        return convert(result, AgentScopeStructuredModels.WorkflowDecision.class,
+                new AgentScopeStructuredModels.WorkflowDecision(
+                        "", false, false, false, List.of(), List.of(), 0.0, "fallback"));
+    }
+
     public AgentScopeStructuredModels.SubagentResult parseSubagentResult(String response) {
         if (response == null || response.isBlank()) {
             return new AgentScopeStructuredModels.SubagentResult("", List.of(), List.of());

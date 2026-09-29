@@ -23,6 +23,8 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeImageTools imageTools;
     private final AgentScopeVideoTools videoTools;
     private final AgentScopeStoryboardTools storyboardTools;
+    private final AgentScopeWorkflowTools workflowTools;
+    private final AgentScopeVideoMergeTools videoMergeTools;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
 
@@ -33,6 +35,8 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeImageTools imageTools,
                                     AgentScopeVideoTools videoTools,
                                     AgentScopeStoryboardTools storyboardTools,
+                                    AgentScopeWorkflowTools workflowTools,
+                                    AgentScopeVideoMergeTools videoMergeTools,
                                     AgentScopeToolPipeline toolPipeline,
                                     SkillExpander skillExpander) {
         this.sessionTools = sessionTools;
@@ -42,6 +46,8 @@ public class AgentScopeToolkitFactory {
         this.imageTools = imageTools;
         this.videoTools = videoTools;
         this.storyboardTools = storyboardTools;
+        this.workflowTools = workflowTools;
+        this.videoMergeTools = videoMergeTools;
         this.toolPipeline = toolPipeline;
         this.skillExpander = skillExpander;
     }
@@ -56,6 +62,8 @@ public class AgentScopeToolkitFactory {
         register(toolkit, assetGroupTools.tool());
         register(toolkit, interactionTools.storyboardCommitTool());
         register(toolkit, interactionTools.tool());
+        register(toolkit, workflowTools.tool());
+        register(toolkit, videoMergeTools.tool());
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
         ToolCallback[] canvasCallbacks = skillExpander.toolCallbacksByPrefix("canvas_");
         if (canvasCallbacks == null) canvasCallbacks = new ToolCallback[0];

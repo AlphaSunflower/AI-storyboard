@@ -118,6 +118,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final GlobalPromptRepository globalPromptRepository;
     private final NacosMcpMetadataRepository mcpMetadataRepository;
     private final FileStorageService fileStorageService;
+    private final com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService workflowService;
 
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
@@ -163,7 +164,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .enablePendingToolRecovery(true)
                     .permissionContext(permissionContext(AgentApprovalMode.PLAN_APPROVAL))
                     .middlewares(List.of(
-                            new TurnContextMiddleware(),
+                            new TurnContextMiddleware(workflowService),
                             new MediaProgressMiddleware(),
                             new ToolCallContentMiddleware(),
                             new AgentTraceBridgeMiddleware()))

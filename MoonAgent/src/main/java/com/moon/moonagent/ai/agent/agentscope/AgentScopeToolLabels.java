@@ -28,6 +28,7 @@ final class AgentScopeToolLabels {
             case AgentScopeStoryboardTools.DELETE_PROJECT_STORYBOARD_SHOT -> "删除项目分镜";
             case AgentScopeStoryboardTools.CLEAR_PROJECT_STORYBOARD -> "清空项目分镜";
             case AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES -> "批量生成分镜图片";
+            case AgentScopeVideoMergeTools.MERGE_STORYBOARD_VIDEOS -> "合并完整分镜视频";
             case AgentScopeSessionTools.LIST_SESSION_ASSETS -> "查询会话素材";
             case AgentScopeSessionTools.RESOLVE_REFERENCE_ASSETS -> "查找参考素材";
             case AgentScopeSessionTools.GET_TASK_STATUS -> "查询生成任务状态";

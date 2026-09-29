@@ -12,7 +12,7 @@ import java.util.Set;
  * deterministic prefaces and media artifacts are recorded here so message_end
  * persists the same content the SSE stream displayed.
  */
-final class AgentScopeTurnState {
+public final class AgentScopeTurnState {
 
     enum ReferenceInputMode {
         NONE,
@@ -43,7 +43,7 @@ final class AgentScopeTurnState {
         segments.add("![" + (alt == null || alt.isBlank() ? "生成图片" : alt) + "](" + url + ")");
     }
 
-    synchronized void addText(String text) {
+    public synchronized void addText(String text) {
         if (text == null || text.isBlank()) return;
         segments.add(text.trim());
     }

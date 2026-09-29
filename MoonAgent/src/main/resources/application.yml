@@ -78,6 +78,11 @@ ai:
       model-mode: ${STORYBOARD_PRODUCTION_V2_MODEL_MODE:live}
       fast-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_FAST_TIMEOUT:120}
       repair-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_REPAIR_TIMEOUT:90}
+  video:
+    merge:
+      ffmpeg-path: ${VIDEO_MERGE_FFMPEG_PATH:ffmpeg}
+      ffprobe-path: ${VIDEO_MERGE_FFPROBE_PATH:ffprobe}
+      timeout-seconds: ${VIDEO_MERGE_TIMEOUT_SECONDS:600}
   storyboard-internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}   # 主后端地址：参考素材(/api/files/**) 本地缺失时经此拉取
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}

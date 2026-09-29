@@ -9,6 +9,7 @@ import com.moon.moonagent.ai.agent.audit.ToolInvocationContext;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationLedger;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationScope;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationScopeHolder;
+import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentToolInvocation;
 import io.agentscope.core.message.ToolResultBlock;
@@ -67,12 +68,15 @@ public class AgentScopeToolPipeline {
                     new ToolPolicy("STORYBOARD_DELETE", "storyboard-project-clear", false, false)),
             Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES,
                     new ToolPolicy("MEDIA_IMAGE_BATCH", "storyboard-image-batch", false, false)),
+            Map.entry(AgentScopeVideoMergeTools.MERGE_STORYBOARD_VIDEOS,
+                    new ToolPolicy("MEDIA_VIDEO", "storyboard-video-merge", false, false)),
             Map.entry("refineImage",
                     new ToolPolicy("MEDIA_IMAGE", "", false, false)));
 
     private final ToolInvocationLedger ledger;
     private final ToolExecutionTemplate executionTemplate;
     private final MediaToolPreflightService preflight;
+    private final AgentWorkflowService workflows;
 
     public AgentScopeTool wrap(AgentScopeTool tool) {
         AgentScopeTool original = tool;
@@ -92,15 +96,20 @@ public class AgentScopeToolPipeline {
         try (ToolInvocationScopeHolder.Scope ignored =
                      ToolInvocationScopeHolder.open(new ToolInvocationScope(
                              record, context, OffsetDateTime.now()))) {
+            workflows.beforeTool(context.getConversationId(), tool.getName(), input, tool.isReadOnly());
             Supplier<Map<String, Object>> invocation = () -> asMap(tool.invoke(input, param));
             Supplier<Map<String, Object>> guarded = preflightFor(tool).contains("preflight")
                     ? () -> preflight.guard(tool.getName(), input, param,
                     effective -> externalAction(tool, context, effective, param, invocation))
                     : () -> externalAction(tool, context, input, param, invocation);
             Map<String, Object> output = guarded.get();
+            workflows.afterTool(context.getConversationId(), tool.getName(), output, null,
+                    context(param) == null ? null : context(param).turnState());
             finish(record, context, input, output, null, started);
             return output;
         } catch (RuntimeException e) {
+            workflows.afterTool(context.getConversationId(), tool.getName(), null, e,
+                    context(param) == null ? null : context(param).turnState());
             finish(record, context, input, null, e, started);
             throw e;
         }

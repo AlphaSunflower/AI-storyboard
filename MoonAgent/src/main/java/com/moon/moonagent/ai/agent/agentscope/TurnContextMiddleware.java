@@ -1,15 +1,20 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.middleware.MiddlewareBase;
 import reactor.core.publisher.Mono;
+import lombok.RequiredArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@RequiredArgsConstructor
 final class TurnContextMiddleware implements MiddlewareBase {
+
+    private final AgentWorkflowService workflows;
 
     @Override
     public Mono<String> onSystemPrompt(Agent agent, RuntimeContext context, String prompt) {
@@ -45,6 +50,10 @@ final class TurnContextMiddleware implements MiddlewareBase {
         }
         if (request.getReferenceVideos() != null && !request.getReferenceVideos().isEmpty()) {
             lines.add("Current turn reference video URLs: " + request.getReferenceVideos());
+        }
+        if (runContext.conversation() != null) {
+            String workflow = workflows.activeContext(runContext.conversation().getId());
+            if (!workflow.isBlank()) lines.add(workflow);
         }
         if (lines.isEmpty()) return Mono.just(prompt);
         return Mono.just((prompt == null ? "" : prompt)

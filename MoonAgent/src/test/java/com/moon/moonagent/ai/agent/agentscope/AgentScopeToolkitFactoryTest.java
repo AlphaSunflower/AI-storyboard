@@ -33,6 +33,8 @@ class AgentScopeToolkitFactoryTest {
         AgentScopeImageTools images = mock(AgentScopeImageTools.class);
         AgentScopeVideoTools videos = mock(AgentScopeVideoTools.class);
         AgentScopeStoryboardTools storyboards = mock(AgentScopeStoryboardTools.class);
+        AgentScopeWorkflowTools workflows = mock(AgentScopeWorkflowTools.class);
+        AgentScopeVideoMergeTools videoMerge = mock(AgentScopeVideoMergeTools.class);
         AgentScopeToolPipeline pipeline = mock(AgentScopeToolPipeline.class);
         SkillExpander expander = mock(SkillExpander.class);
         when(session.tools()).thenReturn(List.of());
@@ -43,13 +45,15 @@ class AgentScopeToolkitFactoryTest {
         when(images.batchTool()).thenReturn(tool("generate_image_batch"));
         when(videos.tool()).thenReturn(tool("generate_video"));
         when(storyboards.tools()).thenReturn(List.of());
+        when(workflows.tool()).thenReturn(tool("resolve_agent_workflow"));
+        when(videoMerge.tool()).thenReturn(tool("merge_storyboard_videos"));
         when(pipeline.wrap(any(AgentScopeTool.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(expander.toolCallbacks(anyList())).thenReturn(new ToolCallback[0]);
 
         return new AgentScopeToolkitFactory(
                 session, interaction, structured, assetGroups, images, videos,
-                storyboards, pipeline, expander);
+                storyboards, workflows, videoMerge, pipeline, expander);
     }
 
     private static AgentScopeTool tool(String name) {
