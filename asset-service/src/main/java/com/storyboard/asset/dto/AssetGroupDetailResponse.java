@@ -1,6 +1,7 @@
 package com.storyboard.asset.dto;
 
 import com.storyboard.asset.client.AssetContracts.MediaRef;
+import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.TagRef;
 
 import java.util.List;
@@ -14,6 +15,7 @@ public record AssetGroupDetailResponse(
 ) {
     public record AssetGroupMediaItem(
             MediaRef media,
+            AssetSummary asset,
             String assetId,
             String assetName,
             String assetDescription,

@@ -128,12 +128,23 @@ public final class AssetContracts {
 
     public record AssetGroupMediaItem(
             MediaRef media,
+            AssetSummary asset,
             String assetId,
             String assetName,
             String assetDescription,
             long assetVersion,
             List<TagRef> assetTags
     ) {
+        public AssetGroupMediaItem(
+                MediaRef media,
+                String assetId,
+                String assetName,
+                String assetDescription,
+                long assetVersion,
+                List<TagRef> assetTags
+        ) {
+            this(media, null, assetId, assetName, assetDescription, assetVersion, assetTags);
+        }
     }
 
     public record CreateAssetRequest(

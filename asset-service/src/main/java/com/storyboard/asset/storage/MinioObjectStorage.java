@@ -2,6 +2,7 @@ package com.storyboard.asset.storage;
 
 import com.storyboard.asset.config.StorageProperties;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -44,6 +45,7 @@ public class MinioObjectStorage implements ObjectStorage {
     private S3Client client;
     private S3Presigner presigner;
 
+    @Autowired
     public MinioObjectStorage(StorageProperties properties) {
         this(properties, null);
     }
