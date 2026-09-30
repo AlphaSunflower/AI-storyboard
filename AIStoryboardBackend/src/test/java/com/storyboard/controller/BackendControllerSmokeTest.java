@@ -6,6 +6,7 @@ import com.storyboard.ai.ScriptGenerationService;
 import com.storyboard.ai.VideoGenerationService;
 import com.storyboard.security.AiAccessGuard;
 import com.storyboard.security.AuthSessionService;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.config.SecurityConfig;
 import com.storyboard.dto.response.AssetImageVO;
@@ -100,6 +101,8 @@ class BackendControllerSmokeTest {
     private AssetService assetService;
     @MockitoBean
     private FileStorageService fileStorageService;
+    @MockitoBean
+    private FileUrlSigner fileUrlSigner;
     @MockitoBean
     private InternalApiService internalApiService;
     @MockitoBean

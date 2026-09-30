@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.crypto.SecretKey;
@@ -36,6 +37,16 @@ class JwtAuthenticationFilterTest {
         @GetMapping("/api/library/media/{id}/content")
         String mediaContent() {
             return "media";
+        }
+
+        @GetMapping("/api/files/images/{filename}")
+        String signedFileContent() {
+            return "file";
+        }
+
+        @PostMapping("/api/files/upload")
+        String upload() {
+            return "upload";
         }
 
         @GetMapping("/echo")
@@ -72,6 +83,19 @@ class JwtAuthenticationFilterTest {
     void signedMediaPaths_passThroughWithoutBearerToken() throws Exception {
         mockMvc.perform(get("/api/library/media/m1/content").queryParam("token", "signed"))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void signedFileGet_passesThroughWithoutBearerToken() throws Exception {
+        mockMvc.perform(get("/api/files/images/a.png").queryParam("token", "signed"))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    void fileUpload_stillRequiresBearerToken() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/files/upload"))
+            .andExpect(status().isUnauthorized());
     }
 
     @Test

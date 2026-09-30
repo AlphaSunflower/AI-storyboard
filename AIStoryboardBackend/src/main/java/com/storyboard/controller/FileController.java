@@ -1,8 +1,11 @@
 package com.storyboard.controller;
 
 import com.storyboard.common.ApiResponse;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.FileStorageService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -18,6 +21,10 @@ import java.util.Map;
 public class FileController {
 
     private final FileStorageService fileStorageService;
+    private final FileUrlSigner fileUrlSigner;
+
+    @Value("${files.allow-unsigned-legacy:false}")
+    private boolean allowUnsignedLegacy;
 
     /**
      /** 上传图片，返回可访问路径。校验（扩展名白名单+content-type）收敛在 FileStorageService.saveUploadedImage。 */
@@ -29,23 +36,40 @@ public class FileController {
      }
 
     @GetMapping("/images/{filename}")
-    public ResponseEntity<Resource> getImage(@PathVariable String filename) {
+    public ResponseEntity<Resource> getImage(@PathVariable String filename,
+                                             @RequestParam(required = false) String token,
+                                             HttpServletRequest request) {
+        verify(request, token);
         return serve(fileStorageService.readImage(filename), filename);
     }
 
     @GetMapping("/videos/{filename}")
-    public ResponseEntity<Resource> getVideo(@PathVariable String filename) {
+    public ResponseEntity<Resource> getVideo(@PathVariable String filename,
+                                             @RequestParam(required = false) String token,
+                                             HttpServletRequest request) {
+        verify(request, token);
         return serve(fileStorageService.readVideo(filename), filename);
     }
 
     @GetMapping("/audios/{filename}")
-    public ResponseEntity<Resource> getAudio(@PathVariable String filename) {
+    public ResponseEntity<Resource> getAudio(@PathVariable String filename,
+                                             @RequestParam(required = false) String token,
+                                             HttpServletRequest request) {
+        verify(request, token);
         return serve(fileStorageService.readAudio(filename), filename);
     }
 
     @GetMapping("/files/{filename}")
-    public ResponseEntity<Resource> getFile(@PathVariable String filename) {
+    public ResponseEntity<Resource> getFile(@PathVariable String filename,
+                                            @RequestParam(required = false) String token,
+                                            HttpServletRequest request) {
+        verify(request, token);
         return serve(fileStorageService.readFile(filename), filename);
+    }
+
+    private void verify(HttpServletRequest request, String token) {
+        if (allowUnsignedLegacy && (token == null || token.isBlank())) return;
+        fileUrlSigner.verifyPath(request.getRequestURI(), token);
     }
 
     /** 对象不存在返回 404；存在则以推断的 Content-Type 返回对象字节。 */

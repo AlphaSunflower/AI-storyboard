@@ -30,15 +30,11 @@ public class AuthController {
 
     @Value("${auth.cookie.secure:true}")
     private boolean secureCookie;
-    @Value("${jwt.access-token-ttl:7200}")
-    private long accessTokenTtlSeconds;
-
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request,
                                             HttpServletResponse response) {
         AuthResult result = authService.login(request);
         writeRefreshCookie(response, result.refreshToken());
-        writeMediaCookie(response, result.response().accessToken());
         return ApiResponse.ok(result.response());
     }
 
@@ -47,7 +43,6 @@ public class AuthController {
                                                HttpServletResponse response) {
         AuthResult result = authService.register(request);
         writeRefreshCookie(response, result.refreshToken());
-        writeMediaCookie(response, result.response().accessToken());
         return ApiResponse.ok(result.response());
     }
 
@@ -62,7 +57,6 @@ public class AuthController {
         }
         AuthResult result = authService.refresh(refreshToken);
         writeRefreshCookie(response, result.refreshToken());
-        writeMediaCookie(response, result.response().accessToken());
         return ApiResponse.ok(result.response());
     }
 
@@ -72,7 +66,6 @@ public class AuthController {
             @CookieValue(value = "refresh_token", required = false) String refreshToken,
             HttpServletResponse response) {
         expireRefreshCookie(response);
-        expireMediaCookie(response);
         return authService.handleUnlogin(req, refreshToken);
     }
 
@@ -109,25 +102,4 @@ public class AuthController {
         response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 
-    private void writeMediaCookie(HttpServletResponse response, String token) {
-        ResponseCookie cookie = ResponseCookie.from("media_token", token)
-                .httpOnly(true)
-                .secure(secureCookie)
-                .sameSite("Lax")
-                .path("/api/files")
-                .maxAge(Duration.ofSeconds(Math.max(60, accessTokenTtlSeconds)))
-                .build();
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-    }
-
-    private void expireMediaCookie(HttpServletResponse response) {
-        ResponseCookie cookie = ResponseCookie.from("media_token", "")
-                .httpOnly(true)
-                .secure(secureCookie)
-                .sameSite("Lax")
-                .path("/api/files")
-                .maxAge(Duration.ZERO)
-                .build();
-        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-    }
 }

@@ -120,13 +120,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     if (!getJobToken()) {
       void bootstrapJobAuth().then((token) => {
-        if (!cancelled && token) setAuthed(true);
+        if (token) setAuthed(true);
       });
     }
-    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {

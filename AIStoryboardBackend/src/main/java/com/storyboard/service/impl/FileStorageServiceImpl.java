@@ -2,6 +2,7 @@ package com.storyboard.service.impl;
 
 import com.storyboard.ai.AiConfigProperties;
 import com.storyboard.common.BusinessException;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.storage.MinioStorage;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     private final AiConfigProperties config;
     private final MinioStorage minioStorage;
+    private final FileUrlSigner fileUrlSigner;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -61,7 +63,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         String filename = UUID.randomUUID() + ".png";
         minioStorage.put(minioStorage.key("images", filename), bytes, "image/png");
         log.debug("Saved base64 image to MinIO: {}", filename);
-        return config.getImageUrlPrefix() + filename;
+        return fileUrlSigner.signPath(config.getImageUrlPrefix() + filename);
     }
 
     @Override
@@ -117,7 +119,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key(targetType, filename), bytes, contentType(filename));
             log.debug("Saved reference {} to MinIO: {}", t, filename);
-            return urlPrefix + filename;
+            return fileUrlSigner.signPath(urlPrefix + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "保存参考素材失败: " + e.getMessage(), e);
         }
@@ -144,7 +146,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key("images", filename), bytes, contentType(filename));
             log.debug("Saved uploaded image to MinIO: {}", filename);
-            return config.getImageUrlPrefix() + filename;
+            return fileUrlSigner.signPath(config.getImageUrlPrefix() + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "保存上传图片失败: " + e.getMessage(), e);
         }
@@ -167,7 +169,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         byte[] bytes = Base64.getDecoder().decode(clean);
         String filename = UUID.randomUUID() + ".mp4";
         minioStorage.put(minioStorage.key("videos", filename), bytes, "video/mp4");
-        return config.getVideoUrlPrefix() + filename;
+        return fileUrlSigner.signPath(config.getVideoUrlPrefix() + filename);
     }
 
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
@@ -190,7 +192,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key(type, filename), bytes, contentType(filename));
             log.debug("Downloaded and saved to MinIO: {} -> {}/{}", sourceUrl, type, filename);
-            return urlPrefix + filename;
+            return fileUrlSigner.signPath(urlPrefix + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "Failed to download file from " + sourceUrl + ": " + e.getMessage(), e);
         } catch (InterruptedException e) {

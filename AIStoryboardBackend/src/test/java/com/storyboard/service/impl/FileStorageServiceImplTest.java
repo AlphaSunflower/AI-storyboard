@@ -1,6 +1,7 @@
 package com.storyboard.service.impl;
 
 import com.storyboard.ai.AiConfigProperties;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.storage.MinioStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,8 @@ class FileStorageServiceImplTest {
 
     private final FileStorageServiceImpl service = new FileStorageServiceImpl(
             new AiConfigProperties(new AiConfigProperties.Gateway()),
-            Mockito.mock(MinioStorage.class));
+            Mockito.mock(MinioStorage.class),
+            new FileUrlSigner("test-file-signing-secret", 900));
     private final List<String> createdUrls = new ArrayList<>();
 
     @AfterEach
@@ -31,7 +33,8 @@ class FileStorageServiceImplTest {
         // 测试真实写文件到 uploads/images/（IMAGES_DIR 为相对路径常量），跑完即删防堆积
         for (String url : createdUrls) {
             try {
-                Path p = Paths.get("uploads/images", url.substring(url.lastIndexOf('/') + 1));
+                String filename = url.substring(url.lastIndexOf('/') + 1).split("\\?", 2)[0];
+                Path p = Paths.get("uploads/images", filename);
                 Files.deleteIfExists(p);
             } catch (Exception ignored) {
             }
@@ -50,7 +53,7 @@ class FileStorageServiceImplTest {
         String url = save(f);
         assertNotNull(url);
         assertTrue(url.startsWith("/api/files/images/"), "URL 前缀必须是 /api/files/images/");
-        assertTrue(url.endsWith(".png"), "png 后缀保留");
+        assertTrue(url.contains(".png?token="), "png 后缀保留并附带对象签名");
     }
 
     @Test
@@ -78,13 +81,13 @@ class FileStorageServiceImplTest {
         // image/* content-type 合法但扩展名 .jsp 非法 → 回退 .png（防御异常扩展名）
         MockMultipartFile f = new MockMultipartFile("file", "a.jsp", "image/png", new byte[]{1});
         String url = save(f);
-        assertTrue(url.endsWith(".png"), "非法扩展名必须回退 png，实际: " + url);
+        assertTrue(url.contains(".png?token="), "非法扩展名必须回退 png，实际: " + url);
     }
 
     @Test
     void 无扩展名_默认png() {
         MockMultipartFile f = new MockMultipartFile("file", "avatar", "image/png", new byte[]{1});
         String url = save(f);
-        assertTrue(url.endsWith(".png"));
+        assertTrue(url.contains(".png?token="));
     }
 }

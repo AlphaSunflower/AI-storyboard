@@ -49,6 +49,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                      FilterChain chain) throws ServletException, IOException {
         // 白名单放行
         String path = request.getRequestURI();
+        // 私有文件读取走对象级 HMAC，不再使用全局 media_token；上传仍必须带 Bearer。
+        if ("GET".equalsIgnoreCase(request.getMethod())
+                && path != null && path.startsWith("/api/files/")) {
+            chain.doFilter(request, response);
+            return;
+        }
         if (isPublicPath(path)) {
             chain.doFilter(request, response);
             return;
@@ -65,9 +71,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = null;
         if (header != null && header.startsWith("Bearer ")) {
             token = header.substring(7);
-        }
-        if (token == null && path != null && path.startsWith("/api/files/")) {
-            token = cookieValue(request, "media_token");
         }
         if (token == null && isSsePath(path)) {
             String ticket = request.getParameter("ticket");
@@ -127,14 +130,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (publicPath.equals(path)) return true;
         }
         return false;
-    }
-
-    private static String cookieValue(HttpServletRequest request, String name) {
-        if (request.getCookies() == null) return null;
-        for (var cookie : request.getCookies()) {
-            if (name.equals(cookie.getName())) return cookie.getValue();
-        }
-        return null;
     }
 
     private boolean consumeStreamTicket(String ticket, String path, HttpServletRequest request,

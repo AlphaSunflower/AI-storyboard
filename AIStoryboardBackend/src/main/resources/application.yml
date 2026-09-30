@@ -21,6 +21,16 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/chat-security
+    baseline-on-migrate: true
+    baseline-version: 43
+
+files:
+  signing-secret: ${FILE_SIGNING_SECRET:${internal.secret:}}
+  signature-ttl-seconds: ${FILE_SIGNATURE_TTL_SECONDS:2592000}
+  allow-unsigned-legacy: ${FILES_ALLOW_UNSIGNED_LEGACY:false}
 
 server:
   port: 8082
