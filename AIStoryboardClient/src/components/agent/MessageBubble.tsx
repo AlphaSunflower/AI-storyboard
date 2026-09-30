@@ -29,6 +29,7 @@ import {
   serializeDragPayload,
   type ChatMediaDragPayload,
 } from '../../lib/projectLibraryDrag';
+import { libraryMediaIdFromUrl } from '../../lib/libraryMedia';
 import './MessageBubble.css';
 
 type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
@@ -72,6 +73,7 @@ function standaloneAttachmentContent(content: string): AgentAttachment | null {
     mimeType: 'image/*',
     kind: 'image',
     source: isLibraryMedia ? 'library' : 'upload',
+    mediaId: libraryMediaIdFromUrl(value) ?? undefined,
   };
 }
 
@@ -86,6 +88,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'image/*',
       kind: 'image' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
     ...(input.referenceVideos ?? []).map((url, index) => ({
       url,
@@ -93,6 +96,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'video/*',
       kind: 'video' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
     ...(input.referenceAudios ?? []).map((url, index) => ({
       url,
@@ -100,6 +104,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'audio/*',
       kind: 'audio' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
   ];
 }

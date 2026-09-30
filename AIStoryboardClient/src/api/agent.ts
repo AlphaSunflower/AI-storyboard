@@ -41,6 +41,8 @@ export interface AgentAttachment {
   sizeBytes?: number;
   kind: AgentAttachmentKind;
   source?: 'upload' | 'library';
+  assetId?: string;
+  mediaId?: string;
 }
 
 export interface AgentActiveTurn {

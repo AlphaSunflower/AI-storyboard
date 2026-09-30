@@ -1,11 +1,15 @@
 package com.storyboard.asset.controller;
 
+import com.storyboard.asset.client.AssetContracts.MediaRef;
+import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.MediaContentService;
 import com.storyboard.asset.storage.StoredObject;
+import com.storyboard.common.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,9 +22,17 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class MediaContentController {
 
     private final MediaContentService mediaContentService;
+    private final AssetCatalogService catalogService;
 
-    public MediaContentController(MediaContentService mediaContentService) {
+    public MediaContentController(MediaContentService mediaContentService,
+                                  AssetCatalogService catalogService) {
         this.mediaContentService = mediaContentService;
+        this.catalogService = catalogService;
+    }
+
+    @GetMapping("/{mediaId}/metadata")
+    public ApiResponse<MediaRef> metadata(Authentication auth, @PathVariable String mediaId) {
+        return ApiResponse.ok(catalogService.getMedia(auth.getName(), mediaId));
     }
 
     @GetMapping("/{mediaId}/content")

@@ -6,6 +6,7 @@ import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
+import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
@@ -50,6 +51,8 @@ public interface AssetCatalogService {
     AssetDetail get(String userId, String assetId);
 
     AssetDetail findBySource(String userId, String sourceType, String sourceId);
+
+    MediaRef getMedia(String userId, String mediaId);
 
     AssetSummary create(String actorUserId, CreateAssetRequest request, String idempotencyKey);
 

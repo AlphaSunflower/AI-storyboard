@@ -17,7 +17,11 @@ import {
 import { useProjectStore } from './projectStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
-import { libraryApi } from '../api/library';
+import { libraryApi, type LibraryMedia } from '../api/library';
+import {
+  refreshLibraryMediaAttachments,
+  refreshLibraryMediaMessages,
+} from '../lib/libraryMedia';
 import {
   buildCanvasRequestContext,
   clearCanvasEditContext,
@@ -735,6 +739,25 @@ async function refreshAfterWakeup(message: AgentWakeupMessage) {
   }));
 }
 
+const libraryMediaRefreshCache = new Map<string, { media: LibraryMedia; freshUntil: number }>();
+
+async function resolveLibraryMedia(
+  conversationId: string,
+  mediaId: string,
+): Promise<LibraryMedia | null> {
+  const cacheKey = `${conversationId}:${mediaId}`;
+  const cached = libraryMediaRefreshCache.get(cacheKey);
+  if (cached && cached.freshUntil > Date.now()) return cached.media;
+  const response = await libraryApi.getMedia(mediaId);
+  const media = response.data.data;
+  if (!media) return null;
+  libraryMediaRefreshCache.set(cacheKey, {
+    media,
+    freshUntil: Date.now() + 10 * 60 * 1000,
+  });
+  return media;
+}
+
 async function refreshConversationMessages(conversationId: string) {
   const before = useAgentStore.getState();
   if (before.activeConversationId !== conversationId) return;
@@ -749,7 +772,11 @@ async function refreshConversationMessages(conversationId: string) {
     pendingMessageReconcile.add(conversationId);
     return;
   }
-  useAgentStore.setState({ messages: response.data.data ?? [] });
+  const messages = await refreshLibraryMediaMessages(
+    response.data.data ?? [],
+    (mediaId) => resolveLibraryMedia(conversationId, mediaId),
+  );
+  useAgentStore.setState({ messages });
 }
 
 function taskKindHint(kind: VideoTaskStatus['kind'], status: string, waitingSec: number) {
@@ -2047,11 +2074,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const res = await agentApi.listMessages(id);
     await get().restoreCanvasMode(id);
     const g = get().generating[id];
-    const base = res.data.data ?? [];
+    const base = await refreshLibraryMediaMessages(
+      res.data.data ?? [],
+      (mediaId) => resolveLibraryMedia(id, mediaId),
+    );
     const savedAttachments = readPendingAttachments(id);
-    const restoredAttachments = savedAttachments.length
+    const restoredAttachments = await refreshLibraryMediaAttachments(savedAttachments.length
       ? savedAttachments
-      : attachmentsFromMessages(base);
+      : attachmentsFromMessages(base), (mediaId) => resolveLibraryMedia(id, mediaId));
     set({
       messages: g?.assistantId
         ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]

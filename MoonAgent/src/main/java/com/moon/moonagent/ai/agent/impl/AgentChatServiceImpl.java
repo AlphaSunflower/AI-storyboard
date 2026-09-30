@@ -650,7 +650,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                             attachmentString(map, "name", "未命名文件"),
                             attachmentString(map, "mimeType", ""),
                             sizeBytes,
-                            attachmentString(map, "kind", "file"));
+                            attachmentString(map, "kind", "file"),
+                            attachmentString(map, "source", "upload"),
+                            attachmentString(map, "assetId", null),
+                            attachmentString(map, "mediaId", null));
                 })
                 .filter(item -> item.url() != null && !item.url().isBlank())
                 .toList();

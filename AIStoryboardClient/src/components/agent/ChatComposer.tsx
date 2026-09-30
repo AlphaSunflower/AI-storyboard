@@ -459,6 +459,7 @@ export function ChatComposer() {
           mimeType: 'image/*',
           kind: 'image',
           source: 'library',
+          assetId: payload.assetId,
         }]);
         return;
       }
@@ -473,6 +474,7 @@ export function ChatComposer() {
           mimeType: 'video/*',
           kind: 'video',
           source: 'library',
+          assetId: payload.assetId,
         }]);
         return;
       }
@@ -486,6 +488,7 @@ export function ChatComposer() {
         mimeType: 'audio/*',
         kind: 'audio',
         source: 'library',
+        assetId: payload.assetId,
       }]);
     } catch (error) {
       addLocalUserMessage(error instanceof Error ? `项目库素材添加失败：${error.message}` : '项目库素材添加失败');
@@ -859,6 +862,8 @@ export function ChatComposer() {
             sizeBytes: reference.sizeBytes,
             kind: reference.type,
             source: 'library' as const,
+            assetId: reference.sourceType === 'library_asset' ? reference.sourceId : undefined,
+            mediaId: reference.mediaId,
           })));
         }}
       />

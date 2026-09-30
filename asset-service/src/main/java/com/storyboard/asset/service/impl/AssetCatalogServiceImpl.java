@@ -96,6 +96,13 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     }
 
     @Override
+    public MediaRef getMedia(String userId, String mediaId) {
+        MediaRef media = repository.findMedia(userId, mediaId)
+                .orElseThrow(() -> new BusinessException(40401, "媒体不存在"));
+        return withSignedUrl(userId, media);
+    }
+
+    @Override
     @Transactional
     public AssetSummary create(String actorUserId, CreateAssetRequest request, String idempotencyKey) {
         validateCreate(actorUserId, request);
