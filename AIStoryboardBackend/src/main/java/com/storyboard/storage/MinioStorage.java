@@ -46,6 +46,11 @@ public class MinioStorage {
 
     @PostConstruct
     void init() {
+        if (accessKey == null || accessKey.isBlank()
+                || secretKey == null || secretKey.isBlank()) {
+            throw new IllegalStateException(
+                    "对象存储凭据未配置：请设置 STORYBOARD_STORAGE_ACCESS_KEY / STORYBOARD_STORAGE_SECRET_KEY");
+        }
         this.s3 = S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.of(region))

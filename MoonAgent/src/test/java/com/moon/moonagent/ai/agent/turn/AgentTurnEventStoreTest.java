@@ -29,6 +29,7 @@ class AgentTurnEventStoreTest {
         conversation.setId("conversation-1");
         AgentTurnEntity turn = store.start(conversation, "hello");
         when(turnMapper.selectById(turn.getId())).thenReturn(turn);
+        when(turnMapper.incrementSequence(turn.getId())).thenReturn(1);
 
         AgentTurnEventEnvelope event =
                 store.append(turn.getId(), "TEXT_BLOCK_DELTA", Map.of("delta", "hi"));
@@ -36,9 +37,8 @@ class AgentTurnEventStoreTest {
         assertThat(event.seq()).isEqualTo(1);
         assertThat(event.type()).isEqualTo("TEXT_BLOCK_DELTA");
         assertThat(event.payload()).containsEntry("delta", "hi");
-        assertThat(turn.getLastSequence()).isEqualTo(1);
         verify(eventMapper).insert(any(AgentTurnEventEntity.class));
-        verify(turnMapper).updateById(turn);
+        verify(turnMapper).incrementSequence(turn.getId());
     }
 
     @Test

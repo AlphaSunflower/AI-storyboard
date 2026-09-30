@@ -22,3 +22,11 @@ ai:
 # 可由环境变量 INTERNAL_SECRET 注入，或在此填入与 MoonAgent/ApiGateway 一致的值
 internal:
   secret: <shared-secret>
+
+storyboard:
+  storage:
+    endpoint: http://localhost:9000
+    access-key: <your-minio-access-key>
+    secret-key: <your-minio-secret-key>
+    bucket: storyboard
+    region: us-east-1

@@ -82,6 +82,16 @@ storyboard:
     internal-token: ${INTERNAL_SECRET:${storyboard.internal-secret:}}
     connect-timeout-seconds: 10
     read-timeout-seconds: 30
+  storage:
+    endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:}
+    bucket: ${STORYBOARD_STORAGE_BUCKET:storyboard}
+    region: ${STORYBOARD_STORAGE_REGION:us-east-1}
+
+# 内部服务共享密钥；兼容本地 profile 中已有的 storyboard.internal-secret
+internal:
+  secret: ${INTERNAL_SECRET:${storyboard.internal-secret:}}
 
 # 跨域：dev 靠 vite proxy，生产走网关统一 CORS
 app:

@@ -23,7 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @SpringBootTest
-@TestPropertySource(properties = "storyboard.internal-secret=test-internal-secret")
+@TestPropertySource(properties = {
+        "storyboard.internal-secret=test-internal-secret",
+        "storyboard.storage.access-key=minioadmin",
+        "storyboard.storage.secret-key=minioadmin123"
+})
 @Transactional
 class HitlCardPersistenceTest {
 

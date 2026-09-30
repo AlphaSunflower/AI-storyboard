@@ -9,7 +9,11 @@ import org.springframework.test.context.TestPropertySource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-@TestPropertySource(properties = "storyboard.internal-secret=test-internal-secret")
+@TestPropertySource(properties = {
+        "storyboard.internal-secret=test-internal-secret",
+        "storyboard.storage.access-key=minioadmin",
+        "storyboard.storage.secret-key=minioadmin123"
+})
 class MoonAgentApplicationTests {
 
 	@Autowired

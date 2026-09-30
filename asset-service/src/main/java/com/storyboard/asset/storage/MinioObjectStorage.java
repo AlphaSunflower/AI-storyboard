@@ -62,6 +62,11 @@ public class MinioObjectStorage implements ObjectStorage {
             this.client = injectedClient;
             return;
         }
+        if (properties.accessKey() == null || properties.accessKey().isBlank()
+                || properties.secretKey() == null || properties.secretKey().isBlank()) {
+            throw new IllegalStateException(
+                    "对象存储凭据未配置：请设置 STORYBOARD_STORAGE_ACCESS_KEY / STORYBOARD_STORAGE_SECRET_KEY");
+        }
         StaticCredentialsProvider credentials = StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(properties.accessKey(), properties.secretKey()));
         S3Configuration configuration = S3Configuration.builder().pathStyleAccessEnabled(true).build();
