@@ -220,6 +220,9 @@ spring.ai.mcp.client.request-timeout: ${MCP_CLIENT_REQUEST_TIMEOUT:1800s}
 # Canvas MCP Server（Morrow Bridge，仅本机 loopback）
 spring.ai.mcp.client.streamable-http.connections.canvas.url: ${MORROW_BRIDGE_URL:http://127.0.0.1:8787}
 spring.ai.mcp.client.streamable-http.connections.canvas.endpoint: /mcp
+# Canvas Graph MCP Server（XiaoYueCanvas 服务端图命令，不依赖浏览器）
+spring.ai.mcp.client.streamable-http.connections.canvas-server.url: ${MORROW_CANVAS_SERVER_URL:http://localhost:9090}
+spring.ai.mcp.client.streamable-http.connections.canvas-server.endpoint: /api/canvas/mcp
 # LLM Gateway media MCP（仅暴露 generate_image / generate_video）
 spring.ai.mcp.client.streamable-http.connections.gateway.url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
 spring.ai.mcp.client.streamable-http.connections.gateway.endpoint: /mcp

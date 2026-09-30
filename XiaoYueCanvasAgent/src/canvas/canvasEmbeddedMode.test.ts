@@ -3,6 +3,7 @@ import {
   buildCanvasModeReadyMessage,
   buildCanvasModeStatusMessage,
   isCanvasModeControlMessage,
+  isCanvasGraphUpdatedMessage,
   parseCanvasEmbeddedMode,
 } from './canvasEmbeddedMode';
 
@@ -55,5 +56,22 @@ describe('canvas embedded mode', () => {
       projectId: 'project-1',
       locked: true,
     })).toBe(true);
+  });
+
+  it('parses parent graph revision updates', () => {
+    expect(isCanvasGraphUpdatedMessage({
+      type: 'ai-storyboard:canvas-graph-updated',
+      conversationId: 'conversation-1',
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      revision: 3,
+    })).toBe(true);
+    expect(isCanvasGraphUpdatedMessage({
+      type: 'ai-storyboard:canvas-graph-updated',
+      conversationId: 'conversation-1',
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      revision: '3',
+    })).toBe(false);
   });
 });

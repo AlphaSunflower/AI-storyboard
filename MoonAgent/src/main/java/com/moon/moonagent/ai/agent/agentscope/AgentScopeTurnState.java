@@ -30,6 +30,8 @@ public final class AgentScopeTurnState {
     private boolean followUpVideoPlanned;
     private boolean storyboardRequested;
     private Integer pendingStoryboardCommitCount;
+    private String activeCanvasRunId;
+    private String activeCanvasId;
     private ReferenceInputMode referenceInputMode = ReferenceInputMode.NONE;
     private final Map<String, Integer> preflightFailures = new HashMap<>();
 
@@ -119,6 +121,19 @@ public final class AgentScopeTurnState {
         Integer value = pendingStoryboardCommitCount;
         pendingStoryboardCommitCount = null;
         return value;
+    }
+
+    synchronized void setActiveCanvasRun(String runId, String canvasId) {
+        activeCanvasRunId = runId == null || runId.isBlank() ? null : runId;
+        activeCanvasId = canvasId == null || canvasId.isBlank() ? null : canvasId;
+    }
+
+    synchronized String activeCanvasRunId() {
+        return activeCanvasRunId;
+    }
+
+    synchronized String activeCanvasId() {
+        return activeCanvasId;
     }
 
     synchronized void markMediaStarted(String mediaType) {

@@ -133,8 +133,22 @@ export interface AgentMessageVideoPlan {
 }
 
 /** 消息元数据 */
+export type AgentCanvasRunStatus = 'queued' | 'planning' | 'running' | 'writing' | 'completed' | 'failed';
+
 export interface AgentMessageMetadata {
-  kind?: 'hitl' | 'assistant-reply' | 'video-plan' | 'storyboard-review';
+  kind?: 'hitl' | 'assistant-reply' | 'video-plan' | 'storyboard-review' | 'canvas-run';
+  canvasRunId?: string;
+  canvasId?: string;
+  turnId?: string;
+  title?: string;
+  status?: AgentCanvasRunStatus;
+  progress?: number;
+  nodeCount?: number;
+  edgeCount?: number;
+  revision?: number;
+  error?: string;
+  projectId?: string;
+  conversationId?: string;
   messageInput?: {
     picUrls?: string[];
     referenceVideos?: string[];
@@ -471,6 +485,10 @@ export type AgentTurnEventType =
   | 'turn_completed'
   | 'turn_failed'
   | 'canvas_session_required'
+  | 'canvas_run_started'
+  | 'canvas_run_updated'
+  | 'canvas_run_completed'
+  | 'canvas_run_failed'
   | 'plan_updated'
   | 'constraint_flagged'
   | 'media_critique'
@@ -538,6 +556,10 @@ const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
   'turn_completed',
   'turn_failed',
   'canvas_session_required',
+  'canvas_run_started',
+  'canvas_run_updated',
+  'canvas_run_completed',
+  'canvas_run_failed',
   'plan_updated',
   'constraint_flagged',
   'media_critique',

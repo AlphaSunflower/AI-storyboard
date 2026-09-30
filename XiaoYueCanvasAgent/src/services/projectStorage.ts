@@ -170,10 +170,8 @@ export async function loadProject(projectId: string): Promise<ProjectDocumentV2 
   try {
     const p = await apiJson<{ id: string; title: string }>(`/projects/${encodeURIComponent(projectId)}`);
     const now = nowMs();
-    // 合并本地 IndexedDB canvases：后端的画布元数据 + 本地缓存的画布 id，供 export/遍历使用
-    const db = await database;
-    const localCanvases = await db.getAll('canvases') as CanvasDocumentV1[];
-    const canvases = [...new Set(localCanvases.filter((c) => c.projectId === p.id).map((c) => c.id))];
+    const canvases = (await apiJson<Array<{ id: string }>>(
+      `/projects/${encodeURIComponent(p.id)}/canvases`)).map((canvas) => canvas.id);
     return { schemaVersion: 2, id: p.id, title: p.title, canvases, createdAt: now, updatedAt: now };
   } catch { return undefined; }
 }
@@ -194,7 +192,9 @@ async function ensureBackendProjects() {
       for (const c of projectCanvases) {
         const meta = await apiJson<{ id: string }>(`/projects/${encodeURIComponent(created.id)}/canvases`, { method: 'POST', body: JSON.stringify({ title: c.title }) });
         await db.delete('canvases', c.id);
-        await db.put('canvases', { ...c, id: meta.id, projectId: created.id });
+        const migrated = { ...c, id: meta.id, projectId: created.id };
+        await db.put('canvases', migrated);
+        await saveCanvas(migrated);
       }
     } catch { /* 迁移失败不阻断（后端不可达/无 token 时跳过，下次再试） */ }
     await db.delete('projects', p.id);
@@ -203,22 +203,21 @@ async function ensureBackendProjects() {
 
 export async function listProjects(): Promise<ProjectSummary[]> {
   await ensureBackendProjects();
-  const projects = await apiJson<Array<{ id: string; title: string }>>('/projects');
-  const db = await database;
-  const localCanvases = await db.getAll('canvases') as CanvasDocumentV1[];
-  return Promise.all(projects.map(async (p) => {
-    let canvasCount = 0, nodeCount = 0, assetCount = 0;
-    try {
-      const canvases = await apiJson<Array<{ id: string; title: string }>>(`/projects/${encodeURIComponent(p.id)}/canvases`);
-      canvasCount = canvases.length;
-      for (const c of canvases) {
-        const doc = localCanvases.find((x) => x.id === c.id);
-        if (doc) { nodeCount += doc.nodes.length; assetCount += new Set(doc.nodes.flatMap((n) => (n.data.assetId ? [n.data.assetId] : []))).size; }
-      }
-    } catch { /* 列表计数失败忽略 */ }
+  const projects = await apiJson<Array<{
+    id: string; title: string; canvasCount?: number; nodeCount?: number; assetCount?: number;
+  }>>('/projects');
+  return projects.map((p) => {
     const now = nowMs();
-    return { id: p.id, title: p.title, createdAt: now, updatedAt: now, canvasCount, nodeCount, assetCount };
-  }));
+    return {
+      id: p.id,
+      title: p.title,
+      createdAt: now,
+      updatedAt: now,
+      canvasCount: p.canvasCount ?? 0,
+      nodeCount: p.nodeCount ?? 0,
+      assetCount: p.assetCount ?? 0,
+    };
+  });
 }
 
 export async function deleteProject(projectId: string) {
@@ -349,17 +348,19 @@ function emptyCanvas(canvasId: string, projectId = ''): CanvasDocumentV1 {
 }
 
 export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {
-  const metas = await apiJson<Array<{ id: string; projectId: string; title: string }>>(`/projects/${encodeURIComponent(projectId)}/canvases`);
-  const db = await database;
+  const metas = await apiJson<Array<{
+    id: string; projectId: string; title: string; nodeCount?: number; assetCount?: number;
+  }>>(`/projects/${encodeURIComponent(projectId)}/canvases`);
   const now = nowMs();
-  const summaries = await Promise.all(metas.map(async (m) => {
-    const doc = await db.get('canvases', m.id) as CanvasDocumentV1 | undefined;
-    return {
-      id: m.id, projectId, title: m.title, createdAt: now, updatedAt: now,
-      nodeCount: doc?.nodes.length ?? 0, assetCount: doc ? canvasAssetIds(doc).size : 0,
-    } satisfies CanvasSummary;
-  }));
-  return summaries.sort((a, b) => a.createdAt - b.createdAt);
+  return metas.map((m) => ({
+    id: m.id,
+    projectId,
+    title: m.title,
+    createdAt: now,
+    updatedAt: now,
+    nodeCount: m.nodeCount ?? 0,
+    assetCount: m.assetCount ?? 0,
+  } satisfies CanvasSummary));
 }
 
 export async function deleteCanvas(canvasId: string) {

@@ -29,8 +29,7 @@ class MoonAgentRuntimePermissionTest {
                     "generate_image",
                     "generate_image_batch",
                     "generate_video",
-                    "clear_project_storyboard",
-                    "canvas_execute_graph");
+                    "clear_project_storyboard");
         }
     }
 
@@ -45,6 +44,32 @@ class MoonAgentRuntimePermissionTest {
                     "choose_storyboard_commit_mode",
                     "request_human_input");
             assertThat(context.getAskRules()).doesNotContainKey("start_storyboard_production");
+        }
+    }
+
+    @Test
+    void canvasRunNodeOperationsBypassApproval() {
+        for (AgentApprovalMode mode : new AgentApprovalMode[]{
+                AgentApprovalMode.PLAN_APPROVAL,
+                AgentApprovalMode.REQUEST_APPROVAL}) {
+            var context = MoonAgentRuntime.permissionContext(mode);
+            assertThat(context.getAllowRules()).containsKeys(
+                    AgentScopeCanvasRunTools.CREATE_CANVAS_RUN,
+                    "canvas_graph_create_node",
+                    "canvas_graph_create_nodes",
+                    "canvas_graph_import_media",
+                    "canvas_graph_create_edge",
+                    "canvas_graph_layout_graph",
+                    "canvas_execute_node",
+                    "canvas_execute_graph",
+                    "todo_write",
+                    "plan_write");
+            assertThat(context.getAskRules()).doesNotContainKeys(
+                    "canvas_graph_create_node",
+                    "canvas_graph_import_media",
+                    "canvas_graph_create_edge",
+                    "canvas_execute_graph",
+                    "todo_write");
         }
     }
 

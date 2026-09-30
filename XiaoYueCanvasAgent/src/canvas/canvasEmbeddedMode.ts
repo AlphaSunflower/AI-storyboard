@@ -1,6 +1,7 @@
 export const CANVAS_MODE_STATUS_MESSAGE = 'ai-storyboard:canvas-mode-status';
 export const CANVAS_MODE_READY_MESSAGE = 'ai-storyboard:canvas-mode-ready';
 export const CANVAS_MODE_CONTROL_MESSAGE = 'ai-storyboard:canvas-mode-control';
+export const CANVAS_GRAPH_UPDATED_MESSAGE = 'ai-storyboard:canvas-graph-updated';
 
 export type CanvasBridgeStatusState = 'selecting' | 'bridge-connecting' | 'bridge-error';
 
@@ -32,6 +33,14 @@ export interface CanvasModeControlMessage {
   conversationId: string;
   projectId: string;
   locked: boolean;
+}
+
+export interface CanvasGraphUpdatedMessage {
+  type: typeof CANVAS_GRAPH_UPDATED_MESSAGE;
+  conversationId: string;
+  projectId: string;
+  canvasId: string;
+  revision: number;
 }
 
 export function parseCanvasEmbeddedMode(search: string): CanvasEmbeddedMode | null {
@@ -94,4 +103,14 @@ export function isCanvasModeControlMessage(value: unknown): value is CanvasModeC
     && typeof message.conversationId === 'string' && message.conversationId.length > 0
     && typeof message.projectId === 'string' && message.projectId.length > 0
     && typeof message.locked === 'boolean';
+}
+
+export function isCanvasGraphUpdatedMessage(value: unknown): value is CanvasGraphUpdatedMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<CanvasGraphUpdatedMessage>;
+  return message.type === CANVAS_GRAPH_UPDATED_MESSAGE
+    && typeof message.conversationId === 'string' && message.conversationId.length > 0
+    && typeof message.projectId === 'string' && message.projectId.length > 0
+    && typeof message.canvasId === 'string' && message.canvasId.length > 0
+    && typeof message.revision === 'number' && Number.isFinite(message.revision);
 }

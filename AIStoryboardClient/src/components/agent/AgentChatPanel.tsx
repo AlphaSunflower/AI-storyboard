@@ -23,7 +23,7 @@ import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, editAndResend, interruptAndSend, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask, canvasBinding } = useAgentStore();
+  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, editAndResend, interruptAndSend, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask, canvasBinding, canvasSession } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -273,6 +273,7 @@ export function AgentChatPanel() {
           <MessageBubble
             key={m.id}
             messageId={m.id}
+            conversationId={m.conversationId}
             role={m.role}
             content={m.content}
             createdAt={m.createdAt}
@@ -320,7 +321,7 @@ export function AgentChatPanel() {
       </div>
 
       {/* HumanInputCard: 人工介入卡片 - 在输入区上方显示 */}
-      <CanvasSessionCard />
+      {canvasSession && <CanvasSessionCard />}
       {waitingHumanInput && (
         <div style={{
           padding: '0 16px', background: 'white', flexShrink: 0,

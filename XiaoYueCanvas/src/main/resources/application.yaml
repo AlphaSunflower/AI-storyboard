@@ -27,6 +27,16 @@ spring:
       max-file-size: 256MB
       max-request-size: 256MB
   ai:
+    mcp:
+      server:
+        enabled: true
+        name: xiaoyue-canvas
+        version: 1.0.0
+        type: SYNC
+        protocol: STREAMABLE
+        # server.servlet.context-path=/api/canvas, so the effective MCP URL is /api/canvas/mcp.
+        streamable-http:
+          mcp-endpoint: /mcp
     openai:
       # 统一走 LLM 网关 8083（Spring AI 自动拼 /chat/completions、/images/generations 等）
       base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1

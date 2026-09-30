@@ -849,6 +849,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_get_selection",
                 "canvas_get_node_model_config",
                 "canvas_get_execution",
+                "canvas_graph_get_context",
+                "canvas_graph_get_state",
+                "canvas_graph_list_nodes",
+                "canvas_graph_get_node",
+                "canvas_graph_list_edges",
+                "canvas_graph_list_node_types",
                 "load_skill_through_path",
                 "reset_equipped_tools")) {
             permissions.addAllowRule(tool, new PermissionRule(
@@ -861,6 +867,23 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "start_storyboard_production",
                 "choose_storyboard_commit_mode",
                 AgentScopeCanvasTools.PREPARE_CANVAS_SESSION,
+                AgentScopeCanvasRunTools.CREATE_CANVAS_RUN,
+                "canvas_graph_create_node",
+                "canvas_graph_create_nodes",
+                "canvas_graph_update_node",
+                "canvas_graph_create_edge",
+                "canvas_graph_import_media",
+                "canvas_graph_import_media_batch",
+                "canvas_graph_create_result_slots",
+                "canvas_graph_mark_result_slots",
+                "canvas_graph_layout_graph",
+                "canvas_execute_node",
+                "canvas_execute_graph",
+                "canvas_cancel_execution",
+                "todo_write",
+                "plan_enter",
+                "plan_write",
+                "plan_exit",
                 "request_human_input")) {
             permissions.addAllowRule(tool, new PermissionRule(
                     tool, null, PermissionBehavior.ALLOW, "MoonAgentAutoApprovePolicy"));
@@ -879,10 +902,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "delete_project_storyboard_shot",
                 "clear_project_storyboard",
                 "canvas_delete_nodes",
-                "canvas_delete_edges",
-                "canvas_execute_node",
-                "canvas_execute_graph",
-                "canvas_cancel_execution")) {
+                "canvas_delete_edges")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
             if (autoApproved) {

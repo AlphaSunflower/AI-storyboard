@@ -31,6 +31,7 @@ import static com.storyboard.asset.client.AssetContracts.ExternalMediaRegistrati
 import static com.storyboard.asset.client.AssetContracts.FolderTreeResponse;
 import static com.storyboard.asset.client.AssetContracts.GenerationOutputEvent;
 import static com.storyboard.asset.client.AssetContracts.LinkProjectRequest;
+import static com.storyboard.asset.client.AssetContracts.MediaRef;
 import static com.storyboard.asset.client.AssetContracts.PageResponse;
 import static com.storyboard.asset.client.AssetContracts.PromoteRequest;
 import static com.storyboard.asset.client.AssetContracts.ReplaceGroupItemsRequest;
@@ -167,6 +168,15 @@ public class AssetClient {
     public AssetGroupDetail getGroupInternal(String groupId, String actingUserId) {
         return exchange("GET", "/api/library/groups/{id}",
                 uri -> uri.path("/api/library/groups/{id}").build(groupId),
+                null, null, UUID.randomUUID().toString(), actingUserId,
+                new ParameterizedTypeReference<>() {});
+    }
+
+    public MediaRef getMediaInternal(String mediaId, String actingUserId) {
+        return exchange("GET", "/api/internal/library/media/{id}",
+                uri -> uri.path("/api/internal/library/media/{id}")
+                        .queryParam("ownerUserId", actingUserId)
+                        .build(mediaId),
                 null, null, UUID.randomUUID().toString(), actingUserId,
                 new ParameterizedTypeReference<>() {});
     }

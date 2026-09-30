@@ -97,6 +97,31 @@ class CanvasProjectLibraryServiceImplTest {
         verify(canvasAssetMapper, never()).insert(any(CanvasAsset.class));
     }
 
+    @Test
+    void importMediaResolvesLibraryMediaByMediaIdWithoutSignedUrl() {
+        AssetClient assetClient = mock(AssetClient.class);
+        MorrowCanvasService canvasService = mock(MorrowCanvasService.class);
+        CanvasAssetMapper canvasAssetMapper = mock(CanvasAssetMapper.class);
+        MorrowCanvas canvas = new MorrowCanvas();
+        canvas.setId("canvas-1");
+        canvas.setProjectId("project-1");
+        when(canvasService.get("user-1", "canvas-1")).thenReturn(canvas);
+        when(assetClient.getMediaInternal("media-1", "user-1"))
+                .thenReturn(media("media-1", MediaType.IMAGE,
+                        "images/library-1.png", "image/png"));
+        when(canvasAssetMapper.selectOne(any())).thenReturn(null);
+
+        CanvasProjectLibraryService service = new CanvasProjectLibraryServiceImpl(
+                assetClient, canvasService, canvasAssetMapper);
+        CanvasAsset imported = service.importMedia("user-1", "canvas-1", "media-1", "node-1");
+
+        assertEquals("/api/files/images/library-1.png", imported.getObjectUrl());
+        assertEquals("images/library-1.png", imported.getObjectKey());
+        assertEquals("media-1", imported.getLibraryAssetId());
+        assertEquals("node-1", imported.getProducerNodeId());
+        verify(canvasAssetMapper).insert(imported);
+    }
+
     private static AssetGroupMediaItem groupItem(
             String assetId,
             String mediaId,

@@ -18,6 +18,7 @@ import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentTaskCard } from './AgentTaskCard';
 import { StoryboardResultActions } from './StoryboardResultActions';
+import { CanvasRunCard } from './CanvasRunCard';
 import { ContextMenu } from '../common/ContextMenu';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
@@ -726,8 +727,9 @@ function useStreamingReveal(content: string, streaming: boolean): string {
   return streaming ? displayed : content;
 }
 
-export function MessageBubble({ messageId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
+export function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
   messageId?: string;
+  conversationId?: string;
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
   variant?: 'default' | 'deepseek'; createdAt?: string; metadata?: AgentMessageMetadata;
   editable?: boolean; onEdit?: () => void;
@@ -736,6 +738,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
+  const canvasRunMeta = metadata?.kind === 'canvas-run' ? metadata : null;
   const currentProject = useProjectStore((state) => state.currentProject);
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -940,6 +943,9 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
 
   return (
     <>
+    {!isUser && canvasRunMeta && (
+      <CanvasRunCard metadata={canvasRunMeta} conversationId={conversationId} />
+    )}
     <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       {/* 助手消息：正文上方渲染推理面板（实时/已思考） */}
       {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
@@ -1073,7 +1079,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
                 </>
               )}
           </span>
-        ) : <span style={{ opacity: 0.6 }}>…</span>}
+        ) : canvasRunMeta ? null : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
         {streaming && content && (
           <span

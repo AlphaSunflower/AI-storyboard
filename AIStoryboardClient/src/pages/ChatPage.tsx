@@ -612,6 +612,7 @@ export function ChatPage() {
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}
+                      conversationId={m.conversationId}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}
@@ -1077,6 +1078,7 @@ export function ChatPage() {
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}
+                      conversationId={m.conversationId}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}

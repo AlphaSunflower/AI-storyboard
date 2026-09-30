@@ -1,0 +1,142 @@
+.canvas-run-card {
+  width: min(560px, 100%);
+  margin: 4px 0 12px;
+  padding: 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-surface-card);
+  color: var(--color-ink);
+}
+
+.canvas-run-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.canvas-run-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: var(--color-surface-soft);
+  color: var(--color-primary);
+}
+
+.canvas-run-card__heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.canvas-run-card__heading strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-run-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.canvas-run-card__status.is-completed {
+  color: rgb(31, 122, 76);
+}
+
+.canvas-run-card__status.is-failed {
+  color: rgb(180, 45, 35);
+}
+
+.canvas-run-card__percent {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.canvas-run-card__progress {
+  height: 5px;
+  margin: 12px 0 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--color-surface-soft);
+}
+
+.canvas-run-card__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width 300ms ease;
+}
+
+.canvas-run-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.canvas-run-card__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: rgba(217, 45, 32, 0.06);
+  color: rgb(180, 45, 35);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.canvas-run-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 11px;
+}
+
+.canvas-run-card__actions button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.canvas-run-card__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.canvas-run-card .is-spinning {
+  animation: canvas-run-spin 1s linear infinite;
+}
+
+@keyframes canvas-run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

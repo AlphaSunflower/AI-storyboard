@@ -93,15 +93,25 @@ export function findReplacementCanvasAsset(
 ): CanvasAssetDescriptor | undefined {
   const exact = assets.find((asset) => asset.id === node.data.assetId);
   if (exact) return exact;
+  const nodeAssetUrl = typeof node.data.assetUrl === 'string' ? node.data.assetUrl : '';
+  if (nodeAssetUrl) {
+    const byUrl = assets.find((asset) => asset.url === nodeAssetUrl);
+    if (byUrl) return byUrl;
+  }
   const parts = generatedNodeParts(node.id);
-  if (!parts) return undefined;
-  const record = useCanvasStore.getState().generationRecords.find((item) => item.id === parts.recordId);
-  const resultIndex = record?.resultNodeIds.indexOf(node.id) ?? -1;
-  const resultKey = resultIndex >= 0
-    ? record?.resultNodeIds[resultIndex]?.split(':').at(-1)
-    : parts.resultKey;
-  return assets.find((asset) => asset.generationRecordId && asset.generationRecordId === resultKey)
-    ?? assets.find((asset) => asset.producerNodeId === node.id);
+  if (parts) {
+    const record = useCanvasStore.getState().generationRecords.find((item) => item.id === parts.recordId);
+    const resultIndex = record?.resultNodeIds.indexOf(node.id) ?? -1;
+    const resultKey = resultIndex >= 0
+      ? record?.resultNodeIds[resultIndex]?.split(':').at(-1)
+      : parts.resultKey;
+    const generated = assets.find((asset) =>
+      asset.generationRecordId && asset.generationRecordId === resultKey);
+    if (generated) return generated;
+  }
+  // Normal media nodes have no generation-record key. The producer node id is
+  // the durable link between the graph node and its server-side asset row.
+  return assets.find((asset) => asset.producerNodeId === node.id);
 }
 
 /** 页面打开后按画布节点引用回填 IndexedDB Blob 缓存。 */

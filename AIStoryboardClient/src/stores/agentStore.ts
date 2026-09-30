@@ -10,6 +10,7 @@ import {
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
+  type AgentCanvasRunStatus,
   type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
   type CanvasSessionInfo,
   DEFAULT_AGENT_APPROVAL_MODE,
@@ -1351,12 +1352,110 @@ function turnMetadata(payload: Record<string, unknown>): AgentMessageMetadata | 
   return metadata;
 }
 
+function optionalString(value: unknown): string | undefined {
+  const text = asString(value);
+  return text || undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function canvasRunStatus(
+  value: unknown,
+  fallback: AgentCanvasRunStatus,
+): AgentCanvasRunStatus {
+  const status = asString(value) as AgentCanvasRunStatus;
+  return status === 'queued' || status === 'planning' || status === 'running' || status === 'writing'
+    || status === 'completed' || status === 'failed'
+    ? status
+    : fallback;
+}
+
+function canvasRunMetadata(
+  payload: Record<string, unknown>,
+  turnId: string,
+  eventType: AgentTurnEventEnvelope['type'],
+  previous?: AgentMessageMetadata,
+): AgentMessageMetadata | null {
+  const canvasRunId = optionalString(payload.canvasRunId ?? payload.runId)
+    ?? previous?.canvasRunId;
+  const canvasId = optionalString(payload.canvasId) ?? previous?.canvasId;
+  if (!canvasRunId && !canvasId) return null;
+  const fallbackStatus: AgentCanvasRunStatus = eventType === 'canvas_run_completed'
+    ? 'completed'
+    : eventType === 'canvas_run_failed'
+      ? 'failed'
+      : eventType === 'canvas_run_started'
+        ? 'queued'
+        : previous?.status ?? 'writing';
+  return {
+    ...previous,
+    kind: 'canvas-run',
+    canvasRunId,
+    canvasId,
+    turnId: optionalString(payload.turnId) ?? turnId,
+    title: optionalString(payload.title) ?? previous?.title,
+    status: canvasRunStatus(payload.status, fallbackStatus),
+    progress: optionalNumber(payload.progress) ?? previous?.progress,
+    nodeCount: optionalNumber(payload.nodeCount) ?? previous?.nodeCount,
+    edgeCount: optionalNumber(payload.edgeCount) ?? previous?.edgeCount,
+    revision: optionalNumber(payload.revision) ?? previous?.revision,
+    error: optionalString(payload.error) ?? (eventType === 'canvas_run_failed' ? previous?.error : undefined),
+    projectId: optionalString(payload.projectId) ?? previous?.projectId,
+    conversationId: optionalString(payload.conversationId) ?? previous?.conversationId,
+  };
+}
+
+function upsertCanvasRunMessage(
+  conversationId: string,
+  assistantId: string,
+  metadata: AgentMessageMetadata,
+) {
+  const runId = metadata.canvasRunId;
+  useAgentStore.setState((state) => {
+    if (state.activeConversationId !== conversationId) return {};
+    const index = state.messages.findIndex((message) =>
+      message.id === assistantId
+      || (!!runId && message.metadata?.canvasRunId === runId));
+    const messages = index >= 0
+      ? state.messages.map((message, messageIndex) => messageIndex === index
+        ? { ...message, metadata: { ...message.metadata, ...metadata } }
+        : message)
+      : [
+          ...state.messages,
+          {
+            id: assistantId || `canvas-run-${runId ?? Date.now()}`,
+            conversationId,
+            role: 'assistant' as const,
+            content: '',
+            metadata,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+    return { messages };
+  });
+}
+
 function applyOneEnvelope(
   envelope: AgentTurnEventEnvelope,
   context: TurnReductionContext,
   effects: AgentTurnEnvelopeEffects,
 ) {
   const payload = envelope.payload;
+  if (envelope.type === 'canvas_run_started'
+    || envelope.type === 'canvas_run_updated'
+    || envelope.type === 'canvas_run_completed'
+    || envelope.type === 'canvas_run_failed') {
+    const previous = useAgentStore.getState().messages.find((message) =>
+      message.id === context.assistantId
+      || message.metadata?.canvasRunId === optionalString(payload.canvasRunId ?? payload.runId))?.metadata;
+    const metadata = canvasRunMetadata(payload, envelope.turnId, envelope.type, previous);
+    if (metadata) upsertCanvasRunMessage(context.conversationId, context.assistantId, metadata);
+    return;
+  }
   if (envelope.type === 'canvas_session_required') {
     effects.canvasSessionRequired = payload as unknown as CanvasSessionInfo;
     return;
@@ -1509,7 +1608,16 @@ function applyOneEnvelope(
         return {
           generating,
           ...(state.activeConversationId === context.conversationId
-            ? { messages: state.messages.map((message) => message.id === context.assistantId ? { ...message, metadata: finalMetadata } : message) }
+            ? {
+                messages: state.messages.map((message) => {
+                  if (message.id !== context.assistantId) return message;
+                  const merged = { ...(message.metadata ?? {}), ...finalMetadata };
+                  if (message.metadata?.kind === 'canvas-run' && finalMetadata.kind === 'assistant-reply') {
+                    merged.kind = 'canvas-run';
+                  }
+                  return { ...message, metadata: merged };
+                }),
+              }
             : {}),
         };
       });

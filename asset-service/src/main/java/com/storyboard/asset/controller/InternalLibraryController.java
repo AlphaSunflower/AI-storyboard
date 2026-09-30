@@ -4,6 +4,7 @@ import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetDetail;
 import com.storyboard.asset.client.AssetContracts.ExternalMediaRegistration;
 import com.storyboard.asset.client.AssetContracts.GenerationOutputEvent;
+import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.ExternalMediaService;
 import com.storyboard.asset.service.LegacyAiAssetMigrationService;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -62,6 +64,18 @@ public class InternalLibraryController {
             throw new com.storyboard.common.BusinessException(40301, "无权读取其他用户的媒体");
         }
         return ApiResponse.ok(catalogService.findBySource(auth.getName(), sourceType, sourceId));
+    }
+
+    @GetMapping("/media/{mediaId}")
+    public ApiResponse<MediaRef> getMedia(
+            Authentication auth,
+            @PathVariable String mediaId,
+            @RequestParam String ownerUserId
+    ) {
+        if (!auth.getName().equals(ownerUserId)) {
+            throw new com.storyboard.common.BusinessException(40301, "无权读取其他用户的媒体");
+        }
+        return ApiResponse.ok(catalogService.getMedia(auth.getName(), mediaId));
     }
 
     @PostMapping("/migrations/legacy-ai-assets")

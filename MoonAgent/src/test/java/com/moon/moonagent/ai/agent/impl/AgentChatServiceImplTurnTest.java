@@ -274,6 +274,7 @@ class AgentChatServiceImplTurnTest {
                 lock,
                 mock(ProjectCreativeContextService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
+                mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
                 transactionManager);
     }
 

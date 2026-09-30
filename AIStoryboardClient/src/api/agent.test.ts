@@ -69,6 +69,18 @@ describe('streamChat', () => {
       type: 'media_critique',
       payload: { decision: 'REPAIR' },
     })?.type).toBe('media_critique');
+    expect(parseAgentTurnEnvelope({
+      turnId: 'turn-1',
+      seq: 5,
+      type: 'canvas_run_started',
+      payload: { canvasRunId: 'canvas-run-1' },
+    })?.type).toBe('canvas_run_started');
+    expect(parseAgentTurnEnvelope({
+      turnId: 'turn-1',
+      seq: 6,
+      type: 'canvas_run_updated',
+      payload: { canvasRunId: 'canvas-run-1', revision: 2 },
+    })?.type).toBe('canvas_run_updated');
   });
 
   it('delivers SSE envelopes without mapping legacy event names', async () => {

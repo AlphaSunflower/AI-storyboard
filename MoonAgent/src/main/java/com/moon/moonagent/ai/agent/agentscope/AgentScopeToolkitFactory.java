@@ -32,6 +32,8 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeVideoMergeTools videoMergeTools;
     private final AgentScopeCreativeTools creativeTools;
     private final AgentScopeCanvasTools canvasTools;
+    private final AgentScopeCanvasRunTools canvasRunTools;
+    private final AgentCanvasRunService canvasRuns;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
     private volatile Toolkit activeToolkit;
@@ -47,6 +49,8 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeVideoMergeTools videoMergeTools,
                                     AgentScopeCreativeTools creativeTools,
                                     AgentScopeCanvasTools canvasTools,
+                                    AgentScopeCanvasRunTools canvasRunTools,
+                                    AgentCanvasRunService canvasRuns,
                                     AgentScopeToolPipeline toolPipeline,
                                     SkillExpander skillExpander) {
         this.sessionTools = sessionTools;
@@ -60,6 +64,8 @@ public class AgentScopeToolkitFactory {
         this.videoMergeTools = videoMergeTools;
         this.creativeTools = creativeTools;
         this.canvasTools = canvasTools;
+        this.canvasRunTools = canvasRunTools;
+        this.canvasRuns = canvasRuns;
         this.toolPipeline = toolPipeline;
         this.skillExpander = skillExpander;
     }
@@ -127,7 +133,9 @@ public class AgentScopeToolkitFactory {
         if (callbacks == null) callbacks = new ToolCallback[0];
         Set<String> desired = Arrays.stream(callbacks)
                 .map(callback -> callback.getToolDefinition().name())
+                .filter(AgentScopeToolkitFactory::isCanvasRunTool)
                 .collect(Collectors.toSet());
+        desired.add(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN);
         for (String existing : List.copyOf(toolkit.getToolNames())) {
             if (existing.startsWith("canvas_") && !desired.contains(existing)) {
                 toolkit.removeTool(existing);
@@ -135,30 +143,38 @@ public class AgentScopeToolkitFactory {
         }
         for (ToolCallback canvasTool : callbacks) {
             String name = canvasTool.getToolDefinition().name();
+            if (!isCanvasRunTool(name)) continue;
             if (toolkit.getTool(name) != null) toolkit.removeTool(name);
-            registerCanvasTool(toolkit, canvasTool, CANVAS_DESIGN_TOOLS);
-            if (canvasRunTool(name)) {
+            if (name.startsWith("canvas_graph_")) {
+                registerCanvasTool(toolkit, canvasTool, CANVAS_DESIGN_TOOLS);
+                registerCanvasTool(toolkit, canvasTool, CANVAS_RUN_TOOLS);
+            } else {
                 registerCanvasTool(toolkit, canvasTool, CANVAS_RUN_TOOLS);
             }
         }
-        if (toolkit.getTool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION) != null) {
-            toolkit.removeTool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION);
-        }
-        AgentScopeTool prepareCanvasTool = canvasTools.tool();
-        registerToGroup(toolkit, toolPipeline.wrap(prepareCanvasTool), CANVAS_DESIGN_TOOLS);
-        registerToGroup(toolkit, toolPipeline.wrap(prepareCanvasTool), CANVAS_RUN_TOOLS);
+        AgentScopeTool createRunTool = canvasRunTools.tool();
+        registerToGroup(toolkit, toolPipeline.wrap(createRunTool), CANVAS_DESIGN_TOOLS);
+        registerToGroup(toolkit, toolPipeline.wrap(createRunTool), CANVAS_RUN_TOOLS);
+    }
+
+    private static boolean isCanvasRunTool(String name) {
+        return name != null && (name.startsWith("canvas_graph_")
+                || canvasRunTool(name));
     }
 
     private void registerCanvasTool(Toolkit toolkit, ToolCallback callback, String group) {
+        if (callback.getToolDefinition().name().startsWith("canvas_graph_")) {
+            registerToGroup(toolkit,
+                    toolPipeline.wrapGeneric(new CanvasRunToolAdapter(callback, canvasRuns)),
+                    group);
+            return;
+        }
         registerToGroup(toolkit,
                 toolPipeline.wrapGeneric(new SpringAiToolAdapter(callback)), group);
     }
 
     private static boolean canvasRunTool(String name) {
         return Set.of(
-                "canvas_get_context", "canvas_get_state", "canvas_list_nodes",
-                "canvas_list_edges", "canvas_get_node", "canvas_create_result_slots",
-                "canvas_create_edge", "canvas_set_node_model_config",
                 "canvas_execute_node", "canvas_execute_graph",
                 "canvas_get_execution", "canvas_cancel_execution")
                 .contains(name);

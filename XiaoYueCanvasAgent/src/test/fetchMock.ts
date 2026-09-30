@@ -11,7 +11,10 @@ import { vi } from 'vitest';
 export function installFetchMock() {
   // key: 原始 title → 生成的 id；画布同理
   const projects = new Map<string, { id: string; title: string }>();
-  const canvases = new Map<string, { id: string; projectId: string; title: string }>();
+  const canvases = new Map<string, {
+    id: string; projectId: string; title: string; nodeCount?: number; edgeCount?: number; assetCount?: number;
+  }>();
+  const graphs = new Map<string, { nodes: unknown[]; edges: unknown[]; viewport: unknown }>();
   let projectSeq = 0;
   let canvasSeq = 0;
 
@@ -28,7 +31,16 @@ export function installFetchMock() {
     }
     // 项目列表 → 内存集合
     if (/\/api\/canvas\/projects$/.test(url) && method === 'GET') {
-      return jsonResponse([...projects.values()]);
+      return jsonResponse([...projects.values()].map((project) => {
+        const projectCanvases = [...canvases.values()].filter((canvas) => canvas.projectId === project.id);
+        return {
+          ...project,
+          canvasCount: projectCanvases.length,
+          nodeCount: projectCanvases.reduce((sum, canvas) => sum + (canvas.nodeCount ?? 0), 0),
+          edgeCount: projectCanvases.reduce((sum, canvas) => sum + (canvas.edgeCount ?? 0), 0),
+          assetCount: projectCanvases.reduce((sum, canvas) => sum + (canvas.assetCount ?? 0), 0),
+        };
+      }));
     }
     // 单个项目 → {id, title}（loadProject）
     if (/\/api\/canvas\/projects\/[^/]+$/.test(url) && method === 'GET') {
@@ -47,7 +59,7 @@ export function installFetchMock() {
       const projectId = url.match(/\/projects\/([^/]+)\/canvases/)?.[1] ?? '';
       const title = JSON.parse(String(init?.body ?? '{}')).title ?? '画布';
       const id = `canvas-${++canvasSeq}`;
-      canvases.set(id, { id, projectId, title });
+      canvases.set(id, { id, projectId, title, nodeCount: 0, edgeCount: 0, assetCount: 0 });
       return jsonResponse({ id, projectId, title });
     }
     // 项目下画布列表
@@ -57,12 +69,22 @@ export function installFetchMock() {
     }
     // 画布图读取 → 空图（或记忆的）
     if (/\/canvases\/[^/]+\/graph$/.test(url) && method === 'GET') {
-      return jsonResponse({ graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, revision: 0 });
+      const id = url.match(/\/canvases\/([^/]+)\/graph$/)?.[1] ?? '';
+      const graph = graphs.get(id) ?? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+      return jsonResponse({ graph, revision: 0 });
     }
     // 画布图保存 → 回显 revision 1
     if (/\/canvases\/[^/]+\/graph$/.test(url) && method === 'PUT') {
+      const id = url.match(/\/canvases\/([^/]+)\/graph$/)?.[1] ?? '';
       const body = JSON.parse(String(init?.body ?? '{}'));
-      return jsonResponse({ graph: body.graph ?? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, revision: (body.baseRevision ?? 0) + 1 });
+      const graph = body.graph ?? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+      graphs.set(id, graph);
+      const canvas = canvases.get(id);
+      if (canvas) {
+        canvas.nodeCount = graph.nodes?.length ?? 0;
+        canvas.edgeCount = graph.edges?.length ?? 0;
+      }
+      return jsonResponse({ graph, revision: (body.baseRevision ?? 0) + 1 });
     }
     // 画布重命名 / 元数据 PATCH
     if (/\/canvases\/[^/]+$/.test(url) && method === 'PATCH') {
@@ -82,6 +104,7 @@ export function installFetchMock() {
     if (/\/canvases\/[^/]+$/.test(url) && method === 'DELETE') {
       const id = url.match(/\/canvases\/([^/]+)$/)?.[1] ?? '';
       canvases.delete(id);
+      graphs.delete(id);
       return jsonResponse({ ok: true });
     }
 

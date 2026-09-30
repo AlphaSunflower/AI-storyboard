@@ -18,5 +18,7 @@ public interface CanvasProjectLibraryService {
 
     CanvasAsset importAsset(String userId, String canvasId, String libraryAssetId, String producerNodeId);
 
+    CanvasAsset importMedia(String userId, String canvasId, String mediaId, String producerNodeId);
+
     List<CanvasAsset> importGroup(String userId, String canvasId, String groupAssetId, String producerNodeId);
 }

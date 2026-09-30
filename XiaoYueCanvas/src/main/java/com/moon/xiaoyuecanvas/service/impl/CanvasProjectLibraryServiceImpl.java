@@ -123,6 +123,34 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
     }
 
     @Override
+    public CanvasAsset importMedia(String userId, String canvasId, String mediaId, String producerNodeId) {
+        MorrowCanvas canvas = canvasService.get(userId, canvasId);
+        MediaRef media = assetClient.getMediaInternal(mediaId, userId);
+        String objectUrl = "/api/files/" + media.objectKey();
+        CanvasAsset existing = canvasAssetMapper.selectOne(new LambdaQueryWrapper<CanvasAsset>()
+                .eq(CanvasAsset::getCanvasId, canvasId)
+                .eq(CanvasAsset::getObjectKey, media.objectKey())
+                .last("LIMIT 1"));
+        if (existing != null) return existing;
+
+        CanvasAsset asset = new CanvasAsset();
+        asset.setId(UUID.randomUUID().toString());
+        asset.setCanvasId(canvasId);
+        asset.setProjectId(canvas.getProjectId());
+        asset.setUserId(userId);
+        asset.setType(media.type().name().toLowerCase());
+        asset.setMimeType(media.mimeType());
+        asset.setObjectUrl(objectUrl);
+        asset.setObjectKey(media.objectKey());
+        asset.setProducerNodeId(producerNodeId);
+        asset.setLibraryAssetId(mediaId);
+        asset.setLibrarySyncState("ready");
+        asset.setStatus("ready");
+        canvasAssetMapper.insert(asset);
+        return asset;
+    }
+
+    @Override
     public List<CanvasAsset> importGroup(
             String userId,
             String canvasId,

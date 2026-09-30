@@ -81,14 +81,12 @@ public class CanvasMcpConnectionManager {
     }
 
     private boolean canvasToolsReady() {
-        return skillExpander.hasTool("canvas_get_context")
-                && skillExpander.hasTool("canvas_import_media")
-                && skillExpander.hasTool("canvas_create_canvas")
-                && skillExpander.hasTool("canvas_rename_canvas")
-                && skillExpander.hasTool("canvas_create_result_slots")
-                && skillExpander.hasTool("canvas_mark_result_slots")
-                && skillExpander.hasTool("canvas_get_node_model_config")
-                && skillExpander.hasTool("canvas_set_node_model_config");
+        return skillExpander.hasTool("canvas_graph_get_state")
+                && skillExpander.hasTool("canvas_graph_create_nodes")
+                && skillExpander.hasTool("canvas_graph_create_edge")
+                && skillExpander.hasTool("canvas_graph_import_media")
+                && skillExpander.hasTool("canvas_graph_import_media_batch")
+                && skillExpander.hasTool("canvas_graph_layout_graph");
     }
 
     private boolean mediaToolsReady() {

@@ -113,6 +113,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final com.moon.moonagent.ai.agent.ConversationLock conversationLock;
     private final ProjectCreativeContextService creativeContext;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
+    private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService canvasRunService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -900,6 +901,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 request.setNativeEventsOnly(true);
                 request.setReferenceVideos(effectiveReferenceVideos);
                 request.setReferenceAudios(effectiveReferenceAudios);
+                request.setAttachments(effectiveAttachments);
                 ConstraintLedger ledger = conversation.getProjectId() == null
                         || conversation.getProjectId().isBlank()
                         ? null
@@ -928,6 +930,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
                 if (turn != null) {
+                    var canvasRun = canvasRunService.activeByTurn(turn.getId());
+                    if (canvasRun != null) {
+                        canvasRunService.fail(canvasRun.runId(), "用户停止");
+                        sendRuntimeEnvelope(emitter, turnEventStore.append(
+                                turn.getId(), "canvas_run_failed",
+                                Map.of("canvasRunId", canvasRun.runId(), "message", "用户停止")));
+                    }
                     turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
                     sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
                             Map.of("code", "40904", "message", "生成已停止")));
@@ -935,6 +944,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.info("AgentScope turn 被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 if (turn != null) {
+                    var canvasRun = canvasRunService.activeByTurn(turn.getId());
+                    if (canvasRun != null) {
+                        canvasRunService.fail(canvasRun.runId(), friendlyRuntimeError(e));
+                        sendRuntimeEnvelope(emitter, turnEventStore.append(
+                                turn.getId(), "canvas_run_failed",
+                                Map.of("canvasRunId", canvasRun.runId(),
+                                        "message", friendlyRuntimeError(e))));
+                    }
                     turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
                     sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
                             Map.of("code", "50001", "message", friendlyRuntimeError(e))));
@@ -1195,6 +1212,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                     turnId, "agent_event", payload);
             sendRuntimeEnvelope(emitter, envelope);
             if (event instanceof ToolResultEndEvent result) {
+                String toolName = result.getToolCallName() == null ? "" : result.getToolCallName();
+                if ("canvas_create_run".equals(toolName) || toolName.startsWith("canvas_graph_")) {
+                    var run = canvasRunService.activeByTurn(turnId);
+                    if (run != null) {
+                        String eventType = "canvas_create_run".equals(toolName)
+                                ? "canvas_run_started" : "canvas_run_updated";
+                        sendRuntimeEnvelope(emitter,
+                                turnEventStore.append(turnId, eventType, run.toMap()));
+                    }
+                }
                 String special = switch (result.getToolCallName() == null
                         ? "" : result.getToolCallName()) {
                     case "plan_enter", "plan_write", "plan_exit", "todo_write" -> "plan_updated";
@@ -1247,6 +1274,15 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         if (result.content() != null && !result.content().isBlank()) {
             persistAssistant(conversation, result);
+        }
+        var canvasRun = canvasRunService.activeByTurn(turn.getId());
+        if (canvasRun != null
+                && com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.RUNNING
+                .equals(canvasRun.status())) {
+            canvasRunService.complete(canvasRun.runId(), Map.of());
+            sendRuntimeEnvelope(emitter,
+                    turnEventStore.append(turn.getId(), "canvas_run_completed",
+                            canvasRunService.activeByTurn(turn.getId()).toMap()));
         }
         turnEventStore.finish(turn.getId(), "completed", "", OffsetDateTime.now());
         Map<String, Object> payload = new LinkedHashMap<>();

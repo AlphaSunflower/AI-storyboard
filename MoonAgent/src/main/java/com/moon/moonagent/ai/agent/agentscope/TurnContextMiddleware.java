@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
@@ -50,8 +51,44 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
             lines.add("Current turn attached image count: " + request.getPicUrls().size()
                     + ". The image bytes are already attached to the user message.");
-            lines.add("Current turn attached image URLs for canvas_import_media: "
-                    + request.getPicUrls());
+            List<AgentAttachmentRequest> attachments = request.getAttachments() == null
+                    ? List.of() : request.getAttachments();
+            if (!attachments.isEmpty()) {
+                lines.add("Current turn attachment metadata for canvas_graph_import_media:");
+                for (AgentAttachmentRequest attachment : attachments) {
+                    StringBuilder value = new StringBuilder("- kind=")
+                            .append(attachment.kind());
+                    if (attachment.mediaId() != null && !attachment.mediaId().isBlank()) {
+                        value.append(" mediaId=").append(attachment.mediaId());
+                    }
+                    if (attachment.assetId() != null && !attachment.assetId().isBlank()) {
+                        value.append(" assetId=").append(attachment.assetId());
+                    }
+                    if (attachment.url() != null && !attachment.url().isBlank()) {
+                        value.append(" url=").append(attachment.url());
+                    }
+                    if (attachment.source() != null && !attachment.source().isBlank()) {
+                        value.append(" source=").append(attachment.source());
+                    }
+                    if (attachment.name() != null && !attachment.name().isBlank()) {
+                        value.append(" name=").append(attachment.name());
+                    }
+                    if (attachment.mimeType() != null && !attachment.mimeType().isBlank()) {
+                        value.append(" mimeType=").append(attachment.mimeType());
+                    }
+                    lines.add(value.toString());
+                }
+                if (attachments.size() > 1) {
+                    lines.add("Import every attachment in ONE canvas_graph_import_media_batch call. "
+                            + "For source=library items, use mediaId; do not fetch the signed URL.");
+                } else {
+                    lines.add("For a source=library attachment, call canvas_graph_import_media with media "
+                            + "containing kind/mediaId/name/mimeType/label. Do not fetch the signed URL.");
+                }
+            } else {
+                lines.add("Current turn attached image URLs for canvas_graph_import_media: "
+                        + request.getPicUrls());
+            }
         }
         if (request.getAssetIds() != null && !request.getAssetIds().isEmpty()) {
             lines.add("Current turn selected asset IDs: " + request.getAssetIds());
