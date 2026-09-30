@@ -113,6 +113,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentScopeProperties properties;
     private final AgentScopeToolkitFactory toolkitFactory;
     private final AgentScopeCanvasTools canvasTools;
+    private final AgentCanvasSessionService canvasSessions;
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
@@ -576,8 +577,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 ? Map.of() : prepareCanvas.getInput();
                         AgentScopeCanvasTools.SessionPreparation preparation =
                                 canvasTools.prepare(conversation, input);
-                        checkpoints.pauseForCanvasBinding(
-                                request, external.getReplyId(), prepareCanvas, preparation);
+                        AgentCanvasSessionService.CanvasSessionView session =
+                                canvasSessions.create(
+                                        conversation,
+                                        request.getTurnId(),
+                                        external.getReplyId(),
+                                        prepareCanvas.getId(),
+                                        preparation,
+                                        canvasMediaRefs(request));
+                        Map<String, Object> metadata = new LinkedHashMap<>(request.getTurnMetadata());
+                        metadata.put("canvasSession", session.toMap());
+                        request.setTurnMetadata(metadata);
                         paused = true;
                         break;
                     }
@@ -691,6 +701,54 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         return turnResult(request, trace, content, paused);
     }
 
+    public AgentTurnResult resumeCanvasTurn(AgentConversation conversation,
+                                            AgentCanvasSessionService.CanvasSessionView session,
+                                            OrchestrationRequest request,
+                                            AgentTraceAccumulator trace,
+                                            Consumer<AgentEvent> observer) {
+        ToolResultBlock result = ToolResultBlock.of(
+                session.runtimeToolCallId(),
+                AgentScopeCanvasTools.PREPARE_CANVAS_SESSION,
+                TextBlock.builder().text(String.valueOf(session.toMap())).build());
+        Msg resume = Msg.builder()
+                .name(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION)
+                .role(MsgRole.TOOL)
+                .content(result)
+                .build();
+        return stream(conversation, request, trace, List.of(resume), null, observer);
+    }
+
+    private static List<Map<String, Object>> canvasMediaRefs(OrchestrationRequest request) {
+        if (request == null) return List.of();
+        if (request.getCanvasContext() != null
+                && !request.getCanvasContext().normalizedMediaRefs().isEmpty()) {
+            return AgentCanvasSessionService.mediaRefMaps(
+                    request.getCanvasContext().normalizedMediaRefs());
+        }
+        List<Map<String, Object>> refs = new ArrayList<>();
+        if (request.getPicUrls() != null) {
+            for (String url : request.getPicUrls()) {
+                if (url == null || url.isBlank()) continue;
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("kind", "image");
+                ref.put("url", url);
+                ref.put("source", "upload");
+                refs.add(ref);
+            }
+        }
+        if (request.getAssetIds() != null) {
+            for (String assetId : request.getAssetIds()) {
+                if (assetId == null || assetId.isBlank()) continue;
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("kind", "file");
+                ref.put("assetId", assetId);
+                ref.put("source", "project");
+                refs.add(ref);
+            }
+        }
+        return refs;
+    }
+
     /**
      * One bounded correction round for a model claiming an async task without
      * producing a taskId. The correction text is not streamed until the task
@@ -780,6 +838,23 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "agent_list",
                 "list_storyboard_draft",
                 "list_project_storyboard",
+                "canvas_get_context",
+                "canvas_get_browser_context",
+                "canvas_get_summary",
+                "canvas_list_node_types",
+                "canvas_get_state",
+                "canvas_list_nodes",
+                "canvas_get_node",
+                "canvas_list_edges",
+                "canvas_get_selection",
+                "canvas_get_node_model_config",
+                "canvas_get_execution",
+                "canvas_graph_get_context",
+                "canvas_graph_get_state",
+                "canvas_graph_list_nodes",
+                "canvas_graph_get_node",
+                "canvas_graph_list_edges",
+                "canvas_graph_list_node_types",
                 "load_skill_through_path",
                 "reset_equipped_tools")) {
             permissions.addAllowRule(tool, new PermissionRule(
@@ -792,6 +867,23 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "start_storyboard_production",
                 "choose_storyboard_commit_mode",
                 AgentScopeCanvasTools.PREPARE_CANVAS_SESSION,
+                AgentScopeCanvasRunTools.CREATE_CANVAS_RUN,
+                "canvas_graph_create_node",
+                "canvas_graph_create_nodes",
+                "canvas_graph_update_node",
+                "canvas_graph_create_edge",
+                "canvas_graph_import_media",
+                "canvas_graph_import_media_batch",
+                "canvas_graph_create_result_slots",
+                "canvas_graph_mark_result_slots",
+                "canvas_graph_layout_graph",
+                "canvas_execute_node",
+                "canvas_execute_graph",
+                "canvas_cancel_execution",
+                "todo_write",
+                "plan_enter",
+                "plan_write",
+                "plan_exit",
                 "request_human_input")) {
             permissions.addAllowRule(tool, new PermissionRule(
                     tool, null, PermissionBehavior.ALLOW, "MoonAgentAutoApprovePolicy"));
@@ -810,10 +902,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "delete_project_storyboard_shot",
                 "clear_project_storyboard",
                 "canvas_delete_nodes",
-                "canvas_delete_edges",
-                "canvas_execute_node",
-                "canvas_execute_graph",
-                "canvas_cancel_execution")) {
+                "canvas_delete_edges")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
             if (autoApproved) {

@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import type { ChatAppKey } from './chatAppDefinitions';
+import type { ChatAppKey, ChatAppOpenOptions } from './chatAppDefinitions';
 
-export type OpenChatApp = (key: ChatAppKey) => void;
+export type OpenChatApp = (key: ChatAppKey, options?: ChatAppOpenOptions) => void;
 
 const ChatAppsContext = createContext<OpenChatApp | null>(null);
 

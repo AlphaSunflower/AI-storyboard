@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearLocalData, collectAssetGarbage, createCanvas, createProject, getAsset, getAssetMetadata, saveAsset, saveAssetToLibrary, saveCanvas } from './projectStorage';
+import { clearLocalData, collectAssetGarbage, createCanvas, createProject, getAsset, getAssetMetadata, loadCanvas, saveAsset, saveAssetToLibrary, saveCanvas } from './projectStorage';
 import type { PersistedAsset } from '../types';
 
 const asset = (id: string, derivedFrom?: string): PersistedAsset => ({
@@ -30,5 +30,16 @@ describe('asset references', () => {
     const metadata = await getAssetMetadata('metadata');
     expect(metadata).toMatchObject({ id: 'metadata', width: 1, height: 1 });
     expect(metadata).not.toHaveProperty('originalBlob');
+  });
+
+  it('loads an empty backend-created canvas without a local cache', async () => {
+    const canvas = await loadCanvas('canvas-new', 'project-1');
+
+    expect(canvas).toMatchObject({
+      id: 'canvas-new',
+      projectId: 'project-1',
+      nodes: [],
+      edges: [],
+    });
   });
 });

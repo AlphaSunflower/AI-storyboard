@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { EmbeddedAppWindow } from './EmbeddedAppWindow';
 import { useAgentStore } from '../../../stores/agentStore';
 import {
+  CANVAS_GRAPH_UPDATED_MESSAGE,
   buildSceneInspectPrompt,
   isCanvasModeReadyMessage,
   isCanvasModeStatusMessage,
@@ -39,6 +40,9 @@ export function ChatAppsHost({
   onCanvasModeReady?: (message: CanvasModeReadyMessage) => void;
   canvasInteractionLocked?: boolean;
 }) {
+  const messages = useAgentStore((state) => state.messages);
+  const postedCanvasRevisionsRef = useRef<Record<string, number>>({});
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const sourceMatches = Array.from(document.querySelectorAll('iframe'))
@@ -81,6 +85,36 @@ export function ChatAppsHost({
     frame.addEventListener('load', send);
     return () => frame.removeEventListener('load', send);
   }, [apps.tabs, canvasInteractionLocked]);
+
+  useEffect(() => {
+    const canvasTab = apps.tabs.find((tab) => tab.key === 'canvas' && tab.canvasMode);
+    const canvasMode = canvasTab?.canvasMode;
+    if (!canvasMode?.canvasId) return;
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[data-app-key="canvas"]');
+    if (!frame?.contentWindow) return;
+    const latest = messages
+      .filter((message) =>
+        message.metadata?.kind === 'canvas-run'
+        && message.conversationId === canvasMode.conversationId
+        && message.metadata.canvasId === canvasMode.canvasId
+        && typeof message.metadata.revision === 'number')
+      .sort((left, right) => (right.metadata?.revision ?? -1) - (left.metadata?.revision ?? -1))[0];
+    const revision = latest?.metadata?.revision;
+    if (revision === undefined) return;
+    const key = `${canvasMode.conversationId}:${canvasMode.canvasId}`;
+    if ((postedCanvasRevisionsRef.current[key] ?? -1) >= revision) return;
+    if (!canvasTab) return;
+    let origin = '';
+    try { origin = new URL(canvasTab.url, window.location.origin).origin; } catch { return; }
+    postedCanvasRevisionsRef.current[key] = revision;
+    frame.contentWindow.postMessage({
+      type: CANVAS_GRAPH_UPDATED_MESSAGE,
+      conversationId: canvasMode.conversationId,
+      projectId: canvasMode.projectId,
+      canvasId: canvasMode.canvasId,
+      revision,
+    }, origin);
+  }, [apps.tabs, messages]);
 
   if (!apps.hasTabs || !apps.activeKey) return null;
 

@@ -7,6 +7,7 @@ import {
   buildCanvasModeReadyMessage,
   buildCanvasModeStatusMessage,
   isCanvasModeControlMessage,
+  isCanvasGraphUpdatedMessage,
   parseCanvasEmbeddedMode,
   postCanvasModeMessage,
   type CanvasEmbeddedMode,
@@ -66,6 +67,7 @@ export default function App() {
   const panelRef = useRef<HTMLElement | null>(null);
   const pendingSave = useRef<CanvasDocumentV1 | null>(null);
   const saveInFlight = useRef<Promise<CanvasDocumentV1 | null> | null>(null);
+  const graphUpdateTimer = useRef<number | null>(null);
   const revision = useCanvasStore((state) => state.revision);
   const loadProjectGraph = useCanvasStore((state) => state.loadProjectGraph);
   const hydrateMetadata = useMediaStore((state) => state.hydrateMetadata);
@@ -280,6 +282,27 @@ export default function App() {
     setView('canvas');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(projectId)}&canvas=${encodeURIComponent(canvasId)}`);
   }, [clearAssets, embeddedMode, embeddedWindow, hydrateMetadata, loadProjectGraph]);
+
+  useEffect(() => {
+    if (!embeddedMode) return;
+    const onGraphUpdated = (event: MessageEvent) => {
+      if (event.origin !== embeddedMode.parentOrigin
+          || !isCanvasGraphUpdatedMessage(event.data)) return;
+      if (event.data.conversationId !== embeddedMode.conversationId
+          || event.data.projectId !== embeddedMode.projectId) return;
+      if (graphUpdateTimer.current !== null) window.clearTimeout(graphUpdateTimer.current);
+      graphUpdateTimer.current = window.setTimeout(() => {
+        graphUpdateTimer.current = null;
+        void openCanvas(event.data.projectId, event.data.canvasId)
+          .catch((error) => notify(error instanceof Error ? error.message : '画布更新加载失败'));
+      }, 120);
+    };
+    window.addEventListener('message', onGraphUpdated);
+    return () => {
+      window.removeEventListener('message', onGraphUpdated);
+      if (graphUpdateTimer.current !== null) window.clearTimeout(graphUpdateTimer.current);
+    };
+  }, [embeddedMode, notify, openCanvas]);
 
   const newProject = useCallback(async () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);

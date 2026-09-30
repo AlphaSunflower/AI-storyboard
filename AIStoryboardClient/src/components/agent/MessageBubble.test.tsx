@@ -123,6 +123,28 @@ describe('MessageBubble project library import', () => {
     );
   });
 
+  it('renders a persistent canvas run card from message metadata', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content=""
+        metadata={{
+          kind: 'canvas-run',
+          canvasRunId: 'run-1',
+          canvasId: 'canvas-1',
+          title: '雪茄房转场画布',
+          status: 'completed',
+          nodeCount: 12,
+          edgeCount: 13,
+          revision: 4,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('雪茄房转场画布')).toBeTruthy();
+    expect(screen.getByText('12 节点 · 13 连线')).toBeTruthy();
+  });
+
   it('marks partial usage as a lower bound', () => {
     render(
       <MessageBubble

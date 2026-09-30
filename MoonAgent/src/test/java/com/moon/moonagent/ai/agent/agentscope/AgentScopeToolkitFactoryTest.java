@@ -30,7 +30,7 @@ class AgentScopeToolkitFactoryTest {
     }
 
     @Test
-    void canvasFallbackToolIsAlwaysRegistered() {
+    void legacyCanvasPrepareToolIsNotRegistered() {
         AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
         when(interaction.tool()).thenReturn(tool("request_human_input"));
         AgentScopeCanvasTools canvasTools = mock(AgentScopeCanvasTools.class);
@@ -40,8 +40,7 @@ class AgentScopeToolkitFactoryTest {
         factory.create();
 
         assertThat(factory.activeToolkit().getToolNames())
-                .contains(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION);
-        verify(canvasTools).tool();
+                .doesNotContain(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION);
     }
 
     @Test
@@ -51,17 +50,53 @@ class AgentScopeToolkitFactoryTest {
         SkillExpander expander = mock(SkillExpander.class);
         when(expander.toolCallbacksByPrefix("canvas_"))
                 .thenReturn(new ToolCallback[0])
-                .thenReturn(new ToolCallback[] { callback("canvas_get_context") });
+                .thenReturn(new ToolCallback[] { callback("canvas_graph_get_context") });
         AgentScopeToolkitFactory factory = factory(
                 interaction, expander, mock(AgentScopeCanvasTools.class));
 
         factory.create();
-        assertThat(factory.activeToolkit().getToolNames()).doesNotContain("canvas_get_context");
+        assertThat(factory.activeToolkit().getToolNames()).doesNotContain("canvas_graph_get_context");
 
         factory.refreshCanvasTools();
 
-        assertThat(factory.activeToolkit().getToolNames()).contains("canvas_get_context");
+        assertThat(factory.activeToolkit().getToolNames()).contains("canvas_graph_get_context");
         verify(expander, atLeastOnce()).toolCallbacksByPrefix("canvas_");
+    }
+
+    @Test
+    void legacyBrowserCanvasToolsAreNotRegisteredInNewCanvasSkills() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        SkillExpander expander = mock(SkillExpander.class);
+        ToolCallback[] callbacks = {
+                callback("canvas_import_media"),
+                callback("canvas_graph_import_media"),
+                callback("canvas_execute_graph")
+        };
+        when(expander.toolCallbacksByPrefix("canvas_")).thenReturn(callbacks);
+        AgentScopeToolkitFactory factory = factory(interaction, expander);
+
+        factory.create();
+
+        assertThat(factory.activeToolkit().getToolNames())
+                .contains("canvas_graph_import_media")
+                .contains("canvas_execute_graph")
+                .doesNotContain("canvas_import_media");
+    }
+
+    @Test
+    void canvasRunStarterIsRegisteredWithoutWaitingForMcp() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeCanvasRunTools runTools = mock(AgentScopeCanvasRunTools.class);
+        when(runTools.tool()).thenReturn(tool(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN));
+        AgentScopeToolkitFactory factory = factory(
+                interaction, mock(SkillExpander.class), mock(AgentScopeCanvasTools.class), runTools);
+
+        factory.create();
+
+        assertThat(factory.activeToolkit().getToolNames())
+                .contains(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN);
     }
 
     private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction) {
@@ -76,6 +111,13 @@ class AgentScopeToolkitFactoryTest {
     private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction,
                                                     SkillExpander expander,
                                                     AgentScopeCanvasTools canvasTools) {
+        return factory(interaction, expander, canvasTools, mock(AgentScopeCanvasRunTools.class));
+    }
+
+    private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction,
+                                                    SkillExpander expander,
+                                                    AgentScopeCanvasTools canvasTools,
+                                                    AgentScopeCanvasRunTools runTools) {
         AgentScopeSessionTools session = mock(AgentScopeSessionTools.class);
         AgentScopeStructuredTools structured = mock(AgentScopeStructuredTools.class);
         AgentScopeAssetGroupTools assetGroups = mock(AgentScopeAssetGroupTools.class);
@@ -98,15 +140,18 @@ class AgentScopeToolkitFactoryTest {
         when(videoMerge.tool()).thenReturn(tool("merge_storyboard_videos"));
         when(creative.tools()).thenReturn(List.of());
         when(canvasTools.tool()).thenReturn(tool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION));
+        when(runTools.tool()).thenReturn(tool(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN));
         when(pipeline.wrap(any(AgentScopeTool.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(expander.toolCallbacks(anyList())).thenReturn(new ToolCallback[0]);
         when(pipeline.wrapGeneric(any()))
-                .thenAnswer(invocation -> tool("canvas_get_context"));
+                .thenAnswer(invocation -> tool(
+                        ((io.agentscope.core.tool.ToolBase) invocation.getArgument(0)).getName()));
 
         return new AgentScopeToolkitFactory(
                 session, interaction, structured, assetGroups, images, videos,
-                storyboards, workflows, videoMerge, creative, canvasTools, pipeline, expander);
+                storyboards, workflows, videoMerge, creative, canvasTools, runTools,
+                mock(AgentCanvasRunService.class), pipeline, expander);
     }
 
     private static AgentScopeTool tool(String name) {

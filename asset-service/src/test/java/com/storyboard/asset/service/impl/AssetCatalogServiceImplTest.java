@@ -5,6 +5,7 @@ import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
+import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.config.StorageProperties;
@@ -26,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -183,6 +185,24 @@ class AssetCatalogServiceImplTest {
         verify(repository).copyMediaLinks("a1", "copy1");
         verify(repository).copyAssetTags("a1", "copy1");
         verify(repository).copyProjectLinks("a1", "copy1", "u1");
+    }
+
+    @Test
+    void getMediaRefreshesSignedUrlForCurrentUser() {
+        MediaUrlSigner signer = mock(MediaUrlSigner.class);
+        when(signer.sign(eq("m1"), eq("u1"), any())).thenReturn("123.fresh");
+        AssetCatalogServiceImpl catalog = new AssetCatalogServiceImpl(
+                repository, projectAccess, signer,
+                new AssetPurgeService(repository),
+                new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
+        when(repository.findMedia("u1", "m1")).thenReturn(Optional.of(new MediaRef(
+                "m1", "b1", MediaType.IMAGE, "images/a.png",
+                "/api/library/media/m1/content", "images/a.png", "a.png", null,
+                "image/png", 10, 1, 1, null, 0, MediaRole.REFERENCE, true, null)));
+
+        MediaRef media = catalog.getMedia("u1", "m1");
+
+        assertThat(media.contentUrl()).isEqualTo("/api/library/media/m1/content?token=123.fresh");
     }
 
     private static AssetSummary asset(String id) {

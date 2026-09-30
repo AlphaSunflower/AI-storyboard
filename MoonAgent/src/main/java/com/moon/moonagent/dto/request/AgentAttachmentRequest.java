@@ -10,6 +10,9 @@ public record AgentAttachmentRequest(
         String name,
         String mimeType,
         Long sizeBytes,
-        String kind
+        String kind,
+        String source,
+        String assetId,
+        String mediaId
 ) {
 }

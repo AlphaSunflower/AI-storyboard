@@ -4,6 +4,7 @@ import com.moon.moonagent.entity.MorrowCanvas;
 import com.moon.moonagent.entity.Project;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.moonagent.service.ProjectService;
+import com.moon.xiaoyuecanvas.service.CanvasSummaryService;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +22,7 @@ public class MorrowProjectController {
 
     private final ProjectService projectService;
     private final MorrowCanvasService canvasService;
+    private final CanvasSummaryService summaryService;
 
     @PostMapping("/projects")
     public Map<String, Object> create(@RequestAttribute("userId") String userId, @RequestBody Map<String, String> body) {
@@ -29,17 +31,21 @@ public class MorrowProjectController {
 
     @GetMapping("/projects")
     public List<Map<String, Object>> list(@RequestAttribute("userId") String userId) {
-        return projectService.listMine(userId).stream().map(this::toProject).toList();
+        return projectService.listMine(userId).stream()
+                .map(project -> toProject(project, summaryService.project(project.getId())))
+                .toList();
     }
 
     @GetMapping("/projects/{id}")
     public Map<String, Object> get(@RequestAttribute("userId") String userId, @PathVariable String id) {
-        return toProject(projectService.get(userId, id));
+        Project project = projectService.get(userId, id);
+        return toProject(project, summaryService.project(project.getId()));
     }
 
     @PatchMapping("/projects/{id}")
     public Map<String, Object> rename(@RequestAttribute("userId") String userId, @PathVariable String id, @RequestBody Map<String, String> body) {
-        return toProject(projectService.rename(userId, id, body.get("title")));
+        Project project = projectService.rename(userId, id, body.get("title"));
+        return toProject(project, summaryService.project(project.getId()));
     }
 
     @DeleteMapping("/projects/{id}")
@@ -55,7 +61,12 @@ public class MorrowProjectController {
 
     @GetMapping("/projects/{id}/canvases")
     public List<Map<String, Object>> canvases(@RequestAttribute("userId") String userId, @PathVariable String id) {
-        return canvasService.listByProject(userId, id).stream().map(this::toCanvas).toList();
+        var summaries = summaryService.byProject(id).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        CanvasSummaryService.CanvasSummary::canvasId, item -> item));
+        return canvasService.listByProject(userId, id).stream()
+                .map(canvas -> toCanvas(canvas, summaries.get(canvas.getId())))
+                .toList();
     }
 
     @PatchMapping("/canvases/{id}")
@@ -70,14 +81,35 @@ public class MorrowProjectController {
     }
 
     private Map<String, Object> toProject(Project p) {
+        return toProject(p, null);
+    }
+
+    private Map<String, Object> toProject(Project p, CanvasSummaryService.ProjectSummary summary) {
         if (p == null) throw new BusinessException(40401, "项目不存在或无权访问");
-        return Map.of("id", p.getId(), "title", p.getName() == null ? "" : p.getName(),
-                "updatedAt", p.getUpdatedAt() == null ? "" : p.getUpdatedAt().toString());
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("id", p.getId());
+        out.put("title", p.getName() == null ? "" : p.getName());
+        out.put("updatedAt", p.getUpdatedAt() == null ? "" : p.getUpdatedAt().toString());
+        out.put("canvasCount", summary == null ? 0 : summary.canvasCount());
+        out.put("nodeCount", summary == null ? 0 : summary.nodeCount());
+        out.put("edgeCount", summary == null ? 0 : summary.edgeCount());
+        out.put("assetCount", summary == null ? 0 : summary.assetCount());
+        return out;
     }
 
     private Map<String, Object> toCanvas(MorrowCanvas c) {
-        return Map.of("id", c.getId(), "projectId", c.getProjectId(),
-                "title", c.getTitle() == null ? "" : c.getTitle(),
-                "updatedAt", c.getUpdatedAt() == null ? "" : c.getUpdatedAt().toString());
+        return toCanvas(c, null);
+    }
+
+    private Map<String, Object> toCanvas(MorrowCanvas c, CanvasSummaryService.CanvasSummary summary) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("id", c.getId());
+        out.put("projectId", c.getProjectId());
+        out.put("title", c.getTitle() == null ? "" : c.getTitle());
+        out.put("updatedAt", c.getUpdatedAt() == null ? "" : c.getUpdatedAt().toString());
+        out.put("nodeCount", summary == null ? 0 : summary.nodeCount());
+        out.put("edgeCount", summary == null ? 0 : summary.edgeCount());
+        out.put("assetCount", summary == null ? 0 : summary.assetCount());
+        return out;
     }
 }

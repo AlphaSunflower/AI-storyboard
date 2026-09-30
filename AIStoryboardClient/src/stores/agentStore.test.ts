@@ -15,7 +15,9 @@ import { useProjectStore } from './projectStore';
 
 function sseEnvelope(
   seq: number,
-  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'turn_completed' | 'turn_failed',
+  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'canvas_session_required'
+    | 'canvas_run_started' | 'canvas_run_updated' | 'canvas_run_completed' | 'canvas_run_failed'
+    | 'turn_completed' | 'turn_failed',
   payload: Record<string, unknown>,
   turnId = 'turn-1',
 ) {
@@ -737,6 +739,53 @@ describe('agentStore detached async tasks', () => {
     expect(state.messages.at(-1)?.content).toBe('修改后的回复');
   });
 
+  it('maps an optimistic edit target to the persisted user message before resending', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '已按新内容重发' }),
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: {
+        data: [{
+          id: 'user-db',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: '原始问题',
+          createdAt: new Date().toISOString(),
+        }],
+      },
+    } as never);
+    resetStore();
+    useAgentStore.setState({
+      messages: [
+        {
+          id: 'tmp-1710000000000',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: '原始问题',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'assistant-failed',
+          conversationId: 'conversation-1',
+          role: 'assistant',
+          content: '（回复失败）',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    await useAgentStore.getState().editAndResend('修改后的问题', 'tmp-1710000000000');
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.editMessageId).toBe('user-db');
+  });
+
   it('interrupts the active run and sends the queued message as a new turn', async () => {
     const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     const body = sseBody([
@@ -995,6 +1044,159 @@ describe('AgentScope turn envelope reduction', () => {
     });
   });
 
+  it('maps canvas_session_required to the independent canvas session state', () => {
+    const effects = applyAgentTurnEnvelope(
+      sseEnvelope(1, 'canvas_session_required', {
+        sessionId: 'canvas-session-1',
+        conversationId: 'conversation-1',
+        turnId: 'turn-canvas-session',
+        projectId: 'project-1',
+        intent: '生成雪茄房转场',
+        status: 'pending_selection',
+        choices: [
+          { canvasId: 'canvas-1', title: '画布 1' },
+          { canvasId: 'canvas-2', title: '画布 2' },
+        ],
+      }, 'turn-canvas-session'),
+      { conversationId: 'conversation-1', assistantId: 'assistant-1' },
+    );
+
+    expect(effects.canvasSessionRequired).toMatchObject({
+      sessionId: 'canvas-session-1',
+      turnId: 'turn-canvas-session',
+      status: 'pending_selection',
+    });
+  });
+
+  it('upserts one stable canvas run message without deleting the assistant placeholder', () => {
+    const turnId = 'turn-canvas-run';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-canvas-run' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [
+        {
+          id: 'user-1',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: '生成画布',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'assistant-canvas-run',
+          conversationId: 'conversation-1',
+          role: 'assistant',
+          content: '',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      canvasSession: null,
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'canvas_run_started', {
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        title: '雪茄房转场画布',
+        status: 'planning',
+        progress: 5,
+        nodeCount: 0,
+        edgeCount: 0,
+        revision: 1,
+      }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'canvas_run_updated', {
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        title: '雪茄房转场画布',
+        status: 'writing',
+        progress: 60,
+        nodeCount: 8,
+        edgeCount: 9,
+        revision: 2,
+      }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'canvas_run_completed', {
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        title: '雪茄房转场画布',
+        status: 'completed',
+        progress: 100,
+        nodeCount: 10,
+        edgeCount: 11,
+        revision: 3,
+      }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(4, 'turn_completed', {
+        content: '画布链路已生成',
+        metadata: { kind: 'assistant-reply' },
+      }, turnId),
+      context,
+    );
+
+    const state = useAgentStore.getState();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({ id: 'user-1', content: '生成画布' });
+    expect(state.messages[1]).toMatchObject({
+      id: 'assistant-canvas-run',
+      role: 'assistant',
+      metadata: {
+        kind: 'canvas-run',
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        turnId,
+        status: 'completed',
+        progress: 100,
+        nodeCount: 10,
+        edgeCount: 11,
+        revision: 3,
+      },
+    });
+    expect(state.messages[1].content).toBe('画布链路已生成');
+    expect(state.canvasSession).toBeNull();
+  });
+
+  it('marks a canvas run failed on canvas_run_failed', () => {
+    const turnId = 'turn-canvas-run-failed';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-canvas-failed' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-canvas-failed',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'canvas_run_failed', {
+        canvasRunId: 'run-failed',
+        canvasId: 'canvas-1',
+        status: 'failed',
+        progress: 20,
+        nodeCount: 2,
+        edgeCount: 1,
+        revision: 3,
+        error: '画布写入失败',
+      }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().messages[0].metadata).toMatchObject({
+      kind: 'canvas-run',
+      canvasRunId: 'run-failed',
+      status: 'failed',
+      error: '画布写入失败',
+    });
+  });
+
   it('applies completed metadata and failed turn errors directly', () => {
     const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
     useAgentStore.setState({
@@ -1070,5 +1272,48 @@ describe('AgentScope turn envelope reduction', () => {
 
     await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 1);
     expect(useAgentStore.getState().messages[0].content).toBe('回放正文');
+  });
+
+  it('restores the canvas session card when replaying a missing final event', async () => {
+    const turnId = 'canvas-replay-turn';
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [
+          sseEnvelope(1, 'canvas_session_required', {
+            sessionId: 'canvas-session-replay',
+            conversationId: 'conversation-1',
+            turnId,
+            projectId: 'project-1',
+            intent: '生成雪茄房转场',
+            status: 'pending_selection',
+            choices: [{ canvasId: 'canvas-1', title: '画布 1' }],
+          }, turnId),
+        ],
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      canvasSession: null,
+      messages: [{
+        id: 'assistant-canvas-replay',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-canvas-replay' },
+      },
+      pendingAssistantId: 'assistant-canvas-replay',
+    });
+
+    await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 0);
+
+    expect(useAgentStore.getState().canvasSession).toMatchObject({
+      sessionId: 'canvas-session-replay',
+      status: 'pending_selection',
+    });
+    expect(useAgentStore.getState().messages).toHaveLength(0);
+    expect(useAgentStore.getState().generating['conversation-1']).toBeUndefined();
   });
 });

@@ -89,6 +89,55 @@ describe('canvas media reconciliation', () => {
     }])?.id).toBe('server-asset-1');
   });
 
+  it('finds a project media asset by producer node id', () => {
+    const mediaNode = {
+      id: 'media-1',
+      type: 'image',
+      position: { x: 0, y: 0 },
+      data: {
+        kind: 'image',
+        label: '环境-平面图',
+        prompt: '',
+        status: 'success',
+        accent: '#fff',
+        assetId: 'stale-local-id',
+      },
+    } as const;
+
+    expect(findReplacementCanvasAsset(mediaNode as never, [{
+      id: 'server-media-1',
+      type: 'image',
+      mimeType: 'image/png',
+      url: '/api/files/images/plan.png',
+      producerNodeId: 'media-1',
+    }])?.id).toBe('server-media-1');
+  });
+
+  it('finds a project media asset by durable URL', () => {
+    const mediaNode = {
+      id: 'media-url-1',
+      type: 'image',
+      position: { x: 0, y: 0 },
+      data: {
+        kind: 'image',
+        label: '环境-旋转楼梯',
+        prompt: '',
+        status: 'success',
+        accent: '#fff',
+        assetId: 'stale-local-id',
+        assetUrl: '/api/files/images/stair.png',
+      },
+    } as const;
+
+    expect(findReplacementCanvasAsset(mediaNode as never, [{
+      id: 'server-media-url-1',
+      type: 'image',
+      mimeType: 'image/png',
+      url: '/api/files/images/stair.png',
+      producerNodeId: 'other-node',
+    }])?.id).toBe('server-media-url-1');
+  });
+
   it('keeps hydrating other assets when one download fails', async () => {
     canvasAssets.list.mockResolvedValue([{
       id: 'asset-1',

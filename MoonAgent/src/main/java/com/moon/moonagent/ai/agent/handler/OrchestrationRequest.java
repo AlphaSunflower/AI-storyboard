@@ -4,6 +4,7 @@ import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
@@ -69,6 +70,9 @@ public class OrchestrationRequest {
 
     /** 本轮由项目库资产组或项目库媒体解析出的参考音频。 */
     private java.util.List<String> referenceAudios = java.util.List.of();
+
+    /** Structured attachment metadata, including stable library media ids. */
+    private java.util.List<AgentAttachmentRequest> attachments = java.util.List.of();
 
     /** 兼容标签；AgentScope 由 Skill 描述自行选择工具，不再依赖意图分发。 */
     private String intentType = "";

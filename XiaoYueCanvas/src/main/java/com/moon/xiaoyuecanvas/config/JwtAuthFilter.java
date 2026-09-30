@@ -31,6 +31,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             chain.doFilter(req, res);
             return;
         }
+        // MCP is an internal tool transport. Ownership is enforced from the
+        // injected userId/projectId/canvasId parameters inside each tool.
+        if (path.startsWith("/api/canvas/mcp")) {
+            chain.doFilter(req, res);
+            return;
+        }
 
         // 信任网关注入的 header（Gateway JwtAuthenticationFilter 已验签）
         String userId = req.getHeader("X-User-Id");

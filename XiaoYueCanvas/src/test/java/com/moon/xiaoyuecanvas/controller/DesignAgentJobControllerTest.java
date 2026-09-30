@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -52,5 +53,23 @@ class DesignAgentJobControllerTest {
 
         assertEquals(List.of(image, video), imported);
         verify(libraryService).importGroup("user-1", "canvas-1", "group-1", "node-1");
+    }
+
+    @Test
+    void assetRedirectsDurableMinioFilesToGatewayInsteadOfLocalDisk() {
+        CanvasAssetService assets = mock(CanvasAssetService.class);
+        CanvasAsset asset = new CanvasAsset();
+        asset.setId("asset-1");
+        asset.setObjectUrl("/api/files/images/reference.png");
+        asset.setType("image");
+        when(assets.getOwned("user-1", "asset-1")).thenReturn(asset);
+        DesignAgentJobController controller = new DesignAgentJobController(
+                mock(DesignJobService.class), assets, mock(CanvasProjectLibraryService.class),
+                mock(FileStorageService.class));
+
+        var response = controller.asset("user-1", "asset-1");
+
+        assertEquals(302, response.getStatusCode().value());
+        assertEquals(URI.create("/api/files/images/reference.png"), response.getHeaders().getLocation());
     }
 }

@@ -82,9 +82,13 @@ export async function listCanvasAssets(canvasId: string): Promise<CanvasAssetDes
 }
 
 export async function downloadCanvasAssetBlob(asset: CanvasAssetDescriptor): Promise<Blob> {
-  const response = await apiFetch(`/assets/${encodeURIComponent(asset.id)}`, {
-    headers: { Accept: asset.mimeType },
-  });
+  const directUrl = asset.url?.trim() ?? '';
+  const canUseDirectUrl = directUrl.startsWith('/api/files/') || /^https?:\/\//i.test(directUrl);
+  const response = await (canUseDirectUrl
+    ? fetch(directUrl, { headers: { Accept: asset.mimeType } })
+    : apiFetch(`/assets/${encodeURIComponent(asset.id)}`, {
+        headers: { Accept: asset.mimeType },
+      }));
   if (!response.ok) {
     throw new Error(`读取画布资产失败: HTTP ${response.status}`);
   }

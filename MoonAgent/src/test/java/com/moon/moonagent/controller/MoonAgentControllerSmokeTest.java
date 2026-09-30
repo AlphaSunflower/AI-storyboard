@@ -2,6 +2,7 @@ package com.moon.moonagent.controller;
 
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
+import com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
@@ -64,6 +65,8 @@ class MoonAgentControllerSmokeTest {
 
     @MockitoBean
     private AgentChatService chatService;
+    @MockitoBean
+    private AgentCanvasSessionService canvasSessionService;
     @MockitoBean
     private PromptOptimizeService optimizeService;
     @MockitoBean

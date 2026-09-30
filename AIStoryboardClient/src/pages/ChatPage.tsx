@@ -71,8 +71,10 @@ export function ChatPage() {
   const currentProject = useProjectStore((s) => s.currentProject);
   const canvasEditContext = useAgentStore((s) => s.canvasEditContext);
   const canvasBinding = useAgentStore((s) => s.canvasBinding);
+  const canvasSession = useAgentStore((s) => s.canvasSession);
   const canvasExitPending = useAgentStore((s) => s.canvasExitPending);
   const resumeCanvasBinding = useAgentStore((s) => s.resumeCanvasBinding);
+  const readyCanvasSession = useAgentStore((s) => s.readyCanvasSession);
   const exitCanvasModeNow = useAgentStore((s) => s.exitCanvasModeNow);
   const cancelCanvasBinding = useAgentStore((s) => s.cancelCanvasBinding);
   const leaveCanvasEditMode = useAgentStore((s) => s.leaveCanvasEditMode);
@@ -98,6 +100,7 @@ export function ChatPage() {
   const [generationCenterTab, setGenerationCenterTab] = useState<GenerationCenterTab>('active');
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
+  const openedCanvasSessionRef = useRef<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
   const titleSavingRef = useRef(false);
   const [convWidth, setConvWidth] = useState(240);
@@ -176,6 +179,13 @@ export function ChatPage() {
     else setCanvasBindingStatus('请选择要编辑的画布');
   }, [setCanvasBindingStatus]);
   const handleCanvasModeReady = useCallback((message: CanvasModeReadyMessage) => {
+    const session = useAgentStore.getState().canvasSession;
+    if (session && session.conversationId === message.conversationId
+      && session.projectId === message.projectId) {
+      useAgentStore.getState().beginCanvasSessionOpen(message.canvasId, false);
+      void readyCanvasSession();
+      return;
+    }
     const binding = useAgentStore.getState().canvasBinding;
     const currentContext = useAgentStore.getState().canvasEditContext;
     const rebound = rebindCanvasEditContext(currentContext, message.projectId, message.canvasId);
@@ -194,11 +204,15 @@ export function ChatPage() {
       mediaRefs: binding.mediaRefs,
     }) ?? base;
     void resumeCanvasBinding(context);
-  }, [bindCanvasMode, resumeCanvasBinding]);
+  }, [bindCanvasMode, readyCanvasSession, resumeCanvasBinding]);
   const handleCancelCanvasBinding = useCallback(() => {
     cancelCanvasBinding();
     releaseCanvasMode();
   }, [cancelCanvasBinding, releaseCanvasMode]);
+
+  useEffect(() => {
+    if (!canvasSession) openedCanvasSessionRef.current = null;
+  }, [canvasSession]);
 
   useEffect(() => {
     if (!canvasBinding?.conversationId || !canvasBinding.projectId) return;
@@ -215,6 +229,24 @@ export function ChatPage() {
       },
     });
   }, [canvasBinding, openChatApp, chatAppTabs]);
+
+  useEffect(() => {
+    if (!canvasSession || canvasSession.status !== 'opening') return;
+    if (openedCanvasSessionRef.current === canvasSession.sessionId) return;
+    openedCanvasSessionRef.current = canvasSession.sessionId;
+    const existing = chatAppTabs.find((tab) => tab.key === 'canvas');
+    openChatApp('canvas', {
+      canvasMode: {
+        conversationId: canvasSession.conversationId,
+        projectId: canvasSession.projectId,
+        canvasId: canvasSession.canvasId,
+        parentOrigin: window.location.origin,
+      },
+    });
+    if (existing?.canvasMode?.canvasId === canvasSession.canvasId) {
+      void readyCanvasSession();
+    }
+  }, [canvasSession, openChatApp, chatAppTabs, readyCanvasSession]);
 
   useEffect(() => {
     if (!canvasEditContext || canvasBinding) return;
@@ -580,6 +612,7 @@ export function ChatPage() {
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}
+                      conversationId={m.conversationId}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}
@@ -1045,6 +1078,7 @@ export function ChatPage() {
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}
+                      conversationId={m.conversationId}
                       role={m.role}
                       content={m.content}
                       metadata={m.metadata}

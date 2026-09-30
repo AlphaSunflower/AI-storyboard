@@ -18,6 +18,7 @@ import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
 import { AgentTaskCard } from './AgentTaskCard';
 import { StoryboardResultActions } from './StoryboardResultActions';
+import { CanvasRunCard } from './CanvasRunCard';
 import { ContextMenu } from '../common/ContextMenu';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
@@ -29,6 +30,7 @@ import {
   serializeDragPayload,
   type ChatMediaDragPayload,
 } from '../../lib/projectLibraryDrag';
+import { libraryMediaIdFromUrl } from '../../lib/libraryMedia';
 import './MessageBubble.css';
 
 type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
@@ -72,6 +74,7 @@ function standaloneAttachmentContent(content: string): AgentAttachment | null {
     mimeType: 'image/*',
     kind: 'image',
     source: isLibraryMedia ? 'library' : 'upload',
+    mediaId: libraryMediaIdFromUrl(value) ?? undefined,
   };
 }
 
@@ -86,6 +89,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'image/*',
       kind: 'image' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
     ...(input.referenceVideos ?? []).map((url, index) => ({
       url,
@@ -93,6 +97,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'video/*',
       kind: 'video' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
     ...(input.referenceAudios ?? []).map((url, index) => ({
       url,
@@ -100,6 +105,7 @@ function messageInputAttachments(metadata?: AgentMessageMetadata): AgentAttachme
       mimeType: 'audio/*',
       kind: 'audio' as const,
       source: url.includes('/api/library/media/') ? 'library' as const : 'upload' as const,
+      mediaId: libraryMediaIdFromUrl(url) ?? undefined,
     })),
   ];
 }
@@ -721,8 +727,9 @@ function useStreamingReveal(content: string, streaming: boolean): string {
   return streaming ? displayed : content;
 }
 
-export function MessageBubble({ messageId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
+export function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
   messageId?: string;
+  conversationId?: string;
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
   variant?: 'default' | 'deepseek'; createdAt?: string; metadata?: AgentMessageMetadata;
   editable?: boolean; onEdit?: () => void;
@@ -731,6 +738,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
+  const canvasRunMeta = metadata?.kind === 'canvas-run' ? metadata : null;
   const currentProject = useProjectStore((state) => state.currentProject);
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -935,6 +943,9 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
 
   return (
     <>
+    {!isUser && canvasRunMeta && (
+      <CanvasRunCard metadata={canvasRunMeta} conversationId={conversationId} />
+    )}
     <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       {/* 助手消息：正文上方渲染推理面板（实时/已思考） */}
       {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
@@ -1068,7 +1079,7 @@ export function MessageBubble({ messageId, role, content, streaming, variant = '
                 </>
               )}
           </span>
-        ) : <span style={{ opacity: 0.6 }}>…</span>}
+        ) : canvasRunMeta ? null : <span style={{ opacity: 0.6 }}>…</span>}
         {/* C 组：流式回复中的打字机光标 */}
         {streaming && content && (
           <span

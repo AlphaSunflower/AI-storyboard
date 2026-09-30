@@ -43,7 +43,7 @@ describe('canvas asset API', () => {
   });
 
   it('downloads a canvas asset by database id', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['video']), {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['video']), {
       status: 200,
       headers: { 'Content-Type': 'video/mp4' },
     }));
@@ -56,5 +56,29 @@ describe('canvas asset API', () => {
     });
 
     expect(blob.type).toBe('video/mp4');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/files/videos/v.mp4',
+      expect.objectContaining({ headers: { Accept: 'video/mp4' } }),
+    );
+  });
+
+  it('falls back to the canvas asset endpoint when no durable file URL is available', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['image']), {
+      status: 200,
+      headers: { 'Content-Type': 'image/png' },
+    }));
+
+    const blob = await downloadCanvasAssetBlob({
+      id: 'asset-image',
+      type: 'image',
+      mimeType: 'image/png',
+      url: '',
+    });
+
+    expect(blob.type).toBe('image/png');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/canvas/assets/asset-image',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
   });
 });

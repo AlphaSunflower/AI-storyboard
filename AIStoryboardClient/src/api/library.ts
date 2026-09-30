@@ -196,6 +196,9 @@ export const libraryApi = {
 
   getAsset: (id: string) => client.get<ApiResponse<LibraryAssetDetail>>(`/library/assets/${id}`),
 
+  getMedia: (mediaId: string) =>
+    client.get<ApiResponse<LibraryMedia>>(`/library/media/${encodeURIComponent(mediaId)}/metadata`),
+
   updateAsset: (
     id: string,
     data: { name?: string; description?: string; expectedVersion: number; manualOverride?: boolean },
