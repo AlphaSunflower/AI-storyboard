@@ -334,7 +334,8 @@ export async function loadCanvas(canvasId: string, projectId?: string): Promise<
     const localHasContent = (local?.nodes?.length ?? 0) > 0 || (local?.edges?.length ?? 0) > 0;
     // 后端为空但本地有内容（迁移/离线缓存）→ 信任本地，防后端空图覆盖勿丢数据
     if (!backendHasContent && localHasContent) return local ? normalizeCanvasGraph(local) : undefined;
-    if (!local && !backendHasContent) return undefined;
+    // 后端记录存在但图仍为空（例如 Agent 刚创建的新画布）→ 返回空画布，不能当成不存在。
+    if (!local && !backendHasContent) return emptyCanvas(canvasId, projectId);
     return normalizeCanvasGraph(applyGraph(local ?? emptyCanvas(canvasId, projectId), dto));
   } catch {
     // 后端不可达/无鉴权 → 降级本地缓存
