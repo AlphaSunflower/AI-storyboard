@@ -17,6 +17,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentCaptor.forClass;
 
 class AgentCanvasSessionServiceTest {
 
@@ -43,6 +44,28 @@ class AgentCanvasSessionServiceTest {
 
         assertThat(session.status()).isEqualTo(AgentCanvasSessionService.PENDING_SELECTION);
         assertThat(session.choices()).hasSize(2);
+    }
+
+    @Test
+    void blankCanvasIdIsStoredAsNullForPendingSelection() {
+        AgentCanvasSessionMapper mapper = mock(AgentCanvasSessionMapper.class);
+        doAnswer(invocation -> {
+            AgentCanvasSessionEntity entity = invocation.getArgument(0);
+            entity.setId("session-1");
+            return 1;
+        }).when(mapper).insert(any(AgentCanvasSessionEntity.class));
+        AgentCanvasSessionService service =
+                new AgentCanvasSessionService(mapper, mock(MorrowCanvasService.class));
+        AgentScopeCanvasTools.SessionPreparation preparation =
+                new AgentScopeCanvasTools.SessionPreparation(
+                        "project-1", "", "", "设计画布", 2, false,
+                        List.of(new AgentScopeCanvasTools.CanvasChoice("canvas-1", "画布 1")));
+
+        service.create(conversation(), "turn-1", "reply-1", "call-1", preparation, List.of());
+
+        var captor = forClass(AgentCanvasSessionEntity.class);
+        verify(mapper).insert(captor.capture());
+        assertThat(captor.getValue().getCanvasId()).isNull();
     }
 
     @Test

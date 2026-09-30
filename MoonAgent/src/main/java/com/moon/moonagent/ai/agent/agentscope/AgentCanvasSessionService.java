@@ -52,7 +52,7 @@ public class AgentCanvasSessionService {
         entity.setTurnId(turnId);
         entity.setRuntimeReplyId(replyId);
         entity.setRuntimeToolCallId(toolCallId);
-        entity.setCanvasId(preparation.canvasId());
+        entity.setCanvasId(blankToNull(preparation.canvasId()));
         entity.setCanvasTitle(preparation.canvasTitle());
         entity.setIntent(preparation.intent());
         entity.setStatus(status);
@@ -198,6 +198,10 @@ public class AgentCanvasSessionService {
         } catch (Exception e) {
             return "[]";
         }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     public record CanvasSessionView(
