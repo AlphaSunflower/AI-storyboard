@@ -98,6 +98,10 @@ public class JwtTokenProvider {
     }
 
     public String signRefreshToken(String userId, String sessionId) {
+        return signRefreshToken(userId, sessionId, UUID.randomUUID().toString());
+    }
+
+    public String signRefreshToken(String userId, String sessionId, String jti) {
         long nowSeconds = System.currentTimeMillis() / 1000;
         return Jwts.builder()
                 .header().add("alg", "HS256").add("typ", "JWT").and()
@@ -107,7 +111,7 @@ public class JwtTokenProvider {
                 .claim("sid", sessionId)
                 .issuedAt(new Date(nowSeconds * 1000))
                 .expiration(new Date((nowSeconds + refreshTokenTtl) * 1000))
-                .id(UUID.randomUUID().toString())
+                .id(jti)
                 .signWith(refreshKey)
                 .compact();
     }

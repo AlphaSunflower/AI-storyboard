@@ -23,20 +23,31 @@ public class AuthSessionService {
     private static final String USER_SESSIONS_PREFIX = "user-sessions:";
     private static final String STREAM_TICKET_PREFIX = "stream-ticket:";
     private static final long STREAM_TICKET_TTL_SECONDS = 60;
+    private static final long REFRESH_REPLAY_GRACE_SECONDS = 60;
 
     private static final DefaultRedisScript<Long> ROTATE_REFRESH_SCRIPT = new DefaultRedisScript<>("""
             local current = redis.call('HGET', KEYS[1], 'refreshJti')
             if not current then
                 return -1
             end
-            if current ~= ARGV[1] then
-                redis.call('DEL', KEYS[1])
-                redis.call('SREM', KEYS[2], ARGV[2])
-                return 0
+            local now = tonumber(ARGV[5])
+            if current == ARGV[1] then
+                redis.call('HSET', KEYS[1],
+                    'previousRefreshJti', ARGV[1],
+                    'previousRefreshUntil', now + tonumber(ARGV[6]),
+                    'refreshJti', ARGV[3],
+                    'refreshToken', ARGV[4])
+                redis.call('EXPIRE', KEYS[1], ARGV[7])
+                return 1
             end
-            redis.call('HSET', KEYS[1], 'refreshJti', ARGV[3])
-            redis.call('EXPIRE', KEYS[1], ARGV[4])
-            return 1
+            local previous = redis.call('HGET', KEYS[1], 'previousRefreshJti')
+            local previousUntil = tonumber(redis.call('HGET', KEYS[1], 'previousRefreshUntil') or '0')
+            if previous == ARGV[1] and previousUntil >= now then
+                return 2
+            end
+            redis.call('DEL', KEYS[1])
+            redis.call('SREM', KEYS[2], ARGV[2])
+            return 0
             """, Long.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -54,6 +65,7 @@ public class AuthSessionService {
         redisTemplate.opsForHash().putAll(key, Map.of(
                 "userId", user.getId(),
                 "refreshJti", refreshJti,
+                "refreshToken", refreshToken,
                 "role", user.getRole(),
                 "status", user.getStatus()
         ));
@@ -80,12 +92,36 @@ public class AuthSessionService {
         String status = session.get("status") == null ? "enabled" : String.valueOf(session.get("status"));
         String newRefresh = jwtTokenProvider.signRefreshToken(userId, sessionId);
         String newJti = jwtTokenProvider.verifyRefreshToken(newRefresh).getId();
+        long nowSeconds = Instant.now().getEpochSecond();
         Long rotated = redisTemplate.execute(
                 ROTATE_REFRESH_SCRIPT,
                 List.of(sessionKey(sessionId), userSessionsKey(userId)),
-                oldJti, sessionId, newJti, String.valueOf(jwtConfig.getRefreshTokenTtl()));
+                oldJti,
+                sessionId,
+                newJti,
+                newRefresh,
+                String.valueOf(nowSeconds),
+                String.valueOf(REFRESH_REPLAY_GRACE_SECONDS),
+                String.valueOf(jwtConfig.getRefreshTokenTtl()));
         if (rotated == null || rotated <= 0) {
             throw new BusinessException(40101, "Refresh Token 已失效或被重复使用");
+        }
+        if (rotated == 2) {
+            Map<Object, Object> currentSession =
+                    redisTemplate.opsForHash().entries(sessionKey(sessionId));
+            String currentRefresh = currentSession.get("refreshToken") == null
+                    ? null : String.valueOf(currentSession.get("refreshToken"));
+            if (currentRefresh == null || currentRefresh.isBlank()) {
+                String currentJti = currentSession.get("refreshJti") == null
+                        ? null : String.valueOf(currentSession.get("refreshJti"));
+                if (currentJti == null || currentJti.isBlank()) {
+                    throw new BusinessException(40101, "Refresh Token 已失效或被重复使用");
+                }
+                currentRefresh = jwtTokenProvider.signRefreshToken(userId, sessionId, currentJti);
+                redisTemplate.opsForHash().put(sessionKey(sessionId), "refreshToken", currentRefresh);
+            }
+            String accessToken = jwtTokenProvider.signAccessToken(userId, role, status, sessionId);
+            return new SessionTokens(accessToken, currentRefresh, sessionId);
         }
         String accessToken = jwtTokenProvider.signAccessToken(userId, role, status, sessionId);
         return new SessionTokens(accessToken, newRefresh, sessionId);
