@@ -949,6 +949,52 @@ describe('AgentScope turn envelope reduction', () => {
     expect(useAgentStore.getState().messages.at(-1)?.content).toBe('已继续');
   });
 
+  it('maps canvas bind pause to an exact canvas mode binding', () => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-canvas' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-canvas',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    });
+
+    const effects = applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_paused', {
+        content: '请打开画布继续',
+        hitl: {
+          kind: 'canvas-bind',
+          formToken: 'canvas-form-1',
+          formContent: '请打开画布继续',
+          projectId: 'project-1',
+          canvasId: 'canvas-9',
+          canvasTitle: '画布 9',
+          requestedIntent: '生成雪茄房转场',
+          picUrls: ['https://example.test/ref.png'],
+          assetIds: ['asset-1'],
+          actions: [{ id: 'open', title: '打开画布继续' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, 'turn-canvas'),
+      context,
+    );
+
+    expect(effects.canvasModeRequired).toMatchObject({
+      conversationId: 'conversation-1',
+      turnId: 'turn-canvas',
+      projectId: 'project-1',
+      canvasId: 'canvas-9',
+      canvasTitle: '画布 9',
+      requestedIntent: '生成雪茄房转场',
+      formToken: 'canvas-form-1',
+      picUrls: ['https://example.test/ref.png'],
+      assetIds: ['asset-1'],
+    });
+  });
+
   it('applies completed metadata and failed turn errors directly', () => {
     const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
     useAgentStore.setState({

@@ -11,7 +11,7 @@ metadata:
     hitl:
       - { id: execute, title: 确认执行 }
       - { id: cancel, title: 取消 }
-allowed-tools: canvas_get_context canvas_list_node_types canvas_get_state canvas_list_nodes canvas_get_node canvas_list_edges canvas_get_selection canvas_create_node canvas_create_nodes canvas_import_media canvas_create_canvas canvas_rename_canvas canvas_create_result_slots canvas_mark_result_slots canvas_get_node_model_config canvas_set_node_model_config canvas_update_node canvas_create_edge canvas_move_nodes canvas_layout_graph canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
+allowed-tools: prepare_canvas_session canvas_get_context canvas_list_node_types canvas_get_state canvas_list_nodes canvas_get_node canvas_list_edges canvas_get_selection canvas_create_node canvas_create_nodes canvas_import_media canvas_create_canvas canvas_rename_canvas canvas_create_result_slots canvas_mark_result_slots canvas_get_node_model_config canvas_set_node_model_config canvas_update_node canvas_create_edge canvas_move_nodes canvas_layout_graph canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
 ---
 
 # 画布执行
@@ -33,3 +33,4 @@ allowed-tools: canvas_get_context canvas_list_node_types canvas_get_state canvas
 12. 分镜链路允许 storyboardPlanner → shot 的结构化数据连接；shot 生成图片或视频时仍必须经过媒体结果槽。
 13. 最终回复报告 executionId、已受理节点和读取到的真实状态。
 14. 目标不明确或存在多个候选画布时，必须调用 request_human_input 让用户按名称点击选择，禁止展示或要求输入 projectId、canvasId、nodeId；ID 仅作为工具隐藏参数传递。
+15. 若目标画布未打开或浏览器未响应，先调用 prepare_canvas_session 准备并恢复画布，再继续执行，不得直接等待画布命令超时。

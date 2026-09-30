@@ -2,6 +2,10 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
+import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
+import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
+import com.moon.moonagent.ai.agent.creative.CreativeMode;
+import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.middleware.MiddlewareBase;
@@ -15,6 +19,8 @@ import java.util.List;
 final class TurnContextMiddleware implements MiddlewareBase {
 
     private final AgentWorkflowService workflows;
+    private final ProjectCreativeContextService creativeContext;
+    private final ConstraintExtractionService constraints;
 
     @Override
     public Mono<String> onSystemPrompt(Agent agent, RuntimeContext context, String prompt) {
@@ -44,6 +50,8 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
             lines.add("Current turn attached image count: " + request.getPicUrls().size()
                     + ". The image bytes are already attached to the user message.");
+            lines.add("Current turn attached image URLs for canvas_import_media: "
+                    + request.getPicUrls());
         }
         if (request.getAssetIds() != null && !request.getAssetIds().isEmpty()) {
             lines.add("Current turn selected asset IDs: " + request.getAssetIds());
@@ -51,9 +59,38 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (request.getReferenceVideos() != null && !request.getReferenceVideos().isEmpty()) {
             lines.add("Current turn reference video URLs: " + request.getReferenceVideos());
         }
+        if (request.getCanvasContext() != null
+                && !request.getCanvasContext().normalizedMediaRefs().isEmpty()) {
+            lines.add("Current canvas media refs: "
+                    + request.getCanvasContext().normalizedMediaRefs().stream()
+                    .map(ref -> {
+                        StringBuilder value = new StringBuilder(ref.kind());
+                        if (ref.url() != null && !ref.url().isBlank()) {
+                            value.append(" url=").append(ref.url());
+                        }
+                        if (ref.assetId() != null && !ref.assetId().isBlank()) {
+                            value.append(" assetId=").append(ref.assetId());
+                        }
+                        return value.toString();
+                    })
+                    .toList());
+        }
         if (runContext.conversation() != null) {
             String workflow = workflows.activeContext(runContext.conversation().getId());
             if (!workflow.isBlank()) lines.add(workflow);
+            String projectContext = creativeContext.promptContext(
+                    runContext.conversation().getProjectId(), request.getContent());
+            if (!projectContext.isBlank()) {
+                lines.add("<project-creative-context>\n" + projectContext
+                        + "\n</project-creative-context>");
+            }
+        }
+        ConstraintLedger ledger = constraints.extract(request.getContent());
+        lines.add("Creative mode: " + ledger.mode());
+        if (ledger.mode() == CreativeMode.STRICT) {
+            lines.add("Strict mode: preserve all HARD constraints. Do not silently weaken, drop "
+                    + "or reinterpret them. If a hard constraint conflicts or is unverifiable, "
+                    + "ask the user before generating.");
         }
         if (lines.isEmpty()) return Mono.just(prompt);
         return Mono.just((prompt == null ? "" : prompt)

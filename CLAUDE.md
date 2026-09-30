@@ -310,6 +310,22 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 | GET | `/api/agent/conversations/{id}/runtime` | 运行时、Skill、Prompt、MCP 元数据状态 |
 | GET | `/api/agent/conversations/{id}/turns/{turnId}/events?afterSeq=N` | 按序号补偿重放 turn 事件 |
 
+### 通用创作智能层
+
+- `project_creative_contexts` 保存项目级目标、创意方向、风格、参考、硬/软约束、反馈和模型偏好；
+  不保存跨项目记忆，也不引入建筑等垂直领域字段。
+- 明确出现“必须/严格/保留/不能改”等词时进入 `STRICT`，命中约束通过
+  `constraint_flagged` 事件下发；未识别到可验证硬约束时要求先澄清。
+- AgentScope 已启用 Plan Mode、任务列表、工具结果驱逐、五类创作子智能体、PostgreSQL
+  `DistributedStore` 和 OpenTelemetry；模型角色通过
+  `AGENTSCOPE_MODEL_PLAN/PROMPT/CRITIC/VISION/IMAGE/VIDEO` 覆盖。
+- 图片生成后会调用视觉批评器。批评结果为 `REPAIR` 时允许一轮提示词/参考修复；
+  第二轮仍失败则必须转 HITL。视频和图片评测记录保存在 `agent_media_critiques`。
+- 长视频先保存 `agent_timeline_manifests`，再由合并工具按顺序组装；缺片不得静默跳过。
+- 新接口：`/api/agent/projects/{projectId}/creative-context`、
+  `/api/agent/runs/{runId}/plan`、`/api/agent/runs/{runId}/critique`、
+  `/api/agent/runs/{runId}/items/{itemId}/repair`。
+
 `/messages/stream`、`/form/submit`、`/video/plan/generate`、计划 actions、
 `/messages/interrupt-and-send` 和 `/messages/{messageId}/edit-and-resend`
 返回 `410 Gone`。会话、消息、资产、生成记录和历史计划读取接口保持可用。

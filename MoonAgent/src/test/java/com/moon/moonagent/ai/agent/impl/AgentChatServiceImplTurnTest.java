@@ -4,6 +4,7 @@ import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.ConversationLock;
+import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.ai.agent.agentscope.MoonAgentRuntime;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
@@ -271,6 +272,7 @@ class AgentChatServiceImplTurnTest {
                 mock(AgentCheckpointMapper.class),
                 checkpoints,
                 lock,
+                mock(ProjectCreativeContextService.class),
                 transactionManager);
     }
 

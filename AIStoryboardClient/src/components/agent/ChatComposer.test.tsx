@@ -75,6 +75,57 @@ describe('ChatComposer project library drops', () => {
     });
   });
 
+  it('shows reference image thumbnails instead of a count-only chip', () => {
+    useAgentStore.setState({
+      refImageUrls: ['/api/files/images/a.png', '/api/files/images/b.png'],
+      pendingAttachments: [
+        {
+          url: '/api/files/images/a.png',
+          name: '角色参考.png',
+          mimeType: 'image/png',
+          kind: 'image',
+        },
+        {
+          url: '/api/files/images/b.png',
+          name: '场景参考.png',
+          mimeType: 'image/png',
+          kind: 'image',
+        },
+      ],
+    });
+
+    render(<ChatComposer />);
+
+    expect(screen.getByRole('button', { name: '预览参考图 1：角色参考.png' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '预览参考图 2：场景参考.png' })).toBeTruthy();
+    expect(screen.queryByText('参考图 2 张')).toBeNull();
+  });
+
+  it('collapses reference previews after five items and exposes the remainder', () => {
+    useAgentStore.setState({
+      refImageUrls: Array.from({ length: 7 }, (_, index) => `/api/files/images/${index + 1}.png`),
+      pendingAttachments: [],
+    });
+
+    render(<ChatComposer />);
+
+    expect(screen.getAllByRole('button', { name: /预览参考图/ })).toHaveLength(4);
+    expect(screen.getByRole('button', { name: '查看其余 3 张参考图' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '预览参考图 5：图 5' })).toBeNull();
+  });
+
+  it('removes one reference image directly from the compact preview strip', () => {
+    useAgentStore.setState({
+      refImageUrls: ['/api/files/images/a.png', '/api/files/images/b.png'],
+      pendingAttachments: [],
+    });
+
+    render(<ChatComposer />);
+    fireEvent.click(screen.getByRole('button', { name: '移除参考图 1' }));
+
+    expect(useAgentStore.getState().refImageUrls).toEqual(['/api/files/images/b.png']);
+  });
+
   it('offers interrupt-and-send while the agent is streaming', () => {
     useAgentStore.setState({ streaming: true });
     render(<ChatComposer />);

@@ -11,6 +11,6 @@ class AgentChatServiceImplMediaTypeTest {
         assertThat(AgentChatServiceImpl.referenceMediaType("image/png")).isEqualTo("image");
         assertThat(AgentChatServiceImpl.referenceMediaType("video/mp4")).isEqualTo("video");
         assertThat(AgentChatServiceImpl.referenceMediaType("audio/mpeg")).isEqualTo("audio");
-        assertThat(AgentChatServiceImpl.referenceMediaType("application/pdf")).isEmpty();
+        assertThat(AgentChatServiceImpl.referenceMediaType("application/pdf")).isEqualTo("file");
     }
 }

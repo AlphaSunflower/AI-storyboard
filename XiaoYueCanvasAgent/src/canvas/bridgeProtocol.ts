@@ -8,6 +8,7 @@ export const BRIDGE_POLL_INTERVAL_MS = 1000;
 export const BRIDGE_COMMAND_TIMEOUT_MS = 11 * 60_000;
 export const BRIDGE_BROWSER_COMMAND_TIMEOUT_MS = 10 * 60_000;
 export const BRIDGE_TAB_STALE_MS = 15 * 60_000;
+export const BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS = 30_000;
 
 export type BridgeSource = 'mcp' | 'cli' | 'agent';
 
@@ -74,5 +75,6 @@ export interface BridgeHealth {
     canvasId: string;
     canvasTitle?: string;
     lastSeen: number;
+    responsive: boolean;
   }>;
 }

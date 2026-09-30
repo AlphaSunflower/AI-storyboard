@@ -1,6 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import io.agentscope.core.model.Model;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 public class AgentScopeModelProvider {
 
     private final AgentScopeProperties properties;
-    private final GatewayModelService gatewayModelService;
+    private final CreativeModelRouter modelRouter;
 
     @Value("${ai.gateway.base-url:${LLM_GATEWAY_BASE_URL:http://localhost:8083}}")
     private String gatewayBaseUrl;
@@ -25,7 +25,7 @@ public class AgentScopeModelProvider {
 
     public Model primary() {
         String modelName = properties.getModel() == null || properties.getModel().isBlank()
-                ? gatewayModelService.getDefaultTextModel() : properties.getModel().trim();
+                ? modelRouter.resolve("creative.plan") : properties.getModel().trim();
         return build(modelName);
     }
 
@@ -37,6 +37,11 @@ public class AgentScopeModelProvider {
             return primary;
         }
         return new RetryableFallbackModel(primary, build(fallbackName.trim()));
+    }
+
+    public Model resolveNamed(String modelName) {
+        if (modelName == null || modelName.isBlank()) return primary();
+        return build(modelName.trim());
     }
 
     private OpenAIChatModel build(String modelName) {

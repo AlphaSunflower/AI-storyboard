@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.skill;
 
+import com.moon.moonagent.ai.agent.agentscope.AgentScopeToolkitFactory;
 import io.modelcontextprotocol.client.McpSyncClient;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class CanvasMcpConnectionManager {
 
     private final ObjectProvider<List<McpSyncClient>> syncClients;
     private final SkillExpander skillExpander;
+    private final ObjectProvider<AgentScopeToolkitFactory> toolkitFactory;
     private final AtomicBoolean stopped = new AtomicBoolean(false);
 
     @EventListener(ApplicationReadyEvent.class)
@@ -55,6 +57,7 @@ public class CanvasMcpConnectionManager {
                                 .build()
                                 .getToolCallbacks();
                         skillExpander.registerRemoteCallbacks(callbacks);
+                        toolkitFactory.ifAvailable(AgentScopeToolkitFactory::refreshCanvasTools);
                     } catch (Exception clientError) {
                         log.debug("[MCP] 连接尚未就绪，将重试: {}", clientError.getMessage());
                     }

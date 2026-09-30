@@ -43,7 +43,8 @@ const contextResult = async (
   input: { projectId?: string; canvasId?: string },
 ) => {
   const health = core.health();
-  const options = health.projects.map((entry) => ({
+  const responsiveProjects = health.projects.filter((entry) => entry.responsive);
+  const options = responsiveProjects.map((entry) => ({
     id: `${entry.projectId}::${entry.canvasId}`,
     title: `${entry.projectTitle || '未命名项目'} / ${entry.canvasTitle || '未命名画布'}`,
     value: {
@@ -57,21 +58,38 @@ const contextResult = async (
     const match = health.projects.find((entry) =>
       (!input.projectId || entry.projectId === input.projectId)
       && (!input.canvasId || entry.canvasId === input.canvasId));
-    return match
-      ? { content: [{ type: 'text' as const, text: JSON.stringify(match) }] }
-      : { content: [{ type: 'text' as const, text: JSON.stringify({ code: 'CANVAS_NOT_OPEN', message: '目标画布未打开' }) }], isError: true };
+    if (!match) {
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ code: 'CANVAS_NOT_OPEN', message: '目标画布未打开' }) }], isError: true };
+    }
+    if (!match.responsive) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            code: 'BROWSER_NOT_RESPONDING',
+            message: '目标画布已打开，但浏览器页面未在响应画布命令，请重新打开或刷新画布。',
+          }),
+        }],
+        isError: true,
+      };
+    }
+    return { content: [{ type: 'text' as const, text: JSON.stringify(match) }] };
   }
-  if (health.projects.length === 1) {
-    return { content: [{ type: 'text' as const, text: JSON.stringify(health.projects[0]) }] };
+  if (responsiveProjects.length === 1) {
+    return { content: [{ type: 'text' as const, text: JSON.stringify(responsiveProjects[0]) }] };
   }
   return { content: [{ type: 'text' as const, text: JSON.stringify({
-    code: health.projects.length ? 'HUMAN_INPUT_REQUIRED' : 'PROJECT_NOT_OPEN',
-    message: health.projects.length
-      ? '检测到多个活动画布，请调用 moon_request_human_input，让用户按项目名和画布名选择。'
-      : '当前没有活动画布',
-    prompt: health.projects.length ? '请选择要编辑的画布：' : undefined,
-    options: health.projects.length ? options : undefined,
-  }) }], isError: health.projects.length === 0 };
+    code: responsiveProjects.length
+      ? 'HUMAN_INPUT_REQUIRED'
+      : health.projects.length ? 'BROWSER_NOT_RESPONDING' : 'PROJECT_NOT_OPEN',
+    message: responsiveProjects.length
+      ? '检测到多个活动画布，请调用 request_human_input，让用户按项目名和画布名选择。'
+      : health.projects.length
+        ? '画布已打开，但浏览器页面未在响应画布命令，请重新打开或刷新画布。'
+        : '当前没有活动画布',
+    prompt: responsiveProjects.length ? '请选择要编辑的画布：' : undefined,
+    options: responsiveProjects.length ? options : undefined,
+  }) }], isError: responsiveProjects.length === 0 };
 };
 
 function createCanvasMcpServer(core: CanvasBridgeCore) {
@@ -80,7 +98,7 @@ function createCanvasMcpServer(core: CanvasBridgeCore) {
   server.registerTool('canvas_get_context', {
     title: '获取画布上下文',
     description: '获取当前打开的画布项目与画布名称。多个画布时返回 HUMAN_INPUT_REQUIRED，'
-      + '必须使用 moon_request_human_input 让用户按名称点击选择，禁止要求用户输入 ID。',
+      + '必须使用 request_human_input 让用户按名称点击选择，禁止要求用户输入 ID。',
     inputSchema: z.object(contextSchema),
     annotations: { readOnlyHint: true },
   }, (input) => contextResult(core, input));

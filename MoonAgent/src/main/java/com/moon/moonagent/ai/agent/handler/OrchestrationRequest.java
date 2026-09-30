@@ -214,6 +214,9 @@ public class OrchestrationRequest {
     /** 新 AgentScope 传输只发送带序号的 envelope，不再混发旧 SSE 事件。 */
     private boolean nativeEventsOnly;
 
+    /** Durable turn id used to correlate events, critiques and replay. */
+    private String turnId = "";
+
     public String getRoutingHint() {
         return routingHint == null ? "" : routingHint;
     }
@@ -244,6 +247,14 @@ public class OrchestrationRequest {
 
     public void setCanvasContext(CanvasSessionContext canvasContext) {
         this.canvasContext = canvasContext;
+    }
+
+    public String getTurnId() {
+        return turnId == null ? "" : turnId;
+    }
+
+    public void setTurnId(String turnId) {
+        this.turnId = turnId == null ? "" : turnId;
     }
 
     public void setSuggestedActions(java.util.List<SuggestedAction> suggestedActions) {

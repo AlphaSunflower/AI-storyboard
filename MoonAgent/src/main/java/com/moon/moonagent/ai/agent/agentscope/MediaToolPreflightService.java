@@ -202,7 +202,8 @@ public class MediaToolPreflightService {
         if (context.turnState() != null) {
             String mediaType = AgentScopeVideoTools.GENERATE_VIDEO.equals(toolName)
                     ? "video" : "image";
-            if (context.turnState().hasStartedMedia(mediaType)) {
+            if (context.turnState().hasStartedMedia(mediaType)
+                    && !context.turnState().mediaRepairAuthorized(mediaType)) {
                 issues.add("本轮已经执行过同类媒体任务，请复用已有结果");
             }
         }

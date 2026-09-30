@@ -3,6 +3,8 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.client.StoryboardClient;
+import com.moon.moonagent.ai.agent.creative.TimelineManifest;
+import com.moon.moonagent.ai.agent.creative.TimelineManifestService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -20,6 +22,7 @@ public class AgentScopeVideoMergeTools {
 
     private final VideoMergeService mergeService;
     private final StoryboardClient storyboardClient;
+    private final TimelineManifestService timelineManifests;
 
     public AgentScopeTool tool() {
         return new AgentScopeTool(
@@ -27,15 +30,28 @@ public class AgentScopeVideoMergeTools {
                 "Merge approved storyboard video clips into one final video. "
                         + "Preserve the source_urls order and validate the expected duration.",
                 AgentScopeTool.schema(Map.of(
+                        "manifest_id", Map.of("type", "string"),
                         "source_urls", array("string"),
                         "expected_duration_seconds", Map.of("type", "integer")),
-                        List.of("source_urls")),
+                        List.of()),
                 false, false, false,
                 (input, param) -> {
                     AgentScopeRunContext context = AgentScopeToolPipeline.context(param);
                     AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
                     List<String> urls = stringList(input.get("source_urls"));
                     Integer expected = integer(input.get("expected_duration_seconds"));
+                    String manifestId = string(input.get("manifest_id"));
+                    if (!manifestId.isBlank()) {
+                        TimelineManifest manifest = timelineManifests.get(
+                                conversation.getProjectId(), conversation.getId(), manifestId);
+                        if (manifest == null) {
+                            throw new IllegalArgumentException("时间线不存在或不属于当前会话");
+                        }
+                        urls = manifest.sourceUrls();
+                        if (expected == null || expected <= 0) {
+                            expected = manifest.totalDurationSeconds();
+                        }
+                    }
                     if (urls.isEmpty()) {
                         List<Scene> scenes = storyboardClient
                                 .getProjectScenesFresh(conversation.getProjectId()).stream()
@@ -51,6 +67,9 @@ public class AgentScopeVideoMergeTools {
                                     .mapToInt(Integer::intValue)
                                     .sum();
                         }
+                    }
+                    if (urls.isEmpty()) {
+                        throw new IllegalStateException("时间线中没有可用视频片段");
                     }
                     String taskId = mergeService.start(
                             conversation.getUserId(), conversation.getId(),
@@ -88,5 +107,9 @@ public class AgentScopeVideoMergeTools {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static String string(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 }

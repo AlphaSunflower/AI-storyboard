@@ -452,7 +452,12 @@ export type AgentTurnEventType =
   | 'agent_event'
   | 'turn_paused'
   | 'turn_completed'
-  | 'turn_failed';
+  | 'turn_failed'
+  | 'plan_updated'
+  | 'constraint_flagged'
+  | 'media_critique'
+  | 'shot_progress'
+  | 'assembly_progress';
 
 /** Native AgentScope event carried inside an `agent_event` payload. */
 export interface AgentScopeEvent {
@@ -468,12 +473,57 @@ export interface AgentTurnEventEnvelope {
   payload: Record<string, unknown>;
 }
 
+export interface ConstraintItem {
+  id: string;
+  statement: string;
+  severity: 'HARD' | 'SOFT';
+  source: string;
+  verifier: string;
+  value: string;
+}
+
+export interface ProjectCreativeContext {
+  projectId: string;
+  objective: string;
+  creativeDirection: string;
+  visualStyle: string;
+  references: Array<{ assetId: string; role: string; url: string; note: string }>;
+  hardConstraints: ConstraintItem[];
+  softConstraints: ConstraintItem[];
+  approvedAssetIds: string[];
+  rejectedDirections: string[];
+  feedback: string[];
+  modelPreferences: Record<string, string>;
+  version: number;
+  updatedAt: string;
+}
+
+export interface MediaCritique {
+  id: string;
+  turnId: string;
+  itemId: string;
+  mediaType: string;
+  assetUrl: string;
+  decision: string;
+  hardConstraintPass: boolean;
+  scores: Record<string, number>;
+  violations: string[];
+  reasons: string[];
+  repairAttempt: number;
+  createdAt: string;
+}
+
 const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
   'turn_started',
   'agent_event',
   'turn_paused',
   'turn_completed',
   'turn_failed',
+  'plan_updated',
+  'constraint_flagged',
+  'media_critique',
+  'shot_progress',
+  'assembly_progress',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -605,6 +655,23 @@ export const agentApi = {
 
   removeConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.delete(`/agent/conversations/${conversationId}/asset-groups/${groupId}`),
+
+  getCreativeContext: (projectId: string) =>
+    client.get<{ data: ProjectCreativeContext }>(
+      `/agent/projects/${projectId}/creative-context`),
+
+  updateCreativeContext: (
+    projectId: string,
+    data: Partial<Omit<ProjectCreativeContext, 'projectId' | 'version' | 'updatedAt'>>,
+  ) =>
+    client.put<{ data: ProjectCreativeContext }>(
+      `/agent/projects/${projectId}/creative-context`, data),
+
+  getRunPlan: (runId: string) =>
+    client.get<{ data: Record<string, unknown> }>(`/agent/runs/${runId}/plan`),
+
+  getRunCritiques: (runId: string) =>
+    client.get<{ data: MediaCritique[] }>(`/agent/runs/${runId}/critique`),
 
   createConversation: (
     projectId: string,

@@ -34,6 +34,17 @@ public class AgentScopeProperties {
     private String wakeupDir = "";
     private int wakeupMaxRetries = 5;
     private Duration wakeupRetryDelay = Duration.ofSeconds(2);
+    private boolean planModeEnabled = true;
+    private boolean taskListEnabled = true;
+    private String planFileDirectory = "plans";
+    private boolean toolResultEvictionEnabled = true;
+    private int toolResultEvictionMaxChars = 80_000;
+    private int toolResultEvictionPreviewChars = 2_000;
+    private boolean otelTracingEnabled = true;
+    private boolean distributedStoreEnabled = true;
+    private boolean critiqueEnabled = true;
+    private int critiqueMaxRepairs = 1;
+    private Models models = new Models();
     private Preflight preflight = new Preflight();
 
     public boolean isEnabled() {
@@ -238,12 +249,162 @@ public class AgentScopeProperties {
                 ? Duration.ofSeconds(2) : wakeupRetryDelay;
     }
 
+    public boolean isPlanModeEnabled() {
+        return planModeEnabled;
+    }
+
+    public void setPlanModeEnabled(boolean planModeEnabled) {
+        this.planModeEnabled = planModeEnabled;
+    }
+
+    public boolean isTaskListEnabled() {
+        return taskListEnabled;
+    }
+
+    public void setTaskListEnabled(boolean taskListEnabled) {
+        this.taskListEnabled = taskListEnabled;
+    }
+
+    public String getPlanFileDirectory() {
+        return planFileDirectory;
+    }
+
+    public void setPlanFileDirectory(String planFileDirectory) {
+        this.planFileDirectory = planFileDirectory == null || planFileDirectory.isBlank()
+                ? "plans" : planFileDirectory.trim();
+    }
+
+    public boolean isToolResultEvictionEnabled() {
+        return toolResultEvictionEnabled;
+    }
+
+    public void setToolResultEvictionEnabled(boolean toolResultEvictionEnabled) {
+        this.toolResultEvictionEnabled = toolResultEvictionEnabled;
+    }
+
+    public int getToolResultEvictionMaxChars() {
+        return toolResultEvictionMaxChars;
+    }
+
+    public void setToolResultEvictionMaxChars(int toolResultEvictionMaxChars) {
+        this.toolResultEvictionMaxChars = Math.max(2_000, toolResultEvictionMaxChars);
+    }
+
+    public int getToolResultEvictionPreviewChars() {
+        return toolResultEvictionPreviewChars;
+    }
+
+    public void setToolResultEvictionPreviewChars(int toolResultEvictionPreviewChars) {
+        this.toolResultEvictionPreviewChars = Math.max(200, toolResultEvictionPreviewChars);
+    }
+
+    public boolean isOtelTracingEnabled() {
+        return otelTracingEnabled;
+    }
+
+    public void setOtelTracingEnabled(boolean otelTracingEnabled) {
+        this.otelTracingEnabled = otelTracingEnabled;
+    }
+
+    public boolean isDistributedStoreEnabled() {
+        return distributedStoreEnabled;
+    }
+
+    public void setDistributedStoreEnabled(boolean distributedStoreEnabled) {
+        this.distributedStoreEnabled = distributedStoreEnabled;
+    }
+
+    public boolean isCritiqueEnabled() {
+        return critiqueEnabled;
+    }
+
+    public void setCritiqueEnabled(boolean critiqueEnabled) {
+        this.critiqueEnabled = critiqueEnabled;
+    }
+
+    public int getCritiqueMaxRepairs() {
+        return critiqueMaxRepairs;
+    }
+
+    public void setCritiqueMaxRepairs(int critiqueMaxRepairs) {
+        this.critiqueMaxRepairs = Math.max(0, Math.min(1, critiqueMaxRepairs));
+    }
+
+    public Models getModels() {
+        return models;
+    }
+
+    public void setModels(Models models) {
+        this.models = models == null ? new Models() : models;
+    }
+
     public Preflight getPreflight() {
         return preflight;
     }
 
     public void setPreflight(Preflight preflight) {
         this.preflight = preflight == null ? new Preflight() : preflight;
+    }
+
+    public static class Models {
+        private String plan = "";
+        private String prompt = "";
+        private String critic = "";
+        private String vision = "";
+        private String image = "";
+        private String video = "";
+
+        public String getPlan() {
+            return plan;
+        }
+
+        public void setPlan(String plan) {
+            this.plan = text(plan);
+        }
+
+        public String getPrompt() {
+            return prompt;
+        }
+
+        public void setPrompt(String prompt) {
+            this.prompt = text(prompt);
+        }
+
+        public String getCritic() {
+            return critic;
+        }
+
+        public void setCritic(String critic) {
+            this.critic = text(critic);
+        }
+
+        public String getVision() {
+            return vision;
+        }
+
+        public void setVision(String vision) {
+            this.vision = text(vision);
+        }
+
+        public String getImage() {
+            return image;
+        }
+
+        public void setImage(String image) {
+            this.image = text(image);
+        }
+
+        public String getVideo() {
+            return video;
+        }
+
+        public void setVideo(String video) {
+            this.video = text(video);
+        }
+
+        private static String text(String value) {
+            return value == null ? "" : value.trim();
+        }
     }
 
     public static class Preflight {

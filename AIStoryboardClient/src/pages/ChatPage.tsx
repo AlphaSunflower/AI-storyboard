@@ -191,6 +191,7 @@ export function ChatPage() {
     const context = buildCanvasRequestContext(base, {
       picUrls: binding.picUrls,
       assetIds: binding.assetIds,
+      mediaRefs: binding.mediaRefs,
     }) ?? base;
     void resumeCanvasBinding(context);
   }, [bindCanvasMode, resumeCanvasBinding]);
@@ -208,7 +209,8 @@ export function ChatPage() {
       canvasMode: {
         conversationId: canvasBinding.conversationId,
         projectId: canvasBinding.projectId,
-        canvasId: existing?.projectId === canvasBinding.projectId ? canvasIdFromUrl(existing.url) : undefined,
+        canvasId: canvasBinding.canvasId
+          ?? (existing?.projectId === canvasBinding.projectId ? canvasIdFromUrl(existing.url) : undefined),
         parentOrigin: window.location.origin,
       },
     });

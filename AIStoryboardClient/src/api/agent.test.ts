@@ -63,6 +63,12 @@ describe('streamChat', () => {
     });
     expect(parseAgentTurnEnvelope({ turnId: 'turn-1', seq: 0, type: 'agent_event', payload: {} })).toBeNull();
     expect(parseAgentTurnEnvelope({ turnId: 'turn-1', seq: 1, type: 'message', payload: {} })).toBeNull();
+    expect(parseAgentTurnEnvelope({
+      turnId: 'turn-1',
+      seq: 4,
+      type: 'media_critique',
+      payload: { decision: 'REPAIR' },
+    })?.type).toBe('media_critique');
   });
 
   it('delivers SSE envelopes without mapping legacy event names', async () => {
@@ -127,6 +133,22 @@ describe('streamChat', () => {
     expect(patch).toHaveBeenCalledWith(
       '/agent/conversations/conversation-1/approval-mode',
       { approvalMode: 'REQUEST_APPROVAL' },
+    );
+  });
+
+  it('loads generic project creative context and run critiques', async () => {
+    const get = vi.spyOn(client, 'get').mockResolvedValue({ data: { data: {} } });
+
+    await agentApi.getCreativeContext('project-1');
+    await agentApi.getRunCritiques('turn-1');
+
+    expect(get).toHaveBeenNthCalledWith(
+      1,
+      '/agent/projects/project-1/creative-context',
+    );
+    expect(get).toHaveBeenNthCalledWith(
+      2,
+      '/agent/runs/turn-1/critique',
     );
   });
 });

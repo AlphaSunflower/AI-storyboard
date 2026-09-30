@@ -27,7 +27,7 @@ class CanvasContextPromptBuilderTest {
         assertThat(prompt)
                 .contains("projectId=project-1")
                 .contains("canvasId=canvas-1")
-                .contains("moon_request_human_input")
+                .contains("request_human_input")
                 .contains("禁止向用户展示或要求输入")
                 .contains("image")
                 .contains("/api/files/images/ref.png")

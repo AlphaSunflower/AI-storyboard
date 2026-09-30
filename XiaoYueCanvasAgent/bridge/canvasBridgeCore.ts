@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   BRIDGE_COMMAND_TIMEOUT_MS,
+  BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_TAB_STALE_MS,
   type BridgeHealth,
@@ -41,6 +42,10 @@ export class CanvasBridgeCore {
 
   private isFresh(tab: TabState) {
     return Date.now() - tab.lastSeen <= BRIDGE_TAB_STALE_MS;
+  }
+
+  private isResponsive(tab: TabState) {
+    return Date.now() - tab.lastSeen <= BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS;
   }
 
   register(payload: BridgeRegisterPayload) {
@@ -93,6 +98,7 @@ export class CanvasBridgeCore {
             canvasId: tab.canvasId,
             canvasTitle: tab.canvasTitle,
             lastSeen: tab.lastSeen,
+            responsive: this.isResponsive(tab),
           }] : [];
         }),
     };
@@ -144,6 +150,12 @@ export class CanvasBridgeCore {
       const tabId = this.tabByCanvas.get(this.canvasKey(projectId, canvasId));
       const tab = tabId ? this.tabs.get(tabId) : undefined;
       if (!tab || !this.isFresh(tab)) return { code: 'CANVAS_NOT_OPEN', message: '目标画布当前未在浏览器中打开' };
+      if (!this.isResponsive(tab)) {
+        return {
+          code: 'BROWSER_NOT_RESPONDING',
+          message: '目标画布已打开，但浏览器页面未在响应画布命令，请重新打开或刷新画布。',
+        };
+      }
       return tab.tabId;
     }
     if (projectId) {
@@ -152,6 +164,12 @@ export class CanvasBridgeCore {
         .filter((tab): tab is TabState => Boolean(tab) && this.isFresh(tab!) && tab!.projectId === projectId);
       if (!matches.length) return { code: 'PROJECT_NOT_OPEN', message: '目标项目当前未在浏览器中打开' };
       if (matches.length > 1) return { code: 'AMBIGUOUS_CANVAS', message: '该项目打开了多个画布，请指定 canvasId' };
+      if (!this.isResponsive(matches[0])) {
+        return {
+          code: 'BROWSER_NOT_RESPONDING',
+          message: '目标画布已打开，但浏览器页面未在响应画布命令，请重新打开或刷新画布。',
+        };
+      }
       return matches[0].tabId;
     }
     const tabs = [...this.tabByCanvas.values()]
@@ -159,6 +177,12 @@ export class CanvasBridgeCore {
       .filter((tab): tab is TabState => Boolean(tab) && this.isFresh(tab!));
     if (!tabs.length) return { code: 'PROJECT_NOT_OPEN', message: '没有打开的项目' };
     if (tabs.length > 1) return { code: 'AMBIGUOUS_PROJECT', message: '多个画布已打开，请指定 projectId 和 canvasId' };
+    if (!this.isResponsive(tabs[0])) {
+      return {
+        code: 'BROWSER_NOT_RESPONDING',
+        message: '目标画布已打开，但浏览器页面未在响应画布命令，请重新打开或刷新画布。',
+      };
+    }
     return tabs[0].tabId;
   }
 
