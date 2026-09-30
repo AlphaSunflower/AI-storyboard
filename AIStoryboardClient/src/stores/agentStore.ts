@@ -1715,7 +1715,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       afterSeq ?? turnEventSequencer.lastSeq(turnId),
     );
     for (const envelope of response.data.data ?? []) {
-      applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      if (effects.canvasSessionRequired) {
+        set({
+          canvasSession: effects.canvasSessionRequired,
+          canvasSessionStatus: '',
+          canvasSessionSelection: { createNew: false },
+        });
+        set((state) => ({
+          generating: Object.fromEntries(
+            Object.entries(state.generating).filter(([key]) => key !== conversationId),
+          ),
+          messages: state.messages.filter((message) => message.id !== assistantId),
+          workflowHint: '',
+        }));
+      }
     }
   },
   canvasEditContext: null,

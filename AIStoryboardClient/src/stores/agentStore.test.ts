@@ -1142,4 +1142,47 @@ describe('AgentScope turn envelope reduction', () => {
     await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 1);
     expect(useAgentStore.getState().messages[0].content).toBe('回放正文');
   });
+
+  it('restores the canvas session card when replaying a missing final event', async () => {
+    const turnId = 'canvas-replay-turn';
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [
+          sseEnvelope(1, 'canvas_session_required', {
+            sessionId: 'canvas-session-replay',
+            conversationId: 'conversation-1',
+            turnId,
+            projectId: 'project-1',
+            intent: '生成雪茄房转场',
+            status: 'pending_selection',
+            choices: [{ canvasId: 'canvas-1', title: '画布 1' }],
+          }, turnId),
+        ],
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      canvasSession: null,
+      messages: [{
+        id: 'assistant-canvas-replay',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-canvas-replay' },
+      },
+      pendingAssistantId: 'assistant-canvas-replay',
+    });
+
+    await useAgentStore.getState().replayTurnEvents('conversation-1', turnId, 0);
+
+    expect(useAgentStore.getState().canvasSession).toMatchObject({
+      sessionId: 'canvas-session-replay',
+      status: 'pending_selection',
+    });
+    expect(useAgentStore.getState().messages).toHaveLength(0);
+    expect(useAgentStore.getState().generating['conversation-1']).toBeUndefined();
+  });
 });
