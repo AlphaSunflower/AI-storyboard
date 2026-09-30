@@ -4,7 +4,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { getJobToken } from './services/jobAuth';
+import { clearToken, getJobToken, setJobToken } from './services/jobAuth';
 
 vi.mock('./services/projectStorage', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services/projectStorage')>();
@@ -25,6 +25,7 @@ vi.mock('./services/projectStorage', async (importOriginal) => {
 describe('App authentication flow', () => {
   beforeEach(() => {
     localStorage.clear();
+    clearToken();
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -59,11 +60,11 @@ describe('App authentication flow', () => {
   });
 
   it('ignores a late 401 from an old token after a new login', async () => {
-    localStorage.setItem('morrow_job_token', 'old-token');
+    setJobToken('old-token');
     render(<App />);
     await waitFor(() => expect(screen.getByText('最近项目 A')).toBeTruthy());
 
-    localStorage.setItem('morrow_job_token', 'new-token');
+    setJobToken('new-token');
     fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: 'old-token' } }));
     expect(screen.getByText('最近项目 A')).toBeTruthy();
 

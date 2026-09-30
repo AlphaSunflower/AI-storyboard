@@ -2,19 +2,23 @@ package com.moon.moonagent.dto.request;
 
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /** 发送 Agent 对话消息请求（streaming 时 picUrls 为参考图 URL 列表，来自 /api/agent/upload；assetIds 为选中的资产库资产 id） */
 public record AgentSendMessageRequest(
-    @NotBlank(message = "消息内容不能为空") String content,
+    @NotBlank(message = "消息内容不能为空")
+    @Size(max = 32768, message = "消息内容过长")
+    String content,
+    @Size(max = 128, message = "幂等键过长") String clientRequestId,
     String picUrl,          // 兼容保留（弃用；新客户端用 picUrls）
-    List<String> picUrls,   // 多图参考 URL 列表
-    List<String> referenceVideos, // 本轮项目库/上传参考视频
-    List<String> referenceAudios, // 本轮项目库/上传参考音频
-    List<AgentAttachmentRequest> attachments, // 附件元数据（名称/MIME/大小；用于对话内文件行与刷新恢复）
-    List<String> assetIds,  // 从资产库选中的资产 id（非空=用户已投资产，编排直接进方案不走资产弹窗）
-    List<String> assetGroupIds, // 项目库资产组 id（仅用于回写结果与路由标记）
-    List<String> assetGroupSnapshotIds, // 项目库资产组快照 id（服务端读取签名媒体）
+    @Size(max = 10, message = "参考图片最多 10 张") List<String> picUrls,
+    @Size(max = 3, message = "参考视频最多 3 个") List<String> referenceVideos,
+    @Size(max = 3, message = "参考音频最多 3 个") List<String> referenceAudios,
+    @Size(max = 20, message = "附件最多 20 个") List<AgentAttachmentRequest> attachments,
+    @Size(max = 20, message = "资产最多选择 20 个") List<String> assetIds,
+    @Size(max = 10, message = "资产组最多 10 个") List<String> assetGroupIds,
+    @Size(max = 10, message = "资产组快照最多 10 个") List<String> assetGroupSnapshotIds,
     String routingHint,     // 显式路由提示（可空）：非空时绕过意图模型直接锁定目标意图（如 intent-storyboard）
     Boolean cancelActiveTasks, // 可空：true=本轮新消息前取消该会话进行中的异步任务（如视频）
     String editMessageId,   // 可空：编辑最后一条用户消息并覆盖重发

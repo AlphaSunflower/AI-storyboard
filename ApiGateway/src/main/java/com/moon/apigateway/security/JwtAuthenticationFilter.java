@@ -8,6 +8,8 @@ import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -30,13 +32,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Value("${internal.secret:}")
     private String internalSecret = "";
 
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
+
     /** 白名单路径（不需要 JWT） */
-    private static final String[] WHITELIST = {
-            "/api/auth/",
-            "/api/files/",
-            // 图片/视频标签无法携带 Authorization；资产服务会继续校验短时签名 token
-            "/api/library/media/",
-            "/actuator/"
+    private static final String[] PUBLIC_AUTH_PATHS = {
+            "/api/auth/login",
+            "/api/auth/register",
+            "/api/auth/refresh",
+            "/api/auth/unlogin"
     };
 
     @Override
@@ -45,11 +49,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                      FilterChain chain) throws ServletException, IOException {
         // 白名单放行
         String path = request.getRequestURI();
-        for (String prefix : WHITELIST) {
-            if (path.startsWith(prefix)) {
-                chain.doFilter(request, response);
-                return;
-            }
+        if (isPublicPath(path)) {
+            chain.doFilter(request, response);
+            return;
         }
 
         // 内部 API 禁止外部访问
@@ -64,9 +66,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             token = header.substring(7);
         }
-        // EventSource 无法带 Authorization 头——仅 SSE 事件端点允许查询参数兜底。
+        if (token == null && path != null && path.startsWith("/api/files/")) {
+            token = cookieValue(request, "media_token");
+        }
         if (token == null && isSsePath(path)) {
-            token = request.getParameter("access_token");
+            String ticket = request.getParameter("ticket");
+            if (ticket != null && !ticket.isBlank() && consumeStreamTicket(ticket, path, request, response, chain)) {
+                return;
+            }
         }
         if (token == null) {
             writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "未授权：缺少 token");
@@ -86,6 +93,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             writeError(response, HttpStatus.FORBIDDEN.value(), "40302", "账号已停用");
             return;
         }
+        String sessionId = claims.get("sid", String.class);
+        if (sessionId != null && !sessionId.isBlank()
+                && redisTemplate != null
+                && !Boolean.TRUE.equals(redisTemplate.hasKey("session:" + sessionId))) {
+            writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "会话已失效，请重新登录");
+            return;
+        }
         // 验签通过，写入下游 header（用 X-User-* 前缀避免与原始 Authorization 冲突）
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("X-User-Id", claims.getSubject());
@@ -101,6 +115,48 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static boolean isSsePath(String path) {
         return path != null && path.endsWith("/events");
+    }
+
+    private static boolean isPublicPath(String path) {
+        if (path == null) return false;
+        if (path.startsWith("/actuator/")) return true;
+        if (path.startsWith("/api/auth/health")) return true;
+        // 资产服务会继续校验短时签名 token。
+        if (path.startsWith("/api/library/media/")) return true;
+        for (String publicPath : PUBLIC_AUTH_PATHS) {
+            if (publicPath.equals(path)) return true;
+        }
+        return false;
+    }
+
+    private static String cookieValue(HttpServletRequest request, String name) {
+        if (request.getCookies() == null) return null;
+        for (var cookie : request.getCookies()) {
+            if (name.equals(cookie.getName())) return cookie.getValue();
+        }
+        return null;
+    }
+
+    private boolean consumeStreamTicket(String ticket, String path, HttpServletRequest request,
+                                        HttpServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        if (redisTemplate == null) return false;
+        String value = redisTemplate.opsForValue().getAndDelete("stream-ticket:" + ticket);
+        if (value == null || value.isBlank()) return false;
+        String[] parts = value.split("\\n", 2);
+        if (parts.length != 2 || !path.equals(parts[1]) || parts[0].isBlank()) {
+            writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "流票据无效");
+            return true;
+        }
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("X-User-Id", parts[0]);
+        headers.put("X-User-Role", "member");
+        headers.put("X-User-Status", "enabled");
+        if (internalSecret != null && !internalSecret.isBlank()) {
+            headers.put("X-Internal-Token", internalSecret);
+        }
+        chain.doFilter(new HeaderWrapper(request, headers), response);
+        return true;
     }
 
     private void writeError(HttpServletResponse response, int status, String code, String message) throws IOException {

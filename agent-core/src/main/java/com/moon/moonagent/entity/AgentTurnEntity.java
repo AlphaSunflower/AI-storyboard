@@ -26,6 +26,8 @@ public class AgentTurnEntity {
 
     private String inputText;
 
+    private String clientRequestId;
+
     private Integer lastSequence;
 
     private String checkpointId;

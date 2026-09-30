@@ -52,6 +52,7 @@ class AgentChatServiceImplTurnTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
         AgentScopeEventMapper eventMapper = mock(AgentScopeEventMapper.class);
@@ -61,7 +62,7 @@ class AgentChatServiceImplTurnTest {
 
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(lock.acquire("conversation-1")).thenReturn(lease);
         when(runtime.enabled()).thenReturn(true);
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         AgentMessage target = message("user-2", "user", "原问题");
@@ -75,7 +76,7 @@ class AgentChatServiceImplTurnTest {
                 message("assistant-2", "assistant", "旧回复")));
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
-        when(turnStore.start(any(), eq("修改后的问题"))).thenReturn(turn);
+        when(turnStore.start(any(), eq("修改后的问题"), anyString())).thenReturn(turn);
         AtomicInteger sequence = new AtomicInteger();
         when(turnStore.append(anyString(), anyString(), any())).thenAnswer(invocation ->
                 new AgentTurnEventEnvelope(
@@ -106,7 +107,7 @@ class AgentChatServiceImplTurnTest {
         verify(messageMapper).deleteBatchIds(List.of("assistant-2"));
         verify(runtime).rewindLastTurn("user-1", "conversation-1", "原问题");
         verify(runtime, timeout(2_000)).runTurn(any(), any(), any(), any());
-        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
+        verify(lease, timeout(2_000).atLeastOnce()).close();
     }
 
     @Test
@@ -114,6 +115,7 @@ class AgentChatServiceImplTurnTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
         MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
@@ -121,12 +123,12 @@ class AgentChatServiceImplTurnTest {
 
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(lock.acquire("conversation-1")).thenReturn(lease);
         when(runtime.enabled()).thenReturn(true);
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
-        when(turnStore.start(any(), eq("带参考图的问题"))).thenReturn(turn);
+        when(turnStore.start(any(), eq("带参考图的问题"), anyString())).thenReturn(turn);
         when(turnStore.append(anyString(), anyString(), any())).thenReturn(
                 new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
         when(runtime.runTurn(any(), any(), any(), any())).thenReturn(
@@ -164,6 +166,7 @@ class AgentChatServiceImplTurnTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
         MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
@@ -171,10 +174,10 @@ class AgentChatServiceImplTurnTest {
         SseEmitter emitter = mock(SseEmitter.class);
 
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
-        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(lock.acquire("conversation-1")).thenReturn(lease);
         when(runtime.enabled()).thenReturn(true);
         when(support.friendlyErrorText(any(), any())).thenReturn("运行时暂不可用");
-        when(turnStore.start(any(), any())).thenThrow(
+        when(turnStore.start(any(), any(), anyString())).thenThrow(
                 new IllegalStateException("agent_turns missing"));
 
         AgentChatServiceImpl service = service(
@@ -191,7 +194,7 @@ class AgentChatServiceImplTurnTest {
         verify(emitter, timeout(2_000).atLeastOnce())
                 .send(any(SseEmitter.SseEventBuilder.class));
         verify(messageMapper, never()).insert(any(AgentMessage.class));
-        verify(lock, timeout(2_000).atLeastOnce()).release("conversation-1");
+        verify(lease, timeout(2_000).atLeastOnce()).close();
     }
 
     @Test
@@ -199,6 +202,7 @@ class AgentChatServiceImplTurnTest {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
         AgentScopeEventMapper eventMapper = mock(AgentScopeEventMapper.class);
@@ -223,7 +227,7 @@ class AgentChatServiceImplTurnTest {
 
         when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        when(lock.tryAcquire("conversation-1")).thenReturn(true);
+        when(lock.acquire("conversation-1")).thenReturn(lease);
         when(runtime.enabled()).thenReturn(true);
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         when(turnStore.find("turn-1")).thenReturn(originalTurn);

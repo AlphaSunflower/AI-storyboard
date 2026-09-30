@@ -12,6 +12,7 @@ import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.UserMapper;
+import com.storyboard.security.AuthSessionService;
 import com.storyboard.security.ScryptPasswordService;
 import com.storyboard.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class UserServiceImpl implements UserService {
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ScryptPasswordService passwordService;
+    private final AuthSessionService authSessionService;
 
     @Override
     public ProfileResponse getProfile(String userId) {
@@ -76,6 +78,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(50000, "密码加密失败");
         }
         userMapper.updateById(user);
+        authSessionService.revokeAll(userId);
     }
 
     @Override

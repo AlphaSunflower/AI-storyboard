@@ -4,8 +4,10 @@ import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.StoryboardVideoQueue;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
+import com.moon.moonagent.service.StoryboardQueueRequestGuard;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.common.BusinessException;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -26,15 +28,18 @@ public class StoryboardVideoQueueController {
 
     private final StoryboardVideoQueueService queueService;
     private final StoryboardClient storyboardClient;
+    private final StoryboardQueueRequestGuard requestGuard;
 
     /** 批量入队勾选的分镜视频任务。 */
     @PostMapping
     public ApiResponse<List<StoryboardVideoQueue>> enqueue(
-            Authentication auth, @RequestBody StoryboardVideoEnqueueRequest request) {
+            Authentication auth, @Valid @RequestBody StoryboardVideoEnqueueRequest request) {
         if (request == null || request.items() == null || request.items().isEmpty()) {
             throw new BusinessException(40001, "请先勾选要生成视频的分镜");
         }
-        assertProjectOwner(auth, request.projectId());
+        requestGuard.requireOwnedScope(
+                auth.getName(), request.projectId(), request.conversationId(),
+                request.items().stream().map(item -> item == null ? null : item.sceneId()).toList());
         return ApiResponse.ok(queueService.enqueue(request));
     }
 

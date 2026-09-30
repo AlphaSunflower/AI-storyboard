@@ -19,6 +19,7 @@ import com.moon.moonagent.ai.agent.stream.ToolCallStreamGuard;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.service.FileStorageService;
 import io.agentscope.core.agent.RuntimeContext;
@@ -386,6 +387,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 ? assetServiceBaseUrl.replaceAll("/+$", "") + value
                 : value;
         if (!absolute.startsWith("http://") && !absolute.startsWith("https://")) return null;
+        OutboundUrlGuard.requireSafeHttpUrl(absolute);
         HttpResponse<byte[]> response = attachmentHttpClient.send(
                 HttpRequest.newBuilder(URI.create(absolute))
                         .timeout(Duration.ofSeconds(30))

@@ -9,7 +9,9 @@ import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ImageGenerationService;
 import com.storyboard.ai.ScriptGenerationService;
 import com.storyboard.ai.VideoGenerationService;
+import com.storyboard.security.AiAccessGuard;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -28,9 +30,12 @@ public class AIController {
     private final ImageGenerationService imageService;
     private final VideoGenerationService videoService;
     private final GatewayModelService gatewayModelService;
+    private final AiAccessGuard accessGuard;
 
     @PostMapping("/generate-script")
-    public ApiResponse<Map<String, Object>> generateScript(@RequestBody GenerateScriptRequest request) {
+    public ApiResponse<Map<String, Object>> generateScript(Authentication auth,
+                                                            @RequestBody GenerateScriptRequest request) {
+        accessGuard.requireProject(auth.getName(), request.projectId());
         // 生成 + 落库全部在 Service 层完成（原 Controller 内 sceneMapper 循环写库已下沉）
         return ApiResponse.ok(scriptService.generateAndSaveScenes(
             request.projectId(), request.scriptText(), request.creationType(),
@@ -41,7 +46,9 @@ public class AIController {
     }
 
     @PostMapping("/generate-image")
-    public ApiResponse<Map<String, String>> generateImage(@RequestBody GenerateImageRequest request) {
+    public ApiResponse<Map<String, String>> generateImage(Authentication auth,
+                                                           @RequestBody GenerateImageRequest request) {
+        accessGuard.requireScene(auth.getName(), request.sceneId());
         String imageUrl = imageService.generateImage(
             request.sceneId(), request.prompt(), request.model(),
             request.size(), request.quality(), request.aspectRatio(),
@@ -53,7 +60,9 @@ public class AIController {
     }
 
     @PostMapping("/generate-video")
-    public ApiResponse<Map<String, String>> generateVideo(@RequestBody GenerateVideoRequest request) {
+    public ApiResponse<Map<String, String>> generateVideo(Authentication auth,
+                                                           @RequestBody GenerateVideoRequest request) {
+        accessGuard.requireScene(auth.getName(), request.sceneId());
         String taskId = videoService.createVideoTask(
             request.sceneId(), request.prompt(), request.model(),
             request.resolution(), request.size(), request.aspectRatio(),
@@ -65,7 +74,8 @@ public class AIController {
     }
 
     @GetMapping("/task/{taskId}")
-    public ApiResponse<TaskStatusResponse> getTaskStatus(@PathVariable String taskId) {
+    public ApiResponse<TaskStatusResponse> getTaskStatus(Authentication auth, @PathVariable String taskId) {
+        accessGuard.requireVideoTask(auth.getName(), taskId);
         Map<String, String> result = videoService.pollVideoTask(taskId);
         return ApiResponse.ok(new TaskStatusResponse(
             result.get("taskId"), result.get("status"),

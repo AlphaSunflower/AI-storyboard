@@ -15,6 +15,7 @@ import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
@@ -136,6 +137,9 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentScopeEventMapper agentScopeEventMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient com.moon.moonagent.service.StorageCleanupService storageCleanupService;
 
     /**
      * 首条消息异步 AI 重命名标题：
@@ -336,6 +340,14 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (agentScopeMediaRuntime != null) {
             agentScopeMediaRuntime.clearSession(userId, conversationId);
         }
+        if (storageCleanupService != null) {
+            List<AgentAsset> assets = assetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
+                    .eq(AgentAsset::getConversationId, conversationId));
+            assets.forEach(asset -> {
+                storageCleanupService.enqueue(asset.getUrl());
+                storageCleanupService.enqueueAll(resultUrls(asset));
+            });
+        }
         conversationLock.releaseAndRemove(conversationId);
         // 消息/资产由 DB 外键 ON DELETE CASCADE 级联删除
         conversationMapper.deleteById(conversation.getId());
@@ -387,6 +399,10 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         // 校验资产归属的会话属于本人（防 IDOR）
         getOwnedConversation(userId, asset.getConversationId());
+        if (storageCleanupService != null) {
+            storageCleanupService.enqueue(asset.getUrl());
+            storageCleanupService.enqueueAll(resultUrls(asset));
+        }
         assetMapper.deleteById(assetId);
     }
 
@@ -453,8 +469,10 @@ public class AgentChatServiceImpl implements AgentChatService {
     public String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
                                        String purpose, String kind) {
         // 校验会话归属（传了 conversationId 时）
+        AgentConversation conversation = null;
         if (conversationId != null && !conversationId.isBlank()) {
-            requireWritable(getOwnedConversation(userId, conversationId));
+            conversation = getOwnedConversation(userId, conversationId);
+            requireWritable(conversation);
         }
         String mediaType = referenceMediaType(file.getContentType());
         String url = fileStorageService.saveUploadedReference(mediaType, file);
@@ -462,6 +480,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         // 落库 agent_assets（type=reference）
         AgentAsset asset = new AgentAsset();
         asset.setConversationId(conversationId != null && !conversationId.isBlank() ? conversationId : null);
+        asset.setUserId(userId);
+        asset.setProjectId(conversation == null ? null : conversation.getProjectId());
         asset.setType("reference");
         asset.setUrl(url);
         asset.setPurpose(purpose == null || purpose.isBlank() ? null : purpose.trim());
@@ -817,7 +837,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      SseEmitter emitter) {
         streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                List.of(), emitter);
+                null, List.of(), emitter);
     }
 
     @Override
@@ -830,7 +850,34 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                attachments, true, emitter);
+                null, attachments, true, emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     String clientRequestId,
+                                     SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                clientRequestId, List.of(), emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     String clientRequestId,
+                                     List<AgentAttachmentRequest> attachments,
+                                     SseEmitter emitter) {
+        streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                clientRequestId, attachments, true, emitter);
     }
 
     private void streamAgentScopeTurnInternal(String userId, String conversationId, String content,
@@ -838,14 +885,17 @@ public class AgentChatServiceImpl implements AgentChatService {
                                               String routingHint, String editMessageId,
                                               CanvasSessionContext canvasContext,
                                               List<String> referenceVideos, List<String> referenceAudios,
+                                              String clientRequestId,
                                               List<AgentAttachmentRequest> attachments,
                                               boolean persistUser, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         if (!requireAgentScope(emitter)) {
             emitter.complete();
             return;
         }
-        if (!conversationLock.tryAcquire(conversationId)) {
+        ConversationLock.LockLease lease = conversationLock.acquire(conversationId);
+        if (lease == null) {
             sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
             emitter.complete();
             return;
@@ -857,7 +907,16 @@ public class AgentChatServiceImpl implements AgentChatService {
             com.moon.moonagent.entity.AgentTurnEntity turn = null;
             try {
                 bootstrapAgentScopeSession(userId, conversation);
-                turn = turnEventStore.start(conversation, content);
+                String idempotencyKey = clientRequestId == null || clientRequestId.isBlank()
+                        ? java.util.UUID.randomUUID().toString()
+                        : clientRequestId.trim();
+                com.moon.moonagent.entity.AgentTurnEntity existing =
+                        turnEventStore.findByClientRequestId(conversationId, idempotencyKey);
+                if (existing != null) {
+                    replayTurnEvents(existing.getId(), emitter);
+                    return;
+                }
+                turn = turnEventStore.start(conversation, content, idempotencyKey);
                 String effectiveContent = content;
                 List<String> effectivePicUrls = picUrls == null ? List.of() : picUrls;
                 List<String> effectiveAssetIds = assetIds == null ? List.of() : assetIds;
@@ -961,7 +1020,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("AgentScope turn 失败: conversationId={}, error={}",
                         conversationId, e.getMessage(), e);
             } finally {
-                conversationLock.release(conversationId);
+                lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
             }
         }, agentExecutor);
@@ -974,6 +1033,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      List<String> assetIds, CanvasSessionContext canvasContext,
                                      SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         if (!requireAgentScope(emitter)) {
             emitter.complete();
             return;
@@ -985,7 +1045,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        if (!conversationLock.tryAcquire(conversationId)) {
+        ConversationLock.LockLease lease = conversationLock.acquire(conversationId);
+        if (lease == null) {
             sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
             emitter.complete();
             return;
@@ -1056,7 +1117,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("AgentScope resume 失败: conversationId={}, error={}",
                         conversationId, e.getMessage(), e);
             } finally {
-                conversationLock.release(conversationId);
+                lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
             }
         }, agentExecutor);
@@ -1067,6 +1128,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     String selectedCanvasId, boolean createNew,
                                     SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
         if (!requireAgentScope(emitter)) {
             emitter.complete();
             return;
@@ -1088,7 +1150,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        if (!conversationLock.tryAcquire(conversationId)) {
+        ConversationLock.LockLease lease = conversationLock.acquire(conversationId);
+        if (lease == null) {
             sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
             emitter.complete();
             return;
@@ -1150,7 +1213,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 log.error("Canvas session resume 失败: conversationId={}, sessionId={}",
                         conversationId, sessionId, e);
             } finally {
-                conversationLock.release(conversationId);
+                lease.close();
                 try {
                     emitter.complete();
                 } catch (Exception ignore) {
@@ -1174,9 +1237,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (agentScopeMediaRuntime != null && agentScopeMediaRuntime.enabled()) {
             status.put("assets", agentScopeMediaRuntime.assetStatus());
         }
-        boolean locked = !conversationLock.tryAcquire(conversationId);
+        boolean locked = conversationLock.isLocked(conversationId);
         status.put("locked", locked);
-        if (!locked) conversationLock.release(conversationId);
         if (turnEventStore != null) {
             com.moon.moonagent.entity.AgentTurnEntity activeTurn =
                     turnEventStore.findActive(conversationId);
@@ -1237,6 +1299,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
             }
         };
+    }
+
+    private void replayTurnEvents(String turnId, SseEmitter emitter) {
+        for (AgentTurnEventEnvelope envelope : turnEventStore.eventsAfter(turnId, 0)) {
+            sendRuntimeEnvelope(emitter, envelope);
+        }
     }
 
     private void finishAgentScopeTurn(AgentConversation conversation,

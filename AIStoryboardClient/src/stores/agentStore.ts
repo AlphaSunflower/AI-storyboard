@@ -36,6 +36,8 @@ import {
   type CanvasEditContext,
 } from '../lib/canvasEditMode';
 
+let conversationLoadEpoch = 0;
+
 /** Newlines separate stage snapshots; token deltas concatenate directly. */
 function appendReasoningDetails(
   prev: AgentReasoning | undefined,
@@ -587,6 +589,7 @@ interface AgentState {
     routingHint?: string;
     cancelActiveTasks?: boolean;
     editMessageId?: string;
+    clientRequestId?: string;
     interruptCurrent?: boolean;
     attachments?: AgentAttachment[];
   }) => Promise<void>;
@@ -2179,6 +2182,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   selectConversation: async (id) => {
+    const loadEpoch = ++conversationLoadEpoch;
     // HITL 按会话隔离（getPendingCheckpoint/hitlVideoPlan 各自恢复），允许切换会话
     set((s) => {
       const g = s.generating[id];
@@ -2202,7 +2206,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
     void get().loadTasks(id);
     const res = await agentApi.listMessages(id);
+    if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     await get().restoreCanvasMode(id);
+    if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     const g = get().generating[id];
     const base = await refreshLibraryMediaMessages(
       res.data.data ?? [],
@@ -2212,6 +2218,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const restoredAttachments = await refreshLibraryMediaAttachments(savedAttachments.length
       ? savedAttachments
       : attachmentsFromMessages(base), (mediaId) => resolveLibraryMedia(id, mediaId));
+    if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     set({
       messages: g?.assistantId
         ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
@@ -2229,6 +2236,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 页面刷新恢复：检查是否有待处理的 HITL checkpoint，恢复 waitingHumanInput
     try {
       const cpRes = await agentApi.getPendingCheckpoint(id);
+      if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
       const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
         kind?: string;
       }) | null;
@@ -2610,9 +2618,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     routingHint?: string;
     cancelActiveTasks?: boolean;
     editMessageId?: string;
+    clientRequestId?: string;
     interruptCurrent?: boolean;
     attachments?: AgentAttachment[];
   }) => {
+    const activeId = get().activeConversationId;
+    const activeConversation = get().conversations.find((conversation) => conversation.id === activeId);
+    if (!activeId || activeConversation?.status === 'archived'
+      || activeConversation?.orchestrationMode === 'LEGACY') {
+      set({ streamError: '该会话已归档，只能查看历史记录' });
+      return;
+    }
     const editMessageId = opts?.editMessageId;
     const interruptCurrent = !!opts?.interruptCurrent && get().streaming;
     const editTargetIndex = editMessageId
@@ -2881,6 +2897,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       };
       await streamChat(id, content, requestPicUrls, handleStreamEvent, requestAssetIds, opts?.assetGroupIds, signal, {
         ...opts,
+        clientRequestId: opts?.clientRequestId ?? (
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        ),
         editMessageId,
         canvasContext,
         referenceVideos: requestReferenceVideos,

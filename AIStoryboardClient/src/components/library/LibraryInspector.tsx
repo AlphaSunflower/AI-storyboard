@@ -20,6 +20,7 @@ import type {
   MetadataState,
 } from '../../api/library';
 import { assetUrl } from '../../config';
+import { authorizedFetch } from '../../lib/authSession';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
 import { AssetIcon } from './LibraryTree';
 
@@ -246,11 +247,7 @@ export function AuthenticatedPreviewImage({
     setObjectUrl('');
     setFailed(false);
 
-    const token = localStorage.getItem('accessToken');
-    fetch(src, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      signal: controller.signal,
-    })
+    authorizedFetch(src, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error(`预览加载失败: ${response.status}`);
         return response.blob();

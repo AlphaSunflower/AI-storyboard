@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.moon.moonagent.entity.AgentAsyncTask;
 import com.moon.moonagent.mapper.AgentAsyncTaskMapper;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -136,6 +137,7 @@ public class VideoMergeService {
             byte[] local = fileStorageService.readVideo(filename);
             if (local != null) return local;
         }
+        OutboundUrlGuard.requireSafeHttpUrl(source);
         HttpRequest request = HttpRequest.newBuilder(URI.create(source))
                 .timeout(Duration.ofSeconds(120))
                 .GET()

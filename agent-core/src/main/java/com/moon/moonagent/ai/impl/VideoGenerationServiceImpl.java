@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.SceneGenerationBridge;
@@ -358,6 +359,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     /** 下载远端字节（参考素材经主后端 `/api/files/**` 拉取）；失败返回 null */
     byte[] downloadBytes(String url) {
         try {
+            OutboundUrlGuard.requireSafeHttpUrl(url);
             HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
                     .timeout(Duration.ofSeconds(60)).GET().build();
             HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());

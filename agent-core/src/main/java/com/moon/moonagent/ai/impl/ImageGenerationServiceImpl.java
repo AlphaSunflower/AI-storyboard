@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.ImageGenerationService;
@@ -542,6 +543,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     }
 
     private byte[] fetchRemoteImage(String url) throws Exception {
+        OutboundUrlGuard.requireSafeHttpUrl(url);
         HttpResponse<byte[]> response = httpClient.send(
                 HttpRequest.newBuilder()
                         .uri(URI.create(url))

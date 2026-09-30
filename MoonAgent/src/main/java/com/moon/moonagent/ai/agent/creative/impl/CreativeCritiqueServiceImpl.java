@@ -11,6 +11,7 @@ import com.moon.moonagent.ai.agent.creative.MediaCritique;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMediaCritiqueEntity;
 import com.moon.moonagent.mapper.AgentMediaCritiqueMapper;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -394,6 +395,7 @@ public class CreativeCritiqueServiceImpl implements CreativeCritiqueService {
             byte[] local = fileStorageService.readVideo(filename);
             if (local != null) return local;
         }
+        OutboundUrlGuard.requireSafeHttpUrl(source);
         HttpRequest request = HttpRequest.newBuilder(URI.create(source))
                 .timeout(Duration.ofSeconds(120))
                 .GET()

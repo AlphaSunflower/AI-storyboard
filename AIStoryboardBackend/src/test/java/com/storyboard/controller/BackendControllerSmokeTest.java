@@ -4,11 +4,14 @@ import com.storyboard.ai.GatewayModelService;
 import com.storyboard.ai.ImageGenerationService;
 import com.storyboard.ai.ScriptGenerationService;
 import com.storyboard.ai.VideoGenerationService;
+import com.storyboard.security.AiAccessGuard;
+import com.storyboard.security.AuthSessionService;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.config.SecurityConfig;
 import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.LoginResponse;
+import com.storyboard.dto.response.AuthResult;
 import com.storyboard.dto.response.ProfileResponse;
 import com.storyboard.dto.response.ProjectResponse;
 import com.storyboard.dto.response.SceneAssetsResponse;
@@ -106,6 +109,10 @@ class BackendControllerSmokeTest {
     @MockitoBean
     private VideoGenerationService videoGenerationService;
     @MockitoBean
+    private AiAccessGuard aiAccessGuard;
+    @MockitoBean
+    private AuthSessionService authSessionService;
+    @MockitoBean
     private GatewayModelService gatewayModelService;
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
@@ -137,9 +144,12 @@ class BackendControllerSmokeTest {
 
     @Test
     void authEndpoints_arePublic_andReturnContract() throws Exception {
-        when(authService.login(any())).thenReturn(new LoginResponse("at", "rt", "u1", "n"));
-        when(authService.register(any())).thenReturn(new LoginResponse("at", "rt", "u1", "n"));
-        when(authService.refresh(anyString())).thenReturn(new LoginResponse("at2", "rt2", "u1", "n"));
+        when(authService.login(any())).thenReturn(
+                new AuthResult(new LoginResponse("at", "u1", "n"), "rt"));
+        when(authService.register(any())).thenReturn(
+                new AuthResult(new LoginResponse("at", "u1", "n"), "rt"));
+        when(authService.refresh(anyString())).thenReturn(
+                new AuthResult(new LoginResponse("at2", "u1", "n"), "rt2"));
         when(authService.handleUnlogin(any(), any())).thenReturn(ApiResponse.ok(Map.of("ok", true)));
 
         mockMvc.perform(post("/api/auth/login")
@@ -289,7 +299,7 @@ class BackendControllerSmokeTest {
     }
 
     @Test
-    void fileEndpoints_arePublic_andReturnContent() throws Exception {
+    void fileEndpoints_requireAuth_andReturnContent() throws Exception {
         when(fileStorageService.saveUploadedImage(any()))
             .thenReturn("/api/files/images/x.png");
         when(fileStorageService.readImage("x.png")).thenReturn(new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47});
@@ -298,12 +308,14 @@ class BackendControllerSmokeTest {
 
         MockMultipartFile f = new MockMultipartFile("file", "x.png", "image/png", new byte[]{1});
         mockMvc.perform(multipart("/api/files/upload").file(f))
+            .andExpect(status().isUnauthorized());
+        mockMvc.perform(multipart("/api/files/upload").file(f).with(user("u1")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.url").value("/api/files/images/x.png"));
-        mockMvc.perform(get("/api/files/images/x.png"))
+        mockMvc.perform(get("/api/files/images/x.png").with(user("u1")))
             .andExpect(status().isOk());
-        mockMvc.perform(get("/api/files/videos/v.mp4"))
+        mockMvc.perform(get("/api/files/videos/v.mp4").with(user("u1")))
             .andExpect(status().isOk());
-        mockMvc.perform(get("/api/files/audios/a.mp3"))
+        mockMvc.perform(get("/api/files/audios/a.mp3").with(user("u1")))
             .andExpect(status().isNotFound());
     }
 

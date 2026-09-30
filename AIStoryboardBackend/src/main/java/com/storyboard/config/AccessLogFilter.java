@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * 请求访问日志 Filter：每个请求一行，输出 method/path/status/耗时/用户 + 链路 traceId，
@@ -33,6 +34,8 @@ public class AccessLogFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger("ACCESS_LOG");
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final Pattern SECRET_QUERY = Pattern.compile(
+            "(?i)(access_token|refresh_token|token)=([^&]*)");
     /** 请求关联 ID：透传/生成后回写到响应头，前端可回显，也便于网关侧按同一 ID 串联 */
     private static final String TRACE_HEADER = "X-Request-Id";
 
@@ -51,13 +54,18 @@ public class AccessLogFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
         } finally {
             long ms = (System.nanoTime() - start) / 1_000_000;
-            String qs = request.getQueryString();
+            String qs = redactQuery(request.getQueryString());
             log.info("{} [user={}] {} {}{} {} {}ms traceId={}",
                     LocalDateTime.now().format(FMT), currentUser(), request.getMethod(),
                     request.getRequestURI(), qs == null ? "" : "?" + qs,
                     response.getStatus(), ms, traceId);
             MDC.remove("traceId");
         }
+    }
+
+    private static String redactQuery(String query) {
+        if (query == null || query.isBlank()) return query;
+        return SECRET_QUERY.matcher(query).replaceAll("$1=REDACTED");
     }
 
     /** 生成/透传请求关联 ID：上游已带 X-Request-Id 则复用（跨服务串联），否则生成 16 位随机 ID */

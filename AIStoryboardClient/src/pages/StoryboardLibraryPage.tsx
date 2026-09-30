@@ -52,23 +52,24 @@ export function StoryboardLibraryPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!localStorage.getItem('accessToken')) {
-      navigate('/login', { replace: true });
-      return;
-    }
-    useAuthStore.getState().checkAuth();
     let alive = true;
-    setLoading(true);
-    loadProjects()
-      .then(() => {
-        if (alive) setError(null);
-      })
-      .catch(() => {
-        if (alive) setError('分镜加载失败，请稍后重试');
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
+    void useAuthStore.getState().checkAuth().then((authenticated) => {
+      if (!authenticated) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      setLoading(true);
+      return loadProjects()
+        .then(() => {
+          if (alive) setError(null);
+        })
+        .catch(() => {
+          if (alive) setError('分镜加载失败，请稍后重试');
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    });
     return () => {
       alive = false;
     };

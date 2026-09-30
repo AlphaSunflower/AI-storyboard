@@ -55,8 +55,12 @@ public class SecurityConfig {
                 // 仅对 ASYNC/ERROR 分发放行，REQUEST 分发仍走 JWT 保护（安全不降级）。
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/files/**").permitAll()
+                .requestMatchers(
+                        "/api/auth/login",
+                        "/api/auth/register",
+                        "/api/auth/refresh",
+                        "/api/auth/unlogin").permitAll()
+                .requestMatchers("/api/files/**").authenticated()
                 .requestMatchers("/api/internal/**").permitAll()
                 // Swagger UI / OpenAPI 文档（本地联调用；prod 由 springdoc.enabled=false 关闭）
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/webjars/**").permitAll()

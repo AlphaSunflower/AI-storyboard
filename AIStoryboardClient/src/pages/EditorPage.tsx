@@ -98,19 +98,7 @@ export function EditorPage() {
     };
     init();
 
-    // URL token auto-login: supports cross-system JWT exchange
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    const refresh = params.get('refresh');
-    const userId = params.get('userId');
-    const name = params.get('name');
-    if (token) {
-      localStorage.setItem('accessToken', token);
-      if (refresh) localStorage.setItem('refreshToken', refresh);
-      if (userId && name) localStorage.setItem('user', JSON.stringify({ userId, displayName: name }));
-      window.history.replaceState({}, '', '/editor');
-      useAuthStore.getState().checkAuth();
-    }
+    void useAuthStore.getState().checkAuth();
   }, [loadProjects, checkDraft, loadProject, createProject, fetchAiModels, selectScene]);
 
   const handleRecoverDraft = () => {

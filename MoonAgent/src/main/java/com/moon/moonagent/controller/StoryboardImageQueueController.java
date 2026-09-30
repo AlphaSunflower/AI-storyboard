@@ -4,8 +4,10 @@ import com.moon.moonagent.dto.request.StoryboardImageEnqueueRequest;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.StoryboardImageTask;
 import com.moon.moonagent.service.StoryboardImageQueueService;
+import com.moon.moonagent.service.StoryboardQueueRequestGuard;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.common.BusinessException;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -26,15 +28,18 @@ public class StoryboardImageQueueController {
 
     private final StoryboardImageQueueService queueService;
     private final StoryboardClient storyboardClient;
+    private final StoryboardQueueRequestGuard requestGuard;
 
     /** 批量入队分镜图片任务（完善已有图或自动生成新图）。 */
     @PostMapping
     public ApiResponse<List<StoryboardImageTask>> enqueue(
-            Authentication auth, @RequestBody StoryboardImageEnqueueRequest request) {
+            Authentication auth, @Valid @RequestBody StoryboardImageEnqueueRequest request) {
         if (request == null || request.items() == null || request.items().isEmpty()) {
             throw new BusinessException(40001, "请先选择要完善图片的分镜");
         }
-        assertProjectOwner(auth, request.projectId());
+        requestGuard.requireOwnedScope(
+                auth.getName(), request.projectId(), request.conversationId(),
+                request.items().stream().map(item -> item == null ? null : item.sceneId()).toList());
         return ApiResponse.ok(queueService.enqueue(request));
     }
 

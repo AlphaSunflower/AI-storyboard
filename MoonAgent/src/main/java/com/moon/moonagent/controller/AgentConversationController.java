@@ -28,12 +28,14 @@ import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -64,6 +66,13 @@ public class AgentConversationController {
     private final AssetClient assetClient;
     private final ConversationAssetGroupService conversationAssetGroupService;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
+
+    @Value("${storyboard.internal-url:}")
+    private String storyboardInternalUrl;
+    @Value("${storyboard.asset-client.base-url:}")
+    private String assetServiceBaseUrl;
+    @Value("${storyboard.storage.endpoint:}")
+    private String storageEndpoint;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -244,18 +253,19 @@ public class AgentConversationController {
         if (request.content() == null || request.content().isBlank()) {
             throw new BusinessException(40001, "消息内容不能为空");
         }
+        validateTurnMedia(request);
         ResolvedTurnMedia media = resolveTurnMedia(auth, id, request);
         SseEmitter emitter = createSseEmitter();
         if (request.attachments() != null && !request.attachments().isEmpty()) {
             chatService.streamAgentScopeTurn(
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
-                    media.audioUrls(), request.attachments(), emitter);
+                    media.audioUrls(), request.clientRequestId(), request.attachments(), emitter);
         } else {
             chatService.streamAgentScopeTurn(
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
-                    media.audioUrls(), emitter);
+                    media.audioUrls(), request.clientRequestId(), emitter);
         }
         return emitter;
     }
@@ -489,6 +499,40 @@ public class AgentConversationController {
                 request.assetIds() == null ? List.of() : request.assetIds(),
                 resolvedVideos.stream().distinct().toList(),
                 resolvedAudios.stream().distinct().toList());
+    }
+
+    private void validateTurnMedia(AgentSendMessageRequest request) {
+        List<String> allowedOrigins = List.of(
+                storyboardInternalUrl == null ? "" : storyboardInternalUrl,
+                assetServiceBaseUrl == null ? "" : assetServiceBaseUrl,
+                storageEndpoint == null ? "" : storageEndpoint
+        );
+        for (String url : picUrls(request)) {
+            validateMediaUrl(url, allowedOrigins);
+        }
+        validateMediaUrls(request.referenceVideos(), allowedOrigins);
+        validateMediaUrls(request.referenceAudios(), allowedOrigins);
+        if (request.attachments() != null) {
+            request.attachments().stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(AgentAttachmentRequest::url)
+                    .forEach(url -> validateMediaUrl(url, allowedOrigins));
+        }
+        if (request.canvasContext() != null) {
+            request.canvasContext().normalizedMediaRefs().stream()
+                    .map(com.moon.moonagent.ai.agent.CanvasMediaRef::url)
+                    .forEach(url -> validateMediaUrl(url, allowedOrigins));
+        }
+    }
+
+    private static void validateMediaUrls(List<String> urls, List<String> allowedOrigins) {
+        if (urls == null) return;
+        urls.forEach(url -> validateMediaUrl(url, allowedOrigins));
+    }
+
+    private static void validateMediaUrl(String url, List<String> allowedOrigins) {
+        if (url == null || url.isBlank()) return;
+        OutboundUrlGuard.requireAllowedMediaUrl(url, allowedOrigins);
     }
 
     private record ResolvedTurnMedia(List<String> picUrls, List<String> assetIds,

@@ -69,6 +69,10 @@ public class JwtTokenProvider {
      * Compatible with Node.js HS256 JWT format.
      */
     public String signAccessToken(String userId, String role, String status) {
+        return signAccessToken(userId, role, status, UUID.randomUUID().toString());
+    }
+
+    public String signAccessToken(String userId, String role, String status, String sessionId) {
         long nowSeconds = System.currentTimeMillis() / 1000;
         return Jwts.builder()
                 .header().add("alg", "HS256").add("typ", "JWT").and()
@@ -77,6 +81,7 @@ public class JwtTokenProvider {
                 .subject(userId)
                 .claim("role", role)
                 .claim("status", status)
+                .claim("sid", sessionId)
                 .issuedAt(new Date(nowSeconds * 1000))
                 .expiration(new Date((nowSeconds + accessTokenTtl) * 1000))
                 .id(UUID.randomUUID().toString())
@@ -89,12 +94,17 @@ public class JwtTokenProvider {
      * Compatible with Node.js HS256 JWT format.
      */
     public String signRefreshToken(String userId) {
+        return signRefreshToken(userId, UUID.randomUUID().toString());
+    }
+
+    public String signRefreshToken(String userId, String sessionId) {
         long nowSeconds = System.currentTimeMillis() / 1000;
         return Jwts.builder()
                 .header().add("alg", "HS256").add("typ", "JWT").and()
                 .claim("typ", "refresh")
                 .issuer(issuer)
                 .subject(userId)
+                .claim("sid", sessionId)
                 .issuedAt(new Date(nowSeconds * 1000))
                 .expiration(new Date((nowSeconds + refreshTokenTtl) * 1000))
                 .id(UUID.randomUUID().toString())

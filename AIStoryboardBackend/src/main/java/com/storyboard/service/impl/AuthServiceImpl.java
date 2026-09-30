@@ -4,10 +4,12 @@ import com.storyboard.dto.request.LoginRequest;
 import com.storyboard.dto.request.RegisterRequest;
 import com.storyboard.dto.request.UnloginRequest;
 import com.storyboard.common.ApiResponse;
+import com.storyboard.dto.response.AuthResult;
 import com.storyboard.dto.response.LoginResponse;
 import com.storyboard.entity.User;
 import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.UserMapper;
+import com.storyboard.security.AuthSessionService;
 import com.storyboard.security.JwtTokenProvider;
 import com.storyboard.security.ScryptPasswordService;
 import com.storyboard.service.AuthService;
@@ -27,9 +29,10 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final JwtTokenProvider jwtTokenProvider;
     private final ScryptPasswordService passwordService;
+    private final AuthSessionService sessionService;
 
     @Override
-    public LoginResponse login(LoginRequest request) {
+    public AuthResult login(LoginRequest request) {
         User user = userMapper.findByEmail(request.email().toLowerCase().trim());
         if (user == null) {
             throw new BusinessException(40102, "用户名或密码错误");
@@ -39,14 +42,14 @@ public class AuthServiceImpl implements AuthService {
         }
         userMapper.updateLastLoginAt(user.getId(), OffsetDateTime.now());
 
-        String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
-        String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());
-
-        return new LoginResponse(accessToken, refreshToken, user.getId(), user.getDisplayName());
+        AuthSessionService.SessionTokens tokens = sessionService.issue(user);
+        return new AuthResult(
+                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
+                tokens.refreshToken());
     }
 
     @Override
-    public LoginResponse register(RegisterRequest request) {
+    public AuthResult register(RegisterRequest request) {
         User existing = userMapper.findByEmail(request.email().toLowerCase().trim());
         if (existing != null) {
             throw new BusinessException(40001, "邮箱已被注册");
@@ -63,14 +66,14 @@ public class AuthServiceImpl implements AuthService {
         }
         userMapper.insert(user);
 
-        String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
-        String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());
-
-        return new LoginResponse(accessToken, refreshToken, user.getId(), user.getDisplayName());
+        AuthSessionService.SessionTokens tokens = sessionService.issue(user);
+        return new AuthResult(
+                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
+                tokens.refreshToken());
     }
 
     @Override
-    public LoginResponse refresh(String refreshToken) {
+    public AuthResult refresh(String refreshToken) {
         try {
             var claims = jwtTokenProvider.verifyRefreshToken(refreshToken);
             String userId = claims.getSubject();
@@ -78,9 +81,10 @@ public class AuthServiceImpl implements AuthService {
             if (user == null || "disabled".equals(user.getStatus())) {
                 throw new BusinessException(40101, "用户不存在或已禁用");
             }
-            String newAccessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
-            String newRefreshToken = jwtTokenProvider.signRefreshToken(user.getId());
-            return new LoginResponse(newAccessToken, newRefreshToken, user.getId(), user.getDisplayName());
+            AuthSessionService.SessionTokens tokens = sessionService.rotate(refreshToken);
+            return new AuthResult(
+                    new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
+                    tokens.refreshToken());
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -89,39 +93,15 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public ApiResponse<Map<String, Object>> handleUnlogin(UnloginRequest req, String authHeader) {
-        String userIdFromHeader = null;
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            try { userIdFromHeader = jwtTokenProvider.tokenToUserId(authHeader.substring(7)); } catch (Exception ignored) {}
+    public ApiResponse<Map<String, Object>> handleUnlogin(UnloginRequest req, String refreshToken) {
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            try {
+                var claims = jwtTokenProvider.verifyRefreshToken(refreshToken);
+                sessionService.revokeSession(claims.get("sid", String.class));
+            } catch (Exception ignored) {
+                // Logout is idempotent even when the cookie is expired or malformed.
+            }
         }
-
-        // 解析 JWT → userId
-        String userIdFromJwt;
-        try {
-            userIdFromJwt = jwtTokenProvider.tokenToUserId(req.jwt());
-        } catch (Exception e) {
-            throw new BusinessException(40101, "JWT 无效");
-        }
-
-        // 查用户
-        User user = userMapper.findByEmail(req.account());
-        if (user == null) {
-            throw new BusinessException(40101, "账号不存在");
-        }
-
-        // 验证 account 和 jwt 指向同一用户
-        if (!user.getId().equals(userIdFromJwt)) {
-            throw new BusinessException(40101, "账号与JWT不匹配");
-        }
-
-        // 已有 token 且同一用户
-        if (userIdFromHeader != null && userIdFromHeader.equals(userIdFromJwt)) {
-            return ApiResponse.ok(Map.of("alreadyLoggedIn", true, "userId", user.getId(), "displayName", user.getDisplayName()));
-        }
-
-        // 签发新 token
-        String accessToken = jwtTokenProvider.signAccessToken(user.getId(), user.getRole(), user.getStatus());
-        String refreshToken = jwtTokenProvider.signRefreshToken(user.getId());
-        return ApiResponse.ok(Map.of("accessToken", accessToken, "refreshToken", refreshToken, "userId", user.getId(), "displayName", user.getDisplayName()));
+        return ApiResponse.ok(Map.of("loggedOut", true));
     }
 }

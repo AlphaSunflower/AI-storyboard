@@ -1,5 +1,6 @@
 import client from './client';
 import { BACKEND_URL } from '../config';
+import { authorizedFetch } from '../lib/authSession';
 import type { GatewayModelOption } from './ai';
 import type { AgentMediaRef, CanvasEditContext } from '../lib/canvasEditMode';
 
@@ -986,16 +987,17 @@ export async function streamChat(
     routingHint?: string;
     cancelActiveTasks?: boolean;
     editMessageId?: string;
+    clientRequestId?: string;
     canvasContext?: CanvasEditContext;
     attachments?: AgentAttachment[];
   },
 ): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/stream`, {
+  const res = await authorizedFetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       content,
+      clientRequestId: opts?.clientRequestId,
       picUrls: picUrls ?? [],
       assetIds: assetIds ?? [],
       assetGroupIds: assetGroupIds ?? [],
@@ -1027,12 +1029,11 @@ export async function submitForm(
   signal?: AbortSignal,
   opts?: { canvasContext?: CanvasEditContext },
 ): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(
+  const res = await authorizedFetch(
     `${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/resume/stream`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         formToken,
         taskId,
@@ -1057,12 +1058,11 @@ export async function streamCanvasSessionReady(
   createNew = false,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(
+  const res = await authorizedFetch(
     `${BACKEND_URL}/api/agent/conversations/${conversationId}/canvas-sessions/${encodeURIComponent(sessionId)}/ready`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ canvasId: selectedCanvasId ?? '', createNew }),
       signal,
     },
@@ -1126,11 +1126,9 @@ export async function streamTaskEvents(
   onEvent: (event: AgentRealtimeEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('accessToken') ?? '';
-  const res = await fetch(`${BACKEND_URL}/api/agent/tasks/events`, {
+  const res = await authorizedFetch(`${BACKEND_URL}/api/agent/tasks/events`, {
     headers: {
       Accept: 'text/event-stream',
-      Authorization: `Bearer ${token}`,
     },
     signal,
   });

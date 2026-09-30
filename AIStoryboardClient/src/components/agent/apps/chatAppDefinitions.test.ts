@@ -38,25 +38,19 @@ describe('chat app definitions', () => {
     });
   });
 
-  it('passes authentication and project context to the canvas app', () => {
-    localStorage.setItem('accessToken', 'access-token');
-    localStorage.setItem('user', JSON.stringify({ userId: 'user-1', displayName: '测试用户' }));
-
+  it('passes project context to the same-origin canvas app without URL credentials', () => {
     const descriptor = buildChatAppDescriptor('canvas', { id: 'project-1', name: '测试项目' });
     expect(descriptor).not.toBeNull();
 
-    const url = new URL(descriptor!.url);
-    expect(url.searchParams.get('token')).toBe('access-token');
+    const url = new URL(descriptor!.url, window.location.origin);
+    expect(url.pathname).toBe('/canvas');
+    expect(url.searchParams.get('token')).toBeNull();
     expect(url.searchParams.get('embedded')).toBe('1');
-    expect(url.searchParams.get('userId')).toBe('user-1');
-    expect(url.searchParams.get('name')).toBe('测试用户');
+    expect(url.searchParams.get('userId')).toBeNull();
     expect(url.hash).toBe('#project=project-1');
   });
 
   it('opens the canvas app in controlled canvas mode', () => {
-    localStorage.setItem('accessToken', 'access-token');
-    localStorage.setItem('user', JSON.stringify({ userId: 'user-1', displayName: '测试用户' }));
-
     const descriptor = buildChatAppDescriptor('canvas', { id: 'project-1', name: '测试项目' }, {
       canvasMode: {
         conversationId: 'conversation-1',
@@ -66,7 +60,7 @@ describe('chat app definitions', () => {
     });
 
     expect(descriptor).not.toBeNull();
-    const url = new URL(descriptor!.url);
+    const url = new URL(descriptor!.url, window.location.origin);
     expect(url.searchParams.get('embedded')).toBe('1');
     expect(url.searchParams.get('canvasMode')).toBe('1');
     expect(url.searchParams.get('conversationId')).toBe('conversation-1');
@@ -77,8 +71,6 @@ describe('chat app definitions', () => {
   });
 
   it('reopens a bound canvas directly in controlled mode', () => {
-    localStorage.setItem('accessToken', 'access-token');
-
     const descriptor = buildChatAppDescriptor('canvas', { id: 'project-1', name: '测试项目' }, {
       canvasMode: {
         conversationId: 'conversation-1',
@@ -88,11 +80,11 @@ describe('chat app definitions', () => {
       },
     });
 
-    expect(new URL(descriptor!.url).hash).toBe('#project=project-1&canvas=canvas-1');
+    expect(new URL(descriptor!.url, window.location.origin).hash).toBe('#project=project-1&canvas=canvas-1');
   });
 
-  it('does not open the canvas without authentication', () => {
-    expect(buildChatAppDescriptor('canvas', null)).toBeNull();
+  it('opens the canvas without project context for cookie-backed authentication', () => {
+    expect(buildChatAppDescriptor('canvas', null)?.url).toBe('/canvas?embedded=1');
   });
 
   it('recovers the active canvas id from an existing child window url', () => {

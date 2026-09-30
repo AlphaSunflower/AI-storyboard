@@ -1,6 +1,7 @@
 package com.moon.moonagent.service.impl;
 
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.storage.MinioStorage;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -182,6 +183,7 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
         try {
+            OutboundUrlGuard.requireSafeHttpUrl(sourceUrl);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(sourceUrl))
                     .timeout(Duration.ofSeconds(120))

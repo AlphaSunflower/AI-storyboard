@@ -7,7 +7,7 @@ import type {
   JobRequest,
   JobSnapshot,
 } from '../types';
-import { getJobToken } from './jobAuth';
+import { bootstrapJobAuth, getJobToken, getStreamTicket } from './jobAuth';
 
 export const LOCAL_CAPABILITIES: CapabilityDescriptor[] = [
   { id: 'image.crop', label: '裁剪', category: 'local', available: true },
@@ -50,10 +50,10 @@ const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, ext
   if (externalSignal?.aborted) controller.abort();
   else externalSignal?.addEventListener('abort', onAbort, { once: true });
   const headers = new Headers(init.headers as HeadersInit | undefined);
-  const token = getJobToken();
+  const token = getJobToken() ?? await bootstrapJobAuth();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   try {
-    return await fetch(input, { credentials: 'omit', ...init, headers, signal: controller.signal });
+    return await fetch(input, { credentials: 'include', ...init, headers, signal: controller.signal });
   } finally {
     window.clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onAbort);
@@ -128,11 +128,9 @@ export class HttpJobAdapter implements JobAdapter {
   }
 
   subscribe(jobId: string, listener: (event: JobEvent) => void) {
-    // EventSource 无法带 Authorization 头——token 放查询参数（后端 events 路径放行 access_token）
-    const token = getJobToken();
     const base = `${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/events`;
-    const url = token ? `${base}?access_token=${encodeURIComponent(token)}` : base;
-    const source = new EventSource(url);
+    let source: EventSource | null = null;
+    let disposed = false;
     const eventTypes: JobEvent['type'][] = [
       'job.queued',
       'job.started',
@@ -146,24 +144,36 @@ export class HttpJobAdapter implements JobAdapter {
       'job.failed',
       'job.cancelled',
     ];
-    const listeners = eventTypes.map((type) => {
-      const handler = (event: MessageEvent<string>) => {
-        const parsed = normalizeEvent(event.data, jobId, type, event.lastEventId);
+    const listeners: Array<readonly [JobEvent['type'], EventListener]> = [];
+    void getStreamTicket(new URL(base, window.location.origin).pathname).then((ticket) => {
+      if (disposed || !ticket) {
+        if (!disposed) listener({ type: 'job.failed', jobId, message: '任务事件流鉴权失败' });
+        return;
+      }
+      source = new EventSource(`${base}?ticket=${encodeURIComponent(ticket)}`);
+      eventTypes.forEach((type) => {
+        const handler = (event: MessageEvent<string>) => {
+          const parsed = normalizeEvent(event.data, jobId, type, event.lastEventId);
+          if (parsed) listener(parsed);
+        };
+        source?.addEventListener(type, handler as EventListener);
+        listeners.push([type, handler as EventListener]);
+      });
+      if (!source) return;
+      source.onmessage = (event) => {
+        const parsed = normalizeEvent(event.data, jobId, undefined, event.lastEventId);
         if (parsed) listener(parsed);
       };
-      source.addEventListener(type, handler as EventListener);
-      return [type, handler] as const;
+      source.onerror = () => {
+        if (source?.readyState === EventSource.CLOSED) {
+          listener({ type: 'job.failed', jobId, message: '任务事件流已断开' });
+        }
+      };
     });
-    source.onmessage = (event) => {
-      const parsed = normalizeEvent(event.data, jobId, undefined, event.lastEventId);
-      if (parsed) listener(parsed);
-    };
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED) listener({ type: 'job.failed', jobId, message: '任务事件流已断开' });
-    };
     return () => {
-      listeners.forEach(([type, handler]) => source.removeEventListener(type, handler as EventListener));
-      source.close();
+      disposed = true;
+      listeners.forEach(([type, handler]) => source?.removeEventListener(type, handler));
+      source?.close();
     };
   }
 

@@ -4,7 +4,7 @@ import '@xyflow/react/dist/style.css';
 import './index.css';
 import './styles.css';
 import App from './App';
-import { captureUrlAuth } from './services/jobAuth';
+import { bootstrapJobAuth } from './services/jobAuth';
 
 // 浏览器按 Origin 隔离 localStorage 与 IndexedDB；开发环境统一使用 localhost，
 // 避免 localhost 与 127.0.0.1 互相看不到登录 token 和本地素材。
@@ -17,7 +17,7 @@ const redirectToCanonicalDevOrigin = () => {
 };
 
 if (!redirectToCanonicalDevOrigin()) {
-  captureUrlAuth();
+  void bootstrapJobAuth();
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

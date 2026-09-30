@@ -21,7 +21,6 @@ export interface RegisterRequest {
 
 export interface LoginResponse {
   accessToken: string;
-  refreshToken: string;
   userId: string;
   displayName: string;
 }
@@ -31,6 +30,10 @@ export const authApi = {
     client.post<ApiResponse<LoginResponse>>('/auth/login', data),
   register: (data: RegisterRequest) =>
     client.post<ApiResponse<LoginResponse>>('/auth/register', data),
-  refresh: (refreshToken: string) =>
-    client.post<ApiResponse<LoginResponse>>('/auth/refresh', { refreshToken }),
+  refresh: () =>
+    client.post<ApiResponse<LoginResponse>>('/auth/refresh', {}),
+  logout: () =>
+    client.post<ApiResponse<{ loggedOut: boolean }>>('/auth/unlogin', {}),
+  streamTicket: (path: string) =>
+    client.post<ApiResponse<{ ticket: string; expiresAt: number }>>('/auth/stream-ticket', { path }),
 };

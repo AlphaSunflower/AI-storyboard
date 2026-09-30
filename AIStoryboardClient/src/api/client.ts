@@ -1,14 +1,20 @@
 import axios from 'axios';
 import { BACKEND_URL, API_TIMEOUT } from '../config';
+import {
+  clearAuthSession,
+  getAccessToken,
+  refreshAccessToken,
+} from '../lib/authSession';
 
 const client = axios.create({
   baseURL: BACKEND_URL + '/api',
+  withCredentials: true,
   timeout: API_TIMEOUT,
   headers: { 'Content-Type': 'application/json' },
 });
 
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -18,11 +24,18 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+    const original = error.config as { _retryAuth?: boolean; url?: string; headers?: Record<string, string> } | undefined;
+    const isRefreshRequest = original?.url?.includes('/auth/refresh');
+    if (error.response?.status === 401 && original && !original._retryAuth && !isRefreshRequest) {
+      original._retryAuth = true;
+      const token = await refreshAccessToken();
+      if (token) {
+        original.headers = original.headers ?? {};
+        original.headers.Authorization = `Bearer ${token}`;
+        return client(original);
+      }
+      clearAuthSession();
+      if (!window.location.pathname.startsWith('/login')) window.location.href = '/login';
     }
     return Promise.reject(error);
   }

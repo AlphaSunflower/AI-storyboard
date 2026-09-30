@@ -53,27 +53,9 @@ export function buildChatAppDescriptor(
     };
   }
 
-  const token = localStorage.getItem('accessToken');
-  if (!token) return null;
-  let userId = '';
-  let name = '';
-  try {
-    const userInfo = JSON.parse(localStorage.getItem('user') ?? '{}') as {
-      userId?: string;
-      displayName?: string;
-    };
-    userId = userInfo.userId ?? '';
-    name = userInfo.displayName ?? '';
-  } catch {
-    // Keep the canvas usable even if the cached user payload is malformed.
-  }
-
   const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
-    || 'http://localhost:3000';
-  const params = new URLSearchParams({ token });
-  params.set('embedded', '1');
-  if (userId) params.set('userId', userId);
-  if (name) params.set('name', name);
+    || '/canvas';
+  const params = new URLSearchParams({ embedded: '1' });
   const canvasMode = options.canvasMode;
   const projectId = canvasMode?.projectId ?? currentProject?.id;
   if (canvasMode) {

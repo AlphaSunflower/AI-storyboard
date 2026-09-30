@@ -151,6 +151,23 @@ public interface AgentChatService {
                               List<AgentAttachmentRequest> attachments,
                               SseEmitter emitter);
 
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              String clientRequestId,
+                              List<AgentAttachmentRequest> attachments,
+                              SseEmitter emitter);
+
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              String clientRequestId,
+                              SseEmitter emitter);
+
     /** Resume an AgentScope HITL checkpoint and continue the turn stream. */
     void resumeAgentScopeTurn(String userId, String conversationId, String turnId,
                               String formToken,

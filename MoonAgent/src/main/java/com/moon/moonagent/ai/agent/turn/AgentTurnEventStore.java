@@ -28,23 +28,39 @@ public class AgentTurnEventStore {
     private final AgentTurnEventMapper eventMapper;
 
     public AgentTurnEntity start(AgentConversation conversation, String input) {
+        return start(conversation, input, null);
+    }
+
+    public AgentTurnEntity start(AgentConversation conversation, String input, String clientRequestId) {
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setConversationId(conversation.getId());
         turn.setStatus("running");
         turn.setRuntimeEngine("agentscope-java-2.0.3");
         turn.setInputText(input == null ? "" : input);
+        turn.setClientRequestId(clientRequestId == null || clientRequestId.isBlank()
+                ? null : clientRequestId);
         turn.setLastSequence(0);
         turn.setStartedAt(OffsetDateTime.now());
         turnMapper.insert(turn);
         return turn;
     }
 
-    public synchronized AgentTurnEventEnvelope append(String turnId, String type, Object payload) {
-        AgentTurnEntity turn = turnMapper.selectById(turnId);
-        if (turn == null) {
+    public AgentTurnEntity findByClientRequestId(String conversationId, String clientRequestId) {
+        if (conversationId == null || conversationId.isBlank()
+                || clientRequestId == null || clientRequestId.isBlank()) {
+            return null;
+        }
+        return turnMapper.selectOne(new LambdaQueryWrapper<AgentTurnEntity>()
+                .eq(AgentTurnEntity::getConversationId, conversationId)
+                .eq(AgentTurnEntity::getClientRequestId, clientRequestId)
+                .last("LIMIT 1"));
+    }
+
+    public AgentTurnEventEnvelope append(String turnId, String type, Object payload) {
+        Integer sequence = turnMapper.incrementSequence(turnId);
+        if (sequence == null) {
             throw new IllegalArgumentException("turn not found: " + turnId);
         }
-        int sequence = (turn.getLastSequence() == null ? 0 : turn.getLastSequence()) + 1;
         AgentTurnEventEntity event = new AgentTurnEventEntity();
         event.setTurnId(turnId);
         event.setSequence(sequence);
@@ -53,8 +69,6 @@ public class AgentTurnEventStore {
         event.setCreatedAt(OffsetDateTime.now());
         eventMapper.insert(event);
 
-        turn.setLastSequence(sequence);
-        turnMapper.updateById(turn);
         return new AgentTurnEventEnvelope(turnId, sequence, type, payloadMap(payload));
     }
 

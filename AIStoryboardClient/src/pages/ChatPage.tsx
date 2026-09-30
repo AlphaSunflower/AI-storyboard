@@ -287,7 +287,6 @@ export function ChatPage() {
   // 登录守卫 + iframe 自登录（/chat?embed=1&token=&userId=&name=）：跨端口 iframe 靠 URL 注入 token
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
     if (params.get('embed') === '1') setEmbed(true);
     const requestedCanvasContext = requestedCanvasContextRef.current;
     if (requestedCanvasContext) {
@@ -296,16 +295,7 @@ export function ChatPage() {
       const persisted = loadCanvasEditContext();
       if (persisted) useAgentStore.getState().setCanvasEditContext(persisted);
     }
-    if (token) {
-      const refresh = params.get('refresh');
-      const userId = params.get('userId');
-      const name = params.get('name');
-      localStorage.setItem('accessToken', token);
-      if (refresh) localStorage.setItem('refreshToken', refresh);
-      if (userId && name) localStorage.setItem('user', JSON.stringify({ userId, displayName: name }));
-      window.history.replaceState({}, '', '/chat');
-    }
-    useAuthStore.getState().checkAuth();
+    void useAuthStore.getState().checkAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
