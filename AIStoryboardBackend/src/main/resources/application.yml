@@ -110,7 +110,7 @@ storyboard:
     read-timeout-seconds: 30
   storage:
     endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
-    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:minioadmin}
-    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:minioadmin123}
+    access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:}
     bucket: storyboard
     region: us-east-1

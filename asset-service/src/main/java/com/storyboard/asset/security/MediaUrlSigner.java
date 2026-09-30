@@ -17,6 +17,10 @@ public class MediaUrlSigner {
     private final byte[] secret;
 
     public MediaUrlSigner(AssetProperties properties) {
+        if (properties.signingSecret() == null || properties.signingSecret().isBlank()) {
+            throw new IllegalStateException(
+                    "媒体签名密钥未配置：请设置 ASSET_SIGNING_SECRET");
+        }
         this.secret = properties.signingSecret().getBytes(StandardCharsets.UTF_8);
     }
 

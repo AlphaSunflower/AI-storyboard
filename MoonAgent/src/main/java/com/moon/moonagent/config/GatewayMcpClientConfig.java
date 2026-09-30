@@ -14,9 +14,14 @@ public class GatewayMcpClientConfig {
     @Bean
     McpClientCustomizer<HttpClientStreamableHttpTransport.Builder> gatewayMcpAuthorization(
             @Value("${ai.gateway.base-url:http://localhost:8083}") String gatewayBaseUrl,
-            @Value("${ai.gateway.api-key:${LLM_GATEWAY_API_KEY:}}") String gatewayApiKey) {
+            @Value("${ai.gateway.api-key:${LLM_GATEWAY_API_KEY:}}") String gatewayApiKey,
+            @Value("${storyboard.internal-secret:}") String internalSecret) {
         URI gateway = URI.create(gatewayBaseUrl);
         return (connectionName, builder) -> builder.httpRequestCustomizer((request, method, uri, body, context) -> {
+            if ("canvas-server".equals(connectionName)
+                    && internalSecret != null && !internalSecret.isBlank()) {
+                request.header("X-Internal-Token", internalSecret);
+            }
             if (uri == null || uri.getHost() == null || gateway.getHost() == null) return;
             if (!uri.getHost().equalsIgnoreCase(gateway.getHost())) return;
             if (gateway.getPort() >= 0 && uri.getPort() >= 0 && gateway.getPort() != uri.getPort()) return;

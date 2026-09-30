@@ -4,11 +4,15 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.annotation.PostConstruct;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * 鉴权过滤器：信任网关注入的 {@code X-User-Id} header（网关已完成 JWT 验签）。
@@ -16,6 +20,16 @@ import java.io.IOException;
  */
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
+
+    @Value("${internal.secret:}")
+    private String internalSecret = "";
+
+    @PostConstruct
+    void validateInternalSecret() {
+        if (internalSecret == null || internalSecret.isBlank()) {
+            throw new IllegalStateException("internal.secret 未配置：请设置 INTERNAL_SECRET");
+        }
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
@@ -31,8 +45,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             chain.doFilter(req, res);
             return;
         }
-        // MCP is an internal tool transport. Ownership is enforced from the
-        // injected userId/projectId/canvasId parameters inside each tool.
+        if (!trustedInternalRequest(req.getHeader("X-Internal-Token"))) {
+            unauthorized(res);
+            return;
+        }
+        // MCP is an internal tool transport. Its identity arguments are only
+        // reachable after the internal service token has been verified.
         if (path.startsWith("/api/canvas/mcp")) {
             chain.doFilter(req, res);
             return;
@@ -42,13 +60,25 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String userId = req.getHeader("X-User-Id");
 
         if (userId == null || userId.isBlank()) {
-            res.setStatus(HttpStatus.UNAUTHORIZED.value());
-            res.setContentType("application/json;charset=UTF-8");
-            res.getWriter().write("{\"code\":40101,\"message\":\"未认证或凭证无效\",\"data\":null}");
+            unauthorized(res);
             return;
         }
 
         req.setAttribute("userId", userId);
         chain.doFilter(req, res);
+    }
+
+    private boolean trustedInternalRequest(String suppliedToken) {
+        if (internalSecret == null || internalSecret.isBlank()) return false;
+        if (suppliedToken == null || suppliedToken.isBlank()) return false;
+        return MessageDigest.isEqual(
+                suppliedToken.getBytes(StandardCharsets.UTF_8),
+                internalSecret.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void unauthorized(HttpServletResponse res) throws IOException {
+        res.setStatus(HttpStatus.UNAUTHORIZED.value());
+        res.setContentType("application/json;charset=UTF-8");
+        res.getWriter().write("{\"code\":40101,\"message\":\"未认证或凭证无效\",\"data\":null}");
     }
 }

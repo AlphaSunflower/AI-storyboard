@@ -13,6 +13,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.service.StoryboardImageQueueService;
+import com.moon.moonagent.service.StoryboardQueueRequestGuard;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
@@ -57,7 +58,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @Import(SecurityConfig.class)
 @EnableConfigurationProperties(AgentAiConfigProperties.class)
-@TestPropertySource(properties = "ai.agent.agentscope.enabled=true")
+@TestPropertySource(properties = {
+        "ai.agent.agentscope.enabled=true",
+        "storyboard.internal-secret="
+})
 class MoonAgentControllerSmokeTest {
 
     @Autowired
@@ -81,6 +85,8 @@ class MoonAgentControllerSmokeTest {
     private StoryboardImageQueueService imageQueueService;
     @MockitoBean
     private StoryboardVideoQueueService videoQueueService;
+    @MockitoBean
+    private StoryboardQueueRequestGuard requestGuard;
     @MockitoBean
     private StoryboardClient storyboardClient;
     @MockitoBean

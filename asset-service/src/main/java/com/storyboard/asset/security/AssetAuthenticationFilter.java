@@ -4,6 +4,7 @@ import com.storyboard.asset.config.AssetProperties;
 import io.jsonwebtoken.Jwts;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 /** asset-service 自己校验 JWT；仅内部调用允许共享密钥认证。 */
@@ -36,13 +38,23 @@ public class AssetAuthenticationFilter extends OncePerRequestFilter {
         this.issuer = issuer;
     }
 
+    @PostConstruct
+    void validateInternalToken() {
+        if (properties.internalToken() == null || properties.internalToken().isBlank()) {
+            throw new IllegalStateException(
+                    "storyboard.asset.internal-token 未配置：请设置 INTERNAL_SECRET");
+        }
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String internalToken = request.getHeader("X-Internal-Token");
         String internalUser = request.getHeader("X-User-Id");
         if (internalToken != null && !properties.internalToken().isBlank()
-                && internalToken.equals(properties.internalToken())) {
+                && MessageDigest.isEqual(
+                internalToken.getBytes(StandardCharsets.UTF_8),
+                properties.internalToken().getBytes(StandardCharsets.UTF_8))) {
             String user = (internalUser != null && !internalUser.isBlank()) ? internalUser : "internal";
             authenticate(user, "internal");
             chain.doFilter(request, response);

@@ -21,7 +21,7 @@ spring:
     # 本地开发凭据/库名在此；生产用 SPRING_DATASOURCE_* 环境变量覆盖（优先级高于 yaml）
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ai_storyboard}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:123456}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
   servlet:
     multipart:
       max-file-size: 256MB

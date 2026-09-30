@@ -29,7 +29,7 @@ spring:
   ai:
     openai:
       base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
-      api-key: ${LLM_GATEWAY_API_KEY:lg-df377c8084e645ffa34e0dfce1fb3e78}
+      api-key: ${LLM_GATEWAY_API_KEY:}
       # Spring AI 2.0 默认 60s；画布技能会在单次请求内执行长工具循环
       timeout: 3600s
       # 超时/连接失败不做 SDK 级隐式重试，避免单次 120s 超时被放大为多次串行请求
@@ -65,7 +65,7 @@ storyboard:
   storage:
     endpoint: ${STORYBOARD_STORAGE_ENDPOINT:http://localhost:9000}
     access-key: ${STORYBOARD_STORAGE_ACCESS_KEY:minioadmin}
-    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:minioadmin123}
+    secret-key: ${STORYBOARD_STORAGE_SECRET_KEY:}
     bucket: storyboard
     region: us-east-1
 

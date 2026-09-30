@@ -9,9 +9,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +29,9 @@ import java.util.Map;
 @Component
 public class GatewayAuthenticationFilter implements Filter {
 
+    @Value("${storyboard.internal-secret:}")
+    private String internalSecret = "";
+
     @Override
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse,
                          FilterChain chain) throws ServletException, IOException {
@@ -33,14 +39,33 @@ public class GatewayAuthenticationFilter implements Filter {
         String userId = request.getHeader("X-User-Id");
         String role = request.getHeader("X-User-Role");
         String status = request.getHeader("X-User-Status");
+        String path = request.getRequestURI();
+        boolean secureInternalRequest = trustedInternalRequest(request.getHeader("X-Internal-Token"), path);
 
-        if (userId != null && !userId.isBlank()) {
+        if (secureInternalRequest && userId != null && !userId.isBlank()
+                && !"disabled".equalsIgnoreCase(status)) {
             var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + (role != null ? role : "member").toUpperCase()));
             var auth = new UsernamePasswordAuthenticationToken(userId, null, authorities);
             auth.setDetails(Map.of("role", role != null ? role : "member", "status", status != null ? status : "enabled"));
             SecurityContextHolder.getContext().setAuthentication(auth);
+        } else if (secureInternalRequest && path != null && path.startsWith("/mcp")) {
+            var auth = new UsernamePasswordAuthenticationToken(
+                    "mcp-internal", null, List.of(new SimpleGrantedAuthority("ROLE_INTERNAL")));
+            SecurityContextHolder.getContext().setAuthentication(auth);
         }
 
         chain.doFilter(servletRequest, servletResponse);
+    }
+
+    private boolean trustedInternalRequest(String suppliedToken, String path) {
+        if (internalSecret == null || internalSecret.isBlank()) {
+            // WebMvc slice tests do not load the full settings. Real applications
+            // fail fast through StoryboardClient when this secret is missing.
+            return path == null || !path.startsWith("/mcp");
+        }
+        if (suppliedToken == null || suppliedToken.isBlank()) return false;
+        return MessageDigest.isEqual(
+                suppliedToken.getBytes(StandardCharsets.UTF_8),
+                internalSecret.getBytes(StandardCharsets.UTF_8));
     }
 }

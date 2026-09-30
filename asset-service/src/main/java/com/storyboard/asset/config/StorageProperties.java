@@ -23,8 +23,12 @@ public record StorageProperties(
 
     public StorageProperties {
         endpoint = endpoint == null ? "http://localhost:9000" : endpoint;
-        accessKey = accessKey == null ? "minioadmin" : accessKey;
-        secretKey = secretKey == null ? "minioadmin123" : secretKey;
+        accessKey = accessKey == null ? "" : accessKey;
+        secretKey = secretKey == null ? "" : secretKey;
+        if (accessKey.isBlank() || secretKey.isBlank()) {
+            throw new IllegalStateException(
+                    "对象存储凭据未配置：请设置 STORYBOARD_STORAGE_ACCESS_KEY / STORYBOARD_STORAGE_SECRET_KEY");
+        }
         bucket = bucket == null ? "storyboard" : bucket;
         region = region == null ? "us-east-1" : region;
         uploadPartSizeBytes = uploadPartSizeBytes <= 0 ? 8L * 1024 * 1024 : uploadPartSizeBytes;

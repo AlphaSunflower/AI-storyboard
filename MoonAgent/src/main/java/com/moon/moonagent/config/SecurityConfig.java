@@ -33,8 +33,7 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 // Swagger UI / OpenAPI 文档（本地联调用；prod 由 springdoc.enabled=false 关闭）
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/webjars/**").permitAll()
-                // MCP 端点（外部 MCP 客户端连接，由 MCP 协议自身鉴权）
-                .requestMatchers("/mcp/**").permitAll()
+                // MCP 端点由 GatewayAuthenticationFilter 校验内部服务令牌。
                 .anyRequest().authenticated()
             )
             .addFilterBefore(gatewayFilter, UsernamePasswordAuthenticationFilter.class);

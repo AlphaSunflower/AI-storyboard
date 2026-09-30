@@ -7,11 +7,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -24,6 +26,9 @@ import java.util.Map;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtVerifier jwtVerifier;
+
+    @Value("${internal.secret:}")
+    private String internalSecret = "";
 
     /** 白名单路径（不需要 JWT） */
     private static final String[] WHITELIST = {
@@ -59,8 +64,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             token = header.substring(7);
         }
-        // EventSource 无法带 Authorization 头——SSE 用查询参数 access_token 兜底
-        if (token == null) {
+        // EventSource 无法带 Authorization 头——仅 SSE 事件端点允许查询参数兜底。
+        if (token == null && isSsePath(path)) {
             token = request.getParameter("access_token");
         }
         if (token == null) {
@@ -77,14 +82,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             writeError(response, HttpStatus.UNAUTHORIZED.value(), "40101", "未授权：token 无效或已过期");
             return;
         }
+        if ("disabled".equalsIgnoreCase(claims.get("status", String.class))) {
+            writeError(response, HttpStatus.FORBIDDEN.value(), "40302", "账号已停用");
+            return;
+        }
         // 验签通过，写入下游 header（用 X-User-* 前缀避免与原始 Authorization 冲突）
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("X-User-Id", claims.getSubject());
+        headers.put("X-User-Role", claims.get("role", String.class));
+        headers.put("X-User-Status", claims.get("status", String.class));
+        if (internalSecret != null && !internalSecret.isBlank()) {
+            headers.put("X-Internal-Token", internalSecret);
+        }
         HttpServletRequest wrapped = new HeaderWrapper(request,
-                Map.of(
-                        "X-User-Id", claims.getSubject(),
-                        "X-User-Role", claims.get("role", String.class),
-                        "X-User-Status", claims.get("status", String.class)
-                ));
+                headers);
         chain.doFilter(wrapped, response);
+    }
+
+    private static boolean isSsePath(String path) {
+        return path != null && path.endsWith("/events");
     }
 
     private void writeError(HttpServletResponse response, int status, String code, String message) throws IOException {

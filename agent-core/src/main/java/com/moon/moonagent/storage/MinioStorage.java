@@ -37,8 +37,8 @@ public class MinioStorage {
     private static final Logger log = LoggerFactory.getLogger(MinioStorage.class);
 
     @Value("${storyboard.storage.endpoint:http://localhost:9000}") private String endpoint;
-    @Value("${storyboard.storage.access-key:minioadmin}") private String accessKey;
-    @Value("${storyboard.storage.secret-key:minioadmin123}") private String secretKey;
+    @Value("${storyboard.storage.access-key:}") private String accessKey;
+    @Value("${storyboard.storage.secret-key:}") private String secretKey;
     @Value("${storyboard.storage.bucket:storyboard}") private String bucket;
     @Value("${storyboard.storage.region:us-east-1}") private String region;
 
@@ -46,6 +46,10 @@ public class MinioStorage {
 
     @PostConstruct
     void init() {
+        if (accessKey == null || accessKey.isBlank() || secretKey == null || secretKey.isBlank()) {
+            throw new IllegalStateException(
+                    "对象存储凭据未配置：请设置 STORYBOARD_STORAGE_ACCESS_KEY / STORYBOARD_STORAGE_SECRET_KEY");
+        }
         this.s3 = S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.of(region))

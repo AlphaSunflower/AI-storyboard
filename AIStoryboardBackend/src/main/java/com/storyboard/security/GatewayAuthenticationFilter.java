@@ -10,10 +10,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 
@@ -29,6 +32,9 @@ public class GatewayAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
+    @Value("${internal.secret:}")
+    private String internalSecret = "";
+
     public GatewayAuthenticationFilter(JwtTokenProvider jwtTokenProvider) {
         this.jwtTokenProvider = jwtTokenProvider;
     }
@@ -43,7 +49,15 @@ public class GatewayAuthenticationFilter extends OncePerRequestFilter {
         String status = request.getHeader("X-User-Status");
 
         if (userId != null && !userId.isBlank()) {
-            // Gateway 已验签，直接用
+            if (!trustedInternalRequest(request.getHeader("X-Internal-Token"))) {
+                writeError(response);
+                return;
+            }
+            if ("disabled".equalsIgnoreCase(status)) {
+                writeError(response);
+                return;
+            }
+            // Gateway 已验签，且内部令牌已确认，直接用
             setAuth(userId, role != null ? role : "member", status != null ? status : "enabled");
             chain.doFilter(request, response);
             return;
@@ -77,5 +91,13 @@ public class GatewayAuthenticationFilter extends OncePerRequestFilter {
         response.setStatus(401);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.error(40101, "未授权")));
+    }
+
+    private boolean trustedInternalRequest(String suppliedToken) {
+        if (internalSecret == null || internalSecret.isBlank()) return false;
+        if (suppliedToken == null || suppliedToken.isBlank()) return false;
+        return MessageDigest.isEqual(
+                suppliedToken.getBytes(StandardCharsets.UTF_8),
+                internalSecret.getBytes(StandardCharsets.UTF_8));
     }
 }
