@@ -97,6 +97,13 @@ public class AgentTurnEventStore {
         turnMapper.updateById(turn);
     }
 
+    public void markWaitingUser(String turnId) {
+        AgentTurnEntity turn = turnMapper.selectById(turnId);
+        if (turn == null) return;
+        turn.setStatus("waiting_user");
+        turnMapper.updateById(turn);
+    }
+
     public void finish(String turnId, String status, String error, OffsetDateTime completedAt) {
         AgentTurnEntity turn = turnMapper.selectById(turnId);
         if (turn == null) return;

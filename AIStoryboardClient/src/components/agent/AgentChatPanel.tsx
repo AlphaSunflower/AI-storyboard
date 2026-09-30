@@ -11,6 +11,7 @@ import { MessageBubble } from './MessageBubble';
 import { HumanInputCard } from './HumanInputCard';
 import { ConfirmResultCard } from './ConfirmResultCard';
 import { VideoPlanCard } from './VideoPlanCard';
+import { CanvasSessionCard } from './CanvasSessionCard';
 import { AgentScopeTimeline } from './AgentScopeTimeline';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
@@ -319,6 +320,7 @@ export function AgentChatPanel() {
       </div>
 
       {/* HumanInputCard: 人工介入卡片 - 在输入区上方显示 */}
+      <CanvasSessionCard />
       {waitingHumanInput && (
         <div style={{
           padding: '0 16px', background: 'white', flexShrink: 0,

@@ -17,7 +17,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AgentScopeCanvasTools {
 
-    public static final String PREPARE_CANVAS_SESSION = "prepare_canvas_session";
+    public static final String PREPARE_CANVAS_SESSION = "canvas_prepare_session";
 
     private final MorrowCanvasService canvasService;
 
@@ -50,19 +50,25 @@ public class AgentScopeCanvasTools {
         List<MorrowCanvas> existing = canvasService.listByProject(
                 conversation.getUserId(), projectId);
         if (existing != null && !existing.isEmpty()) {
+            List<CanvasChoice> choices = existing.stream()
+                    .map(canvas -> new CanvasChoice(
+                            canvas.getId(),
+                            canvas.getTitle() == null ? "画布" : canvas.getTitle()))
+                    .toList();
             MorrowCanvas target = requestedCanvasId.isBlank()
-                    ? existing.getFirst()
+                    ? (existing.size() == 1 ? existing.getFirst() : null)
                     : existing.stream()
                     .filter(canvas -> requestedCanvasId.equals(canvas.getId()))
                     .findFirst()
-                    .orElse(existing.getFirst());
+                    .orElse(null);
             return new SessionPreparation(
                     projectId,
-                    target.getId(),
-                    target.getTitle() == null ? "画布" : target.getTitle(),
+                    target == null ? "" : target.getId(),
+                    target == null ? "" : target.getTitle(),
                     intent,
                     existing.size(),
-                    false);
+                    false,
+                    choices);
         }
 
         String title = requestedTitle.isBlank() ? "AI 设计画布" : requestedTitle;
@@ -74,7 +80,9 @@ public class AgentScopeCanvasTools {
                 created.getTitle() == null ? title : created.getTitle(),
                 intent,
                 0,
-                true);
+                true,
+                List.of(new CanvasChoice(created.getId(), created.getTitle() == null
+                        ? title : created.getTitle())));
     }
 
     private static String text(Object value) {
@@ -87,7 +95,11 @@ public class AgentScopeCanvasTools {
             String canvasTitle,
             String intent,
             int existingCanvasCount,
-            boolean created
+            boolean created,
+            List<CanvasChoice> choices
     ) {
+    }
+
+    public record CanvasChoice(String canvasId, String title) {
     }
 }

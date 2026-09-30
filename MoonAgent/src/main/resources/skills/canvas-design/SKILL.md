@@ -8,7 +8,7 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 8
-allowed-tools: prepare_canvas_session canvas_get_context canvas_list_node_types canvas_get_state canvas_list_nodes canvas_get_node canvas_list_edges canvas_get_selection canvas_create_node canvas_create_nodes canvas_import_media canvas_create_canvas canvas_rename_canvas canvas_create_result_slots canvas_mark_result_slots canvas_get_node_model_config canvas_set_node_model_config canvas_update_node canvas_create_edge canvas_move_nodes canvas_layout_graph canvas_delete_nodes canvas_delete_edges request_human_input
+allowed-tools: canvas_prepare_session canvas_get_context canvas_list_node_types canvas_get_state canvas_list_nodes canvas_get_node canvas_list_edges canvas_get_selection canvas_create_node canvas_create_nodes canvas_import_media canvas_create_canvas canvas_rename_canvas canvas_create_result_slots canvas_mark_result_slots canvas_get_node_model_config canvas_set_node_model_config canvas_update_node canvas_create_edge canvas_move_nodes canvas_layout_graph canvas_delete_nodes canvas_delete_edges request_human_input
 ---
 
 # 画布设计
@@ -34,4 +34,4 @@ allowed-tools: prepare_canvas_session canvas_get_context canvas_list_node_types 
 16. 删除节点或连线前必须先读取目标，并通过 `request_human_input` 获得明确确认；不得把隐藏、替换或修改误判为删除。执行节点属于 canvas-run，不在本技能范围内。
 17. 目标不明确或存在多个候选画布时，必须调用 request_human_input 让用户按“项目名称 / 画布名称”点击选择，禁止展示或要求输入 projectId、canvasId、nodeId。
 18. 最终回复只说明实际创建、更新、连接、重命名、模型调整或布局的内容；ID 仅用于工具参数，不展示给用户。
-19. 若 canvas_get_context 返回 PROJECT_NOT_OPEN、BROWSER_NOT_RESPONDING 或没有可响应画布，调用 prepare_canvas_session 准备并打开画布；用户已明确选择时可在隐藏参数 canvas_id 中传入该画布 ID。等待画布恢复后继续同一任务，不得把超时当作模型能力失败。
+19. 若 canvas_get_context 返回 PROJECT_NOT_OPEN、BROWSER_NOT_RESPONDING 或没有可响应画布，调用 canvas_prepare_session 准备并打开画布；用户已明确选择时可在隐藏参数 canvas_id 中传入该画布 ID。等待画布恢复后继续同一任务，不得把超时当作模型能力失败。

@@ -158,6 +158,9 @@ public interface AgentChatService {
                               List<String> assetIds, CanvasSessionContext canvasContext,
                               SseEmitter emitter);
 
+    void resumeCanvasSession(String userId, String conversationId, String sessionId,
+                             String selectedCanvasId, boolean createNew, SseEmitter emitter);
+
     /** Runtime status used by the new frontend transport. */
     Map<String, Object> getRuntimeStatus(String userId, String conversationId);
 

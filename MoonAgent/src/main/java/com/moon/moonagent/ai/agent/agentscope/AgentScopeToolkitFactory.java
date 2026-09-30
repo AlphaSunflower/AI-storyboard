@@ -18,6 +18,8 @@ public class AgentScopeToolkitFactory {
 
     public static final String IMAGE_TOOLS = "image-tools";
     public static final String VIDEO_TOOLS = "video-tools";
+    public static final String CANVAS_DESIGN_TOOLS = "canvas-design-tools";
+    public static final String CANVAS_RUN_TOOLS = "canvas-run-tools";
 
     private final AgentScopeSessionTools sessionTools;
     private final AgentScopeInteractionTools interactionTools;
@@ -76,7 +78,10 @@ public class AgentScopeToolkitFactory {
         register(toolkit, videoMergeTools.tool());
         creativeTools.tools().forEach(tool -> register(toolkit, tool));
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
-        register(toolkit, canvasTools.tool());
+        toolkit.createSkillToolGroup(
+                CANVAS_DESIGN_TOOLS, "Canvas graph design tools", false, "canvas-design");
+        toolkit.createSkillToolGroup(
+                CANVAS_RUN_TOOLS, "Canvas graph execution tools", false, "canvas-run");
         activeToolkit = toolkit;
         registerCanvasTools(toolkit);
 
@@ -131,8 +136,37 @@ public class AgentScopeToolkitFactory {
         for (ToolCallback canvasTool : callbacks) {
             String name = canvasTool.getToolDefinition().name();
             if (toolkit.getTool(name) != null) toolkit.removeTool(name);
-            register(toolkit, toolPipeline.wrapGeneric(new SpringAiToolAdapter(canvasTool)));
+            registerCanvasTool(toolkit, canvasTool, CANVAS_DESIGN_TOOLS);
+            if (canvasRunTool(name)) {
+                registerCanvasTool(toolkit, canvasTool, CANVAS_RUN_TOOLS);
+            }
         }
+        if (toolkit.getTool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION) != null) {
+            toolkit.removeTool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION);
+        }
+        AgentScopeTool prepareCanvasTool = canvasTools.tool();
+        registerToGroup(toolkit, toolPipeline.wrap(prepareCanvasTool), CANVAS_DESIGN_TOOLS);
+        registerToGroup(toolkit, toolPipeline.wrap(prepareCanvasTool), CANVAS_RUN_TOOLS);
+    }
+
+    private void registerCanvasTool(Toolkit toolkit, ToolCallback callback, String group) {
+        registerToGroup(toolkit,
+                toolPipeline.wrapGeneric(new SpringAiToolAdapter(callback)), group);
+    }
+
+    private static boolean canvasRunTool(String name) {
+        return Set.of(
+                "canvas_get_context", "canvas_get_state", "canvas_list_nodes",
+                "canvas_list_edges", "canvas_get_node", "canvas_create_result_slots",
+                "canvas_create_edge", "canvas_set_node_model_config",
+                "canvas_execute_node", "canvas_execute_graph",
+                "canvas_get_execution", "canvas_cancel_execution")
+                .contains(name);
+    }
+
+    private static void registerToGroup(Toolkit toolkit, io.agentscope.core.tool.AgentTool tool,
+                                        String group) {
+        toolkit.registration().agentTool(tool).group(group).apply();
     }
 
     private void register(Toolkit toolkit, AgentScopeTool tool) {

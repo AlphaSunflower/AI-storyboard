@@ -63,6 +63,7 @@ public class AgentConversationController {
     private final AgentAiConfigProperties agentConfig;
     private final AssetClient assetClient;
     private final ConversationAssetGroupService conversationAssetGroupService;
+    private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -273,6 +274,42 @@ public class AgentConversationController {
                 request.assetIds() == null ? List.of() : request.assetIds(),
                 request.canvasContext(), emitter);
         return emitter;
+    }
+
+    /** Resume a canvas turn after its iframe is ready. */
+    @PostMapping(value = "/conversations/{id}/canvas-sessions/{sessionId}/ready",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter readyCanvasSession(Authentication auth,
+                                         @PathVariable String id,
+                                         @PathVariable String sessionId,
+                                         @RequestBody(required = false) Map<String, Object> request) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = createSseEmitter();
+        String selectedCanvasId = request == null || request.get("canvasId") == null
+                ? "" : String.valueOf(request.get("canvasId"));
+        boolean createNew = request != null && Boolean.TRUE.equals(request.get("createNew"));
+        chatService.resumeCanvasSession(
+                auth.getName(), id, sessionId, selectedCanvasId, createNew, emitter);
+        return emitter;
+    }
+
+    /** Cancel a pending canvas session. */
+    @PostMapping("/conversations/{id}/canvas-sessions/{sessionId}/cancel")
+    public ApiResponse<Map<String, Object>> cancelCanvasSession(Authentication auth,
+                                                                 @PathVariable String id,
+                                                                 @PathVariable String sessionId) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        return ApiResponse.ok(canvasSessionService
+                .cancel(auth.getName(), id, sessionId).toMap());
+    }
+
+    /** Return the current pending canvas session for refresh recovery. */
+    @GetMapping("/conversations/{id}/canvas-sessions/pending")
+    public ApiResponse<Map<String, Object>> pendingCanvasSession(Authentication auth,
+                                                                  @PathVariable String id) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        var pending = canvasSessionService.pending(auth.getName(), id);
+        return ApiResponse.ok(pending == null ? Map.of() : pending.toMap());
     }
 
     /** Interrupt endpoint aligned with the turn protocol. */

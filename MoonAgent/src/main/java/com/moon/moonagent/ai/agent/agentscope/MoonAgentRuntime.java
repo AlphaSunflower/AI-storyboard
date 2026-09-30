@@ -113,6 +113,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentScopeProperties properties;
     private final AgentScopeToolkitFactory toolkitFactory;
     private final AgentScopeCanvasTools canvasTools;
+    private final AgentCanvasSessionService canvasSessions;
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
@@ -576,8 +577,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 ? Map.of() : prepareCanvas.getInput();
                         AgentScopeCanvasTools.SessionPreparation preparation =
                                 canvasTools.prepare(conversation, input);
-                        checkpoints.pauseForCanvasBinding(
-                                request, external.getReplyId(), prepareCanvas, preparation);
+                        AgentCanvasSessionService.CanvasSessionView session =
+                                canvasSessions.create(
+                                        conversation,
+                                        request.getTurnId(),
+                                        external.getReplyId(),
+                                        prepareCanvas.getId(),
+                                        preparation,
+                                        canvasMediaRefs(request));
+                        Map<String, Object> metadata = new LinkedHashMap<>(request.getTurnMetadata());
+                        metadata.put("canvasSession", session.toMap());
+                        request.setTurnMetadata(metadata);
                         paused = true;
                         break;
                     }
@@ -689,6 +699,54 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             request.setTurnMetadata(metadata);
         }
         return turnResult(request, trace, content, paused);
+    }
+
+    public AgentTurnResult resumeCanvasTurn(AgentConversation conversation,
+                                            AgentCanvasSessionService.CanvasSessionView session,
+                                            OrchestrationRequest request,
+                                            AgentTraceAccumulator trace,
+                                            Consumer<AgentEvent> observer) {
+        ToolResultBlock result = ToolResultBlock.of(
+                session.runtimeToolCallId(),
+                AgentScopeCanvasTools.PREPARE_CANVAS_SESSION,
+                TextBlock.builder().text(String.valueOf(session.toMap())).build());
+        Msg resume = Msg.builder()
+                .name(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION)
+                .role(MsgRole.TOOL)
+                .content(result)
+                .build();
+        return stream(conversation, request, trace, List.of(resume), null, observer);
+    }
+
+    private static List<Map<String, Object>> canvasMediaRefs(OrchestrationRequest request) {
+        if (request == null) return List.of();
+        if (request.getCanvasContext() != null
+                && !request.getCanvasContext().normalizedMediaRefs().isEmpty()) {
+            return AgentCanvasSessionService.mediaRefMaps(
+                    request.getCanvasContext().normalizedMediaRefs());
+        }
+        List<Map<String, Object>> refs = new ArrayList<>();
+        if (request.getPicUrls() != null) {
+            for (String url : request.getPicUrls()) {
+                if (url == null || url.isBlank()) continue;
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("kind", "image");
+                ref.put("url", url);
+                ref.put("source", "upload");
+                refs.add(ref);
+            }
+        }
+        if (request.getAssetIds() != null) {
+            for (String assetId : request.getAssetIds()) {
+                if (assetId == null || assetId.isBlank()) continue;
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("kind", "file");
+                ref.put("assetId", assetId);
+                ref.put("source", "project");
+                refs.add(ref);
+            }
+        }
+        return refs;
     }
 
     /**

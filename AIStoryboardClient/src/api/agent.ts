@@ -1,7 +1,7 @@
 import client from './client';
 import { BACKEND_URL } from '../config';
 import type { GatewayModelOption } from './ai';
-import type { CanvasEditContext } from '../lib/canvasEditMode';
+import type { AgentMediaRef, CanvasEditContext } from '../lib/canvasEditMode';
 
 export type AgentApprovalMode = 'PLAN_APPROVAL' | 'REQUEST_APPROVAL' | 'FULL_ACCESS';
 
@@ -345,6 +345,21 @@ export interface AgentMessage {
   metadata?: AgentMessageMetadata;
 }
 
+export interface CanvasSessionInfo {
+  sessionId: string;
+  conversationId: string;
+  turnId: string;
+  runtimeToolCallId?: string;
+  projectId: string;
+  canvasId?: string;
+  canvasTitle?: string;
+  intent: string;
+  status: 'pending_selection' | 'pending_open' | 'opening' | 'ready' | 'resumed' | 'cancelled' | 'expired' | 'failed';
+  choices: Array<{ canvasId: string; title: string }>;
+  mediaRefs?: AgentMediaRef[];
+  expiresAt?: string;
+}
+
 export interface AgentAsset {
   id: string;
   conversationId: string | null;
@@ -453,6 +468,7 @@ export type AgentTurnEventType =
   | 'turn_paused'
   | 'turn_completed'
   | 'turn_failed'
+  | 'canvas_session_required'
   | 'plan_updated'
   | 'constraint_flagged'
   | 'media_critique'
@@ -519,6 +535,7 @@ const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
   'turn_paused',
   'turn_completed',
   'turn_failed',
+  'canvas_session_required',
   'plan_updated',
   'constraint_flagged',
   'media_critique',
@@ -838,6 +855,14 @@ export const agentApi = {
   getPendingCheckpoint: (conversationId: string) =>
     client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
 
+  getPendingCanvasSession: (conversationId: string) =>
+    client.get<{ data: CanvasSessionInfo | Record<string, never> }>(
+      `/agent/conversations/${conversationId}/canvas-sessions/pending`),
+
+  cancelCanvasSession: (conversationId: string, sessionId: string) =>
+    client.post<{ data: CanvasSessionInfo }>(
+      `/agent/conversations/${conversationId}/canvas-sessions/${sessionId}/cancel`),
+
   // 跳过/作废当前会话待处理 HITL checkpoint（「换个话题」按钮用）
   skipPendingCheckpoint: (conversationId: string) =>
     client.post<{ data: null }>(`/agent/conversations/${conversationId}/checkpoint/skip`),
@@ -993,6 +1018,28 @@ export async function submitForm(
         assetIds: assetIds ?? [],
         canvasContext: opts?.canvasContext,
       }),
+      signal,
+    },
+  );
+  await consumeSse(res, onEvent, signal);
+}
+
+/** Mark a canvas iframe ready and continue the paused AgentScope turn. */
+export async function streamCanvasSessionReady(
+  conversationId: string,
+  sessionId: string,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
+  selectedCanvasId?: string,
+  createNew = false,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('accessToken') ?? '';
+  const res = await fetch(
+    `${BACKEND_URL}/api/agent/conversations/${conversationId}/canvas-sessions/${encodeURIComponent(sessionId)}/ready`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ canvasId: selectedCanvasId ?? '', createNew }),
       signal,
     },
   );

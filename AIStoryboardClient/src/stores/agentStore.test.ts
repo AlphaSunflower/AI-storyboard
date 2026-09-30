@@ -15,7 +15,7 @@ import { useProjectStore } from './projectStore';
 
 function sseEnvelope(
   seq: number,
-  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'turn_completed' | 'turn_failed',
+  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'canvas_session_required' | 'turn_completed' | 'turn_failed',
   payload: Record<string, unknown>,
   turnId = 'turn-1',
 ) {
@@ -992,6 +992,30 @@ describe('AgentScope turn envelope reduction', () => {
       formToken: 'canvas-form-1',
       picUrls: ['https://example.test/ref.png'],
       assetIds: ['asset-1'],
+    });
+  });
+
+  it('maps canvas_session_required to the independent canvas session state', () => {
+    const effects = applyAgentTurnEnvelope(
+      sseEnvelope(1, 'canvas_session_required', {
+        sessionId: 'canvas-session-1',
+        conversationId: 'conversation-1',
+        turnId: 'turn-canvas-session',
+        projectId: 'project-1',
+        intent: '生成雪茄房转场',
+        status: 'pending_selection',
+        choices: [
+          { canvasId: 'canvas-1', title: '画布 1' },
+          { canvasId: 'canvas-2', title: '画布 2' },
+        ],
+      }, 'turn-canvas-session'),
+      { conversationId: 'conversation-1', assistantId: 'assistant-1' },
+    );
+
+    expect(effects.canvasSessionRequired).toMatchObject({
+      sessionId: 'canvas-session-1',
+      turnId: 'turn-canvas-session',
+      status: 'pending_selection',
     });
   });
 

@@ -112,6 +112,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final CheckpointResumeService checkpointResumeService;
     private final com.moon.moonagent.ai.agent.ConversationLock conversationLock;
     private final ProjectCreativeContextService creativeContext;
+    private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -1042,6 +1043,103 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @Override
+    public void resumeCanvasSession(String userId, String conversationId, String sessionId,
+                                    String selectedCanvasId, boolean createNew,
+                                    SseEmitter emitter) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        if (!requireAgentScope(emitter)) {
+            emitter.complete();
+            return;
+        }
+        com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.CanvasSessionView session;
+        try {
+            session = canvasSessionService.ready(
+                    userId, conversationId, sessionId, selectedCanvasId, createNew);
+        } catch (Exception firstFailure) {
+            sendRuntimeError(emitter, "40902", friendlyRuntimeError(firstFailure));
+            emitter.complete();
+            return;
+        }
+        String turnId = session.turnId();
+        com.moon.moonagent.entity.AgentTurnEntity priorTurn = turnEventStore.find(turnId);
+        if (priorTurn == null || !conversationId.equals(priorTurn.getConversationId())
+                || !"waiting_user".equals(priorTurn.getStatus())) {
+            sendRuntimeError(emitter, "40902", "画布轮次不存在、已提交或已过期");
+            emitter.complete();
+            return;
+        }
+        if (!conversationLock.tryAcquire(conversationId)) {
+            sendRuntimeError(emitter, "40901", "当前对话正在处理中，请稍候");
+            emitter.complete();
+            return;
+        }
+        orchestratorSupport.clearInterrupt(conversationId);
+        configureEmitter(emitter);
+        CompletableFuture.runAsync(() -> {
+            com.moon.moonagent.entity.AgentTurnEntity turn = null;
+            try {
+                turn = turnEventStore.resume(turnId);
+                if (turn == null) throw new BusinessException(40902, "画布轮次不存在或已过期");
+                Map<String, Object> started = new LinkedHashMap<>();
+                started.put("turnId", turn.getId());
+                started.put("conversationId", conversationId);
+                started.put("resume", true);
+                started.put("canvasSessionId", session.sessionId());
+                started.put("runtime", turn.getRuntimeEngine());
+                sendRuntimeEnvelope(emitter,
+                        turnEventStore.append(turn.getId(), "turn_started", started));
+
+                OrchestrationRequest request = new OrchestrationRequest(
+                        conversation,
+                        priorTurn.getInputText() == null ? "" : priorTurn.getInputText(),
+                        List.of(),
+                        emitter);
+                request.setTurnId(turn.getId());
+                request.setCanvasContext(new CanvasSessionContext(
+                        CanvasSessionContext.EDIT_MODE,
+                        session.projectId(),
+                        session.canvasId(),
+                        List.of()));
+                request.setNativeEventsOnly(true);
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                request.setTrace(trace);
+
+                AgentTurnResult result = agentScopeMediaRuntime.resumeCanvasTurn(
+                        conversation, session, request, trace, eventObserver(turn.getId(), emitter));
+                throwIfInterrupted(conversationId);
+                canvasSessionService.markResumed(session.sessionId());
+                finishAgentScopeTurn(conversation, turn, result, emitter);
+            } catch (AgentInterruptException e) {
+                canvasSessionService.markFailed(session.sessionId(), "用户停止");
+                if (turn != null) {
+                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                    sendRuntimeEnvelope(emitter, turnEventStore.append(
+                            turn.getId(), "turn_failed",
+                            Map.of("code", "40904", "message", "生成已停止")));
+                }
+            } catch (Exception e) {
+                canvasSessionService.markRetryable(session.sessionId(), e.getMessage());
+                if (turn != null) {
+                    turnEventStore.markWaitingUser(turn.getId());
+                    sendRuntimeEnvelope(emitter, turnEventStore.append(
+                            turn.getId(), "turn_failed",
+                            Map.of("code", "50001", "message", friendlyRuntimeError(e))));
+                } else {
+                    sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+                }
+                log.error("Canvas session resume 失败: conversationId={}, sessionId={}",
+                        conversationId, sessionId, e);
+            } finally {
+                conversationLock.release(conversationId);
+                try {
+                    emitter.complete();
+                } catch (Exception ignore) {
+                }
+            }
+        }, agentExecutor);
+    }
+
+    @Override
     public Map<String, Object> getRuntimeStatus(String userId, String conversationId) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         Map<String, Object> status = new LinkedHashMap<>();
@@ -1118,6 +1216,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             turnEventStore.finish(turn.getId(), "failed", "runtime returned no result", OffsetDateTime.now());
             sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
                     Map.of("code", "50001", "message", "AgentScope 运行时没有返回结果")));
+            return;
+        }
+        Object canvasSession = result.metadata() == null
+                ? null : result.metadata().get("canvasSession");
+        if (canvasSession != null) {
+            turnEventStore.markWaitingUser(turn.getId());
+            sendRuntimeEnvelope(emitter,
+                    turnEventStore.append(turn.getId(), "canvas_session_required", canvasSession));
             return;
         }
         if (result.hitlPaused()) {

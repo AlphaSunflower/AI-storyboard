@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import {
-  agentApi, streamChat, submitForm, streamTaskEvents,
+  agentApi, streamChat, submitForm, streamCanvasSessionReady, streamTaskEvents,
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type AgentTurnEventEnvelope, type AgentScopeEvent,
   type AgentTurnMetrics, type VideoTaskStatus, type AssetOption,
@@ -11,6 +11,7 @@ import {
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
   type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
+  type CanvasSessionInfo,
   DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
@@ -445,11 +446,17 @@ interface AgentState {
   canvasBinding: CanvasBinding | null;
   canvasBindingStatus: string;
   canvasExitPending: boolean;
+  canvasSession: CanvasSessionInfo | null;
+  canvasSessionStatus: string;
+  canvasSessionSelection: { canvasId?: string; createNew: boolean };
   setCanvasEditContext: (context: CanvasEditContext | null) => void;
   startCanvasBinding: (binding: CanvasBinding) => void;
   setCanvasBindingStatus: (status: string) => void;
   cancelCanvasBinding: () => void;
   resumeCanvasBinding: (context: CanvasEditContext) => Promise<void>;
+  beginCanvasSessionOpen: (canvasId?: string, createNew?: boolean) => void;
+  readyCanvasSession: () => Promise<void>;
+  cancelCanvasSession: () => Promise<void>;
   addCanvasMediaRefs: (refs: AgentMediaRef[]) => void;
   removeCanvasMediaRef: (url?: string) => void;
   moveCanvasMediaRef: (url: string, direction: -1 | 1) => void;
@@ -954,6 +961,24 @@ function refreshStoryboardQueues() {
   void useAgentStore.getState().refetchStoryboardImageQueue(projectId);
 }
 
+async function restorePendingCanvasSession(conversationId: string) {
+  try {
+    const response = await agentApi.getPendingCanvasSession(conversationId);
+    const value = response.data.data;
+    if (value && typeof value === 'object' && 'sessionId' in value) {
+      useAgentStore.setState({
+        canvasSession: value as CanvasSessionInfo,
+        canvasSessionStatus: '',
+        canvasSessionSelection: { createNew: false },
+      });
+    }
+  } catch {
+    // Canvas Session is optional; keep the rest of conversation restoration intact.
+  }
+}
+
+const canvasSessionResumeLocks = new Set<string>();
+
 async function reconnectTurnThenRecover(conversationId: string) {
   const state = useAgentStore.getState();
   const turnId = state.generating[conversationId]?.turnId;
@@ -1081,6 +1106,7 @@ export type AgentTurnEnvelopeEffects = {
   completed: boolean;
   failed: boolean;
   canvasModeRequired: Record<string, unknown> | null;
+  canvasSessionRequired: CanvasSessionInfo | null;
   taskAccepted: AgentScopeTaskAccepted | null;
   confirmResult: ConfirmResultInfo | null;
 };
@@ -1097,6 +1123,7 @@ function emptyTurnEffects(): AgentTurnEnvelopeEffects {
     completed: false,
     failed: false,
     canvasModeRequired: null,
+    canvasSessionRequired: null,
     taskAccepted: null,
     confirmResult: null,
   };
@@ -1299,6 +1326,10 @@ function applyOneEnvelope(
   effects: AgentTurnEnvelopeEffects,
 ) {
   const payload = envelope.payload;
+  if (envelope.type === 'canvas_session_required') {
+    effects.canvasSessionRequired = payload as unknown as CanvasSessionInfo;
+    return;
+  }
   if (envelope.type === 'turn_started') {
     effects.started = true;
     useAgentStore.setState((state) => {
@@ -1663,6 +1694,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   canvasEditContext: null,
   canvasBinding: null,
   canvasBindingStatus: '',
+  canvasSession: null,
+  canvasSessionStatus: '',
+  canvasSessionSelection: { createNew: false },
   canvasExitPending: false,
   setCanvasEditContext: (context) => {
     const normalized = normalizeCanvasEditContext(context);
@@ -1701,6 +1735,80 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       turnId: binding.turnId,
       canvasContext: context,
     });
+  },
+  beginCanvasSessionOpen: (canvasId, createNew = false) => set((state) => ({
+    canvasSessionSelection: { canvasId, createNew },
+    canvasSessionStatus: '正在打开画布…',
+    canvasSession: state.canvasSession
+      ? { ...state.canvasSession, status: 'opening', canvasId: canvasId ?? state.canvasSession.canvasId }
+      : null,
+  })),
+  readyCanvasSession: async () => {
+    const session = get().canvasSession;
+    const conversationId = session?.conversationId ?? get().activeConversationId;
+    if (!session || !conversationId || canvasSessionResumeLocks.has(session.sessionId)) return;
+    canvasSessionResumeLocks.add(session.sessionId);
+    const selection = get().canvasSessionSelection;
+    const assistantId = `canvas-session-assistant-${Date.now()}`;
+    let nextCanvasSession: CanvasSessionInfo | null = null;
+    set((state) => ({
+      streaming: true,
+      streamError: null,
+      canvasSessionStatus: '画布已就绪，正在继续设计…',
+      pendingAssistantId: assistantId,
+      messages: [...state.messages, {
+        id: assistantId,
+        conversationId,
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    }));
+    try {
+      await streamCanvasSessionReady(
+        conversationId,
+        session.sessionId,
+        (event) => {
+          const effects = applyAgentTurnEnvelope(event, { conversationId, assistantId });
+          if (effects.canvasSessionRequired) {
+            nextCanvasSession = effects.canvasSessionRequired;
+            set({ canvasSession: nextCanvasSession, canvasSessionStatus: '' });
+          }
+          if (effects.completed || effects.failed || effects.paused) {
+            finishAssistantReply(conversationId, assistantId);
+          }
+        },
+        selection.canvasId,
+        selection.createNew,
+      );
+      set({
+        canvasSession: nextCanvasSession,
+        canvasSessionStatus: '',
+        canvasSessionSelection: { createNew: false },
+      });
+      await refreshConversationMessages(conversationId);
+      if (!nextCanvasSession) {
+        await restorePendingCanvasSession(conversationId);
+      }
+    } catch (error) {
+      set({
+        streamError: error instanceof Error ? error.message : '画布恢复失败',
+        canvasSessionStatus: '',
+      });
+    } finally {
+      canvasSessionResumeLocks.delete(session.sessionId);
+      set({ streaming: false, pendingAssistantId: null });
+    }
+  },
+  cancelCanvasSession: async () => {
+    const session = get().canvasSession;
+    if (!session) return;
+    try {
+      await agentApi.cancelCanvasSession(session.conversationId, session.sessionId);
+    } finally {
+      canvasSessionResumeLocks.delete(session.sessionId);
+      set({ canvasSession: null, canvasSessionStatus: '', canvasSessionSelection: { createNew: false } });
+    }
   },
   addCanvasMediaRefs: (refs) => set((state) => {
     if (!state.canvasEditContext) return state;
@@ -1952,6 +2060,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       ...pendingMediaFromAttachments(restoredAttachments),
     });
     void restorePersistedTurn(id);
+    void restorePendingCanvasSession(id);
     const conv = get().conversations.find((c) => c.id === id);
     if (conv) {
       initialSceneCount = useProjectStore.getState().scenes.length;
@@ -2544,6 +2653,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         if (effects.confirmResult && get().activeConversationId === snapshotId) {
           set({ confirmResult: effects.confirmResult });
+        }
+        if (effects.canvasSessionRequired) {
+          receivedCanvasModeRequired = true;
+          set({
+            canvasSession: effects.canvasSessionRequired,
+            canvasSessionStatus: '',
+            canvasSessionSelection: { createNew: false },
+          });
+          set((state) => ({
+            generating: Object.fromEntries(
+              Object.entries(state.generating).filter(([key]) => key !== snapshotId),
+            ),
+            messages: state.messages.filter((message) => message.id !== assistantId),
+            workflowHint: '',
+          }));
         }
         if (effects.canvasModeRequired) {
           receivedCanvasModeRequired = true;
@@ -3208,6 +3332,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   /** 流结束后恢复已落库的待处理 HITL 卡片：SSE 被网关/代理断开或超时，卡片只落库未送达时，可在不刷新页面的情况下补显。 */
   recoverPendingCheckpoint: async (conversationId: string) => {
     if (!conversationId) return;
+    await restorePendingCanvasSession(conversationId);
     try {
       const cpRes = await agentApi.getPendingCheckpoint(conversationId);
       const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
