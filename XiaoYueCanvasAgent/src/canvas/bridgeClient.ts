@@ -10,6 +10,7 @@ import {
 } from './bridgeProtocol';
 
 const endpoint = import.meta.env.VITE_BRIDGE_URL?.trim().replace(/\/$/, '') || `http://127.0.0.1:${BRIDGE_DEFAULT_PORT}`;
+const bridgeToken = import.meta.env.VITE_BRIDGE_TOKEN?.trim() ?? '';
 const BRIDGE_RETRY_INTERVAL_MS = 2000;
 const BRIDGE_HTTP_TIMEOUT_MS = 5_000;
 
@@ -36,7 +37,9 @@ export function startCanvasBridge(
   const fetchWithTimeout = (input: string, init: RequestInit = {}, timeoutMs = BRIDGE_HTTP_TIMEOUT_MS) => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(input, { ...init, signal: controller.signal }).finally(() => window.clearTimeout(timeout));
+    const headers = new Headers(init.headers);
+    if (bridgeToken) headers.set('X-Bridge-Token', bridgeToken);
+    return fetch(input, { ...init, headers, signal: controller.signal }).finally(() => window.clearTimeout(timeout));
   };
 
   const post = async (path: string, body: unknown) => {

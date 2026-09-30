@@ -28,13 +28,38 @@ const readJson = (req: IncomingMessage): Promise<Record<string, unknown>> => new
   req.on('error', reject);
 });
 
-const sendJson = (res: ServerResponse, status: number, body: unknown) => {
+const allowedOrigins = (process.env.MORROW_BRIDGE_ORIGINS ?? 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const bridgeToken = process.env.MORROW_BRIDGE_TOKEN ?? '';
+
+const requestOrigin = (req: IncomingMessage) => {
+  const origin = req.headers.origin;
+  return typeof origin === 'string' ? origin : '';
+};
+
+const originAllowed = (req: IncomingMessage) => {
+  const origin = requestOrigin(req);
+  if (!origin) return true;
+  return allowedOrigins.includes(origin);
+};
+
+const sendJson = (req: IncomingMessage, res: ServerResponse, status: number, body: unknown) => {
   if (res.headersSent) return;
-  res.writeHead(status, {
+  const origin = requestOrigin(req);
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version',
+    'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version, X-Bridge-Token',
+    Vary: 'Origin',
+  };
+  if (origin && allowedOrigins.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+  res.writeHead(status, {
+    ...headers,
   });
   res.end(JSON.stringify(body));
 };
@@ -44,10 +69,17 @@ const core = new CanvasBridgeCore();
 
 export const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
+    if (!originAllowed(req)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    const origin = requestOrigin(req);
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version',
+      'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version, X-Bridge-Token',
+      Vary: 'Origin',
     });
     res.end();
     return;
@@ -57,48 +89,57 @@ export const server = createServer(async (req, res) => {
   const path = url.pathname;
 
   try {
+    if (!originAllowed(req)) {
+      sendJson(req, res, 403, { ok: false, error: { code: 'ORIGIN_DENIED', message: '来源不被允许' } });
+      return;
+    }
     if (path === '/mcp') {
       await attachMcpEndpoint(core, req, res);
       return;
     }
 
     if (req.method === 'GET' && path === '/health') {
-      sendJson(res, 200, core.health());
+      sendJson(req, res, 200, core.health());
       return;
     }
 
     if (req.method === 'GET' && path === '/projects') {
-      sendJson(res, 200, core.projects());
+      sendJson(req, res, 200, core.projects());
       return;
     }
 
     if (req.method === 'POST' && path === '/register') {
       const body = (await readJson(req)) as unknown as BridgeRegisterPayload;
       const result = core.register(body);
-      sendJson(res, result.ok ? 200 : 400, result);
+      sendJson(req, res, result.ok ? 200 : 400, result);
       return;
     }
 
     if (req.method === 'POST' && path === '/unregister') {
       const body = await readJson(req);
       if (typeof body.tabId === 'string') core.unregister(body.tabId);
-      sendJson(res, 200, { ok: true });
+      sendJson(req, res, 200, { ok: true });
       return;
     }
 
     if (req.method === 'GET' && path === '/poll') {
-      sendJson(res, 200, core.poll(url.searchParams.get('tabId') ?? ''));
+      sendJson(req, res, 200, core.poll(url.searchParams.get('tabId') ?? ''));
       return;
     }
 
     if (req.method === 'POST' && path === '/result') {
       const body = (await readJson(req)) as unknown as BridgeResultPayload;
       core.result(body);
-      sendJson(res, 200, { ok: true });
+      sendJson(req, res, 200, { ok: true });
       return;
     }
 
     if (req.method === 'POST' && path === '/command') {
+      const token = req.headers['x-bridge-token'];
+      if (bridgeToken && token !== bridgeToken) {
+        sendJson(req, res, 403, { ok: false, error: { code: 'BRIDGE_TOKEN_INVALID', message: '桥接令牌无效' } });
+        return;
+      }
       const body = await readJson(req);
       const response = await core.command({
         source: body.source === 'mcp' || body.source === 'agent' || body.source === 'cli' ? body.source : 'cli',
@@ -111,13 +152,13 @@ export const server = createServer(async (req, res) => {
         dryRun: body.dryRun === true,
         expectedRevision: typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined,
       });
-      sendJson(res, 200, response);
+      sendJson(req, res, 200, response);
       return;
     }
 
-    sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `未知端点 ${req.method} ${path}` } });
+    sendJson(req, res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `未知端点 ${req.method} ${path}` } });
   } catch (error) {
-    sendJson(res, 500, { ok: false, error: { code: 'INTERNAL', message: error instanceof Error ? error.message : '内部错误' } });
+    sendJson(req, res, 500, { ok: false, error: { code: 'INTERNAL', message: error instanceof Error ? error.message : '内部错误' } });
   }
 });
 

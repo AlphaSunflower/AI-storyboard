@@ -404,6 +404,8 @@ function ImgWithFallback({
         style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
         onClick={onClick}
         onError={() => setFailed(true)}
+        referrerPolicy="no-referrer"
+        loading="lazy"
         draggable={Boolean(dragPayload)}
         onDragStart={(event) => {
           if (!dragPayload) return;
