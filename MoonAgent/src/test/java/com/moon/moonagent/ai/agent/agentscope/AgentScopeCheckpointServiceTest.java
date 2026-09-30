@@ -349,4 +349,59 @@ class AgentScopeCheckpointServiceTest {
                 .extracting(action -> action.get("title"))
                 .containsExactly("允许执行", "拒绝");
     }
+
+    @Test
+    void canvasBindingPauseCarriesCanvasAndUploadedMediaIntoCheckpoint() {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+                .thenReturn("canvas-token");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("canvas-token");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(support, mapper);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setProjectId("project-1");
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "生成雪茄房转场", List.of("https://example.test/one.png"), null);
+        request.setAssetIds(List.of("asset-2", "asset-3"));
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-canvas")
+                .name(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION)
+                .input(Map.of("intent", "生成雪茄房转场"))
+                .build();
+        AgentScopeCanvasTools.SessionPreparation preparation =
+                new AgentScopeCanvasTools.SessionPreparation(
+                        "project-1", "canvas-9", "画布 9", "生成雪茄房转场", 1, false);
+
+        String token = service.pauseForCanvasBinding(
+                request, "reply-canvas", call, preparation);
+
+        assertThat(token).isEqualTo("canvas-token");
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
+                ArgumentCaptor.forClass(Consumer.class);
+        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
+        Map<String, Object> payload = stage.getValue().planPayload().getFirst();
+        assertThat(payload)
+                .containsEntry("kind", "canvas-bind")
+                .containsEntry("projectId", "project-1")
+                .containsEntry("canvasId", "canvas-9")
+                .containsEntry("canvasTitle", "画布 9")
+                .containsEntry("intent", "生成雪茄房转场")
+                .containsEntry("picUrls", List.of("https://example.test/one.png"))
+                .containsEntry("assetIds", List.of("asset-2", "asset-3"));
+        assertThat(stage.getValue().actions())
+                .extracting(action -> action.get("id"))
+                .containsExactly("open", "cancel");
+        AgentCheckpoint created = new AgentCheckpoint();
+        customizer.getValue().accept(created);
+        assertThat(created.getRuntimeToolCallId()).isEqualTo("call-canvas");
+        assertThat(created.getRuntimeToolName())
+                .isEqualTo(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION);
+    }
 }

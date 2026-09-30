@@ -17,6 +17,8 @@ import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
+import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
+import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
@@ -40,6 +42,7 @@ import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.ImageRefinePromptService;
 import com.moon.moonagent.ai.VideoPlanService;
 import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.AssistantMessage;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.UserMessage;
@@ -108,6 +111,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final com.moon.moonagent.mapper.AgentCheckpointMapper checkpointMapper;
     private final CheckpointResumeService checkpointResumeService;
     private final com.moon.moonagent.ai.agent.ConversationLock conversationLock;
+    private final ProjectCreativeContextService creativeContext;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -885,12 +889,32 @@ public class AgentChatServiceImpl implements AgentChatService {
 
                 OrchestrationRequest request = new OrchestrationRequest(
                         conversation, effectiveContent, effectivePicUrls, emitter);
+                request.setTurnId(turn.getId());
                 request.setAssetIds(effectiveAssetIds);
                 request.setRoutingHint(effectiveRoutingHint);
                 request.setCanvasContext(canvasContext);
                 request.setNativeEventsOnly(true);
                 request.setReferenceVideos(effectiveReferenceVideos);
                 request.setReferenceAudios(effectiveReferenceAudios);
+                ConstraintLedger ledger = conversation.getProjectId() == null
+                        || conversation.getProjectId().isBlank()
+                        ? null
+                        : creativeContext.prepareTurn(
+                                userId, conversation.getProjectId(), effectiveContent);
+                if (ledger == null) {
+                    ledger = new ConstraintLedger(
+                            com.moon.moonagent.ai.agent.creative.CreativeMode.BALANCED,
+                            List.of(), List.of(), List.of());
+                }
+                final ConstraintLedger turnLedger = ledger;
+                if (ledger.strict() || !ledger.unresolved().isEmpty()) {
+                    sendRuntimeEnvelope(emitter, turnEventStore.append(
+                            turn.getId(), "constraint_flagged", Map.of(
+                                    "mode", turnLedger.mode().name(),
+                                    "hardConstraints", turnLedger.hard(),
+                                    "softConstraints", turnLedger.soft(),
+                                    "unresolved", turnLedger.unresolved())));
+                }
                 AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
                 request.setTrace(trace);
 
@@ -976,6 +1000,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                         ? "" : priorTurn.getInputText();
                 OrchestrationRequest request = new OrchestrationRequest(
                         conversation, turnInput, List.of(), emitter);
+                request.setTurnId(turn.getId());
                 request.setAction(action == null ? "" : action);
                 request.setCustomText(customText == null ? "" : customText);
                 request.setParams(params == null ? Map.of() : params);
@@ -1068,6 +1093,21 @@ public class AgentChatServiceImpl implements AgentChatService {
             AgentTurnEventEnvelope envelope = turnEventStore.append(
                     turnId, "agent_event", payload);
             sendRuntimeEnvelope(emitter, envelope);
+            if (event instanceof ToolResultEndEvent result) {
+                String special = switch (result.getToolCallName() == null
+                        ? "" : result.getToolCallName()) {
+                    case "plan_enter", "plan_write", "plan_exit", "todo_write" -> "plan_updated";
+                    case "review_generated_media" -> "media_critique";
+                    case "save_timeline_manifest", "merge_storyboard_videos" -> "assembly_progress";
+                    case "generate_storyboard_image", "generate_storyboard_images",
+                            "generate_storyboard_video", "generate_storyboard_videos" -> "shot_progress";
+                    default -> "";
+                };
+                if (!special.isBlank()) {
+                    sendRuntimeEnvelope(emitter, turnEventStore.append(
+                            turnId, special, payload));
+                }
+            }
         };
     }
 
@@ -1194,10 +1234,17 @@ public class AgentChatServiceImpl implements AgentChatService {
             result.put("taskId", "");
             result.put("expirationTime", cp.getExpirationTime().toEpochSecond());
             result.put("hitlType", cp.getAction() == null ? "" : cp.getAction());
+            com.moon.moonagent.entity.AgentTurnEntity waitingTurn = turnEventStore == null
+                    ? null : turnEventStore.findByCheckpoint(cp.getFormToken());
+            if (waitingTurn != null && waitingTurn.getId() != null) {
+                result.put("turnId", waitingTurn.getId());
+            }
             if (CANVAS_BIND_ACTION.equals(cp.getAction())) {
                 AgentConversation conversation = conversationMapper.selectById(conversationId);
                 result.put("kind", CANVAS_BIND_ACTION);
                 result.put("projectId", conversation == null ? "" : conversation.getProjectId());
+                result.put("canvasId", orchestratorSupport.planField(cp.getPlan(), "canvasId"));
+                result.put("canvasTitle", orchestratorSupport.planField(cp.getPlan(), "canvasTitle"));
                 result.put("requestedIntent", orchestratorSupport.planField(cp.getPlan(), "intent"));
                 List<String> picUrls = orchestratorSupport.planPicUrls(cp.getPlan());
                 if (!picUrls.isEmpty()) result.put("picUrls", picUrls);
@@ -1211,6 +1258,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                     }
                 }
                 if (!assetIds.isEmpty()) result.put("assetIds", assetIds);
+                List<Map<String, Object>> mediaRefs =
+                        orchestratorSupport.planListField(cp.getPlan(), "mediaRefs");
+                if (!mediaRefs.isEmpty()) result.put("mediaRefs", mediaRefs);
             }
             if ("generate_video".equals(cp.getAction())) {
                 result.put("kind", "video-plan");

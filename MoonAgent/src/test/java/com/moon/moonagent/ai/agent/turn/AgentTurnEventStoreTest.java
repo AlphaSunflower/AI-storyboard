@@ -56,6 +56,21 @@ class AgentTurnEventStoreTest {
         assertThat(events.get(1).payload()).containsEntry("delta", "b");
     }
 
+    @Test
+    void findsWaitingTurnByCheckpointToken() {
+        AgentTurnMapper turnMapper = mock(AgentTurnMapper.class);
+        AgentTurnEventMapper eventMapper = mock(AgentTurnEventMapper.class);
+        AgentTurnEventStore store = new AgentTurnEventStore(turnMapper, eventMapper);
+        AgentTurnEntity waiting = new AgentTurnEntity();
+        waiting.setId("turn-1");
+        waiting.setCheckpointId("form-1");
+        waiting.setStatus("waiting_user");
+        when(turnMapper.selectOne(any())).thenReturn(waiting);
+
+        assertThat(store.findByCheckpoint("form-1")).isSameAs(waiting);
+        assertThat(store.findByCheckpoint("")).isNull();
+    }
+
     private static AgentTurnEventEntity event(int sequence, String payload) {
         AgentTurnEventEntity event = new AgentTurnEventEntity();
         event.setTurnId("turn-1");

@@ -87,6 +87,54 @@ public class AgentScopeCheckpointService {
         return latestPendingToken(request.getConversation().getId());
     }
 
+    public String pauseForCanvasBinding(OrchestrationRequest request,
+                                        String replyId,
+                                        ToolUseBlock toolCall,
+                                        AgentScopeCanvasTools.SessionPreparation preparation) {
+        if (preparation == null || preparation.canvasId() == null
+                || preparation.canvasId().isBlank()) {
+            throw new IllegalArgumentException("画布准备结果缺少 canvasId");
+        }
+        Map<String, Object> canvas = new LinkedHashMap<>();
+        canvas.put("kind", "canvas-bind");
+        canvas.put("projectId", preparation.projectId());
+        canvas.put("canvasId", preparation.canvasId());
+        canvas.put("canvasTitle", preparation.canvasTitle());
+        canvas.put("intent", preparation.intent());
+        canvas.put("created", preparation.created());
+        if (request != null && request.getPicUrls() != null && !request.getPicUrls().isEmpty()) {
+            canvas.put("picUrls", request.getPicUrls());
+        }
+        if (request != null && request.getAssetIds() != null && !request.getAssetIds().isEmpty()) {
+            canvas.put("assetIds", request.getAssetIds());
+        }
+        if (request != null && request.getCanvasContext() != null
+                && !request.getCanvasContext().normalizedMediaRefs().isEmpty()) {
+            canvas.put("mediaRefs", request.getCanvasContext().normalizedMediaRefs().stream()
+                    .map(AgentScopeCheckpointService::mediaRefMap)
+                    .toList());
+        }
+        String prompt = "画布尚未打开或没有响应。请打开「"
+                + (preparation.canvasTitle() == null || preparation.canvasTitle().isBlank()
+                ? "AI 画布" : preparation.canvasTitle())
+                + "」后继续本次设计。";
+        List<Map<String, Object>> actions = List.of(
+                Map.of("id", "open", "title", "打开画布继续"),
+                Map.of("id", "cancel", "title", "取消"));
+        support.runHITLStage(request, null,
+                new AgentRuntimeSupport.StagePlan(
+                        prompt, "canvas-bind", List.of(canvas), "human_input", actions),
+                checkpoint -> {
+                    checkpoint.setOwnerEngine("AGENTSCOPE");
+                    checkpoint.setStateSchemaVersion(3);
+                    checkpoint.setRuntimeSessionId(request.getConversation().getId());
+                    checkpoint.setRuntimeReplyId(replyId);
+                    checkpoint.setRuntimeToolCallId(toolCall.getId());
+                    checkpoint.setRuntimeToolName(toolCall.getName());
+                });
+        return latestPendingToken(request.getConversation().getId());
+    }
+
     public String pauseForConfirmation(OrchestrationRequest request, String replyId,
                                        List<ToolUseBlock> toolCalls) {
         List<Map<String, Object>> calls = new ArrayList<>();
@@ -304,6 +352,18 @@ public class AgentScopeCheckpointService {
                         .last("LIMIT 1"));
         return checkpoint == null || checkpoint.getFormToken() == null
                 ? "" : checkpoint.getFormToken();
+    }
+
+    private static Map<String, Object> mediaRefMap(
+            com.moon.moonagent.ai.agent.CanvasMediaRef ref) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("kind", ref.kind());
+        if (ref.assetId() != null && !ref.assetId().isBlank()) value.put("assetId", ref.assetId());
+        if (ref.url() != null && !ref.url().isBlank()) value.put("url", ref.url());
+        if (ref.name() != null && !ref.name().isBlank()) value.put("name", ref.name());
+        if (ref.mimeType() != null && !ref.mimeType().isBlank()) value.put("mimeType", ref.mimeType());
+        if (ref.source() != null && !ref.source().isBlank()) value.put("source", ref.source());
+        return value;
     }
 
     public ResumeValue resolve(AgentCheckpoint checkpoint, String action, String customText) {

@@ -12,7 +12,7 @@ import java.util.Set;
  * deterministic prefaces and media artifacts are recorded here so message_end
  * persists the same content the SSE stream displayed.
  */
-final class AgentScopeTurnState {
+public final class AgentScopeTurnState {
 
     enum ReferenceInputMode {
         NONE,
@@ -25,6 +25,8 @@ final class AgentScopeTurnState {
     private final List<Map<String, Object>> taskCards = new ArrayList<>();
     private final Set<String> mediaUrls = new LinkedHashSet<>();
     private final Set<String> startedMediaTypes = new LinkedHashSet<>();
+    private final Map<String, Integer> mediaAttempts = new HashMap<>();
+    private final Set<String> repairAuthorized = new LinkedHashSet<>();
     private boolean followUpVideoPlanned;
     private boolean storyboardRequested;
     private Integer pendingStoryboardCommitCount;
@@ -43,7 +45,7 @@ final class AgentScopeTurnState {
         segments.add("![" + (alt == null || alt.isBlank() ? "生成图片" : alt) + "](" + url + ")");
     }
 
-    synchronized void addText(String text) {
+    public synchronized void addText(String text) {
         if (text == null || text.isBlank()) return;
         segments.add(text.trim());
     }
@@ -69,6 +71,36 @@ final class AgentScopeTurnState {
 
     synchronized boolean hasStartedMedia(String mediaType) {
         return mediaType != null && startedMediaTypes.contains(mediaType);
+    }
+
+    synchronized boolean beginMedia(String mediaType, int maxAttempts) {
+        if (mediaType == null || mediaType.isBlank()) return true;
+        int attempts = mediaAttempts.getOrDefault(mediaType, 0);
+        if (attempts >= Math.max(1, maxAttempts)) return false;
+        if (attempts > 0 && !repairAuthorized.remove(mediaType)) return false;
+        mediaAttempts.put(mediaType, attempts + 1);
+        startedMediaTypes.add(mediaType);
+        return true;
+    }
+
+    synchronized void authorizeMediaRepair(String mediaType) {
+        if (mediaType != null && !mediaType.isBlank()) repairAuthorized.add(mediaType);
+    }
+
+    synchronized void rollbackMediaAttempt(String mediaType) {
+        if (mediaType == null || mediaType.isBlank()) return;
+        int attempts = mediaAttempts.getOrDefault(mediaType, 0);
+        if (attempts <= 1) mediaAttempts.remove(mediaType);
+        else mediaAttempts.put(mediaType, attempts - 1);
+        if (!mediaAttempts.containsKey(mediaType)) startedMediaTypes.remove(mediaType);
+    }
+
+    synchronized int mediaAttempts(String mediaType) {
+        return mediaType == null ? 0 : mediaAttempts.getOrDefault(mediaType, 0);
+    }
+
+    synchronized boolean mediaRepairAuthorized(String mediaType) {
+        return mediaType != null && repairAuthorized.contains(mediaType);
     }
 
     synchronized boolean isStoryboardRequested() {

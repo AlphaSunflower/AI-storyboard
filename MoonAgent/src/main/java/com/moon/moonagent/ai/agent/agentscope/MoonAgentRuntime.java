@@ -2,6 +2,9 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
+import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
+import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
@@ -47,9 +50,13 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.tracing.OtelTracingMiddleware;
+import io.agentscope.extensions.postgresql.PostgresDistributedStore;
 import io.agentscope.extensions.postgresql.state.PostgresAgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.DistributedStore;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
+import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -105,6 +112,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     private final AgentScopeProperties properties;
     private final AgentScopeToolkitFactory toolkitFactory;
+    private final AgentScopeCanvasTools canvasTools;
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
@@ -118,6 +126,10 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final GlobalPromptRepository globalPromptRepository;
     private final NacosMcpMetadataRepository mcpMetadataRepository;
     private final FileStorageService fileStorageService;
+    private final com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService workflowService;
+    private final ProjectCreativeContextService creativeContext;
+    private final ConstraintExtractionService constraintExtraction;
+    private final CreativeModelRouter modelRouter;
 
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
@@ -138,7 +150,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         try {
             Toolkit toolkit = toolkitFactory.create();
             Model model = modelProvider.withFallback();
-            stateStore = new PostgresAgentStateStore(
+            PostgresDistributedStore distributedStore = properties.isDistributedStoreEnabled()
+                    ? PostgresDistributedStore.create(dataSource) : null;
+            stateStore = distributedStore != null
+                    ? distributedStore.agentStateStore()
+                    : new PostgresAgentStateStore(
                     dataSource, properties.getStateSchema(), properties.getStateTable(), false);
             Path workspace = resolveWorkspace();
             try {
@@ -147,6 +163,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 throw new IllegalStateException(
                         "Unable to create AgentScope workspace: " + workspace, e);
             }
+            List<io.agentscope.core.middleware.MiddlewareBase> middlewares =
+                    new ArrayList<>(List.of(
+                            new TurnContextMiddleware(
+                                    workflowService, creativeContext, constraintExtraction),
+                            new MediaProgressMiddleware(),
+                            new ToolCallContentMiddleware(),
+                            new AgentTraceBridgeMiddleware()));
+            if (properties.isOtelTracingEnabled()) {
+                middlewares.add(new OtelTracingMiddleware());
+            }
             HarnessAgent.Builder builder = HarnessAgent.builder()
                     .name("moon-agent")
                     .sysPrompt(globalPromptRepository.getPrompt(Map.of()))
@@ -154,7 +180,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .toolkit(toolkit)
                     .maxIters(properties.getMaxIters())
                     .maxRetries(properties.getMaxRetries())
-                    .stateStore(stateStore)
+                    .modelResolver(modelProvider::resolveNamed)
                     .skillRepository(skillRepository)
                     .skillFilter(SkillFilter.only(
                             "image", "video", "storyboard", "canvas-design",
@@ -162,11 +188,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .enableMetaTool(true)
                     .enablePendingToolRecovery(true)
                     .permissionContext(permissionContext(AgentApprovalMode.PLAN_APPROVAL))
-                    .middlewares(List.of(
-                            new TurnContextMiddleware(),
-                            new MediaProgressMiddleware(),
-                            new ToolCallContentMiddleware(),
-                            new AgentTraceBridgeMiddleware()))
+                    .middlewares(middlewares)
                     .workspace(workspace)
                     .disableFilesystemTools()
                     .disableShellTool()
@@ -177,8 +199,29 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .disableAtPathExpansion()
                     .disableToolsConfig()
                     .disableDefaultWorkspaceSkills()
-                    .disableDynamicSubagents()
-                    .disableToolResultEviction();
+                    .disableDynamicSubagents();
+            builder.stateStore(stateStore);
+            if (distributedStore != null) {
+                builder.distributedStore(distributedStore);
+            }
+            if (properties.isPlanModeEnabled()) {
+                builder.enablePlanMode(true)
+                        .planFileDirectory(properties.getPlanFileDirectory());
+            } else {
+                builder.enablePlanMode(false);
+            }
+            if (properties.isTaskListEnabled()) {
+                builder.enableTaskList(true);
+            }
+            if (properties.isToolResultEvictionEnabled()) {
+                builder.toolResultEviction(ToolResultEvictionConfig.builder()
+                        .maxResultChars(properties.getToolResultEvictionMaxChars())
+                        .previewChars(properties.getToolResultEvictionPreviewChars())
+                        .evictionPath(".agentscope/tool-results")
+                        .build());
+            } else {
+                builder.disableToolResultEviction();
+            }
             if (messageBus.enabled()) {
                 builder.messageBus(messageBus.messageBus());
             }
@@ -196,7 +239,10 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 builder.disableCompaction();
             }
             if (properties.isSubagentsEnabled()) {
-                builder.subagents(AgentScopeSubagents.readOnlyExecutors());
+                builder.subagents(AgentScopeSubagents.readOnlyExecutors(
+                        modelRouter.resolveOrNull("creative.prompt"),
+                        modelRouter.resolveOrNull("creative.critic"),
+                        modelRouter.resolveOrNull("vision.qa")));
             } else {
                 builder.disableSubagents();
             }
@@ -520,6 +566,21 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     resultText = result.getResult() == null
                             ? "" : result.getResult().getTextContent();
                 } else if (event instanceof RequireExternalExecutionEvent external) {
+                    ToolUseBlock prepareCanvas = external.getToolCalls().stream()
+                            .filter(call -> AgentScopeCanvasTools.PREPARE_CANVAS_SESSION
+                                    .equals(call.getName()))
+                            .findFirst()
+                            .orElse(null);
+                    if (prepareCanvas != null) {
+                        Map<String, Object> input = prepareCanvas.getInput() == null
+                                ? Map.of() : prepareCanvas.getInput();
+                        AgentScopeCanvasTools.SessionPreparation preparation =
+                                canvasTools.prepare(conversation, input);
+                        checkpoints.pauseForCanvasBinding(
+                                request, external.getReplyId(), prepareCanvas, preparation);
+                        paused = true;
+                        break;
+                    }
                     ToolUseBlock human = external.getToolCalls().stream()
                             .filter(call -> AgentScopeInteractionTools.REQUEST_HUMAN_INPUT
                                     .equals(call.getName()))
@@ -730,6 +791,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         for (String tool : List.of(
                 "start_storyboard_production",
                 "choose_storyboard_commit_mode",
+                AgentScopeCanvasTools.PREPARE_CANVAS_SESSION,
                 "request_human_input")) {
             permissions.addAllowRule(tool, new PermissionRule(
                     tool, null, PermissionBehavior.ALLOW, "MoonAgentAutoApprovePolicy"));

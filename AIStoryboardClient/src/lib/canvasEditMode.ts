@@ -19,12 +19,16 @@ export interface CanvasEditContext {
 
 export interface CanvasBinding {
   conversationId?: string;
+  turnId?: string;
   projectId?: string;
+  canvasId?: string;
+  canvasTitle?: string;
   requestedIntent?: string;
   formToken: string;
   expirationTime?: string;
   picUrls?: string[];
   assetIds?: string[];
+  mediaRefs?: AgentMediaRef[];
 }
 
 export type CanvasModePhase = 'natural' | 'binding' | 'locked' | 'exit_pending';

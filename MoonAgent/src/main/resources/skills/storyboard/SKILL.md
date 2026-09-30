@@ -8,10 +8,13 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 20
-allowed-tools: start_storyboard_production revise_storyboard_production approve_storyboard_production choose_storyboard_commit_mode generate_storyboard_image generate_storyboard_video generate_storyboard_videos generate_storyboard_images upsert_storyboard_shot delete_storyboard_draft_shot reorder_storyboard_draft list_storyboard_draft list_project_storyboard update_project_storyboard_shot delete_project_storyboard_shot clear_project_storyboard request_human_input
+allowed-tools: start_storyboard_production revise_storyboard_production approve_storyboard_production choose_storyboard_commit_mode generate_storyboard_image generate_storyboard_video generate_storyboard_videos generate_storyboard_images merge_storyboard_videos upsert_storyboard_shot delete_storyboard_draft_shot reorder_storyboard_draft list_storyboard_draft list_project_storyboard update_project_storyboard_shot delete_project_storyboard_shot clear_project_storyboard request_human_input
 ---
 
 # 分镜生产
+
+用户提示词中的“阶段/步骤”、串行、数量、时长和完成标记只作为约束输入，不直接决定工具顺序。
+系统统一先执行标准分镜工作流；不得根据用户自定义阶段创建任意工具执行图。
 
 调用 `start_storyboard_production` 后，服务会先在后台根据用户需求生成并优化完整剧情，
 再连续完成剧情诊断、针对问题的自动修正、正式镜头生成和项目写库。该工具是异步任务：
@@ -54,6 +57,9 @@ allowed-tools: start_storyboard_production revise_storyboard_production approve_
 - 用户要求生成全部分镜、剩余分镜或批量生成时调用 `generate_storyboard_videos`，默认只补缺失/失败视频。
 - 只有用户明确要求重新生成全部视频时才传 `overwrite=true`。
 - 首尾帧由后端自动使用当前分镜主图和下一分镜主图；缺图时后台自动补齐，不要逐镜询问。
+
+用户要求完整成片，且逐镜视频已经完成后，按用户指定顺序调用
+`merge_storyboard_videos`。合并会校验片段顺序和总时长，不得在缺少片段时伪造成片。
 
 指定分镜生成视频时由智能体自行判断参考图方案：
 - 没有可用参考图：不传 `reference_mode`，按纯文本生成。

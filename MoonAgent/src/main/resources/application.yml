@@ -78,12 +78,19 @@ ai:
       model-mode: ${STORYBOARD_PRODUCTION_V2_MODEL_MODE:live}
       fast-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_FAST_TIMEOUT:120}
       repair-timeout-seconds: ${STORYBOARD_PRODUCTION_V2_REPAIR_TIMEOUT:90}
+  video:
+    merge:
+      ffmpeg-path: ${VIDEO_MERGE_FFMPEG_PATH:ffmpeg}
+      ffprobe-path: ${VIDEO_MERGE_FFPROBE_PATH:ffprobe}
+      timeout-seconds: ${VIDEO_MERGE_TIMEOUT_SECONDS:600}
   storyboard-internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}   # 主后端地址：参考素材(/api/files/**) 本地缺失时经此拉取
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:}
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:
+    workflow:
+      custom-enabled: ${AGENT_CUSTOM_WORKFLOW_ENABLED:false}
     tool-audit:
       enabled: ${AGENT_TOOL_AUDIT_ENABLED:true}
       ui-enabled: ${AGENT_TOOL_AUDIT_UI_ENABLED:true}
@@ -111,6 +118,23 @@ ai:
       workspace-dir: ${AGENTSCOPE_WORKSPACE_DIR:${java.io.tmpdir}/moonagent-agentscope}
       structured-output-enabled: ${AGENTSCOPE_STRUCTURED_OUTPUT_ENABLED:true}
       subagents-enabled: ${AGENTSCOPE_SUBAGENTS_ENABLED:true}
+      plan-mode-enabled: ${AGENTSCOPE_PLAN_MODE_ENABLED:true}
+      task-list-enabled: ${AGENTSCOPE_TASK_LIST_ENABLED:true}
+      plan-file-directory: ${AGENTSCOPE_PLAN_FILE_DIRECTORY:plans}
+      tool-result-eviction-enabled: ${AGENTSCOPE_TOOL_RESULT_EVICTION_ENABLED:true}
+      tool-result-eviction-max-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_MAX_CHARS:80000}
+      tool-result-eviction-preview-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_PREVIEW_CHARS:2000}
+      otel-tracing-enabled: ${AGENTSCOPE_OTEL_TRACING_ENABLED:true}
+      distributed-store-enabled: ${AGENTSCOPE_DISTRIBUTED_STORE_ENABLED:true}
+      critique-enabled: ${AGENTSCOPE_CRITIQUE_ENABLED:true}
+      critique-max-repairs: ${AGENTSCOPE_CRITIQUE_MAX_REPAIRS:1}
+      models:
+        plan: ${AGENTSCOPE_MODEL_PLAN:}
+        prompt: ${AGENTSCOPE_MODEL_PROMPT:}
+        critic: ${AGENTSCOPE_MODEL_CRITIC:}
+        vision: ${AGENTSCOPE_MODEL_VISION:}
+        image: ${AGENTSCOPE_MODEL_IMAGE:}
+        video: ${AGENTSCOPE_MODEL_VIDEO:}
       compaction-enabled: ${AGENTSCOPE_COMPACTION_ENABLED:true}
       compaction-trigger-messages: ${AGENTSCOPE_COMPACTION_TRIGGER_MESSAGES:40}
       compaction-trigger-tokens: ${AGENTSCOPE_COMPACTION_TRIGGER_TOKENS:60000}

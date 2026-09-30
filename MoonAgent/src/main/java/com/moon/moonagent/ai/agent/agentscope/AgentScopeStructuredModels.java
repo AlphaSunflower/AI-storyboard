@@ -69,4 +69,40 @@ public final class AgentScopeStructuredModels {
             unresolved = unresolved == null ? List.of() : List.copyOf(unresolved);
         }
     }
+
+    public record WorkflowDecision(
+            String mode,
+            boolean serial,
+            boolean noSkip,
+            boolean requireMarkers,
+            List<Integer> exactCounts,
+            List<WorkflowStepDraft> steps,
+            double confidence,
+            String rationale
+    ) {
+        public WorkflowDecision {
+            mode = mode == null ? "" : mode.trim().toUpperCase();
+            exactCounts = exactCounts == null ? List.of() : List.copyOf(exactCounts);
+            steps = steps == null ? List.of() : List.copyOf(steps);
+            rationale = rationale == null ? "" : rationale.trim();
+        }
+    }
+
+    public record WorkflowStepDraft(
+            String key,
+            String title,
+            String toolName,
+            List<String> dependsOn,
+            int repeatCount,
+            String marker
+    ) {
+        public WorkflowStepDraft {
+            key = key == null ? "" : key.trim();
+            title = title == null ? "" : title.trim();
+            toolName = toolName == null ? "" : toolName.trim();
+            dependsOn = dependsOn == null ? List.of() : List.copyOf(dependsOn);
+            repeatCount = Math.max(1, repeatCount);
+            marker = marker == null ? "" : marker.trim();
+        }
+    }
 }

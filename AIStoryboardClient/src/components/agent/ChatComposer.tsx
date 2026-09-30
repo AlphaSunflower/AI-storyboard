@@ -14,7 +14,7 @@ import {
   type ConversationAssetGroupBinding,
 } from '../../api/agent';
 import { FileText, Paperclip } from 'lucide-react';
-import { Image as ImageIcon, PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
+import { PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
@@ -48,6 +48,8 @@ export const DS = {
   maxContent: 780,
 };
 
+const REFERENCE_PREVIEW_LIMIT = 5;
+
 /**
  * DeepSeek 风格输入卡（780px 悬浮胶囊）：/chat 页 hero 居中与底部输入共用。
  * 逻辑复用 agentStore（参考图/pendingPicUrl/发送/流式禁用）。
@@ -75,7 +77,7 @@ export function ChatComposer() {
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [canvasMediaOpen, setCanvasMediaOpen] = useState(false);
   const [uploadDrafts, setUploadDrafts] = useState<Array<{
@@ -232,6 +234,18 @@ export function ChatComposer() {
     && !canvasBinding && !canvasExitPending;
   const attachLocked = readOnly;
   const fileAttachments = pendingAttachments.filter((attachment) => attachment.kind === 'file');
+  const referencePreviews = refImageUrls.map((url, index) => ({
+    url,
+    index,
+    name: pendingAttachments.find((attachment) => attachment.url === url)?.name || `图 ${index + 1}`,
+  }));
+  const hasReferenceOverflow = referencePreviews.length > REFERENCE_PREVIEW_LIMIT;
+  const visibleReferencePreviews = hasReferenceOverflow
+    ? referencePreviews.slice(0, REFERENCE_PREVIEW_LIMIT - 1)
+    : referencePreviews;
+  const remainingReferenceCount = hasReferenceOverflow
+    ? referencePreviews.length - visibleReferencePreviews.length
+    : 0;
 
   const handleSend = () => {
     const content = text.trim();
@@ -522,14 +536,41 @@ export function ChatComposer() {
           border: `1px solid ${DS.border}`,
         }}>
           {refImageUrls.length > 0 && (
-            <button onClick={() => setRemoveModalOpen(true)} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
-              background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
-              padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
-            }}>
-              <ImageIcon size={14} strokeWidth={2} style={{ color: DS.brand }} />
-              参考图 {refImageUrls.length} 张
-            </button>
+            <div className="chat-reference-preview" role="group" aria-label="参考图预览">
+              {visibleReferencePreviews.map((item) => (
+                <div className="chat-reference-preview__item" key={item.url}>
+                  <button
+                    type="button"
+                    className="chat-reference-preview__open"
+                    onClick={() => setPreviewMedia({ url: item.url, type: 'image' })}
+                    aria-label={`预览参考图 ${item.index + 1}：${item.name}`}
+                    title={item.name}
+                  >
+                    <img src={assetUrl(item.url)} alt="" draggable={false} />
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-reference-preview__remove"
+                    onClick={() => removeRefImageUrl(item.index)}
+                    aria-label={`移除参考图 ${item.index + 1}`}
+                    title="移除参考图"
+                  >
+                    <X size={10} strokeWidth={2.5} />
+                  </button>
+                </div>
+              ))}
+              {remainingReferenceCount > 0 && (
+                <button
+                  type="button"
+                  className="chat-reference-preview__overflow"
+                  onClick={() => setRemoveModalOpen(true)}
+                  aria-label={`查看其余 ${remainingReferenceCount} 张参考图`}
+                  title={`还有 ${remainingReferenceCount} 张参考图`}
+                >
+                  <span>+{remainingReferenceCount}</span>
+                </button>
+              )}
+            </div>
           )}
           {pickedAssetIds.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
@@ -851,11 +892,11 @@ export function ChatComposer() {
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', borderRadius: 12, background: DS.hover }}>
                   <button
                     type="button"
-                    onClick={() => setPreviewUrl(u)}
+                    onClick={() => setPreviewMedia({ url: u, type: 'image' })}
                     aria-label={`放大预览第 ${i + 1} 张参考图`}
                     style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in', flexShrink: 0 }}
                   >
-                    <img src={u} alt={`参考图 ${i + 1}`} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
+                    <img src={assetUrl(u)} alt={`参考图 ${i + 1}`} style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
                   </button>
                   <span style={{ fontSize: 12, color: DS.textCaption, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {pendingAttachments.find((attachment) => attachment.url === u)?.name || `图 ${i + 1}`}
@@ -1069,7 +1110,11 @@ export function ChatComposer() {
         </div>,
         document.body
       )}
-      <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      <ImagePreviewModal
+        url={previewMedia?.url ?? null}
+        type={previewMedia?.type}
+        onClose={() => setPreviewMedia(null)}
+      />
     </div>
     {/* 底部免责声明（位于输入框卡片下方） */}
     <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.4, marginTop: 8 }}>

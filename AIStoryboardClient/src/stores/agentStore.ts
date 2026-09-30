@@ -1327,6 +1327,15 @@ function applyOneEnvelope(
     const source = { ...payload, ...metadata, ...hitl };
     const formToken = asString(source.formToken);
     const messageId = asString(source.messageId) || context.assistantId;
+    if (asString(source.kind) === 'canvas-bind') {
+      effects.canvasModeRequired = {
+        ...source,
+        conversationId: context.conversationId,
+        turnId: envelope.turnId,
+        formToken,
+      };
+      return;
+    }
     const actions = Array.isArray(source.actions)
       ? source.actions.filter(asRecord).map((action) => ({
           id: asString(action?.id),
@@ -1689,6 +1698,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     await get().submitHumanInput('canvas-bound', '', undefined, binding.assetIds, {
       hiddenCard: true,
       formToken: binding.formToken,
+      turnId: binding.turnId,
       canvasContext: context,
     });
   },
@@ -1957,12 +1967,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (cpKind === 'canvas-bind' && cp?.formToken) {
         get().startCanvasBinding({
           conversationId: id,
+          turnId: cp.turnId,
           projectId: cp.projectId,
+          canvasId: cp.canvasId,
+          canvasTitle: cp.canvasTitle,
           requestedIntent: cp.requestedIntent,
           formToken: cp.formToken,
           expirationTime: String(cp.expirationTime ?? ''),
           picUrls: cp.picUrls,
           assetIds: cp.assetIds,
+          mediaRefs: cp.mediaRefs,
         });
         return;
       }
@@ -2540,12 +2554,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           if (get().activeConversationId === snapshotId && canvasConversationId && projectId && formToken) {
             get().startCanvasBinding({
               conversationId: canvasConversationId,
+              turnId: asString(canvas.turnId),
               projectId,
+              canvasId: asString(canvas.canvasId),
+              canvasTitle: asString(canvas.canvasTitle),
               requestedIntent: asString(canvas.requestedIntent),
               formToken,
               expirationTime: asString(canvas.expirationTime),
               picUrls: asStringArray(canvas.picUrls),
               assetIds: asStringArray(canvas.assetIds),
+              mediaRefs: Array.isArray(canvas.mediaRefs)
+                ? canvas.mediaRefs.filter(asRecord).map((ref) => ref as AgentMediaRef)
+                : undefined,
             });
             set((state) => {
               const generating = { ...state.generating };
@@ -3197,12 +3217,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (cpKind === 'canvas-bind' && cp?.formToken) {
         get().startCanvasBinding({
           conversationId,
+          turnId: cp.turnId,
           projectId: cp.projectId,
+          canvasId: cp.canvasId,
+          canvasTitle: cp.canvasTitle,
           requestedIntent: cp.requestedIntent,
           formToken: cp.formToken,
           expirationTime: String(cp.expirationTime ?? ''),
           picUrls: cp.picUrls,
           assetIds: cp.assetIds,
+          mediaRefs: cp.mediaRefs,
         });
         return;
       }

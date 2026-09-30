@@ -2,7 +2,10 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import io.agentscope.harness.agent.bus.MessageBus;
 import io.agentscope.harness.agent.bus.WorkspaceMessageBus;
+import io.agentscope.harness.agent.filesystem.AbstractFilesystem;
 import io.agentscope.harness.agent.filesystem.local.LocalFilesystem;
+import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem;
+import io.agentscope.extensions.postgresql.PostgresDistributedStore;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import javax.sql.DataSource;
 import java.nio.file.Path;
 
 @Component
@@ -21,13 +25,17 @@ public class AgentScopeMessageBus {
     private static final Logger log = LoggerFactory.getLogger(AgentScopeMessageBus.class);
 
     private final AgentScopeProperties properties;
+    private final DataSource dataSource;
     private volatile MessageBus bus;
 
     @PostConstruct
     void init() {
         if (!properties.isWakeupEnabled() || bus != null) return;
         Path workspace = resolveWorkspace();
-        LocalFilesystem filesystem = new LocalFilesystem(workspace);
+        AbstractFilesystem filesystem = properties.isDistributedStoreEnabled()
+                ? new RemoteFilesystem(
+                PostgresDistributedStore.create(dataSource).baseStore())
+                : new LocalFilesystem(workspace);
         bus = new WorkspaceMessageBus(filesystem, ".agentscope/bus");
         log.info("[AgentScope Wakeup] MessageBus ready at {}", workspace.resolve(".agentscope/bus"));
     }

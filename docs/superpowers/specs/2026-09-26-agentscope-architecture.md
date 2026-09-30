@@ -111,3 +111,21 @@ AgentScope event envelope directly; no translation layer to the retired
 - Ordered, durable turn events for every client-visible runtime transition.
 - Existing user ownership and conversation isolation rules are unchanged.
 - Legacy data is preserved and never rewritten by the migration.
+
+## Generic Creative Agent Layer (2026-09-29)
+
+The runtime now also owns a domain-neutral creative intelligence layer:
+
+- product-owned `project_creative_contexts` memory scoped by project id;
+- deterministic HARD/SOFT constraint extraction and BALANCED/STRICT modes;
+- AgentScope Plan Mode and task list for complex or high-cost turns;
+- the fixed creative team `creative-planner`, `reference-curator`,
+  `prompt-director`, `visual-critic`, and `continuity-editor`;
+- persisted media critiques and a bounded image repair loop;
+- persisted timeline manifests that feed ordered long-video assembly;
+- role-based gateway model selection, OpenTelemetry and PostgreSQL
+  `DistributedStore`.
+
+This layer is intentionally domain neutral. Architecture, CAD/BIM and audio
+features must be introduced later as separate skills and domain packages,
+without adding domain fields to the generic project memory contract.

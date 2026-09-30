@@ -71,6 +71,14 @@ public class AgentTurnEventStore {
                 .last("LIMIT 1"));
     }
 
+    public AgentTurnEntity findByCheckpoint(String checkpointToken) {
+        if (checkpointToken == null || checkpointToken.isBlank()) return null;
+        return turnMapper.selectOne(new LambdaQueryWrapper<AgentTurnEntity>()
+                .eq(AgentTurnEntity::getCheckpointId, checkpointToken)
+                .orderByDesc(AgentTurnEntity::getStartedAt)
+                .last("LIMIT 1"));
+    }
+
     public AgentTurnEntity resume(String turnId) {
         AgentTurnEntity turn = find(turnId);
         if (turn == null) return null;

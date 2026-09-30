@@ -168,6 +168,18 @@ public class FileStorageServiceImpl implements FileStorageService {
         return "/api/files/videos/" + filename;
     }
 
+    @Override
+    public String saveVideoBytes(byte[] bytes, String extension) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "视频内容为空");
+        }
+        String ext = extension == null || !extension.matches("[A-Za-z0-9]{1,8}")
+                ? "mp4" : extension.toLowerCase();
+        String filename = UUID.randomUUID() + "." + ext;
+        minioStorage.put(minioStorage.key("videos", filename), bytes, contentType(filename));
+        return "/api/files/videos/" + filename;
+    }
+
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
         try {
             HttpRequest request = HttpRequest.newBuilder()

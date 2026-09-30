@@ -13,6 +13,7 @@ final class AgentScopeToolLabels {
             case AgentScopeVideoTools.GENERATE_VIDEO -> "生成视频";
             case "refineImage" -> "完善图片";
             case AgentScopeInteractionTools.REQUEST_HUMAN_INPUT -> "请求用户补充信息";
+            case AgentScopeCanvasTools.PREPARE_CANVAS_SESSION -> "准备并打开画布";
             case AgentScopeStoryboardTools.START_STORYBOARD -> "启动剧情与分镜流程";
             case AgentScopeStoryboardTools.REVISE_STORYBOARD -> "修订分镜草稿";
             case AgentScopeStoryboardTools.APPROVE_STORYBOARD -> "确认当前分镜阶段";
@@ -28,6 +29,14 @@ final class AgentScopeToolLabels {
             case AgentScopeStoryboardTools.DELETE_PROJECT_STORYBOARD_SHOT -> "删除项目分镜";
             case AgentScopeStoryboardTools.CLEAR_PROJECT_STORYBOARD -> "清空项目分镜";
             case AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES -> "批量生成分镜图片";
+            case AgentScopeVideoMergeTools.MERGE_STORYBOARD_VIDEOS -> "合并完整分镜视频";
+            case AgentScopeCreativeTools.GET_CONTEXT -> "读取项目创作记忆";
+            case AgentScopeCreativeTools.UPDATE_CONTEXT -> "更新项目创作记忆";
+            case AgentScopeCreativeTools.EXTRACT_CONSTRAINTS -> "提取创作约束";
+            case AgentScopeCreativeTools.REVIEW_MEDIA -> "检查生成结果";
+            case AgentScopeCreativeTools.LIST_CRITIQUES -> "读取生成检查记录";
+            case AgentScopeCreativeTools.SAVE_TIMELINE -> "保存时间线";
+            case AgentScopeCreativeTools.GET_TIMELINE -> "读取时间线";
             case AgentScopeSessionTools.LIST_SESSION_ASSETS -> "查询会话素材";
             case AgentScopeSessionTools.RESOLVE_REFERENCE_ASSETS -> "查找参考素材";
             case AgentScopeSessionTools.GET_TASK_STATUS -> "查询生成任务状态";

@@ -20,7 +20,12 @@ class AgentScopeSubagentsTest {
         var declarations = AgentScopeSubagents.readOnlyExecutors();
 
         assertThat(declarations).extracting("name")
-                .containsExactly("visual-prompt-director", "reference-locator", "media-risk-reviewer");
+                .containsExactly(
+                        "creative-planner",
+                        "prompt-director",
+                        "reference-curator",
+                        "visual-critic",
+                        "continuity-editor");
         assertThat(declarations)
                 .allSatisfy(declaration ->
                         assertThat(declaration.getTools())
@@ -28,7 +33,9 @@ class AgentScopeSubagentsTest {
                                         AgentScopeImageTools.GENERATE_IMAGE,
                                         AgentScopeImageTools.GENERATE_IMAGE_BATCH,
                                         AgentScopeVideoTools.GENERATE_VIDEO));
-        assertThat(declarations).extracting("steps").containsOnly(6);
+        assertThat(declarations).extracting("steps").contains(8, 6, 6, 6, 8);
+        assertThat(declarations).extracting("persistSession")
+                .containsExactly(true, false, false, false, true);
     }
 
     @Test

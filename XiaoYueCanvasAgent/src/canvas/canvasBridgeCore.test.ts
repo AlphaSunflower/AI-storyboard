@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasBridgeCore } from '../../bridge/canvasBridgeCore';
-import { BRIDGE_TAB_STALE_MS } from './bridgeProtocol';
+import {
+  BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS,
+  BRIDGE_TAB_STALE_MS,
+} from './bridgeProtocol';
 
 describe('CanvasBridgeCore', () => {
   it('routes a command to the exact project and canvas tab', async () => {
@@ -104,6 +107,35 @@ describe('CanvasBridgeCore', () => {
         projectId: 'project-1',
         canvasId: 'canvas-1',
       }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns BROWSER_NOT_RESPONDING before the tab becomes fully stale', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-16T08:00:00.000Z'));
+      const core = new CanvasBridgeCore();
+      core.register({ tabId: 'sleeping-tab', projectId: 'project-1', canvasId: 'canvas-1' });
+
+      vi.advanceTimersByTime(BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS + 1);
+
+      expect(core.health().projects).toContainEqual(expect.objectContaining({
+        projectId: 'project-1',
+        canvasId: 'canvas-1',
+        responsive: false,
+      }));
+      await expect(core.command({
+        source: 'mcp',
+        projectId: 'project-1',
+        canvasId: 'canvas-1',
+        method: 'canvas.get_summary',
+        params: {},
+      })).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'BROWSER_NOT_RESPONDING' },
+      });
     } finally {
       vi.useRealTimers();
     }

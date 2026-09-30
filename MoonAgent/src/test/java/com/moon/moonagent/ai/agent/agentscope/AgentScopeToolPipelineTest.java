@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationLedger;
+import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import com.moon.moonagent.entity.AgentToolInvocation;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.tool.ToolCallParam;
@@ -28,7 +29,8 @@ class AgentScopeToolPipelineTest {
         when(ledger.start(any(), any())).thenReturn(record);
         ToolExecutionTemplate template = mock(ToolExecutionTemplate.class);
         MediaToolPreflightService preflight = mock(MediaToolPreflightService.class);
-        AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(ledger, template, preflight);
+        AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
+                ledger, template, preflight, mock(AgentWorkflowService.class));
         AgentScopeTool tool = new AgentScopeTool(
                 "read_test", "test", AgentScopeTool.schema(Map.of(), List.of()),
                 true, true, false,

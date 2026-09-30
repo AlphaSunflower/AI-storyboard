@@ -32,7 +32,7 @@ public final class CanvasContextPromptBuilder {
 	                .append("当前处于画布编辑模式：只能执行画布相关操作，不得切换到分镜、图片、视频或通用回答链路。\n")
 	                .append("调用 Canvas MCP 工具时必须使用上述 projectId 和 canvasId。\n")
 	                .append("每次执行前以 canvas_get_context 的真实返回为准；若目标画布未打开或存在多个活动画布，请让用户在当前界面切换到目标画布后再继续，不得要求关闭其他窗口。\n")
-	                .append("禁止向用户展示或要求输入 projectId、canvasId、nodeId、edgeId；需要选择时调用 moon_request_human_input，以项目名、画布名或节点名作为标题。\n");
+	                .append("禁止向用户展示或要求输入 projectId、canvasId、nodeId、edgeId；需要选择时调用 request_human_input，以项目名、画布名或节点名作为标题。\n");
 	    }
         Map<String, CanvasMediaRef> refsByKey = new LinkedHashMap<>();
         if (context != null) {

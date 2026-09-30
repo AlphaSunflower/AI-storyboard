@@ -1,6 +1,9 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
+import com.moon.moonagent.ai.agent.creative.CreativeCritiqueService;
+import com.moon.moonagent.ai.agent.creative.MediaCritique;
 import com.moon.moonagent.entity.AgentConversation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -21,6 +24,8 @@ public class AgentScopeImageTools {
     private final AgentScopeAssetGroupService assetGroups;
     private final AgentScopeAsyncTaskService asyncTasks;
     private final AgentScopeProperties properties;
+    private final CreativeCritiqueService critiqueService;
+    private final ConstraintExtractionService constraintExtraction;
 
     public AgentScopeTool tool() {
         return new AgentScopeTool(
@@ -140,7 +145,8 @@ public class AgentScopeImageTools {
             throw new IllegalStateException(
                     "本轮已进入分镜制作流程，不能改用通用生图；请先完成正式分镜列表，再按 shot_id 生成镜头图片。");
         }
-        if (context.turnState() != null && context.turnState().hasStartedMedia("image")) {
+        if (context.turnState() != null
+                && !context.turnState().beginMedia("image", 2)) {
             throw new IllegalStateException(
                     "本轮已经成功生成或提交过图片，请直接使用已有结果回复，不要重复调用。");
         }
@@ -151,10 +157,16 @@ public class AgentScopeImageTools {
             return startBatchImage(
                     conversation, prompt, List.of(), sources, size, quality, count, context);
         }
-        Map<String, Object> result = generationService.generateImage(
-                conversation, sceneId, prompt, null, size, quality,
-                1,
-                sources.isEmpty() ? null : "edit", sources, null);
+        Map<String, Object> result;
+        try {
+            result = generationService.generateImage(
+                    conversation, sceneId, prompt, null, size, quality,
+                    1,
+                    sources.isEmpty() ? null : "edit", sources, null);
+        } catch (RuntimeException error) {
+            if (context.turnState() != null) context.turnState().rollbackMediaAttempt("image");
+            throw error;
+        }
         Map<String, Object> out = new LinkedHashMap<>(result);
         out.put("ok", true);
         out.put("referencedAssetIds", sourceAssetIds == null ? List.of() : sourceAssetIds);
@@ -169,6 +181,28 @@ public class AgentScopeImageTools {
                 }
             }
             context.turnState().markMediaStarted("image");
+        }
+        if (properties.isCritiqueEnabled() && context.turnState() != null && !urls.isEmpty()) {
+            String turnId = context.request() == null ? "" : context.request().getTurnId();
+            MediaCritique critique = critiqueService.reviewImages(
+                    conversation,
+                    turnId,
+                    sceneId == null || sceneId.isBlank() ? String.valueOf(urls.getFirst()) : sceneId,
+                    prompt,
+                    urls.stream().map(String::valueOf).toList(),
+                    constraintExtraction.extract(
+                            context.request() == null ? "" : context.request().getContent()),
+                    Math.max(0, context.turnState().mediaAttempts("image") - 1));
+            out.put("critique", critiqueService.asToolResult(critique));
+            if (critique.repairRequired()
+                    && context.turnState().mediaAttempts("image") < properties.getCritiqueMaxRepairs() + 1) {
+                context.turnState().authorizeMediaRepair("image");
+                out.put("needsRepair", true);
+                out.put("repairInstruction",
+                        "Revise the prompt or reference and generate one corrected image, then review it again.");
+            } else if (critique.repairRequired()) {
+                out.put("needsUserConfirmation", true);
+            }
         }
         return out;
     }
@@ -192,7 +226,8 @@ public class AgentScopeImageTools {
             throw new IllegalStateException(
                     "本轮已进入分镜制作流程，不能改用通用批量生图；请先完成正式分镜列表，再按 shot_id 生成镜头图片。");
         }
-        if (context.turnState() != null && context.turnState().hasStartedMedia("image")) {
+        if (context.turnState() != null
+                && !context.turnState().beginMedia("image", 1)) {
             throw new IllegalStateException(
                     "本轮已经成功生成或提交过图片，请直接使用已有结果，不要重复调用。");
         }
@@ -204,10 +239,15 @@ public class AgentScopeImageTools {
         int count = requestedPrompts.isEmpty()
                 ? Math.max(2, AgentScopeSessionTools.positiveInt(n, 2))
                 : requestedPrompts.size();
-        return startBatchImage(
-                conversation, prompt, requestedPrompts, sources, size, quality, count,
-                followUpVideo, videoPrompt, videoDuration, videoAspectRatio, videoResolution,
-                context);
+        try {
+            return startBatchImage(
+                    conversation, prompt, requestedPrompts, sources, size, quality, count,
+                    followUpVideo, videoPrompt, videoDuration, videoAspectRatio, videoResolution,
+                    context);
+        } catch (RuntimeException error) {
+            if (context.turnState() != null) context.turnState().rollbackMediaAttempt("image");
+            throw error;
+        }
     }
 
     private Map<String, Object> startBatchImage(
