@@ -737,6 +737,53 @@ describe('agentStore detached async tasks', () => {
     expect(state.messages.at(-1)?.content).toBe('修改后的回复');
   });
 
+  it('maps an optimistic edit target to the persisted user message before resending', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '已按新内容重发' }),
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: {
+        data: [{
+          id: 'user-db',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: '原始问题',
+          createdAt: new Date().toISOString(),
+        }],
+      },
+    } as never);
+    resetStore();
+    useAgentStore.setState({
+      messages: [
+        {
+          id: 'tmp-1710000000000',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: '原始问题',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'assistant-failed',
+          conversationId: 'conversation-1',
+          role: 'assistant',
+          content: '（回复失败）',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    await useAgentStore.getState().editAndResend('修改后的问题', 'tmp-1710000000000');
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.editMessageId).toBe('user-db');
+  });
+
   it('interrupts the active run and sends the queued message as a new turn', async () => {
     const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     const body = sseBody([

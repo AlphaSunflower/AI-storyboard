@@ -2143,8 +2143,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   messages: [],
   streaming: false,
   editAndResend: async (content, messageId) => {
-    const targetMessageId = messageId;
+    let targetMessageId = messageId;
     if (!targetMessageId) return;
+    const conversationId = get().activeConversationId;
+    if (!conversationId) return;
+    if (targetMessageId.startsWith('tmp-')) {
+      await refreshConversationMessages(conversationId);
+      const persistedUser = [...get().messages].reverse()
+        .find((message) => message.role === 'user');
+      if (!persistedUser || persistedUser.id.startsWith('tmp-')) {
+        set({ streamError: '要编辑的消息尚未同步，请刷新后重试' });
+        return;
+      }
+      targetMessageId = persistedUser.id;
+    }
     await get().sendMessage(content, { editMessageId: targetMessageId });
   },
   interruptAndSend: async (content) => {
