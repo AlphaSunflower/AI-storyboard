@@ -50,6 +50,19 @@ public class AgentScopeCanvasTools {
         List<MorrowCanvas> existing = canvasService.listByProject(
                 conversation.getUserId(), projectId);
         if (existing != null && !existing.isEmpty()) {
+            if (requestedCanvasId.isBlank() && !requestedTitle.isBlank()) {
+                MorrowCanvas created = canvasService.create(
+                        conversation.getUserId(), projectId, requestedTitle);
+                return new SessionPreparation(
+                        projectId,
+                        created.getId(),
+                        created.getTitle() == null ? requestedTitle : created.getTitle(),
+                        intent,
+                        existing.size(),
+                        true,
+                        List.of(new CanvasChoice(created.getId(),
+                                created.getTitle() == null ? requestedTitle : created.getTitle())));
+            }
             List<CanvasChoice> choices = existing.stream()
                     .map(canvas -> new CanvasChoice(
                             canvas.getId(),

@@ -49,6 +49,30 @@ class MoonAgentRuntimePermissionTest {
     }
 
     @Test
+    void canvasReadOnlyToolsBypassApproval() {
+        for (AgentApprovalMode mode : new AgentApprovalMode[]{
+                AgentApprovalMode.PLAN_APPROVAL,
+                AgentApprovalMode.REQUEST_APPROVAL}) {
+            var context = MoonAgentRuntime.permissionContext(mode);
+            assertThat(context.getAllowRules()).containsKeys(
+                    "canvas_get_context",
+                    "canvas_get_browser_context",
+                    "canvas_list_node_types",
+                    "canvas_get_state",
+                    "canvas_list_nodes",
+                    "canvas_get_node",
+                    "canvas_list_edges",
+                    "canvas_get_selection",
+                    "canvas_get_node_model_config",
+                    "canvas_get_execution");
+            assertThat(context.getAskRules()).doesNotContainKeys(
+                    "canvas_get_context",
+                    "canvas_list_node_types",
+                    "canvas_get_state");
+        }
+    }
+
+    @Test
     void approvedPlanAutoAllowsOnlyListedHighRiskTools() {
         var context = MoonAgentRuntime.permissionContext(
                 AgentApprovalMode.PLAN_APPROVAL,

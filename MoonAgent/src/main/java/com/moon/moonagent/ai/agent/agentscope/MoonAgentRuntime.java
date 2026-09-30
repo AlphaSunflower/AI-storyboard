@@ -838,6 +838,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "agent_list",
                 "list_storyboard_draft",
                 "list_project_storyboard",
+                "canvas_get_context",
+                "canvas_get_browser_context",
+                "canvas_get_summary",
+                "canvas_list_node_types",
+                "canvas_get_state",
+                "canvas_list_nodes",
+                "canvas_get_node",
+                "canvas_list_edges",
+                "canvas_get_selection",
+                "canvas_get_node_model_config",
+                "canvas_get_execution",
                 "load_skill_through_path",
                 "reset_equipped_tools")) {
             permissions.addAllowRule(tool, new PermissionRule(

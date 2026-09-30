@@ -65,6 +65,25 @@ class AgentScopeCanvasToolsTest {
         assertThat(preparation.canvasTitle()).isEqualTo("重生之我在搞建筑");
     }
 
+    @Test
+    void createsNamedCanvasWhenProjectAlreadyHasCanvases() {
+        MorrowCanvasService canvasService = mock(MorrowCanvasService.class);
+        when(canvasService.listByProject("user-1", "project-1"))
+                .thenReturn(List.of(canvas("canvas-recent", "画布 9")));
+        when(canvasService.create("user-1", "project-1", "雪茄房转场视频链路"))
+                .thenReturn(canvas("canvas-new", "雪茄房转场视频链路"));
+        AgentScopeCanvasTools tools = new AgentScopeCanvasTools(canvasService);
+
+        AgentScopeCanvasTools.SessionPreparation preparation = tools.prepare(
+                conversation(), Map.of(
+                        "intent", "搭建雪茄房转场视频链路",
+                        "canvas_title", "雪茄房转场视频链路"));
+
+        assertThat(preparation.canvasId()).isEqualTo("canvas-new");
+        assertThat(preparation.created()).isTrue();
+        assertThat(preparation.choices()).hasSize(1);
+    }
+
     private static AgentConversation conversation() {
         AgentConversation conversation = new AgentConversation();
         conversation.setId("conversation-1");

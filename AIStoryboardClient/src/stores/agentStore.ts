@@ -993,11 +993,15 @@ async function restorePendingCanvasSession(conversationId: string) {
     const response = await agentApi.getPendingCanvasSession(conversationId);
     const value = response.data.data;
     if (value && typeof value === 'object' && 'sessionId' in value) {
+      const session = value as CanvasSessionInfo;
       useAgentStore.setState({
-        canvasSession: value as CanvasSessionInfo,
+        canvasSession: session,
         canvasSessionStatus: '',
         canvasSessionSelection: { createNew: false },
       });
+      if (session.status === 'pending_open' && session.canvasId) {
+        useAgentStore.getState().beginCanvasSessionOpen(session.canvasId, false);
+      }
     }
   } catch {
     // Canvas Session is optional; keep the rest of conversation restoration intact.
@@ -1717,8 +1721,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     for (const envelope of response.data.data ?? []) {
       const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
       if (effects.canvasSessionRequired) {
+        const session = effects.canvasSessionRequired;
         set({
-          canvasSession: effects.canvasSessionRequired,
+          canvasSession: session,
           canvasSessionStatus: '',
           canvasSessionSelection: { createNew: false },
         });
@@ -1729,6 +1734,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           messages: state.messages.filter((message) => message.id !== assistantId),
           workflowHint: '',
         }));
+        if (session.status === 'pending_open' && session.canvasId) {
+          get().beginCanvasSessionOpen(session.canvasId, false);
+        }
       }
     }
   },
@@ -2712,8 +2720,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         if (effects.canvasSessionRequired) {
           receivedCanvasModeRequired = true;
+          const session = effects.canvasSessionRequired;
           set({
-            canvasSession: effects.canvasSessionRequired,
+            canvasSession: session,
             canvasSessionStatus: '',
             canvasSessionSelection: { createNew: false },
           });
@@ -2724,6 +2733,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             messages: state.messages.filter((message) => message.id !== assistantId),
             workflowHint: '',
           }));
+          if (session.status === 'pending_open' && session.canvasId) {
+            get().beginCanvasSessionOpen(session.canvasId, false);
+          }
         }
         if (effects.canvasModeRequired) {
           receivedCanvasModeRequired = true;
