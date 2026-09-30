@@ -51,16 +51,20 @@ public class LegacyAiAssetMigrationServiceImpl implements LegacyAiAssetMigration
                 rs.getString("type"), rs.getString("name"), rs.getString("description"))).list();
         int migrated = 0;
         for (LegacyAsset asset : assets) {
-            if (repository.findAsset(asset.ownerUserId(), asset.id()).isPresent()) continue;
+            boolean alreadyMigrated = repository.findAsset(asset.ownerUserId(), asset.id()).isPresent();
             AssetScope scope = asset.projectId() == null || asset.projectId().isBlank()
                     ? AssetScope.GLOBAL : AssetScope.PROJECT;
-            String created = repository.insertAssetWithId(
-                    asset.id(), asset.ownerUserId(), scope, asset.projectId(), AssetType.GROUP,
-                    aiKind(asset.type()), asset.name(), asset.description(),
-                    "legacy-ai-asset", asset.id());
-            if (created == null) continue;
-            repository.insertGroup(asset.id(), asset.ownerUserId(), scope, asset.projectId());
-            if (scope == AssetScope.PROJECT) repository.linkProject(asset.ownerUserId(), asset.id(), asset.projectId());
+            if (!alreadyMigrated) {
+                String created = repository.insertAssetWithId(
+                        asset.id(), asset.ownerUserId(), scope, asset.projectId(), AssetType.GROUP,
+                        aiKind(asset.type()), asset.name(), asset.description(),
+                        "legacy-ai-asset", asset.id());
+                if (created == null) continue;
+                repository.insertGroup(asset.id(), asset.ownerUserId(), scope, asset.projectId());
+                if (scope == AssetScope.PROJECT) {
+                    repository.linkProject(asset.ownerUserId(), asset.id(), asset.projectId());
+                }
+            }
 
             List<LegacyImage> images = jdbc.sql("""
                             SELECT id, url, file_name, text, sort_order
@@ -94,7 +98,7 @@ public class LegacyAiAssetMigrationServiceImpl implements LegacyAiAssetMigration
                 repository.linkGroupItem(asset.id(), mediaId, asset.id(), image.sortOrder());
                 if (image.sortOrder() == 0) repository.updateCover(asset.id(), image.url());
             }
-            migrated++;
+            if (!alreadyMigrated) migrated++;
         }
         return migrated;
     }

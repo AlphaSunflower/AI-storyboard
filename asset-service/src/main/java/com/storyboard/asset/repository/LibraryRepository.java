@@ -1351,10 +1351,26 @@ public class LibraryRepository {
         client.sql("""
                         INSERT INTO asset.library_group_items(
                             group_id, media_id, member_asset_id, sort_order, role
-                        ) VALUES (
-                            :groupId, :mediaId, :memberAssetId, :sortOrder, 'REFERENCE'
                         )
-                        ON CONFLICT (group_id, media_id) DO NOTHING
+                        SELECT :groupId, :mediaId, :memberAssetId,
+                               CASE
+                                   WHEN EXISTS (
+                                       SELECT 1 FROM asset.library_group_items
+                                       WHERE group_id = :groupId AND sort_order = :sortOrder
+                                   )
+                                   THEN (
+                                       SELECT COALESCE(MAX(sort_order), -1) + 1
+                                       FROM asset.library_group_items
+                                       WHERE group_id = :groupId
+                                   )
+                                   ELSE :sortOrder
+                               END,
+                               'REFERENCE'
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM asset.library_group_items
+                            WHERE group_id = :groupId AND media_id = :mediaId
+                        )
+                        ON CONFLICT DO NOTHING
                         """)
                 .param("groupId", groupId).param("mediaId", mediaId)
                 .param("memberAssetId", memberAssetId).param("sortOrder", sortOrder)
