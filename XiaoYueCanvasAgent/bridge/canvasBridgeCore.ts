@@ -4,6 +4,7 @@ import {
   BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_TAB_STALE_MS,
+  requiresServerDryRun,
   type BridgeHealth,
   type BridgeRegisterPayload,
   type BridgeResultPayload,
@@ -139,7 +140,8 @@ export class CanvasBridgeCore {
     if (typeof tabId !== 'string') {
       return Promise.resolve({ version: 1 as const, id: '', ok: false as const, error: tabId });
     }
-    return this.dispatch(tabId, request.source, request.method, request.params, request.dryRun, request.expectedRevision);
+    const dryRun = request.dryRun === true || requiresServerDryRun(request.method);
+    return this.dispatch(tabId, request.source, request.method, request.params, dryRun, request.expectedRevision);
   }
 
   private resolveTab(projectId?: string, canvasId?: string): string | { code: string; message: string } {

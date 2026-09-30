@@ -12,6 +12,16 @@ export const BRIDGE_BROWSER_HEARTBEAT_TIMEOUT_MS = 30_000;
 
 export type BridgeSource = 'mcp' | 'cli' | 'agent';
 
+const SERVER_DRY_RUN_METHODS = new Set([
+  'canvas.node.delete',
+  'canvas.edge.delete',
+  'canvas.node.execute',
+  'canvas.graph.execute',
+]);
+
+// 确认类命令只能由服务端强制预览，调用方不能通过 dryRun=false 绕过。
+export const requiresServerDryRun = (method: string) => SERVER_DRY_RUN_METHODS.has(method);
+
 export interface CanvasBridgeRequest {
   version: 1;
   id: string;

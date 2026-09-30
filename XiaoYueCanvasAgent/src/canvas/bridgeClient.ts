@@ -29,6 +29,10 @@ export function startCanvasBridge(
   onStatus?: (status: CanvasBridgeStatus) => void,
   titles?: { projectTitle?: string; canvasTitle?: string },
 ): () => void {
+  if (!bridgeToken) {
+    onStatus?.({ state: 'error', message: '未配置画布桥接令牌' });
+    return () => {};
+  }
   const tabId = createId();
   let stopped = false;
   let timer: number | null = null;

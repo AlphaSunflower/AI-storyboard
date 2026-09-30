@@ -8,11 +8,13 @@ import { Video } from 'lucide-react';
 export function VideoPlanCard({
   info,
   submitted = false,
+  archived = false,
   submittedActionId,
   submittedActionTitle,
 }: {
   info: VideoPlanInfo;
   submitted?: boolean;
+  archived?: boolean;
   submittedActionId?: string;
   submittedActionTitle?: string;
 }) {
@@ -34,6 +36,8 @@ export function VideoPlanCard({
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
           maxHeight: 'min(56vh, 560px)', overflowY: 'auto', overflowX: 'hidden',
           scrollbarWidth: 'thin',
+          opacity: archived ? 0.68 : 1,
+          pointerEvents: archived ? 'none' : undefined,
         }}
       >
         <div style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8, letterSpacing: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>

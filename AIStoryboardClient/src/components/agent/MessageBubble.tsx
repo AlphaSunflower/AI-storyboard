@@ -20,7 +20,9 @@ import { AgentTaskCard } from './AgentTaskCard';
 import { StoryboardResultActions } from './StoryboardResultActions';
 import { CanvasRunCard } from './CanvasRunCard';
 import { ContextMenu } from '../common/ContextMenu';
+import { DeferredExternalImage } from '../common/DeferredExternalImage';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
+import { isExternalImageSource } from '../../lib/externalImages';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { remarkCjkStrong } from './remarkCjkStrong';
 import { remarkMark } from './remarkMark';
@@ -249,16 +251,11 @@ function stripBatchImageMarkdown(content: string): string {
 }
 
 function BatchThumbnail({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return <span className="chat-image-batch__fallback"><Images size={14} strokeWidth={1.7} /></span>;
-  }
   return (
-    <img
+    <DeferredExternalImage
       src={assetUrl(url)}
+      source={url}
       alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
     />
   );
 }
@@ -364,17 +361,50 @@ async function downloadImage(url: string, alt?: string) {
  * onClick 可选：点击图片放大预览（灯箱）。
  */
 function ImgWithFallback({
-  src, source, alt, style, onClick, onImport, importDisabled, importing, dragPayload,
+  src, source, alt, style, onClick, onImport, importDisabled, importing, dragPayload, deferExternalLoad = false,
 }: {
   src: string; source?: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
   onImport?: () => void; importDisabled?: boolean; importing?: boolean; dragPayload?: ChatMediaDragPayload | null;
+  deferExternalLoad?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const [loadRequested, setLoadRequested] = useState(() => !deferExternalLoad || !isExternalImageSource(source));
+  useEffect(() => {
+    setLoadRequested(!deferExternalLoad || !isExternalImageSource(source));
+  }, [deferExternalLoad, source]);
   if (failed) {
     return (
       <span style={{ color: 'var(--color-muted-soft)', fontSize: 12, fontStyle: 'italic', margin: '4px 0' }}>
         （图片已过期或无法加载）
       </span>
+    );
+  }
+  if (deferExternalLoad && isExternalImageSource(source) && !loadRequested) {
+    return (
+      <button
+        type="button"
+        aria-label="点击加载外部图片"
+        onClick={() => setLoadRequested(true)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          minWidth: 180,
+          minHeight: 96,
+          margin: '4px 0',
+          padding: '16px 18px',
+          border: '1px dashed var(--color-hairline)',
+          borderRadius: 8,
+          background: 'var(--color-canvas)',
+          color: 'var(--color-muted)',
+          cursor: 'pointer',
+          font: 'inherit',
+          fontSize: 13,
+        }}
+      >
+        <Images size={18} strokeWidth={1.7} />
+        <span>点击加载外部图片</span>
+      </button>
     );
   }
   return (
@@ -482,7 +512,7 @@ function renderContent(
     const imgMatch = line.match(/!\[([^\]]*)\]\(([^)]+)\)/);
     if (imgMatch) {
       return (
-        <ImgWithFallback
+          <ImgWithFallback
           key={i}
           src={assetUrl(imgMatch[2])}
           source={imgMatch[2]}
@@ -497,8 +527,9 @@ function renderContent(
             url: imgMatch[2],
             name: imgMatch[1] || '对话图片',
           } : null}
-          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
-        />
+            style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+            deferExternalLoad
+          />
       );
     }
     // 视频 URL（http(s) 绝对地址或后端相对路径 /api/files/videos/ 开头的 .mp4/.webm 直接渲染；
@@ -528,7 +559,7 @@ function renderContent(
     if (rawImg) {
       const raw = rawImg[0];
       return (
-        <ImgWithFallback
+          <ImgWithFallback
           key={i}
           src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
           source={raw}
@@ -543,8 +574,9 @@ function renderContent(
             url: raw,
             name: '对话图片',
           } : null}
-          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
-        />
+            style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+            deferExternalLoad
+          />
       );
     }
     // 加粗
@@ -612,6 +644,7 @@ function MarkdownContent({
                   name: alt || '对话图片',
                 } : null}
                 style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+                deferExternalLoad
               />
             ),
             a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
@@ -742,6 +775,9 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const ds = variant === 'deepseek';
   const canvasRunMeta = metadata?.kind === 'canvas-run' ? metadata : null;
   const currentProject = useProjectStore((state) => state.currentProject);
+  const archivedConversation = useAgentStore((state) =>
+    state.conversations.find((conversation) => conversation.id === state.activeConversationId)?.status === 'archived',
+  );
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
@@ -918,6 +954,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         <VideoPlanCard
           info={videoPlanInfo}
           submitted
+          archived={archivedConversation}
           submittedActionId={metadata?.hitl?.selectedActionId}
           submittedActionTitle={metadata?.hitl?.selectedActionTitle}
         />
@@ -933,6 +970,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         ) : null}
         <HumanInputCard
           info={hitlInfo}
+          archived={archivedConversation}
           submittedActionId={submittedActionId}
           submittedActionTitle={submittedActionTitle}
           customText={hitlMeta?.customText ?? hitlMeta?.selectedCustomText}

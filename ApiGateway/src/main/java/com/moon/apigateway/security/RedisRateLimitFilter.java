@@ -32,7 +32,10 @@ public class RedisRateLimitFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        String subject = request.getHeader("X-User-Id");
+        // Login is public; X-User-Id is caller-controlled there and must not be part of the bucket key.
+        String subject = isAnonymousAuthPath(request.getRequestURI())
+                ? request.getRemoteAddr()
+                : request.getHeader("X-User-Id");
         if (subject == null || subject.isBlank()) subject = request.getRemoteAddr();
         String key = "rate:" + rule.scope() + ":" + subject + ":" + (System.currentTimeMillis() / 60_000);
         Long count = redisTemplate.opsForValue().increment(key);
@@ -59,6 +62,12 @@ public class RedisRateLimitFilter extends OncePerRequestFilter {
             return new Rule("prompt-optimize", 20);
         }
         return null;
+    }
+
+    private static boolean isAnonymousAuthPath(String path) {
+        return "/api/auth/login".equals(path)
+                || "/api/auth/register".equals(path)
+                || "/api/auth/refresh".equals(path);
     }
 
     private record Rule(String scope, int limit) {

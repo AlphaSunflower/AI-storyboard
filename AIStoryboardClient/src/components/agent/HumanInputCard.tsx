@@ -17,6 +17,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
  */
 export function HumanInputCard({
   info,
+  archived = false,
   collapsed = false,
   onToggleCollapse,
   submittedActionId,
@@ -26,6 +27,7 @@ export function HumanInputCard({
   assetIds,
 }: {
   info: HumanInputInfo;
+  archived?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   submittedActionId?: string;
@@ -65,6 +67,7 @@ export function HumanInputCard({
   const [selectedActionId, setSelectedActionId] = useState<string | null>(submittedActionId || null);
   
   const handleActionClick = (a: { id: string; title: string }) => {
+    if (archived) return;
     if (a.id === "custom") {
       setCustomOpen(true);
       return;
@@ -134,6 +137,8 @@ export function HumanInputCard({
       overflowX: "hidden",
       scrollbarWidth: "thin",
       textAlign: "left",
+      opacity: archived ? 0.68 : 1,
+      pointerEvents: archived ? "none" : undefined,
     }}>
       {/* 头部：标题 + 折叠按钮 */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { BRIDGE_DEFAULT_PORT } from '../src/canvas/bridgeProtocol.ts';
 import type { BridgeRegisterPayload, BridgeResultPayload } from '../src/canvas/bridgeProtocol.ts';
 import { CanvasBridgeCore } from './canvasBridgeCore.ts';
@@ -32,7 +33,12 @@ const allowedOrigins = (process.env.MORROW_BRIDGE_ORIGINS ?? 'http://localhost:3
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
-const bridgeToken = process.env.MORROW_BRIDGE_TOKEN ?? '';
+const bridgeToken = process.env.MORROW_BRIDGE_TOKEN?.trim() ?? '';
+
+if (!bridgeToken) {
+  console.error('[morrow-bridge] MORROW_BRIDGE_TOKEN 未配置，拒绝启动');
+  process.exit(1);
+}
 
 const requestOrigin = (req: IncomingMessage) => {
   const origin = req.headers.origin;
@@ -43,6 +49,15 @@ const originAllowed = (req: IncomingMessage) => {
   const origin = requestOrigin(req);
   if (!origin) return true;
   return allowedOrigins.includes(origin);
+};
+
+const tokenAllowed = (req: IncomingMessage) => {
+  const raw = req.headers['x-bridge-token'];
+  const token = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof token !== 'string') return false;
+  const expected = Buffer.from(bridgeToken);
+  const actual = Buffer.from(token);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 };
 
 const sendJson = (req: IncomingMessage, res: ServerResponse, status: number, body: unknown) => {
@@ -93,6 +108,11 @@ export const server = createServer(async (req, res) => {
       sendJson(req, res, 403, { ok: false, error: { code: 'ORIGIN_DENIED', message: '来源不被允许' } });
       return;
     }
+    // MCP 继续只允许本机回环客户端；HTTP 管理接口必须携带 Bridge Token。
+    if (path !== '/mcp' && !tokenAllowed(req)) {
+      sendJson(req, res, 403, { ok: false, error: { code: 'BRIDGE_TOKEN_INVALID', message: '桥接令牌无效' } });
+      return;
+    }
     if (path === '/mcp') {
       await attachMcpEndpoint(core, req, res);
       return;
@@ -135,11 +155,6 @@ export const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && path === '/command') {
-      const token = req.headers['x-bridge-token'];
-      if (bridgeToken && token !== bridgeToken) {
-        sendJson(req, res, 403, { ok: false, error: { code: 'BRIDGE_TOKEN_INVALID', message: '桥接令牌无效' } });
-        return;
-      }
       const body = await readJson(req);
       const response = await core.command({
         source: body.source === 'mcp' || body.source === 'agent' || body.source === 'cli' ? body.source : 'cli',

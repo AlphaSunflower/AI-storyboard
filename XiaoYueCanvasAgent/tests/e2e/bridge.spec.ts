@@ -5,15 +5,19 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 // 端到端验证 CLI/MCP 通过 Bridge 读写浏览器画布。
 // 测试自管 Bridge 生命周期：beforeAll 启动，afterAll 关闭。
 
-const BRIDGE_PORT = 8787;
+const BRIDGE_PORT = Number(process.env.MORROW_BRIDGE_PORT ?? 18787);
 const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}`;
+const BRIDGE_TOKEN = process.env.MORROW_BRIDGE_TOKEN ?? 'morrow-bridge-e2e-token';
+const APP_PORT = Number(process.env.PLAYWRIGHT_PORT ?? 13000);
 
 let bridge: ChildProcess | null = null;
 
 const waitForBridge = async () => {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const response = await fetch(`${BRIDGE_URL}/health`);
+      const response = await fetch(`${BRIDGE_URL}/health`, {
+        headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
+      });
       if (response.ok) return;
     } catch {
       // 继续重试
@@ -26,15 +30,26 @@ const waitForBridge = async () => {
 const sendCommand = (projectId: string, method: string, params: Record<string, unknown>, canvasId?: string) =>
   fetch(`${BRIDGE_URL}/command`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Bridge-Token': BRIDGE_TOKEN },
     body: JSON.stringify({ version: 1, id: crypto.randomUUID(), source: 'cli', projectId, canvasId, method, params }),
   }).then((response) => response.json());
+
+const clickNewProject = async (page: import('@playwright/test').Page) => {
+  await expect(page.getByRole('button', { name: '新建项目', exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(1_000);
+  await page.getByRole('button', { name: '新建项目', exact: true }).click({ force: true });
+};
 
 test.beforeAll(async () => {
   bridge = spawn(process.execPath, ['bridge/server.ts'], {
     cwd: process.cwd(),
     stdio: 'ignore',
-    env: { ...process.env, MORROW_BRIDGE_PORT: String(BRIDGE_PORT) },
+    env: {
+      ...process.env,
+      MORROW_BRIDGE_PORT: String(BRIDGE_PORT),
+      MORROW_BRIDGE_TOKEN: BRIDGE_TOKEN,
+      MORROW_BRIDGE_ORIGINS: `http://localhost:${APP_PORT}`,
+    },
   });
   await waitForBridge();
 });
@@ -54,6 +69,9 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/api/auth/refresh', (route) => route.fulfill({
+    json: { data: { accessToken: 'header.payload.signature', userId: 'test-user' } },
+  }));
   await page.goto('/');
   await page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
@@ -75,7 +93,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('CLI 通过 Bridge 读取并写入浏览器画布', async ({ page }) => {
-  await page.getByRole('button', { name: '新建项目', exact: true }).click();
+  await clickNewProject(page);
   await page.getByRole('button', { name: '新建第一个画布' }).click();
   await expect(page.getByText('空画布', { exact: true })).toBeVisible();
 
@@ -85,7 +103,9 @@ test('CLI 通过 Bridge 读取并写入浏览器画布', async ({ page }) => {
   expect(canvasId).toBeTruthy();
 
   // 等待浏览器标签页注册到 Bridge。
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
+  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
+    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
+  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
     projects: expect.arrayContaining([expect.objectContaining({
       projectId,
       projectTitle: 'Untitled',
@@ -153,12 +173,14 @@ test('MCP 通过 Streamable HTTP 创建节点并连接浏览器画布', async ({
 
   await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
   await expect(page.locator('.canvas-workspace')).toBeVisible();
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
+  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
+    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
+  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
     projects: expect.arrayContaining([expect.objectContaining({
       projectId,
       projectTitle: 'MCP 联调',
       canvasId,
-      canvasTitle: '默认画布',
+      canvasTitle: '画布',
     })]),
   });
 
@@ -210,13 +232,15 @@ test('MCP 通过 Streamable HTTP 创建节点并连接浏览器画布', async ({
 });
 
 test('语义操作落成因果链：裁剪→切分，边带标签，节点可展开血缘', async ({ page }) => {
-  await page.getByRole('button', { name: '新建项目', exact: true }).click();
+  await clickNewProject(page);
   await page.getByRole('button', { name: '新建第一个画布' }).click();
   await expect(page.getByText('空画布', { exact: true })).toBeVisible();
   const projectId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('project'));
   const canvasId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('canvas'));
   expect(projectId).toBeTruthy();
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
+  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
+    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
+  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
     projects: expect.arrayContaining([expect.objectContaining({ projectId, canvasId })]),
   });
 

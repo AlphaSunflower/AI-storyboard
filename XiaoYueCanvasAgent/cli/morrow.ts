@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { BRIDGE_DEFAULT_PORT, type CanvasBridgeResponse } from '../src/canvas/bridgeProtocol.ts';
 
 const bridgeUrl = (process.env.MORROW_BRIDGE_URL ?? `http://127.0.0.1:${BRIDGE_DEFAULT_PORT}`).replace(/\/$/, '');
+const bridgeToken = process.env.MORROW_BRIDGE_TOKEN?.trim() ?? '';
 
 const USAGE = `morrow — 通过 Bridge 读写浏览器中打开的 Morrow 画布
 
@@ -26,6 +27,7 @@ const USAGE = `morrow — 通过 Bridge 读写浏览器中打开的 Morrow 画�
 
 环境变量：
   MORROW_BRIDGE_URL   Bridge 地址（默认 http://127.0.0.1:${BRIDGE_DEFAULT_PORT}）
+  MORROW_BRIDGE_TOKEN Bridge 访问令牌（必填）
 `;
 
 interface ParsedArgs {
@@ -103,7 +105,7 @@ function buildRequest(sub: string, o: Record<string, string | boolean>): Command
 }
 
 async function getProjects(): Promise<string[]> {
-  const res = await fetch(`${bridgeUrl}/projects`);
+  const res = await fetch(`${bridgeUrl}/projects`, { headers: bridgeHeaders() });
   if (!res.ok) throw new Error(`无法连接 Bridge（HTTP ${res.status}）`);
   return (await res.json()) as string[];
 }
@@ -111,11 +113,15 @@ async function getProjects(): Promise<string[]> {
 async function sendCommand(request: CommandRequest): Promise<CanvasBridgeResponse> {
   const res = await fetch(`${bridgeUrl}/command`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...bridgeHeaders() },
     body: JSON.stringify({ version: 1, id: randomUUID(), source: 'cli', ...request }),
   });
   if (!res.ok) throw new Error(`Bridge 返回 HTTP ${res.status}`);
   return (await res.json()) as CanvasBridgeResponse;
+}
+
+function bridgeHeaders(): Record<string, string> {
+  return bridgeToken ? { 'X-Bridge-Token': bridgeToken } : {};
 }
 
 function printResponse(response: CanvasBridgeResponse, json: boolean) {
@@ -141,6 +147,12 @@ async function main() {
 
   if (command[0] !== 'canvas') {
     console.error('✗ 未知命令，用 --help 查看用法');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!bridgeToken) {
+    console.error('✗ 未设置 MORROW_BRIDGE_TOKEN，无法连接 Bridge');
     process.exitCode = 1;
     return;
   }

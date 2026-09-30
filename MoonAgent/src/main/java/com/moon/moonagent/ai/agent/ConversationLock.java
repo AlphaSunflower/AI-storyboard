@@ -98,13 +98,9 @@ public class ConversationLock {
         }
     }
 
-    /** 释放锁并移除条目（语义同 release，Redis 无内存条目需清理） */
+    /** 仅释放当前线程实际持有的锁，避免删除其他实例持有的租约。 */
     public void releaseAndRemove(String conversationId) {
-        try {
-            redisTemplate.delete(PREFIX + conversationId);
-        } catch (Exception e) {
-            log.warn("ConversationLock: 删除会话锁失败 conversationId={}", conversationId);
-        }
+        release(conversationId);
     }
 
     /**
@@ -158,13 +154,20 @@ public class ConversationLock {
         private void renew() {
             if (closed) return;
             try {
-                redisTemplate.execute(
+                Long renewed = redisTemplate.execute(
                         RENEW_SCRIPT,
                         List.of(PREFIX + conversationId),
                         owner,
                         String.valueOf(TTL_SECONDS));
+                if (renewed == null || renewed <= 0) {
+                    closed = true;
+                    renewal.cancel(false);
+                    log.warn("ConversationLock: 锁已不再由当前实例持有，停止续租 conversationId={}", conversationId);
+                }
             } catch (Exception e) {
-                log.warn("ConversationLock: 续租失败 conversationId={}", conversationId);
+                closed = true;
+                renewal.cancel(false);
+                log.warn("ConversationLock: 续租失败，停止续租 conversationId={}", conversationId);
             }
         }
 

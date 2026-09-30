@@ -37,6 +37,7 @@ import {
 } from '../lib/canvasEditMode';
 
 let conversationLoadEpoch = 0;
+let conversationListEpoch = 0;
 
 /** Newlines separate stage snapshots; token deltas concatenate directly. */
 function appendReasoningDetails(
@@ -2043,9 +2044,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   loadingConversations: false,
   loadConversations: async () => {
     const projectId = useProjectStore.getState().currentProject?.id;
-    if (!projectId) return;
+    if (!projectId) {
+      conversationListEpoch += 1;
+      return;
+    }
+    const loadEpoch = ++conversationListEpoch;
     set({ loadingConversations: true });
     const res = await agentApi.listConversations(projectId);
+    if (loadEpoch !== conversationListEpoch
+        || useProjectStore.getState().currentProject?.id !== projectId) return;
     const list = res.data.data ?? [];
     set({ conversations: list, loadingConversations: false });
     // 自动选中最近会话
@@ -2964,6 +2971,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       : get().waitingHumanInput;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    if (get().conversations.find((conversation) => conversation.id === id)?.status === 'archived') {
+      set({ streamError: '会话已归档，无法继续操作' });
+      return;
+    }
     const resumeTurnId = info.turnId ?? get().generating[id]?.turnId;
     if (!resumeTurnId) {
       set({ streamError: '当前确认卡片缺少 turnId，请刷新后重试' });
@@ -3155,6 +3166,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const info = get().waitingVideoPlan;
     const id = get().activeConversationId;
     if (!id || !info || get().streaming) return;
+    if (get().conversations.find((conversation) => conversation.id === id)?.status === 'archived') {
+      set({ streamError: '会话已归档，无法继续操作' });
+      return;
+    }
     const resumeTurnId = info.turnId ?? get().generating[id]?.turnId;
     if (!resumeTurnId) {
       set({ streamError: '当前视频方案缺少 turnId，请刷新后重试' });

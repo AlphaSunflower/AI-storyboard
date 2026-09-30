@@ -58,6 +58,28 @@ describe('CanvasBridgeCore', () => {
     })).resolves.toMatchObject({ ok: false, error: { code: 'AMBIGUOUS_CANVAS' } });
   });
 
+  it('forces dry-run for confirmation-class commands even when the caller omits it', async () => {
+    const core = new CanvasBridgeCore();
+    core.register({ tabId: 'tab-1', projectId: 'project-1', canvasId: 'canvas-1' });
+
+    const command = core.command({
+      source: 'mcp',
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      method: 'canvas.node.delete',
+      params: { nodeIds: ['node-1'] },
+      dryRun: false,
+    });
+    const polled = core.poll('tab-1');
+    expect(polled.command?.dryRun).toBe(true);
+    const requestId = polled.command?.requestId ?? '';
+    core.result({
+      requestId,
+      response: { version: 1, id: requestId, ok: true, status: 'preview', result: { nodeIds: ['node-1'] } },
+    });
+    await expect(command).resolves.toMatchObject({ ok: true, status: 'preview' });
+  });
+
   it('promotes the remaining tab when a replaced tab unregisters', async () => {
     const core = new CanvasBridgeCore();
     core.register({ tabId: 'old-tab', projectId: 'project-1', canvasId: 'canvas-1' });

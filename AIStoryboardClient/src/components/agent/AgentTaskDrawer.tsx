@@ -17,6 +17,7 @@ import {
 import { taskStatusLabel, useAgentStore } from '../../stores/agentStore';
 import type { AgentTaskSlotView } from '../../api/agent';
 import { AgentToolAuditPanel } from './AgentToolAuditPanel';
+import { DeferredExternalImage } from '../common/DeferredExternalImage';
 import './AgentTaskDrawer.css';
 
 function formatTime(value?: string | null): string {
@@ -157,7 +158,14 @@ export function AgentTaskDrawer() {
             </button>
             {showOutput && (
               <div className="agent-task-drawer__stream-body" ref={streamRef}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamText}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    img: ({ src, alt }) => (
+                      <DeferredExternalImage src={src ?? ''} source={src ?? ''} alt={alt ?? ''} />
+                    ),
+                  }}
+                >{streamText}</ReactMarkdown>
                 {active && <span className="agent-task-drawer__stream-cursor" aria-hidden="true" />}
               </div>
             )}
@@ -180,7 +188,13 @@ export function AgentTaskDrawer() {
                     </span>
                     <div className="agent-task-slot__body">
                       <strong>{slot.label || `#${slot.index + 1}`} · {slot.prompt || '未命名提示词'}</strong>
-                      {slot.url && <img src={slot.url} alt={`生成图片 ${slot.index + 1}`} loading="lazy" />}
+                      {slot.url && (
+                        <DeferredExternalImage
+                          src={slot.url}
+                          source={slot.url}
+                          alt={`生成图片 ${slot.index + 1}`}
+                        />
+                      )}
                       {slot.error && <small>{slot.error}</small>}
                     </div>
                   </article>
@@ -193,7 +207,16 @@ export function AgentTaskDrawer() {
         <section className="agent-task-drawer__result">
           <h3>结果</h3>
           {task.result
-            ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
+            ? (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  img: ({ src, alt }) => (
+                    <DeferredExternalImage src={src ?? ''} source={src ?? ''} alt={alt ?? ''} />
+                  ),
+                }}
+              >{task.result}</ReactMarkdown>
+            )
             : <p>{task.resultSummary || '任务尚未产生结果。'}</p>}
         </section>
 

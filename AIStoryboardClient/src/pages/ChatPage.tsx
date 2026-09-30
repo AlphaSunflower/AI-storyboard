@@ -632,7 +632,9 @@ export function ChatPage() {
                 )}
                 
                 {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
-                {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
+                {waitingVideoPlan && (
+                  <VideoPlanCard info={waitingVideoPlan} archived={activeConversation?.status === 'archived'} />
+                )}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
                   <div style={{
@@ -1101,7 +1103,9 @@ export function ChatPage() {
                 )}
                 
                 {waitingHumanInput && <HitlPromptCard info={waitingHumanInput} />}
-                {waitingVideoPlan && <VideoPlanCard info={waitingVideoPlan} />}
+                {waitingVideoPlan && (
+                  <VideoPlanCard info={waitingVideoPlan} archived={activeConversation?.status === 'archived'} />
+                )}
                 {confirmResult && <ConfirmResultCard />}
                 {streamError && (
                   <div style={{

@@ -15,6 +15,7 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  localStorage.removeItem('accessToken');
 }
 
 export function persistUser(user: { userId: string; displayName: string }): void {
@@ -24,6 +25,7 @@ export function persistUser(user: { userId: string; displayName: string }): void
 export function clearAuthSession(): void {
   accessToken = null;
   localStorage.removeItem('user');
+  localStorage.removeItem('accessToken');
 }
 
 export async function refreshAccessToken(): Promise<string | null> {
@@ -58,10 +60,8 @@ export async function refreshAccessToken(): Promise<string | null> {
 }
 
 export async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  if (!accessToken) {
-    const legacy = localStorage.getItem('accessToken');
-    if (legacy) accessToken = legacy;
-  }
+  // 旧版本曾把 Access Token 落在 localStorage；任何请求都顺手清除，避免残留复活。
+  localStorage.removeItem('accessToken');
   const token = getAccessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);

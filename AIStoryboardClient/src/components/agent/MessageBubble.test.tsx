@@ -272,6 +272,19 @@ describe('MessageBubble project library import', () => {
     expect(screen.getAllByRole('img')).toHaveLength(3);
   });
 
+  it('defers external markdown images until the user clicks the placeholder', () => {
+    const { container } = render(
+      <MessageBubble
+        role="assistant"
+        content="![外部图片](https://cdn.example.com/remote.png)"
+      />,
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '点击加载外部图片' }));
+    expect(screen.getByRole('img').getAttribute('referrerpolicy')).toBe('no-referrer');
+  });
+
   it('keeps legacy messages without metrics unchanged', () => {
     render(<MessageBubble role="assistant" content="旧消息" />);
 

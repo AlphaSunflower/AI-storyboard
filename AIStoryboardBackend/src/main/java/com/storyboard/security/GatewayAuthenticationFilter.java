@@ -63,20 +63,7 @@ public class GatewayAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 2. 回退：JWT 验签（直连场景）
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            try {
-                var claims = jwtTokenProvider.verifyAccessToken(header.substring(7));
-                setAuth(claims.getSubject(),
-                        claims.get("role", String.class),
-                        claims.get("status", String.class));
-            } catch (Exception e) {
-                writeError(response);
-                return;
-            }
-        }
-
+        // 业务服务只接受 Gateway 注入的可信身份头；直连 JWT 无法校验 Redis 会话撤销。
         chain.doFilter(request, response);
     }
 

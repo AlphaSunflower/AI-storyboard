@@ -55,6 +55,7 @@ export function buildChatAppDescriptor(
 
   const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
     || '/canvas';
+  const normalizedBase = `${base}/`;
   const params = new URLSearchParams({ embedded: '1' });
   const canvasMode = options.canvasMode;
   const projectId = canvasMode?.projectId ?? currentProject?.id;
@@ -71,7 +72,7 @@ export function buildChatAppDescriptor(
   return {
     key,
     title: '画布',
-    url: `${base}?${params.toString()}${hash}`,
+    url: `${normalizedBase}?${params.toString()}${hash}`,
     projectId,
     ...(canvasMode ? { canvasMode } : {}),
   };

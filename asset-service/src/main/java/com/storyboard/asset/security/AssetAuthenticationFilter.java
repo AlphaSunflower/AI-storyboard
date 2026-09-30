@@ -61,23 +61,7 @@ public class AssetAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        String authorization = request.getHeader("Authorization");
-        if (authorization != null && authorization.startsWith("Bearer ") && !jwtSecret.isBlank()) {
-            try {
-                String token = authorization.substring(7);
-                byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
-                javax.crypto.SecretKey key = new SecretKeySpec(keyBytes, "HmacSHA256");
-                var claims = Jwts.parser()
-                        .verifyWith(key)
-                        .requireIssuer(issuer)
-                        .build()
-                        .parseSignedClaims(token)
-                        .getPayload();
-                authenticate(claims.getSubject(), claims.get("role", String.class));
-            } catch (Exception ignored) {
-                SecurityContextHolder.clearContext();
-            }
-        }
+        // Asset Service 只接受 Gateway 注入的内部令牌，直连 JWT 无法校验会话撤销。
         chain.doFilter(request, response);
     }
 

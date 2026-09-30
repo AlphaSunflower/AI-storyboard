@@ -43,7 +43,7 @@ describe('chat app definitions', () => {
     expect(descriptor).not.toBeNull();
 
     const url = new URL(descriptor!.url, window.location.origin);
-    expect(url.pathname).toBe('/canvas');
+    expect(url.pathname).toBe('/canvas/');
     expect(url.searchParams.get('token')).toBeNull();
     expect(url.searchParams.get('embedded')).toBe('1');
     expect(url.searchParams.get('userId')).toBeNull();
@@ -84,7 +84,7 @@ describe('chat app definitions', () => {
   });
 
   it('opens the canvas without project context for cookie-backed authentication', () => {
-    expect(buildChatAppDescriptor('canvas', null)?.url).toBe('/canvas?embedded=1');
+    expect(buildChatAppDescriptor('canvas', null)?.url).toBe('/canvas/?embedded=1');
   });
 
   it('recovers the active canvas id from an existing child window url', () => {

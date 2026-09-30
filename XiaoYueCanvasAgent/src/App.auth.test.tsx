@@ -40,6 +40,9 @@ describe('App authentication flow', () => {
           json: async () => ({ data: { accessToken: 'header.payload.signature', userId: 'user-1' } }),
         } as Response;
       }
+      if (String(input).includes('/api/auth/refresh')) {
+        return { ok: false, status: 401, json: async () => ({}) } as Response;
+      }
       return baseFetch(input, init);
     }));
   });

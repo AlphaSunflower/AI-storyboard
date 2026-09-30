@@ -14,7 +14,7 @@ export function LoginScreen({ onLogin, message }: { onLogin: () => void; message
     setLoading(true); setError(null);
     try {
       const res = await fetch('/api/auth/login', {
-        method: 'POST', credentials: 'omit',
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });

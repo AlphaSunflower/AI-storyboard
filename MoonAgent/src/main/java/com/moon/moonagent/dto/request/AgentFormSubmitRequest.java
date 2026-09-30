@@ -1,17 +1,20 @@
 package com.moon.moonagent.dto.request;
 
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.Map;
 
 /** HITL 人工确认表单提交请求 */
 public record AgentFormSubmitRequest(
-    String formToken,   // 表单令牌（HITL 暂停点返回）
-    String taskId,      // 任务 ID（用于续流）
-    String action,      // 用户点击的按钮 id（actions[].id；custom=自定义输入）
-    String content,     // 自定义输入文本（action=custom 时必填，其余为空）
-    Map<String, String> params,  // 卡片参数选择器提交的生成参数（如 {model, resolution, duration}；可空）
-    java.util.List<String> assetIds,  // 资产选择卡片勾选的资产 ID 列表（可空）
-    String routingHint,  // 显式兼容提示（可空）：新 AgentScope turn 通常不需要，
+    @NotBlank(message = "表单令牌不能为空") @Size(max = 128) String formToken,
+    @Size(max = 128, message = "任务 ID 过长") String taskId,
+    @NotBlank(message = "动作不能为空") @Size(max = 64, message = "动作 ID 过长") String action,
+    @Size(max = 32768, message = "输入内容过长") String content,
+    @Size(max = 50, message = "参数数量过多") Map<@Size(max = 64) String, @Size(max = 512) String> params,
+    @Size(max = 100, message = "资产最多选择 100 个")
+    java.util.List<@Size(max = 128) String> assetIds,
+    @Size(max = 64, message = "路由提示过长") String routingHint,
                         // 路由优先级：routingHint > 卡片合法 action > customText 语义意图识别
     CanvasSessionContext canvasContext // 画布编辑模式上下文；HITL 续流必须原样带回
 ) {}

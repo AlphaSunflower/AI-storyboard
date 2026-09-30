@@ -28,7 +28,7 @@ public class AuthController {
     private final AuthService authService;
     private final AuthSessionService sessionService;
 
-    @Value("${auth.cookie.secure:false}")
+    @Value("${auth.cookie.secure:true}")
     private boolean secureCookie;
     @Value("${jwt.access-token-ttl:7200}")
     private long accessTokenTtlSeconds;

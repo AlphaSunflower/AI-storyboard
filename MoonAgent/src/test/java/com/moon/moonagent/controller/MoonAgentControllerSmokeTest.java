@@ -170,7 +170,7 @@ class MoonAgentControllerSmokeTest {
         mockMvc.perform(get("/api/agent/conversations/c1/messages").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].role").value("assistant"));
         mockMvc.perform(post("/api/agent/conversations/c1/messages").header("X-User-Id", "u1")
-                .contentType("application/json").content("{\"content\":\"你好\"}"))
+                .contentType("application/json").content("{\"content\":\"你好\",\"clientRequestId\":\"smoke-1\"}"))
             .andExpect(status().isGone());
         mockMvc.perform(get("/api/agent/conversations/c1/assets?page=1&size=20").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
@@ -268,14 +268,14 @@ class MoonAgentControllerSmokeTest {
                 any(SseEmitter.class));
 
         mockMvc.perform(post("/api/agent/conversations/c1/turns/stream").header("X-User-Id", "u1")
-                .contentType("application/json").content("{\"content\":\"你好\"}"))
+                .contentType("application/json").content("{\"content\":\"你好\",\"clientRequestId\":\"smoke-2\"}"))
             .andExpect(status().isOk());
         mockMvc.perform(post("/api/agent/conversations/c1/turns/turn-1/resume/stream")
                 .header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"formToken\":\"token-1\",\"action\":\"approve\"}"))
             .andExpect(status().isOk());
         mockMvc.perform(post("/api/agent/conversations/c1/messages/stream").header("X-User-Id", "u1")
-                        .contentType("application/json").content("{\"content\":\"你好\"}"))
+                        .contentType("application/json").content("{\"content\":\"你好\",\"clientRequestId\":\"smoke-3\"}"))
                 .andExpect(status().isGone());
         mockMvc.perform(post("/api/agent/conversations/c1/form/submit").header("X-User-Id", "u1")
                         .contentType("application/json").content("{\"action\":\"confirm\",\"taskId\":\"t\"}"))
@@ -325,6 +325,7 @@ class MoonAgentControllerSmokeTest {
                 .content("""
                     {
                       "content": "请用这个资产组生成视频",
+                      "clientRequestId": "smoke-4",
                       "assetGroupIds": ["group-1"],
                       "assetGroupSnapshotIds": ["snapshot-1"]
                     }

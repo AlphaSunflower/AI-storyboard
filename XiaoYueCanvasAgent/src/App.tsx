@@ -23,7 +23,7 @@ import { useCanvasStore } from './store/canvasStore';
 import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
 import { LoginScreen } from './components/LoginScreen';
-import { clearToken, getJobToken, tokenExpired } from './services/jobAuth';
+import { bootstrapJobAuth, clearToken, getJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
 import { recoverGraphExecutions } from './canvas/graphExecutionService';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
@@ -117,6 +117,16 @@ export default function App() {
     setProjectsLoading(true);
     try { setProjects(await listProjects()); }
     finally { setProjectsLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!getJobToken()) {
+      void bootstrapJobAuth().then((token) => {
+        if (!cancelled && token) setAuthed(true);
+      });
+    }
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {

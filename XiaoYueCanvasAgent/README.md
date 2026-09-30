@@ -21,10 +21,12 @@ npm run test:e2e
 
 ## CLI 与 Bridge（本地命令入口）
 
-浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。Bridge 同时在 `/mcp` 提供 Streamable HTTP MCP Server。
+浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。Bridge 同时在 `/mcp` 提供 Streamable HTTP MCP Server；服务端和管理接口必须携带 `X-Bridge-Token`。
 
 ```bash
+export MORROW_BRIDGE_TOKEN="$(openssl rand -hex 32)"
 npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
+export VITE_BRIDGE_TOKEN="$MORROW_BRIDGE_TOKEN"
 npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
 ```
 
@@ -45,6 +47,8 @@ node cli/morrow.ts canvas node delete --node <id>         # 删除节点
 
 - `MORROW_BRIDGE_URL`：Bridge 地址（默认 `http://127.0.0.1:8787`）
 - `MORROW_BRIDGE_PORT`：Bridge 监听端口（默认 `8787`）
+- `MORROW_BRIDGE_TOKEN`：Bridge 访问令牌，服务端与 CLI 必填
+- `VITE_BRIDGE_TOKEN`：浏览器访问 Bridge 的同一令牌，开发时必须与 `MORROW_BRIDGE_TOKEN` 一致
 
 协议（`src/canvas/bridgeProtocol.ts`）：浏览器打开画布后 `POST /register` 注册 `projectId + projectTitle + canvasId + canvasTitle`、`GET /poll` 拉取命令；CLI `POST /command` 提交并阻塞等待结果。未打开的项目返回 `PROJECT_NOT_OPEN`；存在多个活动画布时 `canvas_get_context` 返回 `HUMAN_INPUT_REQUIRED`，MoonAgent 使用 `moon_request_human_input` 让用户按项目名和画布名点击选择，原始 ID 只作为隐藏参数传递。
 

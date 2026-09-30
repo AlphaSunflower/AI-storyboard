@@ -56,8 +56,10 @@ export function ChatAppsHost({
         );
         return;
       }
+      const canvasTab = apps.tabs.find((tab) => tab.key === 'canvas');
       const canvasBase = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
-        || 'http://localhost:3000';
+        || canvasTab?.url
+        || '/canvas/';
       let canvasOrigin = '';
       try { canvasOrigin = new URL(canvasBase).origin; } catch { /* invalid config falls through */ }
       if (!canvasOrigin || event.origin !== canvasOrigin) return;
@@ -66,7 +68,7 @@ export function ChatAppsHost({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [currentProjectId, onCanvasModeReady, onCanvasModeStatus]);
+  }, [apps.tabs, currentProjectId, onCanvasModeReady, onCanvasModeStatus]);
 
   useEffect(() => {
     const canvasTab = apps.tabs.find((tab) => tab.key === 'canvas' && tab.canvasMode);
