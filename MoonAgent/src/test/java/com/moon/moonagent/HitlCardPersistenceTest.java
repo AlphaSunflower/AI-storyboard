@@ -9,10 +9,9 @@ import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.support.PostgresContainerTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -22,14 +21,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-@SpringBootTest
-@TestPropertySource(properties = {
-        "storyboard.internal-secret=test-internal-secret",
-        "storyboard.storage.access-key=minioadmin",
-        "storyboard.storage.secret-key=minioadmin123"
-})
 @Transactional
-class HitlCardPersistenceTest {
+class HitlCardPersistenceTest extends PostgresContainerTest {
 
     @Autowired
     private AgentRuntimeSupport support;
