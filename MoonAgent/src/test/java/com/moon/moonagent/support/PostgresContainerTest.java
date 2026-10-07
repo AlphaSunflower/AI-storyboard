@@ -1,15 +1,14 @@
 package com.moon.moonagent.support;
 
+import com.moon.moonagent.storage.MinioStorage;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
-import org.testcontainers.containers.GenericContainer;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,7 +17,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.Duration;
 
 /**
  * Base class for MoonAgent tests that need the full Spring context backed by a real
@@ -28,9 +26,10 @@ import java.time.Duration;
  * lives in a gitignored {@code application-local.yml}. That file does not exist on CI,
  * so any full-context test would fail with "Failed to determine suitable jdbc url".
  * The full context also builds {@code MinioStorage} eagerly in a {@code @PostConstruct}
- * bucket check. Throwaway PostgreSQL and MinIO containers keep these tests
- * self-contained: the schema is applied from {@code db/moonagent-test-schema.sql} and
- * every external endpoint is injected before the context is created.
+ * bucket check, so that bean is replaced with a mock: these tests never touch object
+ * storage, and pulling a MinIO image in CI is slow and flaky. A throwaway PostgreSQL
+ * container keeps the persistence assertions real, with the schema applied from
+ * {@code db/moonagent-test-schema.sql} before the context is created.
  */
 @SpringBootTest
 @ActiveProfiles("testcontainers")
@@ -46,19 +45,14 @@ import java.time.Duration;
 })
 public abstract class PostgresContainerTest {
 
+    /** Replaces the eager bucket-check bean; object storage is irrelevant to these tests. */
+    @MockitoBean
+    MinioStorage minioStorage;
+
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("moon_agent")
             .withUsername("test")
             .withPassword("test");
-
-    static final GenericContainer<?> MINIO = new GenericContainer<>(
-            DockerImageName.parse("quay.io/minio/minio:latest"))
-            .withEnv("MINIO_ROOT_USER", "minioadmin")
-            .withEnv("MINIO_ROOT_PASSWORD", "minioadmin123")
-            .withExposedPorts(9000)
-            .withCommand("server", "/data")
-            .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000))
-            .withStartupTimeout(Duration.ofMinutes(2));
 
     static {
         // Start once per JVM and keep the container alive for every subclass. A shared
@@ -66,11 +60,7 @@ public abstract class PostgresContainerTest {
         // Testcontainers' shaded commons-io lookup on the second test class.
         POSTGRES.start();
         applySchema();
-        MINIO.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            MINIO.stop();
-            POSTGRES.stop();
-        }));
+        Runtime.getRuntime().addShutdownHook(new Thread(POSTGRES::stop));
     }
 
     @DynamicPropertySource
@@ -79,8 +69,6 @@ public abstract class PostgresContainerTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
-        registry.add("storyboard.storage.endpoint",
-                () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
     }
 
     private static void applySchema() {
