@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+      const request = indexedDB.open('morrow-creative-canvas-v1', 5);
       request.onsuccess = () => {
         const db = request.result;
         const stores = [...db.objectStoreNames];
@@ -47,10 +47,10 @@ async function seedTextCanvas(page: Page) {
   });
   await page.evaluate(async ({ projectId, canvasId }) => {
     const now = Date.now();
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -63,8 +63,8 @@ async function seedTextCanvas(page: Page) {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
-    transaction.objectStore('projects').put({
+    const transaction = db.transaction(['legacyProjects', 'canvases'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({
       schemaVersion: 2,
       id: projectId,
       title: '画布选择测试',
@@ -427,11 +427,11 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
       height: 160,
       data: { kind: 'image', label: `性能节点 ${index + 1}`, prompt: '', status: 'idle', accent: '#d7ff54' },
     }));
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       request.onupgradeneeded = () => {
         const next = request.result;
-        if (!next.objectStoreNames.contains('projects')) next.createObjectStore('projects', { keyPath: 'id' });
+        if (!next.objectStoreNames.contains('legacyProjects')) next.createObjectStore('legacyProjects', { keyPath: 'id' });
         if (!next.objectStoreNames.contains('canvases')) next.createObjectStore('canvases', { keyPath: 'id' });
         if (!next.objectStoreNames.contains('assets')) next.createObjectStore('assets', { keyPath: 'id' });
         if (!next.objectStoreNames.contains('libraryEntries')) next.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -442,8 +442,8 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
-    transaction.objectStore('projects').put({ schemaVersion: 2, id, title: '500 节点性能基准', canvases: [canvasId], createdAt: now, updatedAt: now });
+    const transaction = db.transaction(['legacyProjects', 'canvases'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id, title: '500 节点性能基准', canvases: [canvasId], createdAt: now, updatedAt: now });
     transaction.objectStore('canvases').put({ schemaVersion: 1, id: canvasId, projectId: id, title: '默认画布', nodes, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, createdAt: now, updatedAt: now });
     await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); });
     db.close();
@@ -457,10 +457,10 @@ test('keeps a 500 node canvas bounded while moving and zooming', async ({ page }
   await expect(page.locator('.project-copy small')).toHaveText('已保存到本地');
   await page.waitForTimeout(700);
   const readProjectUpdatedAt = async () => page.evaluate(async (id) => {
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     const db = await new Promise<IDBDatabase>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     const record = await new Promise<{ updatedAt: number }>((resolve, reject) => {
-      const get = db.transaction('projects').objectStore('projects').get(id);
+      const get = db.transaction('legacyProjects').objectStore('legacyProjects').get(id);
       get.onsuccess = () => resolve(get.result);
       get.onerror = () => reject(get.error);
     });

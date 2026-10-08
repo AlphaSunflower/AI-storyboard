@@ -81,10 +81,10 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   await page.goto('/');
   await page.evaluate(async ({ projectId, canvasId }) => {
     const now = Date.now();
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -106,8 +106,8 @@ test('drags a shot node from its handle and opens details in the inspector', asy
       context.fillRect(0, 0, 24, 24);
       canvas.toBlob((blob) => resolve(blob!), 'image/png');
     });
-    const transaction = db.transaction(['projects', 'canvases', 'assetMeta', 'assetVariants'], 'readwrite');
-    transaction.objectStore('projects').put({
+    const transaction = db.transaction(['legacyProjects', 'canvases', 'assetMeta', 'assetVariants'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({
       schemaVersion: 2,
       id: projectId,
       title: '节点交互测试',

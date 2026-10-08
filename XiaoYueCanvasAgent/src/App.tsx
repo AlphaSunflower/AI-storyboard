@@ -20,7 +20,7 @@ import { HomePage } from './components/HomePage';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProjectHome } from './components/ProjectHome';
 import { exportProjectPackage, importProjectPackage } from './services/projectPackage';
-import { collectAssetGarbage, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, saveCanvas, saveProject } from './services/projectStorage';
+import { cleanupGenerationQueue, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, saveCanvas, saveProject, scheduleAssetGarbageCollection } from './services/projectStorage';
 import { useCanvasStore } from './store/canvasStore';
 import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
@@ -70,6 +70,7 @@ export default function App() {
   const pendingSave = useRef<CanvasDocumentV1 | null>(null);
   const saveInFlight = useRef<Promise<CanvasDocumentV1 | null> | null>(null);
   const graphUpdateTimer = useRef<number | null>(null);
+  const maintenanceRunRef = useRef<string | null>(null);
   const revision = useCanvasStore((state) => state.revision);
   const loadProjectGraph = useCanvasStore((state) => state.loadProjectGraph);
   const hydrateMetadata = useMediaStore((state) => state.hydrateMetadata);
@@ -216,13 +217,20 @@ export default function App() {
     if (!authed || view !== 'canvas' || !canvas?.id) return;
     const reconcile = () => {
       void hydrateReferencedCanvasAssets(canvas.id).catch(() => undefined);
-      void recoverGenerationJobs().catch(() => undefined);
+      void recoverGenerationJobs()
+        .then(() => {
+          const key = `${project?.id ?? ''}:${canvas.id}`;
+          if (maintenanceRunRef.current === key) return;
+          maintenanceRunRef.current = key;
+          return cleanupGenerationQueue().catch(() => undefined);
+        })
+        .catch(() => undefined);
       recoverGraphExecutions();
     };
     reconcile();
     const timer = window.setInterval(reconcile, 15_000);
     return () => window.clearInterval(timer);
-  }, [authed, canvas?.id, view]);
+  }, [authed, canvas?.id, project?.id, view]);
   useEffect(() => { canvasRef.current = canvas; }, [canvas]);
   useEffect(() => {
     if (view === 'canvas' && project && canvas?.id) {
@@ -481,7 +489,7 @@ export default function App() {
       await saveInFlight.current?.catch(() => null);
     }
     await deleteCanvas(canvasId);
-    await collectAssetGarbage();
+    scheduleAssetGarbageCollection();
     const remaining = project ? await listCanvases(project.id) : [];
     setCanvases(remaining);
     if (deletingCurrent && project) {
@@ -555,7 +563,7 @@ export default function App() {
     setView('projectHome');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(project.id)}`);
     void persistCurrentCanvas()
-      .then(() => collectAssetGarbage(protectedIds))
+      .then(() => scheduleAssetGarbageCollection(protectedIds))
       .catch(() => notify('返回前保存失败，已保留项目中心视图'));
     void listCanvases(project.id)
       .then(setCanvases)
@@ -573,7 +581,7 @@ export default function App() {
 
   const removeProject = useCallback(async (projectId: string) => {
     await deleteProject(projectId);
-    await collectAssetGarbage();
+    scheduleAssetGarbageCollection();
     await refreshProjects();
   }, [refreshProjects]);
 
@@ -583,7 +591,7 @@ export default function App() {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     if (saveInFlight.current) await saveInFlight.current;
     await deleteProject(currentProject.id);
-    await collectAssetGarbage();
+    scheduleAssetGarbageCollection();
     setView('home');
     setProject(null);
     setCanvas(null);

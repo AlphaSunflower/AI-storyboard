@@ -3,7 +3,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { Pause, Play, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
-import { getAsset, getAssetVariant } from '../services/projectStorage';
+import { getAssetMetadata, getAssetVariant } from '../services/projectStorage';
 import { useObjectUrl } from '../hooks/useObjectUrl';
 import { useViewportVisibility } from '../hooks/useViewportVisibility';
 import type { CanvasNode, VideoGenerationParams } from '../types';
@@ -19,28 +19,36 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
   const metadata = useMediaStore((state) => data.assetId ? state.metadata[data.assetId] : undefined);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const upsertMetadata = useMediaStore((state) => state.upsertMetadata);
   const visibility = useViewportVisibility<HTMLElement>(id, selected);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lazyBlob, setLazyBlob] = useState<Blob>();
+  const [lazyPreviewBlob, setLazyPreviewBlob] = useState<Blob>();
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const videoBlob = asset?.originalBlob ?? lazyBlob;
   const videoUrl = useObjectUrl(videoBlob, visibility.visible);
-  const posterUrl = useObjectUrl(asset?.previewBlob, visibility.visible);
+  const posterUrl = useObjectUrl(asset?.previewBlob ?? lazyPreviewBlob, visibility.visible);
 
   useEffect(() => {
-    if (!data.assetId || asset || !metadata || !visibility.visible) return;
+    if (!data.assetId || metadata || !visibility.visible) return;
     let cancelled = false;
-    void getAsset(data.assetId).then((loaded) => { if (!cancelled && loaded) upsertAsset(loaded); }).catch(() => undefined);
+    void getAssetMetadata(data.assetId).then((loaded) => { if (!cancelled && loaded) upsertMetadata(loaded); }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [asset, data.assetId, metadata, upsertAsset, visibility.visible]);
+  }, [data.assetId, metadata, upsertMetadata, visibility.visible]);
   useEffect(() => {
     if (!data.assetId || asset || !metadata || !visibility.visible) return;
     let cancelled = false;
     void getAssetVariant(data.assetId, 'original').then((blob) => { if (!cancelled && blob) setLazyBlob(blob); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [asset, data.assetId, metadata, visibility.visible]);
+  useEffect(() => {
+    if (!data.assetId || asset || !metadata || !visibility.visible) return;
+    let cancelled = false;
+    void getAssetVariant(data.assetId, 'preview').then((blob) => { if (!cancelled && blob) setLazyPreviewBlob(blob); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [asset, data.assetId, metadata, visibility.visible]);
   useEffect(() => { setTime(0); setPlaying(false); }, [id, videoUrl]);

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearLocalData, collectAssetGarbage, createCanvas, createProject, getAsset, getAssetMetadata, loadCanvas, saveAsset, saveAssetToLibrary, saveCanvas } from './projectStorage';
+import { assetCacheUsage, clearLocalData, cleanupGenerationQueue, collectAssetGarbage, createCanvas, createProject, evictAssetCache, flushScheduledAssetGarbageCollection, getAsset, getAssetMetadata, getAssetVariant, listGenerationQueueItems, loadCanvas, putGenerationQueueItem, saveAsset, saveAssetToLibrary, saveCanvas, scheduleAssetGarbageCollection } from './projectStorage';
 import type { PersistedAsset } from '../types';
 import { clearToken, setJobToken } from './jobAuth';
+import type { GenerationQueueItem } from '../canvas/generationQueue';
 
 const asset = (id: string, derivedFrom?: string): PersistedAsset => ({
   id, kind: 'image', name: `${id}.png`, mimeType: 'image/png', bytes: 4, width: 1, height: 1,
@@ -40,6 +41,60 @@ describe('asset references', () => {
     const metadata = await getAssetMetadata('metadata');
     expect(metadata).toMatchObject({ id: 'metadata', width: 1, height: 1 });
     expect(metadata).not.toHaveProperty('originalBlob');
+  });
+
+  it('reads one asset variant without materializing the other blobs', async () => {
+    await saveAsset(asset('variant'));
+    expect(await getAssetVariant('variant', 'thumbnail')).toBeDefined();
+    await evictAssetCache({ limit: 0, now: Date.now() + 11 * 60 * 1000 });
+    expect(await getAssetMetadata('variant')).toBeDefined();
+    expect(await getAsset('variant')).toBeUndefined();
+  });
+
+  it('evicts old unpinned cache entries but keeps library assets pinned', async () => {
+    await saveAsset(asset('old'));
+    await saveAsset(asset('library'));
+    await saveAssetToLibrary('library');
+
+    const evicted = await evictAssetCache({ limit: 0, now: Date.now() + 11 * 60 * 1000 });
+
+    expect(evicted).toContain('old');
+    expect(evicted).not.toContain('library');
+    expect(await assetCacheUsage()).toBeGreaterThan(0);
+  });
+
+  it('cleans terminal generation queue items after the retention window', async () => {
+    const now = Date.now();
+    const queueItem = (id: string, status: GenerationQueueItem['status'], updatedAt: number): GenerationQueueItem => ({
+      id,
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      producerNodeId: 'node-1',
+      generationRecordId: id,
+      requestSnapshot: { capabilityId: 'image.generate', sourceAssetIds: [], params: {} },
+      status,
+      attempt: 1,
+      createdAt: updatedAt,
+      updatedAt,
+    });
+    await putGenerationQueueItem(queueItem('old-terminal', 'terminal', now - 10_000));
+    await putGenerationQueueItem(queueItem('recent-terminal', 'terminal', now));
+    await putGenerationQueueItem(queueItem('old-running', 'running', now - 10_000));
+
+    expect(await cleanupGenerationQueue(5_000)).toEqual(['old-terminal']);
+    expect((await listGenerationQueueItems('project-1', 'canvas-1')).map((item) => item.id).sort())
+      .toEqual(['old-running', 'recent-terminal']);
+  });
+
+  it('flushes scheduled asset garbage collection with protected ids', async () => {
+    await saveAsset(asset('protected'));
+    await saveAsset(asset('orphan'));
+
+    scheduleAssetGarbageCollection(['protected']);
+    await flushScheduledAssetGarbageCollection();
+
+    expect(await getAsset('protected')).toBeDefined();
+    expect(await getAsset('orphan')).toBeUndefined();
   });
 
   it('loads an empty backend-created canvas without a local cache', async () => {

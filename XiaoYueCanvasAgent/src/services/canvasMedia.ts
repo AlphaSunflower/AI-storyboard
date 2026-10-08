@@ -1,6 +1,6 @@
 import { useCanvasStore } from '../store/canvasStore';
 import { createImageAsset, createVideoAsset } from '../utils/mediaPipeline';
-import { saveAsset } from './projectStorage';
+import { hasAssetVariants, saveAsset } from './projectStorage';
 import {
   downloadCanvasAssetBlob,
   listCanvasAssets,
@@ -173,8 +173,11 @@ export async function hydrateReferencedCanvasAssets(canvasId: string) {
   ].filter((assetId): assetId is string => Boolean(assetId))));
   if (!referenced.size) return;
   const metadata = useMediaStore.getState().metadata;
-  const missing = serverAssets
-    .filter((asset) => referenced.has(asset.id) && !metadata[asset.id]);
+  const missing: CanvasAssetDescriptor[] = [];
+  for (const asset of serverAssets) {
+    if (!referenced.has(asset.id)) continue;
+    if (!metadata[asset.id] || !await hasAssetVariants(asset.id)) missing.push(asset);
+  }
   for (const asset of missing) {
     try {
       useMediaStore.getState().clearAssetError(asset.id);

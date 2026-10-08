@@ -3,7 +3,7 @@ import { useStore } from '@xyflow/react';
 import { Image as ImageIcon, Upload } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useMediaStore } from '../../store/mediaStore';
-import { getAsset, getAssetVariant } from '../../services/projectStorage';
+import { getAssetMetadata, getAssetVariant } from '../../services/projectStorage';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { useViewportVisibility } from '../../hooks/useViewportVisibility';
 import type { CanvasNode } from '../../types';
@@ -22,6 +22,7 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
   const zoom = useStore((state) => state.transform[2]);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
+  const upsertMetadata = useMediaStore((state) => state.upsertMetadata);
   const clearAssetError = useMediaStore((state) => state.clearAssetError);
   const assetError = useMediaStore((state) => data.assetId ? state.assetErrors[data.assetId] : undefined);
   const quality = useMediaStore((state) => state.quality);
@@ -38,24 +39,24 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!data.assetId || asset || !visibility.visible) return;
+    if (!data.assetId || metadata || !visibility.visible) return;
     let cancelled = false;
     clearAssetError(data.assetId);
-    void getAsset(data.assetId).then((loaded) => {
-      if (!cancelled && loaded) upsertAsset(loaded);
+    void getAssetMetadata(data.assetId).then((loaded) => {
+      if (!cancelled && loaded) upsertMetadata(loaded);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [asset, clearAssetError, data.assetId, upsertAsset, visibility.visible]);
+  }, [clearAssetError, data.assetId, metadata, upsertMetadata, visibility.visible]);
 
   useEffect(() => {
-    if (!data.assetId || asset || !metadata || !visibility.visible || selected || quality === 'placeholder') return;
+    if (!data.assetId || asset || !metadata || !visibility.visible || quality === 'placeholder') return;
     let cancelled = false;
     const key = `${data.assetId}:${desiredVariant}`;
     void getAssetVariant(data.assetId, desiredVariant).then((blob) => {
       if (!cancelled && blob) setLazyVariant({ key, blob });
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [asset, data.assetId, desiredVariant, metadata, quality, selected, visibility.visible]);
+  }, [asset, data.assetId, desiredVariant, metadata, quality, visibility.visible]);
 
   useEffect(() => {
     if (!visibility.visible) setLazyVariant(null);

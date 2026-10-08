@@ -94,10 +94,10 @@ test('extracts a real tail frame with the local ffmpeg pipeline', async ({ page 
     stream.getTracks().forEach((track) => track.stop());
     const videoBlob = new Blob(chunks, { type: 'video/webm' });
 
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -111,8 +111,8 @@ test('extracts a real tail frame with the local ffmpeg pipeline', async ({ page 
       request.onerror = () => reject(request.error);
     });
     const now = Date.now();
-    const transaction = db.transaction(['projects', 'canvases', 'assetMeta', 'assetVariants'], 'readwrite');
-    transaction.objectStore('projects').put({ schemaVersion: 2, id: projectId, title: '视频工具测试', canvases: [canvasId], createdAt: now, updatedAt: now });
+    const transaction = db.transaction(['legacyProjects', 'canvases', 'assetMeta', 'assetVariants'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id: projectId, title: '视频工具测试', canvases: [canvasId], createdAt: now, updatedAt: now });
     transaction.objectStore('assetMeta').put({
       id: 'video-e2e-asset',
       kind: 'video',
@@ -205,10 +205,10 @@ test('reorders clips inside the video merge node', async ({ page }, testInfo) =>
 
   await page.goto('/');
   await page.evaluate(async ({ projectId, canvasId }) => {
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -251,8 +251,8 @@ test('reorders clips inside the video merge node', async ({ page }, testInfo) =>
     await stopped;
     stream.getTracks().forEach((track) => track.stop());
     const blob = new Blob(chunks, { type: 'video/webm' });
-    const transaction = db.transaction(['projects', 'assetMeta', 'assetVariants'], 'readwrite');
-    transaction.objectStore('projects').put({ schemaVersion: 2, id: projectId, title: '视频合并测试', canvases: [canvasId], createdAt: 1, updatedAt: 1 });
+    const transaction = db.transaction(['legacyProjects', 'assetMeta', 'assetVariants'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id: projectId, title: '视频合并测试', canvases: [canvasId], createdAt: 1, updatedAt: 1 });
     for (const id of ['video-a-asset', 'video-b-asset']) {
       transaction.objectStore('assetMeta').put({ id, kind: 'video', name: `${id}.webm`, mimeType: 'video/webm', bytes: blob.size, width: 1280, height: 720, durationSeconds: 4, projectId, canvasId, libraryState: 'project', createdAt: 1 });
       for (const variant of ['original', 'thumbnail', 'preview']) {
@@ -385,10 +385,10 @@ test('restores a 1.68x video by reprocessing its original source at 1.0x', async
     stream.getTracks().forEach((track) => track.stop());
     const blob = new Blob(chunks, { type: 'video/webm' });
 
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -401,8 +401,8 @@ test('restores a 1.68x video by reprocessing its original source at 1.0x', async
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const transaction = db.transaction(['projects', 'assetMeta', 'assetVariants'], 'readwrite');
-    transaction.objectStore('projects').put({ schemaVersion: 2, id: projectId, title: '视频变速测试', canvases: [canvasId], createdAt: 1, updatedAt: 1 });
+    const transaction = db.transaction(['legacyProjects', 'assetMeta', 'assetVariants'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id: projectId, title: '视频变速测试', canvases: [canvasId], createdAt: 1, updatedAt: 1 });
     for (const id of ['speed-source', 'speed-adjusted']) {
       transaction.objectStore('assetMeta').put({
         id,

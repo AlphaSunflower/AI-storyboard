@@ -32,10 +32,10 @@ test('reports a controlled canvas only after it is bridge-ready', async ({ page 
   await page.evaluate(async ({ projectId, canvasId }) => {
     localStorage.setItem('morrow_job_token', 'embed-token');
     localStorage.setItem('morrow_job_user', 'embed-user');
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -49,8 +49,8 @@ test('reports a controlled canvas only after it is bridge-ready', async ({ page 
       request.onerror = () => reject(request.error);
     });
     const now = Date.now();
-    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
-    transaction.objectStore('projects').put({
+    const transaction = db.transaction(['legacyProjects', 'canvases'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({
       schemaVersion: 2,
       id: projectId,
       title: '嵌入测试项目',

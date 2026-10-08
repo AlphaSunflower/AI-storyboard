@@ -76,10 +76,10 @@ async function seedCanvas(page: Page, options: { seedream?: boolean } = {}) {
   await page.goto('/');
   await page.evaluate(async ({ projectId, canvasId }) => {
     const now = Date.now();
-    const request = indexedDB.open('morrow-creative-canvas-v1', 4);
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
@@ -92,8 +92,8 @@ async function seedCanvas(page: Page, options: { seedream?: boolean } = {}) {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const transaction = db.transaction(['projects', 'canvases'], 'readwrite');
-    transaction.objectStore('projects').put({ schemaVersion: 2, id: projectId, title: '区域重绘测试', canvases: [canvasId], createdAt: now, updatedAt: now });
+    const transaction = db.transaction(['legacyProjects', 'canvases'], 'readwrite');
+    transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id: projectId, title: '区域重绘测试', canvases: [canvasId], createdAt: now, updatedAt: now });
     transaction.objectStore('canvases').put({ schemaVersion: 1, id: canvasId, projectId, title: '默认画布', nodes: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, createdAt: now, updatedAt: now });
     await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); });
     db.close();

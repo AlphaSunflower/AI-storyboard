@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
-import type { AssetMetadata, CanvasDocumentV1, CanvasEdge, CanvasNode, CanvasSummary, MediaAsset, PersistedAsset, ProjectDocumentV1, ProjectDocumentV2, ProjectSummary } from '../types';
+import type { IDBPDatabase } from 'idb';
+import type { AssetCacheEntry, AssetMetadata, CanvasDocumentV1, CanvasEdge, CanvasNode, CanvasSummary, LegacyProjectDocument, MediaAsset, PersistedAsset, ProjectDocumentV1, ProjectDocumentV2, ProjectSummary } from '../types';
 import type { Viewport } from '@xyflow/react';
 import { createId } from '../utils/id';
 import { apiJson } from './morrowApi';
@@ -8,7 +9,13 @@ import type { GenerationQueueItem } from '../canvas/generationQueue';
 
 // Use a new versioned namespace instead of attempting to migrate the former demo prototype.
 export const DB_NAME = 'morrow-creative-canvas-v1';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
+
+export const ASSET_CACHE_MAX_BYTES = 500 * 1024 * 1024;
+export const ASSET_CACHE_QUOTA_RATIO = .6;
+export const ASSET_CACHE_TARGET_RATIO = .85;
+export const ASSET_CACHE_MIN_AGE_MS = 10 * 60 * 1000;
+export const GENERATION_QUEUE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type AssetVariant = 'original' | 'thumbnail' | 'preview';
 interface PersistedAssetVariant { assetId: string; variant: AssetVariant; blob: Blob }
@@ -18,9 +25,25 @@ export const assetMetadata = (asset: MediaAsset | PersistedAsset): AssetMetadata
   return metadata;
 };
 
-const database = openDB(DB_NAME, DB_VERSION, {
+const createIndex = (store: any, name: string, keyPath: string | string[], options?: IDBIndexParameters) => {
+  if (!store.indexNames.contains(name)) store.createIndex(name, keyPath, options);
+};
+
+const copyObjectStore = async (
+  source: any,
+  target: any,
+) => {
+  let cursor = await source.openCursor();
+  while (cursor) {
+    await target.put(cursor.value);
+    cursor = await cursor.continue();
+  }
+};
+
+let database: Promise<IDBPDatabase>;
+
+const openDatabase = () => openDB(DB_NAME, DB_VERSION, {
   async upgrade(db, oldVersion, _newVersion, transaction) {
-    if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('libraryEntries')) db.createObjectStore('libraryEntries', { keyPath: 'assetId' });
     if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings');
@@ -28,6 +51,21 @@ const database = openDB(DB_NAME, DB_VERSION, {
     if (!db.objectStoreNames.contains('assetVariants')) db.createObjectStore('assetVariants', { keyPath: ['assetId', 'variant'] });
     if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('generationQueue')) db.createObjectStore('generationQueue', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('assetCacheEntries')) db.createObjectStore('assetCacheEntries', { keyPath: 'assetId' });
+    if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('legacyAssets')) db.createObjectStore('legacyAssets', { keyPath: 'id' });
+
+    createIndex(transaction.objectStore('assetMeta'), 'by-projectId', 'projectId');
+    createIndex(transaction.objectStore('assetMeta'), 'by-canvasId', 'canvasId');
+    createIndex(transaction.objectStore('assetMeta'), 'by-libraryState', 'libraryState');
+    createIndex(transaction.objectStore('canvases'), 'by-projectId', 'projectId');
+    createIndex(transaction.objectStore('canvases'), 'by-updatedAt', 'updatedAt');
+    createIndex(transaction.objectStore('assetCacheEntries'), 'by-lastAccessedAt', 'lastAccessedAt');
+    createIndex(transaction.objectStore('generationQueue'), 'by-projectId', 'projectId');
+    createIndex(transaction.objectStore('generationQueue'), 'by-canvasId', 'canvasId');
+    createIndex(transaction.objectStore('generationQueue'), 'by-project-canvas', ['projectId', 'canvasId']);
+    createIndex(transaction.objectStore('generationQueue'), 'by-status-updatedAt', ['status', 'updatedAt']);
+    createIndex(transaction.objectStore('generationQueue'), 'by-updatedAt', 'updatedAt');
 
     // v2 -> v3 迁移：把旧项目（v1，含图）拆成 project(v2) + 独立 canvas，并回填资产来源信息。
     if (oldVersion >= 1 && oldVersion < 3) {
@@ -58,10 +96,99 @@ const database = openDB(DB_NAME, DB_VERSION, {
         }
       }
     }
+
+    if (oldVersion < 5) {
+      if (db.objectStoreNames.contains('projects')) {
+        await copyObjectStore(transaction.objectStore('projects'), transaction.objectStore('legacyProjects'));
+        db.deleteObjectStore('projects');
+      }
+      if (db.objectStoreNames.contains('assets')) {
+        await copyObjectStore(transaction.objectStore('assets'), transaction.objectStore('legacyAssets'));
+        db.deleteObjectStore('assets');
+      }
+    }
+  },
+  blocked() {
+    console.warn('IndexedDB upgrade is blocked by another Morrow tab.');
+  },
+  blocking() {
+    void database?.then((db) => db.close()).catch(() => undefined);
+  },
+  terminated() {
+    database = openDatabase();
   },
 });
 
+database = openDatabase();
+
 export const hydrateAsset = (asset: PersistedAsset): MediaAsset => asset;
+
+const assetCacheBytes = (asset: MediaAsset | PersistedAsset) =>
+  asset.originalBlob.size + asset.thumbnailBlob.size + asset.previewBlob.size;
+
+const cacheEntryFor = (asset: MediaAsset | PersistedAsset, pinned = asset.libraryState === 'global'): AssetCacheEntry => ({
+  assetId: asset.id,
+  bytes: assetCacheBytes(asset) || asset.bytes,
+  lastAccessedAt: Date.now(),
+  cached: true,
+  pinned,
+});
+
+export async function touchAssetCache(assetId: string) {
+  const db = await database;
+  const transaction = db.transaction('assetCacheEntries', 'readwrite');
+  const entry = await transaction.store.get(assetId) as AssetCacheEntry | undefined;
+  if (entry?.cached) await transaction.store.put({ ...entry, lastAccessedAt: Date.now() });
+  await transaction.done;
+}
+
+export async function hasAssetVariants(assetId: string) {
+  const db = await database;
+  const entry = await db.get('assetCacheEntries', assetId) as AssetCacheEntry | undefined;
+  return Boolean(entry?.cached);
+}
+
+export async function assetCacheUsage() {
+  const entries = await (await database).getAll('assetCacheEntries') as AssetCacheEntry[];
+  return entries.reduce((total, entry) => total + (entry.cached ? Number(entry.bytes) || 0 : 0), 0);
+}
+
+export async function assetCacheLimit() {
+  let estimate: StorageEstimate | undefined;
+  try {
+    estimate = await globalThis.navigator?.storage?.estimate?.();
+  } catch {
+    estimate = undefined;
+  }
+  const quota = estimate?.quota ?? 0;
+  return quota > 0
+    ? Math.min(ASSET_CACHE_MAX_BYTES, quota * ASSET_CACHE_QUOTA_RATIO)
+    : ASSET_CACHE_MAX_BYTES;
+}
+
+export async function evictAssetCache(options: { now?: number; limit?: number } = {}) {
+  const db = await database;
+  const now = options.now ?? Date.now();
+  const limit = options.limit ?? await assetCacheLimit();
+  let usage = await assetCacheUsage();
+  if (usage <= limit) return [];
+
+  const entries = (await db.getAll('assetCacheEntries') as AssetCacheEntry[])
+    .filter((entry) => entry.cached && !entry.pinned && now - entry.lastAccessedAt >= ASSET_CACHE_MIN_AGE_MS)
+    .sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
+  const evicted: string[] = [];
+  const target = limit * ASSET_CACHE_TARGET_RATIO;
+  for (const entry of entries) {
+    if (usage <= target) break;
+    await db.delete('assetVariants', [entry.assetId, 'original']);
+    await db.delete('assetVariants', [entry.assetId, 'thumbnail']);
+    await db.delete('assetVariants', [entry.assetId, 'preview']);
+    await db.delete('assetCacheEntries', entry.assetId);
+    usage -= entry.bytes;
+    evicted.push(entry.assetId);
+  }
+  return evicted;
+}
 
 export async function saveAsset(asset: MediaAsset | PersistedAsset) {
   await saveAssets([asset]);
@@ -69,10 +196,11 @@ export async function saveAsset(asset: MediaAsset | PersistedAsset) {
 
 export async function saveAssets(assets: Array<MediaAsset | PersistedAsset>) {
   const db = await database;
-  const transaction = db.transaction(['assetMeta', 'assetVariants', 'assets'], 'readwrite');
+  const transaction = db.transaction(['assetMeta', 'assetVariants', 'assetCacheEntries', 'legacyAssets'], 'readwrite');
   const metaStore = transaction.objectStore('assetMeta');
   const variantStore = transaction.objectStore('assetVariants');
-  const legacyStore = transaction.objectStore('assets');
+  const cacheStore = transaction.objectStore('assetCacheEntries');
+  const legacyStore = transaction.objectStore('legacyAssets');
   const done = transaction.done;
   await Promise.all([
     ...assets.flatMap((asset) => [
@@ -80,10 +208,12 @@ export async function saveAssets(assets: Array<MediaAsset | PersistedAsset>) {
       variantStore.put({ assetId: asset.id, variant: 'original', blob: asset.originalBlob } satisfies PersistedAssetVariant),
       variantStore.put({ assetId: asset.id, variant: 'thumbnail', blob: asset.thumbnailBlob } satisfies PersistedAssetVariant),
       variantStore.put({ assetId: asset.id, variant: 'preview', blob: asset.previewBlob } satisfies PersistedAssetVariant),
+      cacheStore.put(cacheEntryFor(asset)),
       legacyStore.delete(asset.id),
     ]),
   ]);
   await done;
+  void evictAssetCache().catch(() => undefined);
 }
 
 export async function getAsset(assetId: string) {
@@ -98,10 +228,15 @@ export async function getAsset(assetId: string) {
       transaction.store.get([assetId, 'preview']) as Promise<PersistedAssetVariant | undefined>,
     ]);
     await done;
-    if (!original || !thumbnail || !preview) return undefined;
+    if (!original || !thumbnail || !preview) {
+      const legacy = await db.get('legacyAssets', assetId) as PersistedAsset | undefined;
+      if (legacy) await saveAsset(legacy);
+      return legacy;
+    }
+    void touchAssetCache(assetId);
     return { ...metadata, originalBlob: original.blob, thumbnailBlob: thumbnail.blob, previewBlob: preview.blob } satisfies PersistedAsset;
   }
-  const legacy = await db.get('assets', assetId) as PersistedAsset | undefined;
+  const legacy = await db.get('legacyAssets', assetId) as PersistedAsset | undefined;
   if (legacy) await saveAsset(legacy);
   return legacy;
 }
@@ -109,8 +244,11 @@ export async function getAsset(assetId: string) {
 export async function getAssetVariant(assetId: string, variant: AssetVariant) {
   const db = await database;
   const record = await db.get('assetVariants', [assetId, variant]) as PersistedAssetVariant | undefined;
-  if (record) return record.blob;
-  const legacy = await db.get('assets', assetId) as PersistedAsset | undefined;
+  if (record) {
+    void touchAssetCache(assetId);
+    return record.blob;
+  }
+  const legacy = await db.get('legacyAssets', assetId) as PersistedAsset | undefined;
   if (!legacy) return undefined;
   await saveAsset(legacy);
   return variant === 'original' ? legacy.originalBlob : variant === 'thumbnail' ? legacy.thumbnailBlob : legacy.previewBlob;
@@ -120,7 +258,7 @@ export async function getAssetMetadata(assetId: string) {
   const db = await database;
   const metadata = await db.get('assetMeta', assetId) as AssetMetadata | undefined;
   if (metadata) return metadata;
-  const legacy = await db.get('assets', assetId) as PersistedAsset | undefined;
+  const legacy = await db.get('legacyAssets', assetId) as PersistedAsset | undefined;
   if (!legacy) return undefined;
   await saveAsset(legacy);
   return assetMetadata(legacy);
@@ -133,8 +271,33 @@ export async function getAssetMetadatas(assetIds: Iterable<string>) {
 
 export async function getAssets(assetIds: Iterable<string>) {
   const ids = [...new Set(assetIds)];
-  const records = await Promise.all(ids.map(getAsset));
-  return records.filter((asset): asset is PersistedAsset => Boolean(asset));
+  if (!ids.length) return [];
+  const db = await database;
+  const transaction = db.transaction(['assetMeta', 'assetVariants'], 'readonly');
+  const done = transaction.done;
+  const [metadata, variants] = await Promise.all([
+    Promise.all(ids.map((assetId) => transaction.objectStore('assetMeta').get(assetId) as Promise<AssetMetadata | undefined>)),
+    Promise.all(ids.flatMap((assetId) => (['original', 'thumbnail', 'preview'] as AssetVariant[]).map((variant) =>
+      transaction.objectStore('assetVariants').get([assetId, variant]) as Promise<PersistedAssetVariant | undefined>))),
+  ]);
+  await done;
+  const variantsByKey = new Map(variants.filter((record): record is PersistedAssetVariant => Boolean(record))
+    .map((record) => [`${record.assetId}:${record.variant}`, record.blob]));
+  const records: PersistedAsset[] = [];
+  for (const [index, meta] of metadata.entries()) {
+    if (!meta) continue;
+    const assetId = ids[index];
+    const originalBlob = variantsByKey.get(`${assetId}:original`);
+    const thumbnailBlob = variantsByKey.get(`${assetId}:thumbnail`);
+    const previewBlob = variantsByKey.get(`${assetId}:preview`);
+    if (!originalBlob || !thumbnailBlob || !previewBlob) continue;
+    records.push({ ...meta, originalBlob, thumbnailBlob, previewBlob });
+    void touchAssetCache(assetId);
+  }
+  const missingLegacy = ids.filter((assetId) => !metadata.find((meta) => meta?.id === assetId));
+  records.push(...await Promise.all(missingLegacy.map(getAsset))
+    .then((items) => items.filter((asset): asset is PersistedAsset => Boolean(asset))));
+  return records;
 }
 
 export async function getAssetsWithAncestors(assetIds: Iterable<string>) {
@@ -179,30 +342,77 @@ export async function loadProject(projectId: string): Promise<ProjectDocumentV2 
 // 懒迁移：旧 IndexedDB 项目（id=浏览器生成的 UUID）→ 建后端 ai分镜 项目 + 画布元数据，重映射画布 projectId。
 const BACKEND_ID_RE = /^[0-9a-f]{32}$/;
 
-async function ensureBackendProjects() {
+async function migrateLegacyAssets() {
   const db = await database;
-  const legacy = (await db.getAll('projects')) as ProjectDocumentV2[];
-  if (!legacy.length) return;
-  for (const p of legacy) {
-    if (BACKEND_ID_RE.test(p.id)) continue; // 已是后端项目 id
-    try {
-      const created = await apiJson<{ id: string }>('/projects', { method: 'POST', body: JSON.stringify({ title: p.title }) });
-      const localCanvases = (await db.getAll('canvases')) as CanvasDocumentV1[];
-      const projectCanvases = localCanvases.filter((c) => c.projectId === p.id);
-      for (const c of projectCanvases) {
-        const meta = await apiJson<{ id: string }>(`/projects/${encodeURIComponent(created.id)}/canvases`, { method: 'POST', body: JSON.stringify({ title: c.title }) });
-        await db.delete('canvases', c.id);
-        const migrated = { ...c, id: meta.id, projectId: created.id };
-        await db.put('canvases', migrated);
-        await saveCanvas(migrated);
-      }
-    } catch { /* 迁移失败不阻断（后端不可达/无 token 时跳过，下次再试） */ }
-    await db.delete('projects', p.id);
+  const legacyAssets = await db.getAll('legacyAssets') as PersistedAsset[];
+  for (const asset of legacyAssets) {
+    const transaction = db.transaction(['legacyAssets', 'assetMeta', 'assetVariants', 'assetCacheEntries'], 'readwrite');
+    const done = transaction.done;
+    await Promise.all([
+      transaction.objectStore('assetMeta').put(assetMetadata(asset)),
+      transaction.objectStore('assetVariants').put({ assetId: asset.id, variant: 'original', blob: asset.originalBlob } satisfies PersistedAssetVariant),
+      transaction.objectStore('assetVariants').put({ assetId: asset.id, variant: 'thumbnail', blob: asset.thumbnailBlob } satisfies PersistedAssetVariant),
+      transaction.objectStore('assetVariants').put({ assetId: asset.id, variant: 'preview', blob: asset.previewBlob } satisfies PersistedAssetVariant),
+      transaction.objectStore('assetCacheEntries').put(cacheEntryFor(asset)),
+      transaction.objectStore('legacyAssets').delete(asset.id),
+    ]);
+    await done;
   }
 }
 
-export async function listProjects(): Promise<ProjectSummary[]> {
+async function ensureBackendProjects() {
+  const db = await database;
+  const legacy = (await db.getAll('legacyProjects')) as LegacyProjectDocument[];
+  if (!legacy.length) return;
+  for (const p of legacy) {
+    if (BACKEND_ID_RE.test(p.id)) {
+      await db.delete('legacyProjects', p.id);
+      continue;
+    }
+    try {
+      const migration = p.migration ?? { updatedAt: Date.now(), canvasIdMap: {} };
+      const backendProjectId = migration.backendProjectId ?? (
+        await apiJson<{ id: string }>('/projects', { method: 'POST', body: JSON.stringify({ title: p.title }) })
+      ).id;
+      if (!migration.backendProjectId) {
+        migration.backendProjectId = backendProjectId;
+        migration.updatedAt = Date.now();
+        await db.put('legacyProjects', { ...p, migration });
+      }
+      const projectCanvases = await db.getAllFromIndex('canvases', 'by-projectId', p.id) as CanvasDocumentV1[];
+      for (const c of projectCanvases) {
+        const existingId = migration.canvasIdMap?.[c.id];
+        const canvasId = existingId ?? (
+          await apiJson<{ id: string }>(`/projects/${encodeURIComponent(backendProjectId)}/canvases`, {
+            method: 'POST',
+            body: JSON.stringify({ title: c.title }),
+          })
+        ).id;
+        if (!existingId) {
+          migration.canvasIdMap = { ...(migration.canvasIdMap ?? {}), [c.id]: canvasId };
+          migration.updatedAt = Date.now();
+          await db.put('legacyProjects', { ...p, migration });
+        }
+        const migrated = { ...c, id: canvasId, projectId: backendProjectId, revision: 0 };
+        await saveCanvas(migrated);
+        if (canvasId !== c.id) await db.delete('canvases', c.id);
+        for (const assetId of projectAssetIds(c.nodes)) {
+          const meta = await db.get('assetMeta', assetId) as AssetMetadata | undefined;
+          if (meta) await db.put('assetMeta', { ...meta, projectId: backendProjectId, canvasId });
+        }
+      }
+      await db.delete('legacyProjects', p.id);
+    } catch { /* 迁移失败不阻断（后端不可达/无 token 时跳过，下次再试） */ }
+  }
+}
+
+export async function migrateLegacyStorage() {
+  await migrateLegacyAssets();
   await ensureBackendProjects();
+}
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  await migrateLegacyStorage();
   const projects = await apiJson<Array<{
     id: string; title: string; canvasCount?: number; nodeCount?: number; assetCount?: number;
   }>>('/projects');
@@ -378,26 +588,36 @@ export async function deleteCanvas(canvasId: string) {
 }
 
 export async function saveImportedProject(project: ProjectDocumentV2, canvases: CanvasDocumentV1[], assets: PersistedAsset[]) {
-  const db = await database;
-  const transaction = db.transaction(['projects', 'canvases', 'assets', 'assetMeta', 'assetVariants'], 'readwrite');
-  const projectStore = transaction.objectStore('projects');
-  const canvasStore = transaction.objectStore('canvases');
-  const legacyStore = transaction.objectStore('assets');
-  const metaStore = transaction.objectStore('assetMeta');
-  const variantStore = transaction.objectStore('assetVariants');
-  const done = transaction.done;
-  await Promise.all([
-    ...assets.flatMap((asset) => [
-      metaStore.put(assetMetadata(asset)),
-      variantStore.put({ assetId: asset.id, variant: 'original', blob: asset.originalBlob } satisfies PersistedAssetVariant),
-      variantStore.put({ assetId: asset.id, variant: 'thumbnail', blob: asset.thumbnailBlob } satisfies PersistedAssetVariant),
-      variantStore.put({ assetId: asset.id, variant: 'preview', blob: asset.previewBlob } satisfies PersistedAssetVariant),
-      legacyStore.delete(asset.id),
-    ]),
-    projectStore.put(project),
-    ...canvases.map((canvas) => canvasStore.put(canvas)),
-  ]);
-  await done;
+  const createdProject = await apiJson<{ id: string; title?: string }>('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ title: project.title }),
+  });
+  await saveAssets(assets);
+  const migratedCanvases: CanvasDocumentV1[] = [];
+  for (const canvas of canvases) {
+    const meta = await apiJson<{ id: string; title?: string }>(`/projects/${encodeURIComponent(createdProject.id)}/canvases`, {
+      method: 'POST',
+      body: JSON.stringify({ title: canvas.title }),
+    });
+    const migrated = { ...canvas, id: meta.id, projectId: createdProject.id, revision: 0 };
+    const saved = await saveCanvas(migrated);
+    migratedCanvases.push(saved);
+
+    const db = await database;
+    for (const assetId of projectAssetIds(canvas.nodes)) {
+      const metadata = await db.get('assetMeta', assetId) as AssetMetadata | undefined;
+      if (metadata) await db.put('assetMeta', { ...metadata, projectId: createdProject.id, canvasId: meta.id });
+    }
+  }
+  return {
+    project: {
+      ...project,
+      id: createdProject.id,
+      title: createdProject.title || project.title,
+      canvases: migratedCanvases.map((canvas) => canvas.id),
+    } satisfies ProjectDocumentV2,
+    canvases: migratedCanvases,
+  };
 }
 
 export async function collectAssetGarbage(protectedAssetIds: Iterable<string> = []) {
@@ -406,7 +626,7 @@ export async function collectAssetGarbage(protectedAssetIds: Iterable<string> = 
     db.getAll('canvases') as Promise<CanvasDocumentV1[]>,
     db.getAll('libraryEntries') as Promise<Array<{ assetId: string; savedAt: number }>>,
     db.getAllKeys('assetMeta') as Promise<IDBValidKey[]>,
-    db.getAllKeys('assets') as Promise<IDBValidKey[]>,
+    db.getAllKeys('legacyAssets') as Promise<IDBValidKey[]>,
   ]);
   const referenced = new Set(protectedAssetIds);
   canvases.forEach((canvas) => canvasAssetIds(canvas).forEach((id) => referenced.add(id)));
@@ -421,14 +641,15 @@ export async function collectAssetGarbage(protectedAssetIds: Iterable<string> = 
 
   const garbage = [...new Set([...assetKeys, ...legacyAssetKeys].map(String))].filter((assetId) => !referenced.has(assetId));
   for (let offset = 0; offset < garbage.length; offset += 100) {
-    const transaction = db.transaction(['assets', 'assetMeta', 'assetVariants'], 'readwrite');
+    const transaction = db.transaction(['legacyAssets', 'assetMeta', 'assetVariants', 'assetCacheEntries'], 'readwrite');
     const done = transaction.done;
     await Promise.all(garbage.slice(offset, offset + 100).flatMap((assetId) => [
-      transaction.objectStore('assets').delete(assetId),
+      transaction.objectStore('legacyAssets').delete(assetId),
       transaction.objectStore('assetMeta').delete(assetId),
       transaction.objectStore('assetVariants').delete([assetId, 'original']),
       transaction.objectStore('assetVariants').delete([assetId, 'thumbnail']),
       transaction.objectStore('assetVariants').delete([assetId, 'preview']),
+      transaction.objectStore('assetCacheEntries').delete(assetId),
     ]));
     await done;
   }
@@ -440,9 +661,16 @@ export async function saveAssetToLibrary(assetId: string) {
   const current = await getAsset(assetId);
   if (!current) throw new Error('素材文件不存在');
   const db = await database;
-  const transaction = db.transaction(['assetMeta', 'libraryEntries'], 'readwrite');
+  const transaction = db.transaction(['assetMeta', 'assetCacheEntries', 'libraryEntries'], 'readwrite');
   const done = transaction.done;
   await transaction.objectStore('assetMeta').put({ ...assetMetadata(current), libraryState: 'global' });
+  const cacheEntry = await transaction.objectStore('assetCacheEntries').get(assetId) as AssetCacheEntry | undefined;
+  await transaction.objectStore('assetCacheEntries').put({
+    ...(cacheEntry ?? cacheEntryFor(current, true)),
+    bytes: Number(cacheEntry?.bytes) || assetCacheBytes(current) || current.bytes,
+    pinned: true,
+    lastAccessedAt: Date.now(),
+  });
   await transaction.objectStore('libraryEntries').put({ assetId, savedAt: Date.now() });
   await done;
 }
@@ -457,16 +685,16 @@ export async function listLibraryAssets() {
 // 项目资产库：属于指定项目的所有资产（导入 + 派生）。
 export async function listProjectAssets(projectId: string) {
   const db = await database;
-  const metas = await db.getAll('assetMeta') as AssetMetadata[];
-  const ids = metas.filter((meta) => meta.projectId === projectId).map((meta) => meta.id);
+  const metas = await db.getAllFromIndex('assetMeta', 'by-projectId', projectId) as AssetMetadata[];
+  const ids = metas.map((meta) => meta.id);
   return getAssets(ids);
 }
 
 // 全局总资产库：所有 libraryState === 'global' 的资产（含其来源项目信息）。
 export async function listGlobalAssets() {
   const db = await database;
-  const metas = await db.getAll('assetMeta') as AssetMetadata[];
-  const ids = metas.filter((meta) => meta.libraryState === 'global').map((meta) => meta.id);
+  const metas = await db.getAllFromIndex('assetMeta', 'by-libraryState', 'global') as AssetMetadata[];
+  const ids = metas.map((meta) => meta.id);
   return getAssets(ids);
 }
 
@@ -486,26 +714,94 @@ export async function deleteGenerationQueueItem(id: string) {
   await (await database).delete('generationQueue', id);
 }
 
-export async function listGenerationQueueItems(projectId?: string) {
-  const items = await (await database).getAll('generationQueue') as GenerationQueueItem[];
-  return projectId ? items.filter((item) => item.projectId === projectId) : items;
+export async function listGenerationQueueItems(projectId?: string, canvasId?: string) {
+  const db = await database;
+  if (projectId && canvasId) {
+    return db.getAllFromIndex('generationQueue', 'by-project-canvas', [projectId, canvasId]) as Promise<GenerationQueueItem[]>;
+  }
+  if (projectId) {
+    return db.getAllFromIndex('generationQueue', 'by-projectId', projectId) as Promise<GenerationQueueItem[]>;
+  }
+  return db.getAll('generationQueue') as Promise<GenerationQueueItem[]>;
+}
+
+export async function cleanupGenerationQueue(retentionMs = GENERATION_QUEUE_RETENTION_MS) {
+  const db = await database;
+  const cutoff = Date.now() - retentionMs;
+  const stale = (await db.getAllFromIndex('generationQueue', 'by-updatedAt', IDBKeyRange.upperBound(cutoff))) as GenerationQueueItem[];
+  const removed = stale.filter((item) => ['terminal', 'cancelled', 'interrupted'].includes(item.status));
+  const transaction = db.transaction('generationQueue', 'readwrite');
+  await Promise.all(removed.map((item) => transaction.store.delete(item.id)));
+  await transaction.done;
+  return removed.map((item) => item.id);
 }
 
 export async function clearLocalData() {
   const db = await database;
-  const transaction = db.transaction(['projects', 'canvases', 'assets', 'assetMeta', 'assetVariants', 'libraryEntries', 'settings', 'generationQueue'], 'readwrite');
+  const transaction = db.transaction(['legacyProjects', 'legacyAssets', 'canvases', 'assetMeta', 'assetVariants', 'assetCacheEntries', 'libraryEntries', 'settings', 'generationQueue'], 'readwrite');
   const done = transaction.done;
   await Promise.all([
-    transaction.objectStore('projects').clear(),
+    transaction.objectStore('legacyProjects').clear(),
+    transaction.objectStore('legacyAssets').clear(),
     transaction.objectStore('canvases').clear(),
-    transaction.objectStore('assets').clear(),
     transaction.objectStore('assetMeta').clear(),
     transaction.objectStore('assetVariants').clear(),
+    transaction.objectStore('assetCacheEntries').clear(),
     transaction.objectStore('libraryEntries').clear(),
     transaction.objectStore('settings').clear(),
     transaction.objectStore('generationQueue').clear(),
   ]);
   await done;
+}
+
+export const ASSET_GC_DEBOUNCE_MS = 2_000;
+export const ASSET_GC_IDLE_TIMEOUT_MS = 5_000;
+
+let assetGcTimer: ReturnType<typeof setTimeout> | null = null;
+let assetGcIdle: number | null = null;
+let scheduledAssetIds = new Set<string>();
+
+const runScheduledAssetGarbageCollection = async () => {
+  const protectedIds = [...scheduledAssetIds];
+  scheduledAssetIds = new Set();
+  assetGcTimer = null;
+  assetGcIdle = null;
+  await collectAssetGarbage(protectedIds);
+};
+
+const scheduleIdleAssetGarbageCollection = () => {
+  const idleWindow = globalThis as typeof globalThis & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  };
+  if (idleWindow.requestIdleCallback) {
+    assetGcIdle = idleWindow.requestIdleCallback(
+      () => void runScheduledAssetGarbageCollection().catch(() => undefined),
+      { timeout: ASSET_GC_IDLE_TIMEOUT_MS },
+    );
+    return;
+  }
+  assetGcTimer = setTimeout(
+    () => void runScheduledAssetGarbageCollection().catch(() => undefined),
+    ASSET_GC_IDLE_TIMEOUT_MS,
+  );
+};
+
+export function scheduleAssetGarbageCollection(protectedAssetIds: Iterable<string> = []) {
+  for (const assetId of protectedAssetIds) scheduledAssetIds.add(assetId);
+  if (assetGcTimer !== null || assetGcIdle !== null) return;
+  assetGcTimer = setTimeout(() => {
+    assetGcTimer = null;
+    scheduleIdleAssetGarbageCollection();
+  }, ASSET_GC_DEBOUNCE_MS);
+}
+
+export async function flushScheduledAssetGarbageCollection() {
+  if (assetGcTimer !== null) {
+    clearTimeout(assetGcTimer);
+    assetGcTimer = null;
+  }
+  if (assetGcIdle !== null) assetGcIdle = null;
+  await runScheduledAssetGarbageCollection();
 }
 
 export function projectAssetIds(nodes: CanvasNode[]) {

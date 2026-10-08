@@ -253,6 +253,5 @@ export async function importProjectPackage(file: File) {
     createdAt: now,
     updatedAt: now,
   };
-  await saveImportedProject(project, canvases, assets);
-  return { project, canvases };
+  return saveImportedProject(project, canvases, assets);
 }

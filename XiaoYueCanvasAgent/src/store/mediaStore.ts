@@ -11,6 +11,7 @@ interface MediaState {
   upsertAssets: (assets: MediaAsset[]) => void;
   hydrateAssets: (assets: PersistedAsset[]) => void;
   hydrateMetadata: (assets: AssetMetadata[]) => void;
+  upsertMetadata: (asset: AssetMetadata) => void;
   markAssetError: (assetId: string, message: string) => void;
   clearAssetError: (assetId: string) => void;
   setQuality: (quality: MediaQuality) => void;
@@ -53,6 +54,7 @@ export const useMediaStore = create<MediaState>((set, get) => ({
     set({ assets: Object.fromEntries(records.map((record) => { const asset = hydrateAsset(record); return [asset.id, asset]; })), metadata: Object.fromEntries(records.map((record) => [record.id, record])), assetErrors: {} });
   },
   hydrateMetadata: (records) => set({ metadata: Object.fromEntries(records.map((record) => [record.id, record])), assetErrors: {} }),
+  upsertMetadata: (asset) => set((state) => ({ metadata: { ...state.metadata, [asset.id]: asset } })),
   markAssetError: (assetId, message) => set((state) => ({ assetErrors: { ...state.assetErrors, [assetId]: message } })),
   clearAssetError: (assetId) => set((state) => {
     const assetErrors = { ...state.assetErrors };

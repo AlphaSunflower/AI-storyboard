@@ -25,16 +25,29 @@ const seedLegacyDatabase = () => new Promise<void>((resolve, reject) => {
       updatedAt: 1,
     };
     transaction.objectStore('projects').put(legacy);
-    transaction.objectStore('assetMeta').put({ id: 'asset-1', kind: 'image', name: 'a.png', mimeType: 'image/png', bytes: 1, width: 1, height: 1, libraryState: 'project', createdAt: 1 });
+    transaction.objectStore('assets').put({
+      id: 'asset-1',
+      kind: 'image',
+      name: 'a.png',
+      mimeType: 'image/png',
+      bytes: 4,
+      width: 1,
+      height: 1,
+      originalBlob: new Blob(['test'], { type: 'image/png' }),
+      thumbnailBlob: new Blob(['test'], { type: 'image/webp' }),
+      previewBlob: new Blob(['test'], { type: 'image/webp' }),
+      libraryState: 'project',
+      createdAt: 1,
+    });
   };
   request.onsuccess = () => { request.result.close(); resolve(); };
   request.onerror = () => reject(request.error);
 });
 
-describe('v2 → v3 migration', () => {
+describe('v2 → v5 migration', () => {
   it('splits legacy projects into project + independent canvas and backfills asset provenance', async () => {
     await seedLegacyDatabase();
-    const { listProjects, listCanvases, loadCanvas, getAssetMetadata } = await import('./projectStorage');
+    const { listProjects, listCanvases, loadCanvas, getAsset, getAssetMetadata } = await import('./projectStorage');
 
     const projects = await listProjects();
     expect(projects).toHaveLength(1);
@@ -52,9 +65,10 @@ describe('v2 → v3 migration', () => {
     expect(canvas!.nodes).toHaveLength(1);
     expect(canvas!.nodes[0].data.assetId).toBe('asset-1');
 
-    // v3 upgrade 用 legacy 项目原 id 回填 assetMeta 的 provenance(历史事实；后端重映射不回填 assetMeta)
+    // v5 migration keeps asset provenance aligned with the backend project/canvas that now owns the graph.
     const metadata = await getAssetMetadata('asset-1');
-    expect(metadata?.projectId).toBe('legacy-project');
-    expect(metadata?.canvasId).toBeTruthy(); // v3 upgrade 填的本地 canvasId(后端重映射不回填,故不绑定 canvas.id)
+    expect(metadata?.projectId).toBe(migratedId);
+    expect(metadata?.canvasId).toBe(canvas!.id);
+    expect(await getAsset('asset-1')).toBeDefined();
   });
 });

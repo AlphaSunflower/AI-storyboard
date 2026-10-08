@@ -276,6 +276,14 @@ export interface PersistedAsset {
 
 export type AssetMetadata = Omit<PersistedAsset, 'originalBlob' | 'thumbnailBlob' | 'previewBlob'>;
 
+export interface AssetCacheEntry {
+  assetId: string;
+  bytes: number;
+  lastAccessedAt: number;
+  cached: boolean;
+  pinned: boolean;
+}
+
 // Runtime media URLs are acquired only while a media surface is visible.
 export type MediaAsset = PersistedAsset;
 
@@ -347,6 +355,16 @@ export interface ProjectDocumentV2 {
   canvases: string[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface LegacyProjectMigration {
+  backendProjectId?: string;
+  canvasIdMap?: Record<string, string>;
+  updatedAt: number;
+}
+
+export interface LegacyProjectDocument extends ProjectDocumentV2 {
+  migration?: LegacyProjectMigration;
 }
 
 // 画布图：独立存储，按需加载。
