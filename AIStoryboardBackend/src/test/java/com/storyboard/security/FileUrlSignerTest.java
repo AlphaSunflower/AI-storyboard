@@ -28,4 +28,24 @@ class FileUrlSignerTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("签名无效");
     }
+
+    @Test
+    void signsOnlyLocalMediaPaths() {
+        assertThat(signer.signIfLocal("https://cdn.example.com/a.png"))
+                .isEqualTo("https://cdn.example.com/a.png");
+        assertThat(signer.signIfLocal("data:image/png;base64,abc"))
+                .isEqualTo("data:image/png;base64,abc");
+        assertThat(signer.signIfLocal("/api/files/images/a.png"))
+                .startsWith("/api/files/images/a.png?token=");
+    }
+
+    @Test
+    void reSignsCommaSeparatedMediaPaths() {
+        String signed = signer.signCommaSeparated(
+                "/api/files/images/a.png,/api/files/images/b.png");
+
+        assertThat(signed).contains("/api/files/images/a.png?token=");
+        assertThat(signed).contains(",");
+        assertThat(signed).contains("/api/files/images/b.png?token=");
+    }
 }

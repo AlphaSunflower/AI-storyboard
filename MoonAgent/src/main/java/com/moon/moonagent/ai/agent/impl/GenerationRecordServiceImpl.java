@@ -11,6 +11,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -39,6 +40,7 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
     private final AgentAssetMapper assetMapper;
     private final AgentConversationMapper conversationMapper;
     private final AgentGenerationService generationService;
+    private final FileUrlSigner fileUrlSigner;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService pollExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -52,7 +54,13 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
                 .orderByDesc(AgentAsset::getCreatedAt);
         List<AgentAsset> records = assetMapper.selectList(listQw.last(
                 "LIMIT " + safeSize + " OFFSET " + ((long) (safePage - 1) * safeSize)));
+        records.forEach(this::signAssetUrls);
         return Map.of("records", records, "total", total, "page", safePage, "size", safeSize);
+    }
+
+    private void signAssetUrls(AgentAsset asset) {
+        asset.setUrl(fileUrlSigner.signIfLocal(asset.getUrl()));
+        asset.setResultUrls(fileUrlSigner.signJsonArray(asset.getResultUrls()));
     }
 
     /** 列表/总数共用的筛选条件（不含 orderBy，避免 COUNT 查询报「created_at 必须出现在 GROUP BY」）。 */

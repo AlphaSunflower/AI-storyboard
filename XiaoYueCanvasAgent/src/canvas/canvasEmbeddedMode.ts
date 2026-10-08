@@ -2,6 +2,8 @@ export const CANVAS_MODE_STATUS_MESSAGE = 'ai-storyboard:canvas-mode-status';
 export const CANVAS_MODE_READY_MESSAGE = 'ai-storyboard:canvas-mode-ready';
 export const CANVAS_MODE_CONTROL_MESSAGE = 'ai-storyboard:canvas-mode-control';
 export const CANVAS_GRAPH_UPDATED_MESSAGE = 'ai-storyboard:canvas-graph-updated';
+export const EMBEDDED_APP_READY_MESSAGE = 'ai-storyboard:embedded-app-ready';
+export const CANVAS_AUTH_MESSAGE = 'ai-storyboard:canvas-auth';
 
 export type CanvasBridgeStatusState = 'selecting' | 'bridge-connecting' | 'bridge-error';
 
@@ -9,6 +11,12 @@ export interface CanvasEmbeddedMode {
   conversationId: string;
   projectId: string;
   parentOrigin: string;
+}
+
+export interface CanvasAuthMessage {
+  type: typeof CANVAS_AUTH_MESSAGE;
+  accessToken: string;
+  userId?: string;
 }
 
 export interface CanvasModeStatusMessage {
@@ -57,6 +65,15 @@ export function parseCanvasEmbeddedMode(search: string): CanvasEmbeddedMode | nu
     return null;
   }
   return { conversationId, projectId, parentOrigin };
+}
+
+export function isCanvasAuthMessage(value: unknown): value is CanvasAuthMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<CanvasAuthMessage>;
+  return message.type === CANVAS_AUTH_MESSAGE
+    && typeof message.accessToken === 'string'
+    && message.accessToken.length > 0
+    && (message.userId === undefined || typeof message.userId === 'string');
 }
 
 export function buildCanvasModeStatusMessage(

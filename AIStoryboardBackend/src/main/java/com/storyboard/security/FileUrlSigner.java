@@ -8,7 +8,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.stream.Collectors;
 
 /** 文件对象级 HMAC 签名，避免使用全局 media_token 读取任意对象。 */
 @Component
@@ -34,6 +36,23 @@ public class FileUrlSigner {
         long expiresAt = Instant.now().plusSeconds(ttlSeconds).getEpochSecond();
         String separator = normalized.contains("?") ? "&" : "?";
         return normalized + separator + "token=" + expiresAt + "." + base64(hmac(normalized + "\n" + expiresAt));
+    }
+
+    /** 本地文件路径读取时重签；外部 URL/data URI 原样返回。 */
+    public String signIfLocal(String path) {
+        if (path == null || path.isBlank()) return path;
+        String clean = path.trim();
+        return clean.startsWith("/api/files/") ? signPath(clean) : path;
+    }
+
+    /** 重签逗号分隔的本地文件 URL 列表（历史 scene.image_urls 格式）。 */
+    public String signCommaSeparated(String paths) {
+        if (paths == null || paths.isBlank()) return paths;
+        return Arrays.stream(paths.split(","))
+                .map(String::trim)
+                .filter(path -> !path.isBlank())
+                .map(this::signIfLocal)
+                .collect(Collectors.joining(","));
     }
 
     public void verifyPath(String path, String token) {

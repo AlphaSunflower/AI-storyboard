@@ -127,7 +127,7 @@ public class AssetServiceImpl implements AssetService {
             };
             MediaRef media = assetClient.addAssetMedia(assetId, resource, UUID.randomUUID().toString(), userId);
             return new AssetImageVO(
-                    media.id(), media.url(), media.sortOrder(), file.getOriginalFilename(), text);
+                    media.id(), preferredMediaUrl(media), media.sortOrder(), file.getOriginalFilename(), text);
         } catch (Exception e) {
             throw new BusinessException(50201, "上传资产图片失败", e);
         }
@@ -268,7 +268,11 @@ public class AssetServiceImpl implements AssetService {
     private static List<AssetImageVO> mediaToImages(List<MediaRef> media) {
         if (media == null) return List.of();
         return media.stream().map(item -> new AssetImageVO(
-                item.id(), item.url(), item.sortOrder(), item.fileName(), item.constraintText())).toList();
+                item.id(), preferredMediaUrl(item), item.sortOrder(), item.fileName(), item.constraintText())).toList();
+    }
+
+    private static String preferredMediaUrl(MediaRef media) {
+        return media.contentUrl() == null || media.contentUrl().isBlank() ? media.url() : media.contentUrl();
     }
 
     private static AssetVO toVO(AssetSummary asset, List<AssetImageVO> images) {

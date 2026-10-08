@@ -216,18 +216,22 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     private String callLLM(String model, String systemPrompt, String userPrompt) {
         try {
+            String effectiveModel = resolveScriptModel(model, gatewayModelService.getDefaultTextModel());
             ChatClient.ChatClientRequestSpec spec = chatClient()
                     .prompt()
                     .system(systemPrompt)
-                    .user(userPrompt);
-            if (model != null) {
-                // 单次调用覆盖模型（默认模型已在 defaultOptions 固定）
-                spec = spec.options(OpenAiChatOptions.builder().model(model));
-            }
+                    .user(userPrompt)
+                    .options(OpenAiChatOptions.builder().model(effectiveModel));
             return spec.call().content();
         } catch (Exception e) {
             throw new BusinessException(50201, "AI 生成分镜脚本失败: " + e.getMessage(), e);
         }
+    }
+
+    static String resolveScriptModel(String requestedModel, String gatewayDefaultModel) {
+        return requestedModel == null || requestedModel.isBlank()
+                ? gatewayDefaultModel
+                : requestedModel;
     }
 
     /**
@@ -235,7 +239,30 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
      * 模型优先级：显式传入 understandingModel > 默认视觉模型（与脚本模型共用）。
      */
     private String callUnderstandingModel(String model, List<String> referenceImages) {
-        String effModel = (model != null && !model.isBlank()) ? model : gatewayModelService.getDefaultVisionModel();
+        String preferred = (model != null && !model.isBlank()) ? model : gatewayModelService.getDefaultVisionModel();
+        List<String> candidates = resolveVisionModelCandidates(
+                preferred,
+                gatewayModelService.getDefaultVisionModel(),
+                gatewayModelService.fetchModels("vision").stream()
+                        .map(item -> item.get("value"))
+                        .filter(value -> value != null && !value.isBlank())
+                        .toList()
+        );
+        Exception lastError = null;
+        for (String candidate : candidates) {
+            try {
+                return callVisionModel(candidate, referenceImages);
+            } catch (Exception e) {
+                lastError = e;
+                log.warn("理解模型调用失败，尝试下一个: model={}, error={}", candidate, e.getMessage());
+            }
+        }
+        throw new BusinessException(50201,
+                "理解模型全部调用失败: " + (lastError == null ? "无可用模型" : lastError.getMessage()),
+                lastError);
+    }
+
+    private String callVisionModel(String model, List<String> referenceImages) {
         List<Media> medias = new ArrayList<>();
         for (String img : referenceImages) {
             medias.add(Media.builder()
@@ -251,9 +278,22 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
         return chatClient().prompt()
                 .system(promptConfig.get("script/visual-understanding"))
                 .messages(msg)
-                .options(OpenAiChatOptions.builder().model(effModel))
+                .options(OpenAiChatOptions.builder().model(model))
                 .call()
                 .content();
+    }
+
+    static List<String> resolveVisionModelCandidates(String preferred, String gatewayDefault,
+                                                     List<String> availableModels) {
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        if (preferred != null && !preferred.isBlank()) candidates.add(preferred);
+        if (gatewayDefault != null && !gatewayDefault.isBlank()) candidates.add(gatewayDefault);
+        if (availableModels != null) {
+            availableModels.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .forEach(candidates::add);
+        }
+        return List.copyOf(candidates);
     }
 
     /** 组装分镜生成 user prompt：有理解描述时前置参考图视觉要素，否则仅剧本。 */
@@ -297,22 +337,13 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
 
     private List<Map<String, Object>> parseScenes(String content, String projectId) {
         try {
-            // 提取 JSON 数组（AI 可能在前后包裹 markdown 代码块）
-            String json = content;
-            if (json.contains("```json")) {
-                json = json.substring(json.indexOf("```json") + 7);
-                json = json.substring(0, json.lastIndexOf("```"));
-            } else if (json.contains("```")) {
-                json = json.substring(json.indexOf("```") + 3);
-                json = json.substring(0, json.lastIndexOf("```"));
-            }
-            json = json.trim();
-            if (!json.startsWith("[")) {
-                json = json.substring(json.indexOf('['), json.lastIndexOf(']') + 1);
-            }
+            String json = StoryboardResponseParser.extractJsonArray(content);
 
             List<Map<String, Object>> scenes = new ArrayList<>();
             JsonNode arr = objectMapper.readTree(json);
+            if (!arr.isArray()) {
+                throw new IllegalArgumentException("解析结果不是 JSON 数组");
+            }
             int sceneNum = sceneMapper.maxSceneNumber(projectId);
             for (JsonNode node : arr) {
                 sceneNum++;
@@ -330,7 +361,16 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             }
             return scenes;
         } catch (Exception e) {
+            String raw = content == null ? "" : content;
+            log.error("解析 AI 返回的分镜数据失败: outputLength={}, prefix={}, suffix={}",
+                    raw.length(), abbreviate(raw, 400), abbreviate(raw.length() > 400
+                            ? raw.substring(raw.length() - 400) : raw, 400));
             throw new BusinessException(50201, "解析 AI 返回的分镜数据失败: " + e.getMessage(), e);
         }
+    }
+
+    private static String abbreviate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) return value;
+        return value.substring(0, maxLength);
     }
 }

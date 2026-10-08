@@ -22,7 +22,6 @@ import com.storyboard.common.BusinessException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -120,12 +119,9 @@ public class DesignAgentJobController {
     public ResponseEntity<ByteArrayResource> asset(@RequestAttribute("userId") String userId,
                                                     @PathVariable String assetId) {
         CanvasAsset asset = canvasAssetService.getOwned(userId, assetId);
-        if (asset.getObjectUrl() != null && asset.getObjectUrl().startsWith("/api/files/")) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.FOUND)
-                    .location(URI.create(asset.getObjectUrl()))
-                    .build();
-        }
-        String filename = asset.getObjectUrl().substring(asset.getObjectUrl().lastIndexOf('/') + 1);
+        String objectUrl = asset.getObjectUrl() == null ? "" : asset.getObjectUrl();
+        String cleanUrl = objectUrl.split("\\?", 2)[0];
+        String filename = cleanUrl.substring(cleanUrl.lastIndexOf('/') + 1);
         byte[] data = switch (asset.getType()) {
             case "video" -> fileStorageService.readVideo(filename);
             case "audio" -> fileStorageService.readAudio(filename);

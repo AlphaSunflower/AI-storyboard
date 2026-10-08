@@ -10,6 +10,7 @@ import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.repository.LibraryRepository;
+import com.storyboard.asset.security.FileAccessUrlSigner;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.AssetPurgeService;
@@ -45,7 +46,7 @@ class AssetCatalogServiceImplTest {
         repository = mock(LibraryRepository.class);
         projectAccess = mock(ProjectAccessPort.class);
         service = new AssetCatalogServiceImpl(
-                repository, projectAccess, mock(MediaUrlSigner.class),
+                repository, projectAccess, mock(MediaUrlSigner.class), mock(FileAccessUrlSigner.class),
                 new AssetPurgeService(repository),
                 new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
     }
@@ -192,7 +193,7 @@ class AssetCatalogServiceImplTest {
         MediaUrlSigner signer = mock(MediaUrlSigner.class);
         when(signer.sign(eq("m1"), eq("u1"), any())).thenReturn("123.fresh");
         AssetCatalogServiceImpl catalog = new AssetCatalogServiceImpl(
-                repository, projectAccess, signer,
+                repository, projectAccess, signer, mock(FileAccessUrlSigner.class),
                 new AssetPurgeService(repository),
                 new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
         when(repository.findMedia("u1", "m1")).thenReturn(Optional.of(new MediaRef(

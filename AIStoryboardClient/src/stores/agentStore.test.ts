@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_AGENT_APPROVAL_MODE,
   agentApi,
@@ -12,6 +12,11 @@ import {
   useAgentStore,
 } from './agentStore';
 import { useProjectStore } from './projectStore';
+import { setAccessToken } from '../lib/authSession';
+
+beforeEach(() => {
+  setAccessToken('test-token');
+});
 
 function sseEnvelope(
   seq: number,
@@ -76,6 +81,55 @@ describe('agentStore createConversation', () => {
       DEFAULT_AGENT_APPROVAL_MODE,
     );
     expect(selectConversation).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('creates the first conversation before sending the first message', async () => {
+    const conversation: AgentConversation = {
+      id: 'conversation-first',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '新对话',
+      status: 'active',
+      approvalMode: DEFAULT_AGENT_APPROVAL_MODE,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    useProjectStore.setState({
+      currentProject: { id: 'project-1', name: 'Project' } as never,
+    });
+    const createConversation = vi.spyOn(agentApi, 'createConversation')
+      .mockResolvedValue({ data: { data: conversation } } as never);
+    const selectConversation = vi.fn(async (id: string) => {
+      useAgentStore.setState({ activeConversationId: id });
+    });
+    useAgentStore.setState({
+      activeConversationId: null,
+      conversations: [],
+      messages: [],
+      streaming: false,
+      generating: {},
+      streamError: null,
+      selectConversation,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: conversation.id }),
+      sseEnvelope(2, 'turn_completed', { content: '收到' }),
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await useAgentStore.getState().sendMessage('第一条消息');
+
+    expect(createConversation).toHaveBeenCalledWith(
+      'project-1',
+      '新对话',
+      DEFAULT_AGENT_APPROVAL_MODE,
+    );
+    expect(selectConversation).toHaveBeenCalledWith(conversation.id);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().streamError).toBeNull();
   });
 });
 
@@ -650,6 +704,37 @@ describe('agentStore detached async tasks', () => {
     expect(useAgentStore.getState().agentVideoTask?.taskId).toBe('task-1');
   });
 
+  it('does not leave an empty assistant bubble when a video task stream closes early', async () => {
+    vi.useFakeTimers();
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TOOL_RESULT_TEXT_DELTA',
+        data: {
+          toolCallId: 'tool-1',
+          toolName: 'generate_video',
+          delta: JSON.stringify({ taskId: 'task-1', taskKind: 'video', message: '任务已受理' }),
+        },
+      }),
+      sseEnvelope(3, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: { toolCallId: 'tool-1', toolName: 'generate_video', state: 'SUCCESS' },
+      }),
+    ]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })));
+    resetStore();
+
+    await useAgentStore.getState().sendMessage('生成视频');
+
+    const assistant = [...useAgentStore.getState().messages].reverse()
+      .find((message) => message.role === 'assistant');
+    expect(assistant?.content).toBe('任务已受理，正在后台生成…');
+    expect(assistant?.content).not.toBe('（未收到回复）');
+  });
+
   it('removes the unfinished assistant bubble when the user stops generation', () => {
     const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     resetStore();
@@ -996,6 +1081,106 @@ describe('AgentScope turn envelope reduction', () => {
 
     expect(fetchMock.mock.calls[1]?.[0]).toContain('/turns/turn-pause/resume/stream');
     expect(useAgentStore.getState().messages.at(-1)?.content).toBe('已继续');
+  });
+
+  it('recovers a resumed turn before leaving a failed placeholder', async () => {
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, 'turn-recover'),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-recover',
+        content: '请确认',
+        hitl: {
+          formToken: 'form-recover',
+          taskId: 'task-recover',
+          formContent: '请确认',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, 'turn-recover'),
+    ]);
+    const truncatedResumeBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1', resume: true }, 'turn-recover'),
+    ]);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(pauseBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(truncatedResumeBody, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [sseEnvelope(3, 'turn_completed', { content: '已恢复' }, 'turn-recover')],
+      },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: {
+        data: [{
+          id: 'assistant-recovered',
+          conversationId: 'conversation-1',
+          role: 'assistant',
+          content: '已恢复',
+          createdAt: new Date().toISOString(),
+          metadata: {},
+        }],
+      },
+    } as never);
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+    });
+
+    await useAgentStore.getState().sendMessage('需要确认');
+    await useAgentStore.getState().submitHumanInput('approve');
+    await vi.waitFor(() => {
+      expect(listTurnEvents).toHaveBeenCalledWith('conversation-1', 'turn-recover', 2);
+      expect(useAgentStore.getState().messages.at(-1)?.content).toBe('已恢复');
+    });
+    expect(useAgentStore.getState().messages.some((message) => message.content === '（未收到回复）'))
+      .toBe(false);
+  });
+
+  it('keeps the generated plan when turn_paused appends a HITL card', () => {
+    const turnId = 'turn-plan-pause';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-plan' };
+    const plan = '## 方案对比\n\nA. 万象汇聚\nB. 分镜隧道\nC. 智能体网络';
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-plan',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: plan,
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-plan', assistantContent: plan },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_paused', {
+        messageId: 'hitl-message',
+        content: plan,
+        hitl: {
+          formToken: 'form-1',
+          formContent: '请选择片尾视频的设计方案：',
+          actions: [
+            { id: 'option-0', title: 'A' },
+            { id: 'option-1', title: 'B' },
+            { id: 'option-2', title: 'C' },
+          ],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().messages[0].content).toBe(plan);
+    expect(useAgentStore.getState().waitingHumanInput?.formContent)
+      .toBe('请选择片尾视频的设计方案：');
   });
 
   it('maps canvas bind pause to an exact canvas mode binding', () => {

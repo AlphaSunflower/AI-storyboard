@@ -34,6 +34,14 @@ function safeParseParams(json: string): ModelOption['params'] {
   }
 }
 
+function formatVideoFailure(raw?: string): string {
+  const detail = raw?.trim() ?? '';
+  if (/(new_sensitive|input_sensitive|sensitive|审核|safety)/i.test(detail)) {
+    return `视频生成被内容审核拒绝（${detail}）。请修改提示词或更换参考素材后重试。`;
+  }
+  return detail || '视频生成失败';
+}
+
 interface ProjectState {
   projects: ProjectResponse[];
   currentProject: ProjectResponse | null;
@@ -336,6 +344,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   pollVideoTask: async (sceneId, taskId) => {
     let videoFailed = false;
     let videoDone = false;
+    let videoError = '';
     // 轮询直到完成（上限 120 次 × 5s = 10 分钟：MiniMax 生成 4~15s 视频实测可达 5-10 分钟，
     // 原 60 次上限（5 分钟）会提前放弃——前端停止轮询后任务无人接管，UI 卡在生成中）
     let attempts = 0;
@@ -351,6 +360,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (get().currentProject) await get().loadProject(get().currentProject!.id);
       } else if (status.status === 'failed') {
         videoFailed = true;
+        videoError = formatVideoFailure(status.error);
       } else if (attempts < 120) {
         await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL));
         await poll();
@@ -362,6 +372,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const scene = get().scenes.find(s => s.id === sceneId);
     if (videoFailed) {
       get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+      throw new Error(videoError || '视频生成失败');
     } else if (videoDone) {
       get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
     }

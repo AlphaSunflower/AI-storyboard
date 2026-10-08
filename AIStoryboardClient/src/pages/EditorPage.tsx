@@ -7,6 +7,7 @@ import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { ToastContainer } from '../components/common/Toast';
 import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
+import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
 import { MobileSceneList } from '../components/editor/MobileSceneList';
 import { MobileScenePreview } from '../components/editor/MobileScenePreview';
@@ -33,6 +34,7 @@ export function EditorPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
 
   useEffect(() => {
     if (!embedded) return;
@@ -249,7 +251,10 @@ export function EditorPage() {
 
       {/* 子窗口内不展示生成中心，避免与外部应用窗口重复。 */}
       {!embedded && (
-        <GenerationCenterPanel />
+        <GenerationCenterPanel onOpenRecords={() => setRecordsOpen(true)} />
+      )}
+      {!embedded && (
+        <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
       )}
     </div>
   );

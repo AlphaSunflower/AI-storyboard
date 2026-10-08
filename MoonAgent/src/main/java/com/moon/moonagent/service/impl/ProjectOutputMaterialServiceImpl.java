@@ -9,6 +9,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class ProjectOutputMaterialServiceImpl implements ProjectOutputMaterialSe
 
     private final AgentConversationMapper conversationMapper;
     private final AgentAssetMapper assetMapper;
+    private final FileUrlSigner fileUrlSigner;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -58,7 +60,7 @@ public class ProjectOutputMaterialServiceImpl implements ProjectOutputMaterialSe
                     || (!"image".equals(record.getType()) && !"video".equals(record.getType()))) {
                 continue;
             }
-            List<String> urls = resultUrls(record);
+            List<String> urls = resultUrls(record).stream().map(fileUrlSigner::signIfLocal).toList();
             if (urls.isEmpty()) continue;
             String groupId = record.getConversationId() == null
                     ? EDITOR_GROUP_ID : record.getConversationId();

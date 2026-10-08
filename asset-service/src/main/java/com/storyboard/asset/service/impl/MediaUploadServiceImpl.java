@@ -121,8 +121,7 @@ public class MediaUploadServiceImpl implements MediaUploadService {
                 assetId, blobId, sortOrder, MediaRole.REFERENCE, sortOrder == 0, constraintText);
         if (sortOrder == 0) repository.updateCover(assetId, "/api/files/" + effectiveObjectKey);
         if ("IMAGE".equals(mediaType)) repository.createAnalysisTask(assetId);
-        return repository.findMedia(userId, mediaId)
-                .orElseThrow(() -> new BusinessException(50000, "媒体写入失败"));
+        return assetCatalogService.getMedia(userId, mediaId);
     }
 
     @Override

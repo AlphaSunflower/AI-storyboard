@@ -62,7 +62,7 @@ export async function refreshAccessToken(): Promise<string | null> {
 export async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   // 旧版本曾把 Access Token 落在 localStorage；任何请求都顺手清除，避免残留复活。
   localStorage.removeItem('accessToken');
-  const token = getAccessToken();
+  const token = getAccessToken() ?? await refreshAccessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
   let response = await fetch(input, { ...init, headers });

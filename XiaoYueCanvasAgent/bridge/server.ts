@@ -1,9 +1,21 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { loadEnvFile } from 'node:process';
 import { BRIDGE_DEFAULT_PORT } from '../src/canvas/bridgeProtocol.ts';
+import { isBridgeOriginAllowed, parseBridgeOrigins } from '../src/canvas/bridgeOrigins.ts';
 import type { BridgeRegisterPayload, BridgeResultPayload } from '../src/canvas/bridgeProtocol.ts';
 import { CanvasBridgeCore } from './canvasBridgeCore.ts';
 import { attachMcpEndpoint } from './mcpServer.ts';
+
+for (const envFile of ['.env', '.env.local', '.env.development.local']) {
+  try {
+    loadEnvFile(envFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
 
 const readJson = (req: IncomingMessage): Promise<Record<string, unknown>> => new Promise((resolve, reject) => {
   let raw = '';
@@ -29,14 +41,11 @@ const readJson = (req: IncomingMessage): Promise<Record<string, unknown>> => new
   req.on('error', reject);
 });
 
-const allowedOrigins = (process.env.MORROW_BRIDGE_ORIGINS ?? 'http://localhost:3000')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = parseBridgeOrigins(process.env.MORROW_BRIDGE_ORIGINS);
 const bridgeToken = process.env.MORROW_BRIDGE_TOKEN?.trim() ?? '';
 
 if (!bridgeToken) {
-  console.error('[morrow-bridge] MORROW_BRIDGE_TOKEN 未配置，拒绝启动');
+  console.error('[morrow-bridge] MORROW_BRIDGE_TOKEN 未配置；请设置环境变量，或将令牌写入 .env.development.local');
   process.exit(1);
 }
 
@@ -47,8 +56,7 @@ const requestOrigin = (req: IncomingMessage) => {
 
 const originAllowed = (req: IncomingMessage) => {
   const origin = requestOrigin(req);
-  if (!origin) return true;
-  return allowedOrigins.includes(origin);
+  return isBridgeOriginAllowed(origin, allowedOrigins);
 };
 
 const tokenAllowed = (req: IncomingMessage) => {

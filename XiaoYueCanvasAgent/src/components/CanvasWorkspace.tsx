@@ -155,12 +155,13 @@ interface CanvasWorkspaceProps {
   canvasModeLocked?: boolean;
   canvasInteractionLocked?: boolean;
   hideAgentButton?: boolean;
+  agentPanelOpen?: boolean;
 }
 
 const saveLabel: Record<SaveStatus, string> = { idle: '本地项目', saving: '保存中…', saved: '已保存到本地', error: '保存失败' };
 
 function CanvasInner(props: CanvasWorkspaceProps) {
-  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onRenameCanvas, onDeleteCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false, hideAgentButton = false } = props;
+  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onRenameCanvas, onDeleteCanvas, onDeleteProject, onOpenAgent, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false, hideAgentButton = false, agentPanelOpen = false } = props;
   const [panel, setPanel] = useState<'nodes' | 'templates' | 'history' | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(false);
@@ -570,13 +571,14 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   }, [closeContextMenu, contextTarget, copySelection, cutSelection, deleteSelected, notify, pasteClipboard, redo, selectAll, undo]);
 
   useEffect(() => {
-    if (!workspaceMenuOpen && !projectSwitcherOpen) return;
+    if (!workspaceMenuOpen && !projectSwitcherOpen && !canvasSwitcherOpen) return;
     const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest('.canvas-project-bar')) closeProjectMenus();
+      const target = event.target as Element;
+      if (!target.closest('.canvas-project-bar, .workspace-menu, .project-switcher, .canvas-item-menu')) closeProjectMenus();
     };
     addEventListener('pointerdown', close, true);
     return () => removeEventListener('pointerdown', close, true);
-  }, [closeProjectMenus, projectSwitcherOpen, workspaceMenuOpen]);
+  }, [canvasSwitcherOpen, closeProjectMenus, projectSwitcherOpen, workspaceMenuOpen]);
 
   useEffect(() => {
     if (!renameDialogOpen) setRenameDraft(projectTitle);
@@ -762,7 +764,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             <button className="project-switcher-create" onClick={() => { closeProjectMenus(); onCreateProject(); }}><Plus size={15} /> 新建项目</button>
           </div>}
         </Panel>
-        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="项目库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && !hideAgentButton && <button onClick={onOpenAgent} aria-label="执行服务"><MessageCircle size={20} /></button>}</div></Panel>
+        <Panel className="canvas-tool-island" position="top-left"><button className={panel === 'nodes' ? 'primary-tool is-active' : 'primary-tool'} onClick={() => setPanel(panel === 'nodes' ? null : 'nodes')} aria-label="添加节点"><Plus size={26} /></button><div className="canvas-tool-group"><button className={assetDrawerOpen ? 'is-active' : ''} onClick={() => setAssetDrawerOpen((open) => !open)} aria-label="项目库"><Layers size={20} /></button><button onClick={() => setPanel(panel === 'templates' ? null : 'templates')} aria-label="结构模板"><Download size={20} /></button><button className={panel === 'history' ? 'is-active' : ''} onClick={() => setPanel(panel === 'history' ? null : 'history')} aria-label="生成记录"><History size={20} /></button><button onClick={onOpenInspector} aria-label="节点属性"><LayoutList size={20} /></button>{!canvasModeLocked && !hideAgentButton && <button className={agentPanelOpen ? 'is-active' : ''} onClick={onOpenAgent} aria-label="执行服务" aria-pressed={agentPanelOpen}><MessageCircle size={20} /></button>}</div></Panel>
         <Panel className="canvas-task-queue" position="top-right"><TaskQueuePanel onOpenRecords={() => setPanel('history')} /></Panel>
         <Controls
           className="canvas-controls canvas-view-bar"

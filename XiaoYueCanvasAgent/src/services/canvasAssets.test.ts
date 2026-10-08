@@ -1,11 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   downloadCanvasAssetBlob,
   linkGeneratedCanvasAssets,
   uploadCanvasAsset,
 } from './canvasAssets';
+import { clearToken, setJobToken } from './jobAuth';
+
+beforeEach(() => {
+  setJobToken(validJwt(), 'user-1');
+});
 
 afterEach(() => {
+  clearToken();
   vi.restoreAllMocks();
 });
 
@@ -42,7 +48,7 @@ describe('canvas asset API', () => {
     expect(assets[0].url).toBe('/api/files/videos/v.mp4');
   });
 
-  it('downloads a canvas asset by database id', async () => {
+  it('downloads a durable canvas asset through the authenticated canvas endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Blob(['video']), {
       status: 200,
       headers: { 'Content-Type': 'video/mp4' },
@@ -57,8 +63,8 @@ describe('canvas asset API', () => {
 
     expect(blob.type).toBe('video/mp4');
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/files/videos/v.mp4',
-      expect.objectContaining({ headers: { Accept: 'video/mp4' } }),
+      '/api/canvas/assets/asset-video',
+      expect.objectContaining({ headers: expect.any(Headers) }),
     );
   });
 
@@ -82,3 +88,11 @@ describe('canvas asset API', () => {
     );
   });
 });
+
+function validJwt(): string {
+  const encode = (value: object) => btoa(JSON.stringify(value))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  })}.signature`;
+}

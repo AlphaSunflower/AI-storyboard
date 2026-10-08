@@ -846,6 +846,20 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         reasons: metadata.videoPlan.reasons,
       }
     : null;
+  const hitlPlanContent = !isUser && renderedContent.trim()
+    && (isHitl || videoPlanInfo)
+    && renderedContent.trim() !== (hitlInfo?.formContent ?? videoPlanInfo?.message ?? '').trim()
+    ? (
+        <div style={{ width: '100%', maxWidth: '100%', marginBottom: 8 }}>
+          <MarkdownContent
+            content={renderedContent}
+            onImgClick={(url) => openPreview(url, 'image')}
+            onImportMedia={(media) => void handleImportMedia([media])}
+            importDisabled={importDisabled}
+          />
+        </div>
+      )
+    : null;
   const editShell = editing ? {
     width: '100%',
     maxWidth: '100%',
@@ -951,6 +965,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
           <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
         ) : null}
+        {hitlPlanContent}
         <VideoPlanCard
           info={videoPlanInfo}
           submitted
@@ -968,6 +983,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
           <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
         ) : null}
+        {hitlPlanContent}
         <HumanInputCard
           info={hitlInfo}
           archived={archivedConversation}

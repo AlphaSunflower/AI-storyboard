@@ -24,9 +24,18 @@ npm run test:e2e
 浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。Bridge 同时在 `/mcp` 提供 Streamable HTTP MCP Server；服务端和管理接口必须携带 `X-Bridge-Token`。
 
 ```bash
-export MORROW_BRIDGE_TOKEN="$(openssl rand -hex 32)"
 npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
-export VITE_BRIDGE_TOKEN="$MORROW_BRIDGE_TOKEN"
+npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
+```
+
+首次使用时，将 `.env.example` 复制为 `.env.development.local` 并确保两个令牌值相同。Bridge 和 Vite 都会自动读取本地环境文件。
+
+也可在当前终端临时设置令牌：
+
+```powershell
+$env:MORROW_BRIDGE_TOKEN="随机长令牌"
+$env:VITE_BRIDGE_TOKEN=$env:MORROW_BRIDGE_TOKEN
+npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
 npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
 ```
 

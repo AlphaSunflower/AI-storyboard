@@ -336,10 +336,19 @@ export async function loadCanvas(canvasId: string, projectId?: string): Promise<
     // 后端记录存在但图仍为空（例如 Agent 刚创建的新画布）→ 返回空画布，不能当成不存在。
     if (!local && !backendHasContent) return emptyCanvas(canvasId, projectId);
     return normalizeCanvasGraph(applyGraph(local ?? emptyCanvas(canvasId, projectId), dto));
-  } catch {
-    // 后端不可达/无鉴权 → 降级本地缓存
+  } catch (error) {
+    // 401/403/404 是确定的鉴权或归属结果，不能拿本地缓存冒充后端数据，
+    // 否则跨账号画布会继续自动保存并向画布服务反复发送 403。
+    if (isResolvedHttpError(error)) throw error;
+    // 网络不可达或上游 5xx → 降级本地缓存
     return local ? normalizeCanvasGraph(local) : undefined;
   }
+}
+
+function isResolvedHttpError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('status' in error)) return false;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' && status < 500;
 }
 
 function emptyCanvas(canvasId: string, projectId = ''): CanvasDocumentV1 {

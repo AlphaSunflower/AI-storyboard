@@ -27,7 +27,7 @@ export const aiApi = {
     referenceImages?: string[];
     assetIds?: string[];
     mode?: string;
-  }) => client.post('/ai/generate-script', data),
+  }) => client.post('/ai/generate-script', data, { timeout: 300_000 }),
 
   generateImage: (data: {
     sceneId: string;

@@ -72,52 +72,54 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
         <button onClick={() => setTab('assets')} style={tab === 'assets' ? tabActive : tabInactive}>项目库</button>
       </div>
 
-      {tab === 'canvas' ? (
-        <section>
-          <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div><small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>CANVASES</small><h2 style={{ margin: '2px 0 0', fontSize: 20 }}>画布</h2></div>
-            <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建画布</button>
-          </header>
+      <div className="project-home__content">
+        {tab === 'canvas' ? (
+          <section>
+            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div><small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>CANVASES</small><h2 style={{ margin: '2px 0 0', fontSize: 20 }}>画布</h2></div>
+              <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建画布</button>
+            </header>
 
-          {canvases.length ? (
-            <div className="project-home__grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-              {canvases.map((canvas) => (
-                <article key={canvas.id} style={card}>
-                  <button onClick={() => onOpenCanvas(canvas.id)} style={{ ...cardOpen, textAlign: 'left' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 96, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 12 }}><Layers size={26} style={{ opacity: 0.5 }} /></span>
-                    {renamingCanvasId === canvas.id ? (
-                      <input autoFocus defaultValue={canvas.title} style={{ fontSize: 16, fontWeight: 600, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onClick={(event) => event.stopPropagation()} onBlur={(event) => { onRenameCanvas(canvas.id, event.target.value.trim() || canvas.title); setRenamingCanvasId(null); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
-                    ) : (
-                      <strong style={{ display: 'block', fontSize: 16 }}>{canvas.title}</strong>
-                    )}
-                    <small style={{ opacity: 0.55 }}>{relativeTime(canvas.updatedAt)} · {canvas.nodeCount} 节点 · {canvas.assetCount} 素材</small>
-                  </button>
-                  <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
-                    <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`重命名 ${canvas.title}`} onClick={() => setRenamingCanvasId(canvas.id)}><Pencil size={13} /></button>
-                    {pendingDeleteCanvasId === canvas.id ? (
-                      <span style={{ display: 'flex', gap: 4, fontSize: 12 }}>
-                        <button style={miniDanger} onClick={() => { onDeleteCanvas(canvas.id); setPendingDeleteCanvasId(null); }}>删除</button>
-                        <button style={miniButton} onClick={() => setPendingDeleteCanvasId(null)}>取消</button>
-                      </span>
-                    ) : (
-                      <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`删除 ${canvas.title}`} onClick={() => setPendingDeleteCanvasId(canvas.id)}><Trash2 size={13} /></button>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '64px 24px', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.16)' }}>
-              <FolderOpen size={30} style={{ opacity: 0.5 }} />
-              <strong style={{ display: 'block', marginTop: 12 }}>还没有画布</strong>
-              <p style={{ opacity: 0.55, margin: '6px 0 16px' }}>在这个项目里新建第一个画布开始创作。</p>
-              <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建第一个画布</button>
-            </div>
-          )}
-        </section>
-      ) : (
-        <AssetLibrary projectId={project.id} onNotify={onNotify} />
-      )}
+            {canvases.length ? (
+              <div className="project-home__grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+                {canvases.map((canvas) => (
+                  <article key={canvas.id} style={card}>
+                    <button onClick={() => onOpenCanvas(canvas.id)} style={{ ...cardOpen, textAlign: 'left' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 96, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 12 }}><Layers size={26} style={{ opacity: 0.5 }} /></span>
+                      {renamingCanvasId === canvas.id ? (
+                        <input autoFocus defaultValue={canvas.title} style={{ fontSize: 16, fontWeight: 600, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onClick={(event) => event.stopPropagation()} onBlur={(event) => { onRenameCanvas(canvas.id, event.target.value.trim() || canvas.title); setRenamingCanvasId(null); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
+                      ) : (
+                        <strong style={{ display: 'block', fontSize: 16 }}>{canvas.title}</strong>
+                      )}
+                      <small style={{ opacity: 0.55 }}>{relativeTime(canvas.updatedAt)} · {canvas.nodeCount} 节点 · {canvas.assetCount} 素材</small>
+                    </button>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+                      <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`重命名 ${canvas.title}`} onClick={() => setRenamingCanvasId(canvas.id)}><Pencil size={13} /></button>
+                      {pendingDeleteCanvasId === canvas.id ? (
+                        <span style={{ display: 'flex', gap: 4, fontSize: 12 }}>
+                          <button style={miniDanger} onClick={() => { onDeleteCanvas(canvas.id); setPendingDeleteCanvasId(null); }}>删除</button>
+                          <button style={miniButton} onClick={() => setPendingDeleteCanvasId(null)}>取消</button>
+                        </span>
+                      ) : (
+                        <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`删除 ${canvas.title}`} onClick={() => setPendingDeleteCanvasId(canvas.id)}><Trash2 size={13} /></button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '64px 24px', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.16)' }}>
+                <FolderOpen size={30} style={{ opacity: 0.5 }} />
+                <strong style={{ display: 'block', marginTop: 12 }}>还没有画布</strong>
+                <p style={{ opacity: 0.55, margin: '6px 0 16px' }}>在这个项目里新建第一个画布开始创作。</p>
+                <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建第一个画布</button>
+              </div>
+            )}
+          </section>
+        ) : (
+          <AssetLibrary projectId={project.id} onNotify={onNotify} />
+        )}
+      </div>
     </main>
   );
 }

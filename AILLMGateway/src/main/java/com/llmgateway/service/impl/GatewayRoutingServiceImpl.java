@@ -262,13 +262,11 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 .map(Channel::getId)
                 .collect(Collectors.toSet());
         Map<String, String> modelTypeMap = new LinkedHashMap<>();
-        Map<String, Boolean> modelDefaultMap = new LinkedHashMap<>();
         for (ModelRoute r : routes) {
             if (r.getChannelId() == null || !enabledChannels.contains(r.getChannelId())) continue;
             String t = r.getType() == null || r.getType().isBlank() ? "text" : r.getType();
             if (type != null && !type.isBlank() && !type.equals(t)) continue;
             modelTypeMap.putIfAbsent(r.getModelName(), t);
-            if (Boolean.TRUE.equals(r.getIsDefault())) modelDefaultMap.put(r.getModelName(), true);
         }
         // 按 (model_name|type) 建索引：同一模型可 text/vision 各一套参数
         Map<String, ModelParams> paramsMap = modelParamsMapper.selectList(null).stream()
@@ -280,7 +278,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             m.put("id", name);
             m.put("object", "model");
             m.put("type", t);
-            m.put("is_default", Boolean.TRUE.equals(modelDefaultMap.get(name)));
+            m.put("is_default", mp != null && Boolean.TRUE.equals(mp.getIsDefault()));
             m.put("params", buildParams(mp));
             data.add(m);
         });

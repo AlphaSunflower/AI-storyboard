@@ -6,6 +6,8 @@ import { startCanvasBridge } from './canvas/bridgeClient';
 import {
   buildCanvasModeReadyMessage,
   buildCanvasModeStatusMessage,
+  EMBEDDED_APP_READY_MESSAGE,
+  isCanvasAuthMessage,
   isCanvasModeControlMessage,
   isCanvasGraphUpdatedMessage,
   parseCanvasEmbeddedMode,
@@ -23,7 +25,7 @@ import { useCanvasStore } from './store/canvasStore';
 import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
 import { LoginScreen } from './components/LoginScreen';
-import { bootstrapJobAuth, clearToken, getJobToken, tokenExpired } from './services/jobAuth';
+import { bootstrapJobAuth, clearToken, getJobToken, setJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
 import { recoverGraphExecutions } from './canvas/graphExecutionService';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
@@ -44,7 +46,7 @@ const downloadBlob = (blob: Blob, name: string) => {
 export default function App() {
   const [view, setView] = useState<View>('home');
   // 登录门控：无画布 token（未从 /chat 跳转带 token，也未本地登录）→ 先显示登录页
-  const [authed, setAuthed] = useState(() => !!getJobToken());
+  const [authed, setAuthed] = useState(() => !!getJobToken() && !tokenExpired());
   const embeddedModeRef = useRef<CanvasEmbeddedMode | null>(parseCanvasEmbeddedMode(window.location.search));
   const embeddedMode = embeddedModeRef.current;
   const embeddedWindow = new URLSearchParams(window.location.search).get('embedded') === '1';
@@ -120,12 +122,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (embeddedMode) return;
     if (!getJobToken()) {
       void bootstrapJobAuth().then((token) => {
         if (token) setAuthed(true);
       });
     }
-  }, []);
+  }, [embeddedMode]);
 
   useEffect(() => {
     if (!authed) return;
@@ -133,15 +136,31 @@ export default function App() {
   }, [authed, refreshProjects]);
   // token 过期 → 清 token 回登录页（authed 门控重新为 false）
   useEffect(() => {
-    const check = () => { if (tokenExpired()) { clearToken(); setAuthed(false); } };
-    check();
-    const timer = window.setInterval(check, 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
+    let cancelled = false;
+    const check = async () => {
+      if (embeddedMode && !getJobToken()) return;
+      const token = await bootstrapJobAuth();
+      if (cancelled) return;
+      if (token) setAuthed(true);
+      else if (!getJobToken()) {
+        // 登录请求可能刚好在这次 refresh 期间完成；刷新失败结果不能清掉新 token。
+        clearToken();
+        setAuthed(false);
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [embeddedMode]);
   useEffect(() => {
     const rejectAuth = (event: Event) => {
       const rejectedToken = (event as CustomEvent<{ token?: string | null }>).detail?.token;
-      if (rejectedToken && rejectedToken !== getJobToken()) return;
+      const currentToken = getJobToken();
+      // 无权请求在父页面注入 token 前发出时，迟到的 401 不能清掉刚收到的新身份。
+      if (rejectedToken ? rejectedToken !== currentToken : currentToken) return;
       setAuthMessage('登录已失效，请重新登录。');
       clearToken();
       setAuthed(false);
@@ -149,6 +168,50 @@ export default function App() {
     addEventListener('morrow:auth-rejected', rejectAuth);
     return () => removeEventListener('morrow:auth-rejected', rejectAuth);
   }, []);
+  useEffect(() => {
+    if (!embeddedMode) return;
+    const acceptParentAuth = (event: MessageEvent) => {
+      if (event.origin !== embeddedMode.parentOrigin
+          || event.source !== window.parent
+          || !isCanvasAuthMessage(event.data)) return;
+      setJobToken(event.data.accessToken, event.data.userId);
+      setAuthMessage(null);
+      setAuthed(true);
+    };
+    addEventListener('message', acceptParentAuth);
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        { type: EMBEDDED_APP_READY_MESSAGE, key: 'canvas' },
+        embeddedMode.parentOrigin,
+      );
+    }
+    return () => removeEventListener('message', acceptParentAuth);
+  }, [embeddedMode]);
+  useEffect(() => {
+    const rejectedCanvas = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path ?? '';
+      const activeCanvasId = canvasRef.current?.id;
+      if (!activeCanvasId || !path.includes(`/canvases/${encodeURIComponent(activeCanvasId)}`)) return;
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      pendingSave.current = null;
+      setSaveStatus('error');
+      setCanvas(null);
+      clearAssets();
+      if (project?.id) {
+        setView('projectHome');
+        window.history.replaceState(null, '', `#project=${encodeURIComponent(project.id)}`);
+      } else {
+        setView('home');
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      notify('当前账号无权访问该画布，已停止自动保存');
+    };
+    addEventListener('morrow:permission-denied', rejectedCanvas);
+    return () => removeEventListener('morrow:permission-denied', rejectedCanvas);
+  }, [clearAssets, notify, project?.id]);
   useEffect(() => {
     if (!authed || view !== 'canvas' || !canvas?.id) return;
     const reconcile = () => {
@@ -483,16 +546,20 @@ export default function App() {
   }, [persistCurrentCanvas]);
 
   const returnToProject = async () => {
+    if (!project) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    try { await persistCurrentCanvas(); } catch { notify('返回前保存失败，画布仍保持打开'); return; }
     const state = useCanvasStore.getState();
     const protectedIds = [...state.past, ...state.future].flatMap((snapshot) => [...projectAssetIds(snapshot.nodes)]);
-    await collectAssetGarbage(protectedIds);
-    if (!project) return;
+    // 导航不依赖 IndexedDB 保存：保存或清理变慢时也必须立即回到项目中心。
     setCanvas(null);
-    setCanvases(await listCanvases(project.id));
     setView('projectHome');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(project.id)}`);
+    void persistCurrentCanvas()
+      .then(() => collectAssetGarbage(protectedIds))
+      .catch(() => notify('返回前保存失败，已保留项目中心视图'));
+    void listCanvases(project.id)
+      .then(setCanvases)
+      .catch(() => undefined);
   };
 
   const returnHome = async () => {
@@ -550,6 +617,7 @@ export default function App() {
         saveStatus={saveStatus}
         canvasModeLocked={!!embeddedMode}
         hideAgentButton={embeddedWindow}
+        agentPanelOpen={!embeddedWindow && sideOpen && sideView === 'agent'}
         canvasInteractionLocked={canvasInteractionLocked}
         initialViewport={canvas.viewport}
         onProjectTitleChange={(title) => { setProject((current) => { const next = current ? { ...current, title } : current; if (next) void saveProject(next); return next; }); }}
@@ -562,7 +630,14 @@ export default function App() {
         onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名画布失败'))}
         onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error instanceof Error ? error.message : '删除画布失败'))}
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
-        onOpenAgent={() => { setSideView(embeddedWindow ? 'inspector' : 'agent'); setSideOpen(true); }}
+        onOpenAgent={() => {
+          if (!embeddedWindow && sideOpen && sideView === 'agent') {
+            setSideOpen(false);
+            return;
+          }
+          setSideView(embeddedWindow ? 'inspector' : 'agent');
+          setSideOpen(true);
+        }}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}
         onExportProject={() => void exportPackage()}
         isExporting={isExporting}

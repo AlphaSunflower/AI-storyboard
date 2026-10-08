@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import client from './client';
 import { agentApi, parseAgentTurnEnvelope, streamChat } from './agent';
+import { setAccessToken } from '../lib/authSession';
 
 describe('streamChat', () => {
+  beforeEach(() => {
+    setAccessToken('test-token');
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

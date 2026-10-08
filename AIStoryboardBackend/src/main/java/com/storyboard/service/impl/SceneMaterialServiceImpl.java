@@ -19,6 +19,7 @@ import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.SceneMaterialService;
 import com.storyboard.asset.client.AssetClient;
@@ -56,6 +57,7 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
     private final SceneMaterialGroupSnapshotMapper groupSnapshotMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AssetClient assetClient;
+    private final FileUrlSigner fileUrlSigner;
 
     @Override
     @Transactional
@@ -430,12 +432,12 @@ public class SceneMaterialServiceImpl implements SceneMaterialService {
         return normalizedType + "\n" + normalizedPurpose + "\n" + (url == null ? "" : url);
     }
 
-    private static SceneReferenceResponse toResponse(SceneReferenceImage reference) {
+    private SceneReferenceResponse toResponse(SceneReferenceImage reference) {
         return new SceneReferenceResponse(
                 reference.getId(),
                 reference.getType(),
                 reference.getPurpose(),
-                reference.getImageUrl(),
+                fileUrlSigner.signIfLocal(reference.getImageUrl()),
                 reference.getRole(),
                 reference.getSourceType(),
                 reference.getSourceId(),

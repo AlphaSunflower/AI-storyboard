@@ -5,6 +5,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.storyboard.common.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +32,8 @@ class GenerationRecordServiceImplTest {
     private AgentConversationMapper conversationMapper;
     @Mock
     private AgentGenerationService generationService;
+    @Mock
+    private FileUrlSigner fileUrlSigner;
     @InjectMocks
     private GenerationRecordServiceImpl service;
 

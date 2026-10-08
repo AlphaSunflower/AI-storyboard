@@ -987,7 +987,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 }
 .project-switcher-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: #eef2e5; font-size: 11px; }
 .project-switcher-search input::placeholder { color: rgba(226,233,216,.34); }
-.project-switcher-list { max-height: min(330px,calc(100vh - 190px)); padding: 5px 0; overflow: auto; scrollbar-width: thin; }
+.project-switcher-list { max-height: min(330px,calc(100vh - 190px)); padding: 5px 0; overflow: auto; }
 .project-switcher-list > button {
   width: 100%;
   min-height: 53px;
@@ -5328,4 +5328,78 @@ select option {
 .video-merge-footer .node-upload--generate:disabled {
   opacity: .35;
   cursor: not-allowed;
+}
+
+/* Only the list surfaces scroll; page shells stay fixed. */
+.canvas-home,
+.project-home {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.canvas-home__hero,
+.project-home__header,
+.project-home__tabs {
+  flex: 0 0 auto;
+}
+
+.canvas-home__hero,
+.canvas-home__projects {
+  width: 100%;
+}
+
+.canvas-home__projects,
+.project-home__content,
+.project-switcher-list {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.canvas-home__projects,
+.project-home__content {
+  flex: 1 1 auto;
+}
+
+.canvas-home__projects::-webkit-scrollbar,
+.project-home__content::-webkit-scrollbar,
+.project-switcher-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.canvas-home__projects::-webkit-scrollbar-track,
+.project-home__content::-webkit-scrollbar-track,
+.project-switcher-list::-webkit-scrollbar-track {
+  background: rgba(255,255,255,.055);
+}
+
+.canvas-home__projects::-webkit-scrollbar-thumb,
+.project-home__content::-webkit-scrollbar-thumb,
+.project-switcher-list::-webkit-scrollbar-thumb {
+  min-height: 38px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(215,255,84,.4);
+  background-clip: padding-box;
+}
+
+.canvas-home__projects::-webkit-scrollbar-thumb:hover,
+.project-home__content::-webkit-scrollbar-thumb:hover,
+.project-switcher-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(215,255,84,.58);
+  background-clip: padding-box;
+}
+
+@supports (-moz-appearance:none) {
+  .canvas-home__projects,
+  .project-home__content,
+  .project-switcher-list {
+    scrollbar-color: rgba(215,255,84,.4) rgba(255,255,255,.055);
+    scrollbar-width: thin;
+  }
 }

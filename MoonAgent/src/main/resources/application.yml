@@ -28,8 +28,8 @@ spring:
       max-request-size: 25MB
   ai:
     openai:
-      base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}/v1
-      api-key: ${LLM_GATEWAY_API_KEY:}
+      base-url: ${LLM_GATEWAY_BASE_URL:${ai.gateway.base-url:http://localhost:8083}}/v1
+      api-key: ${LLM_GATEWAY_API_KEY:${ai.gateway.api-key:}}
       # Spring AI 2.0 默认 60s；画布技能会在单次请求内执行长工具循环
       timeout: 3600s
       # 超时/连接失败不做 SDK 级隐式重试，避免单次 120s 超时被放大为多次串行请求
@@ -85,7 +85,7 @@ ai:
       timeout-seconds: ${VIDEO_MERGE_TIMEOUT_SECONDS:600}
   storyboard-internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}   # 主后端地址：参考素材(/api/files/**) 本地缺失时经此拉取
   gateway:
-    base-url: ${LLM_GATEWAY_BASE_URL:}
+    base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
     api-key: ${LLM_GATEWAY_API_KEY:}
 
   agent:

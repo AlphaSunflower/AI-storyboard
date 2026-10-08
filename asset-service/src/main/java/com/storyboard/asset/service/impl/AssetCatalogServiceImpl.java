@@ -18,6 +18,7 @@ import com.storyboard.asset.domain.AssetStatePolicy;
 import com.storyboard.asset.domain.AssetSearchText;
 import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
 import com.storyboard.asset.repository.LibraryRepository;
+import com.storyboard.asset.security.FileAccessUrlSigner;
 import com.storyboard.asset.security.MediaUrlSigner;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.AssetPurgeService;
@@ -39,6 +40,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     private final LibraryRepository repository;
     private final ProjectAccessPort projectAccess;
     private final MediaUrlSigner signer;
+    private final FileAccessUrlSigner fileAccessUrlSigner;
     private final AssetPurgeService purgeService;
     private final StorageProperties properties;
 
@@ -46,12 +48,14 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
             LibraryRepository repository,
             ProjectAccessPort projectAccess,
             MediaUrlSigner signer,
+            FileAccessUrlSigner fileAccessUrlSigner,
             AssetPurgeService purgeService,
             StorageProperties properties
     ) {
         this.repository = repository;
         this.projectAccess = projectAccess;
         this.signer = signer;
+        this.fileAccessUrlSigner = fileAccessUrlSigner;
         this.purgeService = purgeService;
         this.properties = properties;
     }
@@ -72,8 +76,11 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         if (scope == AssetScope.PROJECT && projectId != null && !projectId.isBlank()) {
             projectAccess.requireOwned(userId, projectId);
         }
-        return repository.searchAssets(userId, scope, projectId, folderId, query, type, tagIds,
-                tagMode == null ? TagMode.ALL : tagMode, deleted, page, size);
+        PageResponse<AssetSummary> result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
+                tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, page, size);
+        return new PageResponse<>(
+                result.records().stream().map(this::withSignedCover).toList(),
+                result.total(), result.page(), result.size());
     }
 
     @Override
@@ -92,7 +99,7 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         List<MediaRef> media = repository.listMedia(asset.id()).stream()
                 .map(item -> withSignedUrl(userId, item))
                 .toList();
-        return new AssetDetail(asset, media, asset.projects());
+        return new AssetDetail(withSignedCover(asset), media, asset.projects());
     }
 
     @Override
@@ -319,7 +326,8 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     }
 
     private AssetSummary requireAsset(String userId, String assetId) {
-        return repository.findAsset(userId, assetId).orElseThrow(() -> new BusinessException(40401, "资产不存在"));
+        return withSignedCover(repository.findAsset(userId, assetId)
+                .orElseThrow(() -> new BusinessException(40401, "资产不存在")));
     }
 
     private List<AssetSummary> validateBulkAssets(String userId, Collection<String> assetIds) {
@@ -365,5 +373,15 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
                 media.contentUrl() + "?token=" + token, media.objectKey(), media.fileName(),
                 media.relativePath(), media.mimeType(), media.sizeBytes(), media.width(), media.height(),
                 media.durationSeconds(), media.sortOrder(), media.role(), media.primary(), media.constraintText());
+    }
+
+    private AssetSummary withSignedCover(AssetSummary asset) {
+        if (asset == null || asset.coverUrl() == null || asset.coverUrl().isBlank()) return asset;
+        return new AssetSummary(
+                asset.id(), asset.ownerUserId(), asset.scope(), asset.ownerProjectId(), asset.type(),
+                asset.aiKind(), asset.name(), asset.description(), asset.aiDescription(), asset.manualOverride(),
+                asset.metadataState(), asset.status(), fileAccessUrlSigner.signIfLocal(asset.coverUrl()),
+                asset.version(), asset.tags(), asset.projects(), asset.folderId(), asset.folderPath(),
+                asset.sourceType(), asset.sourceId(), asset.createdAt(), asset.updatedAt());
     }
 }

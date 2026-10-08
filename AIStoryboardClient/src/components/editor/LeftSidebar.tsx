@@ -1,14 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../stores/projectStore';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { REFERENCE_LIMITS, type UnderstandingModelParams } from '../../config';
 import { useAgentStore } from '../../stores/agentStore';
-import { AssetScriptPicker } from './AssetScriptPicker';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
-import { assetApi, type Asset } from '../../api/assets';
+import type { SceneMaterialReferenceInput } from '../../api/assets';
+import { libraryApi, type LibraryAsset } from '../../api/library';
 import { assetUrl } from '../../config';
-import { AssetLibraryPanel } from '../asset/AssetLibraryPanel';
-import { Puzzle, Plus } from 'lucide-react';
+import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
+import { projectLibraryReferencesToDataUrls } from '../../lib/projectLibraryReferences';
+import { FolderOpen, LoaderCircle, Puzzle, Plus } from 'lucide-react';
 
 const creationTypes = [
   { value: 'movie', label: '电影片段' },
@@ -41,7 +43,13 @@ const sharedInputStyle: React.CSSProperties = {
   outline: 'none',
 };
 
+type ProjectLibraryPreview = {
+  asset: LibraryAsset;
+  previewUrl: string | null;
+};
+
 export function LeftSidebar() {
+  const navigate = useNavigate();
   const {
     currentProject,
     scenes,
@@ -64,27 +72,58 @@ export function LeftSidebar() {
   // 参考图（base64 data URI 列表；作为理解模型的看图输入）
   const [refImages, setRefImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // 资产生成（可选）：勾选的资产 id；先生成分镜已存在分镜时弹覆盖确认
-  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
   // 侧栏内置「AI资产库」区块（独立于剧本输入，紧凑列表 + 打开完整面板）
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [assetsLoading, setAssetsLoading] = useState(false);
-  const [assetsOpen, setAssetsOpen] = useState(false);
+  const [libraryAssets, setLibraryAssets] = useState<ProjectLibraryPreview[]>([]);
+  const [libraryAssetsLoading, setLibraryAssetsLoading] = useState(false);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [preparingLibraryRefs, setPreparingLibraryRefs] = useState(false);
+  const [libraryRefError, setLibraryRefError] = useState<string | null>(null);
+
+  const loadProjectLibrary = useCallback(async () => {
+    if (!currentProject?.id) {
+      setLibraryAssets([]);
+      setLibraryAssetsLoading(false);
+      return;
+    }
+    setLibraryAssetsLoading(true);
+    try {
+      const res = await libraryApi.listAssets({
+        scope: 'PROJECT',
+        projectId: currentProject.id,
+        page: 1,
+        size: 8,
+      });
+      const records = (res.data.data?.records ?? [])
+        .filter((asset) => asset.status === 'ACTIVE' && asset.type !== 'GROUP');
+      const previews = await Promise.all(records.map(async (asset): Promise<ProjectLibraryPreview> => {
+        try {
+          const detail = await libraryApi.getAsset(asset.id);
+          const media = detail.data.data?.media;
+          const preview = media?.find((item) => item.primary && item.type === 'IMAGE')
+            ?? media?.find((item) => item.type === 'IMAGE');
+          return { asset, previewUrl: preview?.contentUrl ?? asset.coverUrl };
+        } catch {
+          return { asset, previewUrl: asset.coverUrl };
+        }
+      }));
+      setLibraryAssets(previews);
+    } catch {
+      setLibraryAssets([]);
+    } finally {
+      setLibraryAssetsLoading(false);
+    }
+  }, [currentProject?.id]);
 
   useEffect(() => {
-    if (!currentProject) return;
-    setAssetsLoading(true);
-    assetApi.list(currentProject.id)
-      .then((res) => setAssets(res.data.data || []))
-      .catch(() => { /* 静默 */ })
-      .finally(() => setAssetsLoading(false));
-  }, [currentProject]);
+    void loadProjectLibrary();
+  }, [loadProjectLibrary]);
 
   // 上传约束：优先当前理解模型 params（网关 model_params refImages/maxImageSizeMB），未配置回退静态兜底
   const uParams = understandingModelOptions.find((m) => m.value === understandingModel)?.params as UnderstandingModelParams | undefined;
   const maxCount = uParams?.refImages?.max ?? REFERENCE_LIMITS.image.maxCount;
   const maxSizeMB = uParams?.maxImageSizeMB ?? REFERENCE_LIMITS.image.maxSizeMB;
+  const remainingRefSlots = Math.max(0, maxCount - refImages.length);
 
   const handleRefImages = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -110,6 +149,22 @@ export function LeftSidebar() {
 
   const removeRefImage = (idx: number) => {
     setRefImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleProjectLibraryReferences = async (references: SceneMaterialReferenceInput[]) => {
+    setPreparingLibraryRefs(true);
+    setLibraryRefError(null);
+    try {
+      const uris = await projectLibraryReferencesToDataUrls(references);
+      setRefImages((prev) => [...prev, ...uris].slice(0, maxCount));
+      await loadProjectLibrary();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '读取项目库素材失败';
+      setLibraryRefError(message);
+      throw error;
+    } finally {
+      setPreparingLibraryRefs(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -139,12 +194,11 @@ export function LeftSidebar() {
     }
 
     const preset = resolveVideoPreset(videoPreset);
-    const assetIds = selectedAssetIds.length > 0 ? selectedAssetIds : undefined;
     await generateScript(
       projectId, scriptText, creationType, preset.aspectRatio, undefined,
       refImages.length ? understandingModel : undefined,
       refImages.length ? refImages : undefined,
-      assetIds, mode
+      undefined, mode
     );
   };
 
@@ -276,17 +330,39 @@ export function LeftSidebar() {
 
       {/* Reference image multi-upload（理解模型看图输入） */}
       <div style={{ flexShrink: 0 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 10px', borderRadius: 'var(--rounded-md)',
-          border: '1px dashed var(--color-hairline)', cursor: 'pointer',
-          background: 'var(--color-canvas)',
-        }} onClick={() => fileInputRef.current?.click()}>
-          <span style={{ fontSize: 11, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg> 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
-          </span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{
+            flex: '1 1 190px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 10px', borderRadius: 'var(--rounded-md)',
+            border: '1px dashed var(--color-hairline)', cursor: 'pointer',
+            background: 'var(--color-canvas)',
+          }} onClick={() => fileInputRef.current?.click()}>
+            <span style={{ fontSize: 11, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg> 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
+            </span>
+          </div>
+          <button
+            type="button"
+            aria-label="从项目库选择参考图"
+            disabled={remainingRefSlots === 0 || preparingLibraryRefs}
+            onClick={() => setLibraryPickerOpen(true)}
+            style={{
+              flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '8px 10px', borderRadius: 'var(--rounded-md)',
+              border: '1px solid var(--color-primary)', background: 'white',
+              color: 'var(--color-primary)', fontSize: 11, fontWeight: 600,
+              cursor: remainingRefSlots === 0 || preparingLibraryRefs ? 'not-allowed' : 'pointer',
+              opacity: remainingRefSlots === 0 || preparingLibraryRefs ? 0.55 : 1,
+            }}
+          >
+            {preparingLibraryRefs ? <LoaderCircle size={14} className="is-spinning" /> : <FolderOpen size={14} />}
+            项目库素材
+          </button>
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleRefImages} />
+        {libraryRefError && (
+          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-error)' }}>{libraryRefError}</div>
+        )}
         {refImages.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {refImages.map((uri, i) => (
@@ -319,9 +395,6 @@ export function LeftSidebar() {
           </div>
         )}
       </div>
-
-      {/* 资产生成（可选） */}      
-      <AssetScriptPicker projectId={currentProject?.id} value={selectedAssetIds} onChange={setSelectedAssetIds} />
 
       {/* 理解模型：驱动图片/视频理解的看图模型（剧本输入在这里选，分镜生图分别可选） */}
       <div style={{ flexShrink: 0 }}>
@@ -361,32 +434,33 @@ export function LeftSidebar() {
       </button>
 
       {/* 项目库（独立于剧本输入，侧栏内嵌） */}
-      <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: '1 1 auto', minHeight: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
             <Puzzle size={13} strokeWidth={1.8} /> 项目库
           </span>
           <button
-            onClick={() => setAssetsOpen(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', fontSize: 12, padding: '4px 10px', borderRadius: 'var(--rounded-sm)', cursor: 'pointer' }}
+            onClick={() => currentProject && navigate(`/library?projectId=${encodeURIComponent(currentProject.id)}`)}
+            disabled={!currentProject}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', fontSize: 12, padding: '4px 10px', borderRadius: 'var(--rounded-sm)', cursor: currentProject ? 'pointer' : 'not-allowed', opacity: currentProject ? 1 : 0.5 }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; e.currentTarget.style.color = 'white'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-primary)'; }}
           ><Plus size={13} strokeWidth={1.8} /> 管理</button>
         </div>
-        {assetsLoading ? (
+        {libraryAssetsLoading ? (
           <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>加载中…</div>
-        ) : assets.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--color-muted-soft)' }}>暂无资产，点击「管理」新建</div>
+        ) : libraryAssets.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--color-muted-soft)' }}>项目库暂无素材，点击「管理」上传</div>
         ) : (
-          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {assets.map((a) => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 'var(--rounded-sm)', background: 'white', border: '1px solid var(--color-hairline)' }}>
-                {a.images?.[0]
-                  ? <img src={assetUrl(a.images[0].url)} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 'var(--rounded-sm)', flexShrink: 0 }} />
+          <div data-testid="project-library-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {libraryAssets.map(({ asset, previewUrl }) => (
+              <div key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 'var(--rounded-sm)', background: 'white', border: '1px solid var(--color-hairline)' }}>
+                {previewUrl
+                  ? <img src={assetUrl(previewUrl)} alt={asset.name} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 'var(--rounded-sm)', flexShrink: 0 }} />
                   : <div style={{ width: 34, height: 34, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>无图</div>}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{a.type === 'character' ? '人物' : a.type === 'prop' ? '道具' : '场景'}{a.projectId ? '' : ' · 全局'}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{asset.type === 'IMAGE' ? '图片' : asset.type === 'VIDEO' ? '视频' : asset.type === 'AUDIO' ? '音频' : '素材'}{asset.scope === 'GLOBAL' ? ' · 全局' : ''}</div>
                 </div>
               </div>
             ))}
@@ -420,7 +494,15 @@ export function LeftSidebar() {
         </div>
       )}
 
-      {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
+      <ProjectLibraryPickerModal
+        open={libraryPickerOpen}
+        projectId={currentProject?.id}
+        type="image"
+        purpose="image"
+        maxSelectable={remainingRefSlots}
+        onClose={() => setLibraryPickerOpen(false)}
+        onConfirm={handleProjectLibraryReferences}
+      />
     </div>
   );
 }

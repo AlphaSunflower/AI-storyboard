@@ -17,6 +17,7 @@ import com.moon.moonagent.service.StoryboardQueueRequestGuard;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.storyboard.asset.client.AssetClient;
 import com.storyboard.asset.client.AssetContracts;
 import org.junit.jupiter.api.Test;
@@ -75,6 +76,8 @@ class MoonAgentControllerSmokeTest {
     private PromptOptimizeService optimizeService;
     @MockitoBean
     private GenerationRecordService generationRecordService;
+    @MockitoBean
+    private FileUrlSigner fileUrlSigner;
     @MockitoBean
     private ProjectOutputMaterialService projectOutputMaterialService;
     @MockitoBean
@@ -205,6 +208,26 @@ class MoonAgentControllerSmokeTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.title").value("会话"));
         mockMvc.perform(delete("/api/agent/assets/a1").header("X-User-Id", "u1"))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void messageHistory_reSignsLocalMediaUrls() throws Exception {
+        AgentMessage stored = message();
+        stored.setContent("![生成图片](/api/files/images/a.png)");
+        stored.setMetadata(Map.of("messageInput", Map.of(
+                "picUrls", List.of("/api/files/images/a.png"))));
+        when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
+        when(chatService.listMessages("c1")).thenReturn(List.of(stored));
+        when(fileUrlSigner.signEmbeddedUrls(stored.getContent()))
+                .thenReturn("![生成图片](/api/files/images/a.png?token=signed)");
+        when(fileUrlSigner.signMetadata(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvc.perform(get("/api/agent/conversations/c1/messages").header("X-User-Id", "u1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].content")
+                        .value("![生成图片](/api/files/images/a.png?token=signed)"))
+                .andExpect(jsonPath("$.data[0].metadata.messageInput.picUrls[0]")
+                        .value("/api/files/images/a.png"));
     }
 
     @Test

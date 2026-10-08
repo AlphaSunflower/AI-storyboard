@@ -5,6 +5,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +27,8 @@ class ProjectOutputMaterialServiceImplTest {
     void setUp() {
         conversationMapper = mock(AgentConversationMapper.class);
         assetMapper = mock(AgentAssetMapper.class);
-        service = new ProjectOutputMaterialServiceImpl(conversationMapper, assetMapper);
+        service = new ProjectOutputMaterialServiceImpl(
+                conversationMapper, assetMapper, new FileUrlSigner("test-internal-secret", 900));
     }
 
     @Test
@@ -61,7 +63,9 @@ class ProjectOutputMaterialServiceImplTest {
         assertThat(groups.get(1).items()).extracting(item -> item.id())
                 .containsExactly("a-current-1", "a-current-2");
         assertThat(groups.get(1).items().getFirst().urls())
-                .containsExactly("/api/files/images/p1.png");
+                .singleElement()
+                .asString()
+                .startsWith("/api/files/images/p1.png?token=");
         assertThat(groups.getFirst().items()).extracting(item -> item.id())
                 .containsExactly("a-editor");
     }

@@ -10,8 +10,9 @@ interface RefreshResponse {
 }
 
 export async function bootstrapJobAuth(): Promise<string | null> {
-  if (accessToken) return accessToken;
+  if (accessToken && !tokenExpired()) return accessToken;
   if (refreshPromise) return refreshPromise;
+  accessToken = null;
   refreshPromise = (async () => {
     try {
       const response = await fetch('/api/auth/refresh', {
@@ -71,5 +72,21 @@ export async function getStreamTicket(path: string): Promise<string | null> {
 }
 
 export function tokenExpired(): boolean {
-  return !accessToken;
+  if (!accessToken) return true;
+  const expiresAt = jwtExpiresAt(accessToken);
+  if (expiresAt == null) return true;
+  return expiresAt <= Date.now() + 30_000;
+}
+
+function jwtExpiresAt(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const body = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof body.exp === 'number' ? body.exp * 1000 : null;
+  } catch {
+    return null;
+  }
 }

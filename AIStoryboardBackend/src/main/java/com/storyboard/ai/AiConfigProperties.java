@@ -147,7 +147,7 @@ public class AiConfigProperties {
 
     // ── 脚本生成超时 ──
     /** 脚本生成 ChatClient 超时（秒） */
-    @Setter @Getter private int scriptTimeout = 120;
+    @Setter @Getter private int scriptTimeout = 300;
 
     // ── 网关模型服务超时 ──
     /** 网关模型列表请求超时（秒，connect + request 共用） */

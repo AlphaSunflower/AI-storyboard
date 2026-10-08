@@ -37,7 +37,7 @@ describe('App authentication flow', () => {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ data: { accessToken: 'header.payload.signature', userId: 'user-1' } }),
+          json: async () => ({ data: { accessToken: validJwt('login'), userId: 'user-1' } }),
         } as Response;
       }
       if (String(input).includes('/api/auth/refresh')) {
@@ -63,15 +63,26 @@ describe('App authentication flow', () => {
   });
 
   it('ignores a late 401 from an old token after a new login', async () => {
-    setJobToken('old-token');
+    const oldToken = validJwt('old');
+    const newToken = validJwt('new');
+    setJobToken(oldToken);
     render(<App />);
     await waitFor(() => expect(screen.getByText('最近项目 A')).toBeTruthy());
 
-    setJobToken('new-token');
-    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: 'old-token' } }));
+    setJobToken(newToken);
+    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: oldToken } }));
     expect(screen.getByText('最近项目 A')).toBeTruthy();
 
-    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: 'new-token' } }));
+    fireEvent(window, new CustomEvent('morrow:auth-rejected', { detail: { status: 401, token: newToken } }));
     expect(await screen.findByPlaceholderText('you@example.com')).toBeTruthy();
   });
 });
+
+function validJwt(jti: string): string {
+  const encode = (value: object) => btoa(JSON.stringify(value))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    jti,
+  })}.signature`;
+}

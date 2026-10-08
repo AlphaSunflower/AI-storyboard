@@ -1,5 +1,6 @@
 export const STORYBOARD_REFERENCE_MESSAGE = 'ai-storyboard:reference-scenes';
 export const EMBEDDED_APP_READY_MESSAGE = 'ai-storyboard:embedded-app-ready';
+export const CANVAS_AUTH_MESSAGE = 'ai-storyboard:canvas-auth';
 export const CANVAS_MODE_STATUS_MESSAGE = 'ai-storyboard:canvas-mode-status';
 export const CANVAS_MODE_READY_MESSAGE = 'ai-storyboard:canvas-mode-ready';
 export const CANVAS_MODE_CONTROL_MESSAGE = 'ai-storyboard:canvas-mode-control';

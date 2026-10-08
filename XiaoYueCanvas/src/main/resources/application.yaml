@@ -96,4 +96,4 @@ internal:
 # 跨域：dev 靠 vite proxy，生产走网关统一 CORS
 app:
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}

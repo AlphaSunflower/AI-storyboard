@@ -13,6 +13,7 @@ import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.FileStorageService;
 import com.storyboard.service.SceneService;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,7 @@ public class SceneServiceImpl implements SceneService {
     private final ScenePromptMapper scenePromptMapper;
     private final FileStorageService fileStorageService;
     private final ProjectMapper projectMapper;
+    private final FileUrlSigner fileUrlSigner;
 
     /** 参考素材上限兜底（对齐 MiniMax 输入约束；网关 params 精确值由前端展示，后端硬上限防滥用） */
     private static final Map<String, int[]> REF_LIMITS = Map.of(
@@ -160,7 +162,8 @@ public class SceneServiceImpl implements SceneService {
         if (scene == null) throw new BusinessException(40401, "分镜不存在");
         checkProjectOwnership(userId, scene.getProjectId());
         return refImageMapper.findBySceneId(sceneId).stream()
-            .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(), r.getImageUrl(),
+            .map(r -> new SceneReferenceResponse(r.getId(), r.getType(), r.getPurpose(),
+                    fileUrlSigner.signIfLocal(r.getImageUrl()),
                     r.getRole(), r.getSourceType(), r.getSourceId(), r.getMediaId(), r.getSourceConversationId(),
                     r.getFileName(), r.getFileSize()))
             .toList();
@@ -258,9 +261,10 @@ public class SceneServiceImpl implements SceneService {
             p != null ? p.getAiModel() : null,
             p != null ? p.getVideoResolution() : null,
             p != null ? p.getDuration() : null,
-            s.getImageUrl(), s.getVideoUrl(),
+            fileUrlSigner.signIfLocal(s.getImageUrl()),
+            fileUrlSigner.signIfLocal(s.getVideoUrl()),
             s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
-            s.getImageUrls(),
+            fileUrlSigner.signCommaSeparated(s.getImageUrls()),
             p != null ? p.getImageModel() : null,
             p != null ? p.getImageSize() : null,
             p != null ? p.getImageQuality() : null,

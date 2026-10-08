@@ -12,6 +12,7 @@ import com.storyboard.mapper.AgentAssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.service.AssetService;
 import com.storyboard.asset.client.AssetClient;
@@ -29,6 +30,7 @@ import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -58,7 +60,7 @@ class SceneMaterialServiceImplTest {
         assetClient = mock(AssetClient.class);
         service = new SceneMaterialServiceImpl(
                 sceneMapper, projectMapper, assetService, referenceMapper, agentAssetMapper,
-                groupSnapshotMapper, assetClient);
+                groupSnapshotMapper, assetClient, new FileUrlSigner("test-file-signing-secret", 900));
 
         Scene scene = new Scene();
         scene.setId("s1");
@@ -186,7 +188,7 @@ class SceneMaterialServiceImplTest {
         assertEquals("output", inserted.getValue().getSourceType());
         assertEquals("out-1", inserted.getValue().getSourceId());
         assertEquals("c1", inserted.getValue().getSourceConversationId());
-        assertEquals("/api/files/images/output.png", result.get(0).url());
+        assertTrue(result.get(0).url().startsWith("/api/files/images/output.png?token="));
     }
 
     @Test

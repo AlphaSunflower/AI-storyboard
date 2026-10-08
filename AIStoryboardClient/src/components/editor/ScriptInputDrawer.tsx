@@ -4,7 +4,6 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { resolveVideoPreset } from '../common/VideoPresetSelector';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
-import { AssetScriptPicker } from './AssetScriptPicker';
 
 interface ScriptInputDrawerProps {
   onClose: () => void;
@@ -31,7 +30,6 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
   const [generating, setGenerating] = useState(false);
   const [refImages, setRefImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [confirmOverwrite, setConfirmOverwrite] = useState<null | 'pending'>(null);
 
   const handleRefImages = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,12 +64,11 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
         projectId = p.id;
       }
       const preset = resolveVideoPreset(videoPreset);
-      const assetIds = selectedAssetIds.length > 0 ? selectedAssetIds : undefined;
       await generateScript(
         projectId, scriptText, 'movie', preset.aspectRatio, undefined,
         refImages.length ? understandingModel : undefined,
         refImages.length ? refImages : undefined,
-        assetIds, mode,
+        undefined, mode,
       );
       onClose();
     } catch { /* store 已处理 */ } finally {
@@ -161,9 +158,6 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
                 智能体已生成分镜，手动输入暂时禁用
               </p>
             )}
-
-            {/* 资产生成（可选） */}
-            <AssetScriptPicker projectId={currentProject?.id} value={selectedAssetIds} onChange={setSelectedAssetIds} />
           </div>
 
           {/* 底部按钮 */}

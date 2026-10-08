@@ -83,7 +83,7 @@ export async function listCanvasAssets(canvasId: string): Promise<CanvasAssetDes
 
 export async function downloadCanvasAssetBlob(asset: CanvasAssetDescriptor): Promise<Blob> {
   const directUrl = asset.url?.trim() ?? '';
-  const canUseDirectUrl = directUrl.startsWith('/api/files/') || /^https?:\/\//i.test(directUrl);
+  const canUseDirectUrl = /^https?:\/\//i.test(directUrl);
   const response = await (canUseDirectUrl
     ? fetch(directUrl, { headers: { Accept: asset.mimeType } })
     : apiFetch(`/assets/${encodeURIComponent(asset.id)}`, {

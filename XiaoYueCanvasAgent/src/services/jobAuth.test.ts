@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bootstrapJobAuth, clearToken } from './jobAuth';
+import { bootstrapJobAuth, clearToken, setJobToken, tokenExpired } from './jobAuth';
 
 describe('jobAuth', () => {
   beforeEach(() => {
@@ -32,4 +32,23 @@ describe('jobAuth', () => {
     await expect(second).resolves.toBe('token-1');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('refreshes an expired access token instead of reusing it', async () => {
+    const expired = jwt({ exp: Math.floor(Date.now() / 1000) - 60 });
+    setJobToken(expired, 'user-1');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: { accessToken: jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }), userId: 'user-1' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(tokenExpired()).toBe(true);
+    await expect(bootstrapJobAuth()).resolves.not.toBe(expired);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
+
+function jwt(payload: Record<string, number>): string {
+  const encode = (value: object) => btoa(JSON.stringify(value))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(payload)}.signature`;
+}

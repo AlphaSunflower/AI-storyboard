@@ -32,6 +32,10 @@ management:
       exposure:
         include: health,prometheus
 
+files:
+  signing-secret: ${FILE_SIGNING_SECRET:${INTERNAL_SECRET:${internal.secret:}}}
+  signature-ttl-seconds: ${FILE_SIGNATURE_TTL_SECONDS:2592000}
+
 storyboard:
   asset:
     internal-token: ${INTERNAL_SECRET:${internal.secret:}}

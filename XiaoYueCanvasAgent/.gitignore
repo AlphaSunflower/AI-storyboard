@@ -3,6 +3,7 @@ dist/
 .npm-cache/
 *.tsbuildinfo
 *.log
+.env*.local
 test-results/
 playwright-report/
 .DS_Store

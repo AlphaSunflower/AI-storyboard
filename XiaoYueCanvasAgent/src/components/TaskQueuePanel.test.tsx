@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useCanvasStore } from '../store/canvasStore';
 import { TaskQueuePanel } from './TaskQueuePanel';
@@ -60,5 +60,15 @@ describe('TaskQueuePanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /取消运行节点的生成任务/ }));
     expect(cancelCanvasGeneration).toHaveBeenCalledWith('running');
+  });
+
+  it('closes when the user points outside the panel', async () => {
+    render(<TaskQueuePanel />);
+    fireEvent.click(screen.getByRole('button', { name: '任务队列' }));
+    expect(screen.getByRole('dialog', { name: '任务队列' })).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '任务队列' })).toBeNull());
   });
 });

@@ -55,7 +55,37 @@ import '../styles/canvas-tech-chat.css';
 
 /** 待选人工介入卡占位消息（metadata.kind='hitl' 且 pending）：过滤掉，避免与流内卡片重复渲染 formContent。 */
 const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boolean } } }) =>
-  m.metadata?.kind === 'hitl' && !!m.metadata.hitl?.pending;
+  m.metadata?.kind === 'hitl' && !!m.metadata.hitl?.pending
+  && !('content' in m && typeof m.content === 'string' && m.content.trim());
+
+/** 空会话页也要显示发送前置错误，避免首次发送失败时界面完全没有反馈。 */
+function AgentStreamErrorNotice({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        width: '100%', maxWidth: DS.maxContent, boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 10, padding: '10px 14px', borderRadius: 10,
+        background: 'rgba(217, 45, 32, 0.06)', border: '1px solid rgba(217, 45, 32, 0.15)',
+      }}
+    >
+      <span style={{ color: 'rgb(217, 45, 32)', fontSize: 13, textAlign: 'left' }}>
+        <Info size={15} strokeWidth={2} style={{ marginRight: 6 }} />
+        {message}
+      </span>
+      <button
+        onClick={() => useAgentStore.setState({ streamError: null })}
+        style={{
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          color: 'rgb(217, 45, 32)', fontSize: 18, padding: '0 4px', lineHeight: 1,
+        }}
+      >
+        <X size={14} strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
 
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
@@ -567,6 +597,7 @@ export function ChatPage() {
             <div style={{ width: '100%', maxWidth: 480 }}>
               <ChatComposer />
             </div>
+            {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips（手机端） */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', padding: '0 8px' }}>
               {['帮我设计一个科幻分镜', '生成一张概念海报'].map((t) => (
@@ -958,6 +989,7 @@ export function ChatPage() {
               </>
             )}
             <ChatComposer />
+            {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips */}
             {dockMode !== 'docked' && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: DS.maxContent, padding: '0 16px' }}>

@@ -96,7 +96,7 @@ ai:
   video-request-timeout: 120
   video-download-timeout: 180
   video-retry-delay-ms: 15000
-  script-timeout: 120
+  script-timeout: 300
   gateway-model-timeout: 10
   gateway-cooldown-ms: 300000
 

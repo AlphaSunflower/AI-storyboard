@@ -8,12 +8,13 @@ import com.moon.xiaoyuecanvas.service.CanvasProjectLibraryService;
 import com.moon.xiaoyuecanvas.service.DesignJobService;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.core.io.ByteArrayResource;
 
 import java.util.List;
-import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -56,20 +57,24 @@ class DesignAgentJobControllerTest {
     }
 
     @Test
-    void assetRedirectsDurableMinioFilesToGatewayInsteadOfLocalDisk() {
+    void assetServesDurableMinioFilesThroughAuthenticatedCanvasEndpoint() {
         CanvasAssetService assets = mock(CanvasAssetService.class);
+        FileStorageService fileStorageService = mock(FileStorageService.class);
         CanvasAsset asset = new CanvasAsset();
         asset.setId("asset-1");
-        asset.setObjectUrl("/api/files/images/reference.png");
+        asset.setObjectUrl("/api/files/images/reference.png?token=expired");
         asset.setType("image");
+        asset.setMimeType("image/png");
         when(assets.getOwned("user-1", "asset-1")).thenReturn(asset);
+        when(fileStorageService.readImage("reference.png")).thenReturn(new byte[]{1, 2, 3});
         DesignAgentJobController controller = new DesignAgentJobController(
                 mock(DesignJobService.class), assets, mock(CanvasProjectLibraryService.class),
-                mock(FileStorageService.class));
+                fileStorageService);
 
         var response = controller.asset("user-1", "asset-1");
 
-        assertEquals(302, response.getStatusCode().value());
-        assertEquals(URI.create("/api/files/images/reference.png"), response.getHeaders().getLocation());
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody() instanceof ByteArrayResource);
+        assertEquals(3, ((ByteArrayResource) response.getBody()).getByteArray().length);
     }
 }

@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, RefreshCw, X } from 'lucide-react';
-import { isEmbeddedAppReadyMessage } from '../../../lib/embeddedAppMessages';
+import {
+  CANVAS_AUTH_MESSAGE,
+  isEmbeddedAppReadyMessage,
+} from '../../../lib/embeddedAppMessages';
+import { getAccessToken } from '../../../lib/authSession';
 import { CHAT_DOCK_MIN_APP_WIDTH } from '../chatDockLayout';
 import './EmbeddedAppWindow.css';
 
@@ -79,6 +83,19 @@ export function EmbeddedAppWindow({
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const canvasLocked = tabs.some((tab) => tab.key === 'canvas' && tab.canvasMode);
 
+  const postCanvasAuth = (tab: EmbeddedAppDescriptor | undefined, source: Window | null) => {
+    if (!tab || tab.key !== 'canvas' || !source) return;
+    const accessToken = getAccessToken();
+    if (!accessToken) return;
+    let targetOrigin = window.location.origin;
+    try {
+      targetOrigin = new URL(tab.url, window.location.origin).origin;
+    } catch {
+      return;
+    }
+    source.postMessage({ type: CANVAS_AUTH_MESSAGE, accessToken }, targetOrigin);
+  };
+
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
   }, []);
@@ -113,11 +130,18 @@ export function EmbeddedAppWindow({
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || !isEmbeddedAppReadyMessage(event.data)) return;
+      if (!isEmbeddedAppReadyMessage(event.data)) return;
       const frame = frameRefs.current[event.data.key];
       if (!frame || frame.contentWindow !== event.source) return;
       const tab = tabs.find((item) => item.key === event.data.key);
-      if (tab) setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
+      if (!tab) return;
+      try {
+        if (event.origin !== new URL(tab.url, window.location.origin).origin) return;
+      } catch {
+        return;
+      }
+      setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
+      postCanvasAuth(tab, frame.contentWindow);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -298,7 +322,10 @@ export function EmbeddedAppWindow({
                 src={tab.url}
                 data-app-key={tab.key}
                 title={tab.title}
-                onLoad={() => setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }))}
+                onLoad={() => {
+                  setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
+                  postCanvasAuth(tab, frameRefs.current[tab.key]?.contentWindow ?? null);
+                }}
                 allow="clipboard-read; clipboard-write; camera; microphone; fullscreen"
                 allowFullScreen
                 tabIndex={active ? 0 : -1}

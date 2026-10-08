@@ -28,6 +28,7 @@ import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
@@ -61,6 +62,7 @@ public class AgentConversationController {
     private final AgentChatService chatService;
     private final PromptOptimizeService optimizeService;
     private final GenerationRecordService generationRecordService;
+    private final FileUrlSigner fileUrlSigner;
     private final ProjectOutputMaterialService projectOutputMaterialService;
     private final AgentAiConfigProperties agentConfig;
     private final AssetClient assetClient;
@@ -125,7 +127,7 @@ public class AgentConversationController {
             Authentication auth, @PathVariable String id) {
         AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
         List<AgentMessageVO> messages = chatService.listMessages(id).stream()
-                .map(AgentConversationController::toVO).toList();
+                .map(this::toVO).toList();
         return ApiResponse.ok(Map.of("conversation", toVO(conversation), "messages", messages));
     }
 
@@ -172,7 +174,7 @@ public class AgentConversationController {
     public ApiResponse<List<AgentMessageVO>> listMessages(
             Authentication auth, @PathVariable String id) {
         chatService.getOwnedConversation(auth.getName(), id);
-        return ApiResponse.ok(chatService.listMessages(id).stream().map(AgentConversationController::toVO).toList());
+        return ApiResponse.ok(chatService.listMessages(id).stream().map(this::toVO).toList());
     }
 
     /** 发送消息 */
@@ -403,7 +405,7 @@ public class AgentConversationController {
     /** 生成记录详情 */
     @GetMapping("/generation-records/{id}")
     public ApiResponse<AgentAsset> getGenerationRecord(Authentication auth, @PathVariable String id) {
-        return ApiResponse.ok(generationRecordService.getRecord(auth.getName(), id));
+        return ApiResponse.ok(signAsset(generationRecordService.getRecord(auth.getName(), id)));
     }
 
     /** 当前项目产出素材：按对话分组，当前对话优先，供分镜审查素材选择器使用。 */
@@ -418,7 +420,13 @@ public class AgentConversationController {
     /** 重新拉取（仅视频且 taskId 非空）：重新轮询上游并更新记录 */
     @PostMapping("/generation-records/{id}/refetch")
     public ApiResponse<AgentAsset> refetchGenerationRecord(Authentication auth, @PathVariable String id) {
-        return ApiResponse.ok(generationRecordService.refetch(auth.getName(), id));
+        return ApiResponse.ok(signAsset(generationRecordService.refetch(auth.getName(), id)));
+    }
+
+    private AgentAsset signAsset(AgentAsset asset) {
+        asset.setUrl(fileUrlSigner.signIfLocal(asset.getUrl()));
+        asset.setResultUrls(fileUrlSigner.signJsonArray(asset.getResultUrls()));
+        return asset;
     }
 
     /** 重试（仅 failed 记录）：复用原参数重新生成，产出新记录 */
@@ -559,9 +567,17 @@ public class AgentConversationController {
     }
 
     /** 消息实体 → VO 映射 */
-    private static AgentMessageVO toVO(AgentMessage m) {
-        return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(), m.getContent(),
-                m.getMetadata() == null ? java.util.Map.of() : m.getMetadata(),
+    private AgentMessageVO toVO(AgentMessage m) {
+        String content = m.getContent();
+        String signedContent = fileUrlSigner.signEmbeddedUrls(content);
+        Map<String, Object> metadata = m.getMetadata() == null ? java.util.Map.of() : m.getMetadata();
+        Map<String, Object> signedMetadata = fileUrlSigner.signMetadata(metadata);
+        if (signedMetadata == null || (signedMetadata.isEmpty() && !metadata.isEmpty())) {
+            signedMetadata = metadata;
+        }
+        return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(),
+                signedContent == null ? content : signedContent,
+                signedMetadata,
                 m.getCreatedAt());
     }
 

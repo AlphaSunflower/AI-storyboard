@@ -11,6 +11,7 @@ import com.storyboard.common.BusinessException;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.ProjectService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectMapper projectMapper;
     private final SceneMapper sceneMapper;
     private final ScenePromptMapper scenePromptMapper;
+    private final FileUrlSigner fileUrlSigner;
 
     @Override
     public List<ProjectResponse> listByUser(String userId) {
@@ -121,9 +123,10 @@ public class ProjectServiceImpl implements ProjectService {
             p != null ? p.getAiModel() : null,
             p != null ? p.getVideoResolution() : null,
             p != null ? p.getDuration() : null,
-            s.getImageUrl(), s.getVideoUrl(),
+            fileUrlSigner.signIfLocal(s.getImageUrl()),
+            fileUrlSigner.signIfLocal(s.getVideoUrl()),
             s.getImageStatus(), s.getVideoStatus(), s.getVideoTaskId(),
-            s.getImageUrls(),
+            fileUrlSigner.signCommaSeparated(s.getImageUrls()),
             p != null ? p.getImageModel() : null,
             p != null ? p.getImageSize() : null,
             p != null ? p.getImageQuality() : null,
@@ -136,7 +139,8 @@ public class ProjectServiceImpl implements ProjectService {
         return new ProjectResponse(
             project.getId(), project.getUserId(), project.getName(),
             project.getDescription(), project.getCreationType(), project.getCustomTypeDesc(),
-            project.getAspectRatio(), project.getReferenceImageUrl(), project.getScriptText(),
+            project.getAspectRatio(), fileUrlSigner.signIfLocal(project.getReferenceImageUrl()),
+            project.getScriptText(),
             project.getAiModel(), project.getStatus(),
             project.getCreatedAt(), project.getUpdatedAt(), sceneResponses
         );

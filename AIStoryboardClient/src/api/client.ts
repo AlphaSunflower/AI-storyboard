@@ -13,8 +13,9 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-client.interceptors.request.use((config) => {
-  const token = getAccessToken();
+client.interceptors.request.use(async (config) => {
+  const isAuthPath = config.url?.startsWith('/auth/');
+  const token = getAccessToken() ?? (isAuthPath ? null : await refreshAccessToken());
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

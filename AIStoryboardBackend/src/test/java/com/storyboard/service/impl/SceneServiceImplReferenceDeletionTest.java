@@ -8,6 +8,7 @@ import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.FileStorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,8 @@ class SceneServiceImplReferenceDeletionTest {
         referenceMapper = mock(SceneReferenceImageMapper.class);
         fileStorageService = mock(FileStorageService.class);
         service = new SceneServiceImpl(
-                sceneMapper, referenceMapper, mock(ScenePromptMapper.class), fileStorageService, projectMapper);
+                sceneMapper, referenceMapper, mock(ScenePromptMapper.class), fileStorageService, projectMapper,
+                mock(FileUrlSigner.class));
 
         Scene scene = new Scene();
         scene.setId("s1");

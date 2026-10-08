@@ -12,6 +12,7 @@ import com.storyboard.common.BusinessException;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
@@ -107,6 +108,7 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ConversationTitleService titleService;
     private final StoryboardClient storyboardClient;
     private final FileStorageService fileStorageService;
+    private final FileUrlSigner fileUrlSigner;
     private final AiConfigProperties config;
     private final com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport orchestratorSupport;
     private final com.moon.moonagent.mapper.AgentCheckpointMapper checkpointMapper;
@@ -423,6 +425,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         int from = (int) Math.min(total, (long) (safePage - 1) * safeSize);
         int to = Math.min(total, from + safeSize);
         List<AgentAsset> records = from >= total ? List.of() : all.subList(from, to);
+        records.forEach(this::signAssetUrls);
         int imageTotal = mediaCount(all, "image");
         int videoTotal = mediaCount(all, "video");
         return Map.of(
@@ -433,6 +436,11 @@ public class AgentChatServiceImpl implements AgentChatService {
                 "mediaTotal", imageTotal + videoTotal,
                 "page", safePage,
                 "size", safeSize);
+    }
+
+    private void signAssetUrls(AgentAsset asset) {
+        asset.setUrl(fileUrlSigner.signIfLocal(asset.getUrl()));
+        asset.setResultUrls(fileUrlSigner.signJsonArray(asset.getResultUrls()));
     }
 
     /** 统计某一类型下所有生成结果 URL；一次生成含多图时全部计入。 */
@@ -1325,6 +1333,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             return;
         }
         if (result.hitlPaused()) {
+            updateHitlMessageContent(result.messageId(), result.content());
             Map<String, Object> paused = new LinkedHashMap<>();
             paused.put("turnId", turn.getId());
             paused.put("messageId", result.messageId() == null ? "" : result.messageId());
@@ -1360,6 +1369,15 @@ public class AgentChatServiceImpl implements AgentChatService {
         payload.put("metadata", result.metadata() == null ? Map.of() : result.metadata());
         sendRuntimeEnvelope(emitter,
                 turnEventStore.append(turn.getId(), "turn_completed", payload));
+    }
+
+    /** HITL 卡片落库时先写的是卡片标题，暂停时用本轮完整助手正文补齐，刷新后仍能看到方案。 */
+    void updateHitlMessageContent(String messageId, String content) {
+        if (messageId == null || messageId.isBlank() || content == null || content.isBlank()) return;
+        AgentMessage update = new AgentMessage();
+        update.setId(messageId);
+        update.setContent(content);
+        messageMapper.updateById(update);
     }
 
     private boolean requireAgentScope(SseEmitter emitter) {

@@ -1,6 +1,7 @@
 package com.moon.moonagent.service.impl;
 
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.storage.MinioStorage;
 import com.storyboard.common.BusinessException;
@@ -23,7 +24,7 @@ import java.util.UUID;
 
 /**
  * 文件存储服务实现：图片/视频下载保存、上传图片保存、对象读取/删除（MinIO 对象存储）。
- * 保存后返回对外相对路径（/api/files/{type}/xxx），读取返回对象字节。
+ * 保存后返回带 HMAC 签名的对外路径（/api/files/{type}/xxx?token=...），读取返回对象字节。
  */
 @Service
 @RequiredArgsConstructor
@@ -32,6 +33,7 @@ public class FileStorageServiceImpl implements FileStorageService {
     private static final Logger log = LoggerFactory.getLogger(FileStorageServiceImpl.class);
 
     private final MinioStorage minioStorage;
+    private final FileUrlSigner fileUrlSigner;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -60,7 +62,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         String filename = UUID.randomUUID() + ".png";
         minioStorage.put(minioStorage.key("images", filename), bytes, "image/png");
         log.debug("Saved base64 image to MinIO: {}", filename);
-        return "/api/files/images/" + filename;
+        return fileUrlSigner.signIfLocal("/api/files/images/" + filename);
     }
 
     @Override
@@ -116,7 +118,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key(targetType, filename), bytes, contentType(filename));
             log.debug("Saved reference {} to MinIO: {}", t, filename);
-            return urlPrefix + filename;
+            return fileUrlSigner.signIfLocal(urlPrefix + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "保存参考素材失败: " + e.getMessage(), e);
         }
@@ -143,7 +145,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key("images", filename), bytes, contentType(filename));
             log.debug("Saved uploaded image to MinIO: {}", filename);
-            return "/api/files/images/" + filename;
+            return fileUrlSigner.signIfLocal("/api/files/images/" + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "保存上传图片失败: " + e.getMessage(), e);
         }
@@ -166,7 +168,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         byte[] bytes = Base64.getDecoder().decode(clean);
         String filename = UUID.randomUUID() + ".mp4";
         minioStorage.put(minioStorage.key("videos", filename), bytes, "video/mp4");
-        return "/api/files/videos/" + filename;
+        return fileUrlSigner.signIfLocal("/api/files/videos/" + filename);
     }
 
     @Override
@@ -178,7 +180,7 @@ public class FileStorageServiceImpl implements FileStorageService {
                 ? "mp4" : extension.toLowerCase();
         String filename = UUID.randomUUID() + "." + ext;
         minioStorage.put(minioStorage.key("videos", filename), bytes, contentType(filename));
-        return "/api/files/videos/" + filename;
+        return fileUrlSigner.signIfLocal("/api/files/videos/" + filename);
     }
 
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
@@ -202,7 +204,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             String filename = UUID.randomUUID() + "." + extension;
             minioStorage.put(minioStorage.key(type, filename), bytes, contentType(filename));
             log.debug("Downloaded and saved to MinIO: {} -> {}/{}", sourceUrl, type, filename);
-            return urlPrefix + filename;
+            return fileUrlSigner.signIfLocal(urlPrefix + filename);
         } catch (IOException e) {
             throw new BusinessException(50201, "Failed to download file from " + sourceUrl + ": " + e.getMessage(), e);
         } catch (InterruptedException e) {

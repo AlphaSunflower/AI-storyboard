@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmbeddedAppWindow } from './EmbeddedAppWindow';
+import { clearAuthSession, setAccessToken } from '../../../lib/authSession';
 
 const tabs = [{
   key: 'docs' as const,
@@ -8,7 +9,10 @@ const tabs = [{
   url: '/docs?embedded=1',
 }];
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearAuthSession();
+});
 
 describe('EmbeddedAppWindow chat dock resizing', () => {
   it('reloads the focused app page from the header refresh button', () => {
@@ -122,5 +126,39 @@ describe('EmbeddedAppWindow chat dock resizing', () => {
     fireEvent.pointerUp(document, { clientX: 490, clientY: 500, pointerId: 11 });
 
     expect(onRequestDock).not.toHaveBeenCalled();
+  });
+
+  it('passes the current access token to the canvas iframe', () => {
+    setAccessToken('canvas-token');
+    render(
+      <EmbeddedAppWindow
+        tabs={[{
+          key: 'canvas',
+          title: '画布',
+          url: '/canvas/?embedded=1',
+        }]}
+        activeKey="canvas"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked={false}
+        splitMaxWidth={600}
+        expandedSplitMaxWidth={600}
+        sidebarCollapsed
+        sidebarCollapseWidth={800}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[data-app-key="canvas"]');
+    const postMessage = vi.spyOn(frame!.contentWindow!, 'postMessage');
+
+    fireEvent.load(frame!);
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'ai-storyboard:canvas-auth',
+      accessToken: 'canvas-token',
+    }, window.location.origin);
   });
 });

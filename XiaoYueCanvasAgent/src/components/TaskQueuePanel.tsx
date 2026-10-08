@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CircleStop, Clock3, History, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { cancelCanvasGeneration } from '../services/jobRunner';
@@ -33,12 +33,22 @@ export const TaskQueuePanel = memo(function TaskQueuePanel({
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
+  const rootRef = useRef<HTMLDivElement>(null);
   const records = useCanvasStore((state) => state.generationRecords);
   const nodes = useCanvasStore((state) => state.nodes);
   const active = useMemo(
     () => selectActiveGenerationRecords(records).sort((left, right) => left.startedAt - right.startedAt),
     [records],
   );
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [open]);
 
   const cancel = async (record: GenerationRecord) => {
     setCancelling((current) => new Set(current).add(record.id));
@@ -58,7 +68,7 @@ export const TaskQueuePanel = memo(function TaskQueuePanel({
 
   const nodeLabel = (nodeId: string) => nodes.find((node) => node.id === nodeId)?.data.label ?? '画布任务';
   return (
-    <>
+    <div ref={rootRef} className="task-queue-shell">
       <button className="task-queue-trigger" aria-label="任务队列" aria-expanded={open}
         onClick={() => setOpen((value) => !value)}>
         <ListTodo size={18} />
@@ -112,6 +122,6 @@ export const TaskQueuePanel = memo(function TaskQueuePanel({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 });

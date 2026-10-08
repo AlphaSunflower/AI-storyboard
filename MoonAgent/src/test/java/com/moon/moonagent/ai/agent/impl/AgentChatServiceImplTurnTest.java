@@ -48,6 +48,25 @@ import static org.mockito.Mockito.when;
 class AgentChatServiceImplTurnTest {
 
     @Test
+    void hitlPauseKeepsFullAssistantContentOnThePersistedCard() {
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentChatServiceImpl service = service(
+                mock(AgentConversationMapper.class),
+                messageMapper,
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class));
+
+        service.updateHitlMessageContent("message-1", "## 方案 A\n\n## 方案 B");
+
+        ArgumentCaptor<AgentMessage> updated = ArgumentCaptor.forClass(AgentMessage.class);
+        verify(messageMapper).updateById(updated.capture());
+        assertThat(updated.getValue().getId()).isEqualTo("message-1");
+        assertThat(updated.getValue().getContent()).isEqualTo("## 方案 A\n\n## 方案 B");
+    }
+
+    @Test
     void editTurnUpdatesTargetDeletesLaterMessagesAndRunsAgentScope() throws Exception {
         AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
@@ -271,6 +290,7 @@ class AgentChatServiceImplTurnTest {
                 mock(ConversationTitleService.class),
                 mock(StoryboardClient.class),
                 mock(FileStorageService.class),
+                mock(com.moon.moonagent.security.FileUrlSigner.class),
                 mock(AiConfigProperties.class),
                 support,
                 mock(AgentCheckpointMapper.class),

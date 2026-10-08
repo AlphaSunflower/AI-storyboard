@@ -381,15 +381,29 @@ function finishAssistantReply(conversationId: string, assistantId: string) {
 function resumeGenerationForTask(conversationId: string, assistantId: string, hint = '') {
   useAgentStore.setState((state) => {
     const current = state.generating[conversationId] ?? { hint };
+    const currentMessage = state.messages.find((message) => message.id === assistantId);
+    const fallbackContent = current.assistantContent?.trim()
+      || currentMessage?.content?.trim()
+      || '任务已受理，正在后台生成…';
     const generating = {
       ...state.generating,
-      [conversationId]: { ...current, assistantId, hint, finished: false },
+      [conversationId]: {
+        ...current,
+        assistantId,
+        assistantContent: fallbackContent,
+        hint,
+        finished: false,
+      },
     };
     const view = state.activeConversationId ? generating[state.activeConversationId] : undefined;
     return {
       generating,
       streaming: generationInProgress(view),
       workflowHint: generationHint(view),
+      messages: state.activeConversationId === conversationId && !currentMessage?.content?.trim()
+        ? state.messages.map((message) =>
+            message.id === assistantId ? { ...message, content: fallbackContent } : message)
+        : state.messages,
     };
   });
 }
@@ -1015,9 +1029,9 @@ async function restorePendingCanvasSession(conversationId: string) {
 
 const canvasSessionResumeLocks = new Set<string>();
 
-async function reconnectTurnThenRecover(conversationId: string) {
+async function reconnectTurnThenRecover(conversationId: string, turnIdOverride?: string) {
   const state = useAgentStore.getState();
-  const turnId = state.generating[conversationId]?.turnId;
+  const turnId = turnIdOverride || state.generating[conversationId]?.turnId;
   if (turnId) {
     try {
       await state.replayTurnEvents(conversationId, turnId);
@@ -1026,6 +1040,7 @@ async function reconnectTurnThenRecover(conversationId: string) {
     }
   }
   await useAgentStore.getState().recoverPendingCheckpoint(conversationId);
+  await refreshConversationMessages(conversationId);
 }
 
 function reconnectDelay(ms: number) {
@@ -1492,6 +1507,7 @@ function applyOneEnvelope(
     const source = { ...payload, ...metadata, ...hitl };
     const formToken = asString(source.formToken);
     const messageId = asString(source.messageId) || context.assistantId;
+    const assistantContent = asString(payload.content);
     if (asString(source.kind) === 'canvas-bind') {
       effects.canvasModeRequired = {
         ...source,
@@ -1545,7 +1561,9 @@ function applyOneEnvelope(
         ? {
             ...message,
             id: messageId || message.id,
-            content: info.formContent || videoInfo?.message || message.content,
+            content: message.content.trim()
+              ? message.content
+              : (assistantContent || info.formContent || videoInfo?.message || ''),
             metadata: {
               ...(message.metadata ?? {}),
               kind: videoPlan ? 'video-plan' as const : 'hitl' as const,
@@ -2631,7 +2649,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   }) => {
     const activeId = get().activeConversationId;
     const activeConversation = get().conversations.find((conversation) => conversation.id === activeId);
-    if (!activeId || activeConversation?.status === 'archived'
+    if (activeConversation?.status === 'archived'
       || activeConversation?.orchestrationMode === 'LEGACY') {
       set({ streamError: '该会话已归档，只能查看历史记录' });
       return;
@@ -2928,6 +2946,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
         const isThisStream = get().pendingAssistantId === assistantId;
         const stillSameConversation = get().activeConversationId === snapshotId;
+        const recoverTurnId = get().generating[snapshotId]?.turnId;
         // 失败（streamError 非空）时占位显示"（回复失败）"，避免"（未收到回复）"误导；手动停止显示"（已停止）"
         const failedText = manualStop ? '（已停止）' : (get().streamError ? '（回复失败）' : '（未收到回复）');
         set((s) => {
@@ -2950,7 +2969,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         });
         // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
         if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !receivedCanvasModeRequired && !manualStop) {
-          void reconnectTurnThenRecover(snapshotId);
+          void reconnectTurnThenRecover(snapshotId, recoverTurnId);
         }
       }
     }
@@ -3148,7 +3167,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         });
         // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
         if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
-          void reconnectTurnThenRecover(snapshotId);
+          void reconnectTurnThenRecover(snapshotId, resumeTurnId);
         }
       }
     }
