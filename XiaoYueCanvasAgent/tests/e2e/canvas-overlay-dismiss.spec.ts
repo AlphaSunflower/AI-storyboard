@@ -52,6 +52,9 @@ test('dismisses canvas overlays outside and toggles the execution panel', async 
   await page.mouse.click(blankCanvasPoint.x, blankCanvasPoint.y);
   await expect(page.getByRole('dialog', { name: '切换画布' })).toHaveCount(0);
 
+  await page.getByRole('button', { name: '帮助' }).click();
+  await expect(page.getByText('双击空白处创建文字节点；拖入图片可直接导入')).toHaveCount(1);
+
   const agentButton = page.getByRole('button', { name: '执行服务', exact: true });
   await expect(agentButton).toHaveAttribute('aria-pressed', 'true');
   await agentButton.click();

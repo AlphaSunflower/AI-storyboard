@@ -271,7 +271,11 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const setMediaQuality = useMediaStore((state) => state.setQuality);
 
   const notify = useCallback((message: string) => {
-    setNotice(message); onNotify?.(message);
+    if (onNotify) {
+      onNotify(message);
+      return;
+    }
+    setNotice(message);
     window.setTimeout(() => setNotice(null), 1800);
   }, [onNotify]);
   const minimizeNode = useCallback((nodeId: string) => {
