@@ -1,6 +1,6 @@
 package com.storyboard.storage;
 
-import com.storyboard.ai.AiConfigProperties;
+import com.moon.moonagent.ai.AiConfigProperties;
 import com.storyboard.service.FileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

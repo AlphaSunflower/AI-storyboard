@@ -88,7 +88,7 @@ ai:
   image-url-prefix: /api/files/images/
   video-url-prefix: /api/files/videos/
   audio-url-prefix: /api/files/audios/
-  storyboard-base-url: ${STORYBOARD_BASE_URL:http://localhost:8082}   # 本服务地址：参考素材(/api/files/**) 本地缺失时经此拉取
+  storyboard-internal-url: ${STORYBOARD_BASE_URL:http://localhost:8082}   # 本服务地址：参考素材(/api/files/**) 本地缺失时经此拉取
 
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
   image-request-timeout: 300

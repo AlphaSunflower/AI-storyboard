@@ -1,13 +1,13 @@
 package com.moon.moonagent.ai.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.moon.moonagent.entity.AgentAsset;
-import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.SceneGenerationBridge;
 import com.moon.moonagent.ai.SceneView;
+import com.moon.moonagent.service.FileStorageService;
+import com.storyboard.common.generation.GenerationRecordUpdate;
+import com.storyboard.common.generation.GenerationRecordWriter;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +21,6 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,9 +39,9 @@ public class VideoPollExecutor {
     private final Map<String, Long> firstSucceededAt = new ConcurrentHashMap<>();
 
     private final AiConfigProperties config;
-    private final AgentAssetMapper agentAssetMapper;
     private final SceneGenerationBridge sceneBridge;
-    private final com.moon.moonagent.storage.MinioStorage minioStorage;
+    private final FileStorageService fileStorageService;
+    private final GenerationRecordWriter generationRecordWriter;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -124,11 +123,11 @@ public class VideoPollExecutor {
                     try (InputStream in = resp.body()) {
                         bytes = in.readAllBytes();
                     }
-                    String filename = UUID.randomUUID() + config.getVideoFileExtension();
-                    // 视频字节落 MinIO（统一对象存储；读端主后端 FileController 经 FileStorageService.readVideo → minioStorage.get）
-                    minioStorage.put(minioStorage.key("videos", filename), bytes, "video/mp4");
-                    log.info("视频已转存 MinIO: videos/{} ({} 字节) (attempt {}/{})", filename, bytes.length, attempt, maxRetries);
-                    return config.getVideoUrlPrefix() + filename;
+                    String videoUrl = fileStorageService.saveVideoBytes(
+                            bytes, config.getVideoFileExtension().replaceFirst("^\\.", ""));
+                    log.info("视频已转存对象存储: {} ({} 字节) (attempt {}/{})",
+                            videoUrl, bytes.length, attempt, maxRetries);
+                    return videoUrl;
                 }
 
                 String respBody = "";
@@ -155,21 +154,13 @@ public class VideoPollExecutor {
             scene.videoStatus = status;
             sceneBridge.updateScene(scene);
         }
-        var assets = agentAssetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
-                .eq(AgentAsset::getTaskId, taskId));
-        if (!assets.isEmpty()) {
-            AgentAsset asset = assets.getFirst();
-            asset.setUrl(videoUrl);
-            asset.setStatus(status);
-            asset.setError(error);
-            if ("completed".equals(status) && videoUrl != null && !videoUrl.isBlank()) {
-                asset.setResultUrls("[\"" + videoUrl.replace("\\", "\\\\").replace("\"", "\\\"") + "\"]");
-            }
-            if (("completed".equals(status) || "failed".equals(status)) && asset.getCreatedAt() != null) {
-                asset.setDurationMs(java.time.Duration.between(asset.getCreatedAt(), java.time.OffsetDateTime.now()).toMillis());
-            }
-            agentAssetMapper.updateById(asset);
-        }
+        GenerationRecordUpdate update = "completed".equals(status)
+                ? GenerationRecordUpdate.completed(
+                        videoUrl,
+                        videoUrl == null || videoUrl.isBlank() ? java.util.List.of() : java.util.List.of(videoUrl),
+                        null)
+                : GenerationRecordUpdate.failed(error, null);
+        generationRecordWriter.updateByTaskId(taskId, update);
     }
 
     /** 安全调用 updateTaskOwner：失败仅打 warn，不阻断 pollVideoTask 返回值 */

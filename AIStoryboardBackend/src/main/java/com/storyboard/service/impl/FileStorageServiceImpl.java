@@ -1,6 +1,6 @@
 package com.storyboard.service.impl;
 
-import com.storyboard.ai.AiConfigProperties;
+import com.moon.moonagent.ai.AiConfigProperties;
 import com.storyboard.common.BusinessException;
 import com.storyboard.security.FileUrlSigner;
 import com.storyboard.service.FileStorageService;
@@ -169,6 +169,18 @@ public class FileStorageServiceImpl implements FileStorageService {
         byte[] bytes = Base64.getDecoder().decode(clean);
         String filename = UUID.randomUUID() + ".mp4";
         minioStorage.put(minioStorage.key("videos", filename), bytes, "video/mp4");
+        return fileUrlSigner.signPath(config.getVideoUrlPrefix() + filename);
+    }
+
+    @Override
+    public String saveVideoBytes(byte[] bytes, String extension) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "视频内容为空");
+        }
+        String ext = extension == null || !extension.matches("[A-Za-z0-9]{1,8}")
+                ? "mp4" : extension.toLowerCase();
+        String filename = UUID.randomUUID() + "." + ext;
+        minioStorage.put(minioStorage.key("videos", filename), bytes, contentType(filename));
         return fileUrlSigner.signPath(config.getVideoUrlPrefix() + filename);
     }
 

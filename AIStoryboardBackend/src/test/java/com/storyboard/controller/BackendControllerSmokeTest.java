@@ -1,9 +1,9 @@
 package com.storyboard.controller;
 
-import com.storyboard.ai.GatewayModelService;
-import com.storyboard.ai.ImageGenerationService;
+import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.ImageGenerationService;
 import com.storyboard.ai.ScriptGenerationService;
-import com.storyboard.ai.VideoGenerationService;
+import com.moon.moonagent.ai.VideoGenerationService;
 import com.storyboard.security.AiAccessGuard;
 import com.storyboard.security.AuthSessionService;
 import com.storyboard.security.FileUrlSigner;

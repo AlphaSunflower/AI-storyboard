@@ -45,17 +45,6 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private static final Logger log = LoggerFactory.getLogger(ImageGenerationServiceImpl.class);
     private static final Duration SEEDREAM_TIMEOUT = Duration.ofSeconds(900);
 
-    /**
-     * 合法生图尺寸白名单（OpenAI gpt-image 系列，Laozhang 网关仅认这些）。
-     * LLM 可能输出 DALL-E 3 尺寸（1792x1024 / 1024x1792）或
-     * "2K"/"4K" 等变体，上游返回 400 "不合法的size"（实测 2026-08-04 复现），
-     * 故白名单之外的尺寸一律降级为默认值，保证请求必达。
-     */
-    private static final Set<String> VALID_IMAGE_SIZES = Set.of("1024x1024", "1536x1024", "1024x1536");
-
-    /** 生图尺寸兜底默认（网关 model_params.size_default 为权威源；此处仅本地白名单降级用） */
-    private static final String DEFAULT_IMAGE_SIZE = "1024x1024";
-
     private final AiConfigProperties config;
     private final GatewayModelService gatewayModelService;
     private final FileStorageService fileStorageService;
@@ -291,13 +280,13 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
                 .model(model)
                 // size 白名单校验：非法值（DALL-E 3 尺寸/2K/4K 等）降级为默认 1024x1024，
                 // 避免上游返回 400 "不合法的size"
-                .size(normalizeImageSize(size, DEFAULT_IMAGE_SIZE))
+                .size(normalizeImageSize(size, config.getImageDefaultSize(), config.getImageValidSizes()))
                 // 生成数量：请求显式传入且 >0 时透传，否则默认 1
                 .n((n != null && n > 0) ? n : 1)
                 // 超时 300s + 重试 1 次（对齐网关 requestTimeoutMs=300s；上游 gpt-image-2 实测 60-107s，
                 // 偶发更慢，120s 曾致网关超时重试叠加、主后端 180s 等不到 Read timed out）
                 .timeout(Duration.ofSeconds(config.getImageRequestTimeout()))
-                .maxRetries(1);
+                .maxRetries(config.getImageMaxRetries());
         if (quality != null && !quality.isEmpty()) {
             builder.quality(quality);
         }
@@ -577,14 +566,14 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
      * 3. 拆不出合法值（2K/4K/DALL-E 3 尺寸 1792x1024 等）→ 降级 fallback
      * 避免上游返回 400/500 "不合法的size"。
      */
-    static String normalizeImageSize(String size, String fallback) {
+    static String normalizeImageSize(String size, String fallback, List<String> validSizes) {
         if (size == null || size.isBlank()) return fallback;
         String trimmed = size.trim();
-        if (VALID_IMAGE_SIZES.contains(trimmed)) return trimmed;
+        if (validSizes.contains(trimmed)) return trimmed;
         // 多选列表：拆分后取第一个白名单值
         for (String token : trimmed.split("[|/,，、;；\\s]+")) {
             String t = token.trim();
-            if (VALID_IMAGE_SIZES.contains(t)) {
+            if (validSizes.contains(t)) {
                 log.warn("图片生成 size={} 为多选列表, 取第一个合法值 {}", size, t);
                 return t;
             }

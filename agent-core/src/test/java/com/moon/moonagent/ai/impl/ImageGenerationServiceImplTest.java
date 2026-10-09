@@ -8,15 +8,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.image.ImageModel;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 
 class ImageGenerationServiceImplTest {
+
+    private static final String FALLBACK = "1024x1024";
+    private static final List<String> VALID_SIZES = List.of("1024x1024", "1536x1024", "1024x1536");
 
     @Test
     void includesMaskAndSelectedEditFieldsInMultipart() throws Exception {
@@ -60,5 +66,27 @@ class ImageGenerationServiceImplTest {
 
         assertThat(resolved).startsWith("data:image/png;base64,");
         assertThat(resolved).doesNotContain("/api/library/media/");
+    }
+
+    @Test
+    void normalizesImageSizeAgainstConfiguredWhitelist() {
+        assertEquals("1024x1024",
+                ImageGenerationServiceImpl.normalizeImageSize("1024x1024", FALLBACK, VALID_SIZES));
+        assertEquals("1536x1024",
+                ImageGenerationServiceImpl.normalizeImageSize("1536x1024 / 1024x1024", FALLBACK, VALID_SIZES));
+        assertEquals("1024x1536",
+                ImageGenerationServiceImpl.normalizeImageSize("1024x1536、1792x1024", FALLBACK, VALID_SIZES));
+        assertEquals(FALLBACK,
+                ImageGenerationServiceImpl.normalizeImageSize("2K / 4K", FALLBACK, VALID_SIZES));
+        assertEquals(FALLBACK,
+                ImageGenerationServiceImpl.normalizeImageSize(null, FALLBACK, VALID_SIZES));
+    }
+
+    @Test
+    void cleansBase64DataUriAndPadding() {
+        assertFalse(ImageGenerationServiceImpl.cleanBase64("data:image/png;base64,iVBORw0KGgo=")
+                .startsWith("data:"));
+        assertEquals(0, ImageGenerationServiceImpl.cleanBase64("abc").length() % 4);
+        assertEquals("", ImageGenerationServiceImpl.cleanBase64(null));
     }
 }

@@ -40,6 +40,9 @@ public interface FileStorageService {
      */
     String saveVideo(String sourceUrl);
 
+    /** Save generated or merged video bytes directly to MinIO. */
+    String saveVideoBytes(byte[] bytes, String extension);
+
     /** 读取图片字节；MinIO 对象不存在返回 null。 */
     byte[] readImage(String filename);
 

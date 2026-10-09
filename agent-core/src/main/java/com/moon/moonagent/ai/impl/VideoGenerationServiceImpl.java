@@ -382,7 +382,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/files/upload"))
                     .header("Content-Type", "application/octet-stream")
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(300))
+                    .timeout(Duration.ofSeconds(config.getRefUploadTimeout()))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());

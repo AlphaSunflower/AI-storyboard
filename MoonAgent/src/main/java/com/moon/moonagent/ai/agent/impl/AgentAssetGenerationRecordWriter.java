@@ -72,7 +72,17 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
 
     @Override
     public void updateByTaskId(String taskId, GenerationRecordUpdate update) {
-        // Moon Agent 的视频终态由 GenerationRecordServiceImpl 按记录 id 更新；此处暂不需要反查。
+        if (taskId == null || taskId.isBlank()) return;
+        var records = assetMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
+                        .eq(AgentAsset::getTaskId, taskId)
+                        .orderByDesc(AgentAsset::getCreatedAt)
+                        .last("LIMIT 1"));
+        if (records == null || records.isEmpty()) return;
+        AgentAsset record = records.getFirst();
+        apply(record, update);
+        assetMapper.updateById(record);
+        assetOutputOutboxService.enqueue(record);
     }
 
     private void apply(AgentAsset record, GenerationRecordUpdate update) {

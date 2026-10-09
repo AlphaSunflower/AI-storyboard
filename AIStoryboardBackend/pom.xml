@@ -180,6 +180,12 @@
             <artifactId>asset-client</artifactId>
             <version>0.1.0</version>
         </dependency>
+        <!-- Moon 共享核心：统一复用网关模型/图片/视频客户端 -->
+        <dependency>
+            <groupId>com.moon</groupId>
+            <artifactId>agent-core</artifactId>
+            <version>0.1.0</version>
+        </dependency>
     </dependencies>
 
     <build>

@@ -1,6 +1,6 @@
 package com.storyboard.service.impl;
 
-import com.storyboard.ai.AiConfigProperties;
+import com.moon.moonagent.ai.AiConfigProperties;
 import com.storyboard.security.FileUrlSigner;
 import com.storyboard.storage.MinioStorage;
 import org.junit.jupiter.api.AfterEach;

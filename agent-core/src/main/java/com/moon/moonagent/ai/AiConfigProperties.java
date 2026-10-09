@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -80,6 +81,14 @@ public class AiConfigProperties {
     @Setter
     @Getter
     private String videoUploadDir = "uploads/videos";
+    /** 图片文件本地存储目录 */
+    @Setter
+    @Getter
+    private String imageUploadDir = "uploads/images";
+    /** 音频文件本地存储目录 */
+    @Setter
+    @Getter
+    private String audioUploadDir = "uploads/audios";
     /** 视频文件扩展名 */
     @Setter
     @Getter
@@ -103,6 +112,12 @@ public class AiConfigProperties {
     @Setter @Getter private int imageRequestTimeout = 300;
     /** 图改图请求超时（秒，/v1/images/edits multipart） */
     @Setter @Getter private int imageEditTimeout = 180;
+    /** 合法生图尺寸白名单（白名单外降级默认值） */
+    @Setter @Getter private List<String> imageValidSizes = List.of("1024x1024", "1536x1024", "1024x1536");
+    /** 生图尺寸兜底默认 */
+    @Setter @Getter private String imageDefaultSize = "1024x1024";
+    /** 生图请求重试次数 */
+    @Setter @Getter private int imageMaxRetries = 1;
 
     // ── 视频生成超时 ──
     /** 视频创建 / 轮询 GET 请求超时（秒） */
@@ -111,6 +126,14 @@ public class AiConfigProperties {
     @Setter @Getter private int videoDownloadTimeout = 180;
     /** 视频下载重试间隔（毫秒，单次轮询内重试窗口约 3×该值） */
     @Setter @Getter private long videoRetryDelayMs = 15_000;
+    /** 参考素材上传网关超时（秒） */
+    @Setter @Getter private int refUploadTimeout = 300;
+
+    // ── 文件访问路径 ──
+    /** 图片文件对外访问 URL 前缀 */
+    @Setter @Getter private String imageUrlPrefix = "/api/files/images/";
+    /** 音频文件对外访问 URL 前缀 */
+    @Setter @Getter private String audioUrlPrefix = "/api/files/audios/";
 
     // ── 脚本生成超时 ──
     /** 脚本生成 ChatClient 超时（秒） */
