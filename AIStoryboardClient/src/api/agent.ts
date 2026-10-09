@@ -60,6 +60,16 @@ export interface AgentRuntimeStatus {
   activeTurn?: AgentActiveTurn;
 }
 
+/** 手动压缩上下文结果（POST /conversations/{id}/compact） */
+export interface CompactContextResult {
+  compacted: boolean;
+  status: 'COMPACTED' | 'SKIPPED' | 'UNAVAILABLE';
+  messagesBefore: number;
+  messagesAfter: number;
+  tokensBefore: number;
+  tokensAfter: number;
+}
+
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
 export interface AgentReasoning {
   summary: string;
@@ -364,6 +374,21 @@ export interface AgentMessage {
   };
   /** 消息元数据（reasoning / agentTrace / suggestedActions / hitl） */
   metadata?: AgentMessageMetadata;
+}
+
+export interface AgentMessagePage {
+  records: AgentMessage[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface AgentMessageSearchHit {
+  messageId: string;
+  conversationId: string;
+  conversationTitle: string;
+  role: string;
+  content: string;
+  createdAt: string;
 }
 
 export interface CanvasSessionInfo {
@@ -749,6 +774,18 @@ export const agentApi = {
   listMessages: (id: string) =>
     client.get<{ data: AgentMessage[] }>(`/agent/conversations/${id}/messages`),
 
+  listMessagesPage: (id: string, before?: string | null, limit = 50) =>
+    client.get<{ data: AgentMessagePage }>(
+      `/agent/conversations/${id}/messages/page`,
+      { params: { before: before || undefined, limit } },
+    ),
+
+  searchMessages: (q: string, limit = 100) =>
+    client.get<{ data: AgentMessageSearchHit[] }>(
+      '/agent/messages/search',
+      { params: { q, limit } },
+    ),
+
   listAssets: (id: string, page = 1, size = 20) =>
     client.get<{ data: AgentPage<AgentAsset> }>(`/agent/conversations/${id}/assets`, { params: { page, size } }),
 
@@ -804,6 +841,10 @@ export const agentApi = {
 
   getRuntimeStatus: (conversationId: string) =>
     client.get<{ data: AgentRuntimeStatus }>(`/agent/conversations/${conversationId}/runtime`),
+
+  // 手动压缩会话上下文（/chat 斜杠命令「压缩上下文」）：只压缩运行时会话上下文，消息记录不变
+  compactContext: (conversationId: string) =>
+    client.post<{ data: CompactContextResult }>(`/agent/conversations/${conversationId}/compact`),
 
   // 满意完成：清空会话图片上下文（生成结果确认卡片「满意完成」按钮）
   confirmDone: (conversationId: string) =>

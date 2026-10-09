@@ -23,7 +23,7 @@ import { Paperclip } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 
 export function AgentChatPanel() {
-  const { messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, editAndResend, interruptAndSend, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask, canvasBinding, canvasSession } = useAgentStore();
+  const { messages, messageHasMore, loadOlderMessages, streaming, waitingHumanInput, waitingVideoPlan, streamError, refImageUrls, setRefImageUrls, addRefImageUrls, uploadRefImages, sendMessage, editAndResend, interruptAndSend, confirmResult, pendingPicUrls, cancelRefine, conversations, activeConversationId, workflowHint, pickedAssetIds, setPickedAssetIds, addLocalUserMessage, agentVideoTask, canvasBinding, canvasSession } = useAgentStore();
   const [text, setText] = useState('');
   // 录音中（禁用发送/流转等）
   const [recording, setRecording] = useState(false);
@@ -256,6 +256,19 @@ export function AgentChatPanel() {
         }}
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 20, background: 'var(--color-canvas)' }}
       >
+        {messageHasMore && (
+          <button
+            type="button"
+            onClick={() => void loadOlderMessages()}
+            style={{
+              display: 'block', margin: '0 auto 14px', padding: '6px 14px',
+              border: '1px solid var(--color-hairline)', borderRadius: 8,
+              background: 'white', color: 'var(--color-muted)', cursor: 'pointer',
+            }}
+          >
+            加载更早消息
+          </button>
+        )}
         {messages.length === 0 && !streaming && (
           <TextType
             as="p"

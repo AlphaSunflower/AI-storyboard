@@ -36,6 +36,7 @@ import com.moon.moonagent.mapper.AgentAsyncTaskMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
+import com.moon.moonagent.util.PollingBackoff;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +48,7 @@ import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +58,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Component
@@ -77,6 +80,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final AgentTaskEventHub taskEvents;
     private final AgentScopeMessageBus messageBus;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    private final Semaphore executorAdmission = new Semaphore(64, true);
     /** 任务运行期的实时输出缓冲（仅内存，终态清理），供任务面板流式展示。 */
     private static final int LIVE_STREAM_MAX_CHARS = 8000;
     private static final long LIVE_STREAM_PUBLISH_INTERVAL_MILLIS = 400L;
@@ -87,6 +91,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final Map<String, Long> liveStreamPersistedAt = new ConcurrentHashMap<>();
     private final Map<String, String> liveStages = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> liveSequences = new ConcurrentHashMap<>();
+    private final PollingBackoff pollBackoff = PollingBackoff.video();
     /** 任务 → userId：推送实时输出时避免每次都查库。 */
     private final Map<String, String> liveUserIds = new ConcurrentHashMap<>();
 
@@ -176,7 +181,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 submitStoryboardTask(task);
                 return RecoveryOutcome.deferred("storyboard task submitted");
             }
-            executor.submit(() -> runBatchImageTask(task.getId()));
+            submitAdmitted(() -> runBatchImageTask(task.getId()));
             return RecoveryOutcome.deferred("batch image task submitted");
         }
         if ("waiting_parent".equals(task.getStatus())) {
@@ -244,7 +249,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runBatchImageTask(task.getId()));
+        submitAdmitted(() -> runBatchImageTask(task.getId()));
         return task.getId();
     }
 
@@ -297,7 +302,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runBatchImageTask(task.getId()));
+        submitAdmitted(() -> runBatchImageTask(task.getId()));
         return task.getId();
     }
 
@@ -376,7 +381,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runStoryboardStartTask(task.getId()));
+        submitAdmitted(() -> runStoryboardStartTask(task.getId()));
         return task.getId();
     }
 
@@ -420,7 +425,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runStoryboardApprovalTask(task.getId()));
+        submitAdmitted(() -> runStoryboardApprovalTask(task.getId()));
         return task.getId();
     }
 
@@ -464,7 +469,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runStoryboardRevisionTask(task.getId()));
+        submitAdmitted(() -> runStoryboardRevisionTask(task.getId()));
         return task.getId();
     }
 
@@ -513,7 +518,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         task.setUpdatedAt(OffsetDateTime.now());
         taskMapper.insert(task);
         publish(task.getId());
-        executor.submit(() -> runStoryboardVideoTask(task.getId()));
+        submitAdmitted(() -> runStoryboardVideoTask(task.getId()));
         return task.getId();
     }
 
@@ -568,12 +573,13 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         }
         applyStatusFilter(query, status);
         long total = taskMapper.selectCount(query);
-        List<AgentTaskView> records = taskMapper.selectList(query
-                        .orderByDesc(AgentAsyncTask::getUpdatedAt)
-                        .last("LIMIT " + safeSize + " OFFSET " + ((safePage - 1) * safeSize)))
-                .stream()
+        List<AgentAsyncTask> tasks = taskMapper.selectList(query
+                .orderByDesc(AgentAsyncTask::getUpdatedAt)
+                .last("LIMIT " + safeSize + " OFFSET " + ((safePage - 1) * safeSize)));
+        Map<String, AgentConversation> conversations = conversationsById(tasks);
+        List<AgentTaskView> records = tasks.stream()
                 .map(task -> {
-                    AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
+                    AgentConversation conversation = conversations.get(task.getConversationId());
                     if (conversation == null || !userId.equals(conversation.getUserId())) return null;
                     return view(task, conversation);
                 })
@@ -608,14 +614,27 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             query.in(AgentAsyncTask::getConversationId, conversationIds);
         }
         applyStatusFilter(query, status);
-        return taskMapper.selectList(query).stream()
+        List<AgentAsyncTask> tasks = taskMapper.selectList(query);
+        Map<String, AgentConversation> conversations = conversationsById(tasks);
+        return tasks.stream()
                 .map(task -> {
-                    AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
+                    AgentConversation conversation = conversations.get(task.getConversationId());
                     if (conversation == null || !userId.equals(conversation.getUserId())) return null;
                     return view(task, conversation);
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
+    }
+
+    private Map<String, AgentConversation> conversationsById(Collection<AgentAsyncTask> tasks) {
+        Set<String> ids = tasks.stream()
+                .map(AgentAsyncTask::getConversationId)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (ids.isEmpty()) return Map.of();
+        return conversationMapper.selectBatchIds(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        AgentConversation::getId, conversation -> conversation));
     }
 
     public AgentTaskView cancelTask(String userId, String taskId) {
@@ -1453,6 +1472,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             updateTask(taskId, "result_json", writeJson(progressResult));
 
             int attempts = 0;
+            Integer lastProgress = null;
             while (attempts++ < 8640) {
                 if (isCancelRequested(taskId)) {
                     for (StoryboardVideoQueue row :
@@ -1477,8 +1497,11 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                         .count();
                 long terminal = completed + failed;
                 int progress = (int) Math.min(95, 5 + terminal * 90 / Math.max(1, trackedQueueIds.size()));
-                updateTask(taskId, "progress", progress,
-                        "result_summary", "已完成 " + terminal + "/" + trackedQueueIds.size() + " 个分镜视频");
+                if (!Integer.valueOf(progress).equals(lastProgress)) {
+                    updateTask(taskId, "progress", progress,
+                            "result_summary", "已完成 " + terminal + "/" + trackedQueueIds.size() + " 个分镜视频");
+                    lastProgress = progress;
+                }
                 if (terminal >= trackedQueueIds.size()) {
                     String content = "分镜视频批量生成完成：成功 " + completed + " 个，失败 "
                             + failed + " 个。";
@@ -1489,7 +1512,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     }
                     return;
                 }
-                Thread.sleep(5000);
+                Thread.sleep(pollBackoff.delayMillis(attempts));
             }
             fail(taskId, "分镜视频批量任务等待超时");
         } catch (InterruptedException e) {
@@ -2054,37 +2077,70 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .eq(AgentAsyncTask::getParentTaskId, parentTaskId)
                 .eq(AgentAsyncTask::getStatus, "waiting_parent")
                 .orderByAsc(AgentAsyncTask::getCreatedAt));
+        if (children.isEmpty()) return;
+        OffsetDateTime now = OffsetDateTime.now();
+        boolean cancelled = "cancelled".equals(parent.getStatus());
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("parent_task_id", parentTaskId)
+                .eq("status", "waiting_parent")
+                .set("status", cancelled ? "cancelled" : "queued")
+                .set("stage", cancelled ? "cancelled" : "accepted")
+                .set("progress", cancelled ? null : 0)
+                .set("completed_at", cancelled ? now : null)
+                .set("updated_at", now)
+                .setSql("version = COALESCE(version, 0) + 1"));
+        Map<String, AgentConversation> conversations = conversationsById(children);
         for (AgentAsyncTask child : children) {
-            if ("cancelled".equals(parent.getStatus())) {
-                updateTask(child.getId(), "status", "cancelled", "stage", "cancelled",
-                        "completed_at", OffsetDateTime.now());
-                continue;
+            child.setStatus(cancelled ? "cancelled" : "queued");
+            child.setStage(cancelled ? "cancelled" : "accepted");
+            child.setProgress(cancelled ? child.getProgress() : 0);
+            child.setCompletedAt(cancelled ? now : null);
+            child.setUpdatedAt(now);
+            AgentConversation conversation = conversations.get(child.getConversationId());
+            if (conversation != null) {
+                taskEvents.publish(child.getUserId(), view(child, conversation));
             }
-            updateTask(child.getId(), "status", "queued", "stage", "accepted", "progress", 0);
-            submit(taskMapper.selectById(child.getId()));
+            if (!cancelled) {
+                submit(child);
+            }
         }
     }
 
     private void submit(AgentAsyncTask task) {
         if (task == null) return;
         if (AgentScopeImageTools.GENERATE_IMAGE_BATCH.equals(task.getToolName())) {
-            executor.submit(() -> runBatchImageTask(task.getId()));
+            submitAdmitted(() -> runBatchImageTask(task.getId()));
             return;
         }
         submitStoryboardTask(task);
     }
 
+    private void submitAdmitted(Runnable task) {
+        executor.submit(() -> {
+            boolean acquired = false;
+            try {
+                executorAdmission.acquire();
+                acquired = true;
+                task.run();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                if (acquired) executorAdmission.release();
+            }
+        });
+    }
+
     private void submitStoryboardTask(AgentAsyncTask task) {
         if (task == null) return;
         if (AgentScopeStoryboardTools.START_STORYBOARD.equals(task.getToolName())) {
-            executor.submit(() -> runStoryboardStartTask(task.getId()));
+            submitAdmitted(() -> runStoryboardStartTask(task.getId()));
         } else if (AgentScopeStoryboardTools.APPROVE_STORYBOARD.equals(task.getToolName())) {
-            executor.submit(() -> runStoryboardApprovalTask(task.getId()));
+            submitAdmitted(() -> runStoryboardApprovalTask(task.getId()));
         } else if (AgentScopeStoryboardTools.REVISE_STORYBOARD.equals(task.getToolName())) {
-            executor.submit(() -> runStoryboardRevisionTask(task.getId()));
+            submitAdmitted(() -> runStoryboardRevisionTask(task.getId()));
         } else if (AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO.equals(task.getToolName())
                 || AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS.equals(task.getToolName())) {
-            executor.submit(() -> runStoryboardVideoTask(task.getId()));
+            submitAdmitted(() -> runStoryboardVideoTask(task.getId()));
         } else {
             fail(task.getId(), "不支持的后台任务类型: " + task.getToolName());
         }

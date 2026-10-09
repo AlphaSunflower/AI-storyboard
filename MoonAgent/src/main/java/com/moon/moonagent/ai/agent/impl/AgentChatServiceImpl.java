@@ -2,8 +2,10 @@ package com.moon.moonagent.ai.agent.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.util.RawValue;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
@@ -24,10 +26,15 @@ import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
+import com.moon.moonagent.dto.response.AgentMessageVO;
+import com.moon.moonagent.dto.response.MessagePageVO;
+import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.ai.agent.agentscope.MoonAgentRuntime;
+import com.moon.moonagent.ai.agent.agentscope.CompactOutcome;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
 import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
+import com.moon.moonagent.ai.agent.turn.AgentTurnEventPublisher;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
@@ -62,13 +69,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -119,10 +121,6 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService canvasRunService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
-
     /**
      * 专用 executor（I6）：SSE 长连接任务不再占用 ForkJoinPool.commonPool，
      * 避免一条长流拖垮其他并行流。JDK 21 虚拟线程天然 daemon、无池占用，无需手动 shutdown。
@@ -223,6 +221,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         conversation.setEngineVersion(mode.engineVersion());
         conversation.setDebugComparisonEnabled(false);
         conversation.setApprovalMode(AgentApprovalMode.from(approvalMode).name());
+        conversation.setAgentscopeSessionInitializedAt(OffsetDateTime.now());
         conversationMapper.insert(conversation);
         return conversation;
     }
@@ -252,9 +251,111 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     /** 会话消息列表（created_at 正序） */
     public List<AgentMessage> listMessages(String conversationId) {
-        return messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
+        List<AgentMessage> latest = messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
             .eq(AgentMessage::getConversationId, conversationId)
-            .orderByAsc(AgentMessage::getCreatedAt));
+            .orderByDesc(AgentMessage::getCreatedAt)
+            .orderByDesc(AgentMessage::getId)
+            .last("LIMIT 500"));
+        return latest.reversed();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MessagePageVO listMessagesPage(String userId, String conversationId,
+                                          String before, int limit) {
+        getOwnedConversation(userId, conversationId);
+        int safeLimit = Math.max(1, Math.min(100, limit));
+        LambdaQueryWrapper<AgentMessage> query = new LambdaQueryWrapper<AgentMessage>()
+                .eq(AgentMessage::getConversationId, conversationId);
+        MessageCursor cursor = decodeCursor(before);
+        if (cursor != null) {
+            query.and(wrapper -> wrapper
+                    .lt(AgentMessage::getCreatedAt, cursor.createdAt())
+                    .or(nested -> nested
+                            .eq(AgentMessage::getCreatedAt, cursor.createdAt())
+                            .lt(AgentMessage::getId, cursor.id())));
+        }
+        List<AgentMessage> rows = messageMapper.selectList(query
+                .orderByDesc(AgentMessage::getCreatedAt)
+                .orderByDesc(AgentMessage::getId)
+                .last("LIMIT " + (safeLimit + 1)));
+        boolean hasMore = rows.size() > safeLimit;
+        List<AgentMessage> pageRows = hasMore ? rows.subList(0, safeLimit) : rows;
+        String nextCursor = hasMore && !pageRows.isEmpty()
+                ? encodeCursor(pageRows.getLast().getCreatedAt(), pageRows.getLast().getId())
+                : null;
+        List<AgentMessageVO> records = pageRows.reversed().stream()
+                .map(AgentChatServiceImpl::messageVo)
+                .toList();
+        return new MessagePageVO(records, nextCursor, hasMore);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MessageSearchHitVO> searchMessages(String userId, String query, int limit) {
+        String q = query == null ? "" : query.trim();
+        if (q.length() < 2) return List.of();
+        List<AgentConversation> conversations = conversationMapper.selectList(
+                new LambdaQueryWrapper<AgentConversation>()
+                        .eq(AgentConversation::getUserId, userId)
+                        .orderByDesc(AgentConversation::getUpdatedAt)
+                        .last("LIMIT 200"));
+        if (conversations.isEmpty()) return List.of();
+        Map<String, AgentConversation> byId = conversations.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        AgentConversation::getId, conversation -> conversation));
+        int safeLimit = Math.max(1, Math.min(200, limit));
+        return messageMapper.selectList(new LambdaQueryWrapper<AgentMessage>()
+                        .in(AgentMessage::getConversationId, byId.keySet())
+                        .like(AgentMessage::getContent, q)
+                        .orderByDesc(AgentMessage::getCreatedAt)
+                        .last("LIMIT " + safeLimit))
+                .stream()
+                .map(message -> {
+                    AgentConversation conversation = byId.get(message.getConversationId());
+                    return new MessageSearchHitVO(
+                            message.getId(),
+                            message.getConversationId(),
+                            conversation == null ? "" : conversation.getTitle(),
+                            message.getRole(),
+                            message.getContent(),
+                            message.getCreatedAt());
+                })
+                .toList();
+    }
+
+    private static AgentMessageVO messageVo(AgentMessage message) {
+        return new AgentMessageVO(
+                message.getId(),
+                message.getConversationId(),
+                message.getRole(),
+                message.getContent(),
+                message.getMetadata(),
+                message.getCreatedAt());
+    }
+
+    private static String encodeCursor(OffsetDateTime createdAt, String id) {
+        String value = (createdAt == null ? "" : createdAt.toString()) + "|" + (id == null ? "" : id);
+        return java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static MessageCursor decodeCursor(String encoded) {
+        if (encoded == null || encoded.isBlank()) return null;
+        try {
+            String value = new String(java.util.Base64.getUrlDecoder().decode(encoded),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            int split = value.lastIndexOf('|');
+            if (split <= 0 || split >= value.length() - 1) return null;
+            return new MessageCursor(
+                    OffsetDateTime.parse(value.substring(0, split)),
+                    value.substring(split + 1));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private record MessageCursor(OffsetDateTime createdAt, String id) {
     }
 
     /**
@@ -419,19 +520,18 @@ public class AgentChatServiceImpl implements AgentChatService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(50, Math.max(1, size));
         // 产出素材 = 生成结果（image/video），排除用户自己上传的参考图（type=reference，不算产出）
-        List<AgentAsset> all = assetMapper.selectList(
+        Page<AgentAsset> resultPage = assetMapper.selectPage(
+                new Page<>(safePage, safeSize),
                 new LambdaQueryWrapper<AgentAsset>()
                         .eq(AgentAsset::getConversationId, conversationId)
                         .ne(AgentAsset::getType, "reference")
                         .orderByDesc(AgentAsset::getCreatedAt));
-        all = all == null ? List.of() : all;
-        int total = all.size();
-        int from = (int) Math.min(total, (long) (safePage - 1) * safeSize);
-        int to = Math.min(total, from + safeSize);
-        List<AgentAsset> records = from >= total ? List.of() : all.subList(from, to);
+        List<AgentAsset> records = resultPage.getRecords() == null
+                ? List.of() : resultPage.getRecords();
         records.forEach(this::signAssetUrls);
-        int imageTotal = mediaCount(all, "image");
-        int videoTotal = mediaCount(all, "video");
+        long total = resultPage.getTotal();
+        long imageTotal = countAssets(conversationId, "image");
+        long videoTotal = countAssets(conversationId, "video");
         return Map.of(
                 "records", records,
                 "total", total,
@@ -440,6 +540,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                 "mediaTotal", imageTotal + videoTotal,
                 "page", safePage,
                 "size", safeSize);
+    }
+
+    private long countAssets(String conversationId, String type) {
+        return assetMapper.selectCount(new LambdaQueryWrapper<AgentAsset>()
+                .eq(AgentAsset::getConversationId, conversationId)
+                .eq(AgentAsset::getType, type));
     }
 
     private void signAssetUrls(AgentAsset asset) {
@@ -711,14 +817,25 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private void bootstrapAgentScopeSession(String userId, AgentConversation conversation) {
         if (agentScopeMediaRuntime == null || !agentScopeMediaRuntime.enabled()) return;
+        if (conversation.getAgentscopeSessionInitializedAt() != null) return;
         List<Msg> history = loadRecentHistory(conversation.getId()).stream()
                 .filter(message -> message.getContent() != null && !message.getContent().isBlank())
                 .map(message -> "assistant".equals(message.getRole())
                         ? (Msg) new AssistantMessage(message.getContent())
                         : (Msg) new UserMessage(message.getContent()))
                 .toList();
-        agentScopeMediaRuntime.ensureSessionFromHistory(
-                userId, conversation.getId(), history);
+        MoonAgentRuntime.SessionBootstrapResult result =
+                agentScopeMediaRuntime.ensureSessionFromHistory(
+                        userId, conversation.getId(), history);
+        if (result == MoonAgentRuntime.SessionBootstrapResult.SEEDED
+                || result == MoonAgentRuntime.SessionBootstrapResult.ALREADY_INITIALIZED) {
+            OffsetDateTime initializedAt = OffsetDateTime.now();
+            conversation.setAgentscopeSessionInitializedAt(initializedAt);
+            conversationMapper.update(null, new UpdateWrapper<AgentConversation>()
+                    .eq("id", conversation.getId())
+                    .isNull("agentscope_session_initialized_at")
+                    .set("agentscope_session_initialized_at", initializedAt));
+        }
     }
 
     /** SseEmitter 事件发送（捕获 IOException 忽略——前端已断开） */
@@ -998,9 +1115,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                         request, resolveAgentContextWindow());
                 request.setTrace(trace);
 
-                AgentTurnResult result = agentScopeMediaRuntime.runTurn(
-                        conversation, request, trace,
-                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
+                AgentTurnResult result;
+                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
+                        turn.getId(), emitter, trace.contextWindowTokens())) {
+                    result = agentScopeMediaRuntime.runTurn(
+                            conversation, request, trace,
+                            eventObserver(eventPublisher, turn.getId(), emitter,
+                                    trace.contextWindowTokens()));
+                }
                 throwIfInterrupted(conversationId);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
@@ -1111,10 +1233,15 @@ public class AgentChatServiceImpl implements AgentChatService {
                         request, resolveAgentContextWindow());
                 request.setTrace(trace);
 
-                AgentTurnResult result = agentScopeMediaRuntime.resumeTurn(
-                        conversation, claim.checkpoint(), request, trace,
-                        action, customText,
-                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
+                AgentTurnResult result;
+                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
+                        turn.getId(), emitter, trace.contextWindowTokens())) {
+                    result = agentScopeMediaRuntime.resumeTurn(
+                            conversation, claim.checkpoint(), request, trace,
+                            action, customText,
+                            eventObserver(eventPublisher, turn.getId(), emitter,
+                                    trace.contextWindowTokens()));
+                }
                 throwIfInterrupted(conversationId);
                 checkpointResumeService.complete(claim);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
@@ -1208,9 +1335,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                         : agentContextWindowResolver.resolve(agentScopeMediaRuntime.primaryModelName()));
                 request.setTrace(trace);
 
-                AgentTurnResult result = agentScopeMediaRuntime.resumeCanvasTurn(
-                        conversation, session, request, trace,
-                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
+                AgentTurnResult result;
+                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
+                        turn.getId(), emitter, trace.contextWindowTokens())) {
+                    result = agentScopeMediaRuntime.resumeCanvasTurn(
+                            conversation, session, request, trace,
+                            eventObserver(eventPublisher, turn.getId(), emitter,
+                                    trace.contextWindowTokens()));
+                }
                 throwIfInterrupted(conversationId);
                 canvasSessionService.markResumed(session.sessionId());
                 finishAgentScopeTurn(conversation, turn, result, emitter);
@@ -1278,6 +1410,30 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @Override
+    public Map<String, Object> compactContext(String userId, String conversationId) {
+        getOwnedConversation(userId, conversationId); // 归属校验：不存在/无权统一 40401
+        if (agentScopeMediaRuntime == null || !agentScopeMediaRuntime.enabled()) {
+            throw new BusinessException(40001, "当前会话暂不支持上下文压缩");
+        }
+        if (!conversationLock.tryAcquire(conversationId)) {
+            throw new BusinessException(40901, "当前对话正在处理中，暂时不能压缩上下文");
+        }
+        try {
+            CompactOutcome outcome = agentScopeMediaRuntime.compactSession(userId, conversationId);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("compacted", outcome.compacted());
+            result.put("status", outcome.status());
+            result.put("messagesBefore", outcome.messagesBefore());
+            result.put("messagesAfter", outcome.messagesAfter());
+            result.put("tokensBefore", outcome.tokensBefore());
+            result.put("tokensAfter", outcome.tokensAfter());
+            return result;
+        } finally {
+            conversationLock.release(conversationId);
+        }
+    }
+
+    @Override
     public List<AgentTurnEventEnvelope> getTurnEvents(String userId, String conversationId,
                                                       String turnId, int afterSequence) {
         getOwnedConversation(userId, conversationId);
@@ -1287,16 +1443,20 @@ public class AgentChatServiceImpl implements AgentChatService {
         return turnEventStore.eventsAfter(turnId, afterSequence);
     }
 
-    private java.util.function.Consumer<AgentEvent> eventObserver(
+    private AgentTurnEventPublisher eventPublisher(
             String turnId, SseEmitter emitter, long contextWindowTokens) {
+        return new AgentTurnEventPublisher(
+                turnEventStore, agentScopeEventMapper, turnId, contextWindowTokens,
+                envelope -> sendRuntimeEnvelope(emitter, envelope));
+    }
+
+    private java.util.function.Consumer<AgentEvent> eventObserver(
+            AgentTurnEventPublisher eventPublisher, String turnId, SseEmitter emitter,
+            long contextWindowTokens) {
         return event -> {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("eventType", agentScopeEventMapper.type(event));
-            payload.put("data", agentScopeEventMapper.payload(event, contextWindowTokens));
-            AgentTurnEventEnvelope envelope = turnEventStore.append(
-                    turnId, "agent_event", payload);
-            sendRuntimeEnvelope(emitter, envelope);
+            eventPublisher.accept(event);
             if (event instanceof ToolResultEndEvent result) {
+                eventPublisher.flush();
                 String toolName = result.getToolCallName() == null ? "" : result.getToolCallName();
                 if ("canvas_create_run".equals(toolName) || toolName.startsWith("canvas_graph_")) {
                     var run = canvasRunService.activeByTurn(turnId);
@@ -1317,6 +1477,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                     default -> "";
                 };
                 if (!special.isBlank()) {
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("eventType", agentScopeEventMapper.type(event));
+                    payload.put("data", agentScopeEventMapper.payload(event, contextWindowTokens));
                     sendRuntimeEnvelope(emitter, turnEventStore.append(
                             turnId, special, payload));
                 }
@@ -1425,11 +1588,28 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     private void sendRuntimeEnvelope(SseEmitter emitter, AgentTurnEventEnvelope envelope) {
+        if (envelope.payloadJson() != null && !envelope.payloadJson().isBlank()) {
+            var node = objectMapper.createObjectNode();
+            node.put("turnId", envelope.turnId());
+            node.put("seq", envelope.seq());
+            node.put("type", envelope.type());
+            node.putRawValue("payload", new RawValue(envelope.payloadJson()));
+            sendEventRaw(emitter, envelope.type(), node.toString());
+            return;
+        }
         sendEvent(emitter, envelope.type(), Map.of(
                 "turnId", envelope.turnId(),
                 "seq", envelope.seq(),
                 "type", envelope.type(),
                 "payload", envelope.payload()));
+    }
+
+    private void sendEventRaw(SseEmitter emitter, String eventName, String json) {
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(json));
+        } catch (Exception e) {
+            log.debug("SseEmitter 发送失败（前端可能已断开）: event={}", eventName);
+        }
     }
 
     private void sendRuntimeError(SseEmitter emitter, String code, String message) {
@@ -1501,9 +1681,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentConversation conversation = conversationMapper.selectById(conversationId);
                 result.put("kind", CANVAS_BIND_ACTION);
                 result.put("projectId", conversation == null ? "" : conversation.getProjectId());
-                result.put("canvasId", orchestratorSupport.planField(cp.getPlan(), "canvasId"));
-                result.put("canvasTitle", orchestratorSupport.planField(cp.getPlan(), "canvasTitle"));
-                result.put("requestedIntent", orchestratorSupport.planField(cp.getPlan(), "intent"));
+                result.put("canvasId", orchestratorSupport.planField(plan, "canvasId"));
+                result.put("canvasTitle", orchestratorSupport.planField(plan, "canvasTitle"));
+                result.put("requestedIntent", orchestratorSupport.planField(plan, "intent"));
                 List<String> picUrls = orchestratorSupport.planPicUrls(cp.getPlan());
                 if (!picUrls.isEmpty()) result.put("picUrls", picUrls);
                 List<String> assetIds = new java.util.ArrayList<>();
@@ -1517,13 +1697,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
                 if (!assetIds.isEmpty()) result.put("assetIds", assetIds);
                 List<Map<String, Object>> mediaRefs =
-                        orchestratorSupport.planListField(cp.getPlan(), "mediaRefs");
+                        orchestratorSupport.planListField(plan, "mediaRefs");
                 if (!mediaRefs.isEmpty()) result.put("mediaRefs", mediaRefs);
             }
             if ("generate_video".equals(cp.getAction())) {
                 result.put("kind", "video-plan");
-                result.put("message", orchestratorSupport.planField(cp.getPlan(), "message"));
-                String duration = orchestratorSupport.planField(cp.getPlan(), "duration");
+                result.put("message", orchestratorSupport.planField(plan, "message"));
+                String duration = orchestratorSupport.planField(plan, "duration");
                 if (duration != null && !duration.isBlank()) {
                     try { result.put("duration", Integer.parseInt(duration.trim())); }
                     catch (NumberFormatException ignored) { result.put("duration", 8); }

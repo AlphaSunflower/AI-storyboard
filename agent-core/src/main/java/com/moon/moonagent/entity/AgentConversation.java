@@ -24,6 +24,8 @@ public class AgentConversation {
     private Boolean debugComparisonEnabled;
     /** 会话级 AgentScope 审批模式：PLAN_APPROVAL / REQUEST_APPROVAL / FULL_ACCESS。 */
     private String approvalMode;
+    /** AgentScope state bootstrap 完成时间；新会话创建时即为已初始化。 */
+    private OffsetDateTime agentscopeSessionInitializedAt;
     @TableField(fill = FieldFill.INSERT)
     private OffsetDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

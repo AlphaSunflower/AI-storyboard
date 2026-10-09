@@ -287,8 +287,8 @@ describe('agentStore background tasks', () => {
 
   it('refreshes messages when a long task settles without a wakeup event', async () => {
     vi.useFakeTimers();
-    const listMessages = vi.spyOn(agentApi, 'listMessages')
-      .mockResolvedValue({ data: { data: [] } } as never);
+    const listMessages = vi.spyOn(agentApi, 'listMessagesPage')
+      .mockResolvedValue({ data: { data: { records: [], nextCursor: null, hasMore: false } } } as never);
     useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: false });
 
     useAgentStore.getState().upsertTask(task({ version: 1 }));
@@ -306,8 +306,8 @@ describe('agentStore background tasks', () => {
 
   it('does not overwrite in-flight streaming messages when a task settles mid-turn', async () => {
     vi.useFakeTimers();
-    const listMessages = vi.spyOn(agentApi, 'listMessages')
-      .mockResolvedValue({ data: { data: [] } } as never);
+    const listMessages = vi.spyOn(agentApi, 'listMessagesPage')
+      .mockResolvedValue({ data: { data: { records: [], nextCursor: null, hasMore: false } } } as never);
     useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: true });
 
     useAgentStore.getState().upsertTask(task({ version: 1 }));
@@ -898,15 +898,19 @@ describe('agentStore detached async tasks', () => {
       headers: { 'Content-Type': 'text/event-stream' },
     }));
     vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
       data: {
-        data: [{
-          id: 'user-db',
-          conversationId: 'conversation-1',
-          role: 'user',
-          content: '原始问题',
-          createdAt: new Date().toISOString(),
-        }],
+        data: {
+          records: [{
+            id: 'user-db',
+            conversationId: 'conversation-1',
+            role: 'user',
+            content: '原始问题',
+            createdAt: new Date().toISOString(),
+          }],
+          nextCursor: null,
+          hasMore: false,
+        },
       },
     } as never);
     resetStore();
@@ -1175,16 +1179,20 @@ describe('AgentScope turn envelope reduction', () => {
       },
     } as never);
     vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: null } } as never);
-    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
       data: {
-        data: [{
-          id: 'assistant-recovered',
-          conversationId: 'conversation-1',
-          role: 'assistant',
-          content: '已恢复',
-          createdAt: new Date().toISOString(),
-          metadata: {},
-        }],
+        data: {
+          records: [{
+            id: 'assistant-recovered',
+            conversationId: 'conversation-1',
+            role: 'assistant',
+            content: '已恢复',
+            createdAt: new Date().toISOString(),
+            metadata: {},
+          }],
+          nextCursor: null,
+          hasMore: false,
+        },
       },
     } as never);
     useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });

@@ -167,8 +167,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   selectConversation: async (id) => {
     if (get().waitingHumanInput || get().waitingVideoPlan) return;
     set({ activeConversationId: id, messages: [], waitingHumanInput: null, waitingVideoPlan: null, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null, refImageUrl: null });
-    const res = await agentApi.listMessages(id);
-    set({ messages: res.data.data ?? [] });
+    const res = await agentApi.listMessagesPage(id);
+    set({ messages: res.data.data?.records ?? [] });
     initialSceneCount = useProjectStore.getState().scenes.length;
     void get().loadAssets(1);
     try {

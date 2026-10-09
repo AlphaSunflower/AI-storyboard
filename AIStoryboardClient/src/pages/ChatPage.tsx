@@ -111,7 +111,7 @@ export function ChatPage() {
   const setCanvasBindingStatus = useAgentStore((s) => s.setCanvasBindingStatus);
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
-    messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
+    messages, messageHasMore, loadOlderMessages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     confirmResult, conversations, activeConversationId,
     renameConversation, editAndResend,
   } = useAgentStore();
@@ -629,6 +629,19 @@ export function ChatPage() {
                 className="chat-thread-stage"
                 style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}
               >
+                {messageHasMore && (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderMessages()}
+                    style={{
+                      alignSelf: 'center', marginBottom: 12, padding: '6px 14px',
+                      border: '1px solid var(--color-hairline)', borderRadius: 8,
+                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                    }}
+                  >
+                    加载更早消息
+                  </button>
+                )}
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
@@ -1098,6 +1111,19 @@ export function ChatPage() {
                 className="chat-thread-stage"
                 style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}
               >
+                {messageHasMore && (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderMessages()}
+                    style={{
+                      alignSelf: 'center', marginBottom: 16, padding: '6px 14px',
+                      border: '1px solid var(--color-hairline)', borderRadius: 8,
+                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                    }}
+                  >
+                    加载更早消息
+                  </button>
+                )}
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble

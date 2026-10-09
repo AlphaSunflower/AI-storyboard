@@ -12,6 +12,8 @@ import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
+import com.moon.moonagent.dto.response.MessagePageVO;
+import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
 import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
 import com.storyboard.common.ApiResponse;
@@ -177,6 +179,24 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.listMessages(id).stream().map(this::toVO).toList());
     }
 
+    /** 消息稳定游标分页；旧接口保留 500 条兼容期。 */
+    @GetMapping("/conversations/{id}/messages/page")
+    public ApiResponse<MessagePageVO> listMessagesPage(
+            Authentication auth, @PathVariable String id,
+            @RequestParam(required = false) String before,
+            @RequestParam(defaultValue = "50") int limit) {
+        return ApiResponse.ok(chatService.listMessagesPage(auth.getName(), id, before, limit));
+    }
+
+    /** 当前用户消息全文搜索，替代前端逐会话全量建索引。 */
+    @GetMapping("/messages/search")
+    public ApiResponse<List<MessageSearchHitVO>> searchMessages(
+            Authentication auth,
+            @RequestParam String q,
+            @RequestParam(defaultValue = "100") int limit) {
+        return ApiResponse.ok(chatService.searchMessages(auth.getName(), q, limit));
+    }
+
     /** 发送消息 */
     @PostMapping("/conversations/{id}/messages")
     public ApiResponse<AgentMessageVO> sendMessage(
@@ -336,6 +356,13 @@ public class AgentConversationController {
     public ApiResponse<Map<String, Object>> runtimeStatus(Authentication auth,
                                                           @PathVariable String id) {
         return ApiResponse.ok(chatService.getRuntimeStatus(auth.getName(), id));
+    }
+
+    /** 手动压缩会话上下文（/chat 斜杠命令「压缩上下文」）。 */
+    @PostMapping("/conversations/{id}/compact")
+    public ApiResponse<Map<String, Object>> compactContext(Authentication auth,
+                                                           @PathVariable String id) {
+        return ApiResponse.ok(chatService.compactContext(auth.getName(), id));
     }
 
     /** Replay native AgentScope turn events after a sequence for reconnect. */

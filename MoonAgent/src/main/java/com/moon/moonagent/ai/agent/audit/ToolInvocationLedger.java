@@ -25,9 +25,6 @@ public class ToolInvocationLedger {
         if (!properties.isEnabled() || context == null) return null;
         try {
             String invocationKey = invocationKey(context);
-            AgentToolInvocation existing = mapper.selectByInvocationKey(invocationKey);
-            if (existing != null) return existing;
-
             AgentToolInvocation invocation = new AgentToolInvocation();
             invocation.setInvocationKey(invocationKey);
             invocation.setTraceId(blankToNull(context.getTraceId()));

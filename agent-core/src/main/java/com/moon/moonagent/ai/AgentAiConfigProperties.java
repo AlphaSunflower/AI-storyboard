@@ -42,6 +42,15 @@ public class AgentAiConfigProperties {
     /** 多智能体并行上限：同时运行的批次/绑定/审查 worker 数量。 */
     private int maxParallelAgents = 4;
 
+    /** 全实例同时执行的模型/媒体调用上限。 */
+    private int globalConcurrency = 4;
+
+    /** 单用户同时执行的模型/媒体调用上限。 */
+    private int perUserConcurrency = 2;
+
+    /** 获取并发许可的最长等待时间（秒）。 */
+    private int concurrencyAcquireTimeoutSeconds = 30;
+
     /** 轻量意图判定超时（秒）：例如取消意图判断，超时按不取消处理。 */
     private int intentTimeoutSeconds = 60;
 

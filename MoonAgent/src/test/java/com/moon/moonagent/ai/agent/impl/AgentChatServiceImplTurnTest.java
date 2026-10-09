@@ -92,7 +92,7 @@ class AgentChatServiceImplTurnTest {
                 message("user-1", "user", "第一条"),
                 message("assistant-1", "assistant", "第一条回复"),
                 target,
-                message("assistant-2", "assistant", "旧回复")));
+                message("assistant-2", "assistant", "旧回复")).reversed());
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
         when(turnStore.start(any(), eq("修改后的问题"), anyString())).thenReturn(turn);
@@ -308,6 +308,7 @@ class AgentChatServiceImplTurnTest {
         conversation.setUserId("user-1");
         conversation.setStatus("active");
         conversation.setOrchestrationMode("AGENTSCOPE");
+        conversation.setAgentscopeSessionInitializedAt(java.time.OffsetDateTime.now());
         return conversation;
     }
 
