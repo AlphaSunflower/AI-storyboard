@@ -52,7 +52,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
   const {
     conversations, activeConversationId, selectConversation,
     newConversation, renameConversation, setConversationStatus, deleteConversation,
-    taskUnread,
+    taskUnread, generating, replyUnread,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -130,6 +130,20 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
         overflow: 'hidden',
       }}
     >
+      <style>{`
+        @keyframes conversationGeneratingDot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.35; transform: scale(0.7); }
+        }
+        .conversation-generating__dot {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: currentColor;
+          animation: conversationGeneratingDot 1.1s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .conversation-generating__dot { animation: none; }
+        }
+      `}</style>
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
       {!hideHeader && (
         <div style={{ padding: '16px 16px 12px', borderBottom: `1px solid ${DS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -285,6 +299,36 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                       }}>
                         {c.title}
                       </div>
+                      {/* 正在生成：生成中胶囊（切走别的会话也能看到这个会话在跑） */}
+                      {generating[c.id] && !generating[c.id].finished ? (
+                        <span
+                          className="conversation-generating"
+                          title="正在生成"
+                          aria-label="正在生成"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                            padding: '1px 7px', borderRadius: 999,
+                            background: 'rgba(65, 118, 230, 0.10)', color: DS.brand,
+                            fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <span className="conversation-generating__dot" />
+                          生成中
+                        </span>
+                      ) : replyUnread[c.id] ? (
+                        <span
+                          title="有新回复"
+                          aria-label="有新回复"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
+                            background: DS.brand, color: 'white', fontSize: 10, fontWeight: 700,
+                            flexShrink: 0,
+                          }}
+                        >
+                          新
+                        </span>
+                      ) : null}
                       {!!taskUnread[c.id] && (
                         <span
                           title="后台任务已完成"

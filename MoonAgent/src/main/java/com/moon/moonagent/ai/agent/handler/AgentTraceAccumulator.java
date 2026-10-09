@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.handler;
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.AgentTraceEvent;
 import com.moon.moonagent.ai.agent.AgentTurnMetrics;
+import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,10 +45,24 @@ public class AgentTraceAccumulator {
     private volatile String hitlMessageId = "";
     private volatile List<SuggestedAction> suggestedActions = List.of();
     private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
+    private final int contextWindowTokens;
 
     public AgentTraceAccumulator(OrchestrationRequest request) {
+        this(request, AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS);
+    }
+
+    /**
+     * @param contextWindowTokens 本轮模型的上下文窗口大小（由 {@link AgentContextWindowResolver} 解析后传入）。
+     */
+    public AgentTraceAccumulator(OrchestrationRequest request, int contextWindowTokens) {
         this.request = request;
         this.startedAt = OffsetDateTime.now();
+        this.contextWindowTokens = Math.max(0, contextWindowTokens);
+    }
+
+    /** 本轮模型的上下文窗口大小（token）。 */
+    public int contextWindowTokens() {
+        return contextWindowTokens;
     }
 
     /** 开始一个阶段：生成事件并立即下发 {@code agent_trace}（status=node_started），返回事件 id。 */
@@ -171,7 +186,7 @@ public class AgentTraceAccumulator {
     /** 当前执行段的不可变指标快照。 */
     public AgentTurnMetrics turnMetrics() {
         long durationMs = Duration.between(startedAt, OffsetDateTime.now()).toMillis();
-        return usage.snapshot(durationMs);
+        return usage.snapshot(durationMs, contextWindowTokens);
     }
 
     /** 给终态 SSE payload 注入统一指标；重复调用不会重复累计。 */

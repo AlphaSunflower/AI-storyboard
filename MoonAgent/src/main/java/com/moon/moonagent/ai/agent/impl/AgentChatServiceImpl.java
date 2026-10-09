@@ -36,6 +36,7 @@ import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.AgentTraceAccumulator;
+import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
 import com.moon.moonagent.orchestration.OrchestrationMode;
@@ -139,6 +140,9 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentScopeEventMapper agentScopeEventMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentContextWindowResolver agentContextWindowResolver;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient com.moon.moonagent.service.StorageCleanupService storageCleanupService;
@@ -956,6 +960,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 started.put("conversationId", conversationId);
                 started.put("runtime", turn.getRuntimeEngine() == null
                         ? "agentscope-java-2.0.3" : turn.getRuntimeEngine());
+                // 随 turn_started 提前下发模型上下文窗口，前端首轮即可展示正确分母（无需等 usage 事件）
+                started.put("contextWindowTokens", resolveAgentContextWindow());
                 sendRuntimeEnvelope(emitter,
                         turnEventStore.append(turn.getId(), "turn_started", started));
 
@@ -988,11 +994,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     "softConstraints", turnLedger.soft(),
                                     "unresolved", turnLedger.unresolved())));
                 }
-                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                        request, resolveAgentContextWindow());
                 request.setTrace(trace);
 
                 AgentTurnResult result = agentScopeMediaRuntime.runTurn(
-                        conversation, request, trace, eventObserver(turn.getId(), emitter));
+                        conversation, request, trace,
+                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
                 throwIfInterrupted(conversationId);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
@@ -1099,12 +1107,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                 request.setNativeEventsOnly(true);
                 request.setCheckpointAction(claim.checkpoint().getAction());
                 request.setCheckpointPlan(claim.checkpoint().getPlan());
-                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                        request, resolveAgentContextWindow());
                 request.setTrace(trace);
 
                 AgentTurnResult result = agentScopeMediaRuntime.resumeTurn(
                         conversation, claim.checkpoint(), request, trace,
-                        action, customText, eventObserver(turn.getId(), emitter));
+                        action, customText,
+                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
                 throwIfInterrupted(conversationId);
                 checkpointResumeService.complete(claim);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
@@ -1192,11 +1202,15 @@ public class AgentChatServiceImpl implements AgentChatService {
                         session.canvasId(),
                         List.of()));
                 request.setNativeEventsOnly(true);
-                AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+                AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                        request, agentContextWindowResolver == null
+                        ? AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS
+                        : agentContextWindowResolver.resolve(agentScopeMediaRuntime.primaryModelName()));
                 request.setTrace(trace);
 
                 AgentTurnResult result = agentScopeMediaRuntime.resumeCanvasTurn(
-                        conversation, session, request, trace, eventObserver(turn.getId(), emitter));
+                        conversation, session, request, trace,
+                        eventObserver(turn.getId(), emitter, trace.contextWindowTokens()));
                 throwIfInterrupted(conversationId);
                 canvasSessionService.markResumed(session.sessionId());
                 finishAgentScopeTurn(conversation, turn, result, emitter);
@@ -1273,11 +1287,12 @@ public class AgentChatServiceImpl implements AgentChatService {
         return turnEventStore.eventsAfter(turnId, afterSequence);
     }
 
-    private java.util.function.Consumer<AgentEvent> eventObserver(String turnId, SseEmitter emitter) {
+    private java.util.function.Consumer<AgentEvent> eventObserver(
+            String turnId, SseEmitter emitter, long contextWindowTokens) {
         return event -> {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("eventType", agentScopeEventMapper.type(event));
-            payload.put("data", agentScopeEventMapper.payload(event));
+            payload.put("data", agentScopeEventMapper.payload(event, contextWindowTokens));
             AgentTurnEventEnvelope envelope = turnEventStore.append(
                     turnId, "agent_event", payload);
             sendRuntimeEnvelope(emitter, envelope);
@@ -1307,6 +1322,18 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
             }
         };
+    }
+
+    /** 本轮模型的上下文窗口：网关 model_params.context_window 优先，缺失回退内置表。 */
+    private int resolveAgentContextWindow() {
+        if (agentContextWindowResolver == null || agentScopeMediaRuntime == null) {
+            return AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+        }
+        try {
+            return agentContextWindowResolver.resolve(agentScopeMediaRuntime.primaryModelName());
+        } catch (Exception e) {
+            return AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+        }
     }
 
     private void replayTurnEvents(String turnId, SseEmitter emitter) {

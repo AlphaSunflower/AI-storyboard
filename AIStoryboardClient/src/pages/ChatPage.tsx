@@ -356,7 +356,7 @@ export function ChatPage() {
   const projectId = currentProject?.id;
   useEffect(() => {
     if (!projectId) return;
-    useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, streaming: false, workflowHint: '' });
+    useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, replyUnread: {}, streaming: false, workflowHint: '' });
     useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
     useAgentStore.getState().refetchStoryboardVideoQueue(projectId).catch(() => { /* 静默 */ });
     useAgentStore.getState().refetchStoryboardImageQueue(projectId).catch(() => { /* 静默 */ });

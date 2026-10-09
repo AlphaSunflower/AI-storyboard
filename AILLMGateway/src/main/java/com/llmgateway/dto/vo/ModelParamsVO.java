@@ -11,6 +11,7 @@ public record ModelParamsVO(
         String temperature,
         Integer maxTokens,
         String topP,
+        Integer contextWindow,
         Integer nMin,
         Integer nMax,
         Integer nDefault,

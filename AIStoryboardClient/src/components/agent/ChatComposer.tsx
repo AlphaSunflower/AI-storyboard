@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
+import { useChatAnnotationStore, type ChatAnnotation } from '../../stores/chatAnnotationStore';
+import { AnnotationChip } from './AnnotationChip';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
@@ -20,11 +22,15 @@ import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl } from '../../config';
 import { buildSceneInspectPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
+import { buildAnnotationContext } from '../../lib/chatAnnotation';
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { ContextUsageRing } from './ContextUsageRing';
+import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, contextWindowTokensFor } from './contextWindow';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   parseProjectLibraryDragPayload,
@@ -34,19 +40,8 @@ import {
 // 资产类型中文标签（与 AssetLibraryPanel 一致）
 const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop: '道具', scene: '场景' };
 
-/** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局） */
-export const DS = {
-  brand: 'rgb(65, 118, 230)',
-  brandHover: 'rgb(86, 134, 254)',
-  bubble: 'rgb(235, 240, 250)',
-  ink: 'rgb(15, 17, 21)',
-  textSecondary: 'rgb(96, 100, 108)',
-  textCaption: 'rgb(152, 158, 168)',
-  border: 'rgba(0, 0, 0, 0.08)',
-  hover: 'rgba(65, 118, 230, 0.06)',
-  sidebarBg: '#f7f8fa',
-  maxContent: 780,
-};
+/** /chat 页设计 token（蓝色品牌 + 中性灰底，统一全局）：唯一真源见 agentChatTokens。 */
+export const DS: AgentChatTokens = agentChatTokens;
 
 const REFERENCE_PREVIEW_LIMIT = 5;
 
@@ -73,6 +68,7 @@ export function ChatComposer() {
     pendingApprovalMode,
     setApprovalMode,
   } = useAgentStore();
+  const pendingAnnotations = useChatAnnotationStore((state) => state.annotations);
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -104,6 +100,36 @@ export function ChatComposer() {
   const legacyOrchestration = activeConversation?.orchestrationMode === 'LEGACY';
   const approvalMode = activeConversation?.approvalMode ?? pendingApprovalMode ?? DEFAULT_AGENT_APPROVAL_MODE;
   const readOnly = archived || legacyOrchestration;
+  // 上下文占用：优先后端权威值（末次模型调用 input + 模型窗口）；
+  // 后端未升级（缺 contextTokens）时回退到旧的 inputTokens 估算。
+  const messages = useAgentStore((s) => s.messages);
+  const activeUsageDraft = useAgentStore((s) => s.generating[activeConversationId ?? '']?.usageDraft);
+  const activeTurnContextWindow = useAgentStore(
+    (s) => s.generating[activeConversationId ?? '']?.contextWindowTokens,
+  );
+  const contextBaseline = useMemo(
+    () => [...messages].reverse().find((message) => message.metadata?.metrics)?.metadata?.metrics,
+    [messages],
+  );
+  const contextUsageTokens = useMemo(() => {
+    const live = activeUsageDraft?.contextTokens ?? 0;
+    const base = contextBaseline?.contextTokens ?? 0;
+    if (live || base) return Math.max(live, base);
+    // 兼容旧后端：无 contextTokens 时退回累加口径
+    return (contextBaseline?.inputTokens ?? 0) + (activeUsageDraft?.inputTokens ?? 0);
+  }, [activeUsageDraft, contextBaseline]);
+  const contextCachedTokens = useMemo(
+    () => activeUsageDraft?.cachedInputTokens ?? contextBaseline?.cachedInputTokens ?? 0,
+    [activeUsageDraft, contextBaseline],
+  );
+  const contextLimitTokens = useMemo(() => {
+    const window = activeUsageDraft?.contextWindowTokens
+      || activeTurnContextWindow
+      || contextBaseline?.contextWindowTokens;
+    return window || contextWindowTokensFor() || DEFAULT_CONTEXT_WINDOW_TOKENS;
+  }, [activeTurnContextWindow, activeUsageDraft, contextBaseline]);
+  // 尚无任何真实上下文数据（新会话、未发生模型调用）时不显示圆圈，避免误显静态默认窗口
+  const hasContextData = !!activeUsageDraft || !!contextBaseline;
   /** 只读原因不同提示分开：旧编排会话并未归档，不能一律说「已归档」 */
   const readOnlyHint = archived
     ? '该会话已归档，仅可查看历史记录，请新建会话后继续。'
@@ -246,15 +272,32 @@ export function ChatComposer() {
   const remainingReferenceCount = hasReferenceOverflow
     ? referencePreviews.length - visibleReferencePreviews.length
     : 0;
+  // 输入框上方：当前会话待发注释，按消息分组各显示一枚「N 条注释」胶囊
+  const pendingAnnotationGroups = useMemo(() => {
+    if (!activeConversationId) return [] as ChatAnnotation[][];
+    const groups = new Map<string, ChatAnnotation[]>();
+    for (const annotation of pendingAnnotations) {
+      if (annotation.conversationId !== activeConversationId) continue;
+      const existing = groups.get(annotation.messageId);
+      if (existing) existing.push(annotation);
+      else groups.set(annotation.messageId, [annotation]);
+    }
+    return Array.from(groups.values());
+  }, [pendingAnnotations, activeConversationId]);
 
   const handleSend = () => {
-    const content = text.trim();
-    if (!content || readOnly || (busy && !canInterruptSend)) return;
+    const rawText = text.trim();
+    if (!rawText || readOnly || (busy && !canInterruptSend)) return;
     // 未选项目时 sendMessage 会拒绝发送：先拦下并保留已输入文字，避免清空后丢内容
     if (!projectId) {
       useAgentStore.setState({ streamError: '请先在左上角选择一个项目' });
       return;
     }
+    // 该会话待发的消息内注释一次性随本条消息发给 AI，发送后消费掉
+    const pendingAnnotations = activeConversationId
+      ? useChatAnnotationStore.getState().consumeConversation(activeConversationId)
+      : [];
+    const content = buildAnnotationContext(pendingAnnotations, rawText);
     setText('');
     if (canInterruptSend) {
       void interruptAndSend(content);
@@ -530,6 +573,19 @@ export function ChatComposer() {
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
       boxSizing: 'border-box',
     }}>
+      {!readOnly && pendingAnnotationGroups.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {pendingAnnotationGroups.map((group) => (
+            <AnnotationChip
+              key={group[0].messageId}
+              annotations={group}
+              onEdit={(annotation) => useChatAnnotationStore.getState().openEditor(annotation.id)}
+              onDelete={(id) => useChatAnnotationStore.getState().removeAnnotation(id)}
+              onClear={() => useChatAnnotationStore.getState().removeForMessage(group[0].messageId)}
+            />
+          ))}
+        </div>
+      )}
       {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
         || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
         || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0) && (
@@ -792,6 +848,15 @@ export function ChatComposer() {
         </div>
         {/* 右侧：麦克风 + 发送，紧贴排列 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+          {/* 上下文占用：麦克风左侧，悬浮出详情卡；无真实数据时不渲染 */}
+          {hasContextData && (
+            <ContextUsageRing
+              usedTokens={contextUsageTokens}
+              limitTokens={contextLimitTokens}
+              cachedTokens={contextCachedTokens}
+              disabled={readOnly}
+            />
+          )}
           <MicButton
             onToggle={handleMicToggle}
             onPcm={handlePcm}

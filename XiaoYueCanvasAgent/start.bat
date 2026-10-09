@@ -20,7 +20,7 @@ if not exist "node_modules" (
 )
 
 echo [2/2] Starting Morrow Creative Canvas...
-echo       http://localhost:5173
+echo       http://localhost:3000/canvas/
 echo.
 echo       Press Ctrl+C (or close this window) to stop.
 echo.

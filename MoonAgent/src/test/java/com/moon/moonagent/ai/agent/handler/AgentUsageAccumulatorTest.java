@@ -22,6 +22,8 @@ class AgentUsageAccumulatorTest {
         assertThat(metrics.outputTokens()).isEqualTo(30L);
         assertThat(metrics.cachedInputTokens()).isEqualTo(35L);
         assertThat(metrics.totalTokens()).isEqualTo(170L);
+        // 上下文占用取末次调用的 input（40），而非累加值 140
+        assertThat(metrics.contextTokens()).isEqualTo(40L);
         assertThat(metrics.modelCalls()).isEqualTo(2);
         assertThat(metrics.durationMs()).isEqualTo(1_250L);
         assertThat(metrics.complete()).isTrue();
@@ -45,9 +47,11 @@ class AgentUsageAccumulatorTest {
     void exposesDurationEvenWhenNoModelCallUsedTheGateway() {
         AgentUsageAccumulator accumulator = new AgentUsageAccumulator();
 
-        AgentTurnMetrics metrics = accumulator.snapshot(75L);
+        AgentTurnMetrics metrics = accumulator.snapshot(75L, 200_000L);
 
         assertThat(metrics.totalTokens()).isZero();
+        assertThat(metrics.contextTokens()).isZero();
+        assertThat(metrics.contextWindowTokens()).isEqualTo(200_000L);
         assertThat(metrics.modelCalls()).isZero();
         assertThat(metrics.complete()).isFalse();
         assertThat(metrics.durationMs()).isEqualTo(75L);

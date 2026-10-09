@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { libraryApi } from '../../api/library';
 import { useProjectStore } from '../../stores/projectStore';
+import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
 import { CHAT_MEDIA_DRAG_MIME } from '../../lib/projectLibraryDrag';
 import { MessageBubble } from './MessageBubble';
 
@@ -364,5 +365,163 @@ describe('MessageBubble project library import', () => {
 
     const dialog = screen.getByRole('dialog', { name: '图片预览' });
     expect(dialog.querySelector('video')).toBeTruthy();
+  });
+});
+
+describe('MessageBubble annotations', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    useProjectStore.setState({ currentProject: null });
+    useChatAnnotationStore.getState().reset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    useChatAnnotationStore.getState().reset();
+  });
+
+  const renderAssistant = () => render(
+    <MessageBubble
+      messageId="m1"
+      conversationId="c1"
+      role="assistant"
+      variant="deepseek"
+      content="明白，我停下,等你说完。"
+    />,
+  );
+
+  const stubRangeRect = () => {
+    const proto = Range.prototype as unknown as { getBoundingClientRect?: () => DOMRect };
+    Object.defineProperty(proto, 'getBoundingClientRect', {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        top: 120, left: 100, bottom: 140, right: 180, width: 80, height: 20, x: 100, y: 120,
+        toJSON: () => ({}),
+      } as DOMRect),
+    });
+    return () => { delete proto.getBoundingClientRect; };
+  };
+
+  const waitForHighlightPass = async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+  };
+
+  it('shows the count badge on the quoted text and opens the editor there', async () => {
+    const restore = stubRangeRect();
+    useChatAnnotationStore.setState({
+      annotations: [{
+        id: 'a1', conversationId: 'c1', messageId: 'm1',
+        quote: '明白，我停下,等你说完。', comment: '先别动手', createdAt: 1,
+      }],
+    });
+    renderAssistant();
+    await waitForHighlightPass();
+
+    fireEvent.click(screen.getByRole('button', { name: '1 条注释徽标' }));
+    const editor = await screen.findByRole('dialog', { name: '编辑注释' });
+
+    // 编辑框贴着被引用原文：top = 原文 rect.bottom(140) + 8，left = 原文 left(100)
+    expect((editor as HTMLElement).style.top).toBe('148px');
+    expect((editor as HTMLElement).style.left).toBe('100px');
+
+    const input = editor.querySelector('textarea')!;
+    fireEvent.change(input, { target: { value: '改好的评论' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(useChatAnnotationStore.getState().annotations[0].comment).toBe('改好的评论');
+    expect(useChatAnnotationStore.getState().editingId).toBeNull();
+    restore();
+  });
+
+  it('opens the annotation list at the quoted text when the badge covers several', async () => {
+    const restore = stubRangeRect();
+    useChatAnnotationStore.setState({
+      annotations: [
+        { id: 'a1', conversationId: 'c1', messageId: 'm1', quote: '明白', comment: '第一处', createdAt: 1 },
+        { id: 'a2', conversationId: 'c1', messageId: 'm1', quote: '我停下', comment: '第二处', createdAt: 2 },
+      ],
+    });
+    renderAssistant();
+    await waitForHighlightPass();
+
+    fireEvent.click(screen.getByRole('button', { name: '2 条注释徽标' }));
+    const list = await screen.findByRole('dialog', { name: '注释列表' });
+    expect((list as HTMLElement).style.top).toBe('148px');
+    restore();
+  });
+
+  it('skips the editor in a hidden duplicate layout instead of pinning it to 0,0', () => {
+    // /chat 会同时渲染手机端与桌面端消息，隐藏的那份拿到的 rect 全是 0；
+    // 这种情况不能再画一个编辑框，否则会有一个飘到窗口左上角。
+    useChatAnnotationStore.setState({
+      annotations: [{
+        id: 'a1', conversationId: 'c1', messageId: 'm1',
+        quote: '这段原文在消息里找不到', comment: '', createdAt: 1,
+      }],
+    });
+    renderAssistant();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+
+    act(() => { useChatAnnotationStore.getState().openEditor('a1'); });
+    expect(screen.queryByRole('dialog', { name: '编辑注释' })).toBeNull();
+
+    rectSpy.mockRestore();
+  });
+
+  it('hides the embedded annotation context on sent user messages', () => {
+    render(
+      <MessageBubble
+        messageId="m1"
+        conversationId="c1"
+        role="user"
+        variant="deepseek"
+        content={'【引用注释】\n1. 原文：明白\n   评论：无\n【/引用注释】\n\n我的问题'}
+      />,
+    );
+
+    expect(screen.getByText('我的问题')).toBeTruthy();
+    expect(screen.queryByText(/引用注释/)).toBeNull();
+  });
+
+  it('shows a quote action on selection and opens the editor only after clicking it', () => {
+    const rangeProto = Range.prototype as unknown as {
+      getBoundingClientRect?: () => DOMRect;
+    };
+    Object.defineProperty(rangeProto, 'getBoundingClientRect', {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        top: 120, left: 100, bottom: 140, right: 180, width: 80, height: 20, x: 100, y: 120,
+        toJSON: () => ({}),
+      } as DOMRect),
+    });
+    renderAssistant();
+
+    const paragraph = screen.getByText('明白，我停下,等你说完。');
+    const textNode = paragraph.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 4);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    fireEvent.mouseUp(document.querySelector('.chat-live-text')!);
+
+    expect(screen.getByRole('button', { name: '引用这段内容' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '添加注释' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '引用这段内容' }));
+    expect(screen.getByRole('dialog', { name: '添加注释' })).toBeTruthy();
+
+    delete rangeProto.getBoundingClientRect;
+    window.getSelection()?.removeAllRanges();
   });
 });

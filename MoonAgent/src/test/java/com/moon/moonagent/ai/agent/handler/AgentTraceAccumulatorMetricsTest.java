@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.ai.agent.AgentTurnMetrics;
+import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.entity.AgentConversation;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -29,6 +30,9 @@ class AgentTraceAccumulatorMetricsTest {
         assertThat(firstMetrics.inputTokens()).isEqualTo(120L);
         assertThat(firstMetrics.outputTokens()).isEqualTo(30L);
         assertThat(firstMetrics.totalTokens()).isEqualTo(150L);
+        assertThat(firstMetrics.contextTokens()).isEqualTo(120L);
+        assertThat(firstMetrics.contextWindowTokens())
+                .isEqualTo(AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS);
         assertThat(firstMetrics.complete()).isTrue();
         assertThat(secondMetrics.totalTokens()).isEqualTo(150L);
         assertThat(secondMetrics.modelCalls()).isEqualTo(1);

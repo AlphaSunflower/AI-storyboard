@@ -21,6 +21,8 @@ public class ModelParams {
     private String temperature;
     private Integer maxTokens;
     private String topP;
+    /** 模型上下文窗口（token 数）；文本/理解模型用于上下文占用展示，可空（空=未配置） */
+    private Integer contextWindow;
     // image 能力 + 默认（images/generations + edits 共用）
     private Integer nMin;
     private Integer nMax;

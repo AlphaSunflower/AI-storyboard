@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * LLM 网关模型列表实现：
@@ -36,6 +38,9 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     /** Redis key 前缀：与网关 ModelParamsServiceImpl 一致 */
     private static final String REDIS_KEY_PREFIX = "gateway:default_model:";
 
+    /** 上下文窗口缓存 TTL：网关模型列表缓存为 60s，这里取 2 分钟，兼顾实时性与请求量。 */
+    private static final long CONTEXT_WINDOW_CACHE_TTL_MS = 120_000L;
+
     /** 网关不可达时的兜底默认模型（每类型一个） */
     private static final Map<String, String> FALLBACK_DEFAULTS = Map.of(
             "image", "gpt-image-2",
@@ -49,6 +54,12 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+
+    @Value("${ai.gateway.base-url:${LLM_GATEWAY_BASE_URL:http://localhost:8083}}")
+    private String gatewayBaseUrl;
+
+    /** 模型名 → 上下文窗口 的短 TTL 缓存：modelName → [窗口, 过期时间毫秒] */
+    private final Map<String, long[]> contextWindowCache = new ConcurrentHashMap<>();
 
     @Override
     public List<Map<String, String>> fetchModels(String type) {
@@ -107,6 +118,46 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     @Override
     public String getDefaultTextModel() {
         return getDefaultModel("text");
+    }
+
+    @Override
+    public Integer resolveContextWindow(String modelName) {
+        if (modelName == null || modelName.isBlank()) return null;
+        String key = modelName.trim();
+        long now = System.currentTimeMillis();
+        long[] cached = contextWindowCache.get(key.toLowerCase());
+        if (cached != null && cached[1] > now) {
+            return cached[0] > 0 ? (int) cached[0] : null;
+        }
+        Integer resolved = fetchContextWindowFromGateway(key);
+        // 命中时缓存正数；未命中缓存 0 作负缓存，避免未知模型每轮重复请求
+        contextWindowCache.put(key.toLowerCase(),
+                new long[]{resolved == null ? 0L : resolved, now + CONTEXT_WINDOW_CACHE_TTL_MS});
+        return resolved;
+    }
+
+    /** 直查网关 /v1/models?type=text，匹配模型名取 contextWindow。 */
+    private Integer fetchContextWindowFromGateway(String modelName) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(gatewayBaseUrl + "/v1/models?type=text"))
+                    .header("Authorization", "Bearer " + config.getGatewayApiKey())
+                    .timeout(Duration.ofSeconds(config.getGatewayModelTimeout()))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) return null;
+            JsonNode data = objectMapper.readTree(resp.body()).path("data");
+            if (data.isArray()) {
+                for (JsonNode n : data) {
+                    if (!modelName.equals(n.path("id").asText(""))) continue;
+                    return n.path("contextWindow").isNumber() ? n.path("contextWindow").asInt() : null;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("拉取模型上下文窗口失败: model={}, error={}", modelName, e.getMessage());
+        }
+        return null;
     }
 
     /** Redis 优先 → HTTP 兜底 → 硬编码兜底 */

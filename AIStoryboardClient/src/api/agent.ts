@@ -74,6 +74,10 @@ export interface AgentTurnMetrics {
   outputTokens: number;
   cachedInputTokens: number;
   totalTokens: number;
+  /** 本轮末次模型调用的 input token：当前上下文窗口占用（后端权威值，旧后端可能缺失）。 */
+  contextTokens?: number;
+  /** 本轮所用模型的上下文窗口大小。 */
+  contextWindowTokens?: number;
   durationMs: number;
   modelCalls: number;
   complete: boolean;

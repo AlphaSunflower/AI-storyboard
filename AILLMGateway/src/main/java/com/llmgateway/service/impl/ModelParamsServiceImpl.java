@@ -98,6 +98,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.temperature() != null) entity.setTemperature(req.temperature());
         if (req.maxTokens() != null) entity.setMaxTokens(req.maxTokens());
         if (req.topP() != null) entity.setTopP(req.topP());
+        if (req.contextWindow() != null) entity.setContextWindow(req.contextWindow());
         if (req.nMin() != null) entity.setNMin(req.nMin());
         if (req.nMax() != null) entity.setNMax(req.nMax());
         if (req.nDefault() != null) entity.setNDefault(req.nDefault());

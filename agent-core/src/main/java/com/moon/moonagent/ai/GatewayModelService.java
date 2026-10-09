@@ -31,4 +31,15 @@ public interface GatewayModelService {
 
     /** 默认文本/对话模型（Agent 编排意图识别/标题/主回答/优化/资产判定共用；权威源网关 model_params.is_default） */
     String getDefaultTextModel();
+
+    /**
+     * 模型上下文窗口（token 数）：权威源为网关 {@code model_params.context_window}，
+     * 经 {@code GET {gateway}/v1/models?type=text} 的 {@code data[].contextWindow} 透出。
+     *
+     * <p>网关不可达或该模型未配置时返回 {@code null}，由调用方回退自身默认窗口；实现应做短 TTL 缓存，
+     * 避免每轮对话都触发一次模型列表请求。
+     */
+    default Integer resolveContextWindow(String modelName) {
+        return null;
+    }
 }

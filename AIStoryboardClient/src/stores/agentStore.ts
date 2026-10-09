@@ -223,6 +223,8 @@ type GenerationSnapshot = {
   usageDraft?: AgentTurnMetrics;
   toolDrafts?: Record<string, { name: string; text: string; input: string; status: string }>;
   assistantMessageMetadata?: AgentMessageMetadata;
+  /** 本轮模型上下文窗口（turn_started 提前下发，不等 usage 事件）。 */
+  contextWindowTokens?: number;
   /** message_end 已完成正文回复；异步视频任务可随后重新置回 false */
   finished?: boolean;
 };
@@ -372,6 +374,10 @@ function finishAssistantReply(conversationId: string, assistantId: string) {
       generating,
       streaming: generationInProgress(view),
       workflowHint: generationHint(view),
+      // 没在看这个会话时完成回复 → 侧边栏标记「新」，点进会话再清
+      ...(state.activeConversationId !== conversationId
+        ? { replyUnread: { ...state.replyUnread, [conversationId]: true } }
+        : {}),
       ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
     };
   });
@@ -533,6 +539,8 @@ interface AgentState {
   tasks: Record<string, AgentTaskView>;
   taskNotices: Record<string, AgentTaskNotice[]>;
   taskUnread: Record<string, number>;
+  /** 非当前查看的会话完成一轮回复后置位；点进该会话即清空（侧边栏「新」标记）。 */
+  replyUnread: Record<string, boolean>;
   taskDrawerId: string | null;
   taskFocusId: string | null;
   taskStreamConnected: boolean;
@@ -1251,6 +1259,9 @@ function mergeUsage(
   const outputTokens = asNumber(usage.outputTokens ?? usage.output_tokens);
   const cachedInputTokens = asNumber(usage.cachedTokens ?? usage.cached_input_tokens);
   const totalTokens = asNumber(usage.totalTokens ?? usage.total_tokens, inputTokens + outputTokens);
+  // 上下文占用由后端权威上报：末次调用 input（取最大，不累加）；窗口取最新值。
+  const contextTokens = asNumber(usage.contextTokens ?? usage.context_tokens);
+  const contextWindowTokens = asNumber(usage.contextWindowTokens ?? usage.context_window_tokens);
   if (!inputTokens && !outputTokens && !cachedInputTokens && !totalTokens) return null;
   let next: AgentTurnMetrics | null = null;
   useAgentStore.setState((state) => {
@@ -1261,6 +1272,8 @@ function mergeUsage(
       outputTokens: (previous?.outputTokens ?? 0) + outputTokens,
       cachedInputTokens: (previous?.cachedInputTokens ?? 0) + cachedInputTokens,
       totalTokens: (previous?.totalTokens ?? 0) + totalTokens,
+      contextTokens: Math.max(previous?.contextTokens ?? 0, contextTokens),
+      contextWindowTokens: contextWindowTokens || previous?.contextWindowTokens,
       durationMs: previous?.durationMs ?? asNumber(data.durationMs),
       modelCalls: (previous?.modelCalls ?? 0) + 1,
       complete: false,
@@ -1481,6 +1494,7 @@ function applyOneEnvelope(
   }
   if (envelope.type === 'turn_started') {
     effects.started = true;
+    const startedContextWindow = asNumber(payload.contextWindowTokens ?? payload.context_window_tokens);
     useAgentStore.setState((state) => {
       const generating = {
         ...state.generating,
@@ -1488,6 +1502,7 @@ function applyOneEnvelope(
           ...(state.generating[context.conversationId] ?? { hint: '' }),
           turnId: envelope.turnId,
           hint: 'AgentScope 正在处理',
+          ...(startedContextWindow > 0 ? { contextWindowTokens: startedContextWindow } : {}),
         },
       };
       return {
@@ -2226,6 +2241,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         confirmResult: null, pendingPicUrls: [], refImageUrls: [], pendingAttachments: [],
         pickedReferenceVideos: [], pickedReferenceAudios: [], pickedAssetIds: [],
         taskUnread: { ...s.taskUnread, [id]: 0 },
+        replyUnread: { ...s.replyUnread, [id]: false },
         taskFocusId: null,
       };
     });
@@ -2338,6 +2354,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   tasks: {},
   taskNotices: {},
   taskUnread: {},
+  replyUnread: {},
   taskDrawerId: null,
   taskFocusId: null,
   taskStreamConnected: false,

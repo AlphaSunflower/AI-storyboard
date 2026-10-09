@@ -755,7 +755,8 @@ function refreshOllamaBlock() {
 const paramsGroups = {
   text: sliderField('p-temperature', 'temperature', '0', '2', '0.1', '0.7')
       + sliderField('p-maxtokens', 'max_tokens', '100', '8192', '100', '1024')
-      + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9'),
+      + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9')
+      + '<label>上下文窗口(token) <input class="input" id="p-contextwindow" type="number" placeholder="如 1000000；空=未配置"></label>',
   image: sliderField('p-nmin', '数量min', '1', '10', '1', '1')
        + sliderField('p-nmax', '数量max', '1', '10', '1', '4')
        + sliderField('p-ndefault', '数量默认', '1', '10', '1', '1')
@@ -935,6 +936,7 @@ async function loadModelParamsForEdit(modelName, type) {
     set('p-temperature', mp.temperature);
     set('p-maxtokens', mp.maxTokens);
     set('p-topp', mp.topP);
+    set('p-contextwindow', mp.contextWindow);
     set('p-nmin', mp.nMin);
     set('p-nmax', mp.nMax);
     set('p-ndefault', mp.nDefault);
@@ -1059,6 +1061,7 @@ async function saveModelParams(modelName, type) {
     req.temperature = val('p-temperature');
     req.maxTokens = num('p-maxtokens');
     req.topP = val('p-topp');
+    req.contextWindow = num('p-contextwindow');
     // 本地/Ollama 扩展参数：仅「本地模型」开关勾选时落库；未勾选置空串清除历史值
     const localEl = $('#p-local');
     if (localEl && localEl.checked) {

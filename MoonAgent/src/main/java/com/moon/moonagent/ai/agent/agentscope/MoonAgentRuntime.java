@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
@@ -118,6 +119,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
+    private final AgentContextWindowResolver contextWindowResolver;
     private final AgentScopeAssetGroupService assetGroups;
     private final ExternalActionLedgerService externalActions;
     private final AgentScopeAsyncTaskService asyncTasks;
@@ -260,6 +262,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     public boolean enabled() {
         return properties.isEnabled() && agent != null;
+    }
+
+    /** 本轮主模型名，供上下文窗口解析使用。 */
+    public String primaryModelName() {
+        return modelProvider.primary().getModelName();
     }
 
     /**
@@ -428,7 +435,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         if (!enabled()) return null;
         OrchestrationRequest request = new OrchestrationRequest(
                 conversation, "", List.of(), null);
-        AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+        AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                request, contextWindowResolver.resolve(modelProvider.primary().getModelName()));
         request.setTrace(trace);
         return stream(conversation, request, trace, List.of(), null);
     }

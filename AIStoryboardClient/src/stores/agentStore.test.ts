@@ -496,6 +496,70 @@ describe('agentStore message metrics', () => {
     expect(useAgentStore.getState().messages.at(-1)?.metadata?.metrics).toEqual(metrics);
   });
 
+  it('takes backend context occupancy from MODEL_CALL_END without summing it', () => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: { 'conversation-1': { hint: '', assistantId: 'assistant-1' } },
+      streamError: null,
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', {
+        eventType: 'MODEL_CALL_END',
+        data: {
+          usage: {
+            inputTokens: 900,
+            outputTokens: 100,
+            cachedTokens: 500,
+            contextTokens: 900,
+            contextWindowTokens: 128000,
+          },
+        },
+      }),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'MODEL_CALL_END',
+        data: {
+          usage: { inputTokens: 200, outputTokens: 50, cachedTokens: 200, contextTokens: 200 },
+        },
+      }),
+      context,
+    );
+
+    const draft = useAgentStore.getState().generating['conversation-1']?.usageDraft;
+    // 计费聚合累加（900 + 200），上下文占用取最大（max(900, 200)），窗口沿用以保证不丢失
+    expect(draft?.inputTokens).toBe(1100);
+    expect(draft?.cachedInputTokens).toBe(700);
+    expect(draft?.contextTokens).toBe(900);
+    expect(draft?.contextWindowTokens).toBe(128000);
+  });
+
+  it('records the model context window from turn_started before any usage event', () => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streamError: null,
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(
+        1,
+        'turn_started',
+        { conversationId: 'conversation-1', contextWindowTokens: 1000000 },
+        'turn-start-window',
+      ),
+      context,
+    );
+
+    expect(useAgentStore.getState().generating['conversation-1']?.contextWindowTokens).toBe(1000000);
+  });
+
   it('keeps attachment metadata on the optimistic user message and send request', async () => {
     const body = sseBody([
       sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),

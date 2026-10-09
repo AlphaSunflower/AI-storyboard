@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentApi, type AgentConversation } from '../../api/agent';
 import { libraryApi, type LibraryAsset, type LibraryAssetDetail } from '../../api/library';
 import { useAgentStore } from '../../stores/agentStore';
+import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
+import { useProjectStore } from '../../stores/projectStore';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   serializeDragPayload,
@@ -195,6 +197,40 @@ describe('ChatComposer project library drops', () => {
 
     await waitFor(() => expect(attach).toHaveBeenCalledWith('conversation-1', 'g2'));
   });
+  it('falls back to accumulated input tokens when the backend omits context fields', () => {
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '完成',
+        createdAt: new Date().toISOString(),
+        metadata: {
+          metrics: {
+            inputTokens: 64_000,
+            outputTokens: 1_000,
+            cachedInputTokens: 0,
+            totalTokens: 65_000,
+            durationMs: 100,
+            modelCalls: 1,
+            complete: true,
+          },
+        },
+      }] as never,
+      generating: {},
+    });
+    render(<ChatComposer />);
+    // 128000 窗口下 64000 → 50%
+    expect(screen.getByRole('meter').textContent).toContain('50%');
+  });
+
+  it('hides the context ring until there is real usage data', () => {
+    useAgentStore.setState({ messages: [], generating: {} });
+    render(<ChatComposer />);
+    expect(screen.queryByRole('meter')).toBeNull();
+    expect(document.querySelector('.chat-context-tip')).toBeNull();
+  });
+
   it('keeps legacy conversations read-only', () => {
     useAgentStore.setState({ conversations: [conversation('LEGACY')] });
 
@@ -275,3 +311,99 @@ function mockChatLibrary() {
     data: { code: 0, message: 'ok', data: chatDetail },
   } as never);
 }
+
+describe('ChatComposer annotation context', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      messages: [],
+      streaming: false,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      canvasBinding: null,
+      canvasExitPending: false,
+    });
+    useProjectStore.setState({ currentProject: { id: 'p1', name: '测试项目' } as never });
+    useChatAnnotationStore.getState().reset();
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useChatAnnotationStore.getState().reset();
+    useAgentStore.getState().newConversation();
+  });
+
+  it('sends pending annotations as context and clears them afterwards', () => {
+    const sendSpy = vi.spyOn(useAgentStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+    useChatAnnotationStore.setState({
+      annotations: [{
+        id: 'a1', conversationId: 'conversation-1', messageId: 'm1',
+        quote: '被引用的原文', comment: '看看这里', createdAt: 1,
+      }],
+    });
+    render(<ChatComposer />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我的问题' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const sent = sendSpy.mock.calls[0][0] as string;
+    expect(sent).toContain('【引用注释】');
+    expect(sent).toContain('被引用的原文');
+    expect(sent).toContain('看看这里');
+    expect(sent).toContain('我的问题');
+    expect(useChatAnnotationStore.getState().annotations).toHaveLength(0);
+  });
+
+  it('keeps plain sends unchanged when there are no annotations', () => {
+    const sendSpy = vi.spyOn(useAgentStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+    render(<ChatComposer />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '普通消息' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(sendSpy.mock.calls[0][0]).toBe('普通消息');
+  });
+
+  it('shows one annotation chip per message above the input and manages the list', () => {
+    useChatAnnotationStore.setState({
+      annotations: [
+        { id: 'a1', conversationId: 'conversation-1', messageId: 'm1', quote: '被引用的原文', comment: '评论一', createdAt: 1 },
+        { id: 'a2', conversationId: 'conversation-1', messageId: 'm2', quote: '第二段原文', comment: '', createdAt: 2 },
+      ],
+    });
+    render(<ChatComposer />);
+
+    const chips = screen.getAllByRole('button', { name: '1 条注释' });
+    expect(chips).toHaveLength(2);
+
+    fireEvent.mouseEnter(chips[0].parentElement!);
+    const list = screen.getByRole('dialog', { name: '注释列表' });
+    expect(list.textContent).toContain('被引用的原文');
+    expect(list.textContent).toContain('评论一');
+
+    fireEvent.click(screen.getByRole('button', { name: '删除注释 1' }));
+    expect(useChatAnnotationStore.getState().annotations.map((annotation) => annotation.id)).toEqual(['a2']);
+  });
+
+  it('clears one message annotations from the chip close button', () => {
+    useChatAnnotationStore.setState({
+      annotations: [{
+        id: 'a1', conversationId: 'conversation-1', messageId: 'm1',
+        quote: '被引用的原文', comment: '', createdAt: 1,
+      }],
+    });
+    render(<ChatComposer />);
+
+    const chip = screen.getByRole('button', { name: '1 条注释' }).parentElement!;
+    fireEvent.mouseEnter(chip);
+    fireEvent.click(screen.getByRole('button', { name: '清空该消息全部注释' }));
+
+    expect(useChatAnnotationStore.getState().annotations).toHaveLength(0);
+  });
+});

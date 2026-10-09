@@ -35,6 +35,13 @@ public class AgentScopeEventMapper {
     }
 
     public Map<String, Object> payload(AgentEvent event) {
+        return payload(event, 0L);
+    }
+
+    /**
+     * @param contextWindowTokens 本轮模型的上下文窗口大小；&gt;0 时随 usage 事件一起下发，供前端实时估算占用。
+     */
+    public Map<String, Object> payload(AgentEvent event, long contextWindowTokens) {
         if (event == null) return Map.of();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("eventId", event.getId());
@@ -85,10 +92,15 @@ public class AgentScopeEventMapper {
         } else if (event instanceof ModelCallEndEvent value) {
             payload.put("replyId", value.getReplyId());
             if (value.getUsage() != null) {
-                payload.put("usage", Map.of(
-                        "inputTokens", value.getUsage().getInputTokens(),
-                        "outputTokens", value.getUsage().getOutputTokens(),
-                        "cachedTokens", value.getUsage().getCachedTokens()));
+                Map<String, Object> usage = new LinkedHashMap<>();
+                usage.put("inputTokens", value.getUsage().getInputTokens());
+                usage.put("outputTokens", value.getUsage().getOutputTokens());
+                usage.put("cachedTokens", value.getUsage().getCachedTokens());
+                usage.put("contextTokens", value.getUsage().getInputTokens());
+                if (contextWindowTokens > 0) {
+                    usage.put("contextWindowTokens", contextWindowTokens);
+                }
+                payload.put("usage", usage);
             }
         } else if (event instanceof RequireUserConfirmEvent value) {
             payload.put("replyId", value.getReplyId());

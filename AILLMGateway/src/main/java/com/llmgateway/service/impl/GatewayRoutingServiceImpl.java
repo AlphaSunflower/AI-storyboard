@@ -279,6 +279,9 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             m.put("object", "model");
             m.put("type", t);
             m.put("is_default", mp != null && Boolean.TRUE.equals(mp.getIsDefault()));
+            if (mp != null && mp.getContextWindow() != null) {
+                m.put("contextWindow", mp.getContextWindow());
+            }
             m.put("params", buildParams(mp));
             data.add(m);
         });

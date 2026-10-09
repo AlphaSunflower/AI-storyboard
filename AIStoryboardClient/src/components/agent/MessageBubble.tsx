@@ -1,17 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronRight, Download, FileAudio, FileText, FileVideo,
-  ImagePlus, Images, Library, LoaderCircle, Pencil, Play,
+  Check, ImagePlus, Images, Library, LoaderCircle, MessageSquarePlus, Pencil, Play, Trash2,
 } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentAttachment, AgentMessageMetadata } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
+import {
+  selectAnnotationsForMessage,
+  useChatAnnotationStore,
+  type ChatAnnotation,
+} from '../../stores/chatAnnotationStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { findQuoteRange, selectionOccurrence, stripAnnotationContext } from '../../lib/chatAnnotation';
+import { AnnotationListPopover } from './AnnotationChip';
+import {
+  ANNOTATION_POPOVER_WIDTH, popoverPosition, toAnchorRect, type AnchorRect,
+} from './annotationPopover';
 import { ReasoningPanel } from './ReasoningPanel';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
@@ -762,6 +773,208 @@ function useStreamingReveal(content: string, streaming: boolean): string {
   return streaming ? displayed : content;
 }
 
+/** CSS Custom Highlight API 支持探测（不支持时只保留消息级胶囊 + 列表）。 */
+function getHighlightSupport() {
+  if (typeof window === 'undefined' || typeof CSS === 'undefined') return null;
+  const registry = (CSS as unknown as {
+    highlights?: { set(name: string, value: unknown): void; delete(name: string): void };
+  }).highlights;
+  const HighlightCtor = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+  if (!registry || typeof HighlightCtor !== 'function') return null;
+  return { registry, HighlightCtor };
+}
+
+/** 选中文字后先浮出操作条，点「引用」才打开评论框（避免一选中就直接弹评论）。 */
+function SelectionActionToolbar({
+  anchor,
+  onQuote,
+  onDismiss,
+}: {
+  anchor: AnchorRect;
+  onQuote: () => void;
+  onDismiss: () => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (cardRef.current?.contains(event.target as Node)) return;
+      onDismiss();
+    };
+    const onScroll = () => onDismiss();
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [onDismiss]);
+
+  return createPortal(
+    <div
+      ref={cardRef}
+      data-annotation-ui
+      role="toolbar"
+      aria-label="选中文字操作"
+      style={{
+        position: 'fixed', ...popoverPosition(anchor, 180), zIndex: 2200,
+        display: 'inline-flex', alignItems: 'center', padding: 4,
+        background: 'white', borderRadius: 12,
+        border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 8px 24px rgba(15,17,21,0.16)',
+      }}
+    >
+      <button
+        type="button"
+        aria-label="引用这段内容"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onQuote}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          padding: '6px 10px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+          color: 'rgb(15, 17, 21)', whiteSpace: 'nowrap',
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65, 118, 230, 0.08)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+      >
+        <MessageSquarePlus size={14} strokeWidth={1.9} />
+        引用
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * 注释编辑器：新建（输入 + ✓）与编辑（输入 + 删除 / 取消 / 保存）复用同一张卡。
+ * 放在 body 的 portal 里，避免被消息气泡的 transform / overflow 裁剪。
+ */
+function AnnotationEditor({
+  mode,
+  initialComment,
+  anchor,
+  onSave,
+  onDelete,
+  onCancel,
+}: {
+  mode: 'create' | 'edit';
+  initialComment: string;
+  anchor: AnchorRect;
+  onSave: (comment: string) => void;
+  onDelete?: () => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialComment);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(initialComment.length, initialComment.length);
+  }, [initialComment]);
+
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (cardRef.current?.contains(event.target as Node)) return;
+      onCancel();
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onCancel(); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onCancel]);
+
+  return createPortal(
+    <div
+      ref={cardRef}
+      data-annotation-ui
+      data-annotation-editor
+      role="dialog"
+      aria-label={mode === 'create' ? '添加注释' : '编辑注释'}
+      style={{
+        position: 'fixed', ...popoverPosition(anchor), width: ANNOTATION_POPOVER_WIDTH, zIndex: 2300,
+        background: 'white', borderRadius: 16, padding: 10,
+        border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 12px 32px rgba(15,17,21,0.16)',
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+        <textarea
+          ref={inputRef}
+          aria-label="注释内容"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              onSave(value);
+            }
+          }}
+          rows={1}
+          placeholder="添加可选评论..."
+          style={{
+            flex: 1, minWidth: 0, resize: 'none', border: 'none', outline: 'none',
+            background: 'rgb(246,247,249)', borderRadius: 12, padding: '9px 12px',
+            fontSize: 14, lineHeight: 1.5, color: 'rgb(15,17,21)', fontFamily: 'inherit',
+          }}
+        />
+        {mode === 'create' && (
+          <button
+            type="button"
+            aria-label="保存注释"
+            onClick={() => onSave(value)}
+            style={{
+              width: 36, height: 36, flexShrink: 0, borderRadius: 12, border: 'none',
+              background: 'rgb(15,17,21)', color: 'white', cursor: 'pointer',
+              display: 'grid', placeItems: 'center',
+            }}
+          >
+            <Check size={16} strokeWidth={2.4} />
+          </button>
+        )}
+      </div>
+      {mode === 'edit' && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button
+            type="button"
+            aria-label="删除注释"
+            onClick={onDelete}
+            style={{
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              color: 'rgb(122,127,136)', padding: 4, display: 'grid', placeItems: 'center',
+            }}
+          >
+            <Trash2 size={16} strokeWidth={1.9} />
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={onCancel}
+              style={{
+                borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)', background: 'white',
+                color: 'rgb(60,64,72)', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
+              }}
+            >取消</button>
+            <button
+              type="button"
+              onClick={() => onSave(value)}
+              style={{
+                borderRadius: 10, border: 'none', background: 'rgb(15,17,21)',
+                color: 'white', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
+              }}
+            >保存</button>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
 export function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
   messageId?: string;
   conversationId?: string;
@@ -778,6 +991,11 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const archivedConversation = useAgentStore((state) =>
     state.conversations.find((conversation) => conversation.id === state.activeConversationId)?.status === 'archived',
   );
+  // 归档 / 旧编排会话不允许新增或编辑注释
+  const annotationsLocked = useAgentStore((state) => {
+    const conversation = state.conversations.find((item) => item.id === state.activeConversationId);
+    return conversation?.status === 'archived' || conversation?.orchestrationMode === 'LEGACY';
+  });
   // 图片点击放大预览（灯箱）
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
@@ -802,7 +1020,30 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   });
   const bubbleRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
-  const displayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const rawDisplayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
+  // 用户消息正文里可能带着发送时拼进去的注释上下文块，渲染时剥掉，只显示用户真正输入
+  const displayContent = isUser ? stripAnnotationContext(rawDisplayContent).userText : rawDisplayContent;
+
+  // 消息内注释（选中文字 → 评论），仅 /chat 的 deepseek 变体启用
+  const annotationsVisible = ds && !!messageId;
+  const annotationEditable = annotationsVisible && !editing && !annotationsLocked;
+  const allAnnotations = useChatAnnotationStore((state) => state.annotations);
+  const messageAnnotations = useMemo(
+    () => selectAnnotationsForMessage(allAnnotations, messageId),
+    [allAnnotations, messageId],
+  );
+  const annotationCount = messageAnnotations.length;
+  const highlightName = useMemo(
+    () => `chat-quote-${(messageId ?? 'draft').replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [messageId],
+  );
+  const [draftAnchor, setDraftAnchor] = useState<{ quote: string; occurrence?: number; rect: AnchorRect } | null>(null);
+  const [selectionAction, setSelectionAction] = useState<{ quote: string; occurrence?: number; rect: AnchorRect } | null>(null);
+  const [listAnchor, setListAnchor] = useState<AnchorRect | null>(null);
+  // 每条注释在原文里的高亮位置（视口坐标），供徽标定位与「编辑框贴着原文」使用
+  const [annotationAnchors, setAnnotationAnchors] = useState<Record<string, AnchorRect>>({});
+  const editingId = useChatAnnotationStore((state) => state.editingId);
   const messageMedia = extractMessageMedia(displayContent);
   const legacyAttachment = isUser ? standaloneAttachmentContent(displayContent) : null;
   const userAttachments = isUser
@@ -815,6 +1056,172 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const imageBatch = !isUser && generatedImages.length >= IMAGE_BATCH_THRESHOLD ? generatedImages : null;
   const renderedContent = imageBatch ? stripBatchImageMarkdown(displayContent) : displayContent;
   const importDisabled = !currentProject?.id || messageMedia.length === 0;
+
+  const clearHighlight = useCallback(() => {
+    getHighlightSupport()?.registry.delete(highlightName);
+  }, [highlightName]);
+
+  // 选中气泡内文字 → 先浮出「引用」操作条，不直接弹评论
+  const handleAnnotationSelection = useCallback(() => {
+    if (!annotationEditable || !messageId || !conversationId) return;
+    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+    const root = contentRef.current;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !root) return;
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) return;
+    const quote = selection.toString().replace(/\s+$/, '');
+    if (!quote.trim()) return;
+    const rect = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null;
+    if (!rect || (!rect.width && !rect.height)) return;
+    setSelectionAction({ quote, occurrence: selectionOccurrence(root, range, quote), rect: toAnchorRect(rect) });
+  }, [annotationEditable, messageId, conversationId]);
+
+  const handleStartAnnotation = useCallback(() => {
+    if (!selectionAction) return;
+    setDraftAnchor(selectionAction);
+    setSelectionAction(null);
+  }, [selectionAction]);
+
+  const handleCreateAnnotation = useCallback((comment: string) => {
+    if (!draftAnchor || !messageId || !conversationId) return;
+    useChatAnnotationStore.getState().addAnnotation({
+      conversationId,
+      messageId,
+      quote: draftAnchor.quote,
+      comment,
+      occurrence: draftAnchor.occurrence,
+    });
+    window.getSelection()?.removeAllRanges();
+    setDraftAnchor(null);
+  }, [draftAnchor, messageId, conversationId]);
+
+  const openAnnotationEditor = useCallback((annotation: ChatAnnotation) => {
+    useChatAnnotationStore.getState().openEditor(annotation.id);
+    setListAnchor(null);
+  }, []);
+
+  // 正在编辑的注释（store 驱动：消息徽标、输入框上的胶囊列表都能触发）
+  const editingAnnotation = useMemo(
+    () => messageAnnotations.find((annotation) => annotation.id === editingId) ?? null,
+    [messageAnnotations, editingId],
+  );
+
+  const handleSaveAnnotationComment = useCallback((comment: string) => {
+    if (!editingAnnotation) return;
+    useChatAnnotationStore.getState().updateComment(editingAnnotation.id, comment);
+    useChatAnnotationStore.getState().closeEditor();
+  }, [editingAnnotation]);
+
+  const handleDeleteEditingAnnotation = useCallback(() => {
+    if (!editingAnnotation) return;
+    useChatAnnotationStore.getState().removeAnnotation(editingAnnotation.id);
+    useChatAnnotationStore.getState().closeEditor();
+  }, [editingAnnotation]);
+
+  const badgeAnchor = useMemo(() => {
+    const first = messageAnnotations[0];
+    return first ? annotationAnchors[first.id] ?? null : null;
+  }, [messageAnnotations, annotationAnchors]);
+
+  // 原文滚出视口时收起徽标，避免它悬在顶部挡到别的消息
+  const badgeVisible = useMemo(() => {
+    if (!badgeAnchor) return false;
+    const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight;
+    return badgeAnchor.top >= 0 && badgeAnchor.top <= viewportHeight;
+  }, [badgeAnchor]);
+
+  // 编辑框贴着被引用原文出现；原文定位不到时退回消息本体
+  const editingAnchor = useMemo(() => {
+    if (!editingAnnotation) return null;
+    const anchored = annotationAnchors[editingAnnotation.id] ?? badgeAnchor;
+    if (anchored) return anchored;
+    const root = contentRef.current;
+    if (!root) return null;
+    const rect = root.getBoundingClientRect();
+    // /chat 同时渲染手机端与桌面端布局，隐藏的那份 rect 全是 0；
+    // 不能拿它当锚点，否则编辑框会跑到窗口左上角。
+    if (!rect.width && !rect.height) return null;
+    return toAnchorRect(rect);
+  }, [editingAnnotation, annotationAnchors, badgeAnchor]);
+
+  const handleAnnotationBadgeClick = useCallback(() => {
+    if (messageAnnotations.length === 1) {
+      openAnnotationEditor(messageAnnotations[0]);
+      return;
+    }
+    if (badgeAnchor) setListAnchor(badgeAnchor);
+  }, [messageAnnotations, badgeAnchor, openAnnotationEditor]);
+
+  // 高亮 + 徽标定位：只读测量，不改 React 管理的 DOM
+  useEffect(() => {
+    if (!annotationsVisible || annotationCount === 0) {
+      setAnnotationAnchors({});
+      clearHighlight();
+      return;
+    }
+    const root = contentRef.current;
+    if (!root) return;
+    let frame = 0;
+    const apply = () => {
+      const support = getHighlightSupport();
+      const ranges: Range[] = [];
+      const nextAnchors: Record<string, AnchorRect> = {};
+      for (const annotation of messageAnnotations) {
+        const range = findQuoteRange(root, annotation.quote, annotation.occurrence ?? 0);
+        if (!range) continue;
+        ranges.push(range);
+        if (typeof range.getBoundingClientRect === 'function') {
+          const rect = range.getBoundingClientRect();
+          if (rect.width || rect.height) nextAnchors[annotation.id] = toAnchorRect(rect);
+        }
+      }
+      if (support && ranges.length > 0) {
+        support.registry.set(highlightName, new support.HighlightCtor(...ranges));
+      }
+      setAnnotationAnchors((previous) => {
+        const previousKeys = Object.keys(previous);
+        const nextKeys = Object.keys(nextAnchors);
+        const unchanged = previousKeys.length === nextKeys.length
+          && nextKeys.every((key) => previous[key]
+            && Math.abs(previous[key].top - nextAnchors[key].top) < 0.5
+            && Math.abs(previous[key].left - nextAnchors[key].left) < 0.5);
+        return unchanged ? previous : nextAnchors;
+      });
+    };
+    const schedule = () => {
+      if (typeof window.requestAnimationFrame !== 'function') { apply(); return; }
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(apply);
+    };
+    schedule();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(schedule);
+      observer.observe(root);
+    }
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      clearHighlight();
+    };
+  }, [annotationsVisible, annotationCount, messageAnnotations, displayContent, highlightName, clearHighlight]);
+
+  // 点击空白处关闭注释列表；点列表本身不关
+  useEffect(() => {
+    if (!listAnchor) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-annotation-list]')) return;
+      setListAnchor(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [listAnchor]);
+
   // HITL 卡片：读取 metadata.hitl（新契约）；旧消息无 metadata 时正常渲染 content
   const hitlMeta = metadata?.hitl;
   const isHitl = !!hitlMeta && !hitlMeta.pending && metadata?.kind !== 'video-plan';
@@ -904,6 +1311,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     setEditing(false);
     try {
       await onEditMessage?.(messageId, next);
+      // 正文改了，原有注释的锚点失效，直接清掉这条消息的注释
+      useChatAnnotationStore.getState().removeForMessage(messageId);
     } catch {
       setEditing(true);
     } finally {
@@ -1008,9 +1417,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} />
       )}
       <div
+        ref={contentRef}
+        onMouseUp={handleAnnotationSelection}
+        onKeyUp={handleAnnotationSelection}
         style={ds
           ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
             {
+              position: 'relative',
               maxWidth: isUser ? 'min(525px, 82%)' : '100%',
               padding: isUser ? '10px 16px' : 0,
               borderRadius: isUser ? 22 : 0,
@@ -1024,6 +1437,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               ...editShell,
             }
           : {
+              position: 'relative',
               maxWidth: '82%',
               padding: '12px 18px',
               borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
@@ -1150,6 +1564,9 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           />
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
+        {annotationsVisible && (
+          <style>{`::highlight(${highlightName}) { background-color: rgba(65, 118, 230, 0.16); }`}</style>
+        )}
       </div>
       {!isUser && metadata?.taskCards?.map((task) => (
         <AgentTaskCard key={task.taskId} taskId={task.taskId} />
@@ -1264,6 +1681,64 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       type={previewType}
       onClose={() => setPreviewUrl(null)}
     />
+    {annotationsVisible && annotationCount > 0 && badgeAnchor && badgeVisible && createPortal(
+      <button
+        type="button"
+        data-annotation-ui
+        aria-label={`${annotationCount} 条注释徽标`}
+        title="查看 / 编辑注释"
+        onClick={handleAnnotationBadgeClick}
+        style={{
+          position: 'fixed',
+          top: Math.max(8, badgeAnchor.top - 10),
+          left: badgeAnchor.right - 8,
+          minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999,
+          border: '2px solid white', background: 'rgb(65, 118, 230)', color: 'white',
+          fontSize: 11, fontWeight: 700, lineHeight: 1, cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(65, 118, 230, 0.45)', zIndex: 2100,
+        }}
+      >
+        {annotationCount}
+      </button>,
+      document.body,
+    )}
+    {annotationsVisible && listAnchor && messageAnnotations.length > 0 && (
+      <AnnotationListPopover
+        annotations={messageAnnotations}
+        anchor={listAnchor}
+        onEdit={openAnnotationEditor}
+        onDelete={(id) => useChatAnnotationStore.getState().removeAnnotation(id)}
+      />
+    )}
+    {annotationEditable && selectionAction && (
+      <SelectionActionToolbar
+        anchor={selectionAction.rect}
+        onQuote={handleStartAnnotation}
+        onDismiss={() => setSelectionAction(null)}
+      />
+    )}
+    {annotationEditable && draftAnchor && (
+      <AnnotationEditor
+        mode="create"
+        initialComment=""
+        anchor={draftAnchor.rect}
+        onSave={handleCreateAnnotation}
+        onCancel={() => {
+          window.getSelection()?.removeAllRanges();
+          setDraftAnchor(null);
+        }}
+      />
+    )}
+    {annotationEditable && editingAnnotation && editingAnchor && (
+      <AnnotationEditor
+        mode="edit"
+        initialComment={editingAnnotation.comment}
+        anchor={editingAnchor}
+        onSave={handleSaveAnnotationComment}
+        onDelete={handleDeleteEditingAnnotation}
+        onCancel={() => useChatAnnotationStore.getState().closeEditor()}
+      />
+    )}
     </>
   );
 }
