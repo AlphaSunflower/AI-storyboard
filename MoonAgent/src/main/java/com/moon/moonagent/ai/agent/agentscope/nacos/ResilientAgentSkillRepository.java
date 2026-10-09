@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -33,6 +35,7 @@ public class ResilientAgentSkillRepository implements AgentSkillRepository {
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private volatile Snapshot selected;
+    private final AtomicReference<CompletableFuture<Snapshot>> selecting = new AtomicReference<>();
 
     public ResilientAgentSkillRepository(
             List<String> expectedSkillNames,
@@ -159,11 +162,21 @@ public class ResilientAgentSkillRepository implements AgentSkillRepository {
         if (current != null) {
             return current;
         }
-        synchronized (this) {
-            if (selected == null) {
-                selected = selectSnapshot();
-            }
-            return selected;
+        CompletableFuture<Snapshot> created = new CompletableFuture<>();
+        CompletableFuture<Snapshot> existing = selecting.compareAndExchange(null, created);
+        if (existing != null) {
+            return existing.join();
+        }
+        try {
+            Snapshot resolved = selectSnapshot();
+            selected = resolved;
+            created.complete(resolved);
+            return resolved;
+        } catch (RuntimeException error) {
+            created.completeExceptionally(error);
+            throw error;
+        } finally {
+            selecting.compareAndSet(created, null);
         }
     }
 

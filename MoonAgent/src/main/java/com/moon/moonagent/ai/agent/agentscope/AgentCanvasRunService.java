@@ -12,8 +12,13 @@ import com.moon.moonagent.mapper.AgentCanvasRunOperationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
 import com.moon.moonagent.service.MorrowCanvasService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -42,8 +47,10 @@ public class AgentCanvasRunService {
     private final AgentCanvasRunOperationMapper operationMapper;
     private final MorrowCanvasService canvasService;
     private final AgentMessageMapper messageMapper;
+    @Autowired(required = false)
+    private transient PlatformTransactionManager transactionManager;
+    private volatile TransactionTemplate transactionTemplate;
 
-    @Transactional
     public CanvasRunView create(AgentConversation conversation,
                                 String turnId,
                                 String toolCallId,
@@ -53,7 +60,6 @@ public class AgentCanvasRunService {
         return createInternal(conversation, turnId, toolCallId, null, title, intent, plan);
     }
 
-    @Transactional
     public CanvasRunView createExisting(AgentConversation conversation,
                                         String turnId,
                                         String toolCallId,
@@ -85,6 +91,17 @@ public class AgentCanvasRunService {
                 ? canvasService.create(conversation.getUserId(), conversation.getProjectId(), normalizedTitle)
                 : canvasService.get(conversation.getUserId(), existingCanvasId);
 
+        return inTransaction(() ->
+                persistCreated(conversation, turnId, toolCallId, canvas, intent, normalizedTitle, plan));
+    }
+
+    private CanvasRunView persistCreated(AgentConversation conversation,
+                                         String turnId,
+                                         String toolCallId,
+                                         MorrowCanvas canvas,
+                                         String intent,
+                                         String normalizedTitle,
+                                         List<Map<String, Object>> plan) {
         AgentCanvasRunEntity entity = new AgentCanvasRunEntity();
         entity.setConversationId(conversation.getId());
         entity.setUserId(conversation.getUserId());
@@ -124,6 +141,24 @@ public class AgentCanvasRunService {
         runMapper.updateById(entity);
 
         return view(entity);
+    }
+
+    private TransactionTemplate transactionTemplate() {
+        if (transactionTemplate == null) {
+            synchronized (this) {
+                if (transactionTemplate == null) {
+                    TransactionTemplate template = new TransactionTemplate(transactionManager);
+                    template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    transactionTemplate = template;
+                }
+            }
+        }
+        return transactionTemplate;
+    }
+
+    private <T> T inTransaction(java.util.function.Supplier<T> action) {
+        if (transactionManager == null) return action.get();
+        return transactionTemplate().execute(tx -> action.get());
     }
 
     public CanvasRunView find(String turnId, String toolCallId) {
@@ -187,12 +222,33 @@ public class AgentCanvasRunService {
     }
 
     @Transactional
+    public Map<String, Object> recordGraphResult(String runId,
+                                                 String operationKey,
+                                                 Map<String, Object> result) {
+        Map<String, Object> existing = findOperationResult(runId, operationKey);
+        if (existing != null) return existing;
+        updateFromGraphResult(runId, result);
+        try {
+            return rememberOperationInternal(runId, operationKey, result);
+        } catch (DuplicateKeyException duplicate) {
+            Map<String, Object> winner = findOperationResult(runId, operationKey);
+            return winner == null ? (result == null ? Map.of() : result) : winner;
+        }
+    }
+
+    @Transactional
     public Map<String, Object> rememberOperation(String runId,
                                                  String operationKey,
                                                  Map<String, Object> result) {
         Map<String, Object> existing = findOperationResult(runId, operationKey);
         if (existing != null) return existing;
 
+        return rememberOperationInternal(runId, operationKey, result);
+    }
+
+    private Map<String, Object> rememberOperationInternal(String runId,
+                                                          String operationKey,
+                                                          Map<String, Object> result) {
         AgentCanvasRunOperationEntity operation = new AgentCanvasRunOperationEntity();
         operation.setRunId(runId);
         operation.setOperationKey(operationKey);

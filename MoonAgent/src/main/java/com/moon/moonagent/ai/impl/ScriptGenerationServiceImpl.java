@@ -239,6 +239,7 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
                 projectId, scriptText, creationType, customTypeDesc, aspectRatio, model,
                 understandingModel, referenceImages);
         // 批量写库（原 AIController.generateScript 的循环落库逻辑下沉至此）
+        List<Scene> batch = new ArrayList<>(scenes.size());
         for (Map<String, Object> s : scenes) {
             Scene scene = new Scene();
             scene.setProjectId(projectId);
@@ -250,7 +251,10 @@ public class ScriptGenerationServiceImpl implements ScriptGenerationService {
             scene.setCameraMovement((String) s.get("cameraMovement"));
             scene.setShotType((String) s.get("shotType"));
             scene.setSoundDesign((String) s.get("soundDesign"));
-            storyboardClient.insertScene(scene);
+            batch.add(scene);
+        }
+        if (!batch.isEmpty()) {
+            storyboardClient.batchInsertScenes(batch);
         }
         return Map.of("projectId", projectId, "sceneCount", scenes.size());
     }

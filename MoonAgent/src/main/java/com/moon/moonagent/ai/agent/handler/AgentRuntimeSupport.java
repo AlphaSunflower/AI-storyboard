@@ -24,6 +24,7 @@ import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
 import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.config.PromptResolver;
+import com.moon.moonagent.util.PollingBackoff;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,15 +89,16 @@ public class AgentRuntimeSupport {
 
     /** 视频异步后台轮询专用 executor（虚拟线程，不占池） */
     private final ExecutorService agentExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final PollingBackoff pollBackoff = PollingBackoff.video();
     private final Set<String> activeVideoPolls = ConcurrentHashMap.newKeySet();
 
     /** 主计划 LLM（懒加载，复用网关默认对话模型，超时由 ai.agent.plan-timeout-seconds 控制） */
     private volatile ChatClient planClient;
-    /** 参数推荐 LLM（可降级步骤，超时由 ai.agent.recommend-timeout-seconds 控制） */
-    private volatile ChatClient recommendClient;
     /** 轻量意图判定 LLM（超时由 ai.agent.intent-timeout-seconds 控制） */
     private volatile ChatClient intentClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper STATIC_JSON = new ObjectMapper();
+    private static final Pattern MESSAGE_FIELD = Pattern.compile("\"message\"\\s*:\\s*\"");
 
     /**
      * 澄清上限判定：本次 type=0 记 +1；未达上限返回 false（调用方正常追问并结束本轮）；
@@ -262,22 +264,6 @@ public class AgentRuntimeSupport {
         }
     }
 
-    /** aisplit 分镜参数推荐结果：图片/视频两组模型列表 + LLM 推荐参数（平铺前缀键）+ 推荐理由 */
-    public record SceneParamsRecommendation(List<Map<String, Object>> imageModels,
-                                            List<Map<String, Object>> videoModels,
-                                            Map<String, String> recommended,
-                                            Map<String, String> reasons) {
-        public static SceneParamsRecommendation empty() {
-            return new SceneParamsRecommendation(List.of(), List.of(), Map.of(), Map.of());
-        }
-    }
-
-    /** LLM 推荐参数输出（嵌套结构，BeanOutputConverter 直接解析） */
-    public record RecommendedParams(ImageRec image, VideoRec video, Map<String, String> reasons) {
-        public record ImageRec(String model, String size, String quality) {}
-        public record VideoRec(String model, String duration, String resolution, String aspectRatio) {}
-    }
-
     // ===== LLM 调用（结构化输出：纯解析，不发 response_format） =====
 
     /** 剧本优化：手动澄清循环的单步调用（message 字段流式增量转发） */
@@ -440,7 +426,7 @@ public class AgentRuntimeSupport {
     public String extractMessageField(String json) {
         if (json == null) return null;
         // 兼容 "message":"..." 与 "message": "..."（LLM 输出常带空格）
-        Matcher m = Pattern.compile("\"message\"\\s*:\\s*\"").matcher(json);
+        Matcher m = MESSAGE_FIELD.matcher(json);
         if (!m.find()) return null;
         int start = m.end();
         StringBuilder sb = new StringBuilder();
@@ -753,18 +739,6 @@ public class AgentRuntimeSupport {
         return planClient;
     }
 
-    /** 懒加载推荐客户端：超时后直接使用模型默认参数，不重试。 */
-    private ChatClient recommendClient() {
-        if (recommendClient == null) {
-            synchronized (this) {
-                if (recommendClient == null) {
-                    recommendClient = buildClient(agentConfig.getRecommendTimeoutSeconds());
-                }
-            }
-        }
-        return recommendClient;
-    }
-
     /** 懒加载轻量意图客户端：超时按不取消处理。 */
     private ChatClient intentClient() {
         if (intentClient == null) {
@@ -789,10 +763,6 @@ public class AgentRuntimeSupport {
         return requestOptions(agentConfig.getPlanTimeoutSeconds());
     }
 
-    private OpenAiChatOptions.Builder recommendOptions() {
-        return requestOptions(agentConfig.getRecommendTimeoutSeconds());
-    }
-
     private OpenAiChatOptions.Builder intentOptions() {
         return requestOptions(agentConfig.getIntentTimeoutSeconds());
     }
@@ -807,18 +777,6 @@ public class AgentRuntimeSupport {
         return requestOptions(gatewayModelService.getDefaultTextModel(), timeoutSeconds);
     }
 
-    // ===== 模型能力选项（网关 fetchModels 透传，卡片/LLM 选参共用） =====
-
-    /** 网关模型列表（卡片下拉用）——委托 ModelOptionsAssembler */
-    public List<Map<String, Object>> buildModels(String type) {
-        return modelOptionsAssembler.buildModels(type);
-    }
-
-    /** LLM 选参用的人类可读选项文本——委托 ModelOptionsAssembler */
-    public String buildModelOptionsText(String type) {
-        return modelOptionsAssembler.buildModelOptionsText(type);
-    }
-
     // ===== HITL 卡按钮 =====
 
     /** 直接使用状态感知的 manifest，避免为按钮文案额外调用一次 LLM。 */
@@ -828,54 +786,6 @@ public class AgentRuntimeSupport {
     }
 
     // ===== HITL checkpoint =====
-
-    /**
-     * aisplit 分镜参数推荐（整套统一一套：图片 + 视频各一套）：LLM 从网关模型选项中选择，
-     * 返回两组模型列表 + 平铺推荐参数（image/video 前缀键）+ 推荐理由。
-     * 推荐失败：模型列表照常下发（选择器用模型默认值），无推荐理由，分镜流程不受影响。
-     */
-    public SceneParamsRecommendation recommendSceneParams(String script, OrchestrationRequest req) {
-        List<Map<String, Object>> imageModels = buildModels("image");
-        List<Map<String, Object>> videoModels = buildModels("video");
-        if (imageModels.isEmpty() && videoModels.isEmpty()) return SceneParamsRecommendation.empty();
-        try {
-            String imageOpts = buildModelOptionsText("image");
-            String videoOpts = buildModelOptionsText("video");
-            ChatResponse response = retryTransient(() -> {
-                beginModelCall(req);
-                return recommendClient().prompt().options(recommendOptions())
-                        .system(prompt(req, "scene-params-recommend", "orchestrator/scene-params-recommend", null))
-                        .user("剧本：\n" + script
-                                + "\n\n可选生图模型与参数：\n" + (imageOpts.isBlank() ? "（无）" : imageOpts)
-                                + "\n可选视频模型与参数：\n" + (videoOpts.isBlank() ? "（无）" : videoOpts))
-                        .call()
-                        .chatResponse();
-            });
-            recordUsage(req, response);
-            String raw = response != null && response.getResult() != null
-                    && response.getResult().getOutput() != null
-                    ? response.getResult().getOutput().getText() : null;
-            RecommendedParams r = new BeanOutputConverter<>(RecommendedParams.class).convert(raw);
-            if (r == null) return new SceneParamsRecommendation(imageModels, videoModels, Map.of(), Map.of());
-            Map<String, String> recommended = new java.util.LinkedHashMap<>();
-            Map<String, String> reasons = new java.util.LinkedHashMap<>(r.reasons() == null ? Map.of() : r.reasons());
-            if (r.image() != null) {
-                if (r.image().model() != null) recommended.put("imageModel", r.image().model());
-                if (r.image().size() != null) recommended.put("imageSize", r.image().size());
-                if (r.image().quality() != null) recommended.put("imageQuality", r.image().quality());
-            }
-            if (r.video() != null) {
-                if (r.video().model() != null) recommended.put("videoModel", r.video().model());
-                if (r.video().duration() != null) recommended.put("videoDuration", r.video().duration());
-                if (r.video().resolution() != null) recommended.put("videoResolution", r.video().resolution());
-                if (r.video().aspectRatio() != null) recommended.put("videoAspectRatio", r.video().aspectRatio());
-            }
-            return new SceneParamsRecommendation(imageModels, videoModels, recommended, reasons);
-        } catch (Exception e) {
-            log.warn("分镜参数推荐 LLM 调用失败: {}", e.getMessage());
-            return new SceneParamsRecommendation(imageModels, videoModels, Map.of(), Map.of());
-        }
-    }
 
     /** 用户确认的整套推荐参数（选择器默认值=推荐值）→ 应用到项目全部分镜的覆盖参数列（空键跳过） */
     public void applySceneParamsToProject(String projectId, Map<String, String> params) {
@@ -1613,13 +1523,21 @@ public class AgentRuntimeSupport {
     /** 后台轮询视频任务直至终态（90×5s ≈ 7.5min 上限），终态更新 agent_assets 行 */
     private void pollVideoTaskAndUpdate(String taskId) {
         try {
+            String lastStatus = "";
+            String lastProgress = "";
             for (int i = 0; i < 90; i++) {
                 if (Thread.currentThread().isInterrupted()) return;
                 Map<String, String> result = generationService.pollVideoTask(taskId);
                 String status = result.get("status");
                 String progress = result.get("progress");
-                log.info("视频生成后台轮询: taskId={}, 第 {}/90 次, status={}{}", taskId, i + 1, status,
-                        progress != null && !progress.isBlank() ? ", progress=" + progress : "");
+                if (!java.util.Objects.equals(lastStatus, status)
+                        || !java.util.Objects.equals(lastProgress, progress)) {
+                    log.info("视频生成后台轮询: taskId={}, 第 {}/90 次, status={}{}",
+                            taskId, i + 1, status,
+                            progress != null && !progress.isBlank() ? ", progress=" + progress : "");
+                    lastStatus = status == null ? "" : status;
+                    lastProgress = progress == null ? "" : progress;
+                }
                 if ("completed".equals(status) || "succeeded".equals(status)) {
                     // pollVideoTask 内部已处理下载：succeeded→completed+videoUrl
                     updateVideoAsset(taskId, "completed", result.get("videoUrl"), null);
@@ -1631,9 +1549,12 @@ public class AgentRuntimeSupport {
                     updateVideoAsset(taskId, "failed", null, friendly);
                     return;
                 }
-                // 运行中：status 置 running（progress 无存储列，仅日志可见；前端轮询态即可）
-                updateVideoAsset(taskId, "running", null, null);
-                Thread.sleep(5000);
+                // 运行中：仅首次写 running；progress 无存储列，仅日志可见。
+                if (!"running".equals(lastStatus)) {
+                    updateVideoAsset(taskId, "running", null, null);
+                    lastStatus = "running";
+                }
+                Thread.sleep(pollBackoff.delayMillis(i));
             }
             updateVideoAsset(taskId, "failed", null, "视频生成超时，请重试");
         } catch (InterruptedException e) {
@@ -1781,25 +1702,29 @@ public class AgentRuntimeSupport {
     public String planField(String planJson, String field) {
         if (planJson == null || planJson.isBlank()) return "";
         try {
-            var root = objectMapper.readTree(planJson);
-            if (root.has(field)) {
-                return root.path(field).asText("");
-            }
-            var items = root.path("items");
-            if (items.isArray() && !items.isEmpty()) {
-                return items.get(0).path(field).asText("");
-            }
-            return "";
+            return planField(objectMapper.readTree(planJson), field);
         } catch (Exception e) {
             return "";
         }
+    }
+
+    public String planField(JsonNode root, String field) {
+        if (root == null || root.isMissingNode() || root.isNull()) return "";
+        if (root.has(field)) {
+            return root.path(field).asText("");
+        }
+        var items = root.path("items");
+        if (items.isArray() && !items.isEmpty()) {
+            return items.get(0).path(field).asText("");
+        }
+        return "";
     }
 
     /** checkpoint plan 恢复勾选资产 ID：读取 items[0].assetIds（字符串逗号或 JSON 数组），缺失返回空列表。 */
     public static List<String> planAssetIds(String planJson) {
         if (planJson == null || planJson.isBlank()) return List.of();
         try {
-            var root = new ObjectMapper().readTree(planJson);
+            var root = STATIC_JSON.readTree(planJson);
             var items = root.path("items");
             var node = items.isArray() && !items.isEmpty() ? items.get(0) : root;
             JsonNode assetNode = node.path("assetIds");
@@ -1832,13 +1757,19 @@ public class AgentRuntimeSupport {
     public List<Map<String, Object>> planListField(String planJson, String field) {
         if (planJson == null || planJson.isBlank()) return List.of();
         try {
-            var items = objectMapper.readTree(planJson).path("items");
-            if (items.isArray() && !items.isEmpty() && items.get(0).has(field)) {
-                List<Map<String, Object>> out = new java.util.ArrayList<>();
-                for (var e : items.get(0).path(field)) out.add(objectMapper.convertValue(e, Map.class));
-                return out;
-            }
+            return planListField(objectMapper.readTree(planJson), field);
         } catch (Exception ignored) {}
+        return List.of();
+    }
+
+    public List<Map<String, Object>> planListField(JsonNode root, String field) {
+        if (root == null || root.isMissingNode() || root.isNull()) return List.of();
+        var items = root.path("items");
+        if (items.isArray() && !items.isEmpty() && items.get(0).has(field)) {
+            List<Map<String, Object>> out = new java.util.ArrayList<>();
+            for (var e : items.get(0).path(field)) out.add(objectMapper.convertValue(e, Map.class));
+            return out;
+        }
         return List.of();
     }
 

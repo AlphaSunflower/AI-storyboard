@@ -28,6 +28,7 @@ public class AgentRecoveryCoordinator {
     private final MeterRegistry meters;
     private final ExecutorService executor;
     private final ConcurrentHashMap<String, Long> nextRunAtNanos = new ConcurrentHashMap<>();
+    private final java.util.Set<String> runningSources = ConcurrentHashMap.newKeySet();
     private final String owner = UUID.randomUUID().toString();
 
     public AgentRecoveryCoordinator(AgentRecoveryProperties properties,
@@ -49,13 +50,11 @@ public class AgentRecoveryCoordinator {
     public void scan() {
         if (properties.getMode() != RecoveryMode.COORDINATOR) return;
         long now = System.nanoTime();
-        List<CompletableFuture<Void>> running = new ArrayList<>();
         for (AgentRecoverySource source : sources) {
             if (!due(source, now)) continue;
-            running.add(CompletableFuture.runAsync(() -> runSource(source), executor));
-        }
-        if (!running.isEmpty()) {
-            CompletableFuture.allOf(running.toArray(CompletableFuture[]::new)).join();
+            if (!runningSources.add(source.name())) continue;
+            CompletableFuture.runAsync(() -> runSource(source), executor)
+                    .whenComplete((ignored, error) -> runningSources.remove(source.name()));
         }
     }
 

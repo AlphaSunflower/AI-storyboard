@@ -61,6 +61,18 @@ public class StoryboardClient {
             .maximumSize(100)
             .build();
 
+    /** 单分镜缓存，避免队列同一任务重复读 scene。 */
+    private final Cache<String, Scene> singleSceneCache = Caffeine.newBuilder()
+            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .maximumSize(1000)
+            .build();
+
+    /** 分镜参考素材缓存。 */
+    private final Cache<String, List<Map<String, Object>>> sceneReferenceCache = Caffeine.newBuilder()
+            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .maximumSize(1000)
+            .build();
+
     private HttpHeaders headers() {
         HttpHeaders h = new HttpHeaders();
         h.set("X-Internal-Token", internalSecret);
@@ -96,7 +108,10 @@ public class StoryboardClient {
         try {
             restTemplate.postForEntity(url, new HttpEntity<>(scenes, headers()), String.class);
             // 写操作后清缓存
-            scenes.stream().map(Scene::getProjectId).distinct().forEach(sceneCache::invalidate);
+            scenes.stream().map(Scene::getProjectId).filter(java.util.Objects::nonNull)
+                    .distinct().forEach(sceneCache::invalidate);
+            scenes.stream().map(Scene::getId).filter(java.util.Objects::nonNull)
+                    .distinct().forEach(singleSceneCache::invalidate);
         } catch (ResourceAccessException e) {
             log.error("StoryboardClient.batchInsertScenes: 主后端不可用 {}", e.getMessage());
             throw new RuntimeException("主后端不可用，请稍后重试", e);
@@ -126,6 +141,8 @@ public class StoryboardClient {
                     new HttpEntity<>(scenes == null ? List.of() : scenes, headers()),
                     new ParameterizedTypeReference<ApiResponse<List<String>>>() {});
             sceneCache.invalidate(projectId);
+            scenes.stream().map(Scene::getId).filter(java.util.Objects::nonNull)
+                    .forEach(singleSceneCache::invalidate);
             return resp.getBody() == null || resp.getBody().data() == null
                     ? List.of() : resp.getBody().data();
         } catch (ResourceAccessException e) {
@@ -144,6 +161,8 @@ public class StoryboardClient {
                     new HttpEntity<>(scenes == null ? List.of() : scenes, headers()),
                     new ParameterizedTypeReference<ApiResponse<List<String>>>() {});
             sceneCache.invalidate(projectId);
+            scenes.stream().map(Scene::getId).filter(java.util.Objects::nonNull)
+                    .forEach(singleSceneCache::invalidate);
             return resp.getBody() == null || resp.getBody().data() == null
                     ? List.of() : resp.getBody().data();
         } catch (ResourceAccessException e) {
@@ -159,6 +178,8 @@ public class StoryboardClient {
             restTemplate.exchange(url, HttpMethod.DELETE,
                     new HttpEntity<>(headers()), String.class);
             if (projectId != null && !projectId.isBlank()) sceneCache.invalidate(projectId);
+            singleSceneCache.invalidate(sceneId);
+            sceneReferenceCache.invalidate(sceneId);
         } catch (ResourceAccessException e) {
             log.error("StoryboardClient.deleteScene: 主后端不可用 {}", e.getMessage());
             throw new RuntimeException("主后端不可用，请稍后重试", e);
@@ -187,16 +208,37 @@ public class StoryboardClient {
     public void linkSceneReferences(String sceneId, List<Map<String, Object>> refs) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId + "/reference-links";
         restTemplate.postForEntity(url, new HttpEntity<>(refs, headers()), String.class);
+        sceneReferenceCache.invalidate(sceneId);
     }
 
     /** Replace system-managed first/last video frames while preserving user uploads. */
     public void replaceManagedVideoFrames(String sceneId, List<Map<String, Object>> refs) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId + "/managed-video-frames";
         restTemplate.exchange(url, HttpMethod.PUT, new HttpEntity<>(refs, headers()), String.class);
+        sceneReferenceCache.invalidate(sceneId);
     }
 
     /** 查场景参考素材（含 url/type/purpose/role，按 sortOrder 升序） */
     public List<Map<String, Object>> getSceneReferences(String sceneId) {
+        if (sceneId == null || sceneId.isBlank()) return List.of();
+        return sceneReferenceCache.get(sceneId, this::fetchSceneReferences);
+    }
+
+    public Map<String, Map<String, Boolean>> sceneMaterialPresence(String projectId,
+                                                                   List<String> sceneIds) {
+        if (projectId == null || projectId.isBlank() || sceneIds == null || sceneIds.isEmpty()) {
+            return Map.of();
+        }
+        String url = baseUrl + "/api/internal/projects/" + projectId + "/scene-material-presence";
+        var resp = restTemplate.exchange(url, HttpMethod.POST,
+                new HttpEntity<>(sceneIds, headers()),
+                new ParameterizedTypeReference<
+                        ApiResponse<Map<String, Map<String, Boolean>>>>() {});
+        return resp.getBody() == null || resp.getBody().data() == null
+                ? Map.of() : resp.getBody().data();
+    }
+
+    private List<Map<String, Object>> fetchSceneReferences(String sceneId) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId + "/references";
         var resp = restTemplate.exchange(url, HttpMethod.GET,
                 new HttpEntity<>(headers()),
@@ -279,6 +321,11 @@ public class StoryboardClient {
 
     /** 查单个场景 */
     public Scene getScene(String sceneId) {
+        if (sceneId == null || sceneId.isBlank()) return null;
+        return singleSceneCache.get(sceneId, this::fetchScene);
+    }
+
+    private Scene fetchScene(String sceneId) {
         String url = baseUrl + "/api/internal/scenes/" + sceneId;
         var resp = restTemplate.exchange(url, HttpMethod.GET,
                 new HttpEntity<>(headers()),
@@ -293,6 +340,7 @@ public class StoryboardClient {
             restTemplate.exchange(url, HttpMethod.PUT,
                     new HttpEntity<>(scene, headers()), String.class);
             sceneCache.invalidate(scene.getProjectId());
+            singleSceneCache.put(scene.getId(), scene);
         } catch (ResourceAccessException e) {
             log.error("StoryboardClient.updateScene: 主后端不可用 {}", e.getMessage());
             throw new RuntimeException("主后端不可用，请稍后重试", e);

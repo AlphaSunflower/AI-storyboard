@@ -29,8 +29,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -236,6 +238,41 @@ public class InternalApiServiceImpl implements InternalApiService {
                         r.getRole(), r.getSourceType(), r.getSourceId(), r.getMediaId(), r.getSourceConversationId(),
                         r.getFileName(), r.getFileSize()))
                 .toList();
+    }
+
+    @Override
+    public Map<String, Map<String, Boolean>> sceneMaterialPresence(String projectId,
+                                                                   List<String> sceneIds) {
+        if (sceneIds == null || sceneIds.isEmpty()) return Map.of();
+        Set<String> requested = sceneIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (requested.isEmpty()) return Map.of();
+        Set<String> owned = sceneMapper.selectList(new LambdaQueryWrapper<Scene>()
+                        .eq(Scene::getProjectId, projectId)
+                        .in(Scene::getId, requested))
+                .stream().map(Scene::getId).collect(java.util.stream.Collectors.toSet());
+        if (owned.isEmpty()) return Map.of();
+
+        Set<String> referenced = sceneReferenceImageMapper.selectList(
+                        new LambdaQueryWrapper<SceneReferenceImage>()
+                                .in(SceneReferenceImage::getSceneId, owned))
+                .stream().map(SceneReferenceImage::getSceneId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> linked = sceneAssetMapper.selectList(
+                        new LambdaQueryWrapper<SceneAsset>()
+                                .in(SceneAsset::getSceneId, owned))
+                .stream().map(SceneAsset::getSceneId)
+                .collect(java.util.stream.Collectors.toSet());
+
+        Map<String, Map<String, Boolean>> result = new LinkedHashMap<>();
+        for (String sceneId : requested) {
+            if (!owned.contains(sceneId)) continue;
+            result.put(sceneId, Map.of(
+                    "hasReferences", referenced.contains(sceneId),
+                    "hasAssets", linked.contains(sceneId)));
+        }
+        return result;
     }
 
     @Override

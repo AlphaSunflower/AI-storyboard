@@ -12,6 +12,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.security.FileUrlSigner;
+import com.moon.moonagent.util.PollingBackoff;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -43,6 +44,7 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
     private final FileUrlSigner fileUrlSigner;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService pollExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final PollingBackoff pollBackoff = PollingBackoff.video();
 
     @Override
     public Map<String, Object> listRecords(String userId, String genType, String status,
@@ -187,6 +189,7 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
     /** 重试视频的新任务后台轮询（复用网关轮询，直接更新新记录行；不写对话消息，仅供生成记录展示）。 */
     private void pollVideoTaskAndUpdateRecord(String taskId, String recordId) {
         try {
+            boolean runningWritten = false;
             for (int i = 0; i < 90; i++) {
                 if (Thread.currentThread().isInterrupted()) return;
                 Map<String, String> result = generationService.pollVideoTask(taskId);
@@ -213,9 +216,12 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
                     assetMapper.updateById(record);
                     return;
                 }
-                record.setStatus("running");
-                assetMapper.updateById(record);
-                Thread.sleep(5000);
+                if (!runningWritten) {
+                    record.setStatus("running");
+                    assetMapper.updateById(record);
+                    runningWritten = true;
+                }
+                Thread.sleep(pollBackoff.delayMillis(i));
             }
             AgentAsset record = assetMapper.selectById(recordId);
             if (record != null) {

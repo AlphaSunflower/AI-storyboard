@@ -15,6 +15,17 @@ spring:
         enabled: true
   datasource:
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN:5}
+      connection-timeout: 10000
+      validation-timeout: 3000
+      data-source-properties:
+        reWriteBatchedInserts: true
+  task:
+    scheduling:
+      pool:
+        size: ${SPRING_TASK_SCHEDULING_POOL_SIZE:4}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -55,6 +66,8 @@ management:
 storyboard:
   internal-url: ${STORYBOARD_INTERNAL_URL:http://localhost:8082}
   internal-secret: ${INTERNAL_SECRET:}
+  video:
+    queue-concurrency: ${STORYBOARD_VIDEO_QUEUE_CONCURRENCY:2}
   asset-client:
     base-url: ${ASSET_SERVICE_URL:http://localhost:8085}
     internal-token: ${INTERNAL_SECRET:${storyboard.internal-secret:}}
@@ -122,7 +135,7 @@ ai:
       task-list-enabled: ${AGENTSCOPE_TASK_LIST_ENABLED:true}
       plan-file-directory: ${AGENTSCOPE_PLAN_FILE_DIRECTORY:plans}
       tool-result-eviction-enabled: ${AGENTSCOPE_TOOL_RESULT_EVICTION_ENABLED:true}
-      tool-result-eviction-max-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_MAX_CHARS:80000}
+      tool-result-eviction-max-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_MAX_CHARS:16000}
       tool-result-eviction-preview-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_PREVIEW_CHARS:2000}
       otel-tracing-enabled: ${AGENTSCOPE_OTEL_TRACING_ENABLED:true}
       distributed-store-enabled: ${AGENTSCOPE_DISTRIBUTED_STORE_ENABLED:true}
@@ -137,13 +150,13 @@ ai:
         video: ${AGENTSCOPE_MODEL_VIDEO:}
       compaction-enabled: ${AGENTSCOPE_COMPACTION_ENABLED:true}
       compaction-trigger-messages: ${AGENTSCOPE_COMPACTION_TRIGGER_MESSAGES:40}
-      compaction-trigger-tokens: ${AGENTSCOPE_COMPACTION_TRIGGER_TOKENS:60000}
+      compaction-trigger-tokens: ${AGENTSCOPE_COMPACTION_TRIGGER_TOKENS:48000}
       compaction-keep-messages: ${AGENTSCOPE_COMPACTION_KEEP_MESSAGES:12}
       compaction-keep-tokens: ${AGENTSCOPE_COMPACTION_KEEP_TOKENS:8000}
       async-enabled: ${AGENTSCOPE_ASYNC_ENABLED:true}
       async-tool-timeout: ${AGENTSCOPE_ASYNC_TOOL_TIMEOUT:90s}
       batch-confirm-threshold: ${AGENTSCOPE_BATCH_CONFIRM_THRESHOLD:4}
-      image-batch-concurrency: ${AGENTSCOPE_IMAGE_BATCH_CONCURRENCY:3}
+      image-batch-concurrency: ${AGENTSCOPE_IMAGE_BATCH_CONCURRENCY:4}
       wakeup-enabled: ${AGENTSCOPE_WAKEUP_ENABLED:true}
       wakeup-dir: ${AGENTSCOPE_WAKEUP_DIR:}
       wakeup-max-retries: ${AGENTSCOPE_WAKEUP_MAX_RETRIES:5}
@@ -185,6 +198,9 @@ ai:
     # 骨架只做结构化规划，显式使用快模型；场景 worker 仍使用高质量模型
     skeleton-model: ${AGENT_SKELETON_MODEL:mimo-v2.6-pro}
     max-parallel-agents: ${AGENT_MAX_PARALLEL_AGENTS:4}
+    global-concurrency: ${AGENT_GLOBAL_CONCURRENCY:4}
+    per-user-concurrency: ${AGENT_PER_USER_CONCURRENCY:2}
+    concurrency-acquire-timeout-seconds: ${AGENT_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS:30}
     intent-timeout-seconds: 60
     title-model: ${AGENT_TITLE_MODEL:mimo-v2.6-pro}
     title-timeout-seconds: ${AGENT_TITLE_TIMEOUT_SECONDS:12}
@@ -194,14 +210,16 @@ ai:
     history-context-max-chars: 10000
     history-message-max-chars: 2000
   # ── 超时 / 重试（秒/毫秒，Java 默认值已对齐当前行为，仅需覆盖时取消注释）──
-  image-request-timeout: 900
-  image-edit-timeout: 900
-  video-request-timeout: 900
+  image-request-timeout: 180
+  image-edit-timeout: 180
+  video-request-timeout: 120
+  video-create-timeout: 120
+  video-poll-timeout: 600
   video-download-timeout: 900
   video-retry-delay-ms: 15000
   script-timeout: 1800
   script-max-tokens: 8192
-  gateway-model-timeout: 30
+  gateway-model-timeout: 5
   gateway-cooldown-ms: 300000
 
 # ── MCP Server（暴露 agent 工具给外部 MCP 客户端）──

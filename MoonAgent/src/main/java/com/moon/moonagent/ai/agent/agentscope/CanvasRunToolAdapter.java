@@ -83,9 +83,8 @@ final class CanvasRunToolAdapter extends ToolBase {
                 runs.fail(runId, String.valueOf(parsed.getOrDefault(
                         "message", parsed.getOrDefault("error", "画布图命令失败"))));
             } else {
-                runs.updateFromGraphResult(runId, parsed);
+                parsed = new LinkedHashMap<>(runs.recordGraphResult(runId, operationKey, parsed));
             }
-            runs.rememberOperation(runId, operationKey, parsed);
             return result(param, parsed);
         });
     }

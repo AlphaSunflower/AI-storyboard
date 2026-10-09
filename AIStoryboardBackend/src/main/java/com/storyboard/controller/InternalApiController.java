@@ -118,6 +118,14 @@ public class InternalApiController {
         return ApiResponse.ok(internalApiService.getSceneReferences(sceneId));
     }
 
+    /** 批量判断目标分镜是否已有参考素材或关联资产（自动配图资格过滤）。 */
+    @PostMapping("/projects/{projectId}/scene-material-presence")
+    public ApiResponse<Map<String, Map<String, Boolean>>> sceneMaterialPresence(
+            @PathVariable String projectId,
+            @RequestBody List<String> sceneIds) {
+        return ApiResponse.ok(internalApiService.sceneMaterialPresence(projectId, sceneIds));
+    }
+
     /** 查单个场景 */
     @GetMapping("/scenes/{sceneId}")
     public ApiResponse<SceneFull> getScene(@PathVariable String sceneId) {

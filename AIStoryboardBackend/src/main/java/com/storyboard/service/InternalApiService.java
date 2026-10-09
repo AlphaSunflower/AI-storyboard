@@ -53,6 +53,9 @@ public interface InternalApiService {
     /** 查场景参考素材（含 role，供视频生成按首帧/尾帧/参考映射） */
     List<SceneReferenceResponse> getSceneReferences(String sceneId);
 
+    /** 批量场景素材存在性，供自动配图一次过滤目标分镜。 */
+    Map<String, Map<String, Boolean>> sceneMaterialPresence(String projectId, List<String> sceneIds);
+
     /** 查单个场景，不存在抛 40401 */
     SceneFull getScene(String sceneId);
 
