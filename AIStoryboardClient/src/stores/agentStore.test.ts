@@ -288,7 +288,21 @@ describe('agentStore background tasks', () => {
   it('refreshes messages when a long task settles without a wakeup event', async () => {
     vi.useFakeTimers();
     const listMessages = vi.spyOn(agentApi, 'listMessagesPage')
-      .mockResolvedValue({ data: { data: { records: [], nextCursor: null, hasMore: false } } } as never);
+      .mockResolvedValue({
+        data: {
+          data: {
+            records: [{
+              id: 'm1',
+              conversationId: 'conversation-1',
+              role: 'assistant',
+              content: 'ok',
+              createdAt: new Date().toISOString(),
+            }],
+            nextCursor: null,
+            hasMore: false,
+          },
+        },
+      } as never);
     useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: false });
 
     useAgentStore.getState().upsertTask(task({ version: 1 }));
@@ -299,7 +313,7 @@ describe('agentStore background tasks', () => {
     }));
     await vi.runOnlyPendingTimersAsync();
 
-    expect(listMessages).toHaveBeenCalledWith('conversation-1');
+    expect(listMessages).toHaveBeenCalledWith('conversation-1', undefined);
     listMessages.mockRestore();
     vi.useRealTimers();
   });

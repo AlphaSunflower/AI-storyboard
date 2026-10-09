@@ -10,6 +10,7 @@ import {
   type StoryboardVideoQueueItem, type StoryboardVideoEnqueueItem,
   type StoryboardImageQueueItem, type StoryboardImageEnqueueItem,
   type AgentMessageMetadata, type AgentReasoning, type AgentTraceEvent,
+  type AgentMessagePage,
   type AgentCanvasRunStatus,
   type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
   type CanvasSessionInfo,
@@ -795,7 +796,7 @@ async function refreshConversationMessages(conversationId: string) {
     pendingMessageReconcile.add(conversationId);
     return;
   }
-  const response = await agentApi.listMessagesPage(conversationId);
+  const page = await loadMessagePage(conversationId);
   const state = useAgentStore.getState();
   if (state.activeConversationId !== conversationId) return;
   if (state.streaming) {
@@ -803,14 +804,34 @@ async function refreshConversationMessages(conversationId: string) {
     return;
   }
   const messages = await refreshLibraryMediaMessages(
-    response.data.data?.records ?? [],
+    page.records,
     (mediaId) => resolveLibraryMedia(conversationId, mediaId),
   );
   useAgentStore.setState({
     messages,
-    messageNextCursor: response.data.data?.nextCursor ?? null,
-    messageHasMore: response.data.data?.hasMore ?? false,
+    messageNextCursor: page.nextCursor,
+    messageHasMore: page.hasMore,
   });
+}
+
+async function loadMessagePage(conversationId: string, before?: string | null): Promise<AgentMessagePage> {
+  try {
+    const response = await agentApi.listMessagesPage(conversationId, before);
+    const page = response.data.data ?? { records: [], nextCursor: null, hasMore: false };
+    if (before || page.records.length > 0) return page;
+    // 兼容未部署 /messages/page 或旧数据返回空的运行实例。
+    const legacy = await agentApi.listMessages(conversationId);
+    const records = legacy.data.data ?? [];
+    return records.length ? { records, nextCursor: null, hasMore: false } : page;
+  } catch (error) {
+    if (before) throw error;
+    const legacy = await agentApi.listMessages(conversationId);
+    return {
+      records: legacy.data.data ?? [],
+      nextCursor: null,
+      hasMore: false,
+    };
+  }
 }
 
 function taskKindHint(kind: VideoTaskStatus['kind'], status: string, waitingSec: number) {
@@ -2253,13 +2274,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       };
     });
     void get().loadTasks(id);
-    const res = await agentApi.listMessagesPage(id);
+    const page = await loadMessagePage(id);
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     await get().restoreCanvasMode(id);
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     const g = get().generating[id];
     const base = await refreshLibraryMediaMessages(
-      res.data.data?.records ?? [],
+      page.records,
       (mediaId) => resolveLibraryMedia(id, mediaId),
     );
     const savedAttachments = readPendingAttachments(id);
@@ -2271,8 +2292,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       messages: g?.assistantId
         ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
         : base,
-      messageNextCursor: res.data.data?.nextCursor ?? null,
-      messageHasMore: res.data.data?.hasMore ?? false,
+      messageNextCursor: page.nextCursor,
+      messageHasMore: page.hasMore,
       pendingAttachments: restoredAttachments,
       ...pendingMediaFromAttachments(restoredAttachments),
     });
@@ -2335,17 +2356,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const conversationId = get().activeConversationId;
     const cursor = get().messageNextCursor;
     if (!conversationId || !cursor || !get().messageHasMore) return;
-    const response = await agentApi.listMessagesPage(conversationId, cursor);
+    const page = await loadMessagePage(conversationId, cursor);
     if (get().activeConversationId !== conversationId) return;
     const older = await refreshLibraryMediaMessages(
-      response.data.data?.records ?? [],
+      page.records,
       (mediaId) => resolveLibraryMedia(conversationId, mediaId),
     );
     const known = new Set(get().messages.map((message) => message.id));
     set({
       messages: [...older.filter((message) => !known.has(message.id)), ...get().messages],
-      messageNextCursor: response.data.data?.nextCursor ?? null,
-      messageHasMore: response.data.data?.hasMore ?? false,
+      messageNextCursor: page.nextCursor,
+      messageHasMore: page.hasMore,
     });
   },
   streaming: false,
