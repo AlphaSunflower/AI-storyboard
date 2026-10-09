@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -19,8 +21,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Base64;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 文件存储服务实现：图片/视频下载保存、上传图片保存、对象读取/删除（MinIO 对象存储）。
@@ -34,10 +41,12 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     private final MinioStorage minioStorage;
     private final FileUrlSigner fileUrlSigner;
+    private final ConcurrentHashMap<String, CompletableFuture<String>> downloadInflight =
+            new ConcurrentHashMap<>();
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("attachmentHttpClient")
+    private HttpClient httpClient;
 
     /** 允许保存的上传图片扩展名白名单（其余回退 png，防御异常扩展名） */
     private static final Set<String> ALLOWED_IMAGE_EXTENSIONS =
@@ -184,6 +193,31 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
+        String normalized = sourceUrl == null ? "" : sourceUrl.trim();
+        String hash = sha256(normalized);
+        String extension = extractExtension(normalized, "images".equals(type) ? "png" : "mp4");
+        String filename = hash + "." + extension;
+        String key = minioStorage.key(type, filename);
+        if (minioStorage.exists(key)) {
+            return fileUrlSigner.signIfLocal(urlPrefix + filename);
+        }
+        CompletableFuture<String> created = new CompletableFuture<>();
+        CompletableFuture<String> existing = downloadInflight.putIfAbsent(normalized, created);
+        if (existing != null) return existing.join();
+        try {
+            String result = downloadAndSaveUncached(normalized, type, urlPrefix, filename, key);
+            created.complete(result);
+            return result;
+        } catch (RuntimeException error) {
+            created.completeExceptionally(error);
+            throw error;
+        } finally {
+            downloadInflight.remove(normalized, created);
+        }
+    }
+
+    private String downloadAndSaveUncached(String sourceUrl, String type, String urlPrefix,
+                                           String filename, String key) {
         try {
             OutboundUrlGuard.requireSafeHttpUrl(sourceUrl);
             HttpRequest request = HttpRequest.newBuilder()
@@ -191,18 +225,30 @@ public class FileStorageServiceImpl implements FileStorageService {
                     .timeout(Duration.ofSeconds(120))
                     .GET()
                     .build();
-            HttpResponse<InputStream> resp = httpClient.send(request,
+            HttpResponse<InputStream> resp = httpClient().send(request,
                     HttpResponse.BodyHandlers.ofInputStream());
             if (resp.statusCode() != 200) {
                 throw new BusinessException(50201, "Download failed, status: " + resp.statusCode());
+            }
+            long maxBytes = "images".equals(type) ? 20L * 1024 * 1024 : 200L * 1024 * 1024;
+            long contentLength = resp.headers().firstValueAsLong("content-length").orElse(-1L);
+            if (contentLength > maxBytes) {
+                throw new BusinessException(50201,
+                        "Downloaded file exceeds limit: " + contentLength + " bytes");
+            }
+            String remoteType = resp.headers().firstValue("content-type").orElse("");
+            if ("images".equals(type) && !remoteType.isBlank()
+                    && !remoteType.toLowerCase().startsWith("image/")) {
+                throw new BusinessException(50201, "Remote resource is not an image: " + remoteType);
             }
             byte[] bytes;
             try (InputStream in = resp.body()) {
                 bytes = in.readAllBytes();
             }
-            String extension = extractExtension(sourceUrl, "png");
-            String filename = UUID.randomUUID() + "." + extension;
-            minioStorage.put(minioStorage.key(type, filename), bytes, contentType(filename));
+            if (bytes.length > maxBytes) {
+                throw new BusinessException(50201, "Downloaded file exceeds limit: " + bytes.length);
+            }
+            minioStorage.put(key, bytes, contentType(filename));
             log.debug("Downloaded and saved to MinIO: {} -> {}/{}", sourceUrl, type, filename);
             return fileUrlSigner.signIfLocal(urlPrefix + filename);
         } catch (IOException e) {
@@ -210,6 +256,16 @@ public class FileStorageServiceImpl implements FileStorageService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BusinessException(50201, "Download interrupted: " + sourceUrl, e);
+        }
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
         }
     }
 
@@ -293,5 +349,14 @@ public class FileStorageServiceImpl implements FileStorageService {
         if (h >= 0) p = p.substring(0, h);
         int idx = p.lastIndexOf('/');
         return idx >= 0 ? p.substring(idx + 1) : p;
+    }
+
+    private HttpClient httpClient() {
+        if (httpClient == null) {
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+        return httpClient;
     }
 }

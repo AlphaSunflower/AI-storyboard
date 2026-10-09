@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
 
     /** 上下文窗口缓存 TTL：网关模型列表缓存为 60s，这里取 2 分钟，兼顾实时性与请求量。 */
     private static final long CONTEXT_WINDOW_CACHE_TTL_MS = 120_000L;
+    private static final long MODEL_LIST_CACHE_TTL_MS = 60_000L;
 
     /** 网关不可达时的兜底默认模型（每类型一个） */
     private static final Map<String, String> FALLBACK_DEFAULTS = Map.of(
@@ -51,18 +54,50 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     private final ObjectProvider<StringRedisTemplate> redisTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("gatewayHttpClient")
+    private HttpClient httpClient;
 
     @Value("${ai.gateway.base-url:${LLM_GATEWAY_BASE_URL:http://localhost:8083}}")
     private String gatewayBaseUrl;
 
     /** 模型名 → 上下文窗口 的短 TTL 缓存：modelName → [窗口, 过期时间毫秒] */
     private final Map<String, long[]> contextWindowCache = new ConcurrentHashMap<>();
+    private final Map<String, ModelListCacheEntry> modelListCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<List<Map<String, String>>>>
+            modelListInflight = new ConcurrentHashMap<>();
 
     @Override
     public List<Map<String, String>> fetchModels(String type) {
+        String cacheKey = type == null ? "" : type;
+        ModelListCacheEntry cached = modelListCache.get(cacheKey);
+        long now = System.currentTimeMillis();
+        if (cached != null && cached.expiresAt() > now) {
+            return cached.models();
+        }
+        java.util.concurrent.CompletableFuture<List<Map<String, String>>> created =
+                new java.util.concurrent.CompletableFuture<>();
+        java.util.concurrent.CompletableFuture<List<Map<String, String>>> existing =
+                modelListInflight.putIfAbsent(cacheKey, created);
+        if (existing != null) {
+            return existing.join();
+        }
+        try {
+            List<Map<String, String>> models = fetchModelsRemote(cacheKey);
+            List<Map<String, String>> copy = List.copyOf(models);
+            modelListCache.put(cacheKey,
+                    new ModelListCacheEntry(copy, System.currentTimeMillis() + MODEL_LIST_CACHE_TTL_MS));
+            created.complete(copy);
+            return copy;
+        } catch (RuntimeException error) {
+            created.completeExceptionally(error);
+            throw error;
+        } finally {
+            modelListInflight.remove(cacheKey, created);
+        }
+    }
+
+    private List<Map<String, String>> fetchModelsRemote(String type) {
         List<Map<String, String>> models = new ArrayList<>();
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -98,6 +133,9 @@ public class GatewayModelServiceImpl implements GatewayModelService {
             // 网关不可达/解析失败：返回空列表
         }
         return models;
+    }
+
+    private record ModelListCacheEntry(List<Map<String, String>> models, long expiresAt) {
     }
 
     @Override

@@ -122,6 +122,10 @@ public class AiConfigProperties {
     // ── 视频生成超时 ──
     /** 视频创建 / 轮询 GET 请求超时（秒） */
     @Setter @Getter private int videoRequestTimeout = 120;
+    /** 视频创建请求超时（秒）。 */
+    @Setter @Getter private int videoCreateTimeout = 120;
+    /** 视频轮询请求超时（秒）。 */
+    @Setter @Getter private int videoPollTimeout = 600;
     /** 视频内容下载超时（秒） */
     @Setter @Getter private int videoDownloadTimeout = 180;
     /** 视频下载重试间隔（毫秒，单次轮询内重试窗口约 3×该值） */

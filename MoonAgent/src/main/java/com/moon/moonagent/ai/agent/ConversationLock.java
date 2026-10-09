@@ -7,7 +7,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -101,24 +100,6 @@ public class ConversationLock {
     /** 仅释放当前线程实际持有的锁，避免删除其他实例持有的租约。 */
     public void releaseAndRemove(String conversationId) {
         release(conversationId);
-    }
-
-    /**
-     * 在指定时间内轮询获取会话锁。用于“打断并发送”：先置打断标志，
-     * 再等待旧编排安全收尾并原子接管锁。
-     */
-    public boolean acquireWithTimeout(String conversationId, Duration timeout) {
-        long deadline = System.nanoTime() + Math.max(0L, timeout.toNanos());
-        do {
-            if (tryAcquire(conversationId)) return true;
-            try {
-                Thread.sleep(50L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        } while (System.nanoTime() < deadline);
-        return false;
     }
 
     /** Read-only lock probe used by wakeup scheduling and diagnostics. */

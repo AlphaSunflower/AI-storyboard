@@ -21,6 +21,8 @@ import org.springframework.ai.image.ImagePrompt;
 import org.springframework.ai.image.ImageResponse;
 import org.springframework.ai.openai.OpenAiImageOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -56,9 +58,9 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
     /** edits 图改图仍用 HttpClient 直连（multipart octet-stream workaround，Spring AI 无对应适配） */
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("gatewayHttpClient")
+    private HttpClient httpClient;
 
     /**
      * 生成/编辑图片入口方法（旧签名，n 默认 1）。
@@ -262,10 +264,10 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
     private HttpResponse<String> sendImageWithRetry(java.util.function.Supplier<HttpRequest> requestFactory)
             throws Exception {
         try {
-            return httpClient.send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
+            return httpClient().send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
         } catch (java.net.http.HttpTimeoutException e) {
             log.warn("图片请求超时({}), 重建请求重试 1 次", e.getMessage());
-            return httpClient.send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
+            return httpClient().send(requestFactory.get(), HttpResponse.BodyHandlers.ofString());
         }
     }
 
@@ -533,7 +535,7 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
 
     private byte[] fetchRemoteImage(String url) throws Exception {
         OutboundUrlGuard.requireSafeHttpUrl(url);
-        HttpResponse<byte[]> response = httpClient.send(
+        HttpResponse<byte[]> response = httpClient().send(
                 HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(60))
@@ -621,6 +623,15 @@ public class ImageGenerationServiceImpl implements ImageGenerationService {
             case "gif" -> "image/gif";
             default -> "image/png";
         };
+    }
+
+    private HttpClient httpClient() {
+        if (httpClient == null) {
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+        return httpClient;
     }
 
 }
