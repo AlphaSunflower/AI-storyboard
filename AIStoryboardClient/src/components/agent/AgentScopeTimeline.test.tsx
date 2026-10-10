@@ -41,7 +41,7 @@ describe('AgentScopeTimeline', () => {
 
     render(<AgentScopeTimeline />);
 
-    expect(screen.getByLabelText('AgentScope 执行时间线')).toBeTruthy();
+    expect(screen.getByLabelText('MoonAgent 执行时间线')).toBeTruthy();
     expect(screen.getByText('整理参考素材')).toBeTruthy();
     expect(screen.getByText('视觉提示词导演')).toBeTruthy();
     expect(screen.getByText('visual-prompt-director')).toBeTruthy();
@@ -61,6 +61,6 @@ describe('AgentScopeTimeline', () => {
 
     render(<AgentScopeTimeline />);
 
-    expect(screen.queryByLabelText('AgentScope 执行时间线')).toBeNull();
+    expect(screen.queryByLabelText('MoonAgent 执行时间线')).toBeNull();
   });
 });

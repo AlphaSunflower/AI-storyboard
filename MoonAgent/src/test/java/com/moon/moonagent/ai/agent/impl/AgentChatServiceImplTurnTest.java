@@ -19,6 +19,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentTurnEntity;
+import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
@@ -46,6 +47,69 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentChatServiceImplTurnTest {
+
+    @Test
+    void createSideChatPersistsATemporaryConversationAndClonesStableContext() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentConversation source = conversation();
+        source.setProjectId("project-1");
+        source.setTitle("主对话");
+        source.setApprovalMode("REQUEST_APPROVAL");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(source);
+        when(messageMapper.selectCount(any())).thenReturn(2L);
+        when(runtime.enabled()).thenReturn(true);
+        when(runtime.cloneSessionState(eq("user-1"), eq("conversation-1"), anyString(), any()))
+                .thenReturn(2);
+
+        AgentChatServiceImpl service = service(
+                conversationMapper,
+                messageMapper,
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class));
+        inject(service, "agentScopeMediaRuntime", runtime);
+
+        AgentConversation side = service.createSideChat("user-1", "conversation-1");
+
+        assertThat(side.getStatus()).isEqualTo("temporary");
+        assertThat(side.getProjectId()).isEqualTo("project-1");
+        assertThat(side.getApprovalMode()).isEqualTo("REQUEST_APPROVAL");
+        assertThat(side.getAgentscopeSessionInitializedAt()).isNotNull();
+        verify(conversationMapper).insert(side);
+        verify(runtime).cloneSessionState(
+                eq("user-1"), eq("conversation-1"), eq(side.getId()), any());
+    }
+
+    @Test
+    void closeSideChatClearsRuntimeAndDeletesTheTemporaryConversation() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentConversation side = conversation();
+        side.setStatus("temporary");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(side);
+        when(lock.isLocked("conversation-1")).thenReturn(false);
+
+        AgentChatServiceImpl service = service(
+                conversationMapper,
+                mock(AgentMessageMapper.class),
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                lock,
+                mock(PlatformTransactionManager.class));
+        inject(service, "agentScopeMediaRuntime", runtime);
+
+        service.closeSideChat("user-1", "conversation-1");
+
+        verify(runtime).clearSession("user-1", "conversation-1");
+        verify(lock).releaseAndRemove("conversation-1");
+        verify(conversationMapper).deleteById("conversation-1");
+    }
 
     @Test
     void hitlPauseKeepsFullAssistantContentOnThePersistedCard() {
@@ -92,7 +156,7 @@ class AgentChatServiceImplTurnTest {
                 message("user-1", "user", "第一条"),
                 message("assistant-1", "assistant", "第一条回复"),
                 target,
-                message("assistant-2", "assistant", "旧回复")));
+                message("assistant-2", "assistant", "旧回复")).reversed());
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
         when(turnStore.start(any(), eq("修改后的问题"), anyString())).thenReturn(turn);
@@ -177,6 +241,54 @@ class AgentChatServiceImplTurnTest {
                 (Map<String, Object>) userMessage.getMetadata().get("messageInput");
         assertThat(input.get("picUrls")).isEqualTo(List.of("/api/files/images/ref.png"));
         assertThat(input.get("assetIds")).isEqualTo(List.of("asset-1"));
+    }
+
+    @Test
+    void newTurnBindsUnboundUploadedAttachmentsToConversation() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentConversation conversation = conversation();
+        conversation.setProjectId("project-1");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        when(lock.acquire("conversation-1")).thenReturn(lease);
+        when(runtime.enabled()).thenReturn(true);
+        when(support.isInterrupted("conversation-1")).thenReturn(false);
+        AgentTurnEntity turn = new AgentTurnEntity();
+        turn.setId("turn-1");
+        when(turnStore.start(any(), anyString(), anyString())).thenReturn(turn);
+        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
+                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(runtime.runTurn(any(), any(), any(), any())).thenReturn(
+                new AgentTurnResult("回复", Map.of(), List.of(), null,
+                        List.of(), false, ""));
+
+        AgentChatServiceImpl service = service(
+                conversationMapper, messageMapper, assetMapper, support,
+                mock(CheckpointResumeService.class), lock, transactionManager);
+        inject(service, "agentScopeMediaRuntime", runtime);
+        inject(service, "turnEventStore", turnStore);
+        inject(service, "agentScopeEventMapper", mock(AgentScopeEventMapper.class));
+
+        service.streamAgentScopeTurn(
+                "user-1", "conversation-1", "读取计划书", List.of(), List.of(),
+                null, null, null, List.of(), List.of(),
+                List.of(new AgentAttachmentRequest(
+                        "/api/files/files/plan.docx", "项目计划书.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        123L, "file", "upload", "asset-doc", null)),
+                new SseEmitter(0L));
+
+        verify(assetMapper, timeout(2_000)).bindConversation(
+                List.of("asset-doc"), "conversation-1", "user-1", "project-1");
     }
 
     @Test
@@ -302,12 +414,41 @@ class AgentChatServiceImplTurnTest {
                 transactionManager);
     }
 
+    private static AgentChatServiceImpl service(
+            AgentConversationMapper conversationMapper,
+            AgentMessageMapper messageMapper,
+            AgentAssetMapper assetMapper,
+            AgentRuntimeSupport support,
+            CheckpointResumeService checkpoints,
+            ConversationLock lock,
+            PlatformTransactionManager transactionManager) {
+        return new AgentChatServiceImpl(
+                conversationMapper,
+                mock(AgentGenerationService.class),
+                messageMapper,
+                assetMapper,
+                mock(ConversationTitleService.class),
+                mock(StoryboardClient.class),
+                mock(FileStorageService.class),
+                mock(com.moon.moonagent.security.FileUrlSigner.class),
+                mock(AiConfigProperties.class),
+                support,
+                mock(AgentCheckpointMapper.class),
+                checkpoints,
+                lock,
+                mock(ProjectCreativeContextService.class),
+                mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
+                mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
+                transactionManager);
+    }
+
     private static AgentConversation conversation() {
         AgentConversation conversation = new AgentConversation();
         conversation.setId("conversation-1");
         conversation.setUserId("user-1");
         conversation.setStatus("active");
         conversation.setOrchestrationMode("AGENTSCOPE");
+        conversation.setAgentscopeSessionInitializedAt(java.time.OffsetDateTime.now());
         return conversation;
     }
 

@@ -374,7 +374,7 @@ function DemoTaskCenter() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)' }}>
         <MessageSquare size={12} strokeWidth={1.8} />
-        <div style={{ flex: 1, fontSize: 11, color: 'var(--color-ink)' }}>Moon · 正在设计视频方案</div>
+        <div style={{ flex: 1, fontSize: 11, color: 'var(--color-ink)' }}>多智能体 · 正在设计视频方案</div>
         <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>…</span>
       </div>
     </div>
@@ -670,7 +670,7 @@ function DemoMoonScenes() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: 'var(--color-body)' }}>
       {/* 抽屉顶部 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--color-hairline)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体</span></span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作</span></span>
         <span style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Folder size={12} strokeWidth={1.8} /> 产出素材</span></span>
       </div>
 
@@ -780,18 +780,18 @@ const SECTIONS = [
   { id: 'image-tips', label: '图片技巧' },
   { id: 'video-tips', label: '视频技巧' },
   { id: 'asset-library', label: 'AI资产库' },
-  { id: 'moon', label: 'Moon 智能体' },
+  { id: 'moon', label: '多智能体协作' },
   { id: 'faq', label: '常见问题' },
 ];
 
 /** 核心能力速览（CardSwap 卡片，anchor 对应下方文档段落 id） */
 const FEATURES = [
-  { title: 'AI 分镜', desc: '剧本一键拆解成分镜镜头', anchor: 'manual-script' },
-  { title: '图片生成', desc: '文生图 / 图生图 / 参考图改图', anchor: 'generate' },
-  { title: '视频生成', desc: '文生视频 / 图生视频（参考图作首帧）', anchor: 'generate' },
-  { title: 'Moon 智能体', desc: '对话式创作，计划模式 + 人工确认', anchor: 'moon' },
-  { title: '图片理解', desc: '上传参考图，理解风格再生成', anchor: 'manual-script' },
-  { title: 'AI资产库', desc: '人物 / 道具 / 场景设定，跨镜长相不漂移', anchor: 'asset-library' },
+  { title: '智能分镜规划', desc: '剧本拆解、分镜编排与方案确认', anchor: 'manual-script' },
+  { title: '图像生成', desc: '文生图 / 图生图 / 参考图改图', anchor: 'generate' },
+  { title: '视频生成', desc: '文生视频 / 图生视频，逐镜动态预演', anchor: 'generate' },
+  { title: '多智能体协作', desc: '意图解析、任务编排与人工确认闭环', anchor: 'moon' },
+  { title: '图片理解', desc: '理解参考图风格与内容，再参与生成', anchor: 'manual-script' },
+  { title: '资产一致性', desc: '人物 / 道具 / 场景约束贯穿全流程', anchor: 'asset-library' },
 ];
 
 const PARAMS = [
@@ -804,26 +804,26 @@ const PARAMS = [
 ];
 
 const ABILITIES = [
-  { icon: <Bot size={14} strokeWidth={1.8} />, tag: '文生', name: 'AI 分镜', desc: '剧本 → 分镜方案 → 确认后写入（可覆盖 / 追加 / 不生成），不满意可持续调整。' },
+  { icon: <Bot size={14} strokeWidth={1.8} />, tag: '编排', name: '多智能体分镜规划', desc: '解析剧本与创作意图，生成分镜方案；确认后写入，可覆盖 / 追加 / 不生成。' },
   { icon: <ImageIcon size={14} strokeWidth={1.8} />, tag: '文生图', name: '文字生成图片', desc: '描述画面，直接生成图片（无参考图时自动完成）。' },
   { icon: <Palette size={14} strokeWidth={1.8} />, tag: '图生图', name: '参考图改图', desc: '上传参考图 + 修改诉求（如「色调调暖」），在原图基础上改出新图。' },
   { icon: <Video size={14} strokeWidth={1.8} />, tag: '文生视频', name: '文字生成视频', desc: '描述内容 → 视频方案 → 确认后生成。' },
   { icon: <Film size={14} strokeWidth={1.8} />, tag: '图生视频', name: '参考图生成视频', desc: '参考图作首帧 + 视频方案 → 确认后生成。' },
   { icon: <Trash2 size={14} strokeWidth={1.8} />, tag: '清空', name: '清空 / 删除分镜', desc: '说「清空分镜 / 删除分镜」→ 直接删除当前项目全部分镜。' },
   { icon: <Handshake size={14} strokeWidth={1.8} />, tag: 'HITL', name: '人工介入', desc: '方案确认卡片 + 参数预选与推荐理由 + 自定义输入（确认 30 分钟过期）。' },
-  { icon: <Sparkles size={14} strokeWidth={1.8} />, tag: '完善', name: '继续完善', desc: '结果不满意 → 点「继续完善」→ 输入新诉求，Moon 重新调整再生成。' },
+  { icon: <Sparkles size={14} strokeWidth={1.8} />, tag: '完善', name: '继续完善', desc: '结果不满意 → 点「继续完善」→ 输入新诉求，多智能体重新调整再生成。' },
 ];
 
-/** 计划模式（HITL）四步：理解 → 方案 → 人工确认 → 执行 */
+/** 多智能体协作四步：理解 → 编排 → 人工确认 → 执行 */
 const PLAN_STEPS = [
-  { name: '理解意图', desc: '识别你要的是分镜 / 图片 / 视频 / 删除分镜，还是闲聊。' },
-  { name: '出方案', desc: '给出方案并预选模型参数 + 推荐理由（如「分辨率建议 768P」）。' },
-  { name: '人工确认', desc: <>弹确认卡片：确认生成 / <PenLine size={12} strokeWidth={1.8}  /> 自定义输入 / 不满意再改（30 分钟过期）。</> },
-  { name: '执行', desc: '确认后才写分镜（覆盖 / 追加 / 不生成）、生图、生视频；不确认不执行。' },
+  { name: '解析意图', desc: '识别你要的是分镜、图片、视频、删除分镜，还是围绕文档协作。' },
+  { name: '任务编排', desc: '由多智能体拆解任务，给出方案并预选模型参数与推荐理由。' },
+  { name: '人工确认', desc: <>关键节点弹确认卡片：确认生成 / <PenLine size={12} strokeWidth={1.8}  /> 自定义输入 / 不满意再改。</> },
+  { name: '受控执行', desc: '确认后才写分镜、生图、生视频；执行结果可回看、可继续调整。' },
 ];
 
 const CONV_POINTS = [
-  { name: '新建对话', desc: '会话栏顶部「+ 新建对话」，一个项目可开多个独立会话。' },
+  { name: '新建协作会话', desc: '会话栏顶部「+ 新建对话」，一个项目可并行多个独立协作会话。' },
   { name: '归档 / 恢复', desc: <>会话项 <Archive size={12} strokeWidth={1.8}  /> 归档，归档后可切换「<Archive size={12} strokeWidth={1.8}  /> 已归档」查看并恢复。</> },
   { name: '重命名 / 删除', desc: <><Pencil size={12} strokeWidth={1.8}  /> 重命名，<Trash2 size={12} strokeWidth={1.8}  /> 删除（不可撤销）。</> },
   { name: '清除聊天记录', desc: <>对话区右上「<Eraser size={12} strokeWidth={1.8}  /> 清除聊天记录」，重置 AI 上下文，产出素材保留。</> },
@@ -834,8 +834,8 @@ const FAQS = [
   { q: '上传参考图后分镜更准吗？', a: '是的。理解模型会先「看图」，把画面风格 / 内容提炼进描述，再结合你的提示词生成分镜。' },
   { q: '视频生成要多久？', a: '通常 2~5 分钟。生成期间可切换其他镜头继续操作，进度会自动恢复。' },
   { q: '生成图片想调整？', a: <>点「<Sparkles size={12} strokeWidth={1.8}  /> 完善图片」，输入修改诉求即可在原图基础上改。</> },
-  { q: 'Moon 智能体和手动生成冲突吗？', a: 'Moon 生成分镜后，手动剧本输入会暂时禁用（避免覆盖），刷新页面可恢复。' },
-  { q: '如何用参考图生图 / 生视频？', a: '图片参数区勾选「参考图生图」上传参考图；或在 Moon 上传参考图后让它图生图 / 图生视频。' },
+  { q: '多智能体协作和手动生成冲突吗？', a: '多智能体写入分镜后，手动剧本输入会暂时禁用（避免覆盖），刷新页面可恢复。' },
+  { q: '如何用参考图生图 / 生视频？', a: '图片参数区勾选「参考图生图」上传参考图；或在协作工作台上传参考图后让它图生图 / 图生视频。' },
   { q: '同一个人物在不同分镜里长得不一样？', a: '把它建成「AI资产库 · 人物」资产（多图 + 文字约束），再在分镜里关联，生成时会自动注入，保证全片一致。' },
 ];
 
@@ -901,7 +901,7 @@ export function DocsPage() {
       <nav className="docs-nav">
         <a className="docs-nav__brand" href={primaryAppPath} style={{ display: 'flex', alignItems: 'center' }}>
           <ParticleText
-            text="AlphaSunflower"
+            text="AIGC"
             particleSize={2}
             density={2}
             color="#141413"
@@ -913,7 +913,7 @@ export function DocsPage() {
             glow={false}
             style={{ width: 168, height: 28 }}
           />
-          <span>AI分镜</span>
+          <span>分镜系统</span>
         </a>
         <Magnet padding={60} magnetStrength={25}>
           <SpecularButton
@@ -949,11 +949,11 @@ export function DocsPage() {
           />
         </div>
         <div className="docs-hero__inner">
-          <div className="docs-hero__eyebrow">AI 分镜 · 使用指南</div>
+          <div className="docs-hero__eyebrow">多智能体协作 · 全流程可控 · 使用指南</div>
           <TextType
             as="h1"
             className="docs-hero__title"
-            text="把故事，变成一帧帧画面"
+            text="从剧本到成片，每一步都可控"
             typingSpeed={60}
             initialDelay={200}
             pauseDuration={4000}
@@ -962,7 +962,7 @@ export function DocsPage() {
             cursorCharacter="|"
           />
           <p className="docs-hero__sub">
-            输入剧本，AI 自动拆解分镜；逐镜生成图片与视频，或切换到 /chat 与 Moon 智能体对话式创作。本指南覆盖全部核心功能，三分钟上手。
+            多智能体协同完成剧本理解、分镜编排、图像与视频生成；关键节点由你确认，执行结果可回看、可调整。本指南覆盖完整协作流程与核心功能。
           </p>
           <div className="docs-hero__cta">
             <Magnet padding={70} magnetStrength={25}>
@@ -978,7 +978,7 @@ export function DocsPage() {
                 thickness={1.2}
                 onClick={() => navigate(primaryAppPath)}
               >
-                进入编辑器
+                进入创作工作台
               </SpecularButton>
             </Magnet>
             {!embedded && (
@@ -994,12 +994,12 @@ export function DocsPage() {
                   thickness={1.2}
                   onClick={() => navigate('/chat')}
                 >
-                  Moon 对话
+                  多智能体协作
                 </SpecularButton>
               </Magnet>
             )}
           </div>
-          <div className="docs-hero__hint">登录后即可开始 · 无需额外配置</div>
+          <div className="docs-hero__hint">多智能体协作 · 关键节点人工确认 · 结果可追溯</div>
         </div>
       </header>
 
@@ -1009,9 +1009,9 @@ export function DocsPage() {
           <div className="docs-split docs-split--wide-left" style={{ alignItems: 'center' }}>
             <div>
               <div className="docs-section__eyebrow">核心能力</div>
-              <h2 className="docs-section__title">一块画布，六种能力</h2>
+              <h2 className="docs-section__title">六项能力，一套可控流程</h2>
               <p className="docs-section__lead">
-                从剧本拆解分镜，到生成图片与视频，再到 Moon 智能体对话式创作——核心能力全在这一套工作流里。点击右侧卡片可跳到对应讲解。
+                从剧本理解与分镜编排，到图像、视频和资产一致性控制，核心能力由多智能体协同串联。点击右侧卡片可跳到对应讲解。
               </p>
               <div className="docs-points" style={{ marginTop: 'var(--space-lg)' }}>
                 {FEATURES.map((f, i) => (
@@ -1038,7 +1038,7 @@ export function DocsPage() {
                   if (anchor) document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
               >
-                {/* 卡 1：AI 分镜 → 剧本输入面板 */}
+                {/* 卡 1：智能分镜规划 → 剧本输入面板 */}
                 <Card style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'pointer', background: 'var(--color-canvas)' }}>
                   <CardBar title="剧本输入" />
                   <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
@@ -1084,9 +1084,9 @@ export function DocsPage() {
                   </div>
                 </Card>
 
-                {/* 卡 4：Moon 智能体 → 对话示意 */}
+                {/* 卡 4：多智能体协作 → 对话示意 */}
                 <Card style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', cursor: 'pointer', background: 'var(--color-canvas)' }}>
-                  <CardBar title="Moon 智能体" />
+                  <CardBar title="多智能体协作" />
                   <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                     <div style={{ maxWidth: '85%', marginLeft: 'auto', padding: '7px 10px', borderRadius: 8, background: 'var(--color-primary)', color: '#fff', fontSize: 11, lineHeight: 1.5 }}>把这段剧本生成 8 个分镜</div>
                     <div style={{ maxWidth: '85%', padding: '7px 10px', borderRadius: 8, background: 'var(--color-surface-card)', color: 'var(--color-body)', fontSize: 11, lineHeight: 1.5 }}>好的，这是分镜方案，确认后写入分镜列表。</div>
@@ -1149,7 +1149,7 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">界面总览</div>
             <h2 className="docs-section__title">一个三栏工作台</h2>
             <p className="docs-section__lead">
-              整个编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，右下角保留 <Zap size={12} strokeWidth={1.8}  /> 生成中心；Moon 智能体集中在 /chat 独立对话页。
+              编辑器由「剧本输入 → 分镜列表 → 预览」三栏组成，负责精细调整与逐镜执行；多智能体协作统一在 /chat，生成任务由右下角 <Zap size={12} strokeWidth={1.8}  /> 生成中心统一跟踪。
             </p>
           </div>
           <div className="docs-split">
@@ -1158,7 +1158,7 @@ export function DocsPage() {
                 { name: '左侧 · 剧本输入', desc: '创作类型、剧本 / 描述、参考图上传、生图 / 生视频 / 理解模型，以及历史项目。' },
                 { name: '中间 · 分镜列表', desc: 'AI 拆解出的分镜镜头，点击切换，可增删镜头。' },
                 { name: '右侧 · 预览', desc: '查看剧本、填写提示词、调整参数、生成图片与视频。' },
-                { name: '右下角 · 生成中心', desc: <><Zap size={12} strokeWidth={1.8}  /> 聚合进行中的生成任务；Moon 智能体请前往 /chat。</> },
+                { name: '右下角 · 生成中心', desc: <><Zap size={12} strokeWidth={1.8}  /> 聚合进行中的生成任务；多智能体协作请前往 /chat。</> },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1173,7 +1173,7 @@ export function DocsPage() {
               <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 340 }}>
                 {/* 顶栏 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 10px', borderBottom: '1px solid var(--color-hairline)', background: '#fff' }}>
-                  <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--color-primary)', whiteSpace: 'nowrap' }}>AlphaSunflower AI分镜</span>
+                  <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--color-primary)', whiteSpace: 'nowrap' }}>AIGC 分镜系统</span>
                   <span style={{ ...mChip, background: 'transparent', border: '1px solid var(--color-primary)', padding: '1px 8px' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Save size={12} strokeWidth={1.8} /> 保存</span></span>
                   <span style={{ ...mChip, cursor: 'default' }}>我的短片项目 ▾</span>
                   <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--color-muted)' }}>使用文档</span>
@@ -1247,9 +1247,9 @@ export function DocsPage() {
         <div className="docs-container" data-reveal>
           <div className="docs-section__head">
             <div className="docs-section__eyebrow">手动生成分镜</div>
-            <h2 className="docs-section__title">先拆剧本，再逐镜成片</h2>
+            <h2 className="docs-section__title">需要精细控制时，也可以手动分镜</h2>
             <p className="docs-section__lead">
-              不依赖智能体也能生成分镜：写剧本、选类型、上传参考图，AI 会「看图 + 读剧本」生成更贴合的分镜。
+              写剧本、选类型、上传参考图后，可手动触发分镜生成；AI 会结合图片理解与剧本内容产出镜头，之后仍可逐镜调整。
             </p>
           </div>
           <div className="docs-split docs-split--wide-left">
@@ -1372,7 +1372,7 @@ export function DocsPage() {
             <div className="docs-section__eyebrow">AI资产库</div>
             <h2 className="docs-section__title">锁定人物长相，跨镜不漂移</h2>
             <p className="docs-section__lead">
-              同一人物在不同分镜里长相漂移、道具外观忽变，是 AI 分镜最常见的穿帮。AI资产库把「人物 / 道具 / 场景」做成一张张「图片 + 文字约束」的卡片，
+              同一人物在不同分镜里长相漂移、道具外观忽变，是 AIGC 分镜制作中最常见的穿帮。AI资产库把「人物 / 道具 / 场景」做成一张张「图片 + 文字约束」的卡片，
               生成时自动注入，用「图锁长相 + 文字锁构成」两层硬约束，保证全片一致。
             </p>
           </div>
@@ -1544,7 +1544,7 @@ export function DocsPage() {
               {[
                 { name: '角标数字', desc: <><Zap size={12} strokeWidth={1.8}  /> 球右上角的红点数字 = 当前进行中的任务数。</> },
                 { name: '进度条', desc: '视频任务显示实时进度百分比，生成完自动消失。' },
-                { name: '点击跳转', desc: '点任务项 → 分镜任务跳转到对应镜头；智能体任务打开 Moon 抽屉。' },
+                { name: '点击跳转', desc: '点任务项 → 分镜任务跳转到对应镜头；智能体任务打开协作工作台。' },
               ].map((p, i) => (
                 <div className="docs-point" key={p.name}>
                   <div className="docs-point__num">{i + 1}</div>
@@ -1594,17 +1594,15 @@ export function DocsPage() {
         </div>
       </section>
 
-      {/* Moon 智能体 */}
+      {/* 多智能体协作 */}
       <section className="docs-section docs-section--alt" id="moon">
         <div className="docs-container" data-reveal>
           <div className="docs-section__head">
-            <div className="docs-section__eyebrow">Moon 智能体</div>
-            <h2 className="docs-section__title">对话，就能创作</h2>
+            <div className="docs-section__eyebrow">多智能体协作</div>
+            <h2 className="docs-section__title">从意图到执行，全程可控</h2>
             <p className="docs-section__lead">
-              Moon 采用「计划模式」：先理解你的需求 → 给出方案并预选参数 → 弹确认卡片由你拍板 → 确认后才执行，不确认不执行。
-              分镜、图片、视频都能生成，图生图 / 文生图 / 图生视频 / 文生视频、清空分镜、人工介入、继续完善，全在这里。
-              进入 /chat 独立对话页即可使用 Moon：支持全文+标题搜索（侧栏放大镜）、Markdown 渲染、
-              输入框聚焦光晕、以及右上角「应用」悬浮窗（画布 / 分镜编辑器 / 使用文档）。
+              多智能体先解析你的目标，再编排分镜、图像、视频等任务并给出方案；关键节点由你确认后执行，不确认不执行。
+              协作过程支持文档问答、参考图、分镜方案调整、继续完善与结果回看。进入 /chat 即可使用完整体验。
             </p>
           </div>
 
@@ -1639,7 +1637,7 @@ export function DocsPage() {
                 生成结果在右下角「生成中心」统一查看、预览和删除。
               </div>
             </div>
-            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体 · 对话示意（试试确认 / 再改 / 发送）</span>>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作 · 对话示意（试试确认 / 再改 / 发送）</span>>
               <DemoMoonChat />
             </MockWindow>
           </div>
@@ -1659,7 +1657,7 @@ export function DocsPage() {
                   { id: 2, title: '图生图 · 参考图改图', content: <DemoImagePanel i2i /> },
                   { id: 3, title: '图生视频 · 参考图作首帧', content: <DemoVideoPanel i2v /> },
                   { id: 4, title: '文生视频 · 描述 → 方案 → 确认', content: <DemoVideoPanel /> },
-                  { id: 5, title: 'AI 分镜 · 覆盖 / 追加 / 不生成 / 清空', content: <DemoMoonScenes /> },
+                  { id: 5, title: '分镜方案 · 覆盖 / 追加 / 不生成 / 清空', content: <DemoMoonScenes /> },
                 ]}
               />
             </div>
@@ -1667,13 +1665,13 @@ export function DocsPage() {
         </div>
       </section>
 
-      {/* Moon 会话管理 */}
+      {/* 多智能体会话管理 */}
       <section className="docs-section">
         <div className="docs-container" data-reveal>
           <div className="docs-section__head">
             <div className="docs-section__eyebrow">会话管理</div>
-            <h2 className="docs-section__title">一个项目，多个对话</h2>
-            <p className="docs-section__lead">Moon 抽屉左侧是会话栏：新建对话、归档、重命名、删除，一个项目可并行多个独立会话。</p>
+            <h2 className="docs-section__title">一个项目，多个协作会话</h2>
+            <p className="docs-section__lead">协作工作台左侧是会话栏：新建对话、归档、重命名、删除，一个项目可并行多个独立协作会话。</p>
           </div>
           <div className="docs-split">
             <div className="docs-points">
@@ -1687,9 +1685,9 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon · 会话栏</span> light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体 · 协作会话</span> light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> Moon 智能体</span></div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作</span></div>
                 <div style={{ padding: '6px', border: '1px dashed var(--color-hairline)', borderRadius: 6, fontSize: 11, color: 'var(--color-primary)', textAlign: 'center' }}>+ 新建对话</div>
                 <div style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Archive size={12} strokeWidth={1.8} /> 已归档</span></div>
                 <div style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)', fontSize: 11, color: 'var(--color-ink)', display: 'flex', justifyContent: 'space-between' }}>
@@ -1737,10 +1735,10 @@ export function DocsPage() {
                 gap: 6,
               }}
             >
-              AlphaSunflower <span style={{ color: 'var(--color-primary)' }}>AI 分镜</span>
+              AIGC <span style={{ color: 'var(--color-primary)' }}>分镜系统</span>
             </span>
           </div>
-          <div className="docs-footer__text">从剧本到分镜，再到图片与视频——让每个故事都拥有画面。</div>
+          <div className="docs-footer__text">多智能体协作，全流程可控。从剧本到成片，每一步可确认、可调整、可追溯。</div>
         </div>
       </footer>
     </div>

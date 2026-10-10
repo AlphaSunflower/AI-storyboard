@@ -1,6 +1,7 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.agentscope.AgentScopeAsyncTaskService;
 import com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
@@ -141,7 +142,8 @@ class MoonAgentControllerSmokeTest {
         when(chatService.listAssets(anyString(), anyInt(), anyInt()))
             .thenReturn(Map.of("records", List.of(), "total", 0));
         when(chatService.uploadReferenceImage(anyString(), any(), any(), any(), any()))
-            .thenReturn("/api/files/images/x.png");
+            .thenReturn(new AgentReferenceUpload(
+                    "asset-1", "/api/files/images/x.png", "a.png", "image/png", 1L));
         when(chatService.confirmImageDone(anyString(), anyString())).thenReturn(true);
         when(chatService.interrupt(anyString(), anyString())).thenReturn(true);
         when(chatService.getVideoTaskStatus(anyString(), anyString())).thenReturn(Map.of("status", "processing"));
@@ -181,6 +183,10 @@ class MoonAgentControllerSmokeTest {
                 .file(new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}))
                 .header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.url").value("/api/files/images/x.png"));
+        mockMvc.perform(multipart("/api/agent/upload")
+                .file(new MockMultipartFile("file", "a.png", "image/png", new byte[]{1}))
+                .header("X-User-Id", "u1"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.assetId").value("asset-1"));
         mockMvc.perform(post("/api/agent/prompt/optimize").header("X-User-Id", "u1")
                 .contentType("application/json").content("{\"content\":\"一段足够长的内容\"}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.optimized").value("优化后的提示词"));

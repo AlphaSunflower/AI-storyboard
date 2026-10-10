@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -57,19 +58,38 @@ public class AgentTurnEventStore {
     }
 
     public AgentTurnEventEnvelope append(String turnId, String type, Object payload) {
-        Integer sequence = turnMapper.incrementSequence(turnId);
-        if (sequence == null) {
+        return appendBatch(turnId, List.of(new EventDraft(type, payload))).getFirst();
+    }
+
+    @Transactional
+    public List<AgentTurnEventEnvelope> appendBatch(String turnId, List<EventDraft> drafts) {
+        if (turnId == null || turnId.isBlank() || drafts == null || drafts.isEmpty()) {
+            return List.of();
+        }
+        Integer lastSequence = turnMapper.incrementSequenceBy(turnId, drafts.size());
+        if (lastSequence == null) {
             throw new IllegalArgumentException("turn not found: " + turnId);
         }
-        AgentTurnEventEntity event = new AgentTurnEventEntity();
-        event.setTurnId(turnId);
-        event.setSequence(sequence);
-        event.setEventType(type);
-        event.setPayload(toJson(payload));
-        event.setCreatedAt(OffsetDateTime.now());
-        eventMapper.insert(event);
-
-        return new AgentTurnEventEnvelope(turnId, sequence, type, payloadMap(payload));
+        int firstSequence = lastSequence - drafts.size() + 1;
+        OffsetDateTime now = OffsetDateTime.now();
+        List<AgentTurnEventEntity> events = new java.util.ArrayList<>(drafts.size());
+        List<AgentTurnEventEnvelope> envelopes = new java.util.ArrayList<>(drafts.size());
+        for (int index = 0; index < drafts.size(); index++) {
+            EventDraft draft = drafts.get(index);
+            int sequence = firstSequence + index;
+            String payloadJson = toJson(draft.payload());
+            AgentTurnEventEntity event = new AgentTurnEventEntity();
+            event.setTurnId(turnId);
+            event.setSequence(sequence);
+            event.setEventType(draft.type());
+            event.setPayload(payloadJson);
+            event.setCreatedAt(now);
+            events.add(event);
+            envelopes.add(new AgentTurnEventEnvelope(
+                    turnId, sequence, draft.type(), payloadMap(draft.payload()), payloadJson));
+        }
+        eventMapper.insertBatch(events);
+        return List.copyOf(envelopes);
     }
 
     public AgentTurnEntity find(String turnId) {
@@ -137,8 +157,12 @@ public class AgentTurnEventStore {
                         turnId,
                         event.getSequence(),
                         event.getEventType(),
-                        fromJson(event.getPayload())))
+                        fromJson(event.getPayload()),
+                        event.getPayload()))
                 .toList();
+    }
+
+    public record EventDraft(String type, Object payload) {
     }
 
     private static String toJson(Object payload) {

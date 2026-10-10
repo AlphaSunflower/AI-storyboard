@@ -1,6 +1,6 @@
 .generation-center {
   position: fixed;
-  right: 20px;
+  right: 0;
   bottom: 104px;
   z-index: 130;
   display: flex;
@@ -29,6 +29,16 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   transition: border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.3s ease;
   touch-action: none;
+}
+
+/* 收起时只露出右边缘；悬浮、键盘聚焦或拖拽时完整滑出。 */
+.generation-center.is-collapsed:not(.is-dragging) .generation-center__trigger {
+  transform: translateX(46px);
+}
+
+.generation-center.is-collapsed:not(.is-dragging) .generation-center__trigger:hover,
+.generation-center.is-collapsed:not(.is-dragging) .generation-center__trigger:focus-visible {
+  transform: translateX(0);
 }
 
 .generation-center__trigger:hover,
@@ -458,6 +468,16 @@
 
   .generation-center__panel {
     max-height: min(620px, calc(100vh - 152px));
+  }
+}
+
+@media (hover: none) {
+  .generation-center {
+    right: 12px;
+  }
+
+  .generation-center.is-collapsed:not(.is-dragging) .generation-center__trigger {
+    transform: none;
   }
 }
 

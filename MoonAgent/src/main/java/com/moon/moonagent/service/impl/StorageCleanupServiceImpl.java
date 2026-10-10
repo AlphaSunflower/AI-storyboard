@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
@@ -38,6 +39,11 @@ public class StorageCleanupServiceImpl implements StorageCleanupService {
             task.setUpdatedAt(OffsetDateTime.now());
             mapper.insert(task);
         } catch (Exception error) {
+            if (error instanceof DuplicateKeyException
+                    || error.getCause() instanceof DuplicateKeyException) {
+                log.debug("storage cleanup duplicate ignored objectUrl={}", objectUrl);
+                return;
+            }
             log.warn("enqueue storage cleanup failed objectUrl={} error={}", objectUrl, error.getMessage());
         }
     }
@@ -55,19 +61,31 @@ public class StorageCleanupServiceImpl implements StorageCleanupService {
                 .le(StorageCleanupTask::getNextAttemptAt, OffsetDateTime.now())
                 .orderByAsc(StorageCleanupTask::getCreatedAt)
                 .last("LIMIT 50"));
+        List<String> completedIds = new java.util.ArrayList<>();
+        List<StorageCleanupTask> retried = new java.util.ArrayList<>();
         for (StorageCleanupTask task : tasks) {
             try {
                 deleteObject(task.getObjectUrl());
                 task.setStatus("completed");
                 task.setLastError(null);
+                completedIds.add(task.getId());
             } catch (Exception error) {
                 int attempts = task.getAttempts() == null ? 0 : task.getAttempts();
                 task.setAttempts(attempts + 1);
                 task.setLastError(error.getMessage());
                 task.setStatus(attempts >= 7 ? "failed" : "pending");
                 task.setNextAttemptAt(OffsetDateTime.now().plusMinutes(Math.min(60, 1L << attempts)));
+                retried.add(task);
             }
-            task.setUpdatedAt(OffsetDateTime.now());
+        }
+        if (!completedIds.isEmpty()) {
+            mapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<StorageCleanupTask>()
+                    .in("id", completedIds)
+                    .set("status", "completed")
+                    .set("last_error", null)
+                    .set("updated_at", OffsetDateTime.now()));
+        }
+        for (StorageCleanupTask task : retried) {
             mapper.updateById(task);
         }
     }

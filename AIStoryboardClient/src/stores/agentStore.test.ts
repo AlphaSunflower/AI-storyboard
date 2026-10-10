@@ -133,6 +133,142 @@ describe('agentStore createConversation', () => {
   });
 });
 
+describe('agentStore side chat', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      sideChat: {
+        open: false,
+        loading: false,
+        focusToken: 0,
+        sourceConversationId: null,
+        sourceTitle: '',
+        projectId: null,
+        conversationId: null,
+        error: null,
+      },
+    });
+  });
+
+  it('creates an in-memory temporary branch from the active conversation', async () => {
+    const sideConversation: AgentConversation = {
+      id: 'side-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '侧边 · 主对话',
+      status: 'temporary',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const createSideChat = vi.spyOn(agentApi, 'createSideChat')
+      .mockResolvedValue({ data: { data: sideConversation } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      sideChat: {
+        open: false,
+        loading: false,
+        focusToken: 0,
+        sourceConversationId: null,
+        sourceTitle: '',
+        projectId: null,
+        conversationId: null,
+        error: null,
+      },
+    });
+
+    await useAgentStore.getState().openSideChat('conversation-1', '主对话');
+
+    expect(createSideChat).toHaveBeenCalledWith('conversation-1');
+    expect(useAgentStore.getState().sideChat).toMatchObject({
+      open: true,
+      loading: false,
+      sourceConversationId: 'conversation-1',
+      sourceTitle: '主对话',
+      projectId: 'project-1',
+      conversationId: 'side-1',
+      error: null,
+    });
+  });
+
+  it('retries after temporary-branch creation failed', async () => {
+    const sideConversation: AgentConversation = {
+      id: 'side-retry',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '侧边 · 主对话',
+      status: 'temporary',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const createSideChat = vi.spyOn(agentApi, 'createSideChat')
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce({ data: { data: sideConversation } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      sideChat: {
+        open: false,
+        loading: false,
+        focusToken: 0,
+        sourceConversationId: null,
+        sourceTitle: '',
+        projectId: null,
+        conversationId: null,
+        error: null,
+      },
+    });
+
+    await useAgentStore.getState().openSideChat('conversation-1', '主对话');
+    expect(useAgentStore.getState().sideChat.error).toBe('侧边创建失败，请重试');
+    await useAgentStore.getState().openSideChat('conversation-1', '主对话');
+
+    expect(createSideChat).toHaveBeenCalledTimes(2);
+    expect(useAgentStore.getState().sideChat.conversationId).toBe('side-retry');
+    expect(useAgentStore.getState().sideChat.error).toBeNull();
+  });
+
+  it('discards a temporary branch created after the panel was closed', async () => {
+    const sideConversation: AgentConversation = {
+      id: 'side-late',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '侧边 · 主对话',
+      status: 'temporary',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    let resolveCreate!: (value: unknown) => void;
+    const createSideChat = vi.spyOn(agentApi, 'createSideChat')
+      .mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }) as never);
+    const closeSideChat = vi.spyOn(agentApi, 'closeSideChat')
+      .mockResolvedValue(undefined as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      sideChat: {
+        open: false,
+        loading: false,
+        focusToken: 0,
+        sourceConversationId: null,
+        sourceTitle: '',
+        projectId: null,
+        conversationId: null,
+        error: null,
+      },
+    });
+
+    const opening = useAgentStore.getState().openSideChat('conversation-1', '主对话');
+    await useAgentStore.getState().closeSideChat();
+    resolveCreate({ data: { data: sideConversation } });
+    await opening;
+
+    expect(createSideChat).toHaveBeenCalledTimes(1);
+    expect(closeSideChat).toHaveBeenCalledWith('side-late');
+    expect(useAgentStore.getState().sideChat.open).toBe(false);
+    expect(useAgentStore.getState().sideChat.conversationId).toBeNull();
+  });
+});
+
 describe('agentStore approval mode', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -287,8 +423,22 @@ describe('agentStore background tasks', () => {
 
   it('refreshes messages when a long task settles without a wakeup event', async () => {
     vi.useFakeTimers();
-    const listMessages = vi.spyOn(agentApi, 'listMessages')
-      .mockResolvedValue({ data: { data: [] } } as never);
+    const listMessages = vi.spyOn(agentApi, 'listMessagesPage')
+      .mockResolvedValue({
+        data: {
+          data: {
+            records: [{
+              id: 'm1',
+              conversationId: 'conversation-1',
+              role: 'assistant',
+              content: 'ok',
+              createdAt: new Date().toISOString(),
+            }],
+            nextCursor: null,
+            hasMore: false,
+          },
+        },
+      } as never);
     useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: false });
 
     useAgentStore.getState().upsertTask(task({ version: 1 }));
@@ -299,15 +449,15 @@ describe('agentStore background tasks', () => {
     }));
     await vi.runOnlyPendingTimersAsync();
 
-    expect(listMessages).toHaveBeenCalledWith('conversation-1');
+    expect(listMessages).toHaveBeenCalledWith('conversation-1', undefined);
     listMessages.mockRestore();
     vi.useRealTimers();
   });
 
   it('does not overwrite in-flight streaming messages when a task settles mid-turn', async () => {
     vi.useFakeTimers();
-    const listMessages = vi.spyOn(agentApi, 'listMessages')
-      .mockResolvedValue({ data: { data: [] } } as never);
+    const listMessages = vi.spyOn(agentApi, 'listMessagesPage')
+      .mockResolvedValue({ data: { data: { records: [], nextCursor: null, hasMore: false } } } as never);
     useAgentStore.setState({ activeConversationId: 'conversation-1', streaming: true });
 
     useAgentStore.getState().upsertTask(task({ version: 1 }));
@@ -571,6 +721,7 @@ describe('agentStore message metrics', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
     const attachments = [{
+      assetId: 'asset-reference-1',
       url: '/api/files/images/reference.png',
       name: 'reference.png',
       mimeType: 'image/png',
@@ -600,6 +751,94 @@ describe('agentStore message metrics', () => {
     expect(requestBody.attachments).toEqual(attachments);
     expect(useAgentStore.getState().messages.find((message) => message.role === 'user')?.metadata?.messageInput?.attachments)
       .toEqual(attachments);
+  });
+
+  it('persists the uploaded document assetId on the pending attachment', async () => {
+    vi.spyOn(agentApi, 'uploadImage').mockResolvedValue({
+      data: {
+        data: {
+          assetId: 'asset-doc-1',
+          url: '/api/files/files/brief.md',
+          name: 'brief.md',
+          mimeType: 'text/markdown',
+          sizeBytes: 42,
+        },
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      pendingAttachments: [],
+    });
+
+    await useAgentStore.getState().uploadRefImage(
+      new File(['# 标题'], 'brief.md', { type: 'text/markdown' }),
+      '剧本参考',
+    );
+
+    expect(useAgentStore.getState().pendingAttachments).toEqual([
+      expect.objectContaining({
+        assetId: 'asset-doc-1',
+        url: '/api/files/files/brief.md',
+        kind: 'file',
+      }),
+    ]);
+  });
+});
+
+describe('agentStore turn replay', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+    });
+  });
+
+  it('finishes generation when replay reaches turn_completed', async () => {
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [{
+          turnId: 'turn-replay-terminal',
+          seq: 1,
+          type: 'turn_completed',
+          payload: { content: '最终回复' },
+        }],
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-replay',
+      streaming: true,
+      pendingAssistantId: 'assistant-replay',
+      generating: {
+        'conversation-replay': {
+          hint: '',
+          turnId: 'turn-replay-terminal',
+          assistantId: 'assistant-replay',
+          assistantContent: '',
+          finished: false,
+        },
+      },
+      messages: [{
+        id: 'assistant-replay',
+        conversationId: 'conversation-replay',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    });
+
+    await useAgentStore.getState().replayTurnEvents(
+      'conversation-replay',
+      'turn-replay-terminal',
+      0,
+    );
+
+    expect(useAgentStore.getState().streaming).toBe(false);
+    expect(useAgentStore.getState().pendingAssistantId).toBeNull();
+    expect(useAgentStore.getState().generating['conversation-replay']).toBeUndefined();
   });
 });
 
@@ -898,15 +1137,19 @@ describe('agentStore detached async tasks', () => {
       headers: { 'Content-Type': 'text/event-stream' },
     }));
     vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
       data: {
-        data: [{
-          id: 'user-db',
-          conversationId: 'conversation-1',
-          role: 'user',
-          content: '原始问题',
-          createdAt: new Date().toISOString(),
-        }],
+        data: {
+          records: [{
+            id: 'user-db',
+            conversationId: 'conversation-1',
+            role: 'user',
+            content: '原始问题',
+            createdAt: new Date().toISOString(),
+          }],
+          nextCursor: null,
+          hasMore: false,
+        },
       },
     } as never);
     resetStore();
@@ -1023,6 +1266,31 @@ describe('AgentScope turn envelope reduction', () => {
     expect(sequencer.accept(second).map((event) => event.seq)).toEqual([2, 3]);
     expect(sequencer.accept(second)).toEqual([]);
     expect(sequencer.lastSeq('seq-test')).toBe(3);
+  });
+
+  it('labels the active runtime as MoonAgent in the conversation UI', () => {
+    const turnId = 'runtime-label';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().workflowHint).toBe('MoonAgent 正在处理');
   });
 
   it('keeps the live reasoning summary on finished sentences only', () => {
@@ -1175,16 +1443,20 @@ describe('AgentScope turn envelope reduction', () => {
       },
     } as never);
     vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: null } } as never);
-    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
       data: {
-        data: [{
-          id: 'assistant-recovered',
-          conversationId: 'conversation-1',
-          role: 'assistant',
-          content: '已恢复',
-          createdAt: new Date().toISOString(),
-          metadata: {},
-        }],
+        data: {
+          records: [{
+            id: 'assistant-recovered',
+            conversationId: 'conversation-1',
+            role: 'assistant',
+            content: '已恢复',
+            createdAt: new Date().toISOString(),
+            metadata: {},
+          }],
+          nextCursor: null,
+          hasMore: false,
+        },
       },
     } as never);
     useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });

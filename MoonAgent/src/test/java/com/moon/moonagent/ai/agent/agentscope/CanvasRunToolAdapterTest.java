@@ -38,7 +38,7 @@ class CanvasRunToolAdapterTest {
                 "{\"ok\":true,\"revision\":2,\"nodeCount\":1,\"edgeCount\":0,\"progress\":40}");
         AgentCanvasRunService runs = mock(AgentCanvasRunService.class);
         when(runs.findOperationResult("run-1", "run-1:call-1")).thenReturn(null);
-        when(runs.rememberOperation(eq("run-1"), eq("run-1:call-1"), any()))
+        when(runs.recordGraphResult(eq("run-1"), eq("run-1:call-1"), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         turnState.setActiveCanvasRun("run-1", "canvas-1");
@@ -70,7 +70,7 @@ class CanvasRunToolAdapterTest {
                 .containsEntry("canvasId", "canvas-1")
                 .containsEntry("runId", "run-1")
                 .containsEntry("operationKey", "run-1:call-1");
-        verify(runs).updateFromGraphResult(eq("run-1"), any());
+        verify(runs).recordGraphResult(eq("run-1"), eq("run-1:call-1"), any());
     }
 
     @Test
@@ -88,7 +88,7 @@ class CanvasRunToolAdapterTest {
                 "canvas-1", "画布", "running", 30,
                 2, 1, 4, List.of(), null, OffsetDateTime.now(), null));
         when(runs.findOperationResult("run-1", "run-1:call-1")).thenReturn(null);
-        when(runs.rememberOperation(eq("run-1"), eq("run-1:call-1"), any()))
+        when(runs.recordGraphResult(eq("run-1"), eq("run-1:call-1"), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         OrchestrationRequest request = new OrchestrationRequest(
@@ -135,7 +135,7 @@ class CanvasRunToolAdapterTest {
                         + "\\\"nodeCount\\\":3,\\\"edgeCount\\\":2,\\\"progress\\\":65}\"}]");
         AgentCanvasRunService runs = mock(AgentCanvasRunService.class);
         when(runs.findOperationResult("run-1", "run-1:call-1")).thenReturn(null);
-        when(runs.rememberOperation(eq("run-1"), eq("run-1:call-1"), any()))
+        when(runs.recordGraphResult(eq("run-1"), eq("run-1:call-1"), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         turnState.setActiveCanvasRun("run-1", "canvas-1");
@@ -158,7 +158,7 @@ class CanvasRunToolAdapterTest {
         adapter.callAsync(param).block();
 
         var resultCaptor = org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(runs).updateFromGraphResult(eq("run-1"), resultCaptor.capture());
+        verify(runs).recordGraphResult(eq("run-1"), eq("run-1:call-1"), resultCaptor.capture());
         assertThat(resultCaptor.getValue())
                 .containsEntry("revision", 7)
                 .containsEntry("nodeCount", 3)

@@ -16,5 +16,14 @@ public interface AgentTurnMapper extends BaseMapper<AgentTurnEntity> {
             RETURNING last_sequence
             """)
     Integer incrementSequence(@Param("turnId") String turnId);
+
+    @Select("""
+            UPDATE public.agent_turns
+            SET last_sequence = last_sequence + #{count}
+            WHERE id = #{turnId}
+            RETURNING last_sequence
+            """)
+    Integer incrementSequenceBy(@Param("turnId") String turnId,
+                                @Param("count") int count);
 }
 

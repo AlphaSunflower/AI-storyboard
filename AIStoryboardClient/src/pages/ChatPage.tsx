@@ -30,6 +30,8 @@ import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
+import { shouldShowFirstRunHero } from '../components/agent/sideChatFrame';
+import { agentApi } from '../api/agent';
 import { Moon } from 'lucide-react';
 import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, User, LogOut, ArrowDown, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
@@ -38,6 +40,8 @@ import { usePresence } from '../hooks/usePresence';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
+import { useDocumentPreviewStore } from '../stores/documentPreviewStore';
+import { useSideChatSelectionStore } from '../stores/sideChatSelectionStore';
 import {
   buildCanvasRequestContext,
   loadCanvasEditContext,
@@ -45,8 +49,13 @@ import {
   rebindCanvasEditContext,
   resolveCanvasModePhase,
 } from '../lib/canvasEditMode';
-import type { CanvasModeReadyMessage, CanvasModeStatusMessage } from '../lib/embeddedAppMessages';
+import {
+  isSideChatContextMessage,
+  type CanvasModeReadyMessage,
+  type CanvasModeStatusMessage,
+} from '../lib/embeddedAppMessages';
 import { canvasIdFromUrl } from '../components/agent/apps/chatAppDefinitions';
+import { requestSideChatSelectionContext } from '../lib/sideChatSelectionSync';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
 import { Frame } from 'lucide-react';
@@ -111,7 +120,7 @@ export function ChatPage() {
   const setCanvasBindingStatus = useAgentStore((s) => s.setCanvasBindingStatus);
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
-    messages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
+    messages, messageHasMore, loadOlderMessages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
     confirmResult, conversations, activeConversationId,
     renameConversation, editAndResend,
   } = useAgentStore();
@@ -122,6 +131,7 @@ export function ChatPage() {
   const canEditLastTurn = !conversationReadOnly && !streaming && !waitingHumanInput && !waitingVideoPlan
     && !canvasBinding && !canvasExitPending;
   const chatApps = useChatApps(currentProject);
+  const documentPreviewAttachment = useDocumentPreviewStore((state) => state.attachment);
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
@@ -144,6 +154,9 @@ export function ChatPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
   const [embed, setEmbed] = useState(() =>
     new URLSearchParams(window.location.search).get('embed') === '1'); // iframe 紧凑模式（画布执行服务小窗）
+  const sideChatId = new URLSearchParams(window.location.search).get('sideChatId');
+  const sideProjectId = new URLSearchParams(window.location.search).get('projectId');
+  const sideChatMode = !!embed && !!sideChatId;
   const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const desktopScrollRef = useRef<HTMLDivElement>(null);
@@ -156,6 +169,10 @@ export function ChatPage() {
   const railProjectBtnRef = useRef<HTMLButtonElement>(null);
   const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
   const requestedCanvasContextRef = useRef(parseCanvasEditContext(window.location.search));
+  const sideChat = useAgentStore((state) => state.sideChat);
+  const closeSideChat = useAgentStore((state) => state.closeSideChat);
+  const sideChatRef = useRef(sideChat);
+  sideChatRef.current = sideChat;
 
   useEffect(() => {
     useAgentStore.getState().startTaskStream();
@@ -196,6 +213,7 @@ export function ChatPage() {
   const appWindowOpen = !embed && chatApps.windowOpen;
   const {
     open: openChatApp,
+    close: closeChatApp,
     tabs: chatAppTabs,
     bindCanvasMode,
     releaseCanvasMode,
@@ -334,7 +352,7 @@ export function ChatPage() {
     if (loadedRef.current) return;
     loadedRef.current = true;
     const st = useProjectStore.getState();
-    const targetProjectId = requestedCanvasContextRef.current?.projectId;
+    const targetProjectId = sideProjectId || requestedCanvasContextRef.current?.projectId;
     if (st.currentProject?.id && (!targetProjectId || st.currentProject.id === targetProjectId)) return;
     st.loadProjects()
       .then(() => {
@@ -349,7 +367,7 @@ export function ChatPage() {
         }
       })
       .catch(() => { /* 静默 */ });
-  }, []);
+  }, [sideProjectId]);
 
   // 项目切换（含首次确定）→ 清掉旧会话状态并加载该项目会话列表。
   // ProjectDropdown 选项目只更新 currentProject，不触发会话加载——这里统一兜底。
@@ -357,15 +375,114 @@ export function ChatPage() {
   useEffect(() => {
     if (!projectId) return;
     useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, replyUnread: {}, streaming: false, workflowHint: '' });
+    if (sideChatMode && sideChatId) {
+      void agentApi.getConversation(sideChatId)
+        .then((response) => {
+          const conversation = response.data.data.conversation;
+          useAgentStore.setState((state) => ({
+            conversations: [
+              conversation,
+              ...state.conversations.filter((item) => item.id !== conversation.id),
+            ],
+          }));
+          return useAgentStore.getState().selectConversation(sideChatId);
+        })
+        .catch(() => {
+          useAgentStore.setState({ streamError: '临时侧边加载失败，请关闭后重试' });
+        });
+      return;
+    }
     useAgentStore.getState().loadConversations().catch(() => { /* 静默 */ });
     useAgentStore.getState().refetchStoryboardVideoQueue(projectId).catch(() => { /* 静默 */ });
     useAgentStore.getState().refetchStoryboardImageQueue(projectId).catch(() => { /* 静默 */ });
-  }, [projectId]);
+  }, [projectId, sideChatId, sideChatMode]);
+
+  useEffect(() => {
+    if (!sideChat.open || !sideChat.sourceConversationId) return;
+    if (sideChat.sourceConversationId !== activeConversationId) {
+      void closeSideChat();
+    }
+  }, [activeConversationId, closeSideChat, sideChat.open, sideChat.sourceConversationId]);
+
+  useEffect(() => {
+    if (!sideChat.open || !sideChat.projectId || !projectId) return;
+    if (sideChat.projectId !== projectId) void closeSideChat();
+  }, [closeSideChat, projectId, sideChat.open, sideChat.projectId]);
+
+  useEffect(() => {
+    if (documentPreviewAttachment && sideChat.open) void closeSideChat();
+  }, [closeSideChat, documentPreviewAttachment, sideChat.open]);
+
+  useEffect(() => {
+    if (documentPreviewAttachment) {
+      openChatApp('document', { documentAttachment: documentPreviewAttachment });
+    } else {
+      closeChatApp('document');
+    }
+  }, [closeChatApp, documentPreviewAttachment, openChatApp]);
+
+  useEffect(() => {
+    const sideProjectId = sideChat.projectId ?? currentProject?.id;
+    if (sideChat.open && sideChat.conversationId && sideProjectId) {
+      openChatApp('side-chat', {
+        sideChat: {
+          conversationId: sideChat.conversationId,
+          projectId: sideProjectId,
+          sourceTitle: sideChat.sourceTitle,
+        },
+      });
+    } else {
+      closeChatApp('side-chat');
+    }
+  }, [
+    closeChatApp,
+    currentProject?.id,
+    openChatApp,
+    sideChat.conversationId,
+    sideChat.focusToken,
+    sideChat.open,
+    sideChat.projectId,
+    sideChat.sourceTitle,
+  ]);
+
+  useEffect(() => {
+    if (sideChat.error) useAgentStore.setState({ streamError: sideChat.error });
+  }, [sideChat.error]);
+
+  useEffect(() => {
+    const closeOnPageHide = () => {
+      if (sideChat.open && sideChat.conversationId) {
+        void closeSideChat({ keepalive: true });
+      }
+    };
+    window.addEventListener('pagehide', closeOnPageHide);
+    return () => window.removeEventListener('pagehide', closeOnPageHide);
+  }, [closeSideChat, sideChat.conversationId, sideChat.open]);
+
+  useEffect(() => () => {
+    const current = sideChatRef.current;
+    if (current.open && current.conversationId) {
+      void agentApi.closeSideChat(current.conversationId, true).catch(() => undefined);
+    }
+  }, []);
 
   useEffect(() => {
     if (!embed || !activeConversationId || canvasEditContext) return;
     void useAgentStore.getState().restoreCanvasMode(activeConversationId);
   }, [embed, activeConversationId, canvasEditContext]);
+
+  useEffect(() => {
+    if (!sideChatMode || !sideChatId) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) return;
+      if (!isSideChatContextMessage(event.data)) return;
+      if (event.data.conversationId !== sideChatId) return;
+      useSideChatSelectionStore.getState().replaceSelections(event.data.selections);
+    };
+    window.addEventListener('message', onMessage);
+    requestSideChatSelectionContext(sideChatId);
+    return () => window.removeEventListener('message', onMessage);
+  }, [sideChatId, sideChatMode]);
 
   // 新消息自动滚底（近底才跟随）
   useEffect(() => {
@@ -376,7 +493,13 @@ export function ChatPage() {
   }, [messages, streaming, waitingHumanInput, waitingVideoPlan]);
 
   const currentTitle = conversations.find((c) => c.id === activeConversationId)?.title ?? '未选择对话';
-  const isEmpty = messages.length === 0 && !streaming && !waitingHumanInput && !waitingVideoPlan;
+  const isEmpty = shouldShowFirstRunHero(
+    sideChatMode,
+    messages.length,
+    streaming,
+    !!waitingHumanInput,
+    !!waitingVideoPlan,
+  );
   const scrollDownPresence = usePresence(showScrollDown && !isEmpty, 180);
 
   useEffect(() => {
@@ -402,6 +525,8 @@ export function ChatPage() {
 
   // embed（画布小窗 iframe）强制桌面布局：小窗宽度常 <768px，useIsMobile 会判成手机端，需锁定桌面紧凑模式
   const showMobile = isMobile && !embed;
+  const sideChatCommandEnabled = !showMobile && !embed && !sideChatMode
+    && canvasPhase === 'natural';
   const referenceSidebarWidth = collapsed ? 48 : convWidth;
   const nextDockMode = resolveChatDockMode({
     previousMode: dockMode,
@@ -428,7 +553,7 @@ export function ChatPage() {
   });
   const restoreAutoCollapsedSidebar = shouldRestoreAutoCollapsedSidebar({
     autoCollapsed: autoCollapsedSidebarRef.current,
-    appOpen: chatApps.hasTabs && !showMobile,
+    appOpen: chatApps.hasTabs && !chatApps.layout.minimized && !showMobile,
     docked: dockMode === 'docked',
     appWidth: chatApps.layout.width,
     collapseAtWidth: sidebarCollapseWidth,
@@ -456,12 +581,19 @@ export function ChatPage() {
   }, []);
 
   useLayoutEffect(() => {
-    if (embed || !chatApps.hasTabs || showMobile || collapsed) return;
+    if (embed || !chatApps.hasTabs || chatApps.layout.minimized || showMobile || collapsed) return;
     if (chatApps.layout.width >= sidebarCollapseWidth) {
       autoCollapsedSidebarRef.current = true;
       setCollapsed(true);
     }
-  }, [chatApps.hasTabs, chatApps.layout.width, collapsed, showMobile, sidebarCollapseWidth]);
+  }, [
+    chatApps.hasTabs,
+    chatApps.layout.minimized,
+    chatApps.layout.width,
+    collapsed,
+    showMobile,
+    sidebarCollapseWidth,
+  ]);
 
   useLayoutEffect(() => {
     if (!restoreAutoCollapsedSidebar) return;
@@ -595,7 +727,7 @@ export function ChatPage() {
               <div style={{ fontSize: 13, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
             <div style={{ width: '100%', maxWidth: 480 }}>
-              <ChatComposer />
+              <ChatComposer enableSideChat={false} />
             </div>
             {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips（手机端） */}
@@ -629,6 +761,19 @@ export function ChatPage() {
                 className="chat-thread-stage"
                 style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}
               >
+                {messageHasMore && (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderMessages()}
+                    style={{
+                      alignSelf: 'center', marginBottom: 12, padding: '6px 14px',
+                      border: '1px solid var(--color-hairline)', borderRadius: 8,
+                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                    }}
+                  >
+                    加载更早消息
+                  </button>
+                )}
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
@@ -646,6 +791,19 @@ export function ChatPage() {
                     />
                   </div>
                 ))}
+                {sideChatMode && messages.length === 0 && !streaming && (
+                  <div style={{
+                    alignSelf: 'center',
+                    margin: '40px auto 12px',
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    background: 'var(--color-surface-soft)',
+                    color: DS.textCaption,
+                    fontSize: 12,
+                  }}>
+                    已继承当前对话上下文
+                  </div>
+                )}
                 <AgentTaskCompletionNotices conversationId={activeConversationId} />
                 {streaming && !waitingHumanInput && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
@@ -685,7 +843,7 @@ export function ChatPage() {
 
             {/* 底部输入卡 */}
             <div className="chat-composer-dock" style={{ padding: '8px 12px 12px 12px', background: 'white' }}>
-              <ChatComposer />
+              <ChatComposer enableSideChat={false} />
             </div>
           </>
         )}
@@ -701,7 +859,7 @@ export function ChatPage() {
     >
       <CanvasTechAtmosphere active={canvasTechActive} />
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
-      {!embed && (
+      {!embed && !sideChatMode && (
         <>
           <div
             className={`chat-sidebar-shell${collapsed ? ' is-collapsed' : ''}${convResizing ? ' is-resizing' : ''}`}
@@ -988,7 +1146,7 @@ export function ChatPage() {
                 </div>
               </>
             )}
-            <ChatComposer />
+            <ChatComposer enableSideChat={sideChatCommandEnabled} />
             {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips */}
             {dockMode !== 'docked' && (
@@ -1016,12 +1174,12 @@ export function ChatPage() {
             {/* 头部：会话名称 + 操作（embed 小窗内收紧字号与留白） */}
             <div style={{
               padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
-              display: dockMode === 'docked' ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+              display: dockMode === 'docked' || sideChatMode ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
               paddingRight: !embed ? desktopRightReserve + 16 : 12,
               transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
-                {embed && (
+                {embed && !sideChatMode && (
                   <button
                     onClick={() => setEmbedConvOpen(true)}
                     title="会话"
@@ -1098,6 +1256,19 @@ export function ChatPage() {
                 className="chat-thread-stage"
                 style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}
               >
+                {messageHasMore && (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderMessages()}
+                    style={{
+                      alignSelf: 'center', marginBottom: 16, padding: '6px 14px',
+                      border: '1px solid var(--color-hairline)', borderRadius: 8,
+                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                    }}
+                  >
+                    加载更早消息
+                  </button>
+                )}
                 {messages.filter((m) => !isPendingHitl(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
@@ -1115,6 +1286,19 @@ export function ChatPage() {
                     />
                   </div>
                 ))}
+                {sideChatMode && messages.length === 0 && !streaming && (
+                  <div style={{
+                    alignSelf: 'center',
+                    margin: '40px auto 12px',
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    background: 'var(--color-surface-soft)',
+                    color: DS.textCaption,
+                    fontSize: 12,
+                  }}>
+                    已继承当前对话上下文
+                  </div>
+                )}
                 <AgentTaskCompletionNotices conversationId={activeConversationId} />
                 {streaming && !waitingHumanInput && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: DS.textCaption, fontSize: 14, padding: '2px 4px' }}>
@@ -1165,7 +1349,7 @@ export function ChatPage() {
               background: 'white',
               transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
-              <ChatComposer />
+              <ChatComposer enableSideChat={sideChatCommandEnabled} />
             </div>
           </>
         )}

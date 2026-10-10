@@ -86,8 +86,10 @@ class AgentRecoveryLeaseConcurrencyIntegrationTest {
         properties.setMaxParallel(1);
         properties.setLeaseDuration(Duration.ofSeconds(5));
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        CountDownLatch start = new CountDownLatch(1);
         AtomicInteger recoveries = new AtomicInteger();
+        CountDownLatch recoveryEntered = new CountDownLatch(1);
+        CountDownLatch allowRecovery = new CountDownLatch(1);
+        CountDownLatch recoveryDone = new CountDownLatch(1);
         RecoveryCandidate candidate =
                 new RecoveryCandidate("integration-test", "resource-1", "conversation-1", Map.of());
         AgentRecoverySource source = new AgentRecoverySource() {
@@ -114,10 +116,16 @@ class AgentRecoveryLeaseConcurrencyIntegrationTest {
             @Override
             public RecoveryOutcome recover(RecoveryCandidate ignored, int attempt,
                                            String leaseOwner) {
-                recoveries.incrementAndGet();
-                jdbc.update("INSERT INTO public.agent_recovery_test_results(resource_id) VALUES (?)",
-                        ignored.resourceId());
-                return RecoveryOutcome.completed();
+                try {
+                    recoveries.incrementAndGet();
+                    recoveryEntered.countDown();
+                    await(allowRecovery);
+                    jdbc.update("INSERT INTO public.agent_recovery_test_results(resource_id) VALUES (?)",
+                            ignored.resourceId());
+                    return RecoveryOutcome.completed();
+                } finally {
+                    recoveryDone.countDown();
+                }
             }
         };
         AgentRecoveryCoordinator first = new AgentRecoveryCoordinator(
@@ -126,25 +134,34 @@ class AgentRecoveryLeaseConcurrencyIntegrationTest {
                 properties, leases, List.of(source), meterRegistry);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> a = executor.submit(() -> {
-                await(start);
-                first.scan();
-            });
-            Future<?> b = executor.submit(() -> {
-                await(start);
-                second.scan();
-            });
-            start.countDown();
+            Future<?> a = executor.submit(first::scan);
+            await(recoveryEntered);
+            second.scan();
+            long conflictDeadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+            while (System.nanoTime() < conflictDeadline) {
+                io.micrometer.core.instrument.Counter conflict =
+                        meterRegistry.find("agent_recovery_lease_conflict_total")
+                                .tag("lane", "integration-test").counter();
+                if (conflict != null && conflict.count() >= 1.0) break;
+                Thread.sleep(25);
+            }
+            allowRecovery.countDown();
+            await(recoveryDone);
             a.get();
-            b.get();
         } finally {
             executor.shutdownNow();
             first.close();
             second.close();
         }
 
-        Integer terminalRows = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM public.agent_recovery_test_results", Integer.class);
+        Integer terminalRows = null;
+        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+        while (System.nanoTime() < deadline) {
+            terminalRows = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM public.agent_recovery_test_results", Integer.class);
+            if (terminalRows != null && terminalRows == 1) break;
+            Thread.sleep(25);
+        }
         assertThat(recoveries).hasValue(1);
         assertThat(terminalRows).isEqualTo(1);
         assertThat(meterRegistry.get("agent_recovery_lease_conflict_total")

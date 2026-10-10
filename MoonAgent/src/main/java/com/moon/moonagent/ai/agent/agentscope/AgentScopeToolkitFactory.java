@@ -33,6 +33,7 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeCreativeTools creativeTools;
     private final AgentScopeCanvasTools canvasTools;
     private final AgentScopeCanvasRunTools canvasRunTools;
+    private final AgentScopeDocumentTools documentTools;
     private final AgentCanvasRunService canvasRuns;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
@@ -50,6 +51,7 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeCreativeTools creativeTools,
                                     AgentScopeCanvasTools canvasTools,
                                     AgentScopeCanvasRunTools canvasRunTools,
+                                    AgentScopeDocumentTools documentTools,
                                     AgentCanvasRunService canvasRuns,
                                     AgentScopeToolPipeline toolPipeline,
                                     SkillExpander skillExpander) {
@@ -65,6 +67,7 @@ public class AgentScopeToolkitFactory {
         this.creativeTools = creativeTools;
         this.canvasTools = canvasTools;
         this.canvasRunTools = canvasRunTools;
+        this.documentTools = documentTools;
         this.canvasRuns = canvasRuns;
         this.toolPipeline = toolPipeline;
         this.skillExpander = skillExpander;
@@ -82,6 +85,7 @@ public class AgentScopeToolkitFactory {
         register(toolkit, interactionTools.tool());
         register(toolkit, workflowTools.tool());
         register(toolkit, videoMergeTools.tool());
+        documentTools.tools().forEach(tool -> register(toolkit, tool));
         creativeTools.tools().forEach(tool -> register(toolkit, tool));
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
         toolkit.createSkillToolGroup(

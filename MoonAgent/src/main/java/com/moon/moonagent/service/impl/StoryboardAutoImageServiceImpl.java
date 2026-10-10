@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -36,9 +37,25 @@ public class StoryboardAutoImageServiceImpl implements StoryboardAutoImageServic
             return 0;
         }
         Set<Integer> targets = new HashSet<>(sceneNumbers);
-        List<StoryboardImageEnqueueItem> items = storyboardClient.getProjectScenes(projectId).stream()
+        List<Scene> candidates = storyboardClient.getProjectScenes(projectId).stream()
                 .filter(scene -> targets.contains(scene.getSceneNumber()))
-                .filter(this::isEligible)
+                .filter(scene -> scene != null
+                        && scene.getId() != null
+                        && !scene.getId().isBlank()
+                        && isBlank(scene.getImageUrl())
+                        && isBlank(scene.getImageUrls()))
+                .toList();
+        Map<String, Map<String, Boolean>> presence;
+        try {
+            presence = storyboardClient.sceneMaterialPresence(
+                    projectId, candidates.stream().map(Scene::getId).toList());
+        } catch (Exception e) {
+            log.warn("[分镜自动配图] 批量素材状态读取失败，回退逐场景判断: {}", e.getMessage());
+            presence = Map.of();
+        }
+        final Map<String, Map<String, Boolean>> materialPresence = presence;
+        List<StoryboardImageEnqueueItem> items = candidates.stream()
+                .filter(scene -> isEligible(scene, materialPresence))
                 .map(this::toEnqueueItem)
                 .toList();
         if (items.isEmpty()) return 0;
@@ -50,8 +67,17 @@ public class StoryboardAutoImageServiceImpl implements StoryboardAutoImageServic
     }
 
     private boolean isEligible(Scene scene) {
+        return isEligible(scene, Map.of());
+    }
+
+    private boolean isEligible(Scene scene, Map<String, Map<String, Boolean>> presence) {
         if (scene == null || scene.getId() == null || scene.getId().isBlank()) return false;
         if (!isBlank(scene.getImageUrl()) || !isBlank(scene.getImageUrls())) return false;
+        Map<String, Boolean> material = presence.get(scene.getId());
+        if (material != null) {
+            return !Boolean.TRUE.equals(material.get("hasReferences"))
+                    && !Boolean.TRUE.equals(material.get("hasAssets"));
+        }
         try {
             boolean hasReferences = !storyboardClient.getSceneReferences(scene.getId()).isEmpty();
             if (hasReferences) return false;

@@ -22,4 +22,24 @@ public interface StoryboardVideoQueueMapper extends BaseMapper<StoryboardVideoQu
     /** 下一条待执行（queued）任务，按入队时间正序。 */
     @Select("SELECT * FROM public.storyboard_video_queue WHERE status = 'queued' ORDER BY created_at LIMIT 1")
     StoryboardVideoQueue findNextQueued();
+
+    /** 原子领取下一条 queued 任务；多 worker 并发时使用 SKIP LOCKED。 */
+    @Select("""
+            WITH next_task AS (
+                SELECT id
+                FROM public.storyboard_video_queue
+                WHERE status = 'queued'
+                ORDER BY created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE public.storyboard_video_queue q
+            SET status = 'running',
+                started_at = now(),
+                updated_at = now(),
+                error = NULL
+            WHERE q.id = (SELECT id FROM next_task)
+            RETURNING q.*
+            """)
+    StoryboardVideoQueue claimNextQueued();
 }

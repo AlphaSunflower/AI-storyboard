@@ -40,16 +40,63 @@ export function buildAnnotationContext(annotations: AnnotationContextInput[], us
   return text ? `${block}\n\n${text}` : block;
 }
 
-/** 剥掉消息正文最前面的注释上下文块，返回用户真正输入的文字。 */
-export function stripAnnotationContext(content: string): { userText: string; hasContext: boolean } {
+/** 一条引用注释：被选中的原文 +（可选）评论。 */
+export interface AnnotationQuote {
+  quote: string;
+  comment: string;
+}
+
+/**
+ * 解析消息正文里的注释块：还原「引用的原文 + 评论」列表，以及用户真正输入的文字。
+ * 渲染用户消息时用它替代省略号——引用内容按原文展示，不再被截断。
+ */
+export function parseAnnotationContext(content: string): {
+  items: AnnotationQuote[];
+  userText: string;
+  hasContext: boolean;
+} {
   const normalized = content.replace(/\r\n/g, '\n');
-  if (!normalized.startsWith(ANNOTATION_BLOCK_START)) return { userText: content, hasContext: false };
+  if (!normalized.startsWith(ANNOTATION_BLOCK_START)) {
+    return { items: [], userText: content, hasContext: false };
+  }
   const endIndex = normalized.indexOf(ANNOTATION_BLOCK_END);
-  if (endIndex < 0) return { userText: content, hasContext: false };
+  if (endIndex < 0) return { items: [], userText: content, hasContext: false };
+
+  const items: AnnotationQuote[] = [];
+  let quoteLines: string[] | null = null;
+  let comment = '';
+  const flush = () => {
+    if (quoteLines && quoteLines.length > 0) {
+      items.push({ quote: quoteLines.join('\n'), comment });
+    }
+    quoteLines = null;
+    comment = '';
+  };
+  for (const rawLine of normalized.slice(ANNOTATION_BLOCK_START.length, endIndex).split('\n')) {
+    const line = rawLine.trim();
+    if (/^\d+\.\s*原文：/.test(line)) {
+      flush();
+      quoteLines = [line.replace(/^\d+\.\s*原文：/, '')];
+    } else if (quoteLines && line.startsWith('评论：')) {
+      const value = line.slice('评论：'.length).trim();
+      comment = value === ANNOTATION_NO_COMMENT ? '' : value;
+    } else if (quoteLines && line) {
+      quoteLines.push(line); // 原文续行（多行选区）
+    }
+  }
+  flush();
+
   return {
+    items,
     userText: normalized.slice(endIndex + ANNOTATION_BLOCK_END.length).replace(/^\n+/, ''),
     hasContext: true,
   };
+}
+
+/** 剥掉消息正文最前面的注释上下文块，返回用户真正输入的文字。 */
+export function stripAnnotationContext(content: string): { userText: string; hasContext: boolean } {
+  const { userText, hasContext } = parseAnnotationContext(content);
+  return { userText, hasContext };
 }
 
 interface TextSegment {

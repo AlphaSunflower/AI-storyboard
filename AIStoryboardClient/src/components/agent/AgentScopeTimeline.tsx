@@ -30,7 +30,7 @@ export function AgentScopeTimeline() {
 
   return (
     <section
-      aria-label="AgentScope 执行时间线"
+      aria-label="MoonAgent 执行时间线"
       style={{
         margin: '8px 0 14px',
         padding: '12px 14px',
@@ -43,7 +43,7 @@ export function AgentScopeTimeline() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
         <Route size={14} strokeWidth={1.8} color="var(--color-primary)" />
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', letterSpacing: 0.4 }}>
-          AgentScope 执行
+          MoonAgent 执行
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>

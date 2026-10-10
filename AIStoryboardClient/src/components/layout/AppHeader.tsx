@@ -75,7 +75,7 @@ export function AppHeader() {
               paddingRight: 4,
             }}
           >
-            AlphaSunflower <span style={{ color: 'var(--color-primary)' }}>AI 分镜</span>
+            AIGC <span style={{ color: 'var(--color-primary)' }}>分镜系统</span>
           </span>
 
           {/* Save button */}

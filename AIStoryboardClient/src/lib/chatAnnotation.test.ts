@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildAnnotationContext,
   findQuoteRange,
+  parseAnnotationContext,
   selectionOccurrence,
   stripAnnotationContext,
 } from './chatAnnotation';
@@ -97,5 +98,31 @@ describe('selectionOccurrence', () => {
     range.setStart(textNode, 0);
     range.setEnd(textNode, 3);
     expect(selectionOccurrence(root, range, 'cat')).toBe(0);
+  });
+});
+
+describe('parseAnnotationContext', () => {
+  it('还原原文与评论，无评论时评论为空串', () => {
+    const content = buildAnnotationContext([
+      { quote: '第一段\n第二段', comment: '看看这里' },
+      { quote: '只有引用', comment: '' },
+    ], '我的问题');
+    const parsed = parseAnnotationContext(content);
+    expect(parsed.hasContext).toBe(true);
+    expect(parsed.userText).toBe('我的问题');
+    expect(parsed.items).toEqual([
+      { quote: '第一段\n第二段', comment: '看看这里' },
+      { quote: '只有引用', comment: '' },
+    ]);
+  });
+
+  it('只有注释没有文字时 userText 为空、引用不为空', () => {
+    const parsed = parseAnnotationContext(buildAnnotationContext([{ quote: '引用内容', comment: '' }], ''));
+    expect(parsed.userText).toBe('');
+    expect(parsed.items).toEqual([{ quote: '引用内容', comment: '' }]);
+  });
+
+  it('普通消息返回空引用列表', () => {
+    expect(parseAnnotationContext('普通消息')).toEqual({ items: [], userText: '普通消息', hasContext: false });
   });
 });

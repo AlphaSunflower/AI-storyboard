@@ -28,6 +28,7 @@ public class StructuredDecisionService {
 
     private static final Logger log = LoggerFactory.getLogger(StructuredDecisionService.class);
     private static final Duration CALL_TIMEOUT = Duration.ofSeconds(45);
+    private static final ObjectMapper SCHEMA_JSON = new ObjectMapper();
 
     private final AgentScopeProperties properties;
     private final AgentScopeModelProvider modelProvider;
@@ -260,14 +261,14 @@ public class StructuredDecisionService {
     }
 
     private static ObjectNode objectSchema() {
-        ObjectNode schema = new ObjectMapper().createObjectNode();
+        ObjectNode schema = SCHEMA_JSON.createObjectNode();
         schema.put("type", "object");
         schema.put("additionalProperties", false);
         return schema;
     }
 
     private static ObjectNode textSchema() {
-        return new ObjectMapper().createObjectNode().put("type", "string");
+        return SCHEMA_JSON.createObjectNode().put("type", "string");
     }
 
     private static void required(ObjectNode schema, String... fields) {

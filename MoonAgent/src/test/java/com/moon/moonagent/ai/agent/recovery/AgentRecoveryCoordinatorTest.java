@@ -17,6 +17,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.timeout;
 
 class AgentRecoveryCoordinatorTest {
 
@@ -30,7 +31,7 @@ class AgentRecoveryCoordinatorTest {
 
         coordinator.scan();
 
-        verify(leases).release(any(RecoveryCandidate.class), anyString());
+        verify(leases, timeout(2_000)).release(any(RecoveryCandidate.class), anyString());
         verify(leases, never()).scheduleRetry(any(), anyString(), anyInt(), anyString());
     }
 
@@ -44,7 +45,7 @@ class AgentRecoveryCoordinatorTest {
 
         coordinator.scan();
 
-        verify(leases).scheduleRetry(any(RecoveryCandidate.class), anyString(),
+        verify(leases, timeout(2_000)).scheduleRetry(any(RecoveryCandidate.class), anyString(),
                 org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq("temporary"));
     }
 
@@ -86,6 +87,11 @@ class AgentRecoveryCoordinatorTest {
 
         coordinator.scan();
 
+        try {
+            Thread.sleep(150);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         assertThat(recoveries).hasValue(0);
     }
 

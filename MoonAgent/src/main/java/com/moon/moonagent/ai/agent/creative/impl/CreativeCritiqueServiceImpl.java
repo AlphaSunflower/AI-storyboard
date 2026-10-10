@@ -21,6 +21,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 import java.io.IOException;
 import java.net.URI;
@@ -50,6 +52,10 @@ public class CreativeCritiqueServiceImpl implements CreativeCritiqueService {
     private final FileStorageService fileStorageService;
     private final ChatClient.Builder chatClientBuilder;
     private final CreativeModelRouter modelRouter;
+
+    @Autowired(required = false)
+    @Qualifier("attachmentHttpClient")
+    private HttpClient httpClient;
 
     @Value("${ai.video.merge.ffmpeg-path:ffmpeg}")
     private String ffmpegPath = "ffmpeg";
@@ -400,10 +406,8 @@ public class CreativeCritiqueServiceImpl implements CreativeCritiqueService {
                 .timeout(Duration.ofSeconds(120))
                 .GET()
                 .build();
-        HttpResponse<byte[]> response = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .build()
-                .send(request, HttpResponse.BodyHandlers.ofByteArray());
+        HttpResponse<byte[]> response = httpClient.send(
+                request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("下载视频失败，状态码 " + response.statusCode());
         }

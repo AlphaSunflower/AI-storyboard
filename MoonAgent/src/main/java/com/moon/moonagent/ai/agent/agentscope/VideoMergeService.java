@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -29,6 +31,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +40,8 @@ public class VideoMergeService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoMergeService.class);
     private static final int MAX_SOURCES = 20;
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final AgentAsyncTaskMapper taskMapper;
     private final FileStorageService fileStorageService;
@@ -50,9 +56,10 @@ public class VideoMergeService {
     private int timeoutSeconds = 600;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final Semaphore downloadLimiter = new Semaphore(4, true);
+    @Autowired(required = false)
+    @Qualifier("attachmentHttpClient")
+    private HttpClient httpClient;
 
     public String start(String userId, String conversationId, String projectId,
                         List<String> sourceUrls, Integer expectedDurationSeconds) {
@@ -91,14 +98,40 @@ public class VideoMergeService {
         try {
             update(taskId, "running", "merge", 5, null, null, null);
             work = Files.createTempDirectory("moon-video-merge-");
-            List<Path> clips = new ArrayList<>();
+            Path workDir = work;
+            List<CompletableFuture<Path>> downloads = new ArrayList<>();
             for (int index = 0; index < sources.size(); index++) {
-                Path clip = work.resolve("clip-" + index + ".mp4");
-                Files.write(clip, download(sources.get(index)));
-                clips.add(clip);
-                update(taskId, "running", "merge", 10 + (int) (40.0 * (index + 1) / sources.size()),
-                        null, null, null);
+                final int clipIndex = index;
+                downloads.add(CompletableFuture.supplyAsync(() -> {
+                    boolean acquired = false;
+                    try {
+                        try {
+                            downloadLimiter.acquire();
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("等待视频下载并发许可被中断", interrupted);
+                        }
+                        acquired = true;
+                        Path clip = workDir.resolve("clip-" + clipIndex + ".mp4");
+                        try {
+                            Files.write(clip, download(sources.get(clipIndex)));
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("视频片段下载被中断", interrupted);
+                        }
+                        update(taskId, "running", "merge",
+                                10 + (int) (40.0 * (clipIndex + 1) / sources.size()),
+                                null, null, null);
+                        return clip;
+                    } catch (IOException error) {
+                        throw new IllegalStateException("视频片段下载失败: " + sources.get(clipIndex), error);
+                    } finally {
+                        if (acquired) downloadLimiter.release();
+                    }
+                }, executor));
             }
+            CompletableFuture.allOf(downloads.toArray(CompletableFuture[]::new)).join();
+            List<Path> clips = downloads.stream().map(CompletableFuture::join).toList();
             Path list = work.resolve("concat.txt");
             StringBuilder listText = new StringBuilder();
             for (Path clip : clips) {
@@ -142,7 +175,7 @@ public class VideoMergeService {
                 .timeout(Duration.ofSeconds(120))
                 .GET()
                 .build();
-        HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        HttpResponse<byte[]> response = httpClient().send(request, HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() != 200) {
             throw new IOException("下载视频失败，状态码 " + response.statusCode() + ": " + source);
         }
@@ -242,7 +275,7 @@ public class VideoMergeService {
 
     private static String writeJson(Object value) {
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);
+            return JSON.writeValueAsString(value);
         } catch (Exception ignored) {
             return "{}";
         }
@@ -260,5 +293,14 @@ public class VideoMergeService {
         } catch (IOException ignored) {
             // best effort
         }
+    }
+
+    private HttpClient httpClient() {
+        if (httpClient == null) {
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+        return httpClient;
     }
 }

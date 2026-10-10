@@ -3,9 +3,11 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
+import com.moon.moonagent.ai.agent.AgentConcurrencyGuard;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
+import com.moon.moonagent.ai.agent.document.AgentDocumentService;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
@@ -57,7 +59,10 @@ import io.agentscope.extensions.postgresql.PostgresDistributedStore;
 import io.agentscope.extensions.postgresql.state.PostgresAgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.DistributedStore;
+import io.agentscope.harness.agent.memory.MemoryFlushManager;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
+import io.agentscope.harness.agent.memory.compaction.ConversationCompactor;
+import io.agentscope.harness.agent.memory.compaction.TokenCounterUtil;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -65,6 +70,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -84,8 +91,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 @Component
 @ConditionalOnProperty(prefix = "ai.agent.agentscope", name = "enabled",
@@ -133,14 +142,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService workflowService;
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraintExtraction;
+    private final AgentDocumentService documentService;
     private final CreativeModelRouter modelRouter;
+    private final AgentConcurrencyGuard concurrencyGuard;
 
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
 
-    private final HttpClient attachmentHttpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("attachmentHttpClient")
+    private HttpClient attachmentHttpClient;
 
     private volatile HarnessAgent agent;
     private volatile AgentStateStore stateStore;
@@ -170,7 +181,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             List<io.agentscope.core.middleware.MiddlewareBase> middlewares =
                     new ArrayList<>(List.of(
                             new TurnContextMiddleware(
-                                    workflowService, creativeContext, constraintExtraction),
+                                    workflowService, creativeContext, constraintExtraction,
+                                    documentService),
                             new MediaProgressMiddleware(),
                             new ToolCallContentMiddleware(),
                             new AgentTraceBridgeMiddleware()));
@@ -191,7 +203,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             "canvas-run", "general"))
                     .enableMetaTool(true)
                     .enablePendingToolRecovery(true)
-                    .permissionContext(permissionContext(AgentApprovalMode.PLAN_APPROVAL))
+                    .permissionContext(permissionContext(
+                            AgentApprovalMode.PLAN_APPROVAL, Set.of(),
+                            readOnlyToolNames(toolkit)))
                     .middlewares(middlewares)
                     .workspace(workspace)
                     .disableFilesystemTools()
@@ -274,30 +288,93 @@ public class MoonAgentRuntime implements AgentRecoverySource {
      * Existing runtime state always wins, so this is a one-time migration path for
      * conversations created before the AgentScope cutover.
      */
-    public boolean ensureSessionFromHistory(String userId, String conversationId,
-                                            List<Msg> history) {
+    public SessionBootstrapResult ensureSessionFromHistory(String userId, String conversationId,
+                                                           List<Msg> history) {
         if (!enabled() || conversationId == null || conversationId.isBlank()
                 || history == null || history.isEmpty()) {
-            return false;
+            return enabled() ? SessionBootstrapResult.UNAVAILABLE
+                    : SessionBootstrapResult.DISABLED;
         }
         try {
             AgentState state = agent.getDelegate().getAgentState(userId, conversationId);
             if (state != null && !state.contextMutable().isEmpty()) {
-                return false;
+                return SessionBootstrapResult.ALREADY_INITIALIZED;
             }
             if (state == null) {
-                return false;
+                return SessionBootstrapResult.UNAVAILABLE;
             }
             state.contextMutable().addAll(history);
             agent.getDelegate().saveAgentState(userId, conversationId);
             log.info("[AgentScope] reconstructed session from {} product messages conversationId={}",
                     history.size(), conversationId);
-            return true;
+            return SessionBootstrapResult.SEEDED;
         } catch (Exception exception) {
             log.warn("[AgentScope] session reconstruction failed conversationId={}: {}",
                     conversationId, exception.getMessage());
-            return false;
+            return SessionBootstrapResult.UNAVAILABLE;
         }
+    }
+
+    /**
+     * Clones the last committed AgentScope state into an independent ephemeral session.
+     * Transient plan/tool/task state is intentionally not copied: a side conversation
+     * branches from the stable dialogue context, not from an in-flight execution.
+     */
+    public int cloneSessionState(String userId, String sourceConversationId,
+                                 String targetConversationId, List<Msg> fallbackHistory) {
+        if (!enabled() || stateStore == null) {
+            throw new IllegalStateException("AgentScope state store is unavailable");
+        }
+        if (sourceConversationId == null || sourceConversationId.isBlank()
+                || targetConversationId == null || targetConversationId.isBlank()) {
+            throw new IllegalArgumentException("source and target conversation ids are required");
+        }
+
+        AgentState sourceState = null;
+        var versioned = stateStore.getVersioned(
+                userId, sourceConversationId, "agent_state", AgentState.class);
+        if (versioned != null && versioned.isPresent()) {
+            sourceState = versioned.value();
+        }
+
+        AgentState targetState;
+        if (sourceState == null || sourceState.getContext() == null
+                || sourceState.getContext().isEmpty()) {
+            List<Msg> seeded = fallbackHistory == null ? List.of() : List.copyOf(fallbackHistory);
+            targetState = AgentState.builder()
+                    .sessionId(targetConversationId)
+                    .userId(userId)
+                    .context(seeded)
+                    .build();
+        } else {
+            targetState = cloneStableState(sourceState, targetConversationId, userId);
+        }
+
+        agent.clearStateCache(userId, targetConversationId);
+        stateStore.save(userId, targetConversationId, "agent_state", targetState);
+        log.info("[AgentScope] cloned side-chat state source={} target={} messages={}",
+                sourceConversationId, targetConversationId, targetState.getContext().size());
+        return targetState.getContext().size();
+    }
+
+    static AgentState cloneStableState(AgentState source, String targetConversationId,
+                                       String userId) {
+        AgentState.Builder builder = AgentState.builder()
+                .sessionId(targetConversationId)
+                .userId(userId)
+                .summary(source.getSummary())
+                .context(source.getContext() == null ? List.of() : List.copyOf(source.getContext()));
+        if (source.getPermissionContext() != null) {
+            builder.permissionContext(source.getPermissionContext());
+        }
+        return builder.build();
+    }
+
+    public enum SessionBootstrapResult {
+        SEEDED,
+        ALREADY_INITIALIZED,
+        UNAVAILABLE,
+        DISABLED
     }
 
     public Map<String, Object> assetStatus() {
@@ -330,7 +407,14 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             input = taskContext + "\n\n本轮用户消息：\n" + input;
         }
         Msg message = buildUserMessage(input, request.getPicUrls());
-        return stream(conversation, request, trace, List.of(message), null, observer);
+        return guarded(conversation, () ->
+                stream(conversation, request, trace, List.of(message), null, observer));
+    }
+
+    private AgentTurnResult guarded(AgentConversation conversation, Supplier<AgentTurnResult> action) {
+        return concurrencyGuard == null
+                ? action.get()
+                : concurrencyGuard.call(conversation.getUserId(), action);
     }
 
     private Msg buildUserMessage(String input, List<String> imageUrls) {
@@ -475,11 +559,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .textContent(value.text())
                     .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS, results))
                     .build();
-            return stream(conversation, request, trace, List.of(resume),
-                    checkpoint.getId(), observer, approvedTools);
+            return guarded(conversation, () ->
+                    stream(conversation, request, trace, List.of(resume),
+                            checkpoint.getId(), observer, approvedTools));
         }
-        return stream(conversation, request, trace,
-                List.of(resumeMessage(value)), checkpoint.getId(), observer);
+        return guarded(conversation, () ->
+                stream(conversation, request, trace,
+                        List.of(resumeMessage(value)), checkpoint.getId(), observer));
     }
 
     static Msg resumeMessage(AgentScopeCheckpointService.ResumeValue value) {
@@ -725,7 +811,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 .role(MsgRole.TOOL)
                 .content(result)
                 .build();
-        return stream(conversation, request, trace, List.of(resume), null, observer);
+        return guarded(conversation, () ->
+                stream(conversation, request, trace, List.of(resume), null, observer));
     }
 
     private static List<Map<String, Object>> canvasMediaRefs(OrchestrationRequest request) {
@@ -816,7 +903,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         AgentApprovalMode mode = AgentApprovalMode.from(conversation.getApprovalMode());
         agent.getDelegate().replacePermissionContext(
                 conversation.getUserId(), conversation.getId(),
-                permissionContext(mode, preApprovedTools));
+                permissionContext(mode, preApprovedTools,
+                        readOnlyToolNames(toolkitFactory.activeToolkit())));
     }
 
     static PermissionContextState permissionContext(AgentApprovalMode mode) {
@@ -825,6 +913,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     static PermissionContextState permissionContext(AgentApprovalMode mode,
                                                     Set<String> preApprovedTools) {
+        return permissionContext(mode, preApprovedTools, Set.of());
+    }
+
+    static PermissionContextState permissionContext(AgentApprovalMode mode,
+                                                    Set<String> preApprovedTools,
+                                                    Set<String> readOnlyTools) {
         AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
         Set<String> approved = preApprovedTools == null ? Set.of() : preApprovedTools;
         PermissionContextState.Builder permissions = PermissionContextState.builder()
@@ -832,6 +926,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         ? PermissionMode.BYPASS : PermissionMode.DEFAULT);
         if (effective == AgentApprovalMode.FULL_ACCESS) {
             return permissions.build();
+        }
+        if (readOnlyTools != null) {
+            for (String tool : readOnlyTools) {
+                if (tool == null || tool.isBlank()) continue;
+                permissions.addAllowRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ALLOW, "MoonAgentRegisteredReadOnlyPolicy"));
+            }
         }
         for (String tool : List.of(
                 "list_session_assets",
@@ -846,8 +947,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "task_output",
                 "wait_async_results",
                 "agent_list",
+                "agent_spawn",
+                "agent_send",
                 "list_storyboard_draft",
                 "list_project_storyboard",
+                "resolve_agent_workflow",
                 "canvas_get_context",
                 "canvas_get_browser_context",
                 "canvas_get_summary",
@@ -887,9 +991,25 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_graph_create_result_slots",
                 "canvas_graph_mark_result_slots",
                 "canvas_graph_layout_graph",
+                "canvas_create_canvas",
+                "canvas_rename_canvas",
+                "canvas_update_node",
+                "canvas_move_nodes",
+                "canvas_duplicate_nodes",
+                "canvas_resize_nodes",
+                "canvas_pin_nodes",
+                "canvas_set_node_model_config",
+                "canvas_undo",
+                "canvas_redo",
+                "canvas_image_crop",
+                "canvas_image_split",
+                "canvas_image_adjust",
                 "canvas_execute_node",
                 "canvas_execute_graph",
                 "canvas_cancel_execution",
+                "reorder_storyboard_draft",
+                "save_timeline_manifest",
+                "update_creative_context",
                 "todo_write",
                 "plan_enter",
                 "plan_write",
@@ -912,7 +1032,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "delete_project_storyboard_shot",
                 "clear_project_storyboard",
                 "canvas_delete_nodes",
-                "canvas_delete_edges")) {
+                "canvas_delete_edges",
+                "merge_storyboard_videos",
+                "task_cancel")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
             if (autoApproved) {
@@ -924,6 +1046,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             }
         }
         return permissions.build();
+    }
+
+    private static Set<String> readOnlyToolNames(Toolkit toolkit) {
+        if (toolkit == null || toolkit.getToolNames() == null) return Set.of();
+        return toolkit.getToolNames().stream()
+                .filter(name -> {
+                    var tool = toolkit.getTool(name);
+                    return tool != null && tool.isReadOnly();
+                })
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     static AgentScopeTurnState.ReferenceInputMode classifyReferenceInput(
@@ -1002,6 +1134,80 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         } catch (Exception e) {
             log.warn("[AgentScope] clear session failed conversationId={}: {}",
                     conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * 手动压缩会话上下文（/chat 斜杠命令「压缩上下文」）。
+     *
+     * <p>复用 harness 自带的压缩组件 {@link ConversationCompactor} + {@link CompactionConfig}，
+     * 与上下文溢出时的 emergency compaction（{@code HarnessAgent.forceCompactAndRetry}）
+     * 同一套路：{@code triggerMessages(1)} 强制触发，保留最近 keepMessages 轮。
+     *
+     * <p>只改 AgentScope 运行时会话上下文，不动产品消息表 agent_messages。
+     * 上下文条数不超过保留量时返回 {@link CompactOutcome#SKIPPED}，不报错。
+     */
+    public CompactOutcome compactSession(String userId, String conversationId) {
+        if (!enabled() || conversationId == null || conversationId.isBlank()) {
+            return CompactOutcome.UNAVAILABLE;
+        }
+        try {
+            AgentState state = agent.getDelegate().getAgentState(userId, conversationId);
+            if (state == null) return CompactOutcome.UNAVAILABLE;
+            List<Msg> context = state.contextMutable();
+            if (context == null || context.isEmpty()) return CompactOutcome.UNAVAILABLE;
+
+            // 会话上下文理论上不含 SYSTEM（系统提示词在推理输入里单独拼），防御性剥离并回填
+            Msg system = context.get(0).getRole() == MsgRole.SYSTEM ? context.remove(0) : null;
+            try {
+                int messagesBefore = context.size();
+                int tokensBefore = TokenCounterUtil.calculateToken(context);
+                int keepMessages = properties.getCompactionKeepMessages();
+                if (messagesBefore <= keepMessages) {
+                    log.info("[AgentScope] 手动压缩跳过：{} 条 ≤ 保留 {} 条 conversationId={}",
+                            messagesBefore, keepMessages, conversationId);
+                    return new CompactOutcome("SKIPPED", messagesBefore, messagesBefore,
+                            tokensBefore, tokensBefore);
+                }
+
+                RuntimeContext rc = RuntimeContext.builder()
+                        .userId(userId).sessionId(conversationId).build();
+                CompactionConfig config = CompactionConfig.builder()
+                        .triggerMessages(1)          // 手动压缩 = 强制触发
+                        .keepMessages(keepMessages)  // 与自动压缩同一保留口径
+                        .keepTokens(0)               // 0 = 按条数保留（>0 才走 token 口径）
+                        .flushBeforeCompact(false)   // 本运行时已 disableMemoryHooks，不做长期记忆刷新
+                        .offloadBeforeCompact(false)
+                        .summaryPrompt(COMPACTION_PROMPT)
+                        .build();
+                ConversationCompactor compactor = new ConversationCompactor(
+                        agent.getModel(),
+                        new MemoryFlushManager(agent.getWorkspaceManager(), agent.getModel(),
+                                MemoryFlushManager.DEFAULT_FLUSH_PROMPT));
+                Optional<List<Msg>> compacted = compactor
+                        .compactIfNeeded(rc, context, config, agent.getName(), conversationId)
+                        .block(Duration.ofSeconds(90));
+                if (compacted == null || compacted.isEmpty()) {
+                    log.warn("[AgentScope] 手动压缩未产出结果（compactor 返回空）{} 条/{} token conversationId={}",
+                            messagesBefore, tokensBefore, conversationId);
+                    return new CompactOutcome("SKIPPED", messagesBefore, messagesBefore,
+                            tokensBefore, tokensBefore);
+                }
+
+                context.clear();
+                context.addAll(compacted.get());
+                agent.getDelegate().saveAgentState(userId, conversationId);
+                int tokensAfter = TokenCounterUtil.calculateToken(context);
+                log.info("[AgentScope] 手动压缩完成 conversationId={} {}条/{}token → {}条/{}token",
+                        conversationId, messagesBefore, tokensBefore, context.size(), tokensAfter);
+                return new CompactOutcome("COMPACTED", messagesBefore, context.size(),
+                        tokensBefore, tokensAfter);
+            } finally {
+                if (system != null) context.add(0, system);
+            }
+        } catch (Exception e) {
+            log.warn("[AgentScope] 手动压缩失败 conversationId={}: {}", conversationId, e.getMessage());
+            return CompactOutcome.UNAVAILABLE;
         }
     }
 

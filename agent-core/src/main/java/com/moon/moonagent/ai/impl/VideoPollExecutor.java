@@ -12,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 import java.io.InputStream;
 import java.net.URI;
@@ -43,9 +45,9 @@ public class VideoPollExecutor {
     private final FileStorageService fileStorageService;
     private final GenerationRecordWriter generationRecordWriter;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("gatewayHttpClient")
+    private HttpClient httpClient;
 
     /**
      * 轮询视频任务状态，成功后经网关下载并转存本地（统一响应处理）。
@@ -116,7 +118,7 @@ public class VideoPollExecutor {
                         .header("Authorization", "Bearer " + config.getGatewayApiKey())
                         .timeout(Duration.ofSeconds(config.getVideoDownloadTimeout()))
                         .GET().build();
-                HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+                HttpResponse<InputStream> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofInputStream());
 
                 if (resp.statusCode() == 200) {
                     byte[] bytes;
@@ -178,14 +180,23 @@ public class VideoPollExecutor {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                    .timeout(Duration.ofSeconds(config.getVideoPollTimeout()))
                     .GET().build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 200) return resp.body();
             log.warn("GET {} returned {}", url, resp.statusCode());
         } catch (Exception e) {
             log.warn("GET {} failed: {}", url, e.getMessage());
         }
         return null;
+    }
+
+    private HttpClient httpClient() {
+        if (httpClient == null) {
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+        return httpClient;
     }
 }

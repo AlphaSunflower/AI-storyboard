@@ -71,6 +71,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
   const projectId = useProjectStore((s) => s.currentProject?.id);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState<SearchHit[]>([]);
+  const [messageHits, setMessageHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const { mounted, visible, closing } = usePresence(open, 220);
@@ -86,22 +87,40 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
       try {
         const convRes = await agentApi.listConversations(projectId);
         const convs = convRes.data.data ?? [];
-        const idx: SearchHit[] = [];
-        for (const conv of convs) {
-          idx.push({ conv, field: 'title', snippet: conv.title, raw: conv.title, ts: new Date(conv.updatedAt).getTime() });
-          try {
-            const msgRes = await agentApi.listMessages(conv.id);
-            const msgs = msgRes.data.data ?? [];
-            for (const m of msgs) {
-              idx.push({ conv, field: 'message', snippet: m.content.replace(/\s+/g, ' ').trim(), raw: m.content, ts: new Date(m.createdAt).getTime() });
-            }
-          } catch { /* 单会话消息拉取失败跳过 */ }
-        }
-        setIndex(idx);
+        setIndex(convs.map((conv) => ({
+          conv,
+          field: 'title' as const,
+          snippet: conv.title,
+          raw: conv.title,
+          ts: new Date(conv.updatedAt).getTime(),
+        })));
       } catch { /* 静默 */ }
       setLoading(false);
     })();
   }, [open, projectId]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || q.length < 2) {
+      setMessageHits([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void agentApi.searchMessages(q, 100).then((res) => {
+        setMessageHits((res.data.data ?? []).map((hit) => ({
+          conv: {
+            id: hit.conversationId,
+            title: hit.conversationTitle || '未命名对话',
+          } as AgentConversation,
+          field: 'message' as const,
+          snippet: hit.content.replace(/\s+/g, ' ').trim(),
+          raw: hit.content,
+          ts: new Date(hit.createdAt).getTime(),
+        })));
+      }).catch(() => setMessageHits([]));
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [open, query]);
 
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 30); }, [open]);
 
@@ -118,7 +137,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
   const q = query.trim().toLowerCase();
   const matches = useMemo(() => {
     if (!q || index.length === 0) return [];
-    return index
+    return [...index.filter((hit) => hit.field === 'title'), ...messageHits]
       .filter((h) => h.raw.toLowerCase().includes(q))
       .slice()
       .sort((a, b) => b.ts - a.ts);

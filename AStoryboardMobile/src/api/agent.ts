@@ -112,6 +112,12 @@ export const agentApi = {
   listMessages: (id: string) =>
     client.get<{ data: AgentMessage[] }>(`/agent/conversations/${id}/messages`),
 
+  listMessagesPage: (id: string, before?: string | null, limit = 50) =>
+    client.get<{ data: { records: AgentMessage[]; nextCursor: string | null; hasMore: boolean } }>(
+      `/agent/conversations/${id}/messages/page`,
+      { params: { before: before || undefined, limit } },
+    ),
+
   listAssets: (id: string, page = 1, size = 20) =>
     client.get<{ data: AgentPage<AgentAsset> }>(`/agent/conversations/${id}/assets`, { params: { page, size } }),
 

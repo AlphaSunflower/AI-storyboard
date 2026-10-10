@@ -15,7 +15,6 @@ import java.util.Map;
 
 /**
  * 模型选项组装：网关模型列表 / LLM 选参用的人类可读选项文本。
- * 仅依赖 {@link GatewayModelService} 与 JSON 解析，无 SSE / checkpooint / 会话状态耦合。
  */
 @Component
 @RequiredArgsConstructor
@@ -26,7 +25,6 @@ public class ModelOptionsAssembler {
     private final GatewayModelService gatewayModelService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** 网关模型列表（卡片下拉用；网关异常返回空） */
     public List<Map<String, Object>> buildModels(String type) {
         try {
             List<Map<String, Object>> out = new ArrayList<>();
@@ -40,7 +38,6 @@ public class ModelOptionsAssembler {
         }
     }
 
-    /** LLM 选参用的人类可读选项文本：模型名 + 参数枚举（来自网关 params JSON 字符串；无选项返回空串） */
     public String buildModelOptionsText(String type) {
         List<Map<String, Object>> models = buildModels(type);
         if (models.isEmpty()) return "";
@@ -59,7 +56,7 @@ public class ModelOptionsAssembler {
                     if (p.has("qualities")) parts.add("质量 " + p.get("qualities"));
                     if (!parts.isEmpty()) sb.append("（").append(String.join("；", parts)).append("）");
                 } catch (Exception ignored) {
-                    // params 解析失败忽略，仅保留模型名
+                    // Keep model name only.
                 }
             }
             sb.append("\n");

@@ -11,7 +11,11 @@ import com.moon.moonagent.service.MorrowCanvasService;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -35,6 +39,9 @@ public class AgentCanvasSessionService {
 
     private final AgentCanvasSessionMapper mapper;
     private final MorrowCanvasService canvasService;
+    @Autowired(required = false)
+    private transient PlatformTransactionManager transactionManager;
+    private volatile TransactionTemplate transactionTemplate;
 
     @Transactional
     public CanvasSessionView create(AgentConversation conversation,
@@ -63,7 +70,6 @@ public class AgentCanvasSessionService {
         return view(entity);
     }
 
-    @Transactional
     public CanvasSessionView ready(String userId, String conversationId, String sessionId,
                                    String selectedCanvasId, boolean createNew) {
         AgentCanvasSessionEntity entity = owned(userId, conversationId, sessionId);
@@ -91,13 +97,38 @@ public class AgentCanvasSessionService {
         } else {
             throw new BusinessException(40001, "请选择要打开的画布");
         }
-        entity.setCanvasId(target.getId());
-        entity.setCanvasTitle(target.getTitle() == null ? "画布" : target.getTitle());
-        entity.setStatus(READY);
-        entity.setReadyAt(OffsetDateTime.now());
-        entity.setError(null);
-        mapper.updateById(entity);
-        return view(entity);
+        MorrowCanvas resolvedTarget = target;
+        if (transactionManager == null) {
+            entity.setCanvasId(resolvedTarget.getId());
+            entity.setCanvasTitle(resolvedTarget.getTitle() == null ? "画布" : resolvedTarget.getTitle());
+            entity.setStatus(READY);
+            entity.setReadyAt(OffsetDateTime.now());
+            entity.setError(null);
+            mapper.updateById(entity);
+            return view(entity);
+        }
+        return transactionTemplate().execute(tx -> {
+            entity.setCanvasId(resolvedTarget.getId());
+            entity.setCanvasTitle(resolvedTarget.getTitle() == null ? "画布" : resolvedTarget.getTitle());
+            entity.setStatus(READY);
+            entity.setReadyAt(OffsetDateTime.now());
+            entity.setError(null);
+            mapper.updateById(entity);
+            return view(entity);
+        });
+    }
+
+    private TransactionTemplate transactionTemplate() {
+        if (transactionTemplate == null) {
+            synchronized (this) {
+                if (transactionTemplate == null) {
+                    TransactionTemplate template = new TransactionTemplate(transactionManager);
+                    template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    transactionTemplate = template;
+                }
+            }
+        }
+        return transactionTemplate;
     }
 
     @Transactional

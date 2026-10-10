@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -45,9 +47,9 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl = "http://localhost:8085";
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    @Autowired(required = false)
+    @Qualifier("gatewayHttpClient")
+    private HttpClient httpClient;
 
     /**
      * 创建视频生成任务（统一走网关 POST /v1/videos，JSON 体，OpenAI 风格格式）。
@@ -170,7 +172,10 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
             // ── 定位日志：图在哪一步消失？(grep [参考图] 可见 source → refImages 全程) ──
             log.info("[参考图] 创建视频: hasRefs={} | source(generatedImageUrl)={} | referenceImages传入={} | 资产参考图={} | 解析后refImages={} | refVideos={} | refAudios={}",
-                    hasRefs, generatedImageUrl, referenceImages, assetRefImages, refImages, refVideos, refAudios);
+                    hasRefs, safeReferenceSummary(generatedImageUrl),
+                    safeReferenceSummary(referenceImages), safeReferenceSummary(assetRefImages),
+                    safeReferenceSummary(refImages), safeReferenceSummary(refVideos),
+                    safeReferenceSummary(refAudios));
             if (!hasRefs) {
                 log.warn("[参考图] 无任何参考素材 → 纯文生视频 t2va（MiniMax query 的 input_image_count 将=0，图未进请求体）");
             }
@@ -182,11 +187,11 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                .timeout(Duration.ofSeconds(config.getVideoCreateTimeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
             }
@@ -211,6 +216,26 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             }
             throw new BusinessException(50201, "AI 视频生成失败: " + e.getMessage(), e);
         }
+    }
+
+    private static String safeReferenceSummary(String value) {
+        if (value == null || value.isBlank()) return "";
+        String trimmed = value.trim();
+        if (trimmed.startsWith("data:")) {
+            int comma = trimmed.indexOf(',');
+            String header = comma < 0 ? trimmed.substring(0, Math.min(40, trimmed.length()))
+                    : trimmed.substring(0, Math.min(comma, 40));
+            return header + ",chars=" + trimmed.length();
+        }
+        if (trimmed.startsWith("mm_file://")) return "mm_file://";
+        int query = trimmed.indexOf('?');
+        String clean = query > 0 ? trimmed.substring(0, query) : trimmed;
+        return clean.length() <= 160 ? clean : clean.substring(0, 160) + "…";
+    }
+
+    private static List<String> safeReferenceSummary(List<String> values) {
+        if (values == null || values.isEmpty()) return List.of();
+        return values.stream().map(VideoGenerationServiceImpl::safeReferenceSummary).toList();
     }
 
     /**
@@ -261,10 +286,10 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos/" + taskId))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                    .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                    .timeout(Duration.ofSeconds(config.getVideoCreateTimeout()))
                     .DELETE()
                     .build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() == 404) {
                 throw new BusinessException(40401, "video task not found: " + taskId);
             }
@@ -362,7 +387,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             OutboundUrlGuard.requireSafeHttpUrl(url);
             HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
                     .timeout(Duration.ofSeconds(60)).GET().build();
-            HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() == 200 && resp.body().length > 0) return resp.body();
             log.warn("下载参考素材失败 {}: {}", url, resp.statusCode());
             return null;
@@ -385,7 +410,7 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                     .timeout(Duration.ofSeconds(config.getRefUploadTimeout()))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                     .build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                 throw new BusinessException(50201, "参考素材上传失败: " + resp.statusCode() + " " + resp.body());
             }
@@ -509,11 +534,11 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
                 .uri(URI.create(config.getGatewayBaseUrl() + "/v1/videos"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.getGatewayApiKey())
-                .timeout(Duration.ofSeconds(config.getVideoRequestTimeout()))
+                .timeout(Duration.ofSeconds(config.getVideoCreateTimeout()))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
 
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200 && resp.statusCode() != 201) {
                 throw new BusinessException(50201, "Video API returned " + resp.statusCode() + ": " + resp.body());
             }
@@ -556,6 +581,15 @@ public class VideoGenerationServiceImpl implements VideoGenerationService {
             if (!frameIdx.contains(i)) out.add(refs.get(i));
         }
         return out;
+    }
+
+    private HttpClient httpClient() {
+        if (httpClient == null) {
+            httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+        }
+        return httpClient;
     }
 
 }

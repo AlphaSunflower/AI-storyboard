@@ -12,6 +12,8 @@ import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
+import com.moon.moonagent.dto.response.MessagePageVO;
+import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
 import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
 import com.storyboard.common.ApiResponse;
@@ -23,6 +25,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
 import com.moon.moonagent.ai.agent.PromptOptimizeService;
@@ -177,6 +180,24 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.listMessages(id).stream().map(this::toVO).toList());
     }
 
+    /** 消息稳定游标分页；旧接口保留 500 条兼容期。 */
+    @GetMapping("/conversations/{id}/messages/page")
+    public ApiResponse<MessagePageVO> listMessagesPage(
+            Authentication auth, @PathVariable String id,
+            @RequestParam(required = false) String before,
+            @RequestParam(defaultValue = "50") int limit) {
+        return ApiResponse.ok(chatService.listMessagesPage(auth.getName(), id, before, limit));
+    }
+
+    /** 当前用户消息全文搜索，替代前端逐会话全量建索引。 */
+    @GetMapping("/messages/search")
+    public ApiResponse<List<MessageSearchHitVO>> searchMessages(
+            Authentication auth,
+            @RequestParam String q,
+            @RequestParam(defaultValue = "100") int limit) {
+        return ApiResponse.ok(chatService.searchMessages(auth.getName(), q, limit));
+    }
+
     /** 发送消息 */
     @PostMapping("/conversations/{id}/messages")
     public ApiResponse<AgentMessageVO> sendMessage(
@@ -204,13 +225,14 @@ public class AgentConversationController {
               @RequestParam(required = false) String conversationId,
               @RequestParam(required = false) String purpose,
               @RequestParam(required = false) String kind) {
-        String url = chatService.uploadReferenceImage(auth.getName(), conversationId, file, purpose, kind);
+        AgentReferenceUpload uploaded = chatService.uploadReferenceImage(
+                auth.getName(), conversationId, file, purpose, kind);
         return ApiResponse.ok(Map.of(
-                "url", url,
-                "name", file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
-                        ? "未命名文件" : file.getOriginalFilename(),
-                "mimeType", file.getContentType() == null ? "" : file.getContentType(),
-                "sizeBytes", file.getSize()
+                "assetId", uploaded.assetId(),
+                "url", uploaded.url(),
+                "name", uploaded.name(),
+                "mimeType", uploaded.mimeType(),
+                "sizeBytes", uploaded.sizeBytes()
         ));
     }
 
@@ -336,6 +358,28 @@ public class AgentConversationController {
     public ApiResponse<Map<String, Object>> runtimeStatus(Authentication auth,
                                                           @PathVariable String id) {
         return ApiResponse.ok(chatService.getRuntimeStatus(auth.getName(), id));
+    }
+
+    /** 手动压缩会话上下文（/chat 斜杠命令「压缩上下文」）。 */
+    @PostMapping("/conversations/{id}/compact")
+    public ApiResponse<Map<String, Object>> compactContext(Authentication auth,
+                                                           @PathVariable String id) {
+        return ApiResponse.ok(chatService.compactContext(auth.getName(), id));
+    }
+
+    /** 基于当前会话创建临时侧边分支。 */
+    @PostMapping("/conversations/{id}/side-chats")
+    public ApiResponse<AgentConversationVO> createSideChat(
+            Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(toVO(chatService.createSideChat(auth.getName(), id)));
+    }
+
+    /** 关闭并删除临时侧边分支。 */
+    @DeleteMapping("/side-chats/{id}")
+    public ApiResponse<Void> closeSideChat(
+            Authentication auth, @PathVariable String id) {
+        chatService.closeSideChat(auth.getName(), id);
+        return ApiResponse.ok("侧边已关闭", null);
     }
 
     /** Replay native AgentScope turn events after a sequence for reconnect. */

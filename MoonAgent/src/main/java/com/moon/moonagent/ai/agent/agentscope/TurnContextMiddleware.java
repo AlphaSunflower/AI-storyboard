@@ -1,5 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
+import com.moon.moonagent.ai.agent.document.AgentDocumentService;
+import com.moon.moonagent.ai.agent.document.DocumentSummaryView;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
@@ -22,6 +24,7 @@ final class TurnContextMiddleware implements MiddlewareBase {
     private final AgentWorkflowService workflows;
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraints;
+    private final AgentDocumentService documents;
 
     @Override
     public Mono<String> onSystemPrompt(Agent agent, RuntimeContext context, String prompt) {
@@ -96,6 +99,7 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (request.getReferenceVideos() != null && !request.getReferenceVideos().isEmpty()) {
             lines.add("Current turn reference video URLs: " + request.getReferenceVideos());
         }
+        appendDocumentContext(lines, request, runContext);
         if (request.getCanvasContext() != null
                 && !request.getCanvasContext().normalizedMediaRefs().isEmpty()) {
             lines.add("Current canvas media refs: "
@@ -132,5 +136,68 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (lines.isEmpty()) return Mono.just(prompt);
         return Mono.just((prompt == null ? "" : prompt)
                 + "\n\n<turn-context>\n" + String.join("\n", lines) + "\n</turn-context>");
+    }
+
+    private void appendDocumentContext(List<String> lines, OrchestrationRequest request,
+                                       AgentScopeRunContext runContext) {
+        List<AgentAttachmentRequest> attachments = request.getAttachments() == null
+                ? List.of() : request.getAttachments();
+        List<AgentAttachmentRequest> documentAttachments = attachments.stream()
+                .filter(item -> item != null && ("file".equalsIgnoreCase(item.kind())
+                        || isDocumentMime(item.mimeType())))
+                .toList();
+        List<DocumentSummaryView> recent = runContext.conversation() == null
+                ? List.of()
+                : documents.recentSummaries(runContext.conversation().getId(), 5);
+        if (documentAttachments.isEmpty() && recent.isEmpty()) return;
+
+        lines.add("Document reading policy: use persisted summaries for general follow-up questions. "
+                + "Call read_document when the user asks for exact values, pages, tables, quotations, "
+                + "full content, or when the summary is insufficient or uncertain.");
+        lines.add("文档规则：常规追问使用摘要；精确数值、指定页/表、引文、全文或摘要不足时"
+                + "必须调用 read_document。");
+        if (!documentAttachments.isEmpty()) {
+            lines.add("Current turn document attachments:");
+            for (AgentAttachmentRequest attachment : documentAttachments) {
+                StringBuilder line = new StringBuilder("- ");
+                if (attachment.assetId() != null && !attachment.assetId().isBlank()) {
+                    line.append("assetId=").append(attachment.assetId()).append(' ');
+                }
+                if (attachment.name() != null && !attachment.name().isBlank()) {
+                    line.append("name=").append(attachment.name()).append(' ');
+                }
+                if (attachment.mimeType() != null && !attachment.mimeType().isBlank()) {
+                    line.append("mimeType=").append(attachment.mimeType()).append(' ');
+                }
+                String summary = recent.stream()
+                        .filter(item -> item.assetId() != null
+                                && item.assetId().equals(attachment.assetId()))
+                        .map(DocumentSummaryView::summary)
+                        .findFirst()
+                        .orElse("");
+                line.append(summary.isBlank() ? "summary=(not generated yet)" : "summary=" + summary);
+                lines.add(line.toString());
+            }
+        }
+        if (!recent.isEmpty()) {
+            lines.add("Recent conversation document summaries:");
+            for (DocumentSummaryView item : recent) {
+                lines.add("- assetId=" + item.assetId()
+                        + " name=" + (item.name() == null ? "" : item.name())
+                        + " status=" + item.status()
+                        + " summary=" + item.summary());
+            }
+        }
+    }
+
+    private static boolean isDocumentMime(String mimeType) {
+        if (mimeType == null) return false;
+        String value = mimeType.toLowerCase(java.util.Locale.ROOT);
+        return value.contains("word") || value.contains("excel") || value.contains("spreadsheet")
+                || value.contains("powerpoint") || value.contains("presentation")
+                || value.contains("pdf") || value.contains("markdown")
+                || value.equals("application/msword")
+                || value.equals("application/vnd.ms-excel")
+                || value.equals("application/vnd.ms-powerpoint");
     }
 }

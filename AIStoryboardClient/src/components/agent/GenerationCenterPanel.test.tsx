@@ -104,6 +104,20 @@ describe('GenerationCenterPanel', () => {
     expect(screen.getByText('剧情与分镜诊断')).toBeTruthy();
   });
 
+  it('marks the closed launcher as edge-collapsed for hover reveal', () => {
+    vi.spyOn(agentApi, 'listGenerationRecords').mockResolvedValue({
+      data: { data: { records: [], total: 0, page: 1, size: 50 } },
+    } as never);
+    const { container } = render(
+      <MemoryRouter>
+        <GenerationCenterPanel />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector('.generation-center')?.classList.contains('is-collapsed'))
+      .toBe(true);
+  });
+
   it('shows an active agent task in the default generation view', async () => {
     vi.spyOn(agentApi, 'listGenerationRecords').mockResolvedValue({
       data: { data: { records: [], total: 0, page: 1, size: 50 } },

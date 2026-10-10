@@ -22,6 +22,12 @@ public class AgentWorkflowIntentResolver {
 
     private static final Pattern STAGE = Pattern.compile(
             "(?m)^\\s*(阶段\\s*[0-9一二三四五六七八九十]+|步骤\\s*[0-9一二三四五六七八九十]+)[：:]?.*$");
+    private static final Pattern COMPLETED_MARKER = Pattern.compile("【[^】]*完成】");
+    private static final Pattern QUANTITY = Pattern.compile(
+            "(?:共|全部|生成|分别)?\\s*(\\d{1,3})\\s*(?:个|张|镜|条)");
+    private static final Pattern COMPLETE_VIDEO = Pattern.compile("完整.{0,8}视频");
+    private static final Pattern EXACT_COUNT = Pattern.compile(
+            "(\\d{1,3})\\s*(?:个镜头|镜|个分镜|秒)");
     private final StructuredDecisionService decisions;
 
     @Value("${ai.agent.workflow.custom-enabled:false}")
@@ -137,13 +143,12 @@ public class AgentWorkflowIntentResolver {
     }
 
     private static String marker(String block, String title) {
-        Matcher matcher = Pattern.compile("【[^】]*完成】").matcher(block);
+        Matcher matcher = COMPLETED_MARKER.matcher(block);
         return matcher.find() ? matcher.group() : "【" + title + "完成】";
     }
 
     private static int repeatCount(String block) {
-        Matcher matcher = Pattern.compile("(?:共|全部|生成|分别)?\\s*(\\d{1,3})\\s*(?:个|张|镜|条)")
-                .matcher(block);
+        Matcher matcher = QUANTITY.matcher(block);
         int maximum = 1;
         while (matcher.find()) {
             maximum = Math.max(maximum, Integer.parseInt(matcher.group(1)));
@@ -154,7 +159,7 @@ public class AgentWorkflowIntentResolver {
     private static String toolFor(String block, int index, int total) {
         String value = block.toLowerCase(Locale.ROOT);
         if (containsAny(value, "合并", "拼接", "成片")
-                || Pattern.compile("完整.{0,8}视频").matcher(value).find()) {
+                || COMPLETE_VIDEO.matcher(value).find()) {
             return "merge_storyboard_videos";
         }
         if (containsAny(value, "提示词", "prompt") && !containsAny(value, "生成图片", "绘图")) {
@@ -180,7 +185,7 @@ public class AgentWorkflowIntentResolver {
     }
 
     private static List<Integer> findExactCounts(String prompt) {
-        Matcher matcher = Pattern.compile("(\\d{1,3})\\s*(?:个镜头|镜|个分镜|秒)").matcher(prompt);
+        Matcher matcher = EXACT_COUNT.matcher(prompt);
         List<Integer> counts = new ArrayList<>();
         while (matcher.find()) counts.add(Integer.parseInt(matcher.group(1)));
         return List.copyOf(counts);

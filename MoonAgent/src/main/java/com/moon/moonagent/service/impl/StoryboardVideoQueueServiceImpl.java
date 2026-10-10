@@ -16,9 +16,12 @@ import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.storyboard.VideoGenerationPolicy;
 import com.moon.moonagent.service.AssetService;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
+import com.moon.moonagent.util.PollingBackoff;
 import lombok.RequiredArgsConstructor;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -29,6 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 分镜视频批量生成队列实现。
@@ -43,8 +49,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueService {
 
     private static final Logger log = LoggerFactory.getLogger(StoryboardVideoQueueServiceImpl.class);
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
-    /** 单飞锁：同一时刻只跑一个队列任务（一个分镜一个分镜生成）。 */
+    /** 调度单飞锁：同一时刻只存在一组 drain worker。 */
     private final AtomicBoolean processing = new AtomicBoolean(false);
 
     private final StoryboardVideoQueueMapper queueMapper;
@@ -52,6 +60,11 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
     private final StoryboardClient storyboardClient;
     private final AssetService assetService;
     private final AgentGenerationService generationService;
+    private final ExecutorService drainExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final PollingBackoff pollBackoff = PollingBackoff.video();
+
+    @Value("${storyboard.video.queue-concurrency:2}")
+    private int queueConcurrency = 2;
 
     @Override
     public List<StoryboardVideoQueue> enqueue(StoryboardVideoEnqueueRequest request) {
@@ -137,13 +150,28 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
     /** 串行处理队列：单飞锁，始终只推进最早的 queued 任务。 */
     private void process() {
         if (!processing.compareAndSet(false, true)) return;
-        new Thread(this::drain, "storyboard-video-queue-drainer").start();
+        drainExecutor.submit(() -> {
+            try {
+                int workers = Math.max(1, Math.min(8, queueConcurrency));
+                List<CompletableFuture<Void>> running = new java.util.ArrayList<>(workers);
+                for (int index = 0; index < workers; index++) {
+                    running.add(CompletableFuture.runAsync(this::drain, drainExecutor));
+                }
+                CompletableFuture.allOf(running.toArray(CompletableFuture[]::new)).join();
+            } finally {
+                processing.set(false);
+                // 补上 drain 退出与 processing 复位之间入队的任务。
+                if (queueMapper.findNextQueued() != null) {
+                    process();
+                }
+            }
+        });
     }
 
     private void drain() {
         try {
             while (true) {
-                StoryboardVideoQueue next = queueMapper.findNextQueued();
+                StoryboardVideoQueue next = queueMapper.claimNextQueued();
                 if (next == null) break;
                 runOne(next);
             }
@@ -160,7 +188,6 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         row.setStartedAt(OffsetDateTime.now());
         row.setError(null);
         queueMapper.updateById(row);
-        markSceneRunning(row.getSceneId());
 
         AgentConversation conversation = conversationMapper.selectById(row.getConversationId());
         if (conversation == null) {
@@ -179,6 +206,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             failRow(row, "分镜不存在，无法生成视频");
             return;
         }
+        markSceneRunning(scene);
 
         List<Scene> orderedScenes = List.of(scene);
         try {
@@ -208,23 +236,6 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
                 log.warn("[分镜视频队列] 下一镜图片生成失败，降级仅首帧: sceneId={}, error={}",
                         nextScene.getId(), e.getMessage());
             }
-        }
-        try {
-            orderedScenes = storyboardClient.getProjectScenesFresh(scene.getProjectId()).stream()
-                    .sorted(java.util.Comparator.comparing(
-                            Scene::getSceneNumber,
-                            java.util.Comparator.nullsLast(Integer::compareTo)))
-                    .toList();
-            scene = findScene(orderedScenes, scene.getId());
-            if (scene == null) {
-                failRow(row, "分镜不存在，无法生成视频");
-                return;
-            }
-            nextScene = sceneIndex >= 0 && sceneIndex + 1 < orderedScenes.size()
-                    ? orderedScenes.get(sceneIndex + 1) : null;
-        } catch (Exception e) {
-            log.warn("[分镜视频队列] 刷新分镜图片失败: sceneId={}, error={}",
-                    scene.getId(), e.getMessage());
         }
 
         String prompt = row.getPrompt();
@@ -311,6 +322,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
 
         // 轮询直至终态（复用 VideoPollExecutor：终态按 taskId 反查 scene 回写 videoUrl/videoStatus）
         int attempts = 0;
+        Integer lastProgress = null;
         while (true) {
             // 取消检查：running 期间被取消则停止跟踪（上游无法真正停止）
             StoryboardVideoQueue live = queueMapper.selectById(row.getId());
@@ -335,15 +347,16 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
                     failRow(row, result.getOrDefault("error", "视频生成失败"));
                     return;
                 }
-                if (progress != null) {
+                if (progress != null && !progress.equals(lastProgress)) {
                     row.setProgress(progress);
                     queueMapper.updateById(row);
+                    lastProgress = progress;
                 }
             } catch (Exception e) {
                 log.warn("[分镜视频队列] 轮询异常(不终止): queueId={}, error={}", row.getId(), e.getMessage());
             }
             try {
-                Thread.sleep(5000);
+                Thread.sleep(pollBackoff.delayMillis(attempts));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
@@ -412,9 +425,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         storyboardClient.updateScene(scene);
     }
 
-    private void markSceneRunning(String sceneId) {
-        if (sceneId == null || sceneId.isBlank()) return;
-        Scene scene = storyboardClient.getScene(sceneId);
+    private void markSceneRunning(Scene scene) {
         if (scene == null) return;
         scene.setVideoStatus("generating");
         storyboardClient.updateScene(scene);
@@ -484,6 +495,18 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         if (generated == null || generated.isEmpty()) {
             throw new IllegalStateException("分镜图片生成失败，无法继续创建视频");
         }
+        Object urls = generated.get("imageUrls");
+        if (urls instanceof List<?> list && !list.isEmpty()) {
+            String url = String.valueOf(list.getFirst());
+            if (!url.isBlank()) {
+                scene.setImageUrl(url);
+            }
+        }
+    }
+
+    @PreDestroy
+    void shutdownDrainExecutor() {
+        drainExecutor.shutdownNow();
     }
 
     private static boolean hasExplicitFrame(List<Map<String, Object>> refs, String role) {
@@ -564,7 +587,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
                 .toList();
         if (clean.isEmpty()) return null;
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(clean);
+            return JSON.writeValueAsString(clean);
         } catch (Exception e) {
             log.warn("[分镜视频队列] 参考图角色序列化失败: {}", e.getMessage());
             return null;
@@ -584,7 +607,7 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
         }
         // 新格式：[{url, role}]
         try {
-            var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(t);
+            var arr = JSON.readTree(t);
             List<ReferenceImage> out = new ArrayList<>();
             for (var node : arr) {
                 String url = node.path("url").asText("");
