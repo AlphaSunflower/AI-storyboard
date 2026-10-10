@@ -1271,6 +1271,13 @@ public class AgentChatServiceImpl implements AgentChatService {
                 sendRuntimeEnvelope(emitter,
                         turnEventStore.append(turn.getId(), "turn_started", started));
 
+                if ("reject".equalsIgnoreCase(action)) {
+                    checkpointResumeService.complete(claim);
+                    finishAgentScopeTurn(conversation, turn,
+                            AgentTurnResult.done("已取消，本次操作未执行。"), emitter);
+                    return;
+                }
+
                 String turnInput = priorTurn.getInputText() == null
                         ? "" : priorTurn.getInputText();
                 OrchestrationRequest request = new OrchestrationRequest(
