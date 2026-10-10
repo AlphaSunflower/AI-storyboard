@@ -51,7 +51,9 @@ public class MoonSandboxClient {
     public List<SandboxFileEntry> list(String conversationId, String path) {
         String uri = base(conversationId) + "/files?path=" + urlEncode(path == null ? "" : path);
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(uri))
-                .timeout(properties.getReadTimeout()).GET().build());
+                .timeout(properties.getReadTimeout())
+                .header("X-Internal-Secret", properties.getInternalSecret())
+                .GET().build());
         requireSuccess(response);
         try {
             return JSON.readValue(response.body(), new TypeReference<>() {});

@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.turn;
 
 import com.moon.moonagent.entity.AgentConversation;
+import com.moon.moonagent.ai.agent.AgentTraceEvent;
 import com.moon.moonagent.entity.AgentTurnEntity;
 import com.moon.moonagent.entity.AgentTurnEventEntity;
 import com.moon.moonagent.mapper.AgentTurnEventMapper;
@@ -70,6 +71,25 @@ class AgentTurnEventStoreTest {
 
         assertThat(store.findByCheckpoint("form-1")).isSameAs(waiting);
         assertThat(store.findByCheckpoint("")).isNull();
+    }
+
+    @Test
+    void serializesLiveTraceTimestampPayload() {
+        AgentTurnMapper turnMapper = mock(AgentTurnMapper.class);
+        AgentTurnEventMapper eventMapper = mock(AgentTurnEventMapper.class);
+        AgentTurnEventStore store = new AgentTurnEventStore(turnMapper, eventMapper);
+        when(turnMapper.incrementSequenceBy("turn-1", 1)).thenReturn(1);
+        AgentTraceEvent trace = new AgentTraceEvent(
+                "trace-1", "model_reasoning", "moon", "agentscope",
+                "node_started", "模型推理", "", "", "",
+                OffsetDateTime.parse("2026-10-10T08:00:00Z"), null);
+
+        AgentTurnEventEnvelope event = store.append("turn-1", "agent_event", Map.of(
+                "eventType", "AGENT_TRACE",
+                "data", Map.of("traceEvent", trace)));
+
+        assertThat(event.payloadJson()).contains("\"startedAt\"");
+        assertThat(event.payloadJson()).doesNotContain("\"data\":{}");
     }
 
     private static AgentTurnEventEntity event(int sequence, String payload) {

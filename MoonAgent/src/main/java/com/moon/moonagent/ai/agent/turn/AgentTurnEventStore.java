@@ -3,6 +3,8 @@ package com.moon.moonagent.ai.agent.turn;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentTurnEntity;
 import com.moon.moonagent.entity.AgentTurnEventEntity;
@@ -23,7 +25,9 @@ import java.util.Map;
 public class AgentTurnEventStore {
 
     private static final Logger log = LoggerFactory.getLogger(AgentTurnEventStore.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private final AgentTurnMapper turnMapper;
     private final AgentTurnEventMapper eventMapper;

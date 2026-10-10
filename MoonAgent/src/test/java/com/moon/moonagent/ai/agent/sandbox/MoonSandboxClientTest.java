@@ -36,6 +36,10 @@ class MoonSandboxClientTest {
                      "files":[{"path":"output/a.txt","sizeBytes":2,"mimeType":"text/plain"}]}
                     """);
         });
+        server.createContext("/internal/sandbox/c1/files", exchange -> {
+            secret.set(exchange.getRequestHeaders().getFirst("X-Internal-Secret"));
+            respond(exchange, 200, "[]");
+        });
         server.start();
         MoonSandboxClient client = new MoonSandboxClient(properties(server));
 
@@ -46,6 +50,8 @@ class MoonSandboxClientTest {
         assertThat(result.exitCode()).isZero();
         assertThat(result.files()).extracting(SandboxFileView::path)
                 .containsExactly("output/a.txt");
+        client.list("c1", "output");
+        assertThat(secret.get()).isEqualTo("secret");
     }
 
     private MoonSandboxClientProperties properties(HttpServer server) {
