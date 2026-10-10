@@ -1,0 +1,21 @@
+http_port 3128
+visible_hostname moon-sandbox-egress-proxy
+httpd_suppress_version_string on
+
+acl SSL_ports port 443
+acl Safe_ports port 80 443
+acl CONNECT method CONNECT
+acl allowed_domains dstdomain ${SANDBOX_ALLOWED_DOMAINS}
+
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+http_access allow allowed_domains
+http_access deny all
+
+cache deny all
+cache_store_log none
+pid_filename none
+access_log stdio:/dev/stdout
+cache_log stdio:/dev/stderr
+via off
+forwarded_for delete

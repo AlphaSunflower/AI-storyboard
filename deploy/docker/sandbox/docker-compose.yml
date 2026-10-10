@@ -1,0 +1,99 @@
+name: ${COMPOSE_PROJECT_NAME:-moon-sandbox}
+
+services:
+  sandbox-runner:
+    build:
+      context: ../../..
+      dockerfile: deploy/docker/sandbox/Dockerfile
+      args:
+        MOON_SANDBOX_UID: ${MOON_SANDBOX_UID:-10001}
+        MOON_SANDBOX_GID: ${MOON_SANDBOX_GID:-10001}
+    image: moon-sandbox-runner:${MOON_SANDBOX_IMAGE_TAG:-local}
+    container_name: moon-sandbox-runner
+    user: "${MOON_SANDBOX_UID:-10001}:${MOON_SANDBOX_GID:-10001}"
+    environment:
+      MOON_SANDBOX_WORKSPACE_ROOT: /workspaces
+      MOON_SANDBOX_PYTHON_EXECUTABLE: python3
+      MOON_SANDBOX_DEFAULT_TIMEOUT_SECONDS: ${SANDBOX_DEFAULT_TIMEOUT_SECONDS:-300}
+      MOON_SANDBOX_MAX_TIMEOUT_SECONDS: ${SANDBOX_MAX_TIMEOUT_SECONDS:-600}
+      MOON_SANDBOX_MAX_CONCURRENT_EXECUTIONS: ${SANDBOX_MAX_CONCURRENT_EXECUTIONS:-4}
+      MOON_SANDBOX_IDLE_EXPIRY: ${SANDBOX_IDLE_EXPIRY:-24h}
+      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET:?SANDBOX_INTERNAL_SECRET is required}
+      HTTP_PROXY: http://sandbox-egress-proxy:3128
+      HTTPS_PROXY: http://sandbox-egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,::1,sandbox-runner,sandbox-egress-proxy
+      HOME: /tmp
+      TMPDIR: /tmp
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai
+    ports:
+      - "${SANDBOX_BIND_IP:-127.0.0.1}:${SANDBOX_PORT:-8090}:8090"
+    volumes:
+      - sandbox-workspaces:/workspaces
+    networks:
+      - sandbox-internal
+    read_only: true
+    tmpfs:
+      - /tmp:size=${SANDBOX_TMP_SIZE:-512m},mode=1777
+    pids_limit: ${SANDBOX_PIDS_LIMIT:-256}
+    mem_limit: ${SANDBOX_MEMORY_LIMIT:-2g}
+    cpus: ${SANDBOX_CPUS:-2.0}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: ${SANDBOX_STOP_GRACE_PERIOD:-30s}
+    depends_on:
+      sandbox-egress-proxy:
+        condition: service_healthy
+
+  sandbox-egress-proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    image: moon-sandbox-egress-proxy:${MOON_SANDBOX_IMAGE_TAG:-local}
+    container_name: moon-sandbox-egress-proxy
+    environment:
+      SANDBOX_ALLOWED_DOMAINS: ${SANDBOX_ALLOWED_DOMAINS:?SANDBOX_ALLOWED_DOMAINS is required}
+    networks:
+      - sandbox-internal
+      - sandbox-egress
+    read_only: true
+    tmpfs:
+      - /tmp:size=${SANDBOX_PROXY_TMP_SIZE:-64m},mode=1777
+    pids_limit: ${SANDBOX_PROXY_PIDS_LIMIT:-128}
+    mem_limit: ${SANDBOX_PROXY_MEMORY_LIMIT:-256m}
+    cpus: ${SANDBOX_PROXY_CPUS:-0.5}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3128"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+volumes:
+  sandbox-workspaces:
+    name: ${SANDBOX_WORKSPACES_VOLUME:-sandbox-workspaces}
+
+networks:
+  sandbox-internal:
+    name: ${COMPOSE_PROJECT_NAME:-moon-sandbox}-internal
+    driver: bridge
+    internal: true
+  sandbox-egress:
+    name: ${COMPOSE_PROJECT_NAME:-moon-sandbox}-egress
+    driver: bridge
