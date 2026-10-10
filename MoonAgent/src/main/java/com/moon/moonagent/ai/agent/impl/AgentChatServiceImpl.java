@@ -941,12 +941,13 @@ public class AgentChatServiceImpl implements AgentChatService {
      * 落库 assistant 消息带结构化 metadata（trace/reasoning/suggestedActions/hitl 等）。
      */
     private AgentMessage persistAssistant(AgentConversation conversation, String content, Map<String, Object> metadata) {
-        if (content == null || content.isBlank()) return null;
+        boolean hasMetadata = metadata != null && !metadata.isEmpty();
+        if ((content == null || content.isBlank()) && !hasMetadata) return null;
         return transactionTemplate().execute(tx -> {
             AgentMessage assistantMessage = new AgentMessage();
             assistantMessage.setConversationId(conversation.getId());
             assistantMessage.setRole("assistant");
-            assistantMessage.setContent(content);
+            assistantMessage.setContent(content == null ? "" : content);
             if (metadata != null && !metadata.isEmpty()) assistantMessage.setMetadata(metadata);
             messageMapper.insert(assistantMessage);
             conversationMapper.updateById(conversation); // 触发 updatedAt fill
@@ -1157,6 +1158,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentTraceAccumulator trace = new AgentTraceAccumulator(
                         request, resolveAgentContextWindow());
                 request.setTrace(trace);
+                String traceTurnId = turn.getId();
+                trace.setEventSink(traceEvent -> sendRuntimeEnvelope(
+                        emitter,
+                        turnEventStore.append(traceTurnId, "agent_event", Map.of(
+                                "eventType", "AGENT_TRACE",
+                                "data", Map.of("traceEvent", traceEvent)))));
 
                 AgentTurnResult result;
                 try (AgentTurnEventPublisher eventPublisher = eventPublisher(
@@ -1168,7 +1175,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                 }
                 throwIfInterrupted(conversationId);
                 if (sandboxOutputReconciler != null) {
-                    sandboxOutputReconciler.reconcile(conversation, turn.getId());
+                    var published = sandboxOutputReconciler.reconcile(conversation, turn.getId());
+                    if (!published.assetIds().isEmpty()) {
+                        result = withSandboxAttachments(result, published);
+                    }
                 }
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
@@ -1685,7 +1695,10 @@ public class AgentChatServiceImpl implements AgentChatService {
                     turnEventStore.append(turn.getId(), "turn_paused", paused));
             return;
         }
-        if (result.content() != null && !result.content().isBlank()) {
+        boolean hasSandboxAttachments = result.metadata() != null
+                && result.metadata().get("sandboxAttachments") instanceof List<?> list
+                && !list.isEmpty();
+        if ((result.content() != null && !result.content().isBlank()) || hasSandboxAttachments) {
             persistAssistant(conversation, result);
         }
         var canvasRun = canvasRunService.activeByTurn(turn.getId());
@@ -1705,6 +1718,46 @@ public class AgentChatServiceImpl implements AgentChatService {
         payload.put("metadata", result.metadata() == null ? Map.of() : result.metadata());
         sendRuntimeEnvelope(emitter,
                 turnEventStore.append(turn.getId(), "turn_completed", payload));
+    }
+
+    @SuppressWarnings("unchecked")
+    private AgentTurnResult withSandboxAttachments(
+            AgentTurnResult result,
+            com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher.PublishedArtifacts published) {
+        List<Map<String, Object>> attachments = published.assetIds().stream()
+                .map(assetMapper::selectById)
+                .filter(java.util.Objects::nonNull)
+                .map(asset -> {
+                    Map<String, Object> item = new java.util.LinkedHashMap<>();
+                    item.put("assetId", asset.getId());
+                    item.put("url", asset.getUrl() == null ? "" : asset.getUrl());
+                    item.put("name", asset.getOriginalName() == null
+                            ? "生成文件" : asset.getOriginalName());
+                    item.put("mimeType", asset.getMimeType() == null
+                            ? "application/octet-stream" : asset.getMimeType());
+                    item.put("kind", asset.getMimeType() != null
+                            && asset.getMimeType().startsWith("image/") ? "image" : "file");
+                    item.put("source", "upload");
+                    return item;
+                })
+                .toList();
+        if (attachments.isEmpty()) return result;
+        Map<String, Object> metadata = new LinkedHashMap<>(
+                result.metadata() == null ? Map.of() : result.metadata());
+        Object existing = metadata.get("sandboxAttachments");
+        if (existing instanceof List<?> current) {
+            List<Map<String, Object>> merged = new java.util.ArrayList<>();
+            current.stream().filter(Map.class::isInstance)
+                    .map(item -> (Map<String, Object>) item)
+                    .forEach(merged::add);
+            merged.addAll(attachments);
+            metadata.put("sandboxAttachments", merged);
+        } else {
+            metadata.put("sandboxAttachments", attachments);
+        }
+        return new AgentTurnResult(
+                result.content(), metadata, result.agentTrace(), result.reasoning(),
+                result.suggestedActions(), result.hitlPaused(), result.messageId());
     }
 
     /** HITL 卡片落库时先写的是卡片标题，暂停时用本轮完整助手正文补齐，刷新后仍能看到方案。 */

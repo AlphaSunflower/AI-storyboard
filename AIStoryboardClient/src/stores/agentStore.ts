@@ -1665,6 +1665,8 @@ function applyOneEnvelope(
     const content = asString(payload.content);
     const metadata = turnMetadata(payload);
     const generation = useAgentStore.getState().generating[context.conversationId];
+    const liveSandboxAttachments = useAgentStore.getState().messages
+      .find((message) => message.id === context.assistantId)?.metadata?.sandboxAttachments;
     const finalMetadata: AgentMessageMetadata | undefined = (
       metadata || generation?.reasoningDraft || generation?.traceDraft?.length
       || generation?.usageDraft || generation?.assistantMessageMetadata
@@ -1674,6 +1676,7 @@ function applyOneEnvelope(
         kind: metadata?.kind ?? generation?.assistantMessageMetadata?.kind ?? 'assistant-reply',
         reasoning: metadata?.reasoning ?? generation?.reasoningDraft,
         agentTrace: metadata?.agentTrace ?? generation?.traceDraft,
+        sandboxAttachments: metadata?.sandboxAttachments ?? liveSandboxAttachments,
         metrics: metadata?.metrics ?? generation?.usageDraft ?? generation?.assistantMessageMetadata?.metrics,
       } : undefined;
     if (content) storeAssistantContent(context.conversationId, context.assistantId, content);
@@ -1757,6 +1760,27 @@ function applyOneEnvelope(
       details,
       durationMs: previous?.durationMs,
       source: 'agentscope',
+    });
+    return;
+  }
+
+  if (eventType === 'AGENT_TRACE') {
+    const event = asRecord(data.traceEvent);
+    if (!event) return;
+    const id = asString(event.id);
+    if (!id) return;
+    setLiveTrace(context, {
+      id,
+      phase: asString(event.phase),
+      agent: asString(event.agent, 'moon'),
+      specialist: asString(event.specialist) || undefined,
+      status: asString(event.status),
+      title: asString(event.title),
+      summary: asString(event.summary),
+      currentIntent: asString(event.currentIntent) || undefined,
+      targetIntent: asString(event.targetIntent) || undefined,
+      startedAt: asString(event.startedAt),
+      durationMs: typeof event.durationMs === 'number' ? event.durationMs : undefined,
     });
     return;
   }

@@ -181,6 +181,7 @@ export interface AgentMessageMetadata {
   metrics?: AgentTurnMetrics;
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
+  sandboxAttachments?: AgentAttachment[];
   orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   checkpointOwner?: string;

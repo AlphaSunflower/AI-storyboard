@@ -1332,6 +1332,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     ? hitlFromMetadata(metadata)
     : null;
   const submittedActionId = hitlMeta?.selectedActionId;
+  const sandboxAttachments = metadata?.sandboxAttachments ?? [];
   const metrics = !isUser ? metadata?.metrics : undefined;
   const metricsTitle = metrics
     ? [
@@ -1608,7 +1609,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               >{editSaving ? '发送中…' : '发送'}</button>
             </div>
           </div>
-        ) : (displayContent || userAttachments.length > 0 || quotedAnnotations.length > 0) ? (
+        ) : (displayContent || userAttachments.length > 0 || sandboxAttachments.length > 0 || quotedAnnotations.length > 0) ? (
           <span className="chat-live-text">
             {role === 'assistant'
               ? (
@@ -1630,6 +1631,10 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                       onOpen={onOpenGenerationCenter}
                     />
                   )}
+                  <MessageAttachmentStrip
+                    attachments={sandboxAttachments}
+                    onPreview={openAttachmentPreview}
+                  />
                 </>
               )
               : (

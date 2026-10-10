@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * 一轮编排的轨迹累积器：持有请求、事件列表与开始时间，负责：
@@ -44,6 +45,7 @@ public class AgentTraceAccumulator {
     private volatile boolean terminalEventSent;
     private volatile String hitlMessageId = "";
     private volatile List<SuggestedAction> suggestedActions = List.of();
+    private volatile Consumer<AgentTraceEvent> eventSink;
     private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
     private final int contextWindowTokens;
 
@@ -162,6 +164,11 @@ public class AgentTraceAccumulator {
         synchronized (events) { return new ArrayList<>(events); }
     }
 
+    /** Register an additional live sink used by the sequenced AgentScope transport. */
+    public void setEventSink(Consumer<AgentTraceEvent> eventSink) {
+        this.eventSink = eventSink;
+    }
+
     public OffsetDateTime getStartedAt() {
         return startedAt;
     }
@@ -223,6 +230,14 @@ public class AgentTraceAccumulator {
         } catch (Exception e) {
             log.debug("agent_trace 发送失败（前端可能已断开）: {}",
                     request.getConversation() == null ? "" : request.getConversation().getId());
+        }
+        Consumer<AgentTraceEvent> sink = eventSink;
+        if (sink != null) {
+            try {
+                sink.accept(event);
+            } catch (Exception e) {
+                log.debug("agent_trace sink 发送失败: {}", e.getMessage());
+            }
         }
     }
 }

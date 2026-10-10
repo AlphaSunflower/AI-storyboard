@@ -1371,6 +1371,52 @@ describe('AgentScope turn envelope reduction', () => {
     expect(useAgentStore.getState().messages[0].content).toBe('结果');
   });
 
+  it('reduces live agent trace events before turn completion', () => {
+    const turnId = 'live-trace';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'AGENT_TRACE',
+        data: {
+          traceEvent: {
+            id: 'trace-1',
+            phase: 'model_reasoning',
+            agent: 'moon',
+            specialist: 'agentscope',
+            status: 'node_started',
+            title: '模型推理',
+            summary: '',
+            startedAt: new Date().toISOString(),
+          },
+        },
+      }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().generating['conversation-1'].traceDraft?.[0])
+      .toMatchObject({ id: 'trace-1', status: 'node_started' });
+    expect(useAgentStore.getState().messages[0].metadata?.agentTrace?.[0]?.title)
+      .toBe('模型推理');
+  });
+
   it('pauses on turn_paused and resumes with the same turn id', async () => {
     const pauseBody = sseBody([
       sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, 'turn-pause'),

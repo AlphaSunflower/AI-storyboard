@@ -27,12 +27,13 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai
-    ports:
-      - "${SANDBOX_BIND_IP:-127.0.0.1}:${SANDBOX_PORT:-8090}:8090"
     volumes:
       - sandbox-workspaces:/workspaces
+    ports:
+      - "${SANDBOX_BIND_IP:-127.0.0.1}:${SANDBOX_PORT:-8090}:8090"
     networks:
       - sandbox-internal
+      - sandbox-edge
     read_only: true
     tmpfs:
       - /tmp:size=${SANDBOX_TMP_SIZE:-512m},mode=1777
@@ -96,4 +97,7 @@ networks:
     internal: true
   sandbox-egress:
     name: ${COMPOSE_PROJECT_NAME:-moon-sandbox}-egress
+    driver: bridge
+  sandbox-edge:
+    name: ${COMPOSE_PROJECT_NAME:-moon-sandbox}-edge
     driver: bridge

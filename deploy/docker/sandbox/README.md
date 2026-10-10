@@ -9,13 +9,12 @@ MoonAgent
    │  internal HTTP
    ▼
 sandbox-runner ── sandbox-internal（internal: true）
-   │
-   └── sandbox-egress-proxy ── sandbox-egress（可访问公网）
-                                  │
-                                  └── 仅 SANDBOX_ALLOWED_DOMAINS 中的域名
+   │                 └── sandbox-egress-proxy ── sandbox-egress（可访问公网）
+   │                                                └── 仅 SANDBOX_ALLOWED_DOMAINS 中的域名
+   └── sandbox-edge（主机访问入口，默认 127.0.0.1:8090）
 ```
 
-- `sandbox-runner`：Java 25 + Python 3.12，预装 `python-docx`、`matplotlib`、`pandas`、`openpyxl`、`Pillow`、Noto CJK 字体和常用证书/图形库。
+- `sandbox-runner`：Java 25 + Python 3.12，预装 `python-docx`、`matplotlib`、`pandas`、`openpyxl`、`Pillow`、Noto CJK 字体和常用证书/图形库。runner 通过 `sandbox-edge` 发布内部 HTTP 端口。
 - `sandbox-workspaces`：命名卷，挂载到 `/workspaces`。会话目录由 runner 内部按会话隔离，最终产物仍应上传 MinIO。
 - `sandbox-egress-proxy`：Squid 代理，支持 HTTP 与 HTTPS CONNECT，只放行 `SANDBOX_ALLOWED_DOMAINS` 中的目标域名。
 - runner 使用非 root 用户、只读根文件系统、`tmpfs /tmp`、CPU/内存/PIDs 限额、健康检查和 `unless-stopped` 重启策略。
@@ -59,7 +58,7 @@ docker compose --env-file .env.example config -q
 docker compose --env-file .env.example config
 ```
 
-静态检查会确认：runner 只接 `sandbox-internal`、代理同时接两个网络、internal 网络已隔离、runner 为非 root/只读根文件系统、`/workspaces` 使用命名卷，以及 runner 的代理和白名单环境变量已配置。
+静态检查会确认：runner 同时接 `sandbox-internal` 与 `sandbox-edge`、代理同时接 `sandbox-internal` 与 `sandbox-egress`、internal 网络已隔离、runner 为非 root/只读根文件系统、`/workspaces` 使用命名卷，以及 runner 的代理和白名单环境变量已配置。
 
 ## 启动与停止
 

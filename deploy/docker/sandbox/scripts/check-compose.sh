@@ -61,9 +61,11 @@ def positive_number(value):
         return False
 
 
-assert network_names(runner) == {"sandbox-internal"}, "runner must use only the internal network"
+assert network_names(runner) == {"sandbox-internal", "sandbox-edge"}, "runner must bridge internal and host networks"
 assert network_names(proxy) == {"sandbox-internal", "sandbox-egress"}, "proxy must bridge internal and external networks"
 assert networks["sandbox-internal"]["internal"] is True, "sandbox-internal must be internal"
+assert network_names(runner), "runner networks must be configured"
+assert runner.get("ports"), "runner must publish its API port"
 assert runner["read_only"] is True, "runner rootfs must be read-only"
 assert runner["user"] == "10001:10001", "runner must run as the non-root 10001 identity"
 assert "/workspaces" in [mount["target"] for mount in runner.get("volumes", [])], "runner must mount /workspaces"
