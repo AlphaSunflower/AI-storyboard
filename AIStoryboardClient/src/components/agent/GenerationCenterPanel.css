@@ -209,28 +209,32 @@
 
 .generation-center__tabs {
   flex-shrink: 0;
+  width: 78px;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: 4px;
   padding: 8px;
-  border-bottom: 1px solid var(--color-hairline-soft);
+  border-right: 1px solid var(--color-hairline-soft);
   background: var(--color-canvas);
 }
 
 .generation-center__tabs button {
+  width: 100%;
   min-width: 0;
   min-height: 36px;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 6px;
+  gap: 6px;
+  padding: 0 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--color-muted);
   font: inherit;
   font-size: 12px;
+  text-align: left;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
@@ -252,6 +256,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.generation-center__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.generation-center__content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .generation-center__tabs button b {
@@ -468,6 +486,19 @@
 
   .generation-center__panel {
     max-height: min(620px, calc(100vh - 152px));
+  }
+
+  .generation-center__tabs {
+    padding: 6px;
+  }
+
+  .generation-center__tabs button {
+    grid-template-columns: 16px minmax(0, 1fr);
+    padding: 0 6px;
+  }
+
+  .generation-center__tabs button b {
+    display: none;
   }
 }
 

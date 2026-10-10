@@ -279,23 +279,25 @@ export function GenerationCenterPanel({
             />
           </button>
 
-          <div className="generation-center__tabs" role="tablist" aria-label="生成中心视图">
-            {tabs.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                role="tab"
-                aria-selected={tab === item.key}
-                className={tab === item.key ? 'is-active' : undefined}
-                onClick={() => setTab(item.key)}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-                <b>{item.count}</b>
-              </button>
-            ))}
-          </div>
+          <div className="generation-center__body">
+            <div className="generation-center__tabs" role="tablist" aria-label="生成中心视图">
+              {tabs.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item.key}
+                  className={tab === item.key ? 'is-active' : undefined}
+                  onClick={() => setTab(item.key)}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                  <b>{item.count}</b>
+                </button>
+              ))}
+            </div>
 
+            <div className="generation-center__content">
           {tab === 'active' ? (
             <div ref={rowsRef} className="generation-center__active-list">
               {activeVideo.length === 0 && activeRecordVideo.length === 0
@@ -358,6 +360,8 @@ export function GenerationCenterPanel({
               />
             </div>
           )}
+            </div>
+          </div>
         </div>
       )}
     </div>

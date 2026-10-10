@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.sandbox;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Component
 public class SandboxArtifactPublisher {
@@ -47,45 +49,74 @@ public class SandboxArtifactPublisher {
         List<String> assetIds = new ArrayList<>();
         List<String> urls = new ArrayList<>();
         for (SandboxFileView file : execution.files()) {
-            String extension = extension(file.path());
-            if (!ALLOWED.contains(extension)) {
-                log.warn("Skip unsupported sandbox artifact {} from task {}", file.path(), taskId);
-                continue;
-            }
-            if (file.sizeBytes() > MAX_ARTIFACT_BYTES) {
-                log.warn("Skip oversized sandbox artifact {} from task {}", file.path(), taskId);
-                continue;
-            }
-            try {
-                byte[] bytes = client.download(conversation.getId(), file.path());
-                String name = fileName(file.path());
-                String mime = file.mimeType() == null || file.mimeType().isBlank()
-                        ? FileStorageService.contentType(name) : file.mimeType();
-                String url = storage.saveGeneratedFile(bytes, name, mime);
-                AgentAsset asset = new AgentAsset();
-                asset.setConversationId(conversation.getId());
-                asset.setUserId(conversation.getUserId());
-                asset.setProjectId(conversation.getProjectId());
-                asset.setType(isImage(extension) ? "image" : "document");
-                asset.setUrl(url);
-                asset.setOriginalName(name);
-                asset.setMimeType(mime);
-                asset.setPrompt("由 AgentScope 沙箱生成");
-                asset.setStatus("completed");
-                asset.setTaskId(taskId);
-                asset.setGenType("sandbox_generated");
-                asset.setParams(json(Map.of(
-                        "sandboxPath", file.path(),
-                        "sizeBytes", file.sizeBytes())));
-                asset.setResultUrls(json(List.of(url)));
-                assetMapper.insert(asset);
-                assetIds.add(asset.getId());
-                urls.add(url);
-            } catch (RuntimeException error) {
-                log.warn("Unable to publish sandbox artifact {}: {}", file.path(), error.getMessage());
-            }
+            PublishedArtifacts published = publishPath(
+                    conversation, taskId, file.path(), file.sizeBytes(), file.mimeType());
+            assetIds.addAll(published.assetIds());
+            urls.addAll(published.urls());
         }
         return new PublishedArtifacts(List.copyOf(assetIds), List.copyOf(urls));
+    }
+
+    public PublishedArtifacts publishPath(AgentConversation conversation,
+                                          String taskId,
+                                          String path,
+                                          long sizeBytes,
+                                          String suppliedMimeType) {
+        if (conversation == null || path == null || path.isBlank()) {
+            return PublishedArtifacts.EMPTY;
+        }
+        String extension = extension(path);
+        if (!ALLOWED.contains(extension)) {
+            log.debug("Skip unsupported sandbox artifact {}", path);
+            return PublishedArtifacts.EMPTY;
+        }
+        if (sizeBytes > MAX_ARTIFACT_BYTES) {
+            log.warn("Skip oversized sandbox artifact {} from task {}", path, taskId);
+            return PublishedArtifacts.EMPTY;
+        }
+        try {
+            byte[] bytes = client.download(conversation.getId(), path);
+            String contentHash = sha256(bytes);
+            String idempotencyKey = UUID.nameUUIDFromBytes(
+                    (conversation.getId() + "|" + path + "|" + contentHash)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .toString();
+            AgentAsset existing = assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
+                    .eq(AgentAsset::getIdempotencyKey, idempotencyKey)
+                    .last("LIMIT 1"));
+            if (existing != null) {
+                return new PublishedArtifacts(
+                        List.of(existing.getId()),
+                        existing.getUrl() == null ? List.of() : List.of(existing.getUrl()));
+            }
+            String name = fileName(path);
+            String mime = suppliedMimeType == null || suppliedMimeType.isBlank()
+                    ? FileStorageService.contentType(name) : suppliedMimeType;
+            String url = storage.saveGeneratedFile(bytes, name, mime);
+            AgentAsset asset = new AgentAsset();
+            asset.setConversationId(conversation.getId());
+            asset.setUserId(conversation.getUserId());
+            asset.setProjectId(conversation.getProjectId());
+            asset.setType(isImage(extension) ? "image" : "document");
+            asset.setUrl(url);
+            asset.setOriginalName(name);
+            asset.setMimeType(mime);
+            asset.setPrompt("由 AgentScope 沙箱生成");
+            asset.setStatus("completed");
+            asset.setTaskId(taskId);
+            asset.setGenType("sandbox_generated");
+            asset.setIdempotencyKey(idempotencyKey);
+            asset.setRequestFingerprint(contentHash);
+            asset.setParams(json(Map.of(
+                    "sandboxPath", path,
+                    "sizeBytes", bytes.length)));
+            asset.setResultUrls(json(List.of(url)));
+            assetMapper.insert(asset);
+            return new PublishedArtifacts(List.of(asset.getId()), List.of(url));
+        } catch (RuntimeException error) {
+            log.warn("Unable to publish sandbox artifact {}: {}", path, error.getMessage());
+            return PublishedArtifacts.EMPTY;
+        }
     }
 
     public static Map<String, Object> executionResult(SandboxExecutionResult result) {
@@ -122,6 +153,15 @@ public class SandboxArtifactPublisher {
             return JSON.writeValueAsString(value);
         } catch (Exception error) {
             return "{}";
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
         }
     }
 

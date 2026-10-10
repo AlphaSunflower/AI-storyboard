@@ -153,6 +153,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient com.moon.moonagent.ai.agent.sandbox.SandboxSessionRegistry sandboxSessionRegistry;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient com.moon.moonagent.ai.agent.sandbox.SandboxOutputReconciler sandboxOutputReconciler;
+
     /**
      * 首条消息异步 AI 重命名标题：
      * - titleScheduled：并发去重，仅调度一次；任务结束（无论成败）移除，允许清空后重聊再次触发；
@@ -1164,6 +1167,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     trace.contextWindowTokens()));
                 }
                 throwIfInterrupted(conversationId);
+                if (sandboxOutputReconciler != null) {
+                    sandboxOutputReconciler.reconcile(conversation, turn.getId());
+                }
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
                 if (turn != null) {
