@@ -1158,20 +1158,19 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentTraceAccumulator trace = new AgentTraceAccumulator(
                         request, resolveAgentContextWindow());
                 request.setTrace(trace);
-                String traceTurnId = turn.getId();
-                trace.setEventSink(traceEvent -> sendRuntimeEnvelope(
-                        emitter,
-                        turnEventStore.append(traceTurnId, "agent_event", Map.of(
-                                "eventType", "AGENT_TRACE",
-                                "data", Map.of("traceEvent", traceEvent)))));
 
                 AgentTurnResult result;
                 try (AgentTurnEventPublisher eventPublisher = eventPublisher(
                         turn.getId(), emitter, trace.contextWindowTokens())) {
+                    trace.setEventSink(traceEvent -> eventPublisher.publishRaw(
+                            "agent_event", Map.of(
+                                    "eventType", "AGENT_TRACE",
+                                    "data", Map.of("traceEvent", traceEvent))));
                     result = agentScopeMediaRuntime.runTurn(
                             conversation, request, trace,
                             eventObserver(eventPublisher, turn.getId(), emitter,
                                     trace.contextWindowTokens()));
+                    trace.setEventSink(null);
                 }
                 throwIfInterrupted(conversationId);
                 if (sandboxOutputReconciler != null) {

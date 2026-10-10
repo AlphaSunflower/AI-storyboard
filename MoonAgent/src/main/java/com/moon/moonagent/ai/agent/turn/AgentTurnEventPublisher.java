@@ -44,7 +44,7 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
     }
 
     @Override
-    public void accept(AgentEvent event) {
+    public synchronized void accept(AgentEvent event) {
         if (closed || failure != null || event == null) return;
         AgentTurnEventStore.EventDraft draft = new AgentTurnEventStore.EventDraft(
                 mapper.type(event), mapper.payload(event, contextWindowTokens));
@@ -60,7 +60,7 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
         write(List.of(draft));
     }
 
-    public void flush() {
+    public synchronized void flush() {
         if (pending.isEmpty() || failure != null) return;
         List<AgentTurnEventStore.EventDraft> batch = List.copyOf(pending);
         pending.clear();
@@ -80,6 +80,13 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
             log.error("turn event persistence failed turnId={} batchSize={}: {}",
                     turnId, batch.size(), error.getMessage());
         }
+    }
+
+    /** Publish an already-normalized AgentScope event through the same ordered sequence. */
+    public synchronized void publishRaw(String type, Object payload) {
+        if (closed || failure != null) return;
+        flush();
+        write(List.of(new AgentTurnEventStore.EventDraft(type, payload)));
     }
 
     private static boolean isCoalescible(AgentEvent event) {
