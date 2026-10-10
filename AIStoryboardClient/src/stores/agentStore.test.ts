@@ -1327,6 +1327,10 @@ describe('AgentScope turn envelope reduction', () => {
     );
     expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.summary)
       .toBe('先判断技能。');
+    expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.activity)
+      .toBe('先判断技能。This maps');
+    expect(useAgentStore.getState().workflowHint)
+      .toBe('正在思考：先判断技能。This maps');
   });
 
   it('reduces native thinking and text deltas in order', () => {

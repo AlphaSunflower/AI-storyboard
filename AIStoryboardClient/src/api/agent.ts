@@ -74,6 +74,8 @@ export interface CompactContextResult {
 export interface AgentReasoning {
   summary: string;
   details: string;
+  /** 实时思考尾部片段：完整句子尚未形成时，用于持续展示当前进展。 */
+  activity?: string;
   durationMs?: number;
   source: string;
 }

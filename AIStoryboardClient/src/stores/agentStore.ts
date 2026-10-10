@@ -67,6 +67,12 @@ function reasoningSummaryFrom(details: string, fallback?: string): string {
   return last || fallback || '';
 }
 
+function reasoningActivityFrom(details: string): string {
+  const normalized = (details ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > 72 ? normalized.slice(-72) : normalized;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1264,6 +1270,9 @@ function setLiveReasoning(context: TurnReductionContext, reasoning: AgentReasoni
     if (state.activeConversationId !== context.conversationId) return { generating };
     return {
       generating,
+      workflowHint: reasoning.activity
+        ? `正在思考：${reasoning.activity}`
+        : 'MoonAgent 正在处理',
       messages: state.messages.map((message) =>
         message.id === context.assistantId
           ? { ...message, metadata: { ...(message.metadata ?? {}), kind: message.metadata?.kind ?? 'assistant-reply', reasoning } }
@@ -1758,6 +1767,7 @@ function applyOneEnvelope(
     setLiveReasoning(context, {
       summary: reasoningSummaryFrom(details, previous?.summary),
       details,
+      activity: reasoningActivityFrom(details),
       durationMs: previous?.durationMs,
       source: 'agentscope',
     });

@@ -23,17 +23,33 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const panelPresence = usePresence(expanded, 220);
   const hasContent = !!reasoning || (agentTrace && agentTrace.length > 0);
   useEffect(() => {
     setExpanded(!!streaming);
   }, [streaming]);
+  useEffect(() => {
+    if (!streaming) return;
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [streaming]);
   if (!hasContent && !streaming) return null;
   const live = !!streaming;
   const duration = reasoning?.durationMs != null ? formatDuration(reasoning.durationMs) : '';
   const liveSummary = reasoning?.summary?.trim();
+  const liveActivity = reasoning?.activity?.trim();
+  const liveClock = elapsedSeconds >= 60
+    ? `${Math.floor(elapsedSeconds / 60)}分${elapsedSeconds % 60}秒`
+    : `${elapsedSeconds}秒`;
   const title = live
-    ? (liveSummary ? `正在思考：${liveSummary}` : '正在思考…')
+    ? (liveActivity || liveSummary
+        ? `正在思考 ${liveClock}：${liveActivity || liveSummary}`
+        : `正在思考 ${liveClock}…`)
     : `已思考${duration ? `（用时 ${duration}）` : ''}`;
   const showToggle = hasContent;
 
@@ -68,6 +84,7 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
             {expanded ? <ChevronDown size={13} strokeWidth={1.8} /> : <ChevronRight size={13} strokeWidth={1.8} />}
           </span>
         )}
+        {live && <Clock size={12} strokeWidth={1.8} style={{ color: 'var(--color-primary)' }} />}
         {!live && duration && <Clock size={12} strokeWidth={1.8} style={{ color: 'var(--color-muted-soft)' }} />}
       </button>
       <style>{`@keyframes reasoningDot { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
