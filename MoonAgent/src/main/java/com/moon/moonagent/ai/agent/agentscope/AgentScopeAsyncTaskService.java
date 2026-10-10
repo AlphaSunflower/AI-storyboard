@@ -7,6 +7,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.recovery.AgentRecoverySource;
 import com.moon.moonagent.ai.agent.recovery.RecoveryCandidate;
 import com.moon.moonagent.ai.agent.recovery.RecoveryOutcome;
+import com.moon.moonagent.ai.agent.sandbox.MoonSandboxClient;
+import com.moon.moonagent.ai.agent.sandbox.MoonSandboxException;
+import com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher;
+import com.moon.moonagent.ai.agent.sandbox.SandboxExecutionResult;
+import com.moon.moonagent.ai.agent.sandbox.SandboxSessionLock;
+import com.moon.moonagent.ai.agent.sandbox.SandboxSessionRegistry;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.task.AgentTaskSlotView;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
@@ -100,6 +106,18 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
 
     @Autowired(required = false)
     private transient StoryboardVideoQueueService storyboardVideoQueueService;
+
+    @Autowired(required = false)
+    private transient MoonSandboxClient sandboxClient;
+
+    @Autowired(required = false)
+    private transient SandboxArtifactPublisher sandboxPublisher;
+
+    @Autowired(required = false)
+    private transient SandboxSessionLock sandboxSessionLock;
+
+    @Autowired(required = false)
+    private transient SandboxSessionRegistry sandboxSessionRegistry;
 
     @Override
     public String name() {
@@ -519,6 +537,51 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         taskMapper.insert(task);
         publish(task.getId());
         submitAdmitted(() -> runStoryboardVideoTask(task.getId()));
+        return task.getId();
+    }
+
+    public String startSandboxScriptTask(
+            AgentConversation conversation,
+            String script,
+            List<String> args,
+            int timeoutSeconds,
+            String toolCallId) {
+        if (sandboxClient == null || !sandboxClient.enabled() || sandboxPublisher == null) {
+            throw new MoonSandboxException("Sandbox runner is not enabled");
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("script", script == null ? "" : script);
+        request.put("args", args == null ? List.of() : args);
+        request.put("timeoutSeconds", timeoutSeconds);
+        String requestJson = writeJson(request);
+        String idempotencyKey = UUID.nameUUIDFromBytes(
+                (conversation.getId() + "|" + toolCallId + "|" + requestJson)
+                        .getBytes(StandardCharsets.UTF_8))
+                .toString();
+        AgentAsyncTask existing = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        if (existing != null) return existing.getId();
+
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeSandboxTools.RUN_PYTHON_SCRIPT);
+        task.setKind("long-tool");
+        task.setStatus("queued");
+        task.setTitle("执行 Python 脚本");
+        task.setStage("accepted");
+        task.setProgress(0);
+        task.setRequestJson(requestJson);
+        task.setIdempotencyKey(idempotencyKey);
+        task.setVersion(0L);
+        task.setCancelRequested(false);
+        task.setUpdatedAt(OffsetDateTime.now());
+        taskMapper.insert(task);
+        publish(task.getId());
+        submitAdmitted(() -> runSandboxScriptTask(task.getId()));
         return task.getId();
     }
 
@@ -1712,6 +1775,57 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (enqueueWakeup) enqueueWakeupIfNeeded(taskId, content);
     }
 
+    private void runSandboxScriptTask(String taskId) {
+        AgentAsyncTask task = taskMapper.selectById(taskId);
+        if (task == null) return;
+        AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
+        if (conversation == null) {
+            fail(taskId, "会话不存在");
+            return;
+        }
+        if (sandboxClient == null || sandboxPublisher == null) {
+            fail(taskId, "沙箱执行器未启用");
+            return;
+        }
+        Map<String, Object> request = readMap(task.getRequestJson());
+        String script = string(request.get("script"));
+        List<String> args = stringList(request.get("args"));
+        int timeoutSeconds = integer(request.get("timeoutSeconds"), 300);
+        try {
+            updateTask(taskId, "status", "running", "stage", "executing", "progress", 10);
+            SandboxExecutionResult result = sandboxSessionLock == null
+                    ? sandboxClient.execute(conversation.getId(), script, args, timeoutSeconds)
+                    : sandboxSessionLock.withLock(conversation.getId(),
+                    () -> sandboxClient.execute(conversation.getId(), script, args, timeoutSeconds));
+            if (sandboxSessionRegistry != null) {
+                sandboxSessionRegistry.touch(conversation.getId(), 24);
+            }
+            updateTask(taskId, "stage", "publishing", "progress", 80,
+                    "result_json", writeJson(SandboxArtifactPublisher.executionResult(result)));
+            SandboxArtifactPublisher.PublishedArtifacts published =
+                    sandboxPublisher.publish(conversation, taskId, result);
+            List<String> assetIds = published.assetIds();
+            List<String> urls = published.urls();
+            if (result.timedOut()) {
+                fail(taskId, "Python 脚本执行超时");
+                return;
+            }
+            if (result.exitCode() != 0) {
+                fail(taskId, result.stderr().isBlank()
+                        ? "Python 脚本执行失败，退出码 " + result.exitCode()
+                        : result.stderr());
+                return;
+            }
+            String content = result.stdout().isBlank()
+                    ? "Python 脚本执行完成。"
+                    : result.stdout();
+            complete(taskId, content, assetIds, urls, "", true, "completed");
+        } catch (Exception error) {
+            log.warn("Sandbox task failed: taskId={}, error={}", taskId, error.getMessage());
+            fail(taskId, error.getMessage() == null ? "沙箱执行失败" : error.getMessage());
+        }
+    }
+
     private String persistStoryboardTerminalMessage(AgentAsyncTask task,
                                                     StoryboardRunSnapshot snapshot,
                                                     String content) {
@@ -2141,6 +2255,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         } else if (AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO.equals(task.getToolName())
                 || AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS.equals(task.getToolName())) {
             submitAdmitted(() -> runStoryboardVideoTask(task.getId()));
+        } else if (AgentScopeSandboxTools.RUN_PYTHON_SCRIPT.equals(task.getToolName())) {
+            submitAdmitted(() -> runSandboxScriptTask(task.getId()));
         } else {
             fail(task.getId(), "不支持的后台任务类型: " + task.getToolName());
         }

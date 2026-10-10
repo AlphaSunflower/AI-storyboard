@@ -125,6 +125,12 @@ ai:
       ui-enabled: ${AGENT_TOOL_AUDIT_UI_ENABLED:true}
       retention-days: ${AGENT_TOOL_AUDIT_RETENTION_DAYS:90}
       cleanup-batch-size: ${AGENT_TOOL_AUDIT_CLEANUP_BATCH_SIZE:500}
+    sandbox:
+      enabled: ${AGENT_SANDBOX_ENABLED:false}
+      base-url: ${MOON_SANDBOX_BASE_URL:http://127.0.0.1:8090}
+      internal-secret: ${MOON_SANDBOX_INTERNAL_SECRET:}
+      connect-timeout: ${MOON_SANDBOX_CONNECT_TIMEOUT:5s}
+      read-timeout: ${MOON_SANDBOX_READ_TIMEOUT:10m}
     recovery:
       # legacy: 旧 @Scheduled 恢复入口；coordinator: 统一租约协调器。
       mode: ${AGENT_RECOVERY_MODE:coordinator}

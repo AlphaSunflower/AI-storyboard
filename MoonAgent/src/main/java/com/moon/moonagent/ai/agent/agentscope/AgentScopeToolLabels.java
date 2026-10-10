@@ -40,6 +40,10 @@ final class AgentScopeToolLabels {
             case AgentScopeSessionTools.LIST_SESSION_ASSETS -> "查询会话素材";
             case AgentScopeSessionTools.RESOLVE_REFERENCE_ASSETS -> "查找参考素材";
             case AgentScopeSessionTools.GET_TASK_STATUS -> "查询生成任务状态";
+            case AgentScopeSandboxTools.WRITE_FILE -> "写入沙箱文件";
+            case AgentScopeSandboxTools.READ_FILE -> "读取沙箱文件";
+            case AgentScopeSandboxTools.LIST_FILES -> "列出沙箱文件";
+            case AgentScopeSandboxTools.RUN_PYTHON_SCRIPT -> "执行 Python 脚本";
             case AgentScopeAssetGroupTools.LIST_ASSET_GROUPS -> "查询资产组";
             case "task_list" -> "查询后台任务";
             case "task_output" -> "读取后台任务结果";

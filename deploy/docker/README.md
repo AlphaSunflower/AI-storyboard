@@ -6,6 +6,7 @@ nacos 与 vosk 拆分为**两个独立 compose 项目**（子目录），可单�
 |------|------|------|------|------|
 | nacos | `nacos/` | nacos/nacos-server:v3.2.3 | 8848/9848/8850 | 服务发现（standalone，内网开发） |
 | vosk | `vosk/` | alphacep/kaldi-vosk-server:latest | 2700 | 离线语音识别（中文全量模型，官方 vosk-server 镜像已下架改用 Kaldi 版） |
+| sandbox | `sandbox/` | moon-sandbox-runner:local + squid | 8090 | MoonAgent 会话沙箱执行面与出站白名单代理 |
 
 ## 首次部署
 
@@ -27,6 +28,7 @@ nacos 与 vosk 拆分为**两个独立 compose 项目**（子目录），可单�
 ```bash
 cd nacos && docker compose up -d      # 只启 nacos
 cd vosk && docker compose up -d       # 只启 vosk
+cd sandbox && ./scripts/up.sh         # 构建并启动 MoonAgent 沙箱
 ```
 
 - 换模型：替换 `vosk/data/models/` 下模型目录，重启 vosk 容器即可

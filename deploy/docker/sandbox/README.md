@@ -78,6 +78,14 @@ docker compose --env-file .env down -v
 
 不要用 `down -v` 代替日常停止，否则会一并删除工作区卷。
 
+MoonAgent 侧启用沙箱时设置：
+
+```dotenv
+AGENT_SANDBOX_ENABLED=true
+MOON_SANDBOX_BASE_URL=http://127.0.0.1:8090
+MOON_SANDBOX_INTERNAL_SECRET=<与 SANDBOX_INTERNAL_SECRET 相同>
+```
+
 ## 运行约束
 
 - runner 默认只绑定 `127.0.0.1:8090`；跨主机连接时修改 `SANDBOX_BIND_IP`，并配合防火墙限制来源。

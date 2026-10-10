@@ -193,6 +193,25 @@ public class FileStorageServiceImpl implements FileStorageService {
         return fileUrlSigner.signPath(config.getVideoUrlPrefix() + filename);
     }
 
+    @Override
+    public String saveGeneratedFile(byte[] bytes, String filename, String contentType) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "文件内容为空");
+        }
+        String raw = filename == null ? "generated.bin" : filename.trim();
+        String base = raw.replace('\\', '/');
+        base = base.substring(base.lastIndexOf('/') + 1);
+        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (base.isBlank() || base.equals(".") || base.equals("..")) {
+            base = "generated.bin";
+        }
+        String safeName = UUID.randomUUID() + "-" + base;
+        String mime = contentType == null || contentType.isBlank()
+                ? FileStorageService.contentType(safeName) : contentType;
+        minioStorage.put(minioStorage.key("files", safeName), bytes, mime);
+        return fileUrlSigner.signPath("/api/files/files/" + safeName);
+    }
+
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
         String normalized = sourceUrl == null ? "" : sourceUrl.trim();
         String hash = sha256(normalized);

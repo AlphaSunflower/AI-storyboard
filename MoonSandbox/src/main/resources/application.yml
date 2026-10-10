@@ -1,0 +1,22 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: moon-sandbox
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+moon:
+  sandbox:
+    workspace-root: ${MOON_SANDBOX_WORKSPACE_ROOT:/workspaces}
+    python-executable: ${MOON_SANDBOX_PYTHON:python3}
+    internal-secret: ${MOON_SANDBOX_INTERNAL_SECRET:}
+    default-timeout-seconds: ${MOON_SANDBOX_DEFAULT_TIMEOUT_SECONDS:300}
+    max-timeout-seconds: ${MOON_SANDBOX_MAX_TIMEOUT_SECONDS:600}
+    max-concurrent-executions: ${MOON_SANDBOX_MAX_CONCURRENT_EXECUTIONS:4}
+    idle-expiry: ${MOON_SANDBOX_IDLE_EXPIRY:24h}

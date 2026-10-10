@@ -1034,6 +1034,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_delete_nodes",
                 "canvas_delete_edges",
                 "merge_storyboard_videos",
+                "write_file",
+                "run_python_script",
                 "task_cancel")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);

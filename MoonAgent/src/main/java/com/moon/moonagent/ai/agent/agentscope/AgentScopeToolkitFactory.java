@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +35,8 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeCanvasTools canvasTools;
     private final AgentScopeCanvasRunTools canvasRunTools;
     private final AgentScopeDocumentTools documentTools;
+    @Autowired(required = false)
+    private AgentScopeSandboxTools sandboxTools;
     private final AgentCanvasRunService canvasRuns;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
@@ -86,6 +89,9 @@ public class AgentScopeToolkitFactory {
         register(toolkit, workflowTools.tool());
         register(toolkit, videoMergeTools.tool());
         documentTools.tools().forEach(tool -> register(toolkit, tool));
+        if (sandboxTools != null) {
+            sandboxTools.tools().forEach(tool -> register(toolkit, tool));
+        }
         creativeTools.tools().forEach(tool -> register(toolkit, tool));
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));
         toolkit.createSkillToolGroup(

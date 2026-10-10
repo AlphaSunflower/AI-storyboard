@@ -49,6 +49,11 @@ public class AgentCoreFileStorageAdapter implements FileStorageService {
     }
 
     @Override
+    public String saveGeneratedFile(byte[] bytes, String filename, String contentType) {
+        return delegate.saveGeneratedFile(bytes, filename, contentType);
+    }
+
+    @Override
     public byte[] readImage(String filename) {
         return delegate.readImage(filename);
     }

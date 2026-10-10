@@ -43,6 +43,9 @@ public interface FileStorageService {
     /** Save generated or merged video bytes directly to MinIO. */
     String saveVideoBytes(byte[] bytes, String extension);
 
+    /** Save a generated document or image using its original filename and MIME type. */
+    String saveGeneratedFile(byte[] bytes, String filename, String contentType);
+
     /** 读取图片字节；MinIO 对象不存在返回 null。 */
     byte[] readImage(String filename);
 
@@ -88,6 +91,15 @@ public interface FileStorageService {
             case "wav" -> "audio/wav";
             case "mp3" -> "audio/mpeg";
             case "m4a" -> "audio/mp4";
+            case "md", "markdown" -> "text/markdown";
+            case "txt", "log" -> "text/plain";
+            case "csv" -> "text/csv";
+            case "json" -> "application/json";
+            case "svg" -> "image/svg+xml";
+            case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
             default -> "application/octet-stream";
         };
     }

@@ -192,6 +192,18 @@ public class FileStorageServiceImpl implements FileStorageService {
         return fileUrlSigner.signIfLocal("/api/files/videos/" + filename);
     }
 
+    @Override
+    public String saveGeneratedFile(byte[] bytes, String filename, String contentType) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "文件内容为空");
+        }
+        String safeName = safeGeneratedName(filename);
+        String mime = contentType == null || contentType.isBlank()
+                ? FileStorageService.contentType(safeName) : contentType;
+        minioStorage.put(minioStorage.key("files", safeName), bytes, mime);
+        return fileUrlSigner.signIfLocal("/api/files/files/" + safeName);
+    }
+
     private String downloadAndSave(String sourceUrl, String type, String urlPrefix) {
         String normalized = sourceUrl == null ? "" : sourceUrl.trim();
         String hash = sha256(normalized);
@@ -286,6 +298,17 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     private String contentType(String filename) {
         return FileStorageService.contentType(filename);
+    }
+
+    private static String safeGeneratedName(String filename) {
+        String raw = filename == null ? "generated.bin" : filename.trim();
+        String base = raw.replace('\\', '/');
+        base = base.substring(base.lastIndexOf('/') + 1);
+        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (base.isBlank() || base.equals(".") || base.equals("..")) {
+            base = "generated.bin";
+        }
+        return UUID.randomUUID() + "-" + base;
     }
 
     @Override

@@ -147,6 +147,12 @@ public class AgentChatServiceImpl implements AgentChatService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient com.moon.moonagent.service.StorageCleanupService storageCleanupService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient com.moon.moonagent.ai.agent.sandbox.MoonSandboxClient sandboxClient;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient com.moon.moonagent.ai.agent.sandbox.SandboxSessionRegistry sandboxSessionRegistry;
+
     /**
      * 首条消息异步 AI 重命名标题：
      * - titleScheduled：并发去重，仅调度一次；任务结束（无论成败）移除，允许清空后重聊再次触发；
@@ -377,6 +383,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (agentScopeMediaRuntime != null) {
             agentScopeMediaRuntime.clearSession(userId, conversationId);
         }
+        cleanupSandbox(conversationId);
         log.info("已清空会话聊天记录: conversationId={}, userId={}", conversationId, userId);
     }
 
@@ -537,11 +544,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         long total = resultPage.getTotal();
         long imageTotal = countAssets(conversationId, "image");
         long videoTotal = countAssets(conversationId, "video");
+        long documentTotal = countAssets(conversationId, "document");
         return Map.of(
                 "records", records,
                 "total", total,
                 "imageTotal", imageTotal,
                 "videoTotal", videoTotal,
+                "documentTotal", documentTotal,
                 "mediaTotal", imageTotal + videoTotal,
                 "page", safePage,
                 "size", safeSize);
@@ -1524,9 +1533,24 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (agentScopeMediaRuntime != null) {
             agentScopeMediaRuntime.clearSession(userId, sideChatId);
         }
+        cleanupSandbox(sideChatId);
         orchestratorSupport.cleanupOnDelete(sideChatId);
         conversationMapper.deleteById(sideChatId);
         log.info("Agent 临时侧边已关闭: conversationId={}, userId={}", sideChatId, userId);
+    }
+
+    private void cleanupSandbox(String conversationId) {
+        if (sandboxClient != null && sandboxClient.enabled()) {
+            try {
+                sandboxClient.cleanup(conversationId);
+            } catch (RuntimeException exception) {
+                log.warn("清理 Agent 沙箱失败(忽略): conversationId={}, error={}",
+                        conversationId, exception.getMessage());
+            }
+        }
+        if (sandboxSessionRegistry != null) {
+            sandboxSessionRegistry.markCleaned(conversationId);
+        }
     }
 
     /** 清理刷新/崩溃后遗留的临时侧边，不触发已产出文件的删除。 */

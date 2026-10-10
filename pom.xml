@@ -17,6 +17,7 @@
         <module>asset-service</module>
         <module>AIStoryboardBackend</module>
         <module>MoonAgent</module>
+        <module>MoonSandbox</module>
         <module>ApiGateway</module>
         <module>AILLMGateway</module>
         <module>XiaoYueCanvas</module>
