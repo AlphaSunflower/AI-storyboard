@@ -17,6 +17,9 @@ import {
   DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
+import { rememberDocumentSource } from '../lib/documentPreview';
+import { useDocumentPreviewStore } from './documentPreviewStore';
+import { useSideChatSelectionStore } from './sideChatSelectionStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 import { libraryApi, type LibraryMedia } from '../api/library';
@@ -39,6 +42,7 @@ import {
 
 let conversationLoadEpoch = 0;
 let conversationListEpoch = 0;
+let sideChatRequestSeq = 0;
 
 /** Newlines separate stage snapshots; token deltas concatenate directly. */
 function appendReasoningDetails(
@@ -441,6 +445,17 @@ export interface HumanInputInfo {
   assets?: AssetOption[];
 }
 
+export interface SideChatUiState {
+  open: boolean;
+  loading: boolean;
+  focusToken: number;
+  sourceConversationId: string | null;
+  sourceTitle: string;
+  projectId: string | null;
+  conversationId: string | null;
+  error: string | null;
+}
+
 /** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
 export interface ConfirmResultInfo {
   kind: 'script' | 'image' | 'video';
@@ -494,8 +509,10 @@ interface AgentState {
   exitCanvasModeNow: () => void;
 
   // 窗口
-  windowOpen: boolean;
-  setWindowOpen: (v: boolean) => void;
+  // 临时侧边：仅保存在内存，刷新不恢复；实际聊天由独立 iframe 承载。
+  sideChat: SideChatUiState;
+  openSideChat: (sourceConversationId?: string, sourceTitle?: string) => Promise<void>;
+  closeSideChat: (options?: { keepalive?: boolean }) => Promise<void>;
 
   // 会话
   conversations: AgentConversation[];
@@ -1107,11 +1124,11 @@ async function restorePersistedTurn(conversationId: string) {
     return {
       streaming: true,
       pendingAssistantId: assistantId,
-      workflowHint: 'AgentScope 正在处理',
+      workflowHint: 'MoonAgent 正在处理',
       generating: {
         ...state.generating,
         [conversationId]: {
-          hint: 'AgentScope 正在处理',
+          hint: 'MoonAgent 正在处理',
           turnId: active.turnId,
           assistantId,
           assistantContent: '',
@@ -1529,14 +1546,14 @@ function applyOneEnvelope(
         [context.conversationId]: {
           ...(state.generating[context.conversationId] ?? { hint: '' }),
           turnId: envelope.turnId,
-          hint: 'AgentScope 正在处理',
+          hint: 'MoonAgent 正在处理',
           ...(startedContextWindow > 0 ? { contextWindowTokens: startedContextWindow } : {}),
         },
       };
       return {
         generating,
         ...(state.activeConversationId === context.conversationId
-          ? { workflowHint: 'AgentScope 正在处理', streaming: true }
+          ? { workflowHint: 'MoonAgent 正在处理', streaming: true }
           : {}),
       };
     });
@@ -1692,7 +1709,7 @@ function applyOneEnvelope(
 
   if (envelope.type === 'turn_failed') {
     effects.failed = true;
-    const message = asString(payload.message, 'AgentScope 执行失败');
+    const message = asString(payload.message, 'MoonAgent 执行失败');
     useAgentStore.setState((state) => ({
       ...(state.activeConversationId === context.conversationId ? { streamError: message } : {}),
     }));
@@ -1893,6 +1910,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     );
     for (const envelope of response.data.data ?? []) {
       const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      if (effects.completed) {
+        finishAssistantReply(conversationId, assistantId);
+        useAgentStore.setState((state) => {
+          if (state.generating[conversationId]?.assistantId !== assistantId) return {};
+          const generating = { ...state.generating };
+          delete generating[conversationId];
+          return {
+            generating,
+            streaming: false,
+            workflowHint: '',
+            ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
+          };
+        });
+      }
       if (effects.canvasSessionRequired) {
         const session = effects.canvasSessionRequired;
         set({
@@ -2096,8 +2127,103 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({ canvasEditContext: null, canvasExitPending: false, canvasBinding: null, canvasBindingStatus: '' });
   },
 
-  windowOpen: false,
-  setWindowOpen: (v) => set({ windowOpen: v }),
+  sideChat: {
+    open: false,
+    loading: false,
+    focusToken: 0,
+    sourceConversationId: null,
+    sourceTitle: '',
+    projectId: null,
+    conversationId: null,
+    error: null,
+  },
+  openSideChat: async (sourceConversationId, sourceTitle) => {
+    const sourceId = sourceConversationId ?? get().activeConversationId;
+    if (!sourceId) return;
+    useDocumentPreviewStore.getState().closeDocument();
+    const focusToken = get().sideChat.focusToken + 1;
+    if (get().sideChat.open && (get().sideChat.loading || get().sideChat.conversationId)) {
+      set((state) => ({
+        sideChat: { ...state.sideChat, focusToken },
+      }));
+      document.querySelector<HTMLIFrameElement>('iframe[data-app-key="side-chat"]')?.focus();
+      return;
+    }
+    const requestSeq = ++sideChatRequestSeq;
+    const source = get().conversations.find((conversation) => conversation.id === sourceId);
+    const resolvedTitle = sourceTitle || source?.title || '当前对话';
+    set((state) => ({
+      sideChat: {
+        ...state.sideChat,
+        open: true,
+        loading: true,
+        focusToken,
+        sourceConversationId: sourceId,
+        sourceTitle: resolvedTitle,
+        projectId: source?.projectId ?? useProjectStore.getState().currentProject?.id ?? null,
+        conversationId: null,
+        error: null,
+      },
+    }));
+    try {
+      const response = await agentApi.createSideChat(sourceId);
+      const conversation = response.data.data;
+      if (requestSeq !== sideChatRequestSeq) {
+        void agentApi.closeSideChat(conversation.id).catch(() => undefined);
+        return;
+      }
+      if (get().activeConversationId !== sourceId) {
+        void agentApi.closeSideChat(conversation.id).catch(() => undefined);
+        set((state) => ({
+          sideChat: { ...state.sideChat, open: false, loading: false, conversationId: null },
+        }));
+        return;
+      }
+      set((state) => ({
+        sideChat: {
+          ...state.sideChat,
+          open: true,
+          loading: false,
+          focusToken,
+          projectId: conversation.projectId,
+          conversationId: conversation.id,
+          error: null,
+        },
+      }));
+    } catch {
+      set((state) => ({
+        sideChat: {
+          ...state.sideChat,
+          open: true,
+          loading: false,
+          focusToken,
+          conversationId: null,
+          error: '侧边创建失败，请重试',
+        },
+      }));
+    }
+  },
+  closeSideChat: async (options) => {
+    sideChatRequestSeq += 1;
+    useSideChatSelectionStore.getState().clear();
+    const conversationId = get().sideChat.conversationId;
+    set({
+      sideChat: {
+        open: false,
+        loading: false,
+        focusToken: 0,
+        sourceConversationId: null,
+        sourceTitle: '',
+        projectId: null,
+        conversationId: null,
+        error: null,
+      },
+    });
+    if (conversationId) {
+      await agentApi.closeSideChat(conversationId, options?.keepalive)
+        .catch(() => undefined);
+    }
+  },
 
   conversations: [],
   activeConversationId: null,
@@ -2640,6 +2766,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const payload = res.data.data;
     const url = payload.url;
     const mediaKind = attachmentKind(file);
+    if (mediaKind === 'file') rememberDocumentSource(url, file);
     const canvasKind: AgentMediaRef['kind'] = mediaKind;
     const absoluteUrl = (() => {
       try { return new URL(url, window.location.origin).toString(); } catch { return url; }
@@ -2652,6 +2779,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       source: 'upload',
     }]);
     get().addPendingAttachments([{
+      assetId: payload.assetId,
       url,
       name: payload.name || file.name || '未命名文件',
       mimeType: payload.mimeType || file.type || 'application/octet-stream',
@@ -3153,10 +3281,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let receivedHumanInput = false;
     let acceptedTaskId: string | null = null;
     let acceptedTaskKind: VideoTaskStatus['kind'] | null = null;
+    let receivedAnyEvent = false;
+    let reconciledTerminal = false;
+    let reconciliationBusy = false;
+    let reconciliationTimer: number | null = null;
 
     const releaseStream = await reserveStreamSlot(snapshotId);
+    reconciliationTimer = window.setInterval(() => {
+      if (!receivedAnyEvent || receivedMessageEnd || receivedHumanInput
+          || manualStop || reconciledTerminal || reconciliationBusy) return;
+      reconciliationBusy = true;
+      void agentApi.getRuntimeStatus(snapshotId)
+        .then(async (response) => {
+          const active = response.data.data.activeTurn;
+          if (active?.status === 'running') return;
+          await useAgentStore.getState().replayTurnEvents(snapshotId, resumeTurnId);
+          await refreshConversationMessages(snapshotId);
+          reconciledTerminal = true;
+          streamAbort?.abort();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          reconciliationBusy = false;
+        });
+    }, 2_000);
     try {
       await submitForm(id, resumeTurnId, info.formToken, info.taskId, actionId, (event: AgentTurnEventEnvelope) => {
+        receivedAnyEvent = true;
         const effects = applyAgentTurnEnvelope(event, {
           conversationId: snapshotId,
           assistantId,
@@ -3200,10 +3351,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
-      if (!manualStop && get().activeConversationId === snapshotId) {
+      if (!manualStop && !reconciledTerminal && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
       }
     } finally {
+      if (reconciliationTimer) clearInterval(reconciliationTimer);
       releaseStream();
       if (!acceptedTaskId || isDetachedAsyncTask(acceptedTaskKind)) {
         // streaming=false 无条件（单流模型）；占位补写仅在仍处于原会话时执行
@@ -3232,7 +3384,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           };
         });
         // SSE 被网关/代理断开或超时：HITL 卡片可能已落库但未送达，立即恢复补显（无需刷新）
-        if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput && !manualStop) {
+        if (stillSameConversation && !receivedMessageEnd && !receivedHumanInput
+            && !manualStop && !reconciledTerminal) {
           void reconnectTurnThenRecover(snapshotId, resumeTurnId);
         }
       }
@@ -3389,7 +3542,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return { streaming: true, generating: { ...s.generating, [id]: { hint: '', finished: false } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
     });
 
-    // 新建 assistant 占位气泡：视频异步生成期间为空（AgentChatPanel 显示生成中加载条），
+    // 新建 assistant 占位气泡：视频异步生成期间为空，聊天区显示生成中加载条。
     // 完成后由轮询结果填充，MessageBubble 渲染 <video> 播放器
     const assistantId = `tmp-assistant-${Date.now()}`;
     const optimisticAssistant: AgentMessage = {
@@ -3786,7 +3939,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
        pendingAttachments: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
        pendingAssistantId: null,
        confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
-       canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false });
+       canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false,
+       sideChat: {
+         open: false,
+         loading: false,
+         focusToken: 0,
+         sourceConversationId: null,
+         sourceTitle: '',
+         projectId: null,
+         conversationId: null,
+         error: null,
+       } });
   },
 
   activeModal: null,

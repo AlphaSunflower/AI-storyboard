@@ -6,19 +6,21 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChevronRight, Download, FileAudio, FileText, FileVideo,
-  Check, ImagePlus, Images, Library, LoaderCircle, MessageSquarePlus, Pencil, Play, Trash2,
+  Check, ImagePlus, Images, Library, LoaderCircle, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
 } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentAttachment, AgentMessageMetadata } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
+import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import {
   selectAnnotationsForMessage,
   useChatAnnotationStore,
   type ChatAnnotation,
 } from '../../stores/chatAnnotationStore';
 import { useProjectStore } from '../../stores/projectStore';
-import { findQuoteRange, selectionOccurrence, stripAnnotationContext } from '../../lib/chatAnnotation';
+import { findQuoteRange, parseAnnotationContext, selectionOccurrence, type AnnotationQuote } from '../../lib/chatAnnotation';
 import { AnnotationListPopover } from './AnnotationChip';
 import {
   ANNOTATION_POPOVER_WIDTH, popoverPosition, toAnchorRect, type AnchorRect,
@@ -44,6 +46,8 @@ import {
   type ChatMediaDragPayload,
 } from '../../lib/projectLibraryDrag';
 import { libraryMediaIdFromUrl } from '../../lib/libraryMedia';
+import { currentSideChatId, postSideChatSelectionUpdate } from '../../lib/sideChatSelectionSync';
+import { parseSideChatSelectionContext } from '../../lib/sideChatSelection';
 import './MessageBubble.css';
 
 type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
@@ -198,17 +202,23 @@ function MessageAttachmentStrip({
             : attachment.kind === 'file'
               ? <FileText size={15} />
               : null;
+        const fileChip = attachment.kind === 'file';
+        const Chip = fileChip ? 'button' : 'span';
         return (
-          <span
+          <Chip
             key={`${attachment.url}-${index}`}
             title={label}
+            type={fileChip ? 'button' : undefined}
+            onClick={fileChip ? () => onPreview(attachment) : undefined}
+            aria-label={fileChip ? `打开文档 ${label}` : undefined}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto',
               maxWidth: 220, height: 38,
               padding: attachment.kind === 'image' || attachment.kind === 'video' ? 3 : '0 9px',
               border: '1px solid rgba(65,118,230,0.14)', borderRadius: 9,
               background: 'rgba(255,255,255,0.72)', color: 'rgb(65,118,230)',
-              fontSize: 12, overflow: 'hidden',
+              font: 'inherit', fontSize: 12, overflow: 'hidden',
+              cursor: fileChip ? 'pointer' : 'default', textAlign: 'left',
             }}
           >
             {attachment.kind === 'image' ? (
@@ -231,7 +241,7 @@ function MessageAttachmentStrip({
               {label}
             </span>
             <FileSize value={attachment.sizeBytes} />
-          </span>
+          </Chip>
         );
       })}
     </div>
@@ -788,10 +798,14 @@ function getHighlightSupport() {
 function SelectionActionToolbar({
   anchor,
   onQuote,
+  onAskSideChat,
+  sideChatLabel,
   onDismiss,
 }: {
   anchor: AnchorRect;
   onQuote: () => void;
+  onAskSideChat: () => void;
+  sideChatLabel: string;
   onDismiss: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -817,7 +831,7 @@ function SelectionActionToolbar({
       role="toolbar"
       aria-label="选中文字操作"
       style={{
-        position: 'fixed', ...popoverPosition(anchor, 180), zIndex: 2200,
+        position: 'fixed', ...popoverPosition(anchor, 250), zIndex: 2200,
         display: 'inline-flex', alignItems: 'center', padding: 4,
         background: 'white', borderRadius: 12,
         border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 8px 24px rgba(15,17,21,0.16)',
@@ -839,6 +853,24 @@ function SelectionActionToolbar({
       >
         <MessageSquarePlus size={14} strokeWidth={1.9} />
         引用
+      </button>
+      <span style={{ width: 1, height: 18, background: 'rgba(15,17,21,0.08)', margin: '0 2px' }} />
+      <button
+        type="button"
+        aria-label={sideChatLabel}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onAskSideChat}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          padding: '6px 10px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+          color: 'rgb(15, 17, 21)', whiteSpace: 'nowrap',
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65, 118, 230, 0.08)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+      >
+        <PanelRightOpen size={14} strokeWidth={1.9} />
+        {sideChatLabel}
       </button>
     </div>,
     document.body,
@@ -975,6 +1007,39 @@ function AnnotationEditor({
   );
 }
 
+/**
+ * 用户消息里带的「引用注释」：按原文 + 评论渲染成引用卡。
+ * 引用内容原样展示，不用省略号代替。
+ */
+function QuotedAnnotationList({ items }: { items: AnnotationQuote[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+      {items.map((item, index) => (
+        <div
+          key={`${index}-${item.quote.slice(0, 16)}`}
+          style={{
+            borderLeft: '3px solid var(--color-primary)',
+            borderRadius: 8,
+            background: 'var(--color-surface-soft)',
+            padding: '6px 10px',
+            fontSize: 13,
+            lineHeight: 1.55,
+          }}
+        >
+          <div style={{ color: 'var(--color-ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {item.quote}
+          </div>
+          {item.comment && (
+            <div style={{ marginTop: 3, fontSize: 12, color: 'var(--color-muted-foreground)' }}>
+              评论：{item.comment}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
   messageId?: string;
   conversationId?: string;
@@ -1003,6 +1068,14 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     setPreviewType(type);
     setPreviewUrl(url);
   };
+  const openAttachmentPreview = (attachment: AgentAttachment) => {
+    if (attachment.kind === 'image' || attachment.kind === 'video') {
+      openPreview(attachment.url, attachment.kind === 'video' ? 'video' : 'image');
+      return;
+    }
+    setPreviewUrl(null);
+    useDocumentPreviewStore.getState().openDocument(attachment);
+  };
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(content);
@@ -1022,8 +1095,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const editRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const rawDisplayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
-  // 用户消息正文里可能带着发送时拼进去的注释上下文块，渲染时剥掉，只显示用户真正输入
-  const displayContent = isUser ? stripAnnotationContext(rawDisplayContent).userText : rawDisplayContent;
+  const sideChatContext = isUser ? parseSideChatSelectionContext(rawDisplayContent) : null;
+  const sideChatContextCount = sideChatContext?.selections.length ?? 0;
+  const contentWithoutSideChatContext = sideChatContext?.userText ?? rawDisplayContent;
+  // 用户消息正文里可能带着发送时拼进去的注释上下文块：剥出来渲染成引用卡，正文只留用户真正输入
+  const userAnnotationContext = isUser ? parseAnnotationContext(contentWithoutSideChatContext) : null;
+  const quotedAnnotations = userAnnotationContext?.items ?? [];
+  const displayContent = userAnnotationContext ? userAnnotationContext.userText : rawDisplayContent;
 
   // 消息内注释（选中文字 → 评论），仅 /chat 的 deepseek 变体启用
   const annotationsVisible = ds && !!messageId;
@@ -1056,6 +1134,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const imageBatch = !isUser && generatedImages.length >= IMAGE_BATCH_THRESHOLD ? generatedImages : null;
   const renderedContent = imageBatch ? stripBatchImageMarkdown(displayContent) : displayContent;
   const importDisabled = !currentProject?.id || messageMedia.length === 0;
+  const insideSideChat = !!currentSideChatId();
 
   const clearHighlight = useCallback(() => {
     getHighlightSupport()?.registry.delete(highlightName);
@@ -1081,6 +1160,30 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     setDraftAnchor(selectionAction);
     setSelectionAction(null);
   }, [selectionAction]);
+
+  const handleAskSideChat = useCallback(() => {
+    if (!selectionAction || !conversationId) return;
+    useSideChatSelectionStore.getState().addSelection({
+      text: selectionAction.quote,
+      messageId,
+      occurrence: selectionAction.occurrence,
+    });
+    setSelectionAction(null);
+    window.getSelection()?.removeAllRanges();
+
+    const sideChatId = currentSideChatId();
+    if (sideChatId) {
+      postSideChatSelectionUpdate(
+        sideChatId,
+        useSideChatSelectionStore.getState().selections,
+      );
+      return;
+    }
+
+    const sourceTitle = useAgentStore.getState().conversations
+      .find((item) => item.id === conversationId)?.title;
+    void useAgentStore.getState().openSideChat(conversationId, sourceTitle);
+  }, [conversationId, messageId, selectionAction]);
 
   const handleCreateAnnotation = useCallback((comment: string) => {
     if (!draftAnchor || !messageId || !conversationId) return;
@@ -1505,7 +1608,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               >{editSaving ? '发送中…' : '发送'}</button>
             </div>
           </div>
-        ) : (displayContent || userAttachments.length > 0) ? (
+        ) : (displayContent || userAttachments.length > 0 || quotedAnnotations.length > 0) ? (
           <span className="chat-live-text">
             {role === 'assistant'
               ? (
@@ -1531,12 +1634,21 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               )
               : (
                 <>
+                  {sideChatContextCount > 0 && (
+                    <div style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      marginBottom: 6, padding: '4px 8px', borderRadius: 8,
+                      background: 'rgba(65,118,230,0.07)', color: 'rgb(49,95,196)',
+                      fontSize: 11, fontWeight: 580,
+                    }}>
+                      <MessageSquarePlus size={12} strokeWidth={1.9} />
+                      已参考 {sideChatContextCount} 个选中文本片段
+                    </div>
+                  )}
+                  {quotedAnnotations.length > 0 && <QuotedAnnotationList items={quotedAnnotations} />}
                   <MessageAttachmentStrip
                     attachments={userAttachments}
-                    onPreview={(attachment) => openPreview(
-                      attachment.url,
-                      attachment.kind === 'video' ? 'video' : 'image',
-                    )}
+                    onPreview={openAttachmentPreview}
                   />
                   {userTextContent && renderContent(
                     userTextContent,
@@ -1714,6 +1826,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       <SelectionActionToolbar
         anchor={selectionAction.rect}
         onQuote={handleStartAnnotation}
+        onAskSideChat={handleAskSideChat}
+        sideChatLabel={insideSideChat ? '添加到提问' : '侧边提问'}
         onDismiss={() => setSelectionAction(null)}
       />
     )}

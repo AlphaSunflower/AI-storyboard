@@ -214,7 +214,11 @@ export function GenerationCenterPanel({
   };
 
   return (
-    <div ref={containerRef} className="generation-center" style={{ bottom }}>
+    <div
+      ref={containerRef}
+      className={`generation-center${open ? '' : ' is-collapsed'}${drag.dragging ? ' is-dragging' : ''}`}
+      style={{ bottom }}
+    >
       <button
         type="button"
         onClick={drag.onClick}

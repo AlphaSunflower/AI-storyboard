@@ -21,7 +21,7 @@ function statusLabel(status: string): string {
 
 function sourceLabel(source: string): string {
   switch (source) {
-    case 'AGENT_SCOPE': return 'AgentScope';
+    case 'AGENT_SCOPE': return 'MoonAgent';
     case 'SPRING_AI': return 'Spring AI';
     case 'MCP': return 'MCP';
     default: return source || '未知来源';

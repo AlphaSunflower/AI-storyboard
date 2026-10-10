@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmbeddedAppWindow } from './EmbeddedAppWindow';
 import { clearAuthSession, setAccessToken } from '../../../lib/authSession';
 
+vi.mock('../DocumentPreviewSurface', () => ({
+  DocumentPreviewSurface: () => <div data-testid="local-document-preview">本地文档预览</div>,
+}));
+
 const tabs = [{
   key: 'docs' as const,
   title: '使用文档',
@@ -15,6 +19,94 @@ afterEach(() => {
 });
 
 describe('EmbeddedAppWindow chat dock resizing', () => {
+  it('renders local document content like an app window without an iframe', () => {
+    render(
+      <EmbeddedAppWindow
+        tabs={[{
+          key: 'document',
+          title: '项目计划书.docx',
+          url: '',
+          documentAttachment: {
+            url: '/api/files/files/plan.docx',
+            name: '项目计划书.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            kind: 'file',
+            source: 'upload',
+          },
+        }]}
+        activeKey="document"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked={false}
+        splitMaxWidth={800}
+        expandedSplitMaxWidth={900}
+        sidebarCollapsed
+        sidebarCollapseWidth={450}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('local-document-preview')).toBeTruthy();
+    expect(document.querySelector('iframe[data-app-key="document"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: '跳转到网页' })).toBeNull();
+  });
+
+  it('minimizes from the header action', () => {
+    const onMinimize = vi.fn();
+    render(
+      <EmbeddedAppWindow
+        tabs={tabs}
+        activeKey="docs"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        onMinimize={onMinimize}
+        docked={false}
+        splitMaxWidth={400}
+        expandedSplitMaxWidth={500}
+        sidebarCollapsed
+        sidebarCollapseWidth={450}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '最小化为图标' }));
+    expect(onMinimize).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the iframe mounted while minimized and reuses it after restore', () => {
+    const props = {
+      tabs,
+      activeKey: 'docs' as const,
+      onSelectTab: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseWindow: vi.fn(),
+      docked: false,
+      splitMaxWidth: 400,
+      expandedSplitMaxWidth: 500,
+      sidebarCollapsed: true,
+      sidebarCollapseWidth: 450,
+      onCollapseSidebar: vi.fn(),
+      onRequestDock: vi.fn(),
+      onLayoutChange: vi.fn(),
+    };
+    const { container, rerender } = render(
+      <EmbeddedAppWindow {...props} minimized />,
+    );
+    const minimizedFrame = container.querySelector<HTMLIFrameElement>('iframe[data-app-key="docs"]');
+    expect(minimizedFrame).toBeTruthy();
+    expect(container.querySelector('.embedded-app-window')?.classList.contains('is-minimized'))
+      .toBe(true);
+
+    rerender(<EmbeddedAppWindow {...props} minimized={false} />);
+    expect(container.querySelector('iframe[data-app-key="docs"]')).toBe(minimizedFrame);
+  });
+
   it('reloads the focused app page from the header refresh button', () => {
     render(
       <EmbeddedAppWindow

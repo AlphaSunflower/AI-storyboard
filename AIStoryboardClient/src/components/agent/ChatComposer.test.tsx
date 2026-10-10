@@ -5,11 +5,16 @@ import { libraryApi, type LibraryAsset, type LibraryAssetDetail } from '../../ap
 import { useAgentStore } from '../../stores/agentStore';
 import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   serializeDragPayload,
 } from '../../lib/projectLibraryDrag';
 import { ChatComposer } from './ChatComposer';
+
+beforeEach(() => {
+  useSideChatSelectionStore.getState().clear();
+});
 
 describe('ChatComposer project library drops', () => {
   beforeEach(() => {
@@ -405,5 +410,164 @@ describe('ChatComposer annotation context', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空该消息全部注释' }));
 
     expect(useChatAnnotationStore.getState().annotations).toHaveLength(0);
+  });
+});
+
+describe('ChatComposer 斜杠命令', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      refImageUrls: [],
+    });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('输入 / 弹出命令列表', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } });
+    expect(screen.getByRole('listbox', { name: '命令' })).toBeTruthy();
+    expect(screen.getByText('压缩上下文')).toBeTruthy();
+    expect(screen.getByText('状态')).toBeTruthy();
+    expect(screen.getByText('侧边')).toBeTruthy();
+  });
+
+  it('新对话（无消息）压缩项不可用', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/压缩' } });
+    expect(screen.getByText('新对话暂无可压缩的上下文')).toBeTruthy();
+  });
+
+  it('新对话（无消息）侧边项不可用', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/侧边' } });
+    expect(screen.getByText('先完成一轮对话后再开启侧边')).toBeTruthy();
+  });
+
+  it('已有对话时执行侧边命令会创建临时分支', () => {
+    const openSideChat = vi.fn().mockResolvedValue(undefined);
+    useAgentStore.setState({
+      messages: [{ id: 'm1', conversationId: 'conversation-1', role: 'user', content: 'hi' }] as never,
+      conversations: [conversation('AGENTSCOPE')],
+      openSideChat,
+    });
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/侧边' } });
+    fireEvent.click(screen.getByText('侧边'));
+
+    expect(openSideChat).toHaveBeenCalledWith('conversation-1', '测试会话');
+  });
+
+  it('嵌入侧边聊天时不再展示侧边命令', () => {
+    render(<ChatComposer enableSideChat={false} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } });
+    expect(screen.queryByText('侧边')).toBeNull();
+  });
+
+  it('已有对话时可压缩并展示结果', async () => {
+    useAgentStore.setState({
+      messages: [{ id: 'm1', conversationId: 'conversation-1', role: 'user', content: 'hi' }] as never,
+    });
+    const spy = vi.spyOn(agentApi, 'compactContext').mockResolvedValue({
+      data: {
+        code: 0, message: '', data: {
+          compacted: true, status: 'COMPACTED',
+          messagesBefore: 42, messagesAfter: 13, tokensBefore: 1, tokensAfter: 1,
+        },
+      },
+    } as never);
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } });
+    fireEvent.click(screen.getByText('压缩上下文'));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('conversation-1'));
+    await screen.findByText('上下文已压缩：42 条 → 13 条');
+  });
+
+  it('状态卡展示会话 ID / 背景信息 / 额度占位', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/状态' } });
+    fireEvent.click(screen.getByText('状态'));
+
+    expect(screen.getByText('conversation-1')).toBeTruthy();
+    expect(screen.getByText('背景信息:')).toBeTruthy();
+    expect(screen.getByText('额度:')).toBeTruthy();
+    expect(screen.getByText('不可用')).toBeTruthy();
+  });
+});
+
+describe('ChatComposer 只有注释时发送', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      refImageUrls: [],
+    });
+    useProjectStore.setState({ currentProject: { id: 'project-1' } as never });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useChatAnnotationStore.setState({ annotations: [] });
+    useSideChatSelectionStore.getState().clear();
+  });
+
+  it('无文字但有注释时发送按钮可用，并把注释块作为内容发出', () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never });
+    useChatAnnotationStore.setState({
+      annotations: [{
+        id: 'a1', conversationId: 'conversation-1', messageId: 'm1',
+        quote: '被引用的原文', comment: '', createdAt: 1,
+      }],
+    });
+    render(<ChatComposer />);
+
+    const button = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [content] = sendMessage.mock.calls[0] as [string];
+    expect(content).toContain('【引用注释】');
+    expect(content).toContain('被引用的原文');
+  });
+
+  it('无文字也无注释时发送按钮禁用', () => {
+    render(<ChatComposer />);
+    const button = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it('无文字但有侧边选中片段时发送，并携带片段上下文', () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never });
+    window.history.replaceState({}, '', '/chat?embed=1&sideChatId=side-1');
+    useSideChatSelectionStore.getState().addSelection({
+      text: '这是需要追问的原文片段',
+      messageId: 'm1',
+    });
+    render(<ChatComposer />);
+
+    const button = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [content] = sendMessage.mock.calls[0] as [string];
+    expect(content).toContain('<selected-text-context>');
+    expect(content).toContain('这是需要追问的原文片段');
+    window.history.replaceState({}, '', '/chat');
   });
 });

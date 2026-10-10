@@ -104,12 +104,14 @@ export function LoginPage() {
           <span
             style={{
               color: 'var(--color-on-dark)',
-              fontSize: 17,
+              fontSize: 'clamp(13px, 1.4vw, 17px)',
               fontWeight: 600,
-              letterSpacing: '-0.01em',
+              lineHeight: 1.25,
+              letterSpacing: 0,
+              maxWidth: 'calc(100vw - 170px)',
             }}
           >
-            AlphaSunflower AI 分镜
+            多智能体协作全流程可控的AIGC分镜系统
           </span>
         </div>
         <button
@@ -169,7 +171,7 @@ export function LoginPage() {
               }}
             >
               <Sparkles size={15} strokeWidth={1.8} />
-              AI 分镜创作平台
+              多智能体协作 · AIGC 分镜系统
             </p>
             <h1
               style={{
@@ -182,7 +184,7 @@ export function LoginPage() {
                 maxWidth: '12em',
               }}
             >
-              让剧本，直接长成分镜
+              从剧本到成片，全流程可控
             </h1>
             <p
               className="hero-sub"
@@ -194,8 +196,8 @@ export function LoginPage() {
                 marginBottom: 'var(--space-xl)',
               }}
             >
-              输入剧本，AI 自动拆分镜头、生成画面。Moon 智能体随叫随到，
-              图改图、图生视频一站完成。
+              多智能体协同完成剧本拆解、分镜生成、图片与视频预演；
+              每一步可确认、可调整、可追溯，让创作过程真正可控。
             </p>
             <ul
               className="hero-features"
@@ -210,9 +212,9 @@ export function LoginPage() {
               }}
             >
               {[
-                { icon: <FileText size={16} strokeWidth={1.8} />, label: '剧本智能拆解，生成镜头脚本' },
-                { icon: <ImageIcon size={16} strokeWidth={1.8} />, label: '文生图 / 图改图，产出分镜画面' },
-                { icon: <Film size={16} strokeWidth={1.8} />, label: '图生视频，动态预演镜头' },
+                { icon: <FileText size={16} strokeWidth={1.8} />, label: '多智能体协同拆解，生成可控分镜方案' },
+                { icon: <ImageIcon size={16} strokeWidth={1.8} />, label: '资产约束贯穿全流程，角色道具稳定一致' },
+                { icon: <Film size={16} strokeWidth={1.8} />, label: '逐镜生成图片与视频，结果实时可审' },
               ].map((item) => (
                 <li
                   key={item.label}
@@ -277,7 +279,9 @@ export function LoginPage() {
                 marginBottom: 'var(--space-lg)',
               }}
             >
-              {isRegister ? '注册后即可开始分镜创作' : '登录后继续你的分镜创作'}
+              {isRegister
+                ? '注册后即可开始全流程可控的 AIGC 分镜创作'
+                : '登录后进入多智能体协作工作台'}
             </p>
             <form onSubmit={handleSubmit}>
               {isRegister && (
@@ -398,12 +402,12 @@ export function LoginPage() {
         </div>
       </main>
 
-      {/* 滚动展开转场（ScrollExpand）：静态分镜图随滚动展开；「剧本 → 分镜 → 成片」先浮在小窗上，
+      {/* 滚动展开转场（ScrollExpand）：静态分镜图随滚动展开；全流程协作标题先浮在小窗上，
           全屏时同款大字淡入常驻，字始终可见 */}
       <section style={{ position: 'relative', background: 'var(--color-surface-dark)' }}>
         <ScrollExpand
           src="/se-assets/hero.jpg"
-          title="剧本 → 分镜 → 成片"
+          title="多智能体协作 → 全流程可控"
           scrollHint="滚动展开"
           useWindowScroll
           startWidth={44}
@@ -427,7 +431,7 @@ export function LoginPage() {
                 lineHeight: 1.15,
               }}
             >
-              极速提效，告别纯人工拆解
+              从剧本到成片，每一步都可确认、可调整、可追溯
             </span>
           </div>
         </ScrollExpand>

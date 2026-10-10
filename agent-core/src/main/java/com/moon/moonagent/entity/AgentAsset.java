@@ -15,6 +15,8 @@ public class AgentAsset {
     private String projectId;
     private String type;    // image | video | reference
     private String url;     // /api/files/images/xxx.png 或 /api/files/videos/xxx.mp4
+    private String originalName; // 上传时的原始文件名
+    private String mimeType;     // 上传时的 MIME 类型
     private String prompt;
     private String model;
     private String purpose; // 用户上传素材时填写的用途/说明（人物/场景/风格参考等）

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS public.conversations (
     orchestration_mode        character varying(32) NOT NULL DEFAULT 'LEGACY',
     engine_version            character varying(64) NOT NULL DEFAULT 'plan-graph-v1',
     debug_comparison_enabled  boolean NOT NULL DEFAULT true,
-    approval_mode             character varying(32) NOT NULL DEFAULT 'PLAN_APPROVAL'
+    approval_mode             character varying(32) NOT NULL DEFAULT 'PLAN_APPROVAL',
+    agentscope_session_initialized_at timestamp with time zone
 );
 
 CREATE TABLE IF NOT EXISTS public.agent_messages (
@@ -55,6 +56,8 @@ CREATE TABLE IF NOT EXISTS public.agent_assets (
     conversation_id      text,
     type                 text NOT NULL,
     url                  text,
+    original_name        text,
+    mime_type            character varying(128),
     prompt               text,
     model                text,
     status               text NOT NULL DEFAULT 'queued',
@@ -80,7 +83,24 @@ CREATE TABLE IF NOT EXISTS public.agent_assets (
     node_id              text
 );
 
+CREATE TABLE IF NOT EXISTS public.agent_document_index (
+    id              text PRIMARY KEY DEFAULT (gen_random_uuid())::text,
+    asset_id        text NOT NULL UNIQUE,
+    conversation_id text NOT NULL,
+    original_name   text,
+    mime_type       character varying(128),
+    content_hash    character varying(64) NOT NULL,
+    char_count      integer NOT NULL DEFAULT 0,
+    summary         text,
+    status          character varying(32) NOT NULL DEFAULT 'summarizing',
+    parser_version  character varying(64) NOT NULL,
+    created_at      timestamp with time zone NOT NULL DEFAULT now(),
+    updated_at      timestamp with time zone NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_agent_messages_conv ON public.agent_messages (conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_conv ON public.agent_checkpoints (conversation_id, status);
 CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_token ON public.agent_checkpoints (form_token);
 CREATE INDEX IF NOT EXISTS idx_agent_assets_conv ON public.agent_assets (conversation_id, type);
+CREATE INDEX IF NOT EXISTS idx_agent_document_index_conv_updated
+    ON public.agent_document_index (conversation_id, updated_at DESC);

@@ -1,4 +1,6 @@
 import type { CanvasModeOptions, EmbeddedAppDescriptor } from './EmbeddedAppWindow';
+import type { AgentAttachment } from '../../../api/agent';
+import { buildSideChatFrameUrl } from '../sideChatFrame';
 
 export interface ChatAppProject {
   id?: string;
@@ -7,9 +9,15 @@ export interface ChatAppProject {
 
 export interface ChatAppOpenOptions {
   canvasMode?: CanvasModeOptions;
+  documentAttachment?: AgentAttachment;
+  sideChat?: {
+    conversationId: string;
+    projectId: string;
+    sourceTitle: string;
+  };
 }
 
-export const CHAT_APP_KEYS = ['canvas', 'editor', 'docs', 'library'] as const;
+export const CHAT_APP_KEYS = ['canvas', 'editor', 'docs', 'library', 'document', 'side-chat'] as const;
 
 export type ChatAppKey = typeof CHAT_APP_KEYS[number];
 
@@ -27,6 +35,28 @@ export function buildChatAppDescriptor(
   currentProject: ChatAppProject | null,
   options: ChatAppOpenOptions = {},
 ): EmbeddedAppDescriptor | null {
+  if (key === 'document') {
+    const attachment = options.documentAttachment;
+    if (!attachment) return null;
+    return {
+      key,
+      title: attachment.name || '文档预览',
+      url: '',
+      documentAttachment: attachment,
+    };
+  }
+
+  if (key === 'side-chat') {
+    const sideChat = options.sideChat;
+    if (!sideChat) return null;
+    return {
+      key,
+      title: sideChat.sourceTitle ? `侧边 · ${sideChat.sourceTitle}` : '侧边临时对话',
+      url: buildSideChatFrameUrl(sideChat.conversationId, sideChat.projectId),
+      projectId: sideChat.projectId,
+    };
+  }
+
   if (key === 'docs') {
     return { key, title: '使用文档', url: '/docs?embedded=1' };
   }

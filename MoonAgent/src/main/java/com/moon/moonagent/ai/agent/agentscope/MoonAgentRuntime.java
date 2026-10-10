@@ -7,6 +7,7 @@ import com.moon.moonagent.ai.agent.AgentConcurrencyGuard;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
+import com.moon.moonagent.ai.agent.document.AgentDocumentService;
 import com.moon.moonagent.ai.agent.agentscope.nacos.GlobalPromptRepository;
 import com.moon.moonagent.ai.agent.agentscope.nacos.NacosMcpMetadataRepository;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
@@ -141,6 +142,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService workflowService;
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraintExtraction;
+    private final AgentDocumentService documentService;
     private final CreativeModelRouter modelRouter;
     private final AgentConcurrencyGuard concurrencyGuard;
 
@@ -179,7 +181,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             List<io.agentscope.core.middleware.MiddlewareBase> middlewares =
                     new ArrayList<>(List.of(
                             new TurnContextMiddleware(
-                                    workflowService, creativeContext, constraintExtraction),
+                                    workflowService, creativeContext, constraintExtraction,
+                                    documentService),
                             new MediaProgressMiddleware(),
                             new ToolCallContentMiddleware(),
                             new AgentTraceBridgeMiddleware()));
@@ -200,7 +203,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             "canvas-run", "general"))
                     .enableMetaTool(true)
                     .enablePendingToolRecovery(true)
-                    .permissionContext(permissionContext(AgentApprovalMode.PLAN_APPROVAL))
+                    .permissionContext(permissionContext(
+                            AgentApprovalMode.PLAN_APPROVAL, Set.of(),
+                            readOnlyToolNames(toolkit)))
                     .middlewares(middlewares)
                     .workspace(workspace)
                     .disableFilesystemTools()
@@ -308,6 +313,61 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     conversationId, exception.getMessage());
             return SessionBootstrapResult.UNAVAILABLE;
         }
+    }
+
+    /**
+     * Clones the last committed AgentScope state into an independent ephemeral session.
+     * Transient plan/tool/task state is intentionally not copied: a side conversation
+     * branches from the stable dialogue context, not from an in-flight execution.
+     */
+    public int cloneSessionState(String userId, String sourceConversationId,
+                                 String targetConversationId, List<Msg> fallbackHistory) {
+        if (!enabled() || stateStore == null) {
+            throw new IllegalStateException("AgentScope state store is unavailable");
+        }
+        if (sourceConversationId == null || sourceConversationId.isBlank()
+                || targetConversationId == null || targetConversationId.isBlank()) {
+            throw new IllegalArgumentException("source and target conversation ids are required");
+        }
+
+        AgentState sourceState = null;
+        var versioned = stateStore.getVersioned(
+                userId, sourceConversationId, "agent_state", AgentState.class);
+        if (versioned != null && versioned.isPresent()) {
+            sourceState = versioned.value();
+        }
+
+        AgentState targetState;
+        if (sourceState == null || sourceState.getContext() == null
+                || sourceState.getContext().isEmpty()) {
+            List<Msg> seeded = fallbackHistory == null ? List.of() : List.copyOf(fallbackHistory);
+            targetState = AgentState.builder()
+                    .sessionId(targetConversationId)
+                    .userId(userId)
+                    .context(seeded)
+                    .build();
+        } else {
+            targetState = cloneStableState(sourceState, targetConversationId, userId);
+        }
+
+        agent.clearStateCache(userId, targetConversationId);
+        stateStore.save(userId, targetConversationId, "agent_state", targetState);
+        log.info("[AgentScope] cloned side-chat state source={} target={} messages={}",
+                sourceConversationId, targetConversationId, targetState.getContext().size());
+        return targetState.getContext().size();
+    }
+
+    static AgentState cloneStableState(AgentState source, String targetConversationId,
+                                       String userId) {
+        AgentState.Builder builder = AgentState.builder()
+                .sessionId(targetConversationId)
+                .userId(userId)
+                .summary(source.getSummary())
+                .context(source.getContext() == null ? List.of() : List.copyOf(source.getContext()));
+        if (source.getPermissionContext() != null) {
+            builder.permissionContext(source.getPermissionContext());
+        }
+        return builder.build();
     }
 
     public enum SessionBootstrapResult {
@@ -843,7 +903,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         AgentApprovalMode mode = AgentApprovalMode.from(conversation.getApprovalMode());
         agent.getDelegate().replacePermissionContext(
                 conversation.getUserId(), conversation.getId(),
-                permissionContext(mode, preApprovedTools));
+                permissionContext(mode, preApprovedTools,
+                        readOnlyToolNames(toolkitFactory.activeToolkit())));
     }
 
     static PermissionContextState permissionContext(AgentApprovalMode mode) {
@@ -852,6 +913,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     static PermissionContextState permissionContext(AgentApprovalMode mode,
                                                     Set<String> preApprovedTools) {
+        return permissionContext(mode, preApprovedTools, Set.of());
+    }
+
+    static PermissionContextState permissionContext(AgentApprovalMode mode,
+                                                    Set<String> preApprovedTools,
+                                                    Set<String> readOnlyTools) {
         AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
         Set<String> approved = preApprovedTools == null ? Set.of() : preApprovedTools;
         PermissionContextState.Builder permissions = PermissionContextState.builder()
@@ -859,6 +926,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         ? PermissionMode.BYPASS : PermissionMode.DEFAULT);
         if (effective == AgentApprovalMode.FULL_ACCESS) {
             return permissions.build();
+        }
+        if (readOnlyTools != null) {
+            for (String tool : readOnlyTools) {
+                if (tool == null || tool.isBlank()) continue;
+                permissions.addAllowRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ALLOW, "MoonAgentRegisteredReadOnlyPolicy"));
+            }
         }
         for (String tool : List.of(
                 "list_session_assets",
@@ -873,8 +947,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "task_output",
                 "wait_async_results",
                 "agent_list",
+                "agent_spawn",
+                "agent_send",
                 "list_storyboard_draft",
                 "list_project_storyboard",
+                "resolve_agent_workflow",
                 "canvas_get_context",
                 "canvas_get_browser_context",
                 "canvas_get_summary",
@@ -914,9 +991,25 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_graph_create_result_slots",
                 "canvas_graph_mark_result_slots",
                 "canvas_graph_layout_graph",
+                "canvas_create_canvas",
+                "canvas_rename_canvas",
+                "canvas_update_node",
+                "canvas_move_nodes",
+                "canvas_duplicate_nodes",
+                "canvas_resize_nodes",
+                "canvas_pin_nodes",
+                "canvas_set_node_model_config",
+                "canvas_undo",
+                "canvas_redo",
+                "canvas_image_crop",
+                "canvas_image_split",
+                "canvas_image_adjust",
                 "canvas_execute_node",
                 "canvas_execute_graph",
                 "canvas_cancel_execution",
+                "reorder_storyboard_draft",
+                "save_timeline_manifest",
+                "update_creative_context",
                 "todo_write",
                 "plan_enter",
                 "plan_write",
@@ -939,7 +1032,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "delete_project_storyboard_shot",
                 "clear_project_storyboard",
                 "canvas_delete_nodes",
-                "canvas_delete_edges")) {
+                "canvas_delete_edges",
+                "merge_storyboard_videos",
+                "task_cancel")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
             if (autoApproved) {
@@ -951,6 +1046,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             }
         }
         return permissions.build();
+    }
+
+    private static Set<String> readOnlyToolNames(Toolkit toolkit) {
+        if (toolkit == null || toolkit.getToolNames() == null) return Set.of();
+        return toolkit.getToolNames().stream()
+                .filter(name -> {
+                    var tool = toolkit.getTool(name);
+                    return tool != null && tool.isReadOnly();
+                })
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     static AgentScopeTurnState.ReferenceInputMode classifyReferenceInput(
@@ -1055,11 +1160,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             // 会话上下文理论上不含 SYSTEM（系统提示词在推理输入里单独拼），防御性剥离并回填
             Msg system = context.get(0).getRole() == MsgRole.SYSTEM ? context.remove(0) : null;
             try {
-                int keepMessages = properties.getCompactionKeepMessages();
-                if (context.size() <= keepMessages) return CompactOutcome.SKIPPED;
-
                 int messagesBefore = context.size();
                 int tokensBefore = TokenCounterUtil.calculateToken(context);
+                int keepMessages = properties.getCompactionKeepMessages();
+                if (messagesBefore <= keepMessages) {
+                    log.info("[AgentScope] 手动压缩跳过：{} 条 ≤ 保留 {} 条 conversationId={}",
+                            messagesBefore, keepMessages, conversationId);
+                    return new CompactOutcome("SKIPPED", messagesBefore, messagesBefore,
+                            tokensBefore, tokensBefore);
+                }
+
                 RuntimeContext rc = RuntimeContext.builder()
                         .userId(userId).sessionId(conversationId).build();
                 CompactionConfig config = CompactionConfig.builder()
@@ -1077,7 +1187,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 Optional<List<Msg>> compacted = compactor
                         .compactIfNeeded(rc, context, config, agent.getName(), conversationId)
                         .block(Duration.ofSeconds(90));
-                if (compacted == null || compacted.isEmpty()) return CompactOutcome.SKIPPED;
+                if (compacted == null || compacted.isEmpty()) {
+                    log.warn("[AgentScope] 手动压缩未产出结果（compactor 返回空）{} 条/{} token conversationId={}",
+                            messagesBefore, tokensBefore, conversationId);
+                    return new CompactOutcome("SKIPPED", messagesBefore, messagesBefore,
+                            tokensBefore, tokensBefore);
+                }
 
                 context.clear();
                 context.addAll(compacted.get());

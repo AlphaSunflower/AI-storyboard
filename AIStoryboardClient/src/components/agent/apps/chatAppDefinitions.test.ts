@@ -14,6 +14,39 @@ describe('chat app definitions', () => {
     });
   });
 
+  it('builds a local document tab without an external URL', () => {
+    const attachment = {
+      url: '/api/files/files/plan.docx',
+      name: '项目计划书.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      kind: 'file' as const,
+      source: 'upload' as const,
+    };
+    expect(buildChatAppDescriptor('document', null, {
+      documentAttachment: attachment,
+    })).toEqual({
+      key: 'document',
+      title: '项目计划书.docx',
+      url: '',
+      documentAttachment: attachment,
+    });
+  });
+
+  it('builds a temporary side-chat child window for the current project', () => {
+    expect(buildChatAppDescriptor('side-chat', null, {
+      sideChat: {
+        conversationId: 'side-1',
+        projectId: 'project-1',
+        sourceTitle: '主对话',
+      },
+    })).toEqual({
+      key: 'side-chat',
+      title: '侧边 · 主对话',
+      url: '/chat?embed=1&sideChatId=side-1&projectId=project-1',
+      projectId: 'project-1',
+    });
+  });
+
   it('builds an editor tab with the current project', () => {
     expect(buildChatAppDescriptor('editor', { id: 'project-1', name: '测试项目' })).toEqual({
       key: 'editor',

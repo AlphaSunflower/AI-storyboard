@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { libraryApi } from '../../api/library';
 import { useProjectStore } from '../../stores/projectStore';
 import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
+import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
+import { useAgentStore } from '../../stores/agentStore';
 import { CHAT_MEDIA_DRAG_MIME } from '../../lib/projectLibraryDrag';
+import { rememberDocumentSource } from '../../lib/documentPreview';
 import { MessageBubble } from './MessageBubble';
 
 describe('MessageBubble project library import', () => {
@@ -366,6 +370,39 @@ describe('MessageBubble project library import', () => {
     const dialog = screen.getByRole('dialog', { name: '图片预览' });
     expect(dialog.querySelector('video')).toBeTruthy();
   });
+
+  it('opens a Markdown attachment in the chat document child window', async () => {
+    const url = '/api/files/files/project-brief.md';
+    rememberDocumentSource(url, new Blob([
+      '# 项目概览\n\n- 目标：生成分镜\n- 状态：进行中',
+    ], { type: 'text/markdown' }));
+
+    render(
+      <MessageBubble
+        role="user"
+        content="请阅读文档"
+        metadata={{
+          messageInput: {
+            attachments: [{
+              url,
+              name: 'project-brief.md',
+              mimeType: 'text/markdown',
+              kind: 'file',
+              source: 'upload',
+            }],
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开文档 project-brief.md' }));
+
+    expect(useDocumentPreviewStore.getState().attachment).toMatchObject({
+      url,
+      name: 'project-brief.md',
+      kind: 'file',
+    });
+  });
 });
 
 describe('MessageBubble annotations', () => {
@@ -377,12 +414,14 @@ describe('MessageBubble annotations', () => {
     }));
     useProjectStore.setState({ currentProject: null });
     useChatAnnotationStore.getState().reset();
+    useSideChatSelectionStore.getState().clear();
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     useChatAnnotationStore.getState().reset();
+    useSideChatSelectionStore.getState().clear();
   });
 
   const renderAssistant = () => render(
@@ -522,6 +561,32 @@ describe('MessageBubble annotations', () => {
     expect(screen.getByRole('dialog', { name: '添加注释' })).toBeTruthy();
 
     delete rangeProto.getBoundingClientRect;
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it('adds the selected text to side-chat context and opens a temporary side chat', () => {
+    const restore = stubRangeRect();
+    const openSideChat = vi.spyOn(useAgentStore.getState(), 'openSideChat')
+      .mockResolvedValue(undefined);
+    renderAssistant();
+
+    const paragraph = screen.getByText('明白，我停下,等你说完。');
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild as Text, 0);
+    range.setEnd(paragraph.firstChild as Text, 4);
+    const selectedText = range.toString();
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(document.querySelector('.chat-live-text')!);
+    fireEvent.click(screen.getByRole('button', { name: '侧边提问' }));
+
+    expect(useSideChatSelectionStore.getState().selections).toHaveLength(1);
+    expect(useSideChatSelectionStore.getState().selections[0].text).toBe(selectedText);
+    expect(openSideChat).toHaveBeenCalledWith('c1', undefined);
+
+    openSideChat.mockRestore();
+    restore();
     window.getSelection()?.removeAllRanges();
   });
 });

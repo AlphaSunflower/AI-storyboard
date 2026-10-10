@@ -1,0 +1,266 @@
+.document-preview__viewport {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 20px 60px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.34) 1px, transparent 1px),
+    #eef1f4;
+  background-size: 100% 46px;
+}
+
+.document-preview__viewport.is-docx,
+.document-preview__viewport.is-pptx {
+  padding: 18px;
+  background: #e9edf2;
+  background-image: none;
+}
+
+.document-preview__docx-shell,
+.document-preview__pptx-shell {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.document-preview__docx {
+  min-width: max-content;
+}
+
+.document-preview__docx .document-docx-wrapper {
+  width: max-content;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 0;
+  background: transparent;
+}
+
+.document-preview__docx .document-docx,
+.document-preview__pptx .pptx-preview-slide-wrapper {
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 1px 3px rgba(32, 37, 44, 0.08), 0 10px 32px rgba(32, 37, 44, 0.08);
+}
+
+.document-preview__pptx-shell {
+  min-width: 960px;
+}
+
+.document-preview__pptx .pptx-preview-wrapper {
+  margin: 0 auto;
+  background: transparent !important;
+}
+
+.document-preview__paper {
+  width: min(850px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 64px 74px 86px;
+  border: 1px solid #e4e6e9;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(32, 37, 44, 0.06), 0 10px 32px rgba(32, 37, 44, 0.06);
+}
+
+.document-preview__content,
+.document-preview__text {
+  color: #2f3339;
+  font-size: 16px;
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+
+.document-preview__content > *:first-child {
+  margin-top: 0;
+}
+
+.document-preview__content > *:last-child {
+  margin-bottom: 0;
+}
+
+.document-preview__content h1,
+.document-preview__content h2,
+.document-preview__content h3,
+.document-preview__content h4,
+.document-preview__content h5,
+.document-preview__content h6 {
+  color: #17191d;
+  font-weight: 700;
+  line-height: 1.32;
+  margin: 1.45em 0 0.65em;
+}
+
+.document-preview__content h1 { font-size: 34px; letter-spacing: 0; }
+.document-preview__content h2 { padding-bottom: 0.25em; border-bottom: 1px solid #e7e9ec; font-size: 26px; }
+.document-preview__content h3 { font-size: 21px; }
+.document-preview__content h4,
+.document-preview__content h5,
+.document-preview__content h6 { font-size: 17px; }
+.document-preview__content p { margin: 0.9em 0; }
+.document-preview__content strong { color: #17191d; font-weight: 700; }
+.document-preview__content a { color: #315fc4; text-decoration: underline; text-underline-offset: 2px; }
+.document-preview__content ul,
+.document-preview__content ol { margin: 0.85em 0; padding-left: 1.55em; }
+.document-preview__content li { margin: 0.3em 0; }
+.document-preview__content li > ul,
+.document-preview__content li > ol { margin: 0.25em 0; }
+
+.document-preview__content blockquote {
+  margin: 1.2em 0;
+  padding: 0.4em 1.1em;
+  border-left: 4px solid #cbd4e3;
+  background: #f7f8fa;
+  color: #60666f;
+}
+
+.document-preview__content hr {
+  margin: 1.8em 0;
+  border: none;
+  border-top: 1px solid #e5e7ea;
+}
+
+.document-preview__content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1.2em auto;
+  border-radius: 6px;
+}
+
+.document-preview__content table {
+  width: 100%;
+  margin: 1.2em 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.document-preview__content th,
+.document-preview__content td {
+  padding: 9px 11px;
+  border: 1px solid #dfe3e8;
+  text-align: left;
+  vertical-align: top;
+}
+
+.document-preview__content th {
+  background: #f6f7f9;
+  color: #20242a;
+  font-weight: 650;
+}
+
+.document-preview__content code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #f0f2f4;
+  color: #2b3037;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 0.88em;
+}
+
+.document-preview__content pre {
+  overflow-x: auto;
+  margin: 1.2em 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #20242a;
+  color: #f4f6f8;
+}
+
+.document-preview__content pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.document-preview__text {
+  min-height: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+}
+
+.document-preview__text.is-code {
+  padding: 18px;
+  border-radius: 9px;
+  background: #f5f6f8;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.62;
+  white-space: pre;
+}
+
+.document-preview__pdf {
+  width: 100%;
+  height: 100%;
+  min-height: 620px;
+  border: none;
+  background: white;
+}
+
+.document-preview__status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  color: #6c737d;
+  text-align: center;
+}
+
+.document-preview__status strong {
+  color: #30343a;
+  font-size: 16px;
+}
+
+.document-preview__status span {
+  max-width: 430px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.document-preview__status.is-error svg {
+  color: #8c939d;
+}
+
+.document-preview__warning {
+  margin-top: 40px;
+  padding: 10px 12px;
+  border: 1px solid #eadfc8;
+  border-radius: 7px;
+  background: #fcf8ef;
+  color: #7b6440;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.is-spinning {
+  animation: document-preview-spin 0.85s linear infinite;
+}
+
+@keyframes document-preview-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .document-preview__paper {
+    padding: 36px 24px 54px;
+  }
+
+  .document-preview__content {
+    font-size: 15px;
+    line-height: 1.72;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning {
+    animation-duration: 1.8s;
+  }
+}

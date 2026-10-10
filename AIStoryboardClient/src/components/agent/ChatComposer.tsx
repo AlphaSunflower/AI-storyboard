@@ -16,19 +16,29 @@ import {
   type ConversationAssetGroupBinding,
 } from '../../api/agent';
 import { FileText, Paperclip } from 'lucide-react';
-import { PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X } from 'lucide-react';
+import {
+  PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
+  Minimize2, Info, PanelRightOpen,
+} from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
+import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import { assetUrl } from '../../config';
 import { buildSceneInspectPrompt, SCENE_DRAG_MIME, type EmbeddedSceneReference } from '../../lib/embeddedAppMessages';
 import { buildAnnotationContext } from '../../lib/chatAnnotation';
+import { buildSideChatSelectionContext } from '../../lib/sideChatSelection';
+import { currentSideChatId } from '../../lib/sideChatSelectionSync';
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { SideChatContextChip } from './SideChatContextChip';
 import { ContextUsageRing } from './ContextUsageRing';
+import { ChatSlashMenu, type SlashCommandItem } from './ChatSlashMenu';
+import { ConversationStatusCard } from './ConversationStatusCard';
 import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, contextWindowTokensFor } from './contextWindow';
 import {
@@ -49,7 +59,7 @@ const REFERENCE_PREVIEW_LIMIT = 5;
  * DeepSeek 风格输入卡（780px 悬浮胶囊）：/chat 页 hero 居中与底部输入共用。
  * 逻辑复用 agentStore（参考图/pendingPicUrl/发送/流式禁用）。
  */
-export function ChatComposer() {
+export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boolean } = {}) {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
     refImageUrls, uploadRefImages, sendMessage, interruptAndSend, stopGeneration,
@@ -67,8 +77,12 @@ export function ChatComposer() {
     moveCanvasMediaRef,
     pendingApprovalMode,
     setApprovalMode,
+    sideChat,
+    openSideChat,
   } = useAgentStore();
   const pendingAnnotations = useChatAnnotationStore((state) => state.annotations);
+  const storedSideChatSelections = useSideChatSelectionStore((state) => state.selections);
+  const sideChatSelections = currentSideChatId() ? storedSideChatSelections : [];
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -200,9 +214,17 @@ export function ChatComposer() {
   const [pendingGroup, setPendingGroup] = useState<import('../../api/library').AssetGroupSnapshot | null>(null);
   const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
   const [boundGroups, setBoundGroups] = useState<ConversationAssetGroupBinding[]>([]);
+  // 斜杠命令：状态浮层卡 / 压缩提示（输入框上方）
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [compressNotice, setCompressNotice] = useState('');
+  const [compressing, setCompressing] = useState(false);
 
-  // 切换会话清空草稿（与抽屉 AgentChatPanel 一致）
-  useEffect(() => { setText(''); }, [activeConversationId]);
+  // 切换会话清空草稿，避免不同会话之间串草稿。
+  useEffect(() => {
+    setText('');
+    setStatusOpen(false);
+    setCompressNotice('');
+  }, [activeConversationId]);
 
   useEffect(() => {
     const raw = sessionStorage.getItem('moon.pendingGroupSnapshot');
@@ -284,20 +306,96 @@ export function ChatComposer() {
     }
     return Array.from(groups.values());
   }, [pendingAnnotations, activeConversationId]);
+  // 只有注释、没有文字时也允许发送：注释块本身就是内容
+  const hasPendingAnnotations = pendingAnnotationGroups.length > 0;
+  const hasSideChatSelections = sideChatSelections.length > 0;
+  const canSend = !readOnly && (!busy || canInterruptSend)
+    && (!!text.trim() || hasPendingAnnotations || hasSideChatSelections);
+
+  // ── 斜杠命令（/chat 输入「/」列出「压缩上下文 / 状态」） ──
+  // 命令模式：文本以「/」开头且尚未输入空格（与 Codex 一致）
+  const slashQuery = useMemo(() => {
+    const trimmedStart = text.trimStart();
+    if (!trimmedStart.startsWith('/')) return null;
+    const rest = trimmedStart.slice(1);
+    return rest.includes(' ') || rest.includes('\n') ? null : rest;
+  }, [text]);
+
+  const runCompress = async () => {
+    const conversationId = useAgentStore.getState().activeConversationId;
+    if (!conversationId || compressing) return;
+    setText('');
+    setCompressing(true);
+    try {
+      const res = await agentApi.compactContext(conversationId);
+      const data = res.data.data;
+      setCompressNotice(data.compacted
+        ? `上下文已压缩：${data.messagesBefore} 条 → ${data.messagesAfter} 条`
+        : data.status === 'UNAVAILABLE' ? '当前会话暂不支持压缩' : '当前上下文不足，无需压缩');
+    } catch {
+      setCompressNotice('压缩失败，请稍后重试');
+    } finally {
+      setCompressing(false);
+    }
+  };
+
+  const slashItems: SlashCommandItem[] = [
+    {
+      id: 'compress',
+      icon: <Minimize2 size={16} strokeWidth={2} />,
+      title: '压缩上下文',
+      description: '压缩此对话的上下文，保留最近若干轮',
+      disabled: !activeConversationId || messages.length === 0,
+      disabledHint: '新对话暂无可压缩的上下文',
+      run: () => { void runCompress(); },
+    },
+    {
+      id: 'status',
+      icon: <Info size={16} strokeWidth={2} />,
+      title: '状态',
+      description: '显示会话 ID、背景信息与额度',
+      run: () => { setText(''); setStatusOpen(true); },
+    },
+    {
+      id: 'side',
+      icon: <PanelRightOpen size={16} strokeWidth={2} />,
+      title: '侧边',
+      description: '基于当前对话开启临时分支',
+      visible: enableSideChat,
+      disabled: !activeConversationId || messages.length === 0 || sideChat.loading,
+      disabledHint: '先完成一轮对话后再开启侧边',
+      run: () => {
+        setText('');
+        void openSideChat(
+          activeConversationId ?? undefined,
+          activeConversation?.title,
+        );
+      },
+    },
+  ];
+
+  // 没有任何匹配项时不进入命令模式（否则 "/随便写的文本" 会被吃掉 Enter 发不出去）
+  const slashMenuVisible = slashQuery !== null && !readOnly && !busy && !statusOpen
+    && slashItems.some((item) => item.visible !== false
+      && (item.title.includes(slashQuery) || item.id.includes(slashQuery.toLowerCase())));
 
   const handleSend = () => {
     const rawText = text.trim();
-    if (!rawText || readOnly || (busy && !canInterruptSend)) return;
+    // 只有注释、没有文字时也能发：注释块本身就是内容
+    if ((!rawText && !hasPendingAnnotations && !hasSideChatSelections)
+      || readOnly || (busy && !canInterruptSend)) return;
     // 未选项目时 sendMessage 会拒绝发送：先拦下并保留已输入文字，避免清空后丢内容
     if (!projectId) {
       useAgentStore.setState({ streamError: '请先在左上角选择一个项目' });
       return;
     }
-    // 该会话待发的消息内注释一次性随本条消息发给 AI，发送后消费掉
-    const pendingAnnotations = activeConversationId
-      ? useChatAnnotationStore.getState().consumeConversation(activeConversationId)
-      : [];
-    const content = buildAnnotationContext(pendingAnnotations, rawText);
+    // 该会话待发的消息内注释一次性随本条消息发给 AI：先校验内容，再消费，避免校验失败丢注释
+    const annotationContent = buildAnnotationContext(pendingAnnotationGroups.flat(), rawText);
+    const content = buildSideChatSelectionContext(sideChatSelections, annotationContent);
+    if (!content) return;
+    if (activeConversationId) {
+      useChatAnnotationStore.getState().consumeConversation(activeConversationId);
+    }
     setText('');
     if (canInterruptSend) {
       void interruptAndSend(content);
@@ -571,8 +669,38 @@ export function ChatComposer() {
         : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
       transition: 'border-color 0.2s, box-shadow 0.2s',
       padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
-      boxSizing: 'border-box',
+      boxSizing: 'border-box', position: 'relative',
     }}>
+      {slashMenuVisible && (
+        <ChatSlashMenu items={slashItems} query={slashQuery ?? ''} onClose={() => setText('')} />
+      )}
+      {statusOpen && (
+        <ConversationStatusCard
+          conversationId={activeConversationId ?? null}
+          usedTokens={contextUsageTokens}
+          limitTokens={contextLimitTokens}
+          hasContextData={hasContextData}
+          onClose={() => setStatusOpen(false)}
+        />
+      )}
+      {compressing && (
+        <div style={{ fontSize: 12, color: DS.textSecondary }}>正在压缩上下文…</div>
+      )}
+      {compressNotice && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '8px 12px', borderRadius: 12, background: DS.hover,
+          color: DS.textSecondary, fontSize: 13,
+        }}>
+          <span>{compressNotice}</span>
+          <button
+            type="button"
+            onClick={() => setCompressNotice('')}
+            aria-label="关闭提示"
+            style={{ border: 'none', background: 'none', color: DS.textSecondary, cursor: 'pointer' }}
+          >✕</button>
+        </div>
+      )}
       {!readOnly && pendingAnnotationGroups.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {pendingAnnotationGroups.map((group) => (
@@ -586,6 +714,7 @@ export function ChatComposer() {
           ))}
         </div>
       )}
+      {!readOnly && hasSideChatSelections && <SideChatContextChip />}
       {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
         || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
         || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0) && (
@@ -701,20 +830,45 @@ export function ChatComposer() {
               >×</button>
             </span>
           )}
-          {fileAttachments.length > 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '5px 8px', borderRadius: 8, background: 'white',
-              color: DS.textSecondary, fontSize: 12,
-            }}>
-              <FileText size={14} strokeWidth={2} style={{ color: DS.brand }} />
-              文件 {fileAttachments.length} 个
-              <button
-                onClick={() => fileAttachments.forEach((attachment) => removePendingAttachment(attachment.url))}
-                style={{ border: 'none', background: 'transparent', color: DS.textSecondary, cursor: 'pointer' }}
-              >×</button>
-            </span>
-          )}
+          {fileAttachments.map((attachment, index) => {
+            const label = attachment.name || `文档 ${index + 1}`;
+            return (
+              <span key={`${attachment.url}-${index}`} style={{
+                display: 'inline-flex', alignItems: 'center', maxWidth: 238,
+                padding: '4px 5px 4px 8px', borderRadius: 8, background: 'white',
+                border: `1px solid ${DS.border}`, color: DS.textSecondary, fontSize: 12,
+              }}>
+                <button
+                  type="button"
+                  onClick={() => useDocumentPreviewStore.getState().openDocument(attachment)}
+                  title={label}
+                  aria-label={`打开文档 ${label}`}
+                  style={{
+                    minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: 0, border: 'none', background: 'transparent',
+                    color: DS.textSecondary, cursor: 'pointer', font: 'inherit',
+                  }}
+                >
+                  <FileText size={14} strokeWidth={2} style={{ color: DS.brand, flexShrink: 0 }} />
+                  <span style={{
+                    minWidth: 0, maxWidth: 170, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removePendingAttachment(attachment.url)}
+                  title={`移除 ${label}`}
+                  aria-label={`移除文件 ${label}`}
+                  style={{
+                    width: 22, height: 22, display: 'grid', placeItems: 'center',
+                    border: 'none', borderRadius: 6, background: 'transparent',
+                    color: DS.textCaption, cursor: 'pointer', flexShrink: 0,
+                  }}
+                ><X size={12} strokeWidth={2} /></button>
+              </span>
+            );
+          })}
           {(canvasEditContext?.mediaRefs.length ?? 0) > 0 && (
             <button onClick={() => setCanvasMediaOpen(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -790,11 +944,16 @@ export function ChatComposer() {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
+          // 斜杠命令模式下：面板自己消费 ↑↓/Enter/Esc，这里只阻止 Enter 换行
+          if (slashMenuVisible) {
+            if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
+            return;
+          }
           // I5：中文输入法组合期（选词中）按下 Enter 不发送
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
         disabled={readOnly || (busy && !canInterruptSend)}
         rows={2}
         style={{
@@ -863,7 +1022,7 @@ export function ChatComposer() {
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
             disabled={readOnly || (busy && !recording)}
           />
-          {streaming && !agentVideoTask && !text.trim() ? (
+          {streaming && !agentVideoTask && !canSend ? (
             <button
               onClick={stopGeneration}
               title="停止生成"
@@ -879,15 +1038,15 @@ export function ChatComposer() {
           ) : (
             <button
               onClick={handleSend}
-              disabled={readOnly || (busy && !canInterruptSend) || !text.trim()}
+              disabled={!canSend}
               style={{
                 height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
                 background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
-                cursor: readOnly || (busy && !canInterruptSend) || !text.trim() ? 'not-allowed' : 'pointer',
-                opacity: readOnly || (busy && !canInterruptSend) || !text.trim() ? 0.45 : 1,
+                cursor: canSend ? 'pointer' : 'not-allowed',
+                opacity: canSend ? 1 : 0.45,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { if ((!busy || canInterruptSend) && text.trim()) (e.target as HTMLElement).style.background = DS.brandHover; }}
+              onMouseEnter={(e) => { if (canSend) (e.target as HTMLElement).style.background = DS.brandHover; }}
               onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
             >{canInterruptSend ? '停止并发送' : '发送'}</button>
           )}

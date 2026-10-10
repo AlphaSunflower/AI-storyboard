@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, PenLine, RefreshCw, X } from 'lucide-react';
+import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, Minus, PanelRight, PenLine, RefreshCw, X } from 'lucide-react';
 import {
   CANVAS_AUTH_MESSAGE,
   isEmbeddedAppReadyMessage,
 } from '../../../lib/embeddedAppMessages';
 import { getAccessToken } from '../../../lib/authSession';
+import type { AgentAttachment } from '../../../api/agent';
+import { DocumentPreviewSurface } from '../DocumentPreviewSurface';
 import { CHAT_DOCK_MIN_APP_WIDTH } from '../chatDockLayout';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
-  key: 'canvas' | 'editor' | 'docs' | 'library';
+  key: 'canvas' | 'editor' | 'docs' | 'library' | 'document' | 'side-chat';
   title: string;
   url: string;
   projectId?: string;
   canvasMode?: CanvasModeOptions;
+  documentAttachment?: AgentAttachment;
 }
 
 export interface CanvasModeOptions {
@@ -29,6 +32,7 @@ interface EmbeddedAppWindowProps {
   onSelectTab: (key: EmbeddedAppDescriptor['key']) => void;
   onCloseTab: (key: EmbeddedAppDescriptor['key']) => void;
   onCloseWindow: () => void;
+  onMinimize?: () => void;
   docked: boolean;
   splitMaxWidth: number;
   expandedSplitMaxWidth: number;
@@ -37,6 +41,7 @@ interface EmbeddedAppWindowProps {
   onCollapseSidebar: () => void;
   onRequestDock: () => void;
   onLayoutChange: (layout: { width: number; height: number; fullscreen: boolean }) => void;
+  minimized?: boolean;
 }
 
 const DEFAULT_WIDTH = 420;
@@ -52,6 +57,8 @@ function appIcon(key: EmbeddedAppDescriptor['key']) {
   if (key === 'canvas') return <Frame size={13} strokeWidth={1.9} />;
   if (key === 'editor') return <PenLine size={13} strokeWidth={1.9} />;
   if (key === 'library') return <Library size={13} strokeWidth={1.9} />;
+  if (key === 'document') return <FileText size={13} strokeWidth={1.9} />;
+  if (key === 'side-chat') return <PanelRight size={13} strokeWidth={1.9} />;
   return <FileText size={13} strokeWidth={1.9} />;
 }
 
@@ -61,6 +68,7 @@ export function EmbeddedAppWindow({
   onSelectTab,
   onCloseTab,
   onCloseWindow,
+  onMinimize,
   docked,
   splitMaxWidth,
   expandedSplitMaxWidth,
@@ -69,10 +77,14 @@ export function EmbeddedAppWindow({
   onCollapseSidebar,
   onRequestDock,
   onLayoutChange,
+  minimized = false,
 }: EmbeddedAppWindowProps) {
   const [width, setWidth] = useState(() => Math.max(
     MIN_WIDTH,
-    Math.min(activeKey === 'library' ? 620 : DEFAULT_WIDTH, splitMaxWidth),
+    Math.min(
+      activeKey === 'document' ? 760 : activeKey === 'library' ? 620 : DEFAULT_WIDTH,
+      splitMaxWidth,
+    ),
   ));
   const [height, setHeight] = useState(defaultHeight);
   const [fullscreen, setFullscreen] = useState(false);
@@ -108,6 +120,14 @@ export function EmbeddedAppWindow({
     if (docked) return;
     setWidth((current) => Math.min(splitMaxWidth, Math.max(MIN_WIDTH, current)));
   }, [docked, splitMaxWidth]);
+
+  useEffect(() => {
+    if (activeKey !== 'document') return;
+    setWidth((current) => Math.min(
+      Math.max(MIN_WIDTH, window.innerWidth - 32),
+      Math.max(680, current),
+    ));
+  }, [activeKey]);
 
   useEffect(() => {
     const onResize = () => {
@@ -199,7 +219,7 @@ export function EmbeddedAppWindow({
 
   const openActiveInBrowser = () => {
     const activeTab = tabs.find((tab) => tab.key === activeKey);
-    if (!activeTab) return;
+    if (!activeTab || activeTab.key === 'document' || activeTab.key === 'side-chat') return;
     const targetUrl = new URL(activeTab.url, window.location.origin);
     targetUrl.searchParams.delete('embedded');
     const target = targetUrl.toString();
@@ -207,7 +227,7 @@ export function EmbeddedAppWindow({
   };
 
   const refreshActivePage = () => {
-    if (!activeKey) return;
+    if (!activeKey || activeKey === 'document') return;
     setRefreshTokens((current) => ({
       ...current,
       [activeKey]: (current[activeKey] ?? 0) + 1,
@@ -230,10 +250,16 @@ export function EmbeddedAppWindow({
 
   return (
     <section
-      className={`embedded-app-window${fullscreen ? ' is-fullscreen' : ''}${closingWindow ? ' is-closing' : ''}`}
+      className={[
+        'embedded-app-window',
+        fullscreen ? 'is-fullscreen' : '',
+        closingWindow ? 'is-closing' : '',
+        minimized ? 'is-minimized' : '',
+      ].filter(Boolean).join(' ')}
       style={fullscreen ? undefined : { width, height }}
       aria-label="应用窗口"
       aria-busy={closingWindow}
+      aria-hidden={minimized}
     >
       <header className="embedded-app-window__header">
         <div className="embedded-app-window__tabs" role="tablist" aria-label="应用标签页">
@@ -268,21 +294,35 @@ export function EmbeddedAppWindow({
         </div>
 
         <div className="embedded-app-window__actions">
+          {activeKey !== 'document' && (
+            <>
+              <button
+                type="button"
+                onClick={refreshActivePage}
+                title="刷新当前页面"
+                aria-label="刷新当前页面"
+              >
+                <RefreshCw size={16} strokeWidth={1.9} />
+              </button>
+              {activeKey !== 'side-chat' && (
+                <button
+                  type="button"
+                  onClick={openActiveInBrowser}
+                  title="跳转到网页"
+                  aria-label="跳转到网页"
+                >
+                  <ExternalLink size={16} strokeWidth={1.9} />
+                </button>
+              )}
+            </>
+          )}
           <button
             type="button"
-            onClick={refreshActivePage}
-            title="刷新当前页面"
-            aria-label="刷新当前页面"
+            onClick={onMinimize}
+            title="最小化为图标"
+            aria-label="最小化为图标"
           >
-            <RefreshCw size={16} strokeWidth={1.9} />
-          </button>
-          <button
-            type="button"
-            onClick={openActiveInBrowser}
-            title="跳转到网页"
-            aria-label="跳转到网页"
-          >
-            <ExternalLink size={16} strokeWidth={1.9} />
+            <Minus size={17} strokeWidth={2} />
           </button>
           <button
             type="button"
@@ -296,8 +336,8 @@ export function EmbeddedAppWindow({
             type="button"
             disabled={canvasLocked}
             onClick={closeWindowWithParticles}
-            title={canvasLocked ? '请先离开画布编辑模式' : '关闭应用窗口'}
-            aria-label={canvasLocked ? '先离开画布编辑模式' : '关闭应用窗口'}
+            title={canvasLocked ? '请先离开画布编辑模式' : '关闭全部窗口'}
+            aria-label={canvasLocked ? '先离开画布编辑模式' : '关闭全部窗口'}
           >
             <X size={17} strokeWidth={2} />
           </button>
@@ -307,7 +347,8 @@ export function EmbeddedAppWindow({
       <div className="embedded-app-window__body">
         {tabs.map((tab) => {
           const active = tab.key === activeKey;
-          const loading = loadedUrls[tab.key] !== tab.url;
+          const localDocument = tab.key === 'document';
+          const loading = !localDocument && loadedUrls[tab.key] !== tab.url;
           return (
             <div key={tab.key} className={`embedded-app-window__frame${active ? ' is-active' : ''}`} aria-hidden={!active}>
               {loading && (
@@ -316,20 +357,28 @@ export function EmbeddedAppWindow({
                   <span>正在打开{tab.title}</span>
                 </div>
               )}
-              <iframe
-                key={`${tab.key}:${refreshTokens[tab.key] ?? 0}`}
-                ref={(node) => { frameRefs.current[tab.key] = node; }}
-                src={tab.url}
-                data-app-key={tab.key}
-                title={tab.title}
-                onLoad={() => {
-                  setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
-                  postCanvasAuth(tab, frameRefs.current[tab.key]?.contentWindow ?? null);
-                }}
-                allow="clipboard-read; clipboard-write; camera; microphone; fullscreen"
-                allowFullScreen
-                tabIndex={active ? 0 : -1}
-              />
+              {localDocument ? (
+                <div className="embedded-app-window__document">
+                  {tab.documentAttachment && (
+                    <DocumentPreviewSurface attachment={tab.documentAttachment} />
+                  )}
+                </div>
+              ) : (
+                <iframe
+                  key={`${tab.key}:${refreshTokens[tab.key] ?? 0}`}
+                  ref={(node) => { frameRefs.current[tab.key] = node; }}
+                  src={tab.url}
+                  data-app-key={tab.key}
+                  title={tab.title}
+                  onLoad={() => {
+                    setLoadedUrls((current) => ({ ...current, [tab.key]: tab.url }));
+                    postCanvasAuth(tab, frameRefs.current[tab.key]?.contentWindow ?? null);
+                  }}
+                  allow="clipboard-read; clipboard-write; camera; microphone; fullscreen"
+                  allowFullScreen
+                  tabIndex={active ? 0 : -1}
+                />
+              )}
             </div>
           );
         })}

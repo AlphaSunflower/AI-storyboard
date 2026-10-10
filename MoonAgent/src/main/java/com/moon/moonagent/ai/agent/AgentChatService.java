@@ -101,8 +101,9 @@ public interface AgentChatService {
      * @param kind    素材类型：reference（默认）/ asset（带文字约束，无需整理）
      * @return 图片 URL（/api/files/images/xxx）
      */
-    String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
-                                String purpose, String kind);
+    /** Persist one uploaded conversation reference and return stable asset metadata. */
+    AgentReferenceUpload uploadReferenceImage(String userId, String conversationId,
+                                              MultipartFile file, String purpose, String kind);
 
     /** Persist the assistant message produced by a background wakeup turn. */
     AgentMessage persistWakeupResult(AgentConversation conversation, AgentTurnResult turn);
@@ -188,6 +189,15 @@ public interface AgentChatService {
 
     /** Runtime status used by the new frontend transport. */
     Map<String, Object> getRuntimeStatus(String userId, String conversationId);
+
+    /**
+     * Create an independent temporary conversation that snapshots the source
+     * conversation's stable AgentScope context.
+     */
+    AgentConversation createSideChat(String userId, String sourceConversationId);
+
+    /** Close and delete a temporary side-chat conversation. */
+    void closeSideChat(String userId, String sideChatId);
 
     /**
      * 手动压缩会话上下文（/chat 斜杠命令「压缩上下文」）。

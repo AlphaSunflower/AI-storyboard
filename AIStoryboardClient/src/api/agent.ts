@@ -13,7 +13,7 @@ export interface AgentConversation {
   userId: string;
   projectId: string;
   title: string;
-  status: 'active' | 'archived';
+  status: 'active' | 'archived' | 'temporary';
   canvasContext?: CanvasEditContext | null;
   orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
@@ -716,6 +716,20 @@ export const agentApi = {
       `/agent/conversations/${conversationId}`,
     ),
 
+  createSideChat: (sourceConversationId: string) =>
+    client.post<{ data: AgentConversation }>(
+      `/agent/conversations/${sourceConversationId}/side-chats`,
+    ),
+
+  closeSideChat: (conversationId: string, keepalive = false) => keepalive
+    ? authorizedFetch(`${BACKEND_URL}/api/agent/side-chats/${conversationId}`, {
+        method: 'DELETE',
+        keepalive: true,
+      }).then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      })
+    : client.delete(`/agent/side-chats/${conversationId}`),
+
   listConversationAssetGroups: (conversationId: string) =>
     client.get<{ data: ConversationAssetGroupBinding[] }>(
       `/agent/conversations/${conversationId}/asset-groups`),
@@ -830,6 +844,7 @@ export const agentApi = {
     if (purpose?.trim()) form.append('purpose', purpose.trim());
     if (kind) form.append('kind', kind);
     return client.post<{ data: {
+      assetId: string;
       url: string;
       name?: string;
       mimeType?: string;

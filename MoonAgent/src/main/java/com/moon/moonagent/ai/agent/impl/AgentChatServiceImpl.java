@@ -18,6 +18,7 @@ import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
@@ -59,6 +60,7 @@ import io.agentscope.core.message.UserMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import lombok.RequiredArgsConstructor;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -298,6 +300,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         List<AgentConversation> conversations = conversationMapper.selectList(
                 new LambdaQueryWrapper<AgentConversation>()
                         .eq(AgentConversation::getUserId, userId)
+                        .ne(AgentConversation::getStatus, "temporary")
                         .orderByDesc(AgentConversation::getUpdatedAt)
                         .last("LIMIT 200"));
         if (conversations.isEmpty()) return List.of();
@@ -403,6 +406,7 @@ public class AgentChatServiceImpl implements AgentChatService {
      * selectCount 已 +1，"首条"判定（count==0）永远不成立（线上实测踩坑）。
      */
     private void maybeScheduleTitleRename(AgentConversation conversation, String content) {
+        if ("temporary".equalsIgnoreCase(conversation.getStatus())) return;
         try {
             long msgCount = messageMapper.selectCount(new LambdaQueryWrapper<AgentMessage>()
                     .eq(AgentMessage::getConversationId, conversation.getId()));
@@ -434,6 +438,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         return conversationMapper.selectList(new LambdaQueryWrapper<AgentConversation>()
                 .eq(AgentConversation::getUserId, userId)
                 .eq(AgentConversation::getProjectId, projectId)
+                .ne(AgentConversation::getStatus, "temporary")
                 .orderByDesc(AgentConversation::getUpdatedAt));
     }
 
@@ -584,8 +589,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @Override
-    public String uploadReferenceImage(String userId, String conversationId, MultipartFile file,
-                                       String purpose, String kind) {
+    public AgentReferenceUpload uploadReferenceImage(String userId, String conversationId,
+                                                     MultipartFile file, String purpose, String kind) {
         // 校验会话归属（传了 conversationId 时）
         AgentConversation conversation = null;
         if (conversationId != null && !conversationId.isBlank()) {
@@ -602,13 +607,18 @@ public class AgentChatServiceImpl implements AgentChatService {
         asset.setProjectId(conversation == null ? null : conversation.getProjectId());
         asset.setType("reference");
         asset.setUrl(url);
+        asset.setOriginalName(file.getOriginalFilename());
+        asset.setMimeType(file.getContentType());
         asset.setPurpose(purpose == null || purpose.isBlank() ? null : purpose.trim());
         asset.setKind((kind == null || kind.isBlank()) ? mediaType : kind.trim());
         asset.setStatus("completed");
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
 
-        return url;
+        String name = file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
+                ? "未命名文件" : file.getOriginalFilename();
+        String mimeType = file.getContentType() == null ? "" : file.getContentType();
+        return new AgentReferenceUpload(asset.getId(), url, name, mimeType, file.getSize());
     }
 
     private CanvasSessionContext resolveCanvasContext(AgentConversation conversation,
@@ -706,6 +716,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                         ? null : String.valueOf(previousInput.get("routingHint")))
                 : requestedRoutingHint;
 
+        bindUploadedAttachments(conversation, attachments);
         checkpointResumeService.expirePending(conversation.getId());
         if (agentScopeMediaRuntime != null) {
             agentScopeMediaRuntime.rewindLastTurn(
@@ -758,8 +769,28 @@ public class AgentChatServiceImpl implements AgentChatService {
         userMessage.setContent(content);
         userMessage.setMetadata(messageInputMetadata(picUrls, assetIds, routingHint,
                 referenceVideos, referenceAudios, attachments));
+        bindUploadedAttachments(conversation, attachments);
         maybeScheduleTitleRename(conversation, content);
         transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
+    }
+
+    private void bindUploadedAttachments(AgentConversation conversation,
+                                         List<AgentAttachmentRequest> attachments) {
+        if (conversation == null || attachments == null || attachments.isEmpty()) return;
+        List<String> assetIds = attachments.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(AgentAttachmentRequest::assetId)
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (assetIds.isEmpty()) return;
+        int bound = assetMapper.bindConversation(
+                assetIds, conversation.getId(), conversation.getUserId(),
+                conversation.getProjectId());
+        if (bound > 0) {
+            log.info("已绑定上传附件到会话: conversationId={}, assetIds={}, count={}",
+                    conversation.getId(), assetIds, bound);
+        }
     }
 
     private Map<String, Object> messageInput(AgentMessage message) {
@@ -1430,6 +1461,91 @@ public class AgentChatServiceImpl implements AgentChatService {
             return result;
         } finally {
             conversationLock.release(conversationId);
+        }
+    }
+
+    @Override
+    public AgentConversation createSideChat(String userId, String sourceConversationId) {
+        AgentConversation source = getOwnedConversation(userId, sourceConversationId);
+        requireWritable(source);
+        if ("temporary".equalsIgnoreCase(source.getStatus())) {
+            throw new BusinessException(40001, "临时侧边不能再次创建侧边");
+        }
+        if (agentScopeMediaRuntime == null || !agentScopeMediaRuntime.enabled()) {
+            throw new BusinessException(40001, "当前会话暂不支持侧边");
+        }
+        long messageCount = messageMapper.selectCount(
+                new LambdaQueryWrapper<AgentMessage>()
+                        .eq(AgentMessage::getConversationId, sourceConversationId));
+        if (messageCount <= 0) {
+            throw new BusinessException(40001, "先完成一轮对话后再开启侧边");
+        }
+
+        bootstrapAgentScopeSession(userId, source);
+        List<Msg> fallbackHistory = loadRecentHistory(sourceConversationId).stream()
+                .filter(message -> message.getContent() != null && !message.getContent().isBlank())
+                .map(message -> "assistant".equals(message.getRole())
+                        ? (Msg) new AssistantMessage(message.getContent())
+                        : (Msg) new UserMessage(message.getContent()))
+                .toList();
+
+        AgentConversation side = new AgentConversation();
+        side.setUserId(userId);
+        side.setProjectId(source.getProjectId());
+        side.setTitle("侧边 · " + (source.getTitle() == null ? "临时对话" : source.getTitle()));
+        side.setStatus("temporary");
+        side.setOrchestrationMode(OrchestrationMode.AGENTSCOPE.name());
+        side.setEngineVersion(source.getEngineVersion());
+        side.setDebugComparisonEnabled(false);
+        side.setApprovalMode(AgentApprovalMode.from(source.getApprovalMode()).name());
+        side.setAgentscopeSessionInitializedAt(OffsetDateTime.now());
+        conversationMapper.insert(side);
+        try {
+            agentScopeMediaRuntime.cloneSessionState(
+                    userId, sourceConversationId, side.getId(), fallbackHistory);
+        } catch (Exception exception) {
+            conversationMapper.deleteById(side.getId());
+            throw new BusinessException(50001, "侧边临时会话创建失败");
+        }
+        return side;
+    }
+
+    @Override
+    public void closeSideChat(String userId, String sideChatId) {
+        AgentConversation side = getOwnedConversation(userId, sideChatId);
+        if (!"temporary".equalsIgnoreCase(side.getStatus())) {
+            throw new BusinessException(40001, "仅临时侧边可以关闭");
+        }
+        if (conversationLock.isLocked(sideChatId)) {
+            orchestratorSupport.interrupt(sideChatId);
+        } else {
+            conversationLock.releaseAndRemove(sideChatId);
+        }
+        if (agentScopeMediaRuntime != null) {
+            agentScopeMediaRuntime.clearSession(userId, sideChatId);
+        }
+        orchestratorSupport.cleanupOnDelete(sideChatId);
+        conversationMapper.deleteById(sideChatId);
+        log.info("Agent 临时侧边已关闭: conversationId={}, userId={}", sideChatId, userId);
+    }
+
+    /** 清理刷新/崩溃后遗留的临时侧边，不触发已产出文件的删除。 */
+    @Scheduled(fixedDelay = 15 * 60 * 1000L)
+    public void cleanupExpiredSideChats() {
+        OffsetDateTime cutoff = OffsetDateTime.now().minusHours(2);
+        List<AgentConversation> expired = conversationMapper.selectList(
+                new LambdaQueryWrapper<AgentConversation>()
+                        .eq(AgentConversation::getStatus, "temporary")
+                        .lt(AgentConversation::getUpdatedAt, cutoff)
+                        .last("LIMIT 100"));
+        for (AgentConversation side : expired) {
+            if (conversationLock.isLocked(side.getId())) continue;
+            try {
+                closeSideChat(side.getUserId(), side.getId());
+            } catch (Exception exception) {
+                log.warn("清理过期临时侧边失败: conversationId={}, error={}",
+                        side.getId(), exception.getMessage());
+            }
         }
     }
 

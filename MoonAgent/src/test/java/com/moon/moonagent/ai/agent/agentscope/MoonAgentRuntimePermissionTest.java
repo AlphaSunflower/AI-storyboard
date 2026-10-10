@@ -98,6 +98,47 @@ class MoonAgentRuntimePermissionTest {
     }
 
     @Test
+    void allRegisteredReadOnlyToolsBypassApproval() {
+        var context = MoonAgentRuntime.permissionContext(
+                AgentApprovalMode.PLAN_APPROVAL,
+                Set.of(),
+                Set.of("read_document", "list_conversation_documents", "some_future_reader"));
+
+        assertThat(context.getAllowRules()).containsKeys(
+                "read_document",
+                "list_conversation_documents",
+                "some_future_reader");
+        assertThat(context.getAskRules()).doesNotContainKeys(
+                "read_document",
+                "list_conversation_documents",
+                "some_future_reader");
+    }
+
+    @Test
+    void nonDestructiveInternalHelpersBypassApproval() {
+        var context = MoonAgentRuntime.permissionContext(AgentApprovalMode.PLAN_APPROVAL);
+
+        assertThat(context.getAllowRules()).containsKeys(
+                "resolve_agent_workflow",
+                "agent_spawn",
+                "agent_send",
+                "canvas_undo",
+                "canvas_redo",
+                "canvas_image_crop",
+                "canvas_image_split",
+                "canvas_image_adjust",
+                "reorder_storyboard_draft",
+                "save_timeline_manifest",
+                "update_creative_context");
+        assertThat(context.getAskRules()).doesNotContainKeys(
+                "resolve_agent_workflow",
+                "agent_spawn",
+                "agent_send",
+                "canvas_undo",
+                "canvas_image_crop");
+    }
+
+    @Test
     void approvedPlanAutoAllowsOnlyListedHighRiskTools() {
         var context = MoonAgentRuntime.permissionContext(
                 AgentApprovalMode.PLAN_APPROVAL,

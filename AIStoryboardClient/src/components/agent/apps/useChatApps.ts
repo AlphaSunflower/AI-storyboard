@@ -11,6 +11,7 @@ export interface ChatAppLayout {
   width: number;
   height: number;
   fullscreen: boolean;
+  minimized: boolean;
 }
 
 export function useChatApps(currentProject: ChatAppProject | null) {
@@ -20,6 +21,7 @@ export function useChatApps(currentProject: ChatAppProject | null) {
     width: 420,
     height: 0,
     fullscreen: false,
+    minimized: false,
   });
 
   const open = useCallback((key: ChatAppKey, options: ChatAppOpenOptions = {}) => {
@@ -31,6 +33,7 @@ export function useChatApps(currentProject: ChatAppProject | null) {
       return currentTabs.map((tab) => tab.key === key ? nextTab : tab);
     });
     setActiveKey(key);
+    setLayout((current) => ({ ...current, minimized: false }));
   }, [currentProject]);
 
   useEffect(() => {
@@ -52,7 +55,7 @@ export function useChatApps(currentProject: ChatAppProject | null) {
   const closeAll = useCallback(() => {
     setTabs([]);
     setActiveKey(null);
-    setLayout((current) => ({ ...current, fullscreen: false }));
+    setLayout((current) => ({ ...current, fullscreen: false, minimized: false }));
   }, []);
 
   const releaseCanvasMode = useCallback(() => {
@@ -93,14 +96,14 @@ export function useChatApps(currentProject: ChatAppProject | null) {
         return nextTabs[Math.min(closingIndex, nextTabs.length - 1)]?.key ?? null;
       });
       if (nextTabs.length === 0) {
-        setLayout((current) => ({ ...current, fullscreen: false }));
+        setLayout((current) => ({ ...current, fullscreen: false, minimized: false }));
       }
       return nextTabs;
     });
   }, []);
 
   const activeTab = tabs.find((tab) => tab.key === activeKey) ?? null;
-  const windowOpen = Boolean(activeTab && !layout.fullscreen);
+  const windowOpen = Boolean(activeTab && !layout.fullscreen && !layout.minimized);
   const select = useCallback((key: ChatAppKey) => setActiveKey(key), []);
 
   return {

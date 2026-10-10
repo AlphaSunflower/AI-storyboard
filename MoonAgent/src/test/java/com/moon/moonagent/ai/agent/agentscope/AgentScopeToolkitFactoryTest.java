@@ -7,6 +7,7 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -27,6 +28,36 @@ class AgentScopeToolkitFactoryTest {
         factory.create();
 
         verify(interaction).tool();
+    }
+
+    @Test
+    void documentToolsAreAlwaysRegistered() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+
+        factory.create();
+
+        assertThat(factory.activeToolkit().getToolNames())
+                .contains("list_conversation_documents", "read_document");
+    }
+
+    @Test
+    void everyRegisteredReadOnlyToolIsAutoAllowed() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+        factory.create();
+
+        Set<String> readOnlyTools = factory.activeToolkit().getToolNames().stream()
+                .filter(name -> factory.activeToolkit().getTool(name).isReadOnly())
+                .collect(java.util.stream.Collectors.toSet());
+        var permission = MoonAgentRuntime.permissionContext(
+                com.moon.moonagent.ai.agent.AgentApprovalMode.PLAN_APPROVAL,
+                Set.of(), readOnlyTools);
+
+        assertThat(readOnlyTools).contains("read_document", "list_conversation_documents");
+        assertThat(permission.getAllowRules()).containsKeys(readOnlyTools.toArray(String[]::new));
     }
 
     @Test
@@ -139,6 +170,9 @@ class AgentScopeToolkitFactoryTest {
         when(workflows.tool()).thenReturn(tool("resolve_agent_workflow"));
         when(videoMerge.tool()).thenReturn(tool("merge_storyboard_videos"));
         when(creative.tools()).thenReturn(List.of());
+        AgentScopeDocumentTools documentTools = mock(AgentScopeDocumentTools.class);
+        when(documentTools.tools()).thenReturn(List.of(
+                tool("list_conversation_documents", true), tool("read_document", true)));
         when(canvasTools.tool()).thenReturn(tool(AgentScopeCanvasTools.PREPARE_CANVAS_SESSION));
         when(runTools.tool()).thenReturn(tool(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN));
         when(pipeline.wrap(any(AgentScopeTool.class)))
@@ -151,15 +185,19 @@ class AgentScopeToolkitFactoryTest {
         return new AgentScopeToolkitFactory(
                 session, interaction, structured, assetGroups, images, videos,
                 storyboards, workflows, videoMerge, creative, canvasTools, runTools,
-                mock(AgentCanvasRunService.class), pipeline, expander);
+                documentTools, mock(AgentCanvasRunService.class), pipeline, expander);
     }
 
     private static AgentScopeTool tool(String name) {
+        return tool(name, false);
+    }
+
+    private static AgentScopeTool tool(String name, boolean readOnly) {
         return new AgentScopeTool(
                 name,
                 name,
                 AgentScopeTool.schema(Map.of(), List.of()),
-                false,
+                readOnly,
                 false,
                 false,
                 (input, param) -> Map.of());
