@@ -4,16 +4,23 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { assetUrl } from '../../config';
 import { getSceneImageUrls } from '../../lib/sceneImages';
 import { ImagePreviewModal } from './ImagePreviewModal';
-import { Film, Folder, Image as ImageIcon, Images, LayoutList, Play, Sparkles, X } from 'lucide-react';
-import { assetUrls, getAgentAssetCounts, type AssetsTab } from './assetBrowserModel';
+import { Download, FileText, Film, Folder, Image as ImageIcon, Images, LayoutList, Play, Sparkles, X } from 'lucide-react';
+import {
+  assetUrls,
+  documentAttachmentForAsset,
+  getAgentAssetCounts,
+  type AssetsTab,
+} from './assetBrowserModel';
 import './AgentAssetsPanel.css';
 
 const ASSET_TABS: { key: AssetsTab; label: string; icon: React.ReactNode }[] = [
   { key: 'image', label: '图片', icon: <Images size={14} strokeWidth={1.8} /> },
   { key: 'video', label: '视频', icon: <Film size={14} strokeWidth={1.8} /> },
+  { key: 'document', label: '文档', icon: <FileText size={14} strokeWidth={1.8} /> },
   { key: 'storyboard', label: '分镜', icon: <LayoutList size={14} strokeWidth={1.8} /> },
 ];
 
@@ -42,6 +49,7 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
   const totalPages = Math.max(1, Math.ceil(total / (assets?.size ?? 20)));
   const imageAssets = records.filter((asset) => asset.type === 'image');
   const videoAssets = records.filter((asset) => asset.type === 'video');
+  const documentAssets = records.filter((asset) => asset.type === 'document');
   const counts = getAgentAssetCounts(assets);
   const conversationScenes = conversationId === undefined
     ? scenes
@@ -183,6 +191,39 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
             <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
               {records.length === 0 ? '暂无产出素材，生成的图片和视频会出现在这里' : '暂无视频素材'}
             </p>
+          ) : tab === 'document' && counts.document === 0 ? (
+            <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
+              {records.length === 0 ? '暂无产出素材，生成的文件会出现在这里' : '暂无文档素材'}
+            </p>
+          ) : tab === 'document' ? (
+            <div className="agent-assets-documents">
+              {documentAssets.flatMap((asset) => assetUrls(asset).map((url) => {
+                const attachment = documentAttachmentForAsset(asset, url);
+                return (
+                  <div className="agent-asset-document" key={`${asset.id}-${url}`}>
+                    <button
+                      type="button"
+                      onClick={() => useDocumentPreviewStore.getState().openDocument(attachment)}
+                      aria-label={`打开 ${attachment.name}`}
+                      title={`打开 ${attachment.name}`}
+                    >
+                      <FileText size={16} strokeWidth={1.8} />
+                      <span>{attachment.name}</span>
+                    </button>
+                    <a
+                      href={assetUrl(url)}
+                      download={attachment.name}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`下载 ${attachment.name}`}
+                      title={`下载 ${attachment.name}`}
+                    >
+                      <Download size={14} strokeWidth={1.8} />
+                    </a>
+                  </div>
+                );
+              }))}
+            </div>
           ) : (
             <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(86px, 1fr))', gap: 9 }}>
               {(tab === 'image' ? imageAssets : videoAssets).flatMap((asset) => assetUrls(asset).map((url, index) => (
@@ -291,6 +332,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
   const countForTab = (key: AssetsTab) => {
     if (key === 'image') return counts.image;
     if (key === 'video') return counts.video;
+    if (key === 'document') return counts.document;
     return activeConversationId
       ? scenes.filter((scene) => scene.conversationId === activeConversationId).length
       : scenes.length;

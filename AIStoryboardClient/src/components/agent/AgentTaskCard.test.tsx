@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentApi, type AgentTaskView } from '../../api/agent';
+import { agentApi, type AgentAsset, type AgentTaskView } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { AgentTaskCard } from './AgentTaskCard';
 
 const storyboardTask: AgentTaskView = {
@@ -87,5 +88,43 @@ describe('AgentTaskCard', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '确认剧情' })).toBeNull();
     });
+  });
+
+  it('offers open and download actions for document task results', () => {
+    const documentAsset: AgentAsset = {
+      id: 'document-1',
+      conversationId: 'conversation-1',
+      type: 'document',
+      url: '/api/files/reports/summary.md',
+      prompt: null,
+      model: null,
+      status: 'completed',
+      taskId: storyboardTask.taskId,
+      error: null,
+      createdAt: new Date().toISOString(),
+      resultUrls: '["/api/files/reports/summary.md"]',
+    };
+    useAgentStore.setState({
+      tasks: {
+        [storyboardTask.taskId]: {
+          ...storyboardTask,
+          assetIds: [documentAsset.id],
+          resultUrls: [documentAsset.url],
+        },
+      },
+      assets: {
+        records: [documentAsset],
+        total: 1,
+        documentTotal: 1,
+        page: 1,
+        size: 20,
+      },
+    });
+
+    render(<AgentTaskCard taskId={storyboardTask.taskId} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /打开 summary.md/ }));
+    expect(useDocumentPreviewStore.getState().attachment?.url).toBe(documentAsset.url);
+    expect(screen.getByRole('link', { name: /下载 summary.md/ })).toBeTruthy();
   });
 });

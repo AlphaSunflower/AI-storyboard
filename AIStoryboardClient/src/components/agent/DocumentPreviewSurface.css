@@ -201,6 +201,17 @@
   background: white;
 }
 
+.document-preview__image {
+  display: block;
+  max-width: 100%;
+  max-height: min(78vh, 900px);
+  margin: 0 auto;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(32, 37, 44, 0.08), 0 10px 32px rgba(32, 37, 44, 0.08);
+  object-fit: contain;
+}
+
 .document-preview__status {
   position: absolute;
   inset: 0;

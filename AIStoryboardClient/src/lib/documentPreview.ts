@@ -5,6 +5,7 @@ export type DocumentPreviewKind =
   | 'docx'
   | 'pptx'
   | 'ppt'
+  | 'image'
   | 'markdown'
   | 'text'
   | 'json'
@@ -36,12 +37,16 @@ function extensionOf(value: string | undefined): string {
   return dot >= 0 ? fileName.slice(dot + 1).toLowerCase() : '';
 }
 
+function normalizedMime(value: string | undefined): string {
+  return (value ?? '').toLowerCase().split(';', 1)[0].trim();
+}
+
 export function documentPreviewKind(input: {
   name?: string;
   url?: string;
   mimeType?: string;
 }): DocumentPreviewKind {
-  const mime = (input.mimeType ?? '').toLowerCase();
+  const mime = normalizedMime(input.mimeType);
   const extension = extensionOf(input.name) || extensionOf(input.url);
 
   if (
@@ -63,6 +68,7 @@ export function documentPreviewKind(input: {
     return 'ppt';
   }
   if (extension === 'pdf' || mime === 'application/pdf') return 'pdf';
+  if (extension === 'svg' || mime === 'image/svg+xml') return 'image';
   if (extension === 'html' || extension === 'htm' || mime === 'text/html') return 'html';
   if (MARKDOWN_EXTENSIONS.has(extension) || mime.includes('markdown')) return 'markdown';
   if (JSON_EXTENSIONS.has(extension) || mime.includes('json')) return 'json';
@@ -77,11 +83,50 @@ export function documentPreviewKind(input: {
   return 'unsupported';
 }
 
+export function documentMimeType(input: {
+  name?: string;
+  url?: string;
+  mimeType?: string;
+}): string {
+  const provided = normalizedMime(input.mimeType);
+  if (provided) return provided;
+
+  switch (extensionOf(input.name) || extensionOf(input.url)) {
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint';
+    case 'pdf':
+      return 'application/pdf';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'html':
+    case 'htm':
+      return 'text/html';
+    case 'md':
+    case 'markdown':
+    case 'mdown':
+    case 'mkd':
+      return 'text/markdown';
+    case 'csv':
+      return 'text/csv';
+    case 'json':
+    case 'jsonl':
+    case 'ndjson':
+      return 'application/json';
+    default:
+      return 'text/plain';
+  }
+}
+
 export function documentPreviewKindLabel(kind: DocumentPreviewKind): string {
   switch (kind) {
     case 'docx': return 'Word 文档';
     case 'pptx': return 'PowerPoint';
     case 'ppt': return '旧版 PowerPoint';
+    case 'image': return '图片';
     case 'markdown': return 'Markdown';
     case 'json': return 'JSON';
     case 'html': return 'HTML';

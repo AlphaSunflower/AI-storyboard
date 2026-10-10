@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentTaskView } from '../../api/agent';
+import type { AgentAsset, AgentTaskView } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
+import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { AgentTaskDrawer } from './AgentTaskDrawer';
 
 const task: AgentTaskView = {
@@ -108,5 +109,51 @@ describe('AgentTaskDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /思考链/ }));
     expect(screen.queryByText('先判断这是分镜需求。')).toBeNull();
+  });
+
+  it('opens and downloads documents returned by a completed task', () => {
+    const documentAsset: AgentAsset = {
+      id: 'document-1',
+      conversationId: 'conversation-1',
+      type: 'document',
+      url: '/api/files/reports/quarterly.md',
+      prompt: null,
+      model: null,
+      status: 'completed',
+      taskId: task.taskId,
+      error: null,
+      createdAt: new Date().toISOString(),
+      resultUrls: '["/api/files/reports/quarterly.md"]',
+    };
+    useAgentStore.setState({
+      tasks: {
+        [task.taskId]: {
+          ...task,
+          assetIds: [documentAsset.id],
+          resultUrls: [documentAsset.url],
+          result: '季度报告已生成。',
+        },
+      },
+      assets: {
+        records: [documentAsset],
+        total: 1,
+        documentTotal: 1,
+        page: 1,
+        size: 20,
+      },
+      taskDrawerId: task.taskId,
+    });
+
+    render(<AgentTaskDrawer />);
+
+    fireEvent.click(screen.getByRole('button', { name: /打开 quarterly.md/ }));
+    expect(useDocumentPreviewStore.getState().attachment).toMatchObject({
+      url: documentAsset.url,
+      name: 'quarterly.md',
+      mimeType: 'text/markdown',
+      kind: 'file',
+      assetId: documentAsset.id,
+    });
+    expect(screen.getByRole('link', { name: /下载 quarterly.md/ })).toBeTruthy();
   });
 });

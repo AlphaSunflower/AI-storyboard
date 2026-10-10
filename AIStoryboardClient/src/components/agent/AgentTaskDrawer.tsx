@@ -18,6 +18,7 @@ import { taskStatusLabel, useAgentStore } from '../../stores/agentStore';
 import type { AgentTaskSlotView } from '../../api/agent';
 import { AgentToolAuditPanel } from './AgentToolAuditPanel';
 import { DeferredExternalImage } from '../common/DeferredExternalImage';
+import { TaskDocumentActions } from './TaskDocumentActions';
 import './AgentTaskDrawer.css';
 
 function formatTime(value?: string | null): string {
@@ -206,6 +207,7 @@ export function AgentTaskDrawer() {
 
         <section className="agent-task-drawer__result">
           <h3>结果</h3>
+          <TaskDocumentActions task={task} />
           {task.result
             ? (
               <ReactMarkdown

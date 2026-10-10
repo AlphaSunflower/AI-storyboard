@@ -97,7 +97,8 @@ describe('GenerationCenterPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生成中心' }));
     const tablist = screen.getByRole('tablist');
-    expect(within(tablist).getAllByRole('tab')).toHaveLength(4);
+    expect(within(tablist).getAllByRole('tab')).toHaveLength(5);
+    expect(within(tablist).getByRole('tab', { name: /文档/ })).toBeTruthy();
     expect(within(tablist).queryByText('智能体任务')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /智能体任务/ }));

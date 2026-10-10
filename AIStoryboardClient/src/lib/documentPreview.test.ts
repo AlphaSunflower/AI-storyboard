@@ -25,6 +25,16 @@ describe('documentPreview', () => {
     expect(documentPreviewKind({ name: 'archive.zip' })).toBe('unsupported');
   });
 
+  it('detects document and image MIME types when the file name has no extension', () => {
+    expect(documentPreviewKind({
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })).toBe('docx');
+    expect(documentPreviewKind({ mimeType: 'text/markdown; charset=utf-8' })).toBe('markdown');
+    expect(documentPreviewKind({ mimeType: 'text/plain; charset=utf-8' })).toBe('text');
+    expect(documentPreviewKind({ mimeType: 'text/csv; charset=utf-8' })).toBe('text');
+    expect(documentPreviewKind({ mimeType: 'image/svg+xml' })).toBe('image');
+  });
+
   it('pretty-prints JSON without changing plain text', () => {
     expect(formatDocumentText('{"name":"Moon","items":[1,2]}', 'json')).toBe(
       '{\n  "name": "Moon",\n  "items": [\n    1,\n    2\n  ]\n}',

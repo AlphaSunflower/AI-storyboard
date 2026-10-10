@@ -1,0 +1,49 @@
+.task-document-actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.task-document-actions.is-compact {
+  margin: 0 10px 9px;
+}
+
+.task-document-actions__item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.task-document-actions__item button,
+.task-document-actions__item a {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.task-document-actions__item button:hover,
+.task-document-actions__item a:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  color: var(--color-ink);
+}
+
+.task-document-actions__item button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-document-actions__item a {
+  flex-shrink: 0;
+}

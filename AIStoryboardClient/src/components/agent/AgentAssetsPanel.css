@@ -15,6 +15,52 @@
   padding: 14px;
 }
 
+.agent-assets-documents {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-asset-document {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+}
+
+.agent-asset-document button,
+.agent-asset-document a {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.agent-asset-document button {
+  justify-content: flex-start;
+}
+
+.agent-asset-document button:hover,
+.agent-asset-document a:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.agent-asset-document button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-storyboard-list {
   width: 100%;
   min-width: 0;

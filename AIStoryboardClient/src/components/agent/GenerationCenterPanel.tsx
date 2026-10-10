@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
-import { Check, ChevronRight, CircleAlert, CircleStop, Film, History, Images, LayoutList, ListTodo, LoaderCircle, X } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, CircleStop, FileText, Film, History, Images, LayoutList, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { isActiveTask, taskStatusLabel, useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { agentApi, type GenerationRecord } from '../../api/agent';
@@ -198,6 +198,7 @@ export function GenerationCenterPanel({
     { key: 'active', label: '生成中', icon: <ListTodo size={13} strokeWidth={1.9} />, count: generationActiveCount },
     { key: 'image', label: '图片', icon: <Images size={13} strokeWidth={1.9} />, count: assetCounts.image },
     { key: 'video', label: '视频', icon: <Film size={13} strokeWidth={1.9} />, count: assetCounts.video },
+    { key: 'document', label: '文档', icon: <FileText size={13} strokeWidth={1.9} />, count: assetCounts.document },
     {
       key: 'storyboard',
       label: '分镜',

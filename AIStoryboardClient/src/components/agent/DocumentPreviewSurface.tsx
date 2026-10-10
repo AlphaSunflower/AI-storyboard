@@ -13,7 +13,7 @@ import { DocxPreview } from './DocxPreview';
 import { PptxPreview } from './PptxPreview';
 import './DocumentPreviewSurface.css';
 
-type PreviewMode = 'docx' | 'pptx' | 'html' | 'markdown' | 'text' | 'pdf' | 'unsupported';
+type PreviewMode = 'docx' | 'pptx' | 'html' | 'markdown' | 'text' | 'pdf' | 'image' | 'unsupported';
 
 interface PreviewState {
   status: 'loading' | 'ready' | 'error';
@@ -22,6 +22,7 @@ interface PreviewState {
   content: string;
   source?: Blob;
   pdfUrl?: string;
+  imageUrl?: string;
   error?: string;
   warnings: string[];
 }
@@ -97,6 +98,21 @@ async function buildPreview(
         warnings: [],
       },
       revokeUrl: pdfUrl,
+    };
+  }
+
+  if (kind === 'image') {
+    const imageUrl = URL.createObjectURL(source);
+    return {
+      state: {
+        status: 'ready',
+        kind,
+        mode: 'image',
+        content: '',
+        imageUrl,
+        warnings: [],
+      },
+      revokeUrl: imageUrl,
     };
   }
 
@@ -192,7 +208,14 @@ export function DocumentPreviewSurface({ attachment }: { attachment: AgentAttach
       {canRender && state.mode === 'pptx' && state.source && (
         <PptxPreview source={state.source} />
       )}
-      {canRender && state.mode !== 'pdf' && state.mode !== 'docx' && state.mode !== 'pptx' && (
+      {canRender && state.mode === 'image' && state.imageUrl && (
+        <img
+          className="document-preview__image"
+          src={state.imageUrl}
+          alt={attachment.name || '图片'}
+        />
+      )}
+      {canRender && state.mode !== 'image' && state.mode !== 'pdf' && state.mode !== 'docx' && state.mode !== 'pptx' && (
         <article className="document-preview__paper">
           {state.mode === 'html' && (
             <div

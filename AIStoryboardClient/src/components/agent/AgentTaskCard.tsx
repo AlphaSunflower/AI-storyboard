@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { agentApi } from '../../api/agent';
 import { storyboardRunIdFromTask, useAgentStore, taskStatusLabel } from '../../stores/agentStore';
+import { TaskDocumentActions } from './TaskDocumentActions';
 import './AgentTaskCard.css';
 
 export function AgentTaskCard({ taskId }: { taskId: string }) {
@@ -112,6 +113,8 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
           <span style={{ width: `${progress}%` }} />
         </div>
       )}
+
+      <TaskDocumentActions task={task} compact />
 
       <div className="agent-task-card__actions">
         {plotReviewRunId && !approvedPlot && (

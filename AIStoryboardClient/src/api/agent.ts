@@ -409,7 +409,7 @@ export interface CanvasSessionInfo {
 export interface AgentAsset {
   id: string;
   conversationId: string | null;
-  type: 'image' | 'video' | 'reference';
+  type: 'image' | 'video' | 'document' | 'reference';
   url: string;
   prompt: string | null;
   model: string | null;
@@ -460,6 +460,7 @@ export interface AgentPage<T> {
   total: number;
   imageTotal?: number;
   videoTotal?: number;
+  documentTotal?: number;
   mediaTotal?: number;
   page: number;
   size: number;
