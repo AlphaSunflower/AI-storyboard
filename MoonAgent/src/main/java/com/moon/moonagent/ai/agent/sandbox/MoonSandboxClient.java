@@ -75,6 +75,68 @@ public class MoonSandboxClient {
                 SandboxExecutionResult.class);
     }
 
+    public SandboxShellResult shell(String conversationId, String command, int timeoutSeconds) {
+        return post(conversationId, "/shell",
+                Map.of("command", command == null ? "" : command,
+                        "timeoutSeconds", timeoutSeconds),
+                SandboxShellResult.class);
+    }
+
+    public void upload(String conversationId, String path, byte[] content) {
+        String uri = base(conversationId) + "/files/upload?path=" + urlEncode(path == null ? "" : path);
+        try {
+            HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(uri))
+                    .timeout(properties.getReadTimeout())
+                    .header("Content-Type", "application/octet-stream")
+                    .header("X-Internal-Secret", properties.getInternalSecret())
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(
+                            content == null ? new byte[0] : content))
+                    .build());
+            requireSuccess(response);
+        } catch (MoonSandboxException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new MoonSandboxException("Sandbox upload failed", error);
+        }
+    }
+
+    public byte[] exportArchive(String conversationId) {
+        String uri = base(conversationId) + "/archive";
+        try {
+            HttpResponse<byte[]> response = http.send(HttpRequest.newBuilder(URI.create(uri))
+                    .timeout(properties.getReadTimeout())
+                    .header("X-Internal-Secret", properties.getInternalSecret())
+                    .GET().build(), HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new MoonSandboxException(
+                        "Sandbox archive export failed with HTTP " + response.statusCode());
+            }
+            return response.body();
+        } catch (MoonSandboxException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new MoonSandboxException("Sandbox archive export failed", error);
+        }
+    }
+
+    public void importArchive(String conversationId, byte[] archive) {
+        String uri = base(conversationId) + "/archive";
+        try {
+            HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(uri))
+                    .timeout(properties.getReadTimeout())
+                    .header("Content-Type", "application/octet-stream")
+                    .header("X-Internal-Secret", properties.getInternalSecret())
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(
+                            archive == null ? new byte[0] : archive))
+                    .build());
+            requireSuccess(response);
+        } catch (MoonSandboxException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new MoonSandboxException("Sandbox archive import failed", error);
+        }
+    }
+
     public byte[] download(String conversationId, String path) {
         String uri = base(conversationId) + "/files/download?path=" + urlEncode(path);
         HttpResponse<byte[]> response;

@@ -38,7 +38,9 @@ export function ImagePreviewModal({
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 4000,
-        background: 'rgba(20,20,19,0.78)', backdropFilter: 'blur(2px)',
+        // 不透明背景避免背后的动图/SVG 继续透出，与前景副本形成双图闪烁。
+        background: '#0f0f0e',
+        isolation: 'isolate',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         cursor: 'zoom-out',
       }}
@@ -67,6 +69,7 @@ export function ImagePreviewModal({
           style={{
             maxWidth: '92vw', maxHeight: '88vh', objectFit: 'contain',
             borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+            background: '#111',
           }}
         />
       ) : (

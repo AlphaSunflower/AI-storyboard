@@ -29,7 +29,7 @@ class AgentScopeCheckpointServiceTest {
     void externalInputPauseCreatesOwnedCheckpointAndResolvesCustomText() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("token-1");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setId("cp-1");
@@ -58,7 +58,7 @@ class AgentScopeCheckpointServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
+        verify(support).runHITLStage(any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("id"))
                 .containsExactly("option-0", "custom");
@@ -86,7 +86,7 @@ class AgentScopeCheckpointServiceTest {
     void storyboardCommitOptionsUseReadableFallbackTitles() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("token-append-overwrite");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setFormToken("token-append-overwrite");
@@ -111,7 +111,7 @@ class AgentScopeCheckpointServiceTest {
 
         ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        verify(support).runHITLStage(any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("title"))
                 .containsExactly("追加到末尾", "覆盖全部分镜");
@@ -121,7 +121,7 @@ class AgentScopeCheckpointServiceTest {
     void storyboardCommitCardUsesFixedAppendOverwriteDeleteChoices() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("token-storyboard-commit");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setFormToken("token-storyboard-commit");
@@ -145,7 +145,7 @@ class AgentScopeCheckpointServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
+        verify(support).runHITLStage(any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().planText()).contains("已有 16 个分镜");
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("id"))
@@ -169,7 +169,7 @@ class AgentScopeCheckpointServiceTest {
     void genericHumanInputForStoryboardCommitIsUpgradedToFixedChoices() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("token-storyboard-upgrade");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setFormToken("token-storyboard-upgrade");
@@ -192,7 +192,7 @@ class AgentScopeCheckpointServiceTest {
 
         ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        verify(support).runHITLStage(any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().planText()).contains("已有 31 个分镜");
         assertThat(stage.getValue().actions())
                 .extracting(action -> action.get("title"))
@@ -218,7 +218,7 @@ class AgentScopeCheckpointServiceTest {
     void confirmationUsesChineseToolLabelsAndMarksAgentScopeOwner() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("card text");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setId("cp-2");
@@ -243,7 +243,7 @@ class AgentScopeCheckpointServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
                 ArgumentCaptor.forClass(Consumer.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), customizer.capture());
+        verify(support).runHITLStage(any(), stage.capture(), customizer.capture());
         assertThat(stage.getValue().planText())
                 .contains("生成方案待确认")
                 .contains("批量生成图片")
@@ -268,7 +268,7 @@ class AgentScopeCheckpointServiceTest {
     void planApprovalShowsGenerationDetailsAndTruncatesLongPrompts() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("plan-token");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setFormToken("plan-token");
@@ -296,7 +296,7 @@ class AgentScopeCheckpointServiceTest {
 
         ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        verify(support).runHITLStage(any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().planText())
                 .contains("生成方案待确认")
                 .contains("数量：3 张")
@@ -311,7 +311,7 @@ class AgentScopeCheckpointServiceTest {
     void requestApprovalUsesPerActionWording() {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
-        when(support.runHITLStage(any(), any(), any(), any(Consumer.class)))
+        when(support.runHITLStage(any(), any(), any(Consumer.class)))
                 .thenReturn("request-token");
         AgentCheckpoint persisted = new AgentCheckpoint();
         persisted.setFormToken("request-token");
@@ -337,7 +337,7 @@ class AgentScopeCheckpointServiceTest {
 
         ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
                 ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
-        verify(support).runHITLStage(any(), any(), stage.capture(), any(Consumer.class));
+        verify(support).runHITLStage(any(), stage.capture(), any(Consumer.class));
         assertThat(stage.getValue().planText())
                 .contains("请求批准")
                 .contains("生成视频")

@@ -53,7 +53,7 @@ class HitlCardPersistenceTest extends PostgresContainerTest {
                 "human_input",
                 List.of(Map.of("id", "style1", "title", "赛博朋克")));
 
-        support.runHITLStage(request, null, plan);
+        support.runHITLStage(request, plan);
 
         AgentCheckpoint checkpoint = checkpointMapper.selectOne(
                 new LambdaQueryWrapper<AgentCheckpoint>()

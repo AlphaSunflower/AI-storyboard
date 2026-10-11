@@ -3,6 +3,8 @@ package com.moon.sandbox.session;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -17,14 +19,28 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 import java.util.stream.Stream;
 
 @Service
 public class SandboxSessionService {
+
+    private static final Set<String> PLAIN_TEXT_EXTENSIONS = Set.of(
+            "txt", "log", "html", "htm",
+            "py", "pyw", "js", "mjs", "cjs", "jsx", "ts", "tsx",
+            "java", "kt", "kts", "go", "rs", "rb", "php",
+            "c", "h", "cc", "cpp", "cxx", "hpp", "hxx", "cs",
+            "swift", "m", "mm", "scala", "dart", "lua", "pl", "pm", "r",
+            "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql",
+            "vue", "svelte", "astro", "toml", "gradle", "ini", "conf", "cfg",
+            "config", "properties", "env", "makefile", "dockerfile", "gitignore",
+            "editorconfig", "tex", "rst", "proto", "graphql", "gql");
 
     private final SandboxPathResolver paths;
     private final MoonSandboxProperties properties;
@@ -37,10 +53,16 @@ public class SandboxSessionService {
 
     public WriteFileResult write(String conversationId, String relativePath,
                                  String content, WriteMode mode) {
+        return writeBytes(conversationId, relativePath,
+                (content == null ? "" : content).getBytes(StandardCharsets.UTF_8), mode);
+    }
+
+    public WriteFileResult writeBytes(String conversationId, String relativePath,
+                                      byte[] content, WriteMode mode) {
         return withLock(conversationId, () -> {
             Path session = paths.ensureSession(conversationId);
             Path target = paths.resolve(session, requireFile(relativePath));
-            byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+            byte[] bytes = content == null ? new byte[0] : content;
             if (bytes.length > properties.getMaxWriteBytes()) {
                 throw new SandboxPathException("file exceeds max write size");
             }
@@ -62,6 +84,49 @@ public class SandboxSessionService {
                 throw new SandboxPathException("file already exists", error);
             } catch (IOException error) {
                 throw new SandboxPathException("unable to write file", error);
+            }
+        });
+    }
+
+    public byte[] exportArchive(String conversationId) {
+        return withLock(conversationId, () -> {
+            Path session = paths.ensureSession(conversationId);
+            try (ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                 ZipOutputStream zip = new ZipOutputStream(buffer);
+                 Stream<Path> stream = Files.walk(session)) {
+                for (Path path : stream.filter(Files::isRegularFile).toList()) {
+                    if (path.getFileName().toString().equals(".last-used")) continue;
+                    String name = session.relativize(path).toString().replace('\\', '/');
+                    zip.putNextEntry(new ZipEntry(name));
+                    Files.copy(path, zip);
+                    zip.closeEntry();
+                }
+                zip.finish();
+                paths.touch(session);
+                return buffer.toByteArray();
+            } catch (IOException error) {
+                throw new SandboxPathException("unable to export workspace archive", error);
+            }
+        });
+    }
+
+    public void importArchive(String conversationId, byte[] archive) {
+        withLock(conversationId, () -> {
+            Path session = paths.ensureSession(conversationId);
+            if (archive == null || archive.length == 0) return null;
+            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    Path target = paths.resolve(session, entry.getName());
+                    Files.createDirectories(target.getParent());
+                    Files.copy(zip, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    zip.closeEntry();
+                }
+                paths.touch(session);
+                return null;
+            } catch (IOException error) {
+                throw new SandboxPathException("unable to import workspace archive", error);
             }
         });
     }
@@ -244,23 +309,38 @@ public class SandboxSessionService {
     private static String mimeType(String path) {
         String name = path.toLowerCase(Locale.ROOT);
         if (name.endsWith(".md") || name.endsWith(".markdown")) return "text/markdown";
-        if (name.endsWith(".txt") || name.endsWith(".log")) return "text/plain";
         if (name.endsWith(".csv")) return "text/csv";
-        if (name.endsWith(".json")) return "application/json";
+        if (name.endsWith(".tsv")) return "text/tab-separated-values";
+        if (name.endsWith(".json") || name.endsWith(".jsonl")
+                || name.endsWith(".ndjson")) return "application/json";
         if (name.endsWith(".docx")) {
             return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         }
         if (name.endsWith(".xlsx")) {
             return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         }
+        if (name.endsWith(".pptx")) {
+            return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        }
         if (name.endsWith(".pdf")) return "application/pdf";
         if (name.endsWith(".png")) return "image/png";
         if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+        if (name.endsWith(".webp")) return "image/webp";
+        if (name.endsWith(".gif")) return "image/gif";
         if (name.endsWith(".svg")) return "image/svg+xml";
-        return Map.of(
-                "yaml", "application/yaml",
-                "yml", "application/yaml",
-                "xml", "application/xml").getOrDefault(
-                name.substring(name.lastIndexOf('.') + 1), "application/octet-stream");
+        if (name.endsWith(".mp4")) return "video/mp4";
+        if (name.endsWith(".webm")) return "video/webm";
+        if (name.endsWith(".mov")) return "video/quicktime";
+        if (name.endsWith(".mp3")) return "audio/mpeg";
+        if (name.endsWith(".wav")) return "audio/wav";
+        if (name.endsWith(".m4a")) return "audio/mp4";
+        if (name.endsWith(".txt") || name.endsWith(".log")) return "text/plain";
+        String ext = name.substring(name.lastIndexOf('.') + 1);
+        return switch (ext) {
+            case "yaml", "yml" -> "application/yaml";
+            case "xml" -> "text/plain";
+            default -> PLAIN_TEXT_EXTENSIONS.contains(ext)
+                    ? "text/plain" : "application/octet-stream";
+        };
     }
 }

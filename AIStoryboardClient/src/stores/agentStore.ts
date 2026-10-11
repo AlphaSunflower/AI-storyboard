@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import {
   agentApi, streamChat, submitForm, streamCanvasSessionReady, streamTaskEvents,
   type AgentConversation, type AgentMessage, type AgentAsset,
-  type AgentPage, type AgentTurnEventEnvelope, type AgentScopeEvent,
+  type AgentPage, type AgentTurnEventEnvelope,
   type AgentTurnMetrics, type VideoTaskStatus, type AssetOption,
   type AgentApprovalMode,
   type AgentTaskView,
@@ -203,6 +203,14 @@ export class AgentTurnEventSequencer {
 
   lastSeq(turnId: string): number {
     return this.lastSeqByTurn.get(turnId) ?? 0;
+  }
+
+  /** Move a turn to a known sequence boundary without replaying earlier phases. */
+  seek(turnId: string, seq: number) {
+    if (!turnId) return;
+    this.pendingByTurn.delete(turnId);
+    if (seq > 0) this.lastSeqByTurn.set(turnId, seq);
+    else this.lastSeqByTurn.delete(turnId);
   }
 
   reset(turnId: string) {
@@ -484,6 +492,7 @@ export interface VideoPlanInfo {
   actions: { id: string; title: string }[];
   /** video_plan 事件携带的后端消息 id（human_input/video_plan 均带 messageId） */
   messageId?: string;
+  expirationTime?: number;
   // 卡片模型/参数选项 + LLM 推荐（后端 video_plan 事件下发；无配置时为空数组/空对象）
   models?: GatewayModelOption[];
   recommended?: Record<string, string>;
@@ -1049,11 +1058,11 @@ export function hitlFromMetadata(metadata?: AgentMessageMetadata): HumanInputInf
   const h = metadata?.hitl;
   if (!h) return null;
   return {
-    formToken: '',
+    formToken: h.formToken ?? '',
     taskId: '',
     formContent: h.formContent ?? '',
     actions: h.actions ?? [],
-    expirationTime: 0,
+    expirationTime: h.expirationTime ?? 0,
     messageId: h.messageId,
   };
 }
@@ -1106,6 +1115,96 @@ function reconnectDelay(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
+const SUBMITTED_HITL_KEY = 'moon.hitl.submitted.v1';
+
+type SubmittedHitlReceipt = {
+  conversationId: string;
+  formToken: string;
+  messageId?: string;
+  expiresAt: number;
+};
+
+function readSubmittedHitlReceipts(): SubmittedHitlReceipt[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(SUBMITTED_HITL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is SubmittedHitlReceipt =>
+      !!item
+      && typeof item.conversationId === 'string'
+      && typeof item.formToken === 'string'
+      && typeof item.expiresAt === 'number'
+      && item.expiresAt > Date.now());
+  } catch {
+    return [];
+  }
+}
+
+function writeSubmittedHitlReceipts(receipts: SubmittedHitlReceipt[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (receipts.length === 0) window.sessionStorage.removeItem(SUBMITTED_HITL_KEY);
+    else window.sessionStorage.setItem(SUBMITTED_HITL_KEY, JSON.stringify(receipts));
+  } catch {
+    // 服务端 metadata 仍是主要依据；存储不可用时只失去提交竞态保护。
+  }
+}
+
+function rememberSubmittedHitlReceipt(
+  conversationId: string,
+  formToken: string | undefined,
+  messageId?: string,
+  expirationTime?: number,
+) {
+  if (!conversationId || !formToken) return;
+  const expiresAt = expirationTime && expirationTime > 0
+    ? (expirationTime > 1_000_000_000_000 ? expirationTime : expirationTime * 1000)
+    : Date.now() + 30 * 60 * 1000;
+  const next = readSubmittedHitlReceipts().filter((item) =>
+    !(item.conversationId === conversationId
+      && item.formToken === formToken
+      && item.messageId === messageId));
+  next.push({ conversationId, formToken, messageId, expiresAt });
+  writeSubmittedHitlReceipts(next);
+}
+
+function hasSubmittedHitlReceipt(conversationId: string, formToken: string | undefined): boolean {
+  if (!conversationId || !formToken) return false;
+  return readSubmittedHitlReceipts().some((item) =>
+    item.conversationId === conversationId && item.formToken === formToken);
+}
+
+function forgetSubmittedHitlReceipt(
+  conversationId: string,
+  formToken: string | undefined,
+  messageId?: string,
+) {
+  if (!conversationId || !formToken) return;
+  writeSubmittedHitlReceipts(readSubmittedHitlReceipts().filter((item) =>
+    !(item.conversationId === conversationId
+      && item.formToken === formToken
+      && (!messageId || item.messageId === messageId))));
+}
+
+function hasSubmittedHitlCard(
+  conversationId: string,
+  formToken: string | undefined,
+  messageId?: string,
+): boolean {
+  if (!conversationId || (!formToken && !messageId)) return false;
+  return useAgentStore.getState().messages.some((message) => {
+    const hitl = message.metadata?.hitl;
+    if (hitl?.pending !== false) return false;
+    return (!!formToken && hitl.formToken === formToken)
+      || (!!messageId && (
+        message.id === messageId
+        || hitl.messageId === messageId
+      ));
+  });
+}
+
 /**
  * A page refresh drops the browser SSE connection, but the backend turn keeps
  * running and records every sequenced event. Rebuild the generating bubble from
@@ -1151,26 +1250,123 @@ async function restorePersistedTurn(conversationId: string) {
     };
   });
 
-  let afterSeq = 0;
+  let initialEvents: AgentTurnEventEnvelope[] = [];
+  try {
+    const response = await agentApi.listTurnEvents(conversationId, active.turnId, 0);
+    initialEvents = response.data.data ?? [];
+  } catch {
+    // Recovery can continue polling from sequence zero after a transient failure.
+  }
+  const resumeStartSeq = initialEvents
+    .filter((event) => event.type === 'turn_started'
+      && event.payload?.resume === true)
+    .reduce((max, event) => Math.max(max, event.seq), 0);
+  const lastInitialEvent = initialEvents.at(-1);
+  const waitingForResumeStart = resumeStartSeq === 0
+    && lastInitialEvent?.type === 'turn_paused';
+  let afterSeq = resumeStartSeq > 0
+    ? resumeStartSeq - 1
+    : waitingForResumeStart ? lastInitialEvent!.seq : 0;
+  let bufferedEvents = waitingForResumeStart
+    ? []
+    : initialEvents.filter((event) => event.seq > afterSeq);
+  turnEventSequencer.reset(active.turnId);
+  turnEventSequencer.seek(active.turnId, afterSeq);
+
   let terminal: AgentTurnEventEnvelope['type'] | null = null;
+  let waitingUser = false;
   let pollCount = 0;
   while (useAgentStore.getState().activeConversationId === conversationId) {
     let events: AgentTurnEventEnvelope[] = [];
-    try {
-      const response = await agentApi.listTurnEvents(conversationId, active.turnId, afterSeq);
-      events = response.data.data ?? [];
-    } catch {
-      await reconnectDelay(1500);
-      continue;
+    if (bufferedEvents.length > 0) {
+      events = bufferedEvents;
+      bufferedEvents = [];
+    } else {
+      try {
+        const response = await agentApi.listTurnEvents(conversationId, active.turnId, afterSeq);
+        events = response.data.data ?? [];
+      } catch {
+        await reconnectDelay(1500);
+        continue;
+      }
     }
     for (const envelope of events) {
-      applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
       afterSeq = Math.max(afterSeq, envelope.seq);
-      if (envelope.type === 'turn_completed'
-          || envelope.type === 'turn_failed'
-          || envelope.type === 'turn_paused') {
-        terminal = envelope.type;
+      if (effects.taskAccepted) {
+        const accepted = effects.taskAccepted;
+        if (accepted.taskKind === 'long-tool' || accepted.taskKind === 'image-batch') {
+          attachTaskCard(conversationId, assistantId, {
+            taskId: accepted.taskId,
+            title: accepted.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+            kind: accepted.taskKind,
+          });
+          void agentApi.getTask(accepted.taskId)
+            .then((response) => {
+              useAgentStore.getState().upsertTask(response.data.data);
+              attachTaskCard(conversationId, assistantId, response.data.data);
+            })
+            .catch(() => undefined);
+        } else {
+          beginUnifiedVideoPolling(
+            accepted.taskId, conversationId, assistantId, accepted.taskKind);
+        }
       }
+      if (effects.confirmResult
+          && useAgentStore.getState().activeConversationId === conversationId) {
+        useAgentStore.setState({ confirmResult: effects.confirmResult });
+      }
+      if (effects.canvasSessionRequired) {
+        const session = effects.canvasSessionRequired;
+        useAgentStore.setState((state) => ({
+          canvasSession: session,
+          canvasSessionStatus: '',
+          canvasSessionSelection: { createNew: false },
+          generating: Object.fromEntries(
+            Object.entries(state.generating).filter(([key]) => key !== conversationId),
+          ),
+          messages: state.messages.filter((message) => message.id !== assistantId),
+          workflowHint: '',
+        }));
+        if (session.status === 'pending_open' && session.canvasId) {
+          useAgentStore.getState().beginCanvasSessionOpen(session.canvasId, false);
+        }
+        terminal = 'turn_paused';
+      }
+      if (effects.canvasModeRequired) {
+        const canvas = effects.canvasModeRequired;
+        const formToken = asString(canvas.formToken);
+        const canvasConversationId = asString(canvas.conversationId);
+        const projectId = asString(canvas.projectId);
+        if (canvasConversationId && projectId && formToken) {
+          useAgentStore.getState().startCanvasBinding({
+            conversationId: canvasConversationId,
+            turnId: asString(canvas.turnId),
+            projectId,
+            canvasId: asString(canvas.canvasId),
+            canvasTitle: asString(canvas.canvasTitle),
+            requestedIntent: asString(canvas.requestedIntent),
+            formToken,
+            expirationTime: asString(canvas.expirationTime),
+            picUrls: asStringArray(canvas.picUrls),
+            assetIds: asStringArray(canvas.assetIds),
+            mediaRefs: Array.isArray(canvas.mediaRefs)
+              ? canvas.mediaRefs.filter(asRecord).map((ref) => ref as AgentMediaRef)
+              : undefined,
+          });
+          useAgentStore.setState((state) => ({
+            generating: Object.fromEntries(
+              Object.entries(state.generating).filter(([key]) => key !== conversationId),
+            ),
+            messages: state.messages.filter((message) => message.id !== assistantId),
+            workflowHint: '',
+          }));
+        }
+        terminal = 'turn_paused';
+      }
+      if (effects.completed) terminal = 'turn_completed';
+      else if (effects.failed) terminal = 'turn_failed';
+      else if (effects.paused && !terminal) terminal = 'turn_paused';
     }
     if (terminal) break;
     pollCount += 1;
@@ -1178,7 +1374,10 @@ async function restorePersistedTurn(conversationId: string) {
       try {
         const latest = await agentApi.getRuntimeStatus(conversationId);
         const status = latest.data.data.activeTurn?.status;
-        if (!status || status === 'waiting_user') break;
+        if (!status || status === 'waiting_user') {
+          waitingUser = true;
+          break;
+        }
       } catch {
         // Keep replaying; a transient status failure should not abort recovery.
       }
@@ -1198,6 +1397,9 @@ async function restorePersistedTurn(conversationId: string) {
       ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
     };
   });
+  if (terminal === 'turn_paused' || waitingUser) {
+    await useAgentStore.getState().recoverPendingCheckpoint(conversationId);
+  }
   if (terminal === 'turn_completed'
       && useAgentStore.getState().activeConversationId === conversationId) {
     await refreshConversationMessages(conversationId);
@@ -1559,10 +1761,18 @@ function applyOneEnvelope(
           ...(startedContextWindow > 0 ? { contextWindowTokens: startedContextWindow } : {}),
         },
       };
+      const hitlVideoPlan = { ...state.hitlVideoPlan };
+      delete hitlVideoPlan[context.conversationId];
       return {
         generating,
         ...(state.activeConversationId === context.conversationId
-          ? { workflowHint: 'MoonAgent 正在处理', streaming: true }
+          ? {
+              workflowHint: 'MoonAgent 正在处理',
+              streaming: true,
+              waitingHumanInput: null,
+              waitingVideoPlan: null,
+              hitlVideoPlan,
+            }
           : {}),
       };
     });
@@ -1622,6 +1832,7 @@ function applyOneEnvelope(
         picUrl: info.picUrl ?? '',
         actions,
         messageId,
+        expirationTime: info.expirationTime,
         models: info.models,
         recommended: info.recommended,
         reasons: info.reasons,
@@ -1632,7 +1843,7 @@ function applyOneEnvelope(
             id: messageId || message.id,
             content: message.content.trim()
               ? message.content
-              : (assistantContent || info.formContent || videoInfo?.message || ''),
+              : assistantContent,
             metadata: {
               ...(message.metadata ?? {}),
               kind: videoPlan ? 'video-plan' as const : 'hitl' as const,
@@ -1641,6 +1852,8 @@ function applyOneEnvelope(
                 actions,
                 pending: true,
                 messageId,
+                formToken,
+                expirationTime: info.expirationTime,
               },
               ...(videoInfo ? { videoPlan: {
                 message: videoInfo.message,
@@ -1656,14 +1869,22 @@ function applyOneEnvelope(
             },
           }
         : message);
+      const seen = new Set<string>();
+      const dedupedMessages = messages.filter((message) => {
+        if (seen.has(message.id)) return false;
+        seen.add(message.id);
+        return true;
+      });
+      const alreadySubmitted = state.messages.some((message) =>
+        message.id === messageId && message.metadata?.hitl?.pending === false);
       return {
         workflowHint: '',
-        waitingHumanInput: videoPlan ? null : info,
-        waitingVideoPlan: videoInfo,
+        waitingHumanInput: videoPlan || alreadySubmitted ? null : info,
+        waitingVideoPlan: alreadySubmitted ? null : videoInfo,
         hitlVideoPlan: videoInfo
           ? { ...state.hitlVideoPlan, [context.conversationId]: videoInfo }
           : state.hitlVideoPlan,
-        messages: state.activeConversationId === context.conversationId ? messages : state.messages,
+        messages: state.activeConversationId === context.conversationId ? dedupedMessages : state.messages,
       };
     });
     return;
@@ -1699,10 +1920,15 @@ function applyOneEnvelope(
             usageDraft: undefined,
           },
         };
+        const hitlVideoPlan = { ...state.hitlVideoPlan };
+        delete hitlVideoPlan[context.conversationId];
         return {
           generating,
           ...(state.activeConversationId === context.conversationId
             ? {
+                waitingHumanInput: null,
+                waitingVideoPlan: null,
+                hitlVideoPlan,
                 messages: state.messages.map((message) => {
                   if (message.id !== context.assistantId) return message;
                   const merged = { ...(message.metadata ?? {}), ...finalMetadata };
@@ -1728,9 +1954,9 @@ function applyOneEnvelope(
     return;
   }
 
-  const native = asRecord(payload) as AgentScopeEvent | null;
-  const eventType = asString(native?.eventType);
-  const data = asRecord(native?.data) ?? {};
+  const native = asRecord(payload);
+  const eventType = asString(native?.eventType) || envelope.type;
+  const data = asRecord(native?.data) ?? native ?? {};
   if (!eventType) return;
 
   if (eventType === 'TEXT_BLOCK_DELTA') {
@@ -1756,6 +1982,21 @@ function applyOneEnvelope(
   if (eventType === 'AGENT_RESULT') {
     const result = asString(data.result ?? data.content);
     if (result) storeAssistantContent(context.conversationId, context.assistantId, result);
+    return;
+  }
+
+  if (eventType === 'THINKING_BLOCK_START') {
+    const previous = useAgentStore.getState().generating[context.conversationId]?.reasoningDraft;
+    const details = previous?.details
+      ? (previous.details.endsWith('\n\n') ? previous.details : `${previous.details}\n\n`)
+      : '';
+    setLiveReasoning(context, {
+      summary: previous?.summary ?? '',
+      details,
+      activity: previous?.activity,
+      durationMs: previous?.durationMs,
+      source: 'agentscope',
+    });
     return;
   }
 
@@ -1942,8 +2183,31 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       turnId,
       afterSeq ?? turnEventSequencer.lastSeq(turnId),
     );
+    let paused = false;
     for (const envelope of response.data.data ?? []) {
       const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
+      if (effects.taskAccepted) {
+        const accepted = effects.taskAccepted;
+        if (accepted.taskKind === 'long-tool' || accepted.taskKind === 'image-batch') {
+          attachTaskCard(conversationId, assistantId, {
+            taskId: accepted.taskId,
+            title: accepted.taskKind === 'image-batch' ? '批量生成图片' : '生成剧情稿',
+            kind: accepted.taskKind,
+          });
+          void agentApi.getTask(accepted.taskId)
+            .then((taskResponse) => {
+              get().upsertTask(taskResponse.data.data);
+              attachTaskCard(conversationId, assistantId, taskResponse.data.data);
+            })
+            .catch(() => undefined);
+        } else {
+          beginUnifiedVideoPolling(
+            accepted.taskId, conversationId, assistantId, accepted.taskKind);
+        }
+      }
+      if (effects.confirmResult && get().activeConversationId === conversationId) {
+        set({ confirmResult: effects.confirmResult });
+      }
       if (effects.completed) {
         finishAssistantReply(conversationId, assistantId);
         useAgentStore.setState((state) => {
@@ -1958,6 +2222,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           };
         });
       }
+      if (effects.failed) {
+        useAgentStore.setState((state) => {
+          const generating = { ...state.generating };
+          delete generating[conversationId];
+          return {
+            generating,
+            streaming: false,
+            workflowHint: '',
+            ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
+          };
+        });
+      }
+      if (effects.paused) paused = true;
       if (effects.canvasSessionRequired) {
         const session = effects.canvasSessionRequired;
         set({
@@ -1976,6 +2253,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           get().beginCanvasSessionOpen(session.canvasId, false);
         }
       }
+      if (effects.canvasModeRequired) {
+        const canvas = effects.canvasModeRequired;
+        const canvasConversationId = asString(canvas.conversationId);
+        const projectId = asString(canvas.projectId);
+        const formToken = asString(canvas.formToken);
+        if (canvasConversationId && projectId && formToken) {
+          get().startCanvasBinding({
+            conversationId: canvasConversationId,
+            turnId: asString(canvas.turnId),
+            projectId,
+            canvasId: asString(canvas.canvasId),
+            canvasTitle: asString(canvas.canvasTitle),
+            requestedIntent: asString(canvas.requestedIntent),
+            formToken,
+            expirationTime: asString(canvas.expirationTime),
+            picUrls: asStringArray(canvas.picUrls),
+            assetIds: asStringArray(canvas.assetIds),
+            mediaRefs: Array.isArray(canvas.mediaRefs)
+              ? canvas.mediaRefs.filter(asRecord).map((ref) => ref as AgentMediaRef)
+              : undefined,
+          });
+          set((state) => ({
+            generating: Object.fromEntries(
+              Object.entries(state.generating).filter(([key]) => key !== conversationId),
+            ),
+            messages: state.messages.filter((message) => message.id !== assistantId),
+            workflowHint: '',
+          }));
+        }
+      }
+    }
+    if (paused) {
+      await get().recoverPendingCheckpoint(conversationId);
     }
   },
   canvasEditContext: null,
@@ -2471,6 +2781,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
         kind?: string;
       }) | null;
+      if (cp?.formToken && (
+        hasSubmittedHitlReceipt(id, cp.formToken)
+        || hasSubmittedHitlCard(id, cp.formToken, cp.messageId)
+      )) {
+        set({ waitingHumanInput: null });
+        return;
+      }
       const cpKind = (cp as { kind?: string } | null)?.kind;
       if (cpKind === 'canvas-bind' && cp?.formToken) {
         get().startCanvasBinding({
@@ -2497,6 +2814,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             picUrl: cp.picUrl ?? '',
             actions: cp.actions,
             messageId: cp.messageId,
+            expirationTime: cp.expirationTime,
             models: cp.models,
             recommended: cp.recommended,
             reasons: cp.reasons,
@@ -3236,21 +3554,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // （metadata.hitl），提交后仅更新该卡片选中状态（不再 push 新的用户「确认：xxx」气泡）。
     const act = info.actions.find((a) => a.id === actionId);
     const cardId = info.messageId ?? `hitl-${Date.now()}`;
-    const hitlMeta: AgentMessageMetadata = {
-      kind: 'hitl',
-      pending: false,
-      hitl: {
-        formContent: info.formContent || '',
-        actions: info.actions || [],
-        pending: false,
-        selectedActionId: actionId,
-        selectedActionTitle: act?.title ?? actionId,
-        customText: actionId === 'custom' ? customText : undefined,
-        params,
-        assetIds,
-        messageId: cardId,
-      },
-    };
+    let submittedCommitted = false;
     set((s) => {
       if (opts?.hiddenCard) {
         return {
@@ -3260,23 +3564,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           streamError: null,
         };
       }
-      const hasCard = s.messages.some((m) => m.id === cardId && m.metadata?.kind === 'hitl');
-      const newCard: AgentMessage = {
-        id: cardId,
-        conversationId: id,
-        role: 'assistant',
-        content: info.formContent || '',
-        createdAt: new Date().toISOString(),
-        metadata: hitlMeta,
-      };
       return {
         streaming: true,
         generating: { ...s.generating, [id]: { hint: '', finished: false } },
-        waitingHumanInput: null,
         streamError: null,
-        messages: hasCard
-          ? s.messages.map((m) => (m.id === cardId ? { ...m, metadata: { ...(m.metadata ?? {}), ...hitlMeta } } : m))
-          : [...s.messages, newCard],
       };
     });
 
@@ -3320,6 +3611,105 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     let reconciliationBusy = false;
     let reconciliationTimer: number | null = null;
 
+    const submittedHitlMeta = (): AgentMessageMetadata => ({
+      kind: 'hitl',
+      pending: false,
+      hitl: {
+        formContent: info.formContent || '',
+        actions: info.actions || [],
+        pending: false,
+        formToken: info.formToken,
+        expirationTime: info.expirationTime,
+        selectedActionId: actionId,
+        selectedActionTitle: act?.title ?? actionId,
+        customText: actionId === 'custom' ? customText : undefined,
+        params,
+        assetIds,
+        messageId: cardId,
+      },
+    });
+
+    const commitSubmittedHitl = () => {
+      if (submittedCommitted) return;
+      submittedCommitted = true;
+      rememberSubmittedHitlReceipt(id, info.formToken, cardId, info.expirationTime);
+      const metadata = submittedHitlMeta();
+      set((state) => {
+        if (opts?.hiddenCard) return { waitingHumanInput: null };
+        const hasCard = state.messages.some((message) => message.id === cardId);
+        const nextCard: AgentMessage = {
+          id: cardId,
+          conversationId: id,
+          role: 'assistant',
+          content: info.formContent || '',
+          createdAt: new Date().toISOString(),
+          metadata,
+        };
+        return {
+          waitingHumanInput: null,
+          messages: hasCard
+            ? state.messages.map((message) => message.id === cardId
+              ? { ...message, metadata: { ...(message.metadata ?? {}), ...metadata } }
+              : message)
+            : [...state.messages, nextCard],
+        };
+      });
+    };
+
+    const rollbackSubmittedHitl = () => {
+      forgetSubmittedHitlReceipt(id, info.formToken, cardId);
+      set((state) => ({
+        ...(opts?.hiddenCard ? {} : { waitingHumanInput: info }),
+        workflowHint: '',
+        messages: opts?.hiddenCard
+          ? state.messages
+          : state.messages.map((message) => message.id === cardId
+            ? {
+                ...message,
+                content: message.content || info.formContent || '',
+                metadata: {
+                  ...(message.metadata ?? {}),
+                  kind: 'hitl',
+                  pending: true,
+                  hitl: {
+                    formContent: info.formContent || '',
+                    actions: info.actions || [],
+                    pending: true,
+                    formToken: info.formToken,
+                    expirationTime: info.expirationTime,
+                    messageId: cardId,
+                  },
+                },
+              }
+            : message),
+      }));
+    };
+
+    const reconcileFailedSubmission = async () => {
+      if (submittedCommitted) return;
+      try {
+        const pending = await agentApi.getPendingCheckpoint(id);
+        const checkpoint = pending.data.data as { formToken?: string } | null;
+        if (checkpoint?.formToken === info.formToken) {
+          rollbackSubmittedHitl();
+          return;
+        }
+      } catch {
+        // Fall through to the runtime check; an unknown state must not silently consume the card.
+      }
+      try {
+        const runtime = await agentApi.getRuntimeStatus(id);
+        if (runtime.data.data.activeTurn?.status === 'running'
+            || hasSubmittedHitlCard(id, info.formToken, cardId)) {
+          commitSubmittedHitl();
+          return;
+        }
+      } catch {
+        // A transient status failure is safest as a retryable pending card.
+      }
+      rollbackSubmittedHitl();
+    };
+
     const releaseStream = await reserveStreamSlot(snapshotId);
     reconciliationTimer = window.setInterval(() => {
       if (!receivedAnyEvent || receivedMessageEnd || receivedHumanInput
@@ -3346,6 +3736,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           conversationId: snapshotId,
           assistantId,
         });
+        if (effects.started || effects.completed) {
+          commitSubmittedHitl();
+        }
         if (effects.paused) receivedHumanInput = true;
         if (effects.completed) {
           receivedMessageEnd = true;
@@ -3387,6 +3780,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && !reconciledTerminal && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+      }
+      if (!manualStop && get().activeConversationId === snapshotId) {
+        await reconcileFailedSubmission();
       }
     } finally {
       if (reconciliationTimer) clearInterval(reconciliationTimer);
@@ -3464,52 +3860,119 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       recommended: info.recommended,
       reasons: info.reasons,
     };
-    const markVideoCardSubmitted = () => set((s) => {
-      const hasCard = s.messages.some((m) => m.id === cardId);
-      const nextCard: AgentMessage = {
-        id: cardId,
-        conversationId: id,
-        role: 'assistant',
-        content: info.message,
-        createdAt: new Date().toISOString(),
-        metadata: {
-          kind: 'video-plan',
-          hitl: {
-            formContent: info.message,
-            actions: info.actions,
-            pending: false,
-            selectedActionId: actionId,
-            selectedActionTitle,
-            customText: actionId === 'custom' ? customText : undefined,
-            params,
-            messageId: cardId,
-          },
-          videoPlan: videoPlanMeta,
-        },
-      };
-      return {
-        messages: hasCard
-          ? s.messages.map((m) => m.id === cardId ? {
-              ...m,
-              metadata: {
-                ...(m.metadata ?? {}),
-                ...(nextCard.metadata ?? {}),
-              } as AgentMessageMetadata,
-            } : m)
-          : [...s.messages, nextCard],
-      };
+    let videoSubmissionCommitted = false;
+    const submittedVideoMeta = (): AgentMessageMetadata => ({
+      kind: 'video-plan',
+      hitl: {
+        formContent: info.message,
+        actions: info.actions,
+        pending: false,
+        formToken: info.planToken,
+        expirationTime: Number(info.expirationTime ?? 0),
+        selectedActionId: actionId,
+        selectedActionTitle,
+        customText: actionId === 'custom' ? customText : undefined,
+        params,
+        messageId: cardId,
+      },
+      videoPlan: videoPlanMeta,
     });
-    markVideoCardSubmitted();
+    const commitVideoSubmission = () => {
+      if (videoSubmissionCommitted) return;
+      videoSubmissionCommitted = true;
+      rememberSubmittedHitlReceipt(
+        id, info.planToken, cardId, Number(info.expirationTime ?? 0));
+      const metadata = submittedVideoMeta();
+      set((state) => {
+        const hasCard = state.messages.some((message) => message.id === cardId);
+        const nextCard: AgentMessage = {
+          id: cardId,
+          conversationId: id,
+          role: 'assistant',
+          content: info.message,
+          createdAt: new Date().toISOString(),
+          metadata,
+        };
+        const hitlVideoPlan = { ...state.hitlVideoPlan };
+        delete hitlVideoPlan[id];
+        return {
+          waitingVideoPlan: null,
+          hitlVideoPlan,
+          messages: hasCard
+            ? state.messages.map((message) => message.id === cardId
+              ? { ...message, metadata: { ...(message.metadata ?? {}), ...metadata } }
+              : message)
+            : [...state.messages, nextCard],
+        };
+      });
+    };
+    const rollbackVideoSubmission = () => {
+      forgetSubmittedHitlReceipt(id, info.planToken, cardId);
+      set((state) => {
+        const hitlVideoPlan = { ...state.hitlVideoPlan, [id]: info };
+        return {
+          waitingVideoPlan: info,
+          hitlVideoPlan,
+          workflowHint: '',
+          messages: state.messages.map((message) => message.id === cardId
+            ? {
+                ...message,
+                metadata: {
+                  ...(message.metadata ?? {}),
+                  kind: 'video-plan',
+                  hitl: {
+                    formContent: info.message,
+                    actions: info.actions,
+                    pending: true,
+                    formToken: info.planToken,
+                    expirationTime: Number(info.expirationTime ?? 0),
+                    messageId: cardId,
+                  },
+                  videoPlan: videoPlanMeta,
+                },
+              }
+            : message),
+        };
+      });
+    };
+    const reconcileVideoFailure = async () => {
+      if (videoSubmissionCommitted) return;
+      try {
+        const pending = await agentApi.getPendingCheckpoint(id);
+        const checkpoint = pending.data.data as { formToken?: string } | null;
+        if (checkpoint?.formToken === info.planToken) {
+          rollbackVideoSubmission();
+          return;
+        }
+      } catch {
+        // Fall through to the runtime check.
+      }
+      try {
+        const runtime = await agentApi.getRuntimeStatus(id);
+        if (runtime.data.data.activeTurn?.status === 'running'
+            || hasSubmittedHitlCard(id, info.planToken, cardId)) {
+          commitVideoSubmission();
+          return;
+        }
+      } catch {
+        // Unknown server state remains retryable.
+      }
+      rollbackVideoSubmission();
+    };
     // 继续完善：本地关闭卡片 + 保留参考图（assetUrl 转绝对 URL，后端容器内可访问）
     if (actionId === 'refine') {
+      commitVideoSubmission();
       set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { waitingVideoPlan: null, hitlVideoPlan: h, pendingPicUrl: assetUrl(info.picUrl) }; });
       return;
     }
     // 自定义输入：走 submitForm 发送 custom action + 自定义文本，与 HumanInputCard 的 custom 流程对齐
     if (actionId === 'custom') {
       set((s) => {
-        const h = { ...s.hitlVideoPlan }; delete h[id];
-        return { streaming: true, generating: { ...s.generating, [id]: { hint: '', finished: false } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
+        return {
+          streaming: true,
+          generating: { ...s.generating, [id]: { hint: '', finished: false } },
+          streamError: null,
+        };
       });
       const assistantId = `tmp-assistant-${Date.now()}`;
       set((s) => ({
@@ -3533,6 +3996,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             conversationId: snapshotId,
             assistantId,
           });
+          if (effects.started || effects.completed) commitVideoSubmission();
           if (effects.paused) receivedHumanInput = true;
           if (effects.completed) {
             receivedMessageEnd = true;
@@ -3546,7 +4010,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }),
         });
       } catch (err) {
-        if (!manualStop && get().activeConversationId === snapshotId) set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+        if (!manualStop && get().activeConversationId === snapshotId) {
+          set({ streamError: err instanceof Error ? err.message : '对话出错，请重试' });
+          await reconcileVideoFailure();
+        }
       } finally {
         releaseStream();
         // 仅当本流仍是「当前活动流」时才清 streaming/占位（无新流接管、未被切换重置），防旧流误清新流
@@ -3572,8 +4039,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     // 开始生成视频：与 submitHumanInput 一致——提交时清除上次 streamError
     set((s) => {
-      const h = { ...s.hitlVideoPlan }; delete h[id];
-      return { streaming: true, generating: { ...s.generating, [id]: { hint: '', finished: false } }, waitingVideoPlan: null, hitlVideoPlan: h, streamError: null };
+      return {
+        streaming: true,
+        generating: { ...s.generating, [id]: { hint: '', finished: false } },
+        streamError: null,
+      };
     });
 
     // 新建 assistant 占位气泡：视频异步生成期间为空，聊天区显示生成中加载条。
@@ -3713,6 +4183,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           conversationId: snapshotId,
           assistantId,
         });
+        if (effects.started || effects.completed) commitVideoSubmission();
         if (effects.taskAccepted) {
           acceptedTaskId = effects.taskAccepted.taskId;
           set((state) => ({
@@ -3741,6 +4212,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）
       if (!manualStop && get().activeConversationId === snapshotId) {
         set({ streamError: err instanceof Error ? err.message : '生成出错，请重试' });
+        await reconcileVideoFailure();
       }
     } finally {
       releaseStream();
@@ -3822,6 +4294,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const cp = cpRes.data.data as (HumanInputInfo & Partial<VideoPlanInfo> & Partial<CanvasBinding> & {
         kind?: string;
       }) | null;
+      if (cp?.formToken && (
+        hasSubmittedHitlReceipt(conversationId, cp.formToken)
+        || hasSubmittedHitlCard(conversationId, cp.formToken, cp.messageId)
+      )) {
+        if (get().activeConversationId === conversationId) {
+          set({ waitingHumanInput: null, workflowHint: '' });
+        }
+        return;
+      }
       const cpKind = (cp as { kind?: string } | null)?.kind;
       if (cpKind === 'canvas-bind' && cp?.formToken) {
         get().startCanvasBinding({
@@ -3849,6 +4330,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           picUrl: cp.picUrl ?? '',
           actions: cp.actions,
           messageId: cp.messageId,
+          expirationTime: cp.expirationTime,
           models: cp.models,
           recommended: cp.recommended,
           reasons: cp.reasons,

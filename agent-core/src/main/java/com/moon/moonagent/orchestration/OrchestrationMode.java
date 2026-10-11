@@ -5,7 +5,7 @@ import java.util.Locale;
 public enum OrchestrationMode {
     LEGACY("plan-graph-v1"),
     UNIFIED_LOOP("unified-loop-v1"),
-    AGENTSCOPE("agentscope-java-2.0.3");
+    AGENTSCOPE("agentscope-java-2.0.4");
 
     private final String engineVersion;
 

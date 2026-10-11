@@ -604,7 +604,7 @@ public class AgentConversationController {
         return new AgentConversationVO(c.getId(), c.getUserId(), c.getProjectId(), c.getTitle(),
                 c.getStatus(), canvasContext,
                 c.getOrchestrationMode() == null ? "AGENTSCOPE" : c.getOrchestrationMode(),
-                c.getEngineVersion() == null ? "agentscope-java-2.0.3" : c.getEngineVersion(),
+                c.getEngineVersion() == null ? "agentscope-java-2.0.4" : c.getEngineVersion(),
                 c.getDebugComparisonEnabled() == null || c.getDebugComparisonEnabled(),
                 c.getApprovalMode() == null ? "PLAN_APPROVAL" : c.getApprovalMode(),
                 c.getCreatedAt(), c.getUpdatedAt());

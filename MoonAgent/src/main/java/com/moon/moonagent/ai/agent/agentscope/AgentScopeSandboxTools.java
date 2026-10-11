@@ -16,9 +16,6 @@ import java.util.Map;
         havingValue = "true")
 public class AgentScopeSandboxTools {
 
-    public static final String WRITE_FILE = "write_file";
-    public static final String READ_FILE = "read_file";
-    public static final String LIST_FILES = "list_files";
     public static final String RUN_PYTHON_SCRIPT = "run_python_script";
 
     private final MoonSandboxClient client;
@@ -27,63 +24,15 @@ public class AgentScopeSandboxTools {
 
     public List<AgentScopeTool> tools() {
         if (!properties.isEnabled() || !client.enabled()) return List.of();
-        return List.of(writeFile(), readFile(), listFiles(), runPythonScript());
-    }
-
-    private AgentScopeTool writeFile() {
-        return new AgentScopeTool(
-                WRITE_FILE,
-                "Write UTF-8 text to a file in the current conversation sandbox. "
-                        + "Paths are relative to the session root, for example work/report.md. "
-                        + "Binary files must be generated with run_python_script.",
-                AgentScopeTool.schema(Map.of(
-                        "path", Map.of("type", "string"),
-                        "content", Map.of("type", "string"),
-                        "mode", Map.of("type", "string",
-                                "enum", List.of("CREATE", "OVERWRITE", "APPEND"))),
-                        List.of("path", "content")),
-                false, false, false,
-                (input, param) -> client.write(
-                        conversationId(param),
-                        string(input.get("path")),
-                        string(input.get("content")),
-                        string(input.get("mode")).isBlank()
-                                ? "OVERWRITE" : string(input.get("mode"))));
-    }
-
-    private AgentScopeTool readFile() {
-        return new AgentScopeTool(
-                READ_FILE,
-                "Read a UTF-8 text file from the current conversation sandbox in chunks.",
-                AgentScopeTool.schema(Map.of(
-                        "path", Map.of("type", "string"),
-                        "offset", Map.of("type", "integer"),
-                        "maxChars", Map.of("type", "integer")),
-                        List.of("path")),
-                true, true, false,
-                (input, param) -> client.read(
-                        conversationId(param),
-                        string(input.get("path")),
-                        integer(input.get("offset"), 0),
-                        integer(input.get("maxChars"), 0)));
-    }
-
-    private AgentScopeTool listFiles() {
-        return new AgentScopeTool(
-                LIST_FILES,
-                "List files and directories in the current conversation sandbox.",
-                AgentScopeTool.schema(Map.of(
-                        "path", Map.of("type", "string")), List.of()),
-                true, true, false,
-                (input, param) -> client.list(
-                        conversationId(param), string(input.get("path"))));
+        return List.of(runPythonScript());
     }
 
     private AgentScopeTool runPythonScript() {
         return new AgentScopeTool(
                 RUN_PYTHON_SCRIPT,
                 "Execute a Python script asynchronously inside the current conversation sandbox. "
-                        + "Files written to output/ are published to MinIO and returned as assets.",
+                        + "All user-facing deliverables MUST be written beneath output/; only files "
+                        + "under output/ are published and returned as clickable attachments.",
                 AgentScopeTool.schema(Map.of(
                         "script", Map.of("type", "string"),
                         "args", Map.of("type", "array",

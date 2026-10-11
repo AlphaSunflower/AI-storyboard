@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.turn;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ThinkingBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,6 +93,7 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
     private static boolean isCoalescible(AgentEvent event) {
         return event instanceof TextBlockDeltaEvent
                 || event instanceof ThinkingBlockDeltaEvent
+                || event instanceof ToolCallDeltaEvent
                 || event instanceof ToolResultTextDeltaEvent;
     }
 

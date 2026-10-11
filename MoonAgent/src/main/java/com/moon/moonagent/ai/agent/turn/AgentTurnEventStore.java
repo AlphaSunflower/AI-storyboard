@@ -40,7 +40,7 @@ public class AgentTurnEventStore {
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setConversationId(conversation.getId());
         turn.setStatus("running");
-        turn.setRuntimeEngine("agentscope-java-2.0.3");
+        turn.setRuntimeEngine("agentscope-java-2.0.4");
         turn.setInputText(input == null ? "" : input);
         turn.setClientRequestId(clientRequestId == null || clientRequestId.isBlank()
                 ? null : clientRequestId);

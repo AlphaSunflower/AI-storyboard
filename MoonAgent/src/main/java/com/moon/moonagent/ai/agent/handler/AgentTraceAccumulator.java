@@ -46,6 +46,9 @@ public class AgentTraceAccumulator {
     private volatile String hitlMessageId = "";
     private volatile List<SuggestedAction> suggestedActions = List.of();
     private volatile Consumer<AgentTraceEvent> eventSink;
+    private final StringBuilder thinkingDetails = new StringBuilder();
+    private volatile OffsetDateTime thinkingStartedAt;
+    private volatile OffsetDateTime thinkingEndedAt;
     private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
     private final int contextWindowTokens;
 
@@ -126,6 +129,39 @@ public class AgentTraceAccumulator {
         return reasoning;
     }
 
+    /** AgentScope 原生思考增量可能在结束后才发现没有 Snapshot；这里保留可落库副本。 */
+    public synchronized void recordThinkingStart() {
+        if (thinkingDetails.length() > 0
+                && !thinkingDetails.toString().endsWith("\n\n")) {
+            thinkingDetails.append("\n\n");
+        }
+        if (thinkingStartedAt == null) thinkingStartedAt = OffsetDateTime.now();
+        thinkingEndedAt = null;
+    }
+
+    public synchronized void recordThinkingDelta(String delta) {
+        if (delta == null || delta.isEmpty()) return;
+        if (thinkingStartedAt == null) thinkingStartedAt = OffsetDateTime.now();
+        thinkingDetails.append(delta);
+        thinkingEndedAt = null;
+    }
+
+    public synchronized void recordThinkingEnd() {
+        if (thinkingDetails.length() > 0 && thinkingEndedAt == null) {
+            thinkingEndedAt = OffsetDateTime.now();
+        }
+    }
+
+    public synchronized AgentReasoningSnapshot reasoningSnapshot() {
+        if (thinkingDetails.length() == 0) return reasoning;
+        String details = thinkingDetails.toString();
+        String summary = lastCompletedSentence(details);
+        OffsetDateTime endedAt = thinkingEndedAt == null ? OffsetDateTime.now() : thinkingEndedAt;
+        long durationMs = thinkingStartedAt == null
+                ? 0L : Math.max(0L, Duration.between(thinkingStartedAt, endedAt).toMillis());
+        return new AgentReasoningSnapshot(summary, details, durationMs, "agentscope");
+    }
+
     public void setTurnMetadata(Map<String, Object> turnMetadata) {
         Map<String, Object> merged = new java.util.LinkedHashMap<>(this.turnMetadata);
         if (turnMetadata != null) merged.putAll(turnMetadata);
@@ -167,6 +203,10 @@ public class AgentTraceAccumulator {
     /** Register an additional live sink used by the sequenced AgentScope transport. */
     public void setEventSink(Consumer<AgentTraceEvent> eventSink) {
         this.eventSink = eventSink;
+    }
+
+    public boolean hasEventSink() {
+        return eventSink != null;
     }
 
     public OffsetDateTime getStartedAt() {
@@ -220,7 +260,26 @@ public class AgentTraceAccumulator {
         }
     }
 
+    private static String lastCompletedSentence(String details) {
+        if (details == null || details.isBlank()) return "";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("[^。．.!?！？\\n]+[。．.!?！？]")
+                .matcher(details);
+        String last = "";
+        while (matcher.find()) last = matcher.group().trim();
+        return last;
+    }
+
     private void send(AgentTraceEvent event) {
+        Consumer<AgentTraceEvent> sink = eventSink;
+        if (sink != null) {
+            try {
+                sink.accept(event);
+            } catch (Exception e) {
+                log.debug("agent_trace sink 发送失败: {}", e.getMessage());
+            }
+            return;
+        }
         try {
             SseEmitter emitter = request.getEmitter();
             if (emitter != null) {
@@ -230,14 +289,6 @@ public class AgentTraceAccumulator {
         } catch (Exception e) {
             log.debug("agent_trace 发送失败（前端可能已断开）: {}",
                     request.getConversation() == null ? "" : request.getConversation().getId());
-        }
-        Consumer<AgentTraceEvent> sink = eventSink;
-        if (sink != null) {
-            try {
-                sink.accept(event);
-            } catch (Exception e) {
-                log.debug("agent_trace sink 发送失败: {}", e.getMessage());
-            }
         }
     }
 }

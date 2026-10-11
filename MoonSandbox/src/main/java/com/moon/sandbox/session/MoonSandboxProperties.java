@@ -12,6 +12,8 @@ public class MoonSandboxProperties {
 
     private Path workspaceRoot = Path.of("/workspaces");
     private String pythonExecutable = "python3";
+    private String shellExecutable = "sh";
+    private String shellFlag = "-c";
     private int maxWriteBytes = 1_048_576;
     private int defaultReadChars = 100_000;
     private int maxReadChars = 200_000;
@@ -42,6 +44,23 @@ public class MoonSandboxProperties {
     public void setPythonExecutable(String pythonExecutable) {
         this.pythonExecutable = pythonExecutable == null || pythonExecutable.isBlank()
                 ? "python3" : pythonExecutable;
+    }
+
+    public String getShellExecutable() {
+        return shellExecutable;
+    }
+
+    public void setShellExecutable(String shellExecutable) {
+        this.shellExecutable = shellExecutable == null || shellExecutable.isBlank()
+                ? "sh" : shellExecutable;
+    }
+
+    public String getShellFlag() {
+        return shellFlag;
+    }
+
+    public void setShellFlag(String shellFlag) {
+        this.shellFlag = shellFlag == null || shellFlag.isBlank() ? "-c" : shellFlag;
     }
 
     public int getMaxWriteBytes() {

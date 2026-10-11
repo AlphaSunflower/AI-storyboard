@@ -2,21 +2,83 @@
 
 AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScript frontend.
 
-## 当前任务优先级与项目库状态（2026-09-21）
+## 当前工程状态（2026-10-10）
 
-> **项目库统一改造已由用户重新授权。** 当前方向是让项目库成为原始素材、生成结果、画布资产和资产组的真源，同时保留画布节点 ID 与旧 AI 资产的兼容层。
+- MoonAgent 是 Spring Boot 4.1.1 + Java 25 + AgentScope 2.0.4 服务，监听 `8084`；`MoonAgentRuntime` 是唯一智能体执行器。
+- MoonSandbox 是独立常驻执行服务，监听宿主 `127.0.0.1:8090`，工作目录只存在于 Docker 命名卷 `sandbox-workspaces`；MoonAgent 通过内部 HTTP 调用，不挂载 Docker socket。
+- MoonSandbox 不注册 Nacos。MoonAgent 通过 `AGENT_SANDBOX_ENABLED`、`MOON_SANDBOX_BASE_URL`、`MOON_SANDBOX_INTERNAL_SECRET` 连接；Nacos 只承载 Skill、全局提示词和 MCP 元数据。
+- 会话隔离采用“`/workspaces/{conversationId}` 独立目录 + Redis 会话任务锁 + runner 内文件锁”。同一会话严格串行，不同会话共享容器并可并发。
+- Markdown、TXT、DOCX、XLSX、PDF 和图表等最终产物必须上传 MinIO，并写入 `agent_assets`；聊天消息通过 `metadata.sandboxAttachments` 展示文件卡片。
+- 2026-09-21 的“项目库统一改造”仍是已批准方向，但已转入存量架构要求：保留 `canvas_assets.id`、`/api/assets` 只读兼容与统一 `asset.library_*` 数据映射，相关权限、上传、快照、迁移和跨服务故障测试仍须补齐。
 
-- 继续保留现有未提交改动，不以回退换“干净工作区”。
-- 新功能必须同时维护旧 `canvas_assets.id`、旧 `/api/assets` 只读兼容与统一 `asset.library_*` 数据之间的映射。
-- 项目库相关接口仍需持续补齐权限、上传、快照、迁移和跨服务故障测试；不能仅凭编译通过视为完成。
+## AgentScope / Sandbox 不可回归红线（最高优先级）
+
+> 以下问题已经在真实运行中造成“界面卡住、思考链不出现、实时文字延迟、产物看不见、取消卡片反复弹出”。这些不是普通体验问题，而是关键链路事故。任何触及事件流、HITL、推理展示、沙箱调用或产物发布的改动，都必须把本节当作回归验收标准。
+
+### 1. 一个 turn 只能有一条有序事件通道
+
+- `AgentTurnEventPublisher` 必须继续作为 `THINKING_BLOCK_DELTA`、`TEXT_BLOCK_DELTA`、工具事件、`AGENT_TRACE` 和其他原生事件的唯一有序发布入口。
+- 禁止在 publisher 存活期间另起线程、回调或组件直接并发调用 `AgentTurnEventStore.append(...)`。独立 append 会绕开批次顺序和 emitter 串行化，产生乱序 SSE；前端 `AgentTurnEventSequencer` 会按 `seq` 等待缺口，表现为“看起来卡住”或思考链到结束后才出现。
+- 每个 turn 的 `seq` 必须从 1 开始连续递增。事件持久化、SSE 推送和 `afterSeq` 补偿必须使用同一份序号；任何持久化失败都必须显式暴露，不能静默吞掉后继续发送后续序号。
+- 高频文本和思考 delta 可以由 publisher 合并批次，但 `AGENT_TRACE`、工具、HITL、完成和失败等结构事件必须先 flush 尚未写入的 delta，再按同一序号顺序发布。
+- 终端事件必须与直播事件保持同序。`turn_completed`、`turn_paused`、`turn_failed`、`canvas_*` 不能先于其依赖的文本、思考、工具或产物事件到达前端。
+
+### 2. 思考与实时输出必须持续可见
+
+- `THINKING_BLOCK_DELTA` 到达后必须立刻更新可见状态，不能等 `turn_completed`、完整句子或完整事件批次。
+- `reasoning.activity` / `workflowHint` 必须持续展示最新思考尾部；前端 `ReasoningPanel` 在流式阶段必须显示“正在思考 N 秒：...”，即使还没有完整句子也不能空白。
+- 首个 `turn_started` 就应让用户看到活动状态和计时，文本 delta 出现后继续追加显示。用户必须始终能判断智能体是在推理、调工具、执行脚本还是等待用户。
+- 完成事件只能把直播推理归档为最终 metadata，不能成为首次显示推理的触发条件。
+
+### 3. 时间字段与 JSON 序列化不可退化
+
+- 任何手工创建、持久化或解析 `OffsetDateTime` / `Instant` 的 `ObjectMapper` 必须注册 `JavaTimeModule` 并关闭 `WRITE_DATES_AS_TIMESTAMPS`。
+- `AgentTurnEventStore` 与 `MoonSandboxClient` 是已知事故点。缺模块会让 `AGENT_TRACE.startedAt` 序列化失败，事件 payload 退化成 `{}`，沙箱文件列表也会解析失败，最终导致前端轨迹为空和产物无法发布。
+- 新增事件 payload 涉及 Java 时间类型时，必须补一个真实 JSON round-trip 测试，不能只测对象构造。
+
+### 4. HITL 与取消语义必须保持终态
+
+- `reject` 是终止取消，不是可回灌给模型的工具结果。用户拒绝后：checkpoint 原子转为 `used`，turn 以取消/完成结束，不再调用模型、不重新发确认卡片。
+- HITL pending/claimed 状态必须限定在当前会话和当前 turn。完成、取消、失败或清理后不得从陈旧 checkpoint 恢复出可再次点击的卡片。
+- 前端不得因重放、刷新、补偿事件或重复点击再次提交同一个 `formToken`；后端必须保持一次性消费和幂等终止。
+
+### 5. 沙箱与产物发布链路不可混用宿主机路径
+
+- `write_file`、`read_file`、`list_files`、`run_python_script` 都只操作 runner 容器内的会话工作区：`/workspaces/{conversationId}/{work,output,vendor}`。
+- 宿主机 `MoonSandbox/target/workspaces/...`、本机上传目录或 MoonAgent 进程目录都不是沙箱真源，也不是聊天附件真源。
+- 每轮任务完成后，`SandboxOutputReconciler` 必须扫描沙箱 `output/`，由 `SandboxArtifactPublisher` 下载文件、校验扩展名/MIME/大小、上传 MinIO，并写入 `agent_assets`。
+- Markdown、TXT、DOCX、XLSX、CSV、PDF 属于 `agent_assets.type=document`；PNG/JPG/SVG 属于 `type=image`。产物应带 `gen_type=sandbox_generated`、turn/task 来源、内容哈希和幂等键。
+- 后端必须把公开 URL、文件名、MIME、大小等写入 assistant message 的 `metadata.sandboxAttachments`；前端消息卡必须展示文件卡、类型、大小、生成时间和下载入口。只上传 MinIO 但不回写消息，属于未完成。
+- 同一内容重复扫描必须幂等，不能制造重复资产或重复卡片；文件超过限制或 MIME 不匹配时跳过并记录可诊断日志。
+
+### 6. 关键链路的最低验证门槛
+
+任何修改下列任一路径的提交，至少运行对应聚焦测试，并在完成说明中写出证据：
+
+```powershell
+mvn -pl MoonAgent -am "-Dtest=AgentTurnEventStoreTest,MoonSandboxClientTest,SandboxOutputReconcilerTest,CheckpointResumeServiceTest" test
+cd AIStoryboardClient
+npm test -- --run src/stores/agentStore.test.ts
+npm run build
+```
+
+新增或修复直播、HITL、沙箱工具或产物展示时，测试必须覆盖：
+
+- delta 与结构事件按 `seq` 连续、乱序到达时前端正确等待和归并。
+- `THINKING_BLOCK_DELTA` 到达即出现可见思考与计时，不依赖 `turn_completed`。
+- `AGENT_TRACE.startedAt` 和时间字段 JSON round-trip 不丢失。
+- `reject` 后 checkpoint 为终态、模型不再执行、卡片不复活。
+- 同一会话写/执行互斥，不同会话可并行。
+- `output/` 文件发布到 MinIO、写入 `agent_assets`，并在消息 metadata 与 UI 中形成文件卡。
 
 ## Tech Stack
 
-- **Backend**: Spring Boot 4.1.1, JDK 21, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, JDK HttpClient
+- **Backend**: Spring Boot 4.1.1, Java 25, MyBatis-Plus 3.5.16 (spring-boot4-starter), PostgreSQL, Redis, MinIO, JDK HttpClient
 - **Frontend**: React 19 + TypeScript 6 + Vite 8, Zustand 5, Tailwind CSS 4, Axios (timeout 120s), React Router 7
 - **AI**: 全部模型调用统一走 **LLM 网关**（AILLMGateway，:8083，`LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`）；chat/文生图/图改图/视频均经网关转发（生图 `gpt-image-2`、视觉 `gemini-3-flash-preview`、视频 `MiniMax-H3`），协议转换与上游密钥下沉网关
+- **Agent**: MoonAgent Spring Boot 4.1.1 + Java 25 + AgentScope 2.0.4，运行时端口 `8084`；共享 Docker 沙箱执行面端口 `8090`
 - **Auth**: JWT (jjwt), scrypt password hashing (lambdaworks 1.4.0), cross-system token exchange via `/api/auth/unlogin`
-- **Ports**: Backend 8082, Frontend 5173
+- **Ports**: ApiGateway 8080, Backend 8082, AILLMGateway 8083, MoonAgent 8084, MoonSandbox 8090, Frontend 5173
 
 ## Design System
 
@@ -34,48 +96,50 @@ From `claude/DESIGN.md` — Anthropic-inspired warm editorial:
 
 ```
 AI-storyboard/
-├── CommonCore/                   # 公共模块（独立 jar，本地 install：com.storyboard:common-core:0.1.0）
-│   └── src/main/java/com/storyboard/common/   # ApiResponse / BusinessException / GlobalExceptionHandler / MultipartBuilder
-│                                              # 网关（AILLMGateway）保留自有契约（code=0 无 timestamp），不引用
-├── AIStoryboardBackend/          # Spring Boot 后端
-│   └── src/main/java/com/storyboard/
-│       ├── controller/           # REST controllers
-│       ├── service/              # 业务逻辑
-│       ├── ai/                   # AI 生成服务（原 service/ai）
-│       │   └── impl/             # AI 服务实现
-│       ├── entity/               # JPA entities
-│       ├── dto/                  # Request/Response DTOs
-│       ├── mapper/               # MyBatis-Plus mappers
-│       ├── config/               # Security, CORS, MyBatis config
-│       ├── security/             # JWT provider, filters, scrypt
-│       └── exception/            # 网关/本地异常（GlobalExceptionHandler 已抽公共）
-├── AIStoryboardClient/           # React frontend
-│   └── src/
-│       ├── pages/                # EditorPage, LoginPage
-│       ├── components/
-│       │   ├── editor/           # PreviewPanel, SceneListPanel, LeftSidebar
-│       │   ├── scene/            # SceneCard
-│       │   ├── ai/               # ImageRefineModal, VideoRefineModal
-│       │   ├── layout/           # AppHeader
-│       │   └── common/           # GenerationProgress, DraftRecoverBanner
-│       ├── stores/               # Zustand stores
-│       ├── api/                  # Axios API clients
-│       └── types/                # TypeScript types
-├── docs/                         # Chinese documentation
-│   ├── 大模型调用文档.md
-│   ├── 系统一接入指南.md
-│   └── 系统一调用参数更新.md
+├── CommonCore/                   # ApiResponse / BusinessException / GlobalExceptionHandler / MultipartBuilder
+├── agent-core/                   # Agent 通用模型、存储与工具契约
+├── asset-client/                 # 资产服务客户端契约
+├── asset-service/                # 统一资产库服务
+├── AIStoryboardBackend/          # 主业务后端（8082）：项目、分镜、认证、文件兼容接口
+├── MoonAgent/                    # Moon 智能体（8084）：AgentScope 运行时、SSE turn、HITL、沙箱工具与产物发布
+├── MoonSandbox/                  # 常驻共享 Docker runner（8090）：会话目录、文件工具、Python 执行、资源限制
+├── AILLMGateway/                 # 模型网关（8083）：chat/image/video 路由、厂商适配、渠道密钥下沉
+├── ApiGateway/                   # 统一 API 网关（8080）
+├── XiaoYueCanvas/                # 画布后端（3000，前端代理 `/canvas`）
+├── XiaoYueCanvasAgent/           # 画布前端/Agent 相关包
+├── AIStoryboardClient/           # React 19 前端（5173）：编辑器、ChatPage、文档/图片资产中心
+├── deploy/docker/                # nacos / vosk / redis / minio / sandbox 独立 Compose
+├── docs/                         # 设计与实施文档
 └── claude/DESIGN.md              # Design tokens spec
 ```
 
 ## Docker 部署目录（deploy/docker/）
 
-基础设施 Docker 部署，**nacos 与 vosk 拆为两个独立 compose 项目**（`nacos/`、`vosk/` 子目录，可单独启停、单独拷到其他机器；scripts/ 下有 setup/up/down/status 脚本，均接受 `[nacos|vosk|all]` 参数）：
+基础设施 Docker 部署按服务拆为独立 Compose 项目，可单独启停、单独拷到其他机器。根 `scripts/` 提供 `setup/up/down/status`，接受 `[nacos|vosk|redis|minio|all]`；`sandbox/` 使用自己的 `scripts/up|down|status`，因为启动前需要先构建 runner jar。
 
-- **nacos** `nacos/nacos-server:v3.2.3` — standalone 服务发现（8848/9848/8850，数据卷 nacos-data）
-- **vosk** `alphacep/kaldi-vosk-server:latest` — 离线语音识别（2700，挂载 vosk/data/models/vosk-model-cn-0.22；官方 vosk-server 镜像已下架改用 Kaldi 版，entrypoint 跑 websocket/asr_server.py，需 VOSK_SAMPLE_RATE=16000；端口默认绑定 127.0.0.1，生产设 `VOSK_BIND_IP` 内网 IP 配合防火墙禁公网）
+| 服务 | 目录 | 端口 | 说明 |
+|------|------|------|------|
+| nacos | `nacos/` | 8848/9848/8850 | `nacos/nacos-server:v3.2.3` standalone 服务发现；数据卷 `nacos-data` |
+| vosk | `vosk/` | 2700 | 离线中文语音识别；模型挂载 `vosk/data/models/vosk-model-cn-0.22` |
+| redis | `redis/` | 6379 | 会话锁、缓存；`redis-ai` + AOF 命名卷 |
+| minio | `minio/` | 9000/9001 | 最终对象存储：S3 API + 控制台；数据在 `minio/data/` |
+| sandbox | `sandbox/` | 8090 | `moon-sandbox-runner` + Squid 出站代理；工作区命名卷 `sandbox-workspaces` |
 
-首次部署：`./scripts/setup.sh`（下载 1.3GB 中文模型到 vosk/data/models/）→ `./scripts/up.sh`（自动接管旧容器）。
+首次部署：`./scripts/setup.sh`（下载约 1.3GB 中文模型）→ `./scripts/up.sh`。沙箱需另执行：
+
+```bash
+mvn -pl MoonSandbox -am package -DskipTests
+cd deploy/docker/sandbox
+cp .env.example .env
+./scripts/up.sh
+```
+
+沙箱约束：
+
+- runner 只接 internal 网络，公网只能经 `sandbox-egress-proxy`；域名白名单在 `SANDBOX_ALLOWED_DOMAINS`。
+- runner 使用非 root、只读根文件系统、`tmpfs /tmp`、CPU/内存/PIDs 限额和 `unless-stopped`。
+- 日常停止不要使用 `docker compose down -v`，否则会删除 `sandbox-workspaces` 命名卷。
+- 沙箱工作文件最终仍以 MinIO 为准；MoonAgent 的 `SandboxOutputReconciler` 每轮扫描并发布 `output/`。
 
 ## Databases
 
@@ -334,28 +398,43 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 
 每个 SSE frame 的 `data` 都是 `AgentTurnEventEnvelope`：
 `{turnId, seq, type, payload}`。生命周期 `type` 为 `turn_started`、
-`turn_paused`、`turn_completed`、`turn_failed`；原生 AgentScope 事件使用
+`turn_paused`、`turn_completed`、`turn_failed`，另有 `constraint_flagged`、
+`canvas_session_required`、`canvas_run_completed`、`canvas_run_failed`；原生 AgentScope 事件使用
 `type=agent_event`，其中 `payload={eventType, data}`。前端按 `seq` 去重并按
 turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 和 Error。
+
+- 实时文本使用 `TEXT_BLOCK_DELTA` / `AGENT_RESULT`，思考使用 `THINKING_BLOCK_DELTA`，轨迹使用
+  `AGENT_TRACE`。所有这些事件都必须经 `AgentTurnEventPublisher` 发布并保持连续 `seq`。
+- 前端 `AgentTurnEventSequencer` 对每个 turn 持有缺口；如果后端绕开有序 publisher，前端不会
+  “猜顺序”，而是等待缺失序号，表现为卡住。不要用缩短前端等待时间掩盖后端乱序。
+- `turn_completed.payload.metadata` 必须合并并保留实时阶段的 `reasoning`、`agentTrace`、
+  `metrics` 和 `sandboxAttachments`，不能因终态 payload 只含正文而把直播数据覆盖为空。
+- 沙箱产物文件卡由 `metadata.sandboxAttachments` 驱动；没有该 metadata 就不能算产物已交付。
 
 ### 数据与恢复
 
 - `agent_turns` / `agent_turn_events`：流重连、审计和 `afterSeq` 补偿。
 - `agentscope_sessions`：AgentScope 运行时上下文。
+- `agent_sandbox_sessions`：会话沙箱状态、最后使用时间、过期时间和版本。
 - `agent_messages/assets/checkpoints/tool_invocations`：产品数据。
 - 未迁移会话在首个 AgentScope turn 前从最近 20 条产品消息重建会话；已有运行时状态优先。
 - 旧 checkpoint 标记过期，活动旧计划标记取消；表和历史内容不删除。
+- runner 重启不丢 `sandbox-workspaces`；MoonAgent 重启后可重新扫描 `output/` 并按内容哈希幂等发布。
 
 ### 权限与资产
 
 - 读工具默认 ALLOW。
 - 删除、清空、覆盖、批量生成、Canvas 执行进入 AgentScope `ASK`/HITL。
 - 单张媒体生成是否直接执行由 `ai.agent.agentscope.direct-media-generation` 控制。
+- `write_file` 和 `run_python_script` 走现有审批、工具审计与 FULL_ACCESS 策略；`reject` 必须终止本轮，不能把拒绝结果继续喂给模型。
+- 沙箱最终产物统一经 `SandboxArtifactPublisher` 上传 MinIO 并写 `agent_assets`；聊天卡片只引用资产 URL 和 message metadata，不暴露宿主机路径。
 - 六个生产 Skill：`storyboard`、`image`、`video`、`canvas-design`、`canvas-run`、`general`。
 - Nacos 发布脚本：`scripts/nacos/publish_assets.py`；只支持 upload/review/release 生命周期，
   Canvas Bridge 不进入共享 Nacos。
 
-## Historical pre-AgentScope notes (`/api/agent/**`)
+## Historical pre-AgentScope notes (`/api/agent/**`) — 非当前协议，仅供迁移追溯
+
+> 本节记录 2026-09 以前的编排器、SSE 和 HITL 实现。它们不是当前调用协议，不能让新代码按这里的 endpoint/event 名实现；当前唯一权威说明见上方的 `AgentScope 运行时` 与 `AgentScope / Sandbox 不可回归红线`。
 
 ### 数据库（V2 migration `V2__agent_conversation.sql`，3 张表，与分镜 scenes 无关）
 
@@ -464,16 +543,32 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 
 ## Verification Commands
 
-```bash
-# Backend (MUST use Windows paths for JAVA_HOME)
-export JAVA_HOME="C:\\Program Files\\Java\\jdk-21"
-"/e/Development/apache-maven-3.9.15/bin/mvn.cmd" -f "E:\\Desktop\\AI-storyboard\\AIStoryboardBackend\\pom.xml" compile -q
+```powershell
+# 仓库根目录；Java 25。JAVA_HOME 必须是 Windows 路径。
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-25"
 
-# Frontend（tsconfig 为 solution-style，必须 -p tsconfig.app.json 才真正检查；裸 `npx tsc --noEmit` 不检查任何文件）
-cd AIStoryboardClient && npx tsc -p tsconfig.app.json --noEmit && npm run build
+# 关键 Agent 直播、HITL、沙箱链路
+mvn -pl MoonAgent -am test
+
+# 主后端
+mvn -pl AIStoryboardBackend -am test
+
+# Sandbox runner jar（部署镜像前必须成功）
+mvn -pl MoonSandbox clean package
+
+# 前端（tsconfig 为 solution-style；仓库脚本已包含 tsc -b）
+cd AIStoryboardClient
+npm test -- --run
+npm run build
+
+# 沙箱 Compose 静态检查与启动
+cd ..\deploy\docker\sandbox
+docker compose --env-file .env.example config -q
+docker compose --env-file .env up -d
+docker compose --env-file .env ps
 ```
 
-**Maven gotcha**: `JAVA_HOME` must use Windows path format (`C:\\...`), not POSIX (`/c/...`). `mvn.cmd` is a Windows batch file — cmd.exe doesn't understand POSIX paths. Direct invocation (not bash `mvn` alias) required or `ClassNotFoundException: plexus-classworlds`.
+**Maven gotcha**: `JAVA_HOME` must use Windows path format (`C:\\...`), not POSIX (`/c/...`). `mvn.cmd` is a Windows batch file；direct invocation is required or Maven can fail with `ClassNotFoundException: plexus-classworlds`.
 
 ## Coding Conventions
 

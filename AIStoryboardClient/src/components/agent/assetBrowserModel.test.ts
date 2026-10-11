@@ -58,4 +58,18 @@ describe('assetBrowserModel', () => {
       assetId: 'document-1',
     });
   });
+
+  it('prefers the stored asset mime type over the url extension', () => {
+    const asset = documentAsset({
+      url: '/api/files/files/uuid-report.html',
+      mimeType: 'text/plain',
+      resultUrls: '["/api/files/files/uuid-report.html"]',
+    });
+
+    expect(documentAttachmentForAsset(asset, asset.url)).toMatchObject({
+      name: 'uuid-report.html',
+      mimeType: 'text/plain',
+      kind: 'file',
+    });
+  });
 });

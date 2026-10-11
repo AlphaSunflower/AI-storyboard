@@ -86,6 +86,62 @@ describe('streamChat', () => {
       type: 'canvas_run_updated',
       payload: { canvasRunId: 'canvas-run-1', revision: 2 },
     })?.type).toBe('canvas_run_updated');
+    expect(parseAgentTurnEnvelope({
+      turnId: 'turn-1',
+      seq: 7,
+      type: 'THINKING_BLOCK_DELTA',
+      payload: { delta: 'reasoning' },
+    })).toEqual({
+      turnId: 'turn-1',
+      seq: 7,
+      type: 'THINKING_BLOCK_DELTA',
+      payload: { delta: 'reasoning' },
+    });
+  });
+
+  it('accepts every canonical AgentScope 2.0.4 event type', () => {
+    const eventTypes = [
+      'AGENT_START',
+      'AGENT_END',
+      'AGENT_RESULT',
+      'MODEL_CALL_START',
+      'MODEL_CALL_END',
+      'TEXT_BLOCK_START',
+      'TEXT_BLOCK_DELTA',
+      'TEXT_BLOCK_END',
+      'THINKING_BLOCK_START',
+      'THINKING_BLOCK_DELTA',
+      'THINKING_BLOCK_END',
+      'DATA_BLOCK_START',
+      'DATA_BLOCK_DELTA',
+      'DATA_BLOCK_END',
+      'TOOL_CALL_START',
+      'TOOL_CALL_DELTA',
+      'TOOL_CALL_END',
+      'TOOL_RESULT_START',
+      'TOOL_RESULT_TEXT_DELTA',
+      'TOOL_RESULT_DATA_DELTA',
+      'TOOL_RESULT_END',
+      'EXCEED_MAX_ITERS',
+      'REQUIRE_USER_CONFIRM',
+      'REQUIRE_EXTERNAL_EXECUTION',
+      'USER_CONFIRM_RESULT',
+      'EXTERNAL_EXECUTION_RESULT',
+      'REQUEST_STOP',
+      'SUBAGENT_EXPOSED',
+      'HINT_BLOCK',
+      'ALL_TOOLS_DENIED',
+      'CUSTOM',
+    ];
+
+    for (const type of eventTypes) {
+      expect(parseAgentTurnEnvelope({
+        turnId: 'turn-contract',
+        seq: 1,
+        type,
+        payload: {},
+      })?.type).toBe(type);
+    }
   });
 
   it('delivers SSE envelopes without mapping legacy event names', async () => {
@@ -106,6 +162,24 @@ describe('streamChat', () => {
     await streamChat('conversation-1', 'hello', [], (event) => received.push(event));
 
     expect(received).toEqual([envelope]);
+  });
+
+  it('surfaces unsequenced turn_failed frames as request errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response([
+      'event: turn_failed',
+      `data: ${JSON.stringify({
+        turnId: '',
+        seq: 0,
+        type: 'turn_failed',
+        payload: { code: '40901', message: '当前对话正在处理中，请稍候' },
+      })}`,
+      '',
+      '',
+    ].join('\n'), { status: 200 }));
+
+    await expect(
+      streamChat('conversation-1', 'hello', [], () => undefined),
+    ).rejects.toThrow('当前对话正在处理中，请稍候');
   });
 
   it('loads replay events after a sequence', async () => {

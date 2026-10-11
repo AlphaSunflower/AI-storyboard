@@ -2,10 +2,12 @@ package com.moon.sandbox.web;
 
 import com.moon.sandbox.execution.ExecutionResult;
 import com.moon.sandbox.execution.SandboxExecutionService;
+import com.moon.sandbox.execution.ShellResult;
 import com.moon.sandbox.session.FileEntry;
 import com.moon.sandbox.session.ReadFileResult;
 import com.moon.sandbox.session.SandboxSessionService;
 import com.moon.sandbox.session.WriteFileResult;
+import com.moon.sandbox.session.WriteMode;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -40,6 +42,13 @@ public class SandboxController {
         return sessions.write(conversationId, request.path(), request.content(), request.mode());
     }
 
+    @PostMapping(value = "/files/upload", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public WriteFileResult upload(@PathVariable String conversationId,
+                                  @RequestParam String path,
+                                  @RequestBody byte[] content) {
+        return sessions.writeBytes(conversationId, path, content, WriteMode.OVERWRITE);
+    }
+
     @PostMapping("/files/read")
     public ReadFileResult read(@PathVariable String conversationId,
                                @Valid @RequestBody ReadFileRequest request) {
@@ -66,6 +75,28 @@ public class SandboxController {
         return execution.execute(conversationId, request.script(),
                 request.args() == null ? List.of() : request.args(),
                 request.timeoutSeconds());
+    }
+
+    @PostMapping("/shell")
+    public ShellResult shell(@PathVariable String conversationId,
+                             @Valid @RequestBody ShellCommandRequest request) {
+        return execution.executeShell(conversationId, request.command(), request.timeoutSeconds());
+    }
+
+    @GetMapping(value = "/archive", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<byte[]> exportArchive(@PathVariable String conversationId) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(sessions.exportArchive(conversationId));
+    }
+
+    @PostMapping(value = "/archive", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<Map<String, Object>> importArchive(@PathVariable String conversationId,
+                                                             @RequestBody byte[] archive) {
+        sessions.importArchive(conversationId, archive);
+        return ResponseEntity.ok(Map.of(
+                "conversationId", conversationId,
+                "bytes", archive == null ? 0 : archive.length));
     }
 
     @DeleteMapping

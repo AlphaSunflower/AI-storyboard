@@ -41,15 +41,11 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   if (!hasContent && !streaming) return null;
   const live = !!streaming;
   const duration = reasoning?.durationMs != null ? formatDuration(reasoning.durationMs) : '';
-  const liveSummary = reasoning?.summary?.trim();
-  const liveActivity = reasoning?.activity?.trim();
   const liveClock = elapsedSeconds >= 60
     ? `${Math.floor(elapsedSeconds / 60)}分${elapsedSeconds % 60}秒`
     : `${elapsedSeconds}秒`;
   const title = live
-    ? (liveActivity || liveSummary
-        ? `正在思考 ${liveClock}：${liveActivity || liveSummary}`
-        : `正在思考 ${liveClock}…`)
+    ? `正在思考 ${liveClock}…`
     : `已思考${duration ? `（用时 ${duration}）` : ''}`;
   const showToggle = hasContent;
 
@@ -101,17 +97,10 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
                 maxWidth: '100%', overflowWrap: 'anywhere',
               }}
             >
-              {reasoning?.summary && (
-                <div className="reasoning-detail-item" style={{ '--item-index': 0 } as React.CSSProperties}>
-                  <div style={{ fontSize: 13, color: 'var(--color-body-strong)', fontWeight: 500, marginBottom: 6 }}>
-                    {reasoning.summary}
-                  </div>
-                </div>
-              )}
               {reasoning?.details && (
                 <div
                   className="reasoning-detail-item"
-                  style={{ '--item-index': 1 } as React.CSSProperties}
+                  style={{ '--item-index': 0 } as React.CSSProperties}
                 >
                   <div style={{ fontSize: 12, color: 'var(--color-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 240, overflowY: 'auto' }}>
                     <span style={{ color: 'var(--color-muted-soft)', fontSize: 11, letterSpacing: 1, display: 'block', marginBottom: 4 }}>推理详情</span>

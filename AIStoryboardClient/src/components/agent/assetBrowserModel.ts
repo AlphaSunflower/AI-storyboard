@@ -25,7 +25,7 @@ export function documentAttachmentForAsset(asset: AgentAsset, url: string): Agen
   return {
     url,
     name,
-    mimeType: documentMimeType({ name, url }),
+    mimeType: documentMimeType({ name, url, mimeType: asset.mimeType ?? undefined }),
     kind: 'file',
     assetId: asset.id,
   };

@@ -189,6 +189,32 @@ class AiLlmGatewaySmokeTest {
     }
 
     @Test
+    void chatCompletionsWithSpacedStreamFlag_forwardsSseChunks() throws Exception {
+        allowApiKey();
+        String body = "{\"model\":\"m\",\"messages\":[],\"stream\": true}";
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Consumer<byte[]> sink = invocation.getArgument(2);
+            sink.accept("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n".getBytes());
+            return null;
+        }).when(routingService).streamChat(
+                eq("/chat/completions"), eq(body), any(), eq("call-stream"));
+
+        mockMvc.perform(post("/v1/chat/completions")
+                .header("Authorization", "Bearer valid")
+                .header("X-Call-Id", "call-stream")
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(content().contentTypeCompatibleWith("text/event-stream"))
+            .andExpect(content().string(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"));
+
+        verify(routingService).streamChat(
+                eq("/chat/completions"), eq(body), any(), eq("call-stream"));
+    }
+
+    @Test
     void adminLogin_andUi_arePublic() throws Exception {
         when(adminUserService.login(any())).thenReturn(new AdminLoginResponse("at", "rt"));
         mockMvc.perform(post("/admin/login")

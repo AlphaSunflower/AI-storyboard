@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.middleware.ActingInput;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
@@ -54,5 +55,26 @@ class ToolCallContentMiddlewareTest {
         }).blockLast();
 
         assertThat(captured.get().toolCalls().getFirst()).isSameAs(original);
+    }
+
+    @Test
+    void countsRewriteOnlyWhenContentIsActuallyRestored() {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        ToolCallContentMiddleware middleware = new ToolCallContentMiddleware(meters);
+
+        ToolUseBlock missingContent = new ToolUseBlock(
+                "call-1", "write_file", Map.of("path", "output/a.md"), null, Map.of(), null);
+        middleware.onActing(null, null, new ActingInput(List.of(missingContent)),
+                input -> Flux.empty()).blockLast();
+
+        ToolUseBlock presentContent = new ToolUseBlock(
+                "call-2", "write_file", Map.of("path", "output/a.md"),
+                "{\"path\":\"output/a.md\"}", Map.of(), null);
+        middleware.onActing(null, null, new ActingInput(List.of(presentContent)),
+                input -> Flux.empty()).blockLast();
+
+        assertThat(meters.counter(
+                ToolCallContentMiddleware.REWRITE_METRIC, "tool", "write_file").count())
+                .isEqualTo(1.0d);
     }
 }

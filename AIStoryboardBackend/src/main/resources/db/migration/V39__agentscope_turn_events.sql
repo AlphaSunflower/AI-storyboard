@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS public.agent_turns (
     id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     conversation_id  TEXT NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
     status           VARCHAR(32) NOT NULL DEFAULT 'running',
-    runtime_engine   VARCHAR(64) NOT NULL DEFAULT 'agentscope-java-2.0.3',
+    runtime_engine   VARCHAR(64) NOT NULL DEFAULT 'agentscope-java-2.0.4',
     input_text       TEXT,
     last_sequence    INTEGER NOT NULL DEFAULT 0,
     checkpoint_id    TEXT,

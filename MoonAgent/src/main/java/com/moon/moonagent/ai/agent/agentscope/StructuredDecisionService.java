@@ -42,7 +42,8 @@ public class StructuredDecisionService {
         agent = ReActAgent.builder()
                 .name("moon-structured-decisions")
                 .sysPrompt("Return only the requested structured decision. Be concise and precise.")
-                .model(modelProvider.withFallback())
+                .model(modelProvider.primary())
+                .fallbackModel(modelProvider.fallback())
                 .maxIters(2)
                 .maxRetries(properties.getMaxRetries())
                 .build();

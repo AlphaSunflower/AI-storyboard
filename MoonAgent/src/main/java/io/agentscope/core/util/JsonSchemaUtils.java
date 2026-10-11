@@ -1,5 +1,5 @@
 /*
- * Compatibility override for AgentScope 2.0.3.
+ * Compatibility override for AgentScope 2.0.4.
  *
  * AgentScope was compiled against Victools 4, whose SchemaGenerator returns a Jackson 2
  * ObjectNode. Spring AI 2.0 requires Victools 5, whose SchemaGenerator returns a Jackson 3
@@ -28,6 +28,7 @@ public class JsonSchemaUtils {
 
     private static final boolean PROPERTY_REQUIRED_BY_DEFAULT = false;
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Object SCHEMA_LOCK = new Object();
     private static final SchemaGenerator SCHEMA_GENERATOR;
 
     static {
@@ -54,7 +55,9 @@ public class JsonSchemaUtils {
 
     public static Map<String, Object> generateSchemaFromClass(Class<?> clazz) {
         try {
-            return toMap(SCHEMA_GENERATOR.generateSchema(clazz));
+            synchronized (SCHEMA_LOCK) {
+                return toMap(SCHEMA_GENERATOR.generateSchema(clazz));
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate JSON schema for " + clazz.getName(), e);
         }
@@ -70,7 +73,9 @@ public class JsonSchemaUtils {
 
     public static Map<String, Object> generateSchemaFromType(Type type) {
         try {
-            return toMap(SCHEMA_GENERATOR.generateSchema(type, new Type[0]));
+            synchronized (SCHEMA_LOCK) {
+                return toMap(SCHEMA_GENERATOR.generateSchema(type, new Type[0]));
+            }
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to generate JSON schema for " + type.getTypeName(), e);

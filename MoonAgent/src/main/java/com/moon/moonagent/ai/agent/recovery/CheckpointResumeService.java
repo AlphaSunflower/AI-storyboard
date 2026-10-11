@@ -60,10 +60,6 @@ public class CheckpointResumeService {
         }
         validateVersion(checkpoint);
         hydrateRuntime(checkpoint);
-        if ("claimed".equals(checkpoint.getStatus())) {
-            throw new CheckpointResumeException(40901, "确认正在处理中，请稍候");
-        }
-
         String owner = "user-" + UUID.randomUUID();
         RecoveryCandidate candidate = candidate(checkpoint);
         if (leases.tryClaim(candidate.resourceType(), candidate.resourceId(), owner) == 0) {
@@ -73,7 +69,7 @@ public class CheckpointResumeService {
         checkpoint.setResumePayload(serialize(command));
         int updated = checkpointMapper.update(null, new UpdateWrapper<AgentCheckpoint>()
                 .eq("id", checkpoint.getId())
-                .eq("status", "pending")
+                .in("status", "pending", "claimed")
                 .set("status", "claimed")
                 .set("resume_payload", checkpoint.getResumePayload())
                 .set("updated_at", OffsetDateTime.now()));
@@ -100,6 +96,11 @@ public class CheckpointResumeService {
         }
         ResumeCommand command = deserialize(checkpoint.getResumePayload());
         return new CheckpointClaim(checkpoint, command, owner);
+    }
+
+    public boolean hasActiveClaim(AgentCheckpoint checkpoint) {
+        return checkpoint != null
+                && leases.hasActiveLease("checkpoint", checkpoint.getId());
     }
 
     @Transactional

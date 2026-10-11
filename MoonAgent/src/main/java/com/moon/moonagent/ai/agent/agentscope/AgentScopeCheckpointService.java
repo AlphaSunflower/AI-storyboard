@@ -73,7 +73,7 @@ public class AgentScopeCheckpointService {
         payload.put("options", options);
         payload.put("allowCustom", allowCustom);
 
-        support.runHITLStage(request, null,
+        support.runHITLStage(request,
                 new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-reply", List.of(payload), "human_input", actions),
                 checkpoint -> {
@@ -113,7 +113,7 @@ public class AgentScopeCheckpointService {
         payload.put("approvalMode", mode.name());
         payload.put("replyId", replyId);
         payload.put("toolCalls", calls);
-        support.runHITLStage(request, null,
+        support.runHITLStage(request,
                 new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-confirm", List.of(payload), "human_input", actions),
                 checkpoint -> {
@@ -279,7 +279,7 @@ public class AgentScopeCheckpointService {
                         "description", "删除现有分镜及其素材关联，再写入新分镜"),
                 Map.of("id", "delete", "title", "删除全部分镜",
                         "description", "只删除现有分镜，本次不写入新分镜"));
-        support.runHITLStage(request, null,
+        support.runHITLStage(request,
                 new AgentRuntimeSupport.StagePlan(
                         "当前项目已有 " + existingSceneCount
                                 + " 个分镜。本次生成结果要怎么处理？",

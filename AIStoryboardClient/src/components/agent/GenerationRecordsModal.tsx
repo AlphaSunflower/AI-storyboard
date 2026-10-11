@@ -14,7 +14,7 @@ import {
 import type { GenerationRecord } from '../../api/agent';
 import {
   X, History, Download, ArrowRight, Copy, RefreshCw, RotateCcw, ChevronLeft,
-  Calendar, Clock, AlertTriangle, Image as ImageIcon, Film,
+  Calendar, Clock, AlertTriangle, Image as ImageIcon, Film, FileText,
 } from 'lucide-react';
 
 /** 生成类型标签映射 */
@@ -29,6 +29,7 @@ const GEN_TYPE_LABEL: Record<string, string> = {
   first_last_frame_to_video: '首尾帧生视频',
   storyboard_video: '分镜视频',
   storyboard_image: '分镜图片',
+  sandbox_generated: '沙箱文件',
 };
 
 const GEN_TYPE_OPTIONS = [
@@ -99,6 +100,51 @@ function isStoryboardQueueRecord(record: GenerationRecord): boolean {
   return record.genType === 'storyboard_video' || record.genType === 'storyboard_image';
 }
 
+type ResultKind = 'image' | 'video' | 'file';
+
+/** 结果类型：图片/视频直接渲染，其余（document 等）按文件卡片处理。 */
+function resultKind(record: GenerationRecord): ResultKind {
+  if (record.type === 'video') return 'video';
+  if (record.type === 'image') return 'image';
+  return 'file';
+}
+
+function fileNameFromUrl(url: string): string {
+  const clean = (url ?? '').split('?')[0].split('#')[0];
+  const slash = clean.lastIndexOf('/');
+  return (slash >= 0 ? clean.slice(slash + 1) : clean) || '生成文件';
+}
+
+function resultFileName(record: GenerationRecord, url: string): string {
+  const original = record.originalName?.trim();
+  return original ? original : fileNameFromUrl(url);
+}
+
+const TEXT_PREVIEW_EXT = new Set([
+  'md', 'markdown', 'txt', 'log', 'csv', 'json', 'yaml', 'yml', 'xml',
+  'html', 'htm', 'js', 'ts', 'css', 'sql', 'sh', 'py', 'java',
+]);
+
+function isTextPreviewable(url: string, mimeType?: string | null): boolean {
+  const mime = (mimeType ?? '').toLowerCase();
+  if (mime.startsWith('text/')) return true;
+  if (mime === 'application/json' || mime === 'application/xml') return true;
+  const ext = fileNameFromUrl(url).toLowerCase();
+  const dot = ext.lastIndexOf('.');
+  return dot >= 0 && TEXT_PREVIEW_EXT.has(ext.slice(dot + 1));
+}
+
+function isPdf(url: string, mimeType?: string | null): boolean {
+  return (mimeType ?? '').toLowerCase() === 'application/pdf'
+    || fileNameFromUrl(url).toLowerCase().endsWith('.pdf');
+}
+
+/** 追加 download=1，让后端返回 attachment 语义的 Content-Disposition。 */
+function downloadUrl(url: string): string {
+  if (!url) return url;
+  return url.includes('?') ? `${url}&download=1` : `${url}?download=1`;
+}
+
 function MediaThumb({ url, type, onClick }: { url: string; type: 'image' | 'video'; onClick?: (e: React.MouseEvent) => void }) {
   const src = assetUrl(url);
   const common: React.CSSProperties = {
@@ -131,6 +177,106 @@ function RefArrow({ label }: { label?: string }) {
   );
 }
 
+function FileThumb({ name, onClick }: { name: string; onClick?: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      onClick={onClick}
+      title={name}
+      style={{
+        width: '100%', height: '100%', borderRadius: 8, background: 'var(--color-surface-soft)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 4, padding: 6, overflow: 'hidden', textAlign: 'center',
+        cursor: onClick ? 'zoom-in' : 'default',
+      }}
+    >
+      <FileText size={22} strokeWidth={1.8} color={DS.textSecondary} />
+      <span style={{
+        fontSize: 10, color: 'var(--color-muted)', width: '100%',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{name}</span>
+    </div>
+  );
+}
+
+function TextPreviewModal({
+  file, onClose,
+}: {
+  file: { name: string; url: string } | null;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) return;
+    setText(null);
+    setError(null);
+    let cancelled = false;
+    fetch(assetUrl(file.url))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then((body) => { if (!cancelled) setText(body); })
+      .catch((err: Error) => { if (!cancelled) setError(err.message || '加载失败'); });
+    return () => { cancelled = true; };
+  }, [file]);
+
+  useEffect(() => {
+    if (!file) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [file, onClose]);
+
+  if (!file) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 460, background: 'rgba(20,20,19,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(880px, 94vw)', height: 'min(80vh, 720px)', background: 'white',
+          borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          boxShadow: '0 16px 64px rgba(0,0,0,0.3)',
+        }}
+      >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+          padding: '12px 16px', borderBottom: '1px solid var(--color-hairline)',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: DS.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {file.name}
+          </span>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <a href={downloadUrl(file.url)} download={file.name} style={actionBtn(DS.textSecondary)}>
+              <Download size={13} strokeWidth={2} /> 下载
+            </a>
+            <button onClick={onClose} style={actionBtn(DS.textSecondary)} aria-label="关闭预览">关闭</button>
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, background: 'var(--color-surface-soft)' }}>
+          {error ? (
+            <span style={{ fontSize: 13, color: '#d92d20' }}>预览失败：{error}</span>
+          ) : text == null ? (
+            <span style={{ fontSize: 13, color: 'var(--color-muted)' }}>加载中…</span>
+          ) : (
+            <pre style={{
+              margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              fontSize: 13, lineHeight: 1.65, color: DS.ink, fontFamily: 'inherit',
+            }}>{text}</pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
     filters, setFilters, resetFilters, page, size, total, records, loading, error,
@@ -138,12 +284,25 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
     refetch, retry,
   } = useGenerationRecordsStore();
   const [preview, setPreview] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [filePreview, setFilePreview] = useState<{ name: string; url: string } | null>(null);
   const [refetchTried, setRefetchTried] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const showDetail = Boolean(activeId && detail);
+
+  const previewFile = (name: string, url: string, mimeType?: string | null) => {
+    if (isPdf(url, mimeType)) {
+      window.open(assetUrl(url), '_blank', 'noopener');
+      return;
+    }
+    if (isTextPreviewable(url, mimeType)) {
+      setFilePreview({ name, url });
+      return;
+    }
+    window.open(assetUrl(url), '_blank', 'noopener');
+  };
 
   // 弹窗入场：对话框淡入 + 上浮（打开时执行一次）
   useGSAP(() => {
@@ -331,6 +490,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
                   onRefetch={() => void handleRefetch(detail.id)}
                   onRetry={() => void retry(detail.id)}
                   onPreviewMedia={(url, type) => setPreview({ url, type })}
+                  onPreviewFile={(name, url, mimeType) => previewFile(name, url, mimeType)}
                 />
               </div>
             )}
@@ -350,6 +510,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
         </div>
       </div>
       <ImagePreviewModal url={preview?.url ?? null} type={preview?.type ?? 'image'} onClose={() => setPreview(null)} />
+      <TextPreviewModal file={filePreview} onClose={() => setFilePreview(null)} />
     </>
   );
 }
@@ -367,6 +528,7 @@ function RecordCard({
   const refBased = isRefBased(record);
   const sm = statusMeta(record.status);
   const mediaType = record.type === 'video' ? 'video' : 'image';
+  const kind = resultKind(record);
   const primary = results[0];
   const firstRef = refs[0]?.url;
   const preview = (url: string, type: 'image' | 'video') => (e: React.MouseEvent) => {
@@ -389,7 +551,13 @@ function RecordCard({
     >
       {/* 缩略图区 */}
       <div style={{ flexShrink: 0, width: 96, height: 72, display: 'flex', alignItems: 'center', gap: 4 }}>
-        {refBased && firstRef ? (
+        {kind === 'file' ? (
+          <div style={{ width: 96, height: 72 }}>
+            {primary
+              ? <FileThumb name={resultFileName(record, primary)} />
+              : <div style={thumbPlaceholder}>{record.status === 'failed' ? '失败' : '生成中'}</div>}
+          </div>
+        ) : refBased && firstRef ? (
           <>
             <div style={{ width: 48, height: 72 }}>
               <MediaThumb url={firstRef} type={refs[0]?.type === 'video' ? 'video' : 'image'} onClick={preview(firstRef, refs[0]?.type === 'video' ? 'video' : 'image')} />
@@ -416,7 +584,11 @@ function RecordCard({
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: DS.ink, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            {record.type === 'video' ? <Film size={12} strokeWidth={2} /> : <ImageIcon size={12} strokeWidth={2} />}
+            {record.type === 'video'
+              ? <Film size={12} strokeWidth={2} />
+              : kind === 'file'
+                ? <FileText size={12} strokeWidth={2} />
+                : <ImageIcon size={12} strokeWidth={2} />}
             {genTypeLabel(record.genType)}
           </span>
           {record.model && <Tag>{record.model}</Tag>}
@@ -437,7 +609,9 @@ function RecordCard({
         <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
           {primary && (
             <a
-              href={assetUrl(primary)} download target="_blank" rel="noreferrer"
+              href={downloadUrl(assetUrl(primary))}
+              download={resultFileName(record, primary)}
+              target="_blank" rel="noreferrer"
               onClick={(e) => e.stopPropagation()}
               style={actionBtn(DS.textSecondary)}
             ><Download size={12} strokeWidth={2} /> 下载</a>
@@ -449,7 +623,7 @@ function RecordCard({
 }
 
 function RecordDetail({
-  record, detailLoading, refetchTried, onBack, onRefetch, onRetry, onPreviewMedia,
+  record, detailLoading, refetchTried, onBack, onRefetch, onRetry, onPreviewMedia, onPreviewFile,
 }: {
   record: GenerationRecord | null;
   detailLoading: boolean;
@@ -458,6 +632,7 @@ function RecordDetail({
   onRefetch: () => void;
   onRetry: () => void;
   onPreviewMedia: (url: string, type: 'image' | 'video') => void;
+  onPreviewFile: (name: string, url: string, mimeType?: string | null) => void;
 }) {
   if (!record || detailLoading) return <Loading />;
   const results = resultUrls(record);
@@ -465,6 +640,7 @@ function RecordDetail({
   const refBased = isRefBased(record);
   const sm = statusMeta(record.status);
   const mediaType = record.type === 'video' ? 'video' : 'image';
+  const kind = resultKind(record);
   const params = parseParams(record.params);
 
   return (
@@ -495,8 +671,9 @@ function RecordDetail({
 
       {/* 生成状况 */}
       <GenContent
-        refs={refs} results={results} refBased={refBased} mediaType={mediaType}
-        onPreviewMedia={onPreviewMedia}
+        record={record} refs={refs} results={results} refBased={refBased}
+        mediaType={mediaType} kind={kind}
+        onPreviewMedia={onPreviewMedia} onPreviewFile={onPreviewFile}
       />
 
       {/* 提示词 */}
@@ -534,13 +711,16 @@ function RecordDetail({
 }
 
 function GenContent({
-  refs, results, refBased, mediaType, onPreviewMedia,
+  record, refs, results, refBased, mediaType, kind, onPreviewMedia, onPreviewFile,
 }: {
+  record: GenerationRecord;
   refs: { type: string; url: string | null; role?: string }[];
   results: string[];
   refBased: boolean;
   mediaType: 'image' | 'video';
+  kind: ResultKind;
   onPreviewMedia: (url: string, type: 'image' | 'video') => void;
+  onPreviewFile: (name: string, url: string, mimeType?: string | null) => void;
 }) {
   return (
     <div style={{
@@ -548,7 +728,14 @@ function GenContent({
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-muted)' }}>生成状况</span>
-      {refBased && refs.length > 0 ? (
+      {kind === 'file' ? (
+        <FileStrip
+          title={`生成结果（${results.length}）`}
+          mimeType={record.mimeType}
+          items={results.map((u) => ({ name: resultFileName(record, u), url: u }))}
+          onPreviewFile={onPreviewFile}
+        />
+      ) : refBased && refs.length > 0 ? (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <MediaStrip
             title={`参考素材（${refs.length}）`}
@@ -572,6 +759,51 @@ function GenContent({
       {results.length === 0 && refs.length === 0 && (
         <span style={{ fontSize: 13, color: 'var(--color-muted)' }}>暂无结果（生成中或失败）</span>
       )}
+    </div>
+  );
+}
+
+function FileStrip({
+  title, items, mimeType, onPreviewFile,
+}: {
+  title: string;
+  items: { name: string; url: string }[];
+  mimeType?: string | null;
+  onPreviewFile: (name: string, url: string, mimeType?: string | null) => void;
+}) {
+  const shown = items.filter((item) => item.url).slice(0, 8);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={{ fontSize: 12, color: 'var(--color-muted)' }}>{title}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {shown.map((item) => (
+          <div
+            key={item.url}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              border: '1px solid var(--color-hairline)', borderRadius: 10, padding: '8px 10px',
+            }}
+          >
+            <div style={{ width: 36, height: 36, flexShrink: 0 }}>
+              <FileThumb name={item.name} />
+            </div>
+            <span style={{
+              flex: 1, minWidth: 0, fontSize: 13, color: DS.ink,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{item.name}</span>
+            <button
+              onClick={() => onPreviewFile(item.name, item.url, mimeType)}
+              style={actionBtn(DS.brand)}
+            >预览</button>
+            <a
+              href={downloadUrl(assetUrl(item.url))}
+              download={item.name}
+              target="_blank" rel="noreferrer"
+              style={actionBtn(DS.textSecondary)}
+            ><Download size={12} strokeWidth={2} /> 下载</a>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -53,6 +53,9 @@ import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.ImageRefinePromptService;
 import com.moon.moonagent.ai.VideoPlanService;
 import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.ThinkingBlockDeltaEvent;
+import io.agentscope.core.event.ThinkingBlockEndEvent;
+import io.agentscope.core.event.ThinkingBlockStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.AssistantMessage;
 import io.agentscope.core.message.Msg;
@@ -87,6 +90,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -296,7 +300,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 ? encodeCursor(pageRows.getLast().getCreatedAt(), pageRows.getLast().getId())
                 : null;
         List<AgentMessageVO> records = pageRows.reversed().stream()
-                .map(AgentChatServiceImpl::messageVo)
+                .map(this::messageVo)
                 .toList();
         return new MessagePageVO(records, nextCursor, hasMore);
     }
@@ -336,13 +340,20 @@ public class AgentChatServiceImpl implements AgentChatService {
                 .toList();
     }
 
-    private static AgentMessageVO messageVo(AgentMessage message) {
+    private AgentMessageVO messageVo(AgentMessage message) {
+        String content = message.getContent();
+        String signedContent = fileUrlSigner.signEmbeddedUrls(content);
+        Map<String, Object> metadata = message.getMetadata() == null ? Map.of() : message.getMetadata();
+        Map<String, Object> signedMetadata = fileUrlSigner.signMetadata(metadata);
+        if (signedMetadata == null || (signedMetadata.isEmpty() && !metadata.isEmpty())) {
+            signedMetadata = metadata;
+        }
         return new AgentMessageVO(
                 message.getId(),
                 message.getConversationId(),
                 message.getRole(),
-                message.getContent(),
-                message.getMetadata(),
+                signedContent == null ? content : signedContent,
+                signedMetadata,
                 message.getCreatedAt());
     }
 
@@ -1120,7 +1131,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 started.put("turnId", turn.getId());
                 started.put("conversationId", conversationId);
                 started.put("runtime", turn.getRuntimeEngine() == null
-                        ? "agentscope-java-2.0.3" : turn.getRuntimeEngine());
+                        ? "agentscope-java-2.0.4" : turn.getRuntimeEngine());
                 // 随 turn_started 提前下发模型上下文窗口，前端首轮即可展示正确分母（无需等 usage 事件）
                 started.put("contextWindowTokens", resolveAgentContextWindow());
                 sendRuntimeEnvelope(emitter,
@@ -1162,23 +1173,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentTurnResult result;
                 try (AgentTurnEventPublisher eventPublisher = eventPublisher(
                         turn.getId(), emitter, trace.contextWindowTokens())) {
-                    trace.setEventSink(traceEvent -> eventPublisher.publishRaw(
-                            "agent_event", Map.of(
-                                    "eventType", "AGENT_TRACE",
-                                    "data", Map.of("traceEvent", traceEvent))));
-                    result = agentScopeMediaRuntime.runTurn(
-                            conversation, request, trace,
-                            eventObserver(eventPublisher, turn.getId(), emitter,
-                                    trace.contextWindowTokens()));
-                    trace.setEventSink(null);
+                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
+                    String orderedTurnId = turn.getId();
+                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                            agentScopeMediaRuntime.runTurn(
+                                    conversation, request, trace,
+                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                            trace.contextWindowTokens())));
                 }
                 throwIfInterrupted(conversationId);
-                if (sandboxOutputReconciler != null) {
-                    var published = sandboxOutputReconciler.reconcile(conversation, turn.getId());
-                    if (!published.assetIds().isEmpty()) {
-                        result = withSandboxAttachments(result, published);
-                    }
-                }
+                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
                 if (turn != null) {
@@ -1298,13 +1302,17 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentTurnResult result;
                 try (AgentTurnEventPublisher eventPublisher = eventPublisher(
                         turn.getId(), emitter, trace.contextWindowTokens())) {
-                    result = agentScopeMediaRuntime.resumeTurn(
-                            conversation, claim.checkpoint(), request, trace,
-                            action, customText,
-                            eventObserver(eventPublisher, turn.getId(), emitter,
-                                    trace.contextWindowTokens()));
+                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
+                    String orderedTurnId = turn.getId();
+                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                            agentScopeMediaRuntime.resumeTurn(
+                                    conversation, claim.checkpoint(), request, trace,
+                                    action, customText,
+                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                            trace.contextWindowTokens())));
                 }
                 throwIfInterrupted(conversationId);
+                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
                 checkpointResumeService.complete(claim);
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
@@ -1400,12 +1408,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                 AgentTurnResult result;
                 try (AgentTurnEventPublisher eventPublisher = eventPublisher(
                         turn.getId(), emitter, trace.contextWindowTokens())) {
-                    result = agentScopeMediaRuntime.resumeCanvasTurn(
-                            conversation, session, request, trace,
-                            eventObserver(eventPublisher, turn.getId(), emitter,
-                                    trace.contextWindowTokens()));
+                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
+                    String orderedTurnId = turn.getId();
+                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                            agentScopeMediaRuntime.resumeCanvasTurn(
+                                    conversation, session, request, trace,
+                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                            trace.contextWindowTokens())));
                 }
                 throwIfInterrupted(conversationId);
+                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
                 canvasSessionService.markResumed(session.sessionId());
                 finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
@@ -1612,10 +1624,33 @@ public class AgentChatServiceImpl implements AgentChatService {
                 envelope -> sendRuntimeEnvelope(emitter, envelope));
     }
 
+    private <T> T withTraceStreaming(
+            AgentTraceAccumulator trace,
+            AgentTurnEventPublisher eventPublisher,
+            Supplier<T> runtimeCall) {
+        trace.setEventSink(traceEvent -> eventPublisher.publishRaw(
+                "agent_event", Map.of(
+                        "eventType", "AGENT_TRACE",
+                        "data", Map.of("traceEvent", traceEvent))));
+        try {
+            return runtimeCall.get();
+        } finally {
+            trace.setEventSink(null);
+        }
+    }
+
     private java.util.function.Consumer<AgentEvent> eventObserver(
+            AgentTraceAccumulator trace,
             AgentTurnEventPublisher eventPublisher, String turnId, SseEmitter emitter,
             long contextWindowTokens) {
         return event -> {
+            if (event instanceof ThinkingBlockStartEvent) {
+                trace.recordThinkingStart();
+            } else if (event instanceof ThinkingBlockDeltaEvent thinking) {
+                trace.recordThinkingDelta(thinking.getDelta());
+            } else if (event instanceof ThinkingBlockEndEvent) {
+                trace.recordThinkingEnd();
+            }
             eventPublisher.accept(event);
             if (event instanceof ToolResultEndEvent result) {
                 eventPublisher.flush();
@@ -1649,9 +1684,16 @@ public class AgentChatServiceImpl implements AgentChatService {
         };
     }
 
-    /** 本轮模型的上下文窗口：网关 model_params.context_window 优先，缺失回退内置表。 */
+    /** 本轮模型上下文窗口优先取自 AgentScope Model，旧运行时测试再回退网关解析。 */
     private int resolveAgentContextWindow() {
-        if (agentContextWindowResolver == null || agentScopeMediaRuntime == null) {
+        if (agentScopeMediaRuntime != null) {
+            int resolved = agentScopeMediaRuntime.contextWindowTokens();
+            if (resolved > 0) return resolved;
+        }
+        if (agentContextWindowResolver == null) {
+            return AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+        }
+        if (agentScopeMediaRuntime == null) {
             return AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
         }
         try {
@@ -1686,6 +1728,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         if (result.hitlPaused()) {
             updateHitlMessageContent(result.messageId(), result.content());
+            mergeHitlMessageThinking(result.messageId(), result);
             Map<String, Object> paused = new LinkedHashMap<>();
             paused.put("turnId", turn.getId());
             paused.put("messageId", result.messageId() == null ? "" : result.messageId());
@@ -1727,6 +1770,16 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     @SuppressWarnings("unchecked")
+    private AgentTurnResult reconcileSandboxOutputs(
+            AgentConversation conversation, String turnId, AgentTurnResult result) {
+        if (sandboxOutputReconciler == null || result == null) return result;
+        var published = sandboxOutputReconciler.reconcile(conversation, turnId);
+        return published.assetIds().isEmpty()
+                ? result
+                : withSandboxAttachments(result, published);
+    }
+
+    @SuppressWarnings("unchecked")
     private AgentTurnResult withSandboxAttachments(
             AgentTurnResult result,
             com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher.PublishedArtifacts published) {
@@ -1741,8 +1794,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                             ? "生成文件" : asset.getOriginalName());
                     item.put("mimeType", asset.getMimeType() == null
                             ? "application/octet-stream" : asset.getMimeType());
-                    item.put("kind", asset.getMimeType() != null
-                            && asset.getMimeType().startsWith("image/") ? "image" : "file");
+                    item.put("kind", com.moon.moonagent.ai.agent.sandbox
+                            .SandboxArtifactPublisher.attachmentKind(asset.getMimeType()));
                     item.put("source", "upload");
                     return item;
                 })
@@ -1753,10 +1806,21 @@ public class AgentChatServiceImpl implements AgentChatService {
         Object existing = metadata.get("sandboxAttachments");
         if (existing instanceof List<?> current) {
             List<Map<String, Object>> merged = new java.util.ArrayList<>();
+            java.util.Set<String> seenAssetIds = new java.util.HashSet<>();
             current.stream().filter(Map.class::isInstance)
                     .map(item -> (Map<String, Object>) item)
-                    .forEach(merged::add);
-            merged.addAll(attachments);
+                    .forEach(item -> {
+                        String assetId = item.get("assetId") == null
+                                ? null : String.valueOf(item.get("assetId"));
+                        if (assetId != null && !seenAssetIds.add(assetId)) return;
+                        merged.add(item);
+                    });
+            for (Map<String, Object> item : attachments) {
+                String assetId = item.get("assetId") == null
+                        ? null : String.valueOf(item.get("assetId"));
+                if (assetId != null && !seenAssetIds.add(assetId)) continue;
+                merged.add(item);
+            }
             metadata.put("sandboxAttachments", merged);
         } else {
             metadata.put("sandboxAttachments", attachments);
@@ -1772,6 +1836,30 @@ public class AgentChatServiceImpl implements AgentChatService {
         AgentMessage update = new AgentMessage();
         update.setId(messageId);
         update.setContent(content);
+        messageMapper.updateById(update);
+    }
+
+    /** HITL 暂停时把本轮思考链合并到已落库卡片，确保刷新后仍可恢复。 */
+    void mergeHitlMessageThinking(String messageId, AgentTurnResult result) {
+        if (messageId == null || messageId.isBlank() || result == null) return;
+        Map<String, Object> additions = new LinkedHashMap<>();
+        if (result.reasoning() != null) additions.put("reasoning", result.reasoning());
+        if (result.agentTrace() != null && !result.agentTrace().isEmpty()) {
+            additions.put("agentTrace", result.agentTrace());
+        }
+        if (result.metadata() != null && result.metadata().get("metrics") != null) {
+            additions.put("metrics", result.metadata().get("metrics"));
+        }
+        if (additions.isEmpty()) return;
+
+        AgentMessage persisted = messageMapper.selectById(messageId);
+        if (persisted == null) return;
+        Map<String, Object> merged = persisted.getMetadata() == null
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(persisted.getMetadata());
+        merged.putAll(additions);
+        AgentMessage update = new AgentMessage();
+        update.setId(messageId);
+        update.setMetadata(merged);
         messageMapper.updateById(update);
     }
 
@@ -1865,13 +1953,18 @@ public class AgentChatServiceImpl implements AgentChatService {
         var cp = checkpointMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.moon.moonagent.entity.AgentCheckpoint>()
                         .eq(com.moon.moonagent.entity.AgentCheckpoint::getConversationId, conversationId)
-                        .eq(com.moon.moonagent.entity.AgentCheckpoint::getStatus, "pending")
+                        .in(com.moon.moonagent.entity.AgentCheckpoint::getStatus, "pending", "claimed")
                         .gt(com.moon.moonagent.entity.AgentCheckpoint::getExpirationTime, java.time.OffsetDateTime.now())
                         .orderByDesc(com.moon.moonagent.entity.AgentCheckpoint::getCreatedAt)
                         .last("LIMIT 1"));
         if (cp == null) return null;
+        if ("claimed".equals(cp.getStatus())
+                && checkpointResumeService.hasActiveClaim(cp)) {
+            return null;
+        }
         try {
             JsonNode plan = objectMapper.readTree(cp.getPlan());
+            if (isSubmittedHitlCheckpoint(cp, plan)) return null;
             Map<String, Object> result = new java.util.LinkedHashMap<>();
             result.put("formToken", cp.getFormToken());
             result.put("taskId", "");
@@ -1957,6 +2050,18 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
     }
 
+    private boolean isSubmittedHitlCheckpoint(
+            com.moon.moonagent.entity.AgentCheckpoint checkpoint, JsonNode plan) {
+        String messageId = plan.path("_hitlMessageId").asText("");
+        if (messageId.isBlank()) return false;
+        AgentMessage message = messageMapper.selectById(messageId);
+        if (message == null || message.getMetadata() == null) return false;
+        Object rawHitl = message.getMetadata().get("hitl");
+        if (!(rawHitl instanceof Map<?, ?> hitl)) return false;
+        return java.util.Objects.equals(checkpoint.getFormToken(), hitl.get("formToken"))
+                && Boolean.FALSE.equals(hitl.get("pending"));
+    }
+
     @Override
     public void skipPendingCheckpoints(String userId, String conversationId) {
         getOwnedConversation(userId, conversationId);
@@ -1968,7 +2073,10 @@ public class AgentChatServiceImpl implements AgentChatService {
     public boolean interrupt(String userId, String conversationId) {
         // 归属校验（40401 同文案，防 IDOR 枚举）
         getOwnedConversation(userId, conversationId);
-        // 置位会话级打断标志：编排的流式循环/阶段边界检测到后协作式取消
+        if (agentScopeMediaRuntime != null) {
+            agentScopeMediaRuntime.interruptTurn(userId, conversationId);
+        }
+        // Legacy compatibility for any non-AgentScope path still sharing the support registry.
         orchestratorSupport.interrupt(conversationId);
         log.info("Agent 对话打断请求已登记: conversationId={}, userId={}", conversationId, userId);
         return true;

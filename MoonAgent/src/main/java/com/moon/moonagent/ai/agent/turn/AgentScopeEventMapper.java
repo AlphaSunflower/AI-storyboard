@@ -14,6 +14,7 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.TextBlockEndEvent;
 import io.agentscope.core.event.TextBlockStartEvent;
 import io.agentscope.core.event.ThinkingBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
@@ -69,6 +70,11 @@ public class AgentScopeEventMapper {
             payload.put("replyId", value.getReplyId());
             payload.put("toolCallId", value.getToolCallId());
             payload.put("toolName", value.getToolCallName());
+        } else if (event instanceof ToolCallDeltaEvent value) {
+            payload.put("replyId", value.getReplyId());
+            payload.put("toolCallId", value.getToolCallId());
+            payload.put("toolName", value.getToolCallName());
+            payload.put("delta", value.getDelta());
         } else if (event instanceof ToolCallEndEvent value) {
             payload.put("replyId", value.getReplyId());
             payload.put("toolCallId", value.getToolCallId());

@@ -17,6 +17,8 @@ describe('ImagePreviewModal', () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(dialog.parentElement).toBe(document.body);
     expect((dialog as HTMLElement).style.zIndex).toBe('4000');
+    expect((dialog as HTMLElement).style.background).toBe('rgb(15, 15, 14)');
+    expect((dialog as HTMLElement).style.backdropFilter).toBe('');
   });
 
   it('keeps image clicks open and closes from the backdrop or close button', () => {

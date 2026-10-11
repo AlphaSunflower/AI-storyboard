@@ -8,11 +8,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -62,9 +65,11 @@ public class FileController {
     @GetMapping("/files/{filename}")
     public ResponseEntity<Resource> getFile(@PathVariable String filename,
                                             @RequestParam(required = false) String token,
+                                            @RequestParam(required = false, defaultValue = "false")
+                                            boolean download,
                                             HttpServletRequest request) {
         verify(request, token);
-        return serve(fileStorageService.readFile(filename), filename);
+        return serve(fileStorageService.readFile(filename), filename, download);
     }
 
     private void verify(HttpServletRequest request, String token) {
@@ -74,13 +79,34 @@ public class FileController {
 
     /** 对象不存在返回 404；存在则以推断的 Content-Type 返回对象字节。 */
     private ResponseEntity<Resource> serve(byte[] bytes, String filename) {
+        return serve(bytes, filename, false);
+    }
+
+    /**
+     * 内联展示或作为附件下载。显式写出 Content-Disposition，避免框架兜底成 {@code filename=f.txt}
+     * 导致下载文件扩展名错误；文件名按 RFC 5987 编码，保留中文原名。
+     */
+    private ResponseEntity<Resource> serve(byte[] bytes, String filename, boolean download) {
         if (bytes == null) {
             return ResponseEntity.notFound().build();
         }
-        MediaType contentType = MediaType.parseMediaType(FileStorageService.contentType(filename));
-        return ResponseEntity.ok()
+        boolean inline = !download && FileStorageService.inlineDisplayable(filename);
+        MediaType contentType = inline
+                ? MediaType.parseMediaType(FileStorageService.contentType(filename))
+                : MediaType.APPLICATION_OCTET_STREAM;
+        ContentDisposition disposition = (inline
+                ? ContentDisposition.inline()
+                : ContentDisposition.attachment())
+                .filename(filename, StandardCharsets.UTF_8)
+                .build();
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
                 .contentType(contentType)
-                .contentLength(bytes.length)
-                .body(new ByteArrayResource(bytes));
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .contentLength(bytes.length);
+        if (inline && FileStorageService.sandboxedInline(filename)) {
+            response.header("Content-Security-Policy", "sandbox");
+        }
+        return response.body(new ByteArrayResource(bytes));
     }
 }

@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
+import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import io.agentscope.core.model.Model;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
@@ -16,6 +17,7 @@ public class AgentScopeModelProvider {
 
     private final AgentScopeProperties properties;
     private final CreativeModelRouter modelRouter;
+    private final AgentContextWindowResolver contextWindowResolver;
 
     @Value("${ai.gateway.base-url:${LLM_GATEWAY_BASE_URL:http://localhost:8083}}")
     private String gatewayBaseUrl;
@@ -29,14 +31,13 @@ public class AgentScopeModelProvider {
         return build(modelName);
     }
 
-    public Model withFallback() {
-        Model primary = primary();
+    public Model fallback() {
         String fallbackName = properties.getFallbackModel();
         if (fallbackName == null || fallbackName.isBlank()
-                || fallbackName.equalsIgnoreCase(primary.getModelName())) {
-            return primary;
+                || fallbackName.equalsIgnoreCase(primary().getModelName())) {
+            return null;
         }
-        return new RetryableFallbackModel(primary, build(fallbackName.trim()));
+        return build(fallbackName.trim());
     }
 
     public Model resolveNamed(String modelName) {
@@ -50,6 +51,7 @@ public class AgentScopeModelProvider {
                 .baseUrl(gatewayBaseUrl)
                 .modelName(modelName)
                 .stream(true)
+                .contextWindowSize(Math.max(1, contextWindowResolver.resolve(modelName)))
                 .nativeStructuredOutputWithTools(false)
                 .build();
     }

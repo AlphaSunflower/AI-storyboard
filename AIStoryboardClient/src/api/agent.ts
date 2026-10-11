@@ -124,6 +124,8 @@ export interface SuggestedAction {
 export interface AgentMessageHitl {
   formContent: string;
   actions: { id: string; title: string }[];
+  formToken?: string;
+  expirationTime?: number;
   pending?: boolean;
   selectedActionId?: string;
   selectedActionTitle?: string;
@@ -420,6 +422,8 @@ export interface AgentAsset {
   taskId: string | null;
   error: string | null;
   createdAt: string;
+  originalName?: string | null;
+  mimeType?: string | null;
   // 生成记录扩展（产出素材面板按 resultUrls 展示多图）
   genType?: string | null;
   params?: string | null;
@@ -435,8 +439,10 @@ export interface GenerationRecord {
   conversationId: string | null;
   userId?: string | null;
   projectId?: string | null;
-  type: 'image' | 'video' | 'reference';
+  type: 'image' | 'video' | 'document' | 'reference';
   url: string | null;
+  originalName?: string | null;
+  mimeType?: string | null;
   prompt: string | null;
   model: string | null;
   status: string;
@@ -527,7 +533,38 @@ export type AgentTurnEventType =
   | 'constraint_flagged'
   | 'media_critique'
   | 'shot_progress'
-  | 'assembly_progress';
+  | 'assembly_progress'
+  | 'AGENT_START'
+  | 'AGENT_END'
+  | 'AGENT_RESULT'
+  | 'MODEL_CALL_START'
+  | 'MODEL_CALL_END'
+  | 'THINKING_BLOCK_START'
+  | 'THINKING_BLOCK_DELTA'
+  | 'THINKING_BLOCK_END'
+  | 'DATA_BLOCK_START'
+  | 'DATA_BLOCK_DELTA'
+  | 'DATA_BLOCK_END'
+  | 'TEXT_BLOCK_START'
+  | 'TEXT_BLOCK_DELTA'
+  | 'TEXT_BLOCK_END'
+  | 'TOOL_CALL_START'
+  | 'TOOL_CALL_DELTA'
+  | 'TOOL_CALL_END'
+  | 'TOOL_RESULT_START'
+  | 'TOOL_RESULT_TEXT_DELTA'
+  | 'TOOL_RESULT_DATA_DELTA'
+  | 'TOOL_RESULT_END'
+  | 'EXCEED_MAX_ITERS'
+  | 'REQUIRE_USER_CONFIRM'
+  | 'REQUIRE_EXTERNAL_EXECUTION'
+  | 'EXTERNAL_EXECUTION_RESULT'
+  | 'USER_CONFIRM_RESULT'
+  | 'REQUEST_STOP'
+  | 'SUBAGENT_EXPOSED'
+  | 'HINT_BLOCK'
+  | 'ALL_TOOLS_DENIED'
+  | 'CUSTOM';
 
 /** Native AgentScope event carried inside an `agent_event` payload. */
 export interface AgentScopeEvent {
@@ -599,6 +636,37 @@ const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
   'media_critique',
   'shot_progress',
   'assembly_progress',
+  'AGENT_START',
+  'AGENT_END',
+  'AGENT_RESULT',
+  'MODEL_CALL_START',
+  'MODEL_CALL_END',
+  'THINKING_BLOCK_START',
+  'THINKING_BLOCK_DELTA',
+  'THINKING_BLOCK_END',
+  'DATA_BLOCK_START',
+  'DATA_BLOCK_DELTA',
+  'DATA_BLOCK_END',
+  'TEXT_BLOCK_START',
+  'TEXT_BLOCK_DELTA',
+  'TEXT_BLOCK_END',
+  'TOOL_CALL_START',
+  'TOOL_CALL_DELTA',
+  'TOOL_CALL_END',
+  'TOOL_RESULT_START',
+  'TOOL_RESULT_TEXT_DELTA',
+  'TOOL_RESULT_DATA_DELTA',
+  'TOOL_RESULT_END',
+  'EXCEED_MAX_ITERS',
+  'REQUIRE_USER_CONFIRM',
+  'REQUIRE_EXTERNAL_EXECUTION',
+  'EXTERNAL_EXECUTION_RESULT',
+  'USER_CONFIRM_RESULT',
+  'REQUEST_STOP',
+  'SUBAGENT_EXPOSED',
+  'HINT_BLOCK',
+  'ALL_TOOLS_DENIED',
+  'CUSTOM',
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1140,9 +1208,20 @@ async function consumeSse(
   onEvent: (e: AgentTurnEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  await consumeSseData<unknown>(res, (_eventName, data) => {
+  await consumeSseData<unknown>(res, (eventName, data) => {
     const envelope = parseAgentTurnEnvelope(data);
-    if (envelope) onEvent(envelope);
+    if (envelope) {
+      onEvent(envelope);
+      return;
+    }
+    const record = isRecord(data) ? data : null;
+    const type = typeof record?.type === 'string' ? record.type : eventName;
+    if (type !== 'turn_failed') return;
+    const payload = isRecord(record?.payload) ? record.payload : {};
+    const message = typeof payload.message === 'string'
+      ? payload.message
+      : '对话处理失败，请重试';
+    throw new Error(message);
   }, signal);
 }
 
@@ -1175,10 +1254,11 @@ async function consumeSseData<T>(
         const dataLine = lines.find((l) => l.startsWith('data:'));
         if (!dataLine) continue;
         const eventName = eventLine ? eventLine.slice(6).trim() : '';
+        let data: T;
         try {
-          const data = JSON.parse(dataLine.slice(5).trim()) as T;
-          onEvent(eventName, data);
-        } catch { /* 忽略坏帧 */ }
+          data = JSON.parse(dataLine.slice(5).trim()) as T;
+        } catch { continue; /* 忽略坏帧 */ }
+        onEvent(eventName, data);
       }
     }
   } finally {

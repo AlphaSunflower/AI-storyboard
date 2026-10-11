@@ -51,6 +51,24 @@ class CheckpointResumeServiceTest {
     }
 
     @Test
+    void reclaimsAStaleClaimedCheckpointAfterTheLeaseExpires() {
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        AgentRecoveryLeaseService leases = mock(AgentRecoveryLeaseService.class);
+        AgentCheckpoint checkpoint = checkpoint("claimed", 3, "AGENTSCOPE");
+        when(mapper.selectOne(any())).thenReturn(checkpoint);
+        when(mapper.update(any(), any())).thenReturn(1);
+        when(leases.tryClaim(anyString(), anyString(), anyString())).thenReturn(2);
+        CheckpointResumeService service = new CheckpointResumeService(mapper, leases);
+
+        CheckpointClaim claim = service.claim("c1", "token-1",
+                new ResumeCommand("approve", "", Map.of(), List.of(), "", ""));
+
+        assertThat(claim.checkpoint().getStatus()).isEqualTo("claimed");
+        assertThat(claim.leaseOwner()).startsWith("user-");
+        verify(mapper).update(any(), any());
+    }
+
+    @Test
     void completesAndReleasesLease() {
         AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
         AgentRecoveryLeaseService leases = mock(AgentRecoveryLeaseService.class);

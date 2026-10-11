@@ -875,33 +875,33 @@ public class AgentRuntimeSupport {
      *
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
-    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan) {
-        return runHITLStage(req, workflowTitle, plan, false, null);
+    public String runHITLStage(OrchestrationRequest req, StagePlan plan) {
+        return runHITLStage(req, plan, false, null);
     }
 
-    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan,
+    public String runHITLStage(OrchestrationRequest req, StagePlan plan,
                                Consumer<AgentCheckpoint> customizer) {
-        return runHITLStage(req, workflowTitle, plan, false, customizer);
+        return runHITLStage(req, plan, false, customizer);
     }
 
     /**
-     * HITL 通用模板：workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件
+     * HITL 通用模板：方案消息 → checkpoint 落库 → human_input/video_plan 事件
      * （发完即结束本轮，等表单提交 resume）。
+     *
+     * <p>进度提示不再直发裸 {@code workflow} SSE：AgentScope 轮次以有序 turn event envelope
+     * 为准，本方法只通过 {@link #sendEvent} 发送自身需要的业务事件。
      *
      * @param skipMessage 追问场景传 true：方案文本已由流式 message 增量发过（streamPlanWithMessage），
      *                    再发一次会重复出现在气泡里；human_input 事件的 formContent 不受影响
      * @return 方案文本（即本轮最后一条 message 内容，供调用方落库）
      */
-    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan, boolean skipMessage) {
-        return runHITLStage(req, workflowTitle, plan, skipMessage, null);
+    public String runHITLStage(OrchestrationRequest req, StagePlan plan, boolean skipMessage) {
+        return runHITLStage(req, plan, skipMessage, null);
     }
 
-    public String runHITLStage(OrchestrationRequest req, String workflowTitle, StagePlan plan,
+    public String runHITLStage(OrchestrationRequest req, StagePlan plan,
                                boolean skipMessage, Consumer<AgentCheckpoint> customizer) {
         checkInterrupted(req); // 打断：不再弹出确认卡片/落库 checkpoint
-        if (workflowTitle != null) {
-            sendWorkflowEvent(req, "hitl_plan", workflowTitle, "node_started");
-        }
         if (!skipMessage) {
             sendEvent(req, "message", Map.of("content", plan.planText()));
         }
@@ -1373,7 +1373,7 @@ public class AgentRuntimeSupport {
                 + StoryboardClient.buildSheetText(chosenAssets)
                 + "\n" + (r.reason() == null || r.reason().isBlank() ? "请讲清楚这些资产在本次创作中的用途。" : r.reason())
                 + "\n\n请重新描述需求（讲清楚资产如何融入），或选择不使用资产继续。";
-        return runHITLStage(req, null, new StagePlan(
+        return runHITLStage(req, new StagePlan(
                 planText, "asset-gate",
                 List.of(Map.of("source", source, "content", prompt, "assetIds", String.join(",", ids),
                         "picUrls", picUrls == null ? List.of() : picUrls)),
@@ -1407,7 +1407,7 @@ public class AgentRuntimeSupport {
                 String planText = "⚠ 调整后的需求与资产关联性仍不强："
                         + (r.reason() == null || r.reason().isBlank() ? "" : r.reason())
                         + "\n\n请进一步讲清楚资产在本次创作中的用途，或选择不使用资产。";
-                runHITLStage(req, null, new StagePlan(
+                runHITLStage(req, new StagePlan(
                         planText, "asset-gate",
                         List.of(Map.of("source", planField(cp.getPlan(), PlanField.SOURCE),
                                 "content", newPrompt, "assetIds", String.join(",", ids),
@@ -1427,31 +1427,6 @@ public class AgentRuntimeSupport {
     private List<String> parseAssetIds(String s) {
         if (s == null || s.isBlank()) return List.of();
         return java.util.Arrays.stream(s.split(",")).map(String::trim).filter(x -> !x.isEmpty()).toList();
-    }
-
-    /**
-     * resume 通用收尾模板：workflow → message（结果内容）→ confirm_result → message_end。
-     * 各链只填充执行工具结果（executeTool 钩子），收尾事件序列全部复用。
-     *
-     * @param result 含 {content, confirm(Map), sceneCount(long)} 三键
-     */
-    public void resumeStage(OrchestrationRequest req, String workflowTitle, Map<String, Object> result) {
-        checkInterrupted(req); // 打断：不再发送生成结果/confirm_result，跳过被截断内容的落库
-        if (workflowTitle != null) {
-            sendWorkflowEvent(req, "resume_action", workflowTitle, "node_started");
-        }
-        String content = String.valueOf(result.getOrDefault("content", ""));
-        sendMessage(req, content);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> confirm = (Map<String, Object>) result.getOrDefault("confirm", Map.of());
-        sendEvent(req, "confirm_result", confirm);
-        long sceneCount = result.get("sceneCount") instanceof Number n ? n.longValue() : -1L;
-        Map<String, Object> endPayload = new java.util.LinkedHashMap<>(Map.of(
-                "messageId", "", "sceneCount", sceneCount, "content", content));
-        if (result.get("suggestedActions") != null) {
-            endPayload.put("suggestedActions", result.get("suggestedActions"));
-        }
-        sendEvent(req, "message_end", endPayload);
     }
 
     /**
@@ -1998,44 +1973,6 @@ public class AgentRuntimeSupport {
     public static String sseJson(Object data) {
         try { return SSE_JSON.writeValueAsString(data); }
         catch (Exception e) { return String.valueOf(data); }
-    }
-
-    /** 发送带稳定阶段标识的 workflow 事件；durationMs 仅在节点结束时写入。 */
-    public void sendWorkflowEvent(OrchestrationRequest req, String stage, String title, String status) {
-        sendWorkflowEvent(req, stage, title, status, null);
-    }
-
-    /** 发送阶段事件。startedAtNanos 由 {@link #workflowStart()} 获取，结束事件自动计算耗时。 */
-    public void sendWorkflowEvent(OrchestrationRequest req, String stage, String title, String status,
-                                  Long startedAtNanos) {
-        java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
-        data.put("stage", stage);
-        data.put("title", title == null ? "" : title);
-        data.put("status", status);
-        if (startedAtNanos != null) {
-            data.put("durationMs", Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L));
-        }
-        sendEvent(req, "workflow", data);
-    }
-
-    /** 统一阶段计时起点。 */
-    public static long workflowStart() {
-        return System.nanoTime();
-    }
-
-    /** 执行同步阶段：自动发送 started，成功发送 finished，异常发送 failed 后原样抛出。 */
-    public <T> T runWorkflowStage(OrchestrationRequest req, String stage, String title,
-                                  java.util.function.Supplier<T> action) {
-        long startedAtNanos = workflowStart();
-        sendWorkflowEvent(req, stage, title, "node_started");
-        try {
-            T result = action.get();
-            sendWorkflowEvent(req, stage, title, "node_finished", startedAtNanos);
-            return result;
-        } catch (RuntimeException | Error e) {
-            sendWorkflowEvent(req, stage, title, "node_failed", startedAtNanos);
-            throw e;
-        }
     }
 
     /** SseEmitter 事件发送（前端断开忽略）；message 事件同步更新 req.lastMessage（per-request，并发安全） */

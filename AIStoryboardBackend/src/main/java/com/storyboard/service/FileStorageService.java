@@ -2,6 +2,9 @@ package com.storyboard.service;
 
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Locale;
+import java.util.Set;
+
 /**
  * 文件存储服务接口：图片/视频下载保存、上传图片保存、对象读取/删除、Content-Type 推断。
  * <p>
@@ -70,30 +73,91 @@ public interface FileStorageService {
     /** 删除通用文件对象（best-effort）。 */
     void deleteFile(String filename);
 
+    /**
+     * Extensions whose bytes are human-readable text. Unknown content types fall back to
+     * {@code application/octet-stream}, but these are safe to serve as {@code text/plain} even when
+     * the model wrote an extension the server has never seen before.
+     */
+    Set<String> PLAIN_TEXT_EXTENSIONS = Set.of(
+            "txt", "log", "html", "htm",
+            "py", "pyw", "js", "mjs", "cjs", "jsx", "ts", "tsx",
+            "java", "kt", "kts", "go", "rs", "rb", "php",
+            "c", "h", "cc", "cpp", "cxx", "hpp", "hxx", "cs",
+            "swift", "m", "mm", "scala", "dart", "lua", "pl", "pm", "r",
+            "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql",
+            "vue", "svelte", "astro", "toml", "gradle", "ini", "conf", "cfg",
+            "config", "properties", "env", "makefile", "dockerfile", "gitignore",
+            "editorconfig", "tex", "rst", "proto", "graphql", "gql");
+
+    /** Binary archive formats are always sent as attachments. */
+    Set<String> ARCHIVE_EXTENSIONS = Set.of(
+            "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar");
+
     /** Infer Content-Type from filename extension. */
     static String contentType(String filename) {
-        String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+        String ext = extensionOf(filename);
         return switch (ext) {
             case "png" -> "image/png";
             case "jpg", "jpeg" -> "image/jpeg";
             case "webp" -> "image/webp";
             case "gif" -> "image/gif";
+            case "bmp" -> "image/bmp";
+            case "avif" -> "image/avif";
+            case "svg" -> "image/svg+xml";
             case "mp4" -> "video/mp4";
             case "webm" -> "video/webm";
             case "mov" -> "video/quicktime";
+            case "mkv" -> "video/x-matroska";
             case "wav" -> "audio/wav";
             case "mp3" -> "audio/mpeg";
             case "m4a" -> "audio/mp4";
+            case "ogg" -> "audio/ogg";
+            case "flac" -> "audio/flac";
             case "md", "markdown" -> "text/markdown";
-            case "txt", "log" -> "text/plain";
             case "csv" -> "text/csv";
+            case "tsv" -> "text/tab-separated-values";
             case "json" -> "application/json";
-            case "svg" -> "image/svg+xml";
+            case "jsonl", "ndjson" -> "application/x-ndjson";
+            case "yaml", "yml" -> "application/yaml";
+            case "xml" -> "text/plain";
             case "pdf" -> "application/pdf";
             case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-            default -> "application/octet-stream";
+            case "zip" -> "application/zip";
+            case "tar" -> "application/x-tar";
+            case "gz", "tgz" -> "application/gzip";
+            case "bz2" -> "application/x-bzip2";
+            case "xz" -> "application/x-xz";
+            case "7z" -> "application/x-7z-compressed";
+            case "rar" -> "application/vnd.rar";
+            default -> PLAIN_TEXT_EXTENSIONS.contains(ext)
+                    ? "text/plain" : "application/octet-stream";
         };
+    }
+
+    /**
+     * Whether a file may be served with {@code Content-Disposition: inline}. HTML is deliberately
+     * excluded from the generic file endpoint so an agent-written page can never run as same-origin
+     * script; it is downloaded instead and previewed as escaped text on the client.
+     */
+    static boolean inlineDisplayable(String filename) {
+        String ext = extensionOf(filename);
+        if ("html".equals(ext) || "htm".equals(ext) || ARCHIVE_EXTENSIONS.contains(ext)) {
+            return false;
+        }
+        return !"application/octet-stream".equals(contentType(filename));
+    }
+
+    /** SVG can be inlined for {@code <img>} previews but must run inside a CSP sandbox document. */
+    static boolean sandboxedInline(String filename) {
+        return "svg".equals(extensionOf(filename));
+    }
+
+    static String extensionOf(String filename) {
+        if (filename == null) return "";
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) return "";
+        return filename.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 }

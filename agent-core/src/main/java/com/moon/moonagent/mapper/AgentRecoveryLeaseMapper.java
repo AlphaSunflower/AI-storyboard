@@ -83,6 +83,16 @@ public interface AgentRecoveryLeaseMapper {
                 @Param("owner") String owner);
 
     @Select("""
+            SELECT COUNT(*)
+            FROM public.agent_recovery_leases
+            WHERE resource_type = #{resourceType}
+              AND resource_id = #{resourceId}
+              AND lease_until > now()
+            """)
+    int hasActiveLease(@Param("resourceType") String resourceType,
+                       @Param("resourceId") String resourceId);
+
+    @Select("""
             SELECT COALESCE(attempt, 0)
             FROM public.agent_recovery_leases
             WHERE resource_type = #{resourceType}

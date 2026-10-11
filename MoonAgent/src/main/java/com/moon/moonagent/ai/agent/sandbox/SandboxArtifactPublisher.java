@@ -23,9 +23,10 @@ public class SandboxArtifactPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(SandboxArtifactPublisher.class);
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Set<String> ALLOWED = Set.of(
-            "md", "markdown", "txt", "log", "csv", "json", "docx", "xlsx", "pdf",
-            "png", "jpg", "jpeg", "svg");
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of(
+            "png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg");
+    private static final Set<String> VIDEO_EXTENSIONS = Set.of(
+            "mp4", "webm", "mov", "mkv");
     private static final long MAX_ARTIFACT_BYTES = 50L * 1024 * 1024;
 
     private final MoonSandboxClient client;
@@ -66,10 +67,6 @@ public class SandboxArtifactPublisher {
             return PublishedArtifacts.EMPTY;
         }
         String extension = extension(path);
-        if (!ALLOWED.contains(extension)) {
-            log.debug("Skip unsupported sandbox artifact {}", path);
-            return PublishedArtifacts.EMPTY;
-        }
         if (sizeBytes > MAX_ARTIFACT_BYTES) {
             log.warn("Skip oversized sandbox artifact {} from task {}", path, taskId);
             return PublishedArtifacts.EMPTY;
@@ -77,10 +74,7 @@ public class SandboxArtifactPublisher {
         try {
             byte[] bytes = client.download(conversation.getId(), path);
             String contentHash = sha256(bytes);
-            String idempotencyKey = UUID.nameUUIDFromBytes(
-                    (conversation.getId() + "|" + path + "|" + contentHash)
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                    .toString();
+            String idempotencyKey = idempotencyKey(conversation.getId(), path, contentHash);
             AgentAsset existing = assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
                     .eq(AgentAsset::getIdempotencyKey, idempotencyKey)
                     .last("LIMIT 1"));
@@ -97,7 +91,7 @@ public class SandboxArtifactPublisher {
             asset.setConversationId(conversation.getId());
             asset.setUserId(conversation.getUserId());
             asset.setProjectId(conversation.getProjectId());
-            asset.setType(isImage(extension) ? "image" : "document");
+            asset.setType(assetType(extension));
             asset.setUrl(url);
             asset.setOriginalName(name);
             asset.setMimeType(mime);
@@ -119,6 +113,87 @@ public class SandboxArtifactPublisher {
         }
     }
 
+    /**
+     * Publishes bytes supplied directly by the AgentScope {@code deliver_artifact} tool.
+     *
+     * <p>Uses the same idempotency key as {@link #publishPath} so the explicit delivery path and
+     * the turn-end reconciler collapse onto a single {@code agent_assets} row per content.
+     */
+    public DeliveryOutcome deliver(AgentConversation conversation,
+                                   String taskId,
+                                   String sandboxPath,
+                                   String fileName,
+                                   byte[] bytes,
+                                   String suppliedMimeType,
+                                   boolean force) {
+        if (conversation == null || sandboxPath == null || sandboxPath.isBlank()) {
+            return DeliveryOutcome.fail("conversation and sandbox path are required");
+        }
+        String extension = extension(sandboxPath);
+        if (bytes == null) {
+            return DeliveryOutcome.fail("artifact content is missing");
+        }
+        if (bytes.length > MAX_ARTIFACT_BYTES) {
+            return DeliveryOutcome.fail("artifact exceeds the size limit");
+        }
+        try {
+            String contentHash = sha256(bytes);
+            String idempotencyKey = idempotencyKey(conversation.getId(), sandboxPath, contentHash);
+            AgentAsset existing = assetMapper.selectOne(new LambdaQueryWrapper<AgentAsset>()
+                    .eq(AgentAsset::getIdempotencyKey, idempotencyKey)
+                    .last("LIMIT 1"));
+            if (existing != null) {
+                return DeliveryOutcome.of(new PublishedArtifacts(
+                        List.of(existing.getId()),
+                        existing.getUrl() == null ? List.of() : List.of(existing.getUrl())));
+            }
+            String name = fileName == null || fileName.isBlank() ? fileName(sandboxPath) : fileName;
+            if (!force && nameExists(conversation.getId(), name)) {
+                return DeliveryOutcome.conflict("artifact '" + name + "' already exists");
+            }
+            String mime = suppliedMimeType == null || suppliedMimeType.isBlank()
+                    ? FileStorageService.contentType(name) : suppliedMimeType;
+            String url = storage.saveGeneratedFile(bytes, name, mime);
+            AgentAsset asset = new AgentAsset();
+            asset.setConversationId(conversation.getId());
+            asset.setUserId(conversation.getUserId());
+            asset.setProjectId(conversation.getProjectId());
+            asset.setType(assetType(extension));
+            asset.setUrl(url);
+            asset.setOriginalName(name);
+            asset.setMimeType(mime);
+            asset.setPrompt("由 AgentScope 沙箱生成");
+            asset.setStatus("completed");
+            asset.setTaskId(taskId);
+            asset.setGenType("sandbox_generated");
+            asset.setIdempotencyKey(idempotencyKey);
+            asset.setRequestFingerprint(contentHash);
+            asset.setParams(json(Map.of(
+                    "sandboxPath", sandboxPath,
+                    "sizeBytes", bytes.length)));
+            asset.setResultUrls(json(List.of(url)));
+            assetMapper.insert(asset);
+            return DeliveryOutcome.of(
+                    new PublishedArtifacts(List.of(asset.getId()), List.of(url)));
+        } catch (RuntimeException error) {
+            log.warn("Unable to deliver sandbox artifact {}: {}", sandboxPath, error.getMessage());
+            return DeliveryOutcome.fail(error.getMessage());
+        }
+    }
+
+    private boolean nameExists(String conversationId, String name) {
+        return assetMapper.selectCount(new LambdaQueryWrapper<AgentAsset>()
+                .eq(AgentAsset::getConversationId, conversationId)
+                .eq(AgentAsset::getOriginalName, name)) > 0;
+    }
+
+    private static String idempotencyKey(String conversationId, String path, String contentHash) {
+        return UUID.nameUUIDFromBytes(
+                (conversationId + "|" + path + "|" + contentHash)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                .toString();
+    }
+
     public static Map<String, Object> executionResult(SandboxExecutionResult result) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("exitCode", result.exitCode());
@@ -133,8 +208,26 @@ public class SandboxArtifactPublisher {
         return value;
     }
 
-    private static boolean isImage(String extension) {
-        return Set.of("png", "jpg", "jpeg", "svg").contains(extension);
+    /**
+     * Maps a sandbox artifact extension onto the {@code agent_assets.type} vocabulary used by the
+     * asset panel. Everything that is not a browser-playable image or video stays a document,
+     * including audio, archives and code files.
+     */
+    static String assetType(String extension) {
+        if (IMAGE_EXTENSIONS.contains(extension)) return "image";
+        if (VIDEO_EXTENSIONS.contains(extension)) return "video";
+        return "document";
+    }
+
+    /**
+     * Maps a stored artifact MIME type onto the attachment kind understood by the chat UI.
+     * Audio, archives and code stay {@code file} so their chips remain clickable downloads.
+     */
+    public static String attachmentKind(String mimeType) {
+        String value = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
+        if (value.startsWith("image/")) return "image";
+        if (value.startsWith("video/")) return "video";
+        return "file";
     }
 
     private static String extension(String path) {
@@ -167,5 +260,19 @@ public class SandboxArtifactPublisher {
 
     public record PublishedArtifacts(List<String> assetIds, List<String> urls) {
         public static final PublishedArtifacts EMPTY = new PublishedArtifacts(List.of(), List.of());
+    }
+
+    public record DeliveryOutcome(PublishedArtifacts artifacts, boolean conflict, String error) {
+        static DeliveryOutcome of(PublishedArtifacts artifacts) {
+            return new DeliveryOutcome(artifacts, false, null);
+        }
+
+        static DeliveryOutcome conflict(String error) {
+            return new DeliveryOutcome(PublishedArtifacts.EMPTY, true, error);
+        }
+
+        static DeliveryOutcome fail(String error) {
+            return new DeliveryOutcome(PublishedArtifacts.EMPTY, false, error);
+        }
     }
 }

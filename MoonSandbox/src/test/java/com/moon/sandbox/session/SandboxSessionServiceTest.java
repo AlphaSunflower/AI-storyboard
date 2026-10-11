@@ -7,6 +7,7 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 class SandboxSessionServiceTest {
 
@@ -52,5 +53,24 @@ class SandboxSessionServiceTest {
 
         assertThat(service.cleanup("c1")).isTrue();
         assertThat(root.resolve("c1")).doesNotExist();
+    }
+
+    @Test
+    void listsArbitraryFilesWithInferredMimeTypes() {
+        MoonSandboxProperties properties = MoonSandboxProperties.defaults();
+        SandboxSessionService service = new SandboxSessionService(
+                new SandboxPathResolver(root), properties);
+        service.write("c1", "output/tool.py", "print(1)", WriteMode.OVERWRITE);
+        service.write("c1", "output/clip.mp4", "fake-video", WriteMode.OVERWRITE);
+        service.write("c1", "output/notes.weird", "x", WriteMode.OVERWRITE);
+
+        var files = service.listOutput("c1");
+
+        assertThat(files)
+                .extracting(FileEntry::path, FileEntry::mimeType)
+                .containsExactlyInAnyOrder(
+                        tuple("output/clip.mp4", "video/mp4"),
+                        tuple("output/tool.py", "text/plain"),
+                        tuple("output/notes.weird", "application/octet-stream"));
     }
 }

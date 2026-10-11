@@ -6,7 +6,6 @@ import io.agentscope.harness.agent.filesystem.AbstractFilesystem;
 import io.agentscope.harness.agent.filesystem.local.LocalFilesystem;
 import io.agentscope.harness.agent.filesystem.remote.RemoteFilesystem;
 import io.agentscope.extensions.postgresql.PostgresDistributedStore;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -28,15 +27,27 @@ public class AgentScopeMessageBus {
     private final DataSource dataSource;
     private volatile MessageBus bus;
 
-    @PostConstruct
-    void init() {
-        if (!properties.isWakeupEnabled() || bus != null) return;
+    /**
+     * Binds the bus to the same distributed store used by HarnessAgent. Without this, the runtime
+     * creates separate Postgres stores for state, wakeups and async-tool tracking.
+     */
+    public synchronized void bind(PostgresDistributedStore distributedStore) {
+        if (!properties.isWakeupEnabled()) return;
         Path workspace = resolveWorkspace();
-        AbstractFilesystem filesystem = properties.isDistributedStoreEnabled()
-                ? new RemoteFilesystem(
-                PostgresDistributedStore.create(dataSource).baseStore())
+        AbstractFilesystem filesystem = distributedStore != null
+                ? new RemoteFilesystem(distributedStore.baseStore())
+                : properties.isDistributedStoreEnabled()
+                ? new RemoteFilesystem(PostgresDistributedStore.create(dataSource).baseStore())
                 : new LocalFilesystem(workspace);
+        MessageBus previous = bus;
         bus = new WorkspaceMessageBus(filesystem, ".agentscope/bus");
+        if (previous != null) {
+            try {
+                previous.close();
+            } catch (Exception e) {
+                log.debug("[AgentScope Wakeup] previous MessageBus close failed: {}", e.getMessage());
+            }
+        }
         log.info("[AgentScope Wakeup] MessageBus ready at {}", workspace.resolve(".agentscope/bus"));
     }
 

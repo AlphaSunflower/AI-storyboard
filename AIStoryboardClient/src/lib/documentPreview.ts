@@ -16,7 +16,18 @@ export type DocumentPreviewKind =
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd']);
 const TEXT_EXTENSIONS = new Set([
   'txt', 'text', 'log', 'csv', 'tsv', 'yaml', 'yml', 'xml', 'ini',
-  'conf', 'config', 'properties', 'sql', 'srt', 'vtt',
+  'conf', 'config', 'properties', 'sql', 'srt', 'vtt', 'env',
+  'py', 'pyw', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx',
+  'java', 'kt', 'kts', 'go', 'rs', 'rb', 'php',
+  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hxx', 'cs',
+  'swift', 'm', 'mm', 'scala', 'dart', 'lua', 'pl', 'pm', 'r',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd',
+  'vue', 'svelte', 'astro', 'toml', 'gradle', 'cfg',
+  'makefile', 'dockerfile', 'gitignore', 'editorconfig',
+  'tex', 'rst', 'proto', 'graphql', 'gql',
+  // HTML 只在 MIME 明确为 text/html 时走原始渲染；
+  // 沙箱产物没有可信 HTML MIME，按纯文本转义预览更安全。
+  'html', 'htm',
 ]);
 const JSON_EXTENSIONS = new Set(['json', 'jsonl', 'ndjson']);
 
@@ -69,7 +80,7 @@ export function documentPreviewKind(input: {
   }
   if (extension === 'pdf' || mime === 'application/pdf') return 'pdf';
   if (extension === 'svg' || mime === 'image/svg+xml') return 'image';
-  if (extension === 'html' || extension === 'htm' || mime === 'text/html') return 'html';
+  if (mime === 'text/html') return 'html';
   if (MARKDOWN_EXTENSIONS.has(extension) || mime.includes('markdown')) return 'markdown';
   if (JSON_EXTENSIONS.has(extension) || mime.includes('json')) return 'json';
   if (
@@ -104,7 +115,7 @@ export function documentMimeType(input: {
       return 'image/svg+xml';
     case 'html':
     case 'htm':
-      return 'text/html';
+      return 'text/plain';
     case 'md':
     case 'markdown':
     case 'mdown':

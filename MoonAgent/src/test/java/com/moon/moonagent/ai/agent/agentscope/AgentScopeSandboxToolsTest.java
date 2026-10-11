@@ -11,7 +11,7 @@ import static org.mockito.Mockito.when;
 class AgentScopeSandboxToolsTest {
 
     @Test
-    void registersSandboxToolsWithExpectedReadOnlyPolicy() {
+    void registersOnlyAsyncPythonTool() {
         MoonSandboxClient client = mock(MoonSandboxClient.class);
         when(client.enabled()).thenReturn(true);
         MoonSandboxClientProperties properties = new MoonSandboxClientProperties();
@@ -22,10 +22,6 @@ class AgentScopeSandboxToolsTest {
         var registered = tools.tools();
 
         assertThat(registered).extracting(AgentScopeTool::getName)
-                .containsExactly("write_file", "read_file", "list_files", "run_python_script");
-        assertThat(registered).filteredOn(tool -> tool.getName().equals("read_file"))
-                .allMatch(AgentScopeTool::isReadOnly);
-        assertThat(registered).filteredOn(tool -> tool.getName().equals("list_files"))
-                .allMatch(AgentScopeTool::isReadOnly);
+                .containsExactly("run_python_script");
     }
 }

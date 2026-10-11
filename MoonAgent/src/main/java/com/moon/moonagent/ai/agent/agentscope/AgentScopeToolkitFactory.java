@@ -37,6 +37,8 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeDocumentTools documentTools;
     @Autowired(required = false)
     private AgentScopeSandboxTools sandboxTools;
+    @Autowired(required = false)
+    private AgentScopeWebTools webTools;
     private final AgentCanvasRunService canvasRuns;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
@@ -91,6 +93,9 @@ public class AgentScopeToolkitFactory {
         documentTools.tools().forEach(tool -> register(toolkit, tool));
         if (sandboxTools != null) {
             sandboxTools.tools().forEach(tool -> register(toolkit, tool));
+        }
+        if (webTools != null) {
+            webTools.tools().forEach(tool -> register(toolkit, tool));
         }
         creativeTools.tools().forEach(tool -> register(toolkit, tool));
         storyboardTools.tools().forEach(tool -> register(toolkit, tool));

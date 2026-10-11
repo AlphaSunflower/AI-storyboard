@@ -18,6 +18,7 @@ import com.moon.moonagent.ai.agent.recovery.ExternalActionLedgerService;
 import com.moon.moonagent.ai.agent.recovery.AgentRecoverySource;
 import com.moon.moonagent.ai.agent.recovery.RecoveryCandidate;
 import com.moon.moonagent.ai.agent.recovery.RecoveryOutcome;
+import com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher;
 import com.moon.moonagent.ai.agent.stream.ToolCallStreamGuard;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentCheckpoint;
@@ -64,6 +65,7 @@ import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import io.agentscope.harness.agent.memory.compaction.ConversationCompactor;
 import io.agentscope.harness.agent.memory.compaction.TokenCounterUtil;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
+import io.agentscope.harness.agent.sandbox.SandboxContext;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -128,7 +130,6 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
-    private final AgentContextWindowResolver contextWindowResolver;
     private final AgentScopeAssetGroupService assetGroups;
     private final ExternalActionLedgerService externalActions;
     private final AgentScopeAsyncTaskService asyncTasks;
@@ -145,6 +146,20 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentDocumentService documentService;
     private final CreativeModelRouter modelRouter;
     private final AgentConcurrencyGuard concurrencyGuard;
+
+    @Autowired(required = false)
+    private com.moon.moonagent.ai.agent.agentscope.sandbox.MoonSandboxFilesystemSpec
+            moonSandboxFilesystemSpec;
+
+    @Autowired(required = false)
+    private com.moon.moonagent.ai.agent.agentscope.sandbox.MoonArtifactDeliveryTarget
+            moonArtifactDeliveryTarget;
+
+    @Autowired(required = false)
+    private ToolCallContentMiddleware toolCallContentMiddleware;
+
+    @Autowired(required = false)
+    private FrameworkToolAuditMiddleware frameworkToolAuditMiddleware;
 
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
@@ -164,9 +179,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         }
         try {
             Toolkit toolkit = toolkitFactory.create();
-            Model model = modelProvider.withFallback();
+            Model model = modelProvider.primary();
+            Model fallbackModel = modelProvider.fallback();
             PostgresDistributedStore distributedStore = properties.isDistributedStoreEnabled()
                     ? PostgresDistributedStore.create(dataSource) : null;
+            messageBus.bind(distributedStore);
             stateStore = distributedStore != null
                     ? distributedStore.agentStateStore()
                     : new PostgresAgentStateStore(
@@ -183,9 +200,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             new TurnContextMiddleware(
                                     workflowService, creativeContext, constraintExtraction,
                                     documentService),
-                            new MediaProgressMiddleware(),
-                            new ToolCallContentMiddleware(),
+                            toolCallContentMiddleware != null
+                                    ? toolCallContentMiddleware
+                                    : new ToolCallContentMiddleware(),
                             new AgentTraceBridgeMiddleware()));
+            if (frameworkToolAuditMiddleware != null) {
+                middlewares.add(frameworkToolAuditMiddleware);
+            }
             if (properties.isOtelTracingEnabled()) {
                 middlewares.add(new OtelTracingMiddleware());
             }
@@ -193,6 +214,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     .name("moon-agent")
                     .sysPrompt(globalPromptRepository.getPrompt(Map.of()))
                     .model(model)
+                    .fallbackModel(fallbackModel)
                     .toolkit(toolkit)
                     .maxIters(properties.getMaxIters())
                     .maxRetries(properties.getMaxRetries())
@@ -208,8 +230,6 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             readOnlyToolNames(toolkit)))
                     .middlewares(middlewares)
                     .workspace(workspace)
-                    .disableFilesystemTools()
-                    .disableShellTool()
                     .disableMemoryTools()
                     .disableMemoryHooks()
                     .disableTranscript()
@@ -222,6 +242,15 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             if (distributedStore != null) {
                 builder.distributedStore(distributedStore);
             }
+            if (moonSandboxFilesystemSpec != null) {
+                builder.filesystem(moonSandboxFilesystemSpec);
+            } else {
+                builder.disableFilesystemTools().disableShellTool();
+            }
+            if (moonArtifactDeliveryTarget != null) {
+                builder.artifactDeliveryTarget(moonArtifactDeliveryTarget);
+            }
+            builder.disableWebTools();
             if (properties.isPlanModeEnabled()) {
                 builder.enablePlanMode(true)
                         .planFileDirectory(properties.getPlanFileDirectory());
@@ -281,6 +310,23 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     /** 本轮主模型名，供上下文窗口解析使用。 */
     public String primaryModelName() {
         return modelProvider.primary().getModelName();
+    }
+
+    /** Authoritative context window from the AgentScope model instance. */
+    public int contextWindowTokens() {
+        Model current = agent != null && agent.getDelegate() != null
+                ? agent.getDelegate().getModel() : null;
+        if (current != null && current.getContextWindowSize() > 0) {
+            return current.getContextWindowSize();
+        }
+        return AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+    }
+
+    /** Cooperatively interrupt the in-flight AgentScope call for one conversation slot. */
+    public boolean interruptTurn(String userId, String conversationId) {
+        if (!enabled() || conversationId == null || conversationId.isBlank()) return false;
+        agent.interrupt(userId, conversationId);
+        return true;
     }
 
     /**
@@ -520,7 +566,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         OrchestrationRequest request = new OrchestrationRequest(
                 conversation, "", List.of(), null);
         AgentTraceAccumulator trace = new AgentTraceAccumulator(
-                request, contextWindowResolver.resolve(modelProvider.primary().getModelName()));
+                request, contextWindowTokens());
         request.setTrace(trace);
         return stream(conversation, request, trace, List.of(), null);
     }
@@ -604,13 +650,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
-        RuntimeContext runtime = RuntimeContext.builder()
+        RuntimeContext.Builder runtimeBuilder = RuntimeContext.builder()
                 .userId(conversation.getUserId())
                 .sessionId(conversation.getId())
                 .put(AgentScopeRunContext.class,
                         new AgentScopeRunContext(conversation, request, support, turnState,
-                                checkpointId, externalActions))
-                .build();
+                                checkpointId, externalActions));
+        if (moonSandboxFilesystemSpec != null) {
+            runtimeBuilder.put(SandboxContext.class,
+                    moonSandboxFilesystemSpec.contextForConversation(conversation.getId()));
+        }
+        RuntimeContext runtime = runtimeBuilder.build();
         StringBuilder finalText = new StringBuilder();
         StringBuilder visibleText = new StringBuilder();
         AgentTaskClaimGuard claimGuard = new AgentTaskClaimGuard();
@@ -685,7 +735,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         metadata.put("canvasSession", session.toMap());
                         request.setTurnMetadata(metadata);
                         paused = true;
-                        break;
+                        continue;
                     }
                     ToolUseBlock human = external.getToolCalls().stream()
                             .filter(call -> AgentScopeInteractionTools.REQUEST_HUMAN_INPUT
@@ -723,12 +773,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         }
                     }
                     paused = true;
-                    break;
+                    continue;
                 } else if (event instanceof RequireUserConfirmEvent confirm) {
                     checkpoints.pauseForConfirmation(
                             request, confirm.getReplyId(), confirm.getToolCalls());
                     paused = true;
-                    break;
+                    continue;
                 }
             }
         } catch (RuntimeException e) {
@@ -748,14 +798,10 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             support.sendFriendlyError(request, "", "模型的这条回复陷入了重复调用，已中止。请重试或换个说法再问一次。");
             return turnResult(request, trace, "模型的这条回复陷入了重复调用，已中止。", paused);
         }
-        if (finalText.isEmpty() && resultText != null && !resultText.isBlank()) {
+        if (resultText != null && !resultText.isBlank()) {
             String complete = ToolCallStreamGuard.sanitizeComplete(resultText);
+            finalText.setLength(0);
             finalText.append(complete);
-            String safe = claimGuard.accept(complete);
-            if (!safe.isEmpty()) {
-                visibleText.append(safe);
-                support.sendMessage(request, safe);
-            }
         }
         if (!paused && claimGuard.hasClaim() && !turnState.hasTaskIds()) {
             String correction = runTaskClaimCorrection(conversation, request, trace, runtime, turnState);
@@ -794,7 +840,38 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             metadata.put("taskCards", taskCards);
             request.setTurnMetadata(metadata);
         }
+        attachDeliveredSandboxAssets(request, turnState);
         return turnResult(request, trace, content, paused);
+    }
+
+    /**
+     * Backfills {@code metadata.sandboxAttachments} for files the agent delivered explicitly via
+     * the official {@code deliver_artifact} tool. The turn-end reconciler merges its own scan on
+     * top, so files under {@code output/} still get picked up without duplication.
+     */
+    private void attachDeliveredSandboxAssets(OrchestrationRequest request,
+                                              AgentScopeTurnState turnState) {
+        if (request == null || turnState == null) return;
+        Set<String> assetIds = turnState.deliveredAssetIds();
+        if (assetIds.isEmpty()) return;
+        List<Map<String, Object>> attachments = new ArrayList<>();
+        for (String assetId : assetIds) {
+            AgentAsset asset = assetMapper.selectById(assetId);
+            if (asset == null) continue;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("assetId", asset.getId());
+            item.put("url", asset.getUrl() == null ? "" : asset.getUrl());
+            item.put("name", asset.getOriginalName() == null ? "生成文件" : asset.getOriginalName());
+            item.put("mimeType", asset.getMimeType() == null
+                    ? "application/octet-stream" : asset.getMimeType());
+            item.put("kind", SandboxArtifactPublisher.attachmentKind(asset.getMimeType()));
+            item.put("source", "upload");
+            attachments.add(item);
+        }
+        if (attachments.isEmpty()) return;
+        Map<String, Object> metadata = new LinkedHashMap<>(request.getTurnMetadata());
+        metadata.put("sandboxAttachments", attachments);
+        request.setTurnMetadata(metadata);
     }
 
     public AgentTurnResult resumeCanvasTurn(AgentConversation conversation,
@@ -1111,14 +1188,19 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         }
         metadata.put("orchestrationMode", "AGENTSCOPE");
         metadata.put("checkpointOwner", "AGENTSCOPE");
-        metadata.put("agentRuntime", "agentscope-java-2.0.3");
+        metadata.put("agentRuntime", "agentscope-java-2.0.4");
         List<com.moon.moonagent.ai.agent.AgentTraceEvent> events =
                 trace == null ? List.of() : trace.snapshot();
+        com.moon.moonagent.ai.agent.AgentReasoningSnapshot reasoning =
+                request == null ? null : request.getReasoning();
+        if (reasoning == null && trace != null) {
+            reasoning = trace.reasoningSnapshot();
+        }
         return new AgentTurnResult(
                 content == null ? "" : content,
                 metadata,
                 events,
-                request == null ? null : request.getReasoning(),
+                reasoning,
                 request == null ? List.of() : request.getSuggestedActions(),
                 hitlPaused || (request != null && request.isHitlPaused()),
                 request == null ? "" : request.getHitlMessageId());

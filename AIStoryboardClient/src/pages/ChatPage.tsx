@@ -56,16 +56,12 @@ import {
 } from '../lib/embeddedAppMessages';
 import { canvasIdFromUrl } from '../components/agent/apps/chatAppDefinitions';
 import { requestSideChatSelectionContext } from '../lib/sideChatSelectionSync';
+import { shouldHidePendingCardMessage } from '../lib/pendingCardMessage';
 import MoonLogo from '../components/agent/MoonLogo';
 import AmbientGlow from '../components/AmbientGlow';
 import { Frame } from 'lucide-react';
 import '../styles/chat-interactions.css';
 import '../styles/canvas-tech-chat.css';
-
-/** 待选人工介入卡占位消息（metadata.kind='hitl' 且 pending）：过滤掉，避免与流内卡片重复渲染 formContent。 */
-const isPendingHitl = (m: { metadata?: { kind?: string; hitl?: { pending?: boolean } } }) =>
-  m.metadata?.kind === 'hitl' && !!m.metadata.hitl?.pending
-  && !('content' in m && typeof m.content === 'string' && m.content.trim());
 
 /** 空会话页也要显示发送前置错误，避免首次发送失败时界面完全没有反馈。 */
 function AgentStreamErrorNotice({ message }: { message: string }) {
@@ -774,7 +770,7 @@ export function ChatPage() {
                     加载更早消息
                   </button>
                 )}
-                {messages.filter((m) => !isPendingHitl(m)).map((m) => (
+                {messages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}
@@ -1269,7 +1265,7 @@ export function ChatPage() {
                     加载更早消息
                   </button>
                 )}
-                {messages.filter((m) => !isPendingHitl(m)).map((m) => (
+                {messages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
                   <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
                     <MessageBubble
                       messageId={m.id}

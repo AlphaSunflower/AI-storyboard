@@ -161,6 +161,16 @@ ai:
       tool-result-eviction-preview-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_PREVIEW_CHARS:2000}
       otel-tracing-enabled: ${AGENTSCOPE_OTEL_TRACING_ENABLED:true}
       distributed-store-enabled: ${AGENTSCOPE_DISTRIBUTED_STORE_ENABLED:true}
+      web-search:
+        # 自研 web_search/web_fetch 走 Firecrawl REST；无 key 时不注册这两个工具。
+        enabled: ${AGENTSCOPE_WEB_SEARCH_ENABLED:true}
+        firecrawl-url: ${AGENTSCOPE_FIRECRAWL_URL:https://api.firecrawl.dev/v2/search}
+        firecrawl-api-key: ${AGENTSCOPE_FIRECRAWL_API_KEY:${FIRECRAWL_API_KEY:}}
+        max-results: ${AGENTSCOPE_WEB_SEARCH_MAX_RESULTS:5}
+        timeout: ${AGENTSCOPE_WEB_SEARCH_TIMEOUT:30s}
+        # 成功结果的 TTL + 条数上限：同 query 窗口内命中缓存，避免重复计费。
+        cache-ttl: ${AGENTSCOPE_WEB_SEARCH_CACHE_TTL:5m}
+        cache-max-entries: ${AGENTSCOPE_WEB_SEARCH_CACHE_MAX_ENTRIES:256}
       critique-enabled: ${AGENTSCOPE_CRITIQUE_ENABLED:true}
       critique-max-repairs: ${AGENTSCOPE_CRITIQUE_MAX_REPAIRS:1}
       models:

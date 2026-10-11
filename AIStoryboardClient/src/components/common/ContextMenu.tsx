@@ -41,7 +41,7 @@ export function ContextMenu({ items, children }: { items: ContextMenuItem[]; chi
   };
 
   return (
-    <div onContextMenu={handleContextMenu} style={{ display: 'contents' }}>
+    <span onContextMenu={handleContextMenu} style={{ display: 'contents' }}>
       {children}
       {pos && createPortal(
         <div
@@ -86,6 +86,6 @@ export function ContextMenu({ items, children }: { items: ContextMenuItem[]; chi
         </div>,
         document.body,
       )}
-    </div>
+    </span>
   );
 }

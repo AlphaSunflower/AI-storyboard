@@ -68,7 +68,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 
 @WebMvcTest(controllers = {
     AuthController.class,
@@ -320,6 +323,60 @@ class BackendControllerSmokeTest {
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/files/audios/a.mp3").with(user("u1")))
             .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void fileDownload_setsContentDispositionWithRealExtension() throws Exception {
+        when(fileStorageService.readFile("uuid-manual.md"))
+            .thenReturn("# 手册".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mockMvc.perform(get("/api/files/files/uuid-manual.md").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Disposition", startsWith("inline")))
+            .andExpect(header().string("Content-Disposition", containsString(".md")));
+
+        mockMvc.perform(get("/api/files/files/uuid-manual.md")
+                .param("download", "true").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Disposition", startsWith("attachment")));
+    }
+
+    @Test
+    void fileDownload_appliesInlinePolicyForArbitraryExtensions() throws Exception {
+        when(fileStorageService.readFile("uuid-main.py"))
+            .thenReturn("print(1)".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(fileStorageService.readFile("uuid-page.html"))
+            .thenReturn("<script>alert(1)</script>"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(fileStorageService.readFile("uuid-bundle.zip")).thenReturn(new byte[]{1});
+        when(fileStorageService.readFile("uuid-shot.png")).thenReturn(new byte[]{1});
+        when(fileStorageService.readFile("uuid-icon.svg"))
+            .thenReturn("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        mockMvc.perform(get("/api/files/files/uuid-main.py").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Type", containsString("text/plain")))
+            .andExpect(header().string("Content-Disposition", startsWith("inline")))
+            .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+
+        mockMvc.perform(get("/api/files/files/uuid-page.html").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Type", containsString("application/octet-stream")))
+            .andExpect(header().string("Content-Disposition", startsWith("attachment")));
+
+        mockMvc.perform(get("/api/files/files/uuid-bundle.zip").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Disposition", startsWith("attachment")));
+
+        mockMvc.perform(get("/api/files/files/uuid-shot.png").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Type", containsString("image/png")));
+
+        mockMvc.perform(get("/api/files/files/uuid-icon.svg").with(user("u1")))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Content-Type", containsString("image/svg+xml")))
+            .andExpect(header().string("Content-Security-Policy", "sandbox"));
     }
 
     @Test

@@ -52,6 +52,21 @@ export function ChatAppsHost({
   const sideChatSelections = useSideChatSelectionStore((state) => state.selections);
   const replaceSideChatSelections = useSideChatSelectionStore((state) => state.replaceSelections);
   const postedCanvasRevisionsRef = useRef<Record<string, number>>({});
+  const setAppLayout = apps.setLayout;
+
+  const handleLayoutChange = useCallback((layout: {
+    width: number;
+    height: number;
+    fullscreen: boolean;
+  }) => {
+    setAppLayout((current) => (
+      current.width === layout.width
+      && current.height === layout.height
+      && current.fullscreen === layout.fullscreen
+        ? current
+        : { ...current, ...layout }
+    ));
+  }, [setAppLayout]);
 
   const closeTab = useCallback((key: Parameters<typeof apps.close>[0]) => {
     if (key === 'document') closeDocumentPreview();
@@ -220,7 +235,7 @@ export function ChatAppsHost({
         sidebarCollapseWidth={sidebarCollapseWidth}
         onCollapseSidebar={onCollapseSidebar}
         onRequestDock={onRequestDock}
-        onLayoutChange={(layout) => apps.setLayout((current) => ({ ...current, ...layout }))}
+        onLayoutChange={handleLayoutChange}
         minimized={apps.layout.minimized}
       />
     </>

@@ -43,6 +43,7 @@ public class AgentScopeProperties {
     private boolean otelTracingEnabled = true;
     private boolean distributedStoreEnabled = true;
     private boolean critiqueEnabled = true;
+    private WebSearch webSearch = new WebSearch();
     private int critiqueMaxRepairs = 1;
     private Models models = new Models();
     private Preflight preflight = new Preflight();
@@ -322,6 +323,14 @@ public class AgentScopeProperties {
         this.critiqueEnabled = critiqueEnabled;
     }
 
+    public WebSearch getWebSearch() {
+        return webSearch;
+    }
+
+    public void setWebSearch(WebSearch webSearch) {
+        this.webSearch = webSearch == null ? new WebSearch() : webSearch;
+    }
+
     public int getCritiqueMaxRepairs() {
         return critiqueMaxRepairs;
     }
@@ -449,6 +458,93 @@ public class AgentScopeProperties {
 
         public void setMaxRepairs(int maxRepairs) {
             this.maxRepairs = Math.max(1, Math.min(1, maxRepairs));
+        }
+    }
+
+    /**
+     * 网页搜索配置。
+     *
+     * <p>上游 Harness 的 {@code web_search} 只支持 Tavily 且直接读 {@code TAVILY_API_KEY}，本项目改用
+     * Firecrawl REST（{@code /v2/search}）作为搜索后端，见 {@code AgentScopeWebTools}。
+     *
+     * <p>不走 AgentScope 自带 MCP 客户端：它编译时依赖 MCP SDK 0.17.x 的
+     * {@code HttpClientStreamableHttpTransport.Builder#customizeRequest}，而本项目根 pom 为 Spring AI 2.0
+     * 统一管理到 MCP SDK 2.0.x（该方法已移除），两者无法共存于同一 classpath。
+     */
+    public static class WebSearch {
+
+        private boolean enabled = true;
+        private String firecrawlUrl = "https://api.firecrawl.dev/v2/search";
+        private String firecrawlApiKey = "";
+        private int maxResults = 5;
+        private Duration timeout = Duration.ofSeconds(30);
+        private Duration cacheTtl = Duration.ofMinutes(5);
+        private int cacheMaxEntries = 256;
+
+        /** 只有开启且拿到 key 才注册工具；否则保留原状，由调用方给出明确提示。 */
+        public boolean isConfigured() {
+            return enabled && firecrawlApiKey != null && !firecrawlApiKey.isBlank();
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getFirecrawlUrl() {
+            return firecrawlUrl;
+        }
+
+        public void setFirecrawlUrl(String firecrawlUrl) {
+            this.firecrawlUrl = firecrawlUrl == null || firecrawlUrl.isBlank()
+                    ? "https://api.firecrawl.dev/v2/search" : firecrawlUrl.trim();
+        }
+
+        public String getFirecrawlApiKey() {
+            return firecrawlApiKey;
+        }
+
+        public void setFirecrawlApiKey(String firecrawlApiKey) {
+            this.firecrawlApiKey = firecrawlApiKey == null ? "" : firecrawlApiKey.trim();
+        }
+
+        public int getMaxResults() {
+            return maxResults;
+        }
+
+        public void setMaxResults(int maxResults) {
+            this.maxResults = Math.max(1, Math.min(10, maxResults));
+        }
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout == null || timeout.isZero() || timeout.isNegative()
+                    ? Duration.ofSeconds(30) : timeout;
+        }
+
+        /** 成功搜索结果的 TTL；相同 query 在窗口内直接命中缓存，避免重复计费。 */
+        public Duration getCacheTtl() {
+            return cacheTtl;
+        }
+
+        public void setCacheTtl(Duration cacheTtl) {
+            this.cacheTtl = cacheTtl == null || cacheTtl.isZero() || cacheTtl.isNegative()
+                    ? Duration.ofMinutes(5) : cacheTtl;
+        }
+
+        /** 缓存条数上限，超出后按写入时间淘汰最旧的条目。 */
+        public int getCacheMaxEntries() {
+            return cacheMaxEntries;
+        }
+
+        public void setCacheMaxEntries(int cacheMaxEntries) {
+            this.cacheMaxEntries = Math.max(1, Math.min(4096, cacheMaxEntries));
         }
     }
 }

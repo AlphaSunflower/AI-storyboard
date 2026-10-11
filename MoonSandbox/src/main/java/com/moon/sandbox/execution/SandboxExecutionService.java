@@ -53,6 +53,78 @@ public class SandboxExecutionService {
         }
     }
 
+    public ShellResult executeShell(String conversationId, String command,
+                                    int requestedTimeoutSeconds) {
+        boolean acquired = false;
+        try {
+            acquired = admission.tryAcquire(
+                    Math.max(1, properties.getDefaultTimeoutSeconds()), TimeUnit.SECONDS);
+            if (!acquired) {
+                throw new SandboxPathException("sandbox execution capacity is full");
+            }
+            return sessions.withLock(conversationId,
+                    () -> executeShellLocked(conversationId, command, requestedTimeoutSeconds));
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new SandboxPathException("sandbox execution interrupted", error);
+        } finally {
+            if (acquired) admission.release();
+        }
+    }
+
+    private ShellResult executeShellLocked(String conversationId, String command,
+                                           int requestedTimeoutSeconds) {
+        Path session = sessions.sessionRoot(conversationId);
+        Path tmpDir = session.resolve("tmp");
+        try {
+            Files.createDirectories(tmpDir);
+            List<String> argv = new ArrayList<>();
+            argv.add(properties.getShellExecutable());
+            argv.add(properties.getShellFlag());
+            argv.add(command == null ? "" : command);
+            ProcessBuilder builder = new ProcessBuilder(argv);
+            builder.directory(session.toFile());
+            builder.redirectErrorStream(false);
+            builder.environment().put("PYTHONPATH", session.resolve("vendor").toString());
+            builder.environment().put("PYTHONUNBUFFERED", "1");
+            builder.environment().put("PYTHONDONTWRITEBYTECODE", "1");
+            builder.environment().put("HOME", session.toString());
+            builder.environment().put("TMPDIR", tmpDir.toString());
+            long started = System.nanoTime();
+            Process process = builder.start();
+            CompletableFuture<LimitedOutput> stdout = readAsync(
+                    process.getInputStream(), properties.getStdoutLimitBytes());
+            CompletableFuture<LimitedOutput> stderr = readAsync(
+                    process.getErrorStream(), properties.getStderrLimitBytes());
+            int timeout = requestedTimeoutSeconds <= 0
+                    ? properties.getDefaultTimeoutSeconds()
+                    : Math.min(requestedTimeoutSeconds, properties.getMaxTimeoutSeconds());
+            boolean finished = process.waitFor(timeout, TimeUnit.SECONDS);
+            boolean timedOut = !finished;
+            if (!finished) {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            LimitedOutput out = stdout.join();
+            LimitedOutput err = stderr.join();
+            int exitCode = finished ? process.exitValue() : -1;
+            sessions.touch(conversationId);
+            return new ShellResult(
+                    exitCode,
+                    out.text(),
+                    err.text(),
+                    out.truncated() || err.truncated(),
+                    timedOut,
+                    Duration.ofNanos(System.nanoTime() - started).toMillis());
+        } catch (IOException error) {
+            throw new SandboxPathException("unable to execute shell command", error);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new SandboxPathException("shell execution interrupted", error);
+        }
+    }
+
     private ExecutionResult executeLocked(String conversationId, String script,
                                           List<String> arguments, int requestedTimeoutSeconds) {
         Path session = sessions.sessionRoot(conversationId);

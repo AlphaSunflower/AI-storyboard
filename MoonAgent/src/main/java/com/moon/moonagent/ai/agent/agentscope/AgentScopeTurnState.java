@@ -34,6 +34,16 @@ public final class AgentScopeTurnState {
     private String activeCanvasId;
     private ReferenceInputMode referenceInputMode = ReferenceInputMode.NONE;
     private final Map<String, Integer> preflightFailures = new HashMap<>();
+    private final Set<String> deliveredAssetIds = new LinkedHashSet<>();
+
+    public synchronized void addDeliveredAsset(String assetId) {
+        if (assetId == null || assetId.isBlank()) return;
+        deliveredAssetIds.add(assetId);
+    }
+
+    public synchronized Set<String> deliveredAssetIds() {
+        return new LinkedHashSet<>(deliveredAssetIds);
+    }
 
     synchronized void setReferenceInputMode(ReferenceInputMode mode) {
         referenceInputMode = mode == null ? ReferenceInputMode.NONE : mode;

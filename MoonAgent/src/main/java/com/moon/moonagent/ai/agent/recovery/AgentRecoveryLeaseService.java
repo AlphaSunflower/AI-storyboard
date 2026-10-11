@@ -40,6 +40,10 @@ public class AgentRecoveryLeaseService {
         return mapper.ownedBy(candidate.resourceType(), candidate.resourceId(), owner) > 0;
     }
 
+    public boolean hasActiveLease(String resourceType, String resourceId) {
+        return mapper.hasActiveLease(resourceType, resourceId) > 0;
+    }
+
     public int attempt(RecoveryCandidate candidate, String owner) {
         Integer attempt = mapper.attemptFor(candidate.resourceType(), candidate.resourceId(), owner);
         return attempt == null ? 1 : Math.max(1, attempt);

@@ -16,7 +16,7 @@
     <properties>
         <java.version>25</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
-        <agentscope.version>2.0.3</agentscope.version>
+        <agentscope.version>2.0.4</agentscope.version>
         <tika.version>4.1.0</tika.version>
         <nacos.client.version>3.2.1-2026.03.30</nacos.client.version>
         <spring-cloud.version>2025.1.0</spring-cloud.version>
@@ -45,7 +45,7 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- AgentScope 2.0.3 Nacos extensions use the Nacos 3.2.1 AI APIs.
+            <!-- AgentScope 2.0.4 Nacos extensions use the Nacos 3.2.1 AI APIs.
                  Pin the client family so Spring Cloud Alibaba's older 3.1.1 does
                  not win Maven mediation and break prompt/skill calls at runtime. -->
             <dependency>

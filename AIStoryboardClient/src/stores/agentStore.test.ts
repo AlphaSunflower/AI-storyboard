@@ -4,6 +4,7 @@ import {
   agentApi,
   type AgentConversation,
   type AgentTaskView,
+  type AgentTurnEventType,
 } from '../api/agent';
 import {
   AgentTurnEventSequencer,
@@ -20,9 +21,7 @@ beforeEach(() => {
 
 function sseEnvelope(
   seq: number,
-  type: 'turn_started' | 'agent_event' | 'turn_paused' | 'canvas_session_required'
-    | 'canvas_run_started' | 'canvas_run_updated' | 'canvas_run_completed' | 'canvas_run_failed'
-    | 'turn_completed' | 'turn_failed',
+  type: AgentTurnEventType,
   payload: Record<string, unknown>,
   turnId = 'turn-1',
 ) {
@@ -840,6 +839,227 @@ describe('agentStore turn replay', () => {
     expect(useAgentStore.getState().pendingAssistantId).toBeNull();
     expect(useAgentStore.getState().generating['conversation-replay']).toBeUndefined();
   });
+
+  it('replays a paused turn through the same checkpoint recovery path as a live stream', async () => {
+    const turnId = 'turn-replay-paused';
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({
+      data: { data: null },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({
+      data: {
+        data: {
+          turnId,
+          formToken: 'form-replayed',
+          taskId: '',
+          formContent: '请确认回放卡片',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() / 1000 + 60,
+        },
+      },
+    } as never);
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [{
+          turnId,
+          seq: 1,
+          type: 'turn_paused',
+          payload: {
+            messageId: 'hitl-replayed',
+            content: '请确认回放卡片',
+            hitl: {
+              formToken: 'form-replayed',
+              formContent: '请确认回放卡片',
+              actions: [{ id: 'approve', title: '批准' }],
+            },
+          },
+        }],
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-replay',
+      messages: [],
+      generating: {
+        'conversation-replay': {
+          hint: '',
+          turnId,
+          assistantId: 'assistant-replay',
+          assistantContent: '',
+        },
+      },
+      streaming: false,
+      pendingAssistantId: 'assistant-replay',
+      waitingHumanInput: null,
+    });
+
+    await useAgentStore.getState().replayTurnEvents('conversation-replay', turnId, 0);
+
+    expect(useAgentStore.getState().waitingHumanInput?.formToken).toBe('form-replayed');
+  });
+
+  it('applies a replayed task-accepted side effect to the assistant card', async () => {
+    const turnId = 'turn-replay-task';
+    const task: AgentTaskView = {
+      taskId: 'task-replayed',
+      conversationId: 'conversation-replay',
+      projectId: 'project-1',
+      title: '生成剧情稿',
+      toolName: 'start_storyboard',
+      kind: 'long-tool',
+      status: 'queued',
+      stage: 'accepted',
+      progress: 0,
+      resultSummary: '',
+      error: '',
+      parentTaskId: '',
+      anchorMessageId: '',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      assetIds: [],
+      resultUrls: [],
+      slots: [],
+      result: '',
+      liveText: '',
+      liveThinking: '',
+      liveStage: '',
+      canCancel: true,
+      canRetry: false,
+      canFollowUp: false,
+    };
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [
+          sseEnvelope(1, 'turn_started', {
+            conversationId: 'conversation-replay',
+          }, turnId),
+          sseEnvelope(2, 'TOOL_RESULT_TEXT_DELTA', {
+            toolCallId: 'tool-task',
+            toolName: 'start_storyboard',
+            delta: JSON.stringify({
+              taskId: task.taskId,
+              taskKind: 'long-tool',
+              message: '任务已受理',
+            }),
+          }, turnId),
+          sseEnvelope(3, 'TOOL_RESULT_END', {
+            toolCallId: 'tool-task',
+            toolName: 'start_storyboard',
+            state: 'SUCCESS',
+          }, turnId),
+        ],
+      },
+    } as never);
+    vi.spyOn(agentApi, 'getTask').mockResolvedValue({ data: { data: task } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-replay',
+      messages: [{
+        id: 'assistant-replay',
+        conversationId: 'conversation-replay',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-replay': {
+          hint: '',
+          turnId,
+          assistantId: 'assistant-replay',
+        },
+      },
+      pendingAssistantId: 'assistant-replay',
+      tasks: {},
+    });
+
+    await useAgentStore.getState().replayTurnEvents('conversation-replay', turnId, 0);
+
+    expect(useAgentStore.getState().messages[0].metadata?.taskCards?.[0]?.taskId)
+      .toBe(task.taskId);
+    expect(useAgentStore.getState().tasks[task.taskId]?.taskId).toBe(task.taskId);
+  });
+
+  it('restores only the latest resumed phase after a refresh', async () => {
+    const turnId = 'turn-resume-refresh';
+    const events = [
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-refresh' }, turnId),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'old-hitl',
+        content: '旧方案待确认',
+        hitl: {
+          formToken: 'old-form',
+          formContent: '旧方案待确认',
+          actions: [{ id: 'approve', title: '批准' }],
+        },
+      }, turnId),
+      sseEnvelope(3, 'turn_started', {
+        conversationId: 'conversation-refresh',
+        resume: true,
+      }, turnId),
+      sseEnvelope(4, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: 'resumed text' },
+      }, turnId),
+    ];
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: {
+        data: { records: [], nextCursor: null, hasMore: false },
+      },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: { data: [] },
+    } as never);
+    vi.spyOn(agentApi, 'listTasks').mockResolvedValue({
+      data: {
+        data: {
+          records: [],
+          total: 0,
+          page: 1,
+          size: 100,
+        },
+      },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({
+      data: { data: null },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({
+      data: { data: null },
+    } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({
+      data: {
+        data: {
+          activeTurn: {
+            turnId,
+            status: 'running',
+          },
+        },
+      },
+    } as never);
+    const listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents')
+      .mockImplementation(async (_conversationId, _turnId, afterSeq = 0) => ({
+        data: {
+          data: events.filter((event) => event.seq > afterSeq),
+        },
+      } as never));
+    useAgentStore.setState({
+      activeConversationId: null,
+      conversations: [],
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+    });
+
+    await useAgentStore.getState().selectConversation('conversation-refresh');
+
+    await vi.waitFor(() => {
+      expect(listTurnEvents).toHaveBeenCalledWith('conversation-refresh', turnId, 0);
+      expect(useAgentStore.getState().messages.some(
+        (message) => message.content === 'resumed text',
+      )).toBe(true);
+    });
+    expect(useAgentStore.getState().waitingHumanInput).toBeNull();
+    useAgentStore.setState({ activeConversationId: null });
+  });
 });
 
 describe('agentStore detached async tasks', () => {
@@ -1333,6 +1553,34 @@ describe('AgentScope turn envelope reduction', () => {
       .toBe('正在思考：先判断技能。This maps');
   });
 
+  it('keeps a visible boundary between multiple thinking blocks', () => {
+    const turnId = 'thinking-blocks';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+
+    applyAgentTurnEnvelope(sseEnvelope(1, 'turn_started', {}, turnId), context);
+    applyAgentTurnEnvelope(sseEnvelope(2, 'THINKING_BLOCK_START', {}, turnId), context);
+    applyAgentTurnEnvelope(sseEnvelope(3, 'THINKING_BLOCK_DELTA', { delta: 'first' }, turnId), context);
+    applyAgentTurnEnvelope(sseEnvelope(4, 'THINKING_BLOCK_END', {}, turnId), context);
+    applyAgentTurnEnvelope(sseEnvelope(5, 'THINKING_BLOCK_START', {}, turnId), context);
+    applyAgentTurnEnvelope(sseEnvelope(6, 'THINKING_BLOCK_DELTA', { delta: 'second' }, turnId), context);
+
+    expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.details)
+      .toBe('first\n\nsecond');
+  });
+
   it('reduces native thinking and text deltas in order', () => {
     const turnId = 'ordered-reduce';
     const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
@@ -1419,6 +1667,38 @@ describe('AgentScope turn envelope reduction', () => {
       .toMatchObject({ id: 'trace-1', status: 'node_started' });
     expect(useAgentStore.getState().messages[0].metadata?.agentTrace?.[0]?.title)
       .toBe('模型推理');
+  });
+
+  it('reduces native thinking deltas carried as top-level turn events', () => {
+    const turnId = 'native-thinking';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'THINKING_BLOCK_DELTA', { delta: '实时推理' }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().generating['conversation-1'].reasoningDraft?.details)
+      .toBe('实时推理');
+    expect(useAgentStore.getState().messages[0].metadata?.reasoning?.details)
+      .toBe('实时推理');
   });
 
   it('pauses on turn_paused and resumes with the same turn id', async () => {
@@ -1565,8 +1845,435 @@ describe('AgentScope turn envelope reduction', () => {
     );
 
     expect(useAgentStore.getState().messages[0].content).toBe(plan);
+    expect(useAgentStore.getState().messages[0].metadata?.hitl?.formToken).toBe('form-1');
     expect(useAgentStore.getState().waitingHumanInput?.formContent)
       .toBe('请选择片尾视频的设计方案：');
+  });
+
+  it('does not copy the HITL prompt into an empty assistant placeholder body', () => {
+    const turnId = 'turn-pause-empty-body';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-empty' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-empty',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': {
+          hint: '',
+          turnId,
+          assistantId: 'assistant-empty',
+          assistantContent: '',
+        },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_paused', {
+        messageId: 'hitl-empty-body',
+        content: '',
+        hitl: {
+          formToken: 'form-empty-body',
+          formContent: '这张卡片不应复制到正文占位',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().messages[0].content).toBe('');
+    expect(useAgentStore.getState().waitingHumanInput?.formContent)
+      .toBe('这张卡片不应复制到正文占位');
+  });
+
+  it('keeps a submitted form token across refresh before the checkpoint claim lands', async () => {
+    const formToken = 'form-in-flight';
+    const pending = {
+      turnId: 'turn-in-flight',
+      formToken,
+      taskId: '',
+      formContent: '请选择',
+      actions: [{ id: 'approve', title: '批准' }],
+      expirationTime: Date.now() / 1000 + 60,
+    };
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, 'turn-in-flight'),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-in-flight',
+        content: '请选择',
+        hitl: pending,
+      }, 'turn-in-flight'),
+    ]);
+    const resumeBody = sseBody([
+      sseEnvelope(3, 'turn_started', {
+        conversationId: 'conversation-1',
+        resume: true,
+      }, 'turn-in-flight'),
+    ]);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(pauseBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(resumeBody, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: pending } } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({ data: { data: { activeTurn: null } } } as never);
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records: [], nextCursor: null, hasMore: false } },
+    } as never);
+    sessionStorage.clear();
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+    });
+
+    await useAgentStore.getState().sendMessage('需要确认');
+    await useAgentStore.getState().submitHumanInput('approve');
+
+    useAgentStore.setState({ messages: [], waitingHumanInput: null });
+    await useAgentStore.getState().recoverPendingCheckpoint('conversation-1');
+
+    expect(useAgentStore.getState().waitingHumanInput).toBeNull();
+  });
+
+  it('rolls back a HITL submission that fails before server acceptance', async () => {
+    const formToken = 'form-retry-after-failure';
+    const pending = {
+      turnId: 'turn-retry-after-failure',
+      formToken,
+      taskId: '',
+      formContent: '请选择方案',
+      actions: [{ id: 'approve', title: '批准' }],
+      expirationTime: Date.now() / 1000 + 60,
+    };
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, pending.turnId),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-retry',
+        content: '请选择方案',
+        hitl: pending,
+      }, pending.turnId),
+    ]);
+    const failureBody = [
+      'event: turn_failed',
+      `data: ${JSON.stringify({
+        turnId: '',
+        seq: 0,
+        type: 'turn_failed',
+        payload: { code: '40901', message: '当前对话正在处理中，请稍候' },
+      })}`,
+      '',
+      '',
+    ].join('\n');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(pauseBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(failureBody, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: pending } } as never);
+    const persistedPendingCard = {
+      id: 'hitl-retry',
+      conversationId: 'conversation-1',
+      role: 'assistant' as const,
+      content: '请选择方案',
+      createdAt: new Date().toISOString(),
+      metadata: {
+        kind: 'hitl' as const,
+        hitl: {
+          formContent: '请选择方案',
+          actions: [{ id: 'approve', title: '批准' }],
+          pending: true,
+          formToken,
+          messageId: 'hitl-retry',
+        },
+      },
+    };
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records: [persistedPendingCard], nextCursor: null, hasMore: false } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: { data: [persistedPendingCard] },
+    } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({
+      data: { data: { activeTurn: null } },
+    } as never);
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: { data: [] },
+    } as never);
+    sessionStorage.clear();
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+      streamError: null,
+    });
+
+    await useAgentStore.getState().sendMessage('需要确认');
+    await useAgentStore.getState().submitHumanInput('approve');
+
+    await vi.waitFor(() => {
+      const card = useAgentStore.getState().messages.find(
+        (message) => message.metadata?.hitl?.formToken === formToken,
+      );
+      expect(card?.metadata?.hitl?.pending).toBe(true);
+      expect(card?.metadata?.hitl?.selectedActionId).toBeUndefined();
+    });
+    expect(useAgentStore.getState().waitingHumanInput?.formToken).toBe(formToken);
+  });
+
+  it('rolls back a video plan submission that fails before server acceptance', async () => {
+    const planToken = 'video-retry-after-failure';
+    const pending = {
+      turnId: 'turn-video-retry',
+      formToken: planToken,
+      taskId: '',
+      formContent: '视频方案待确认',
+      kind: 'video-plan',
+      message: '镜头缓慢推进',
+      duration: 8,
+      picUrl: '/api/files/images/ref.png',
+      actions: [
+        { id: 'generate_video', title: '开始生成' },
+        { id: 'refine', title: '继续完善' },
+      ],
+      expirationTime: Date.now() / 1000 + 60,
+    };
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, pending.turnId),
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'video-plan-retry',
+        content: '',
+        hitl: pending,
+      }, pending.turnId),
+    ]);
+    const failureBody = [
+      'event: turn_failed',
+      `data: ${JSON.stringify({
+        turnId: '',
+        seq: 0,
+        type: 'turn_failed',
+        payload: { code: '40901', message: '当前对话正在处理中，请稍候' },
+      })}`,
+      '',
+      '',
+    ].join('\n');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(pauseBody, { status: 200 }))
+      .mockResolvedValueOnce(new Response(failureBody, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: pending } } as never);
+    const persistedVideoCard = {
+      id: 'video-plan-retry',
+      conversationId: 'conversation-1',
+      role: 'assistant' as const,
+      content: '',
+      createdAt: new Date().toISOString(),
+      metadata: {
+        kind: 'video-plan' as const,
+        hitl: {
+          formContent: '视频方案待确认',
+          actions: pending.actions,
+          pending: true,
+          formToken: planToken,
+          messageId: 'video-plan-retry',
+        },
+        videoPlan: {
+          message: '镜头缓慢推进',
+          duration: 8,
+          picUrl: '/api/files/images/ref.png',
+          actions: pending.actions,
+          formToken: planToken,
+          messageId: 'video-plan-retry',
+        },
+      },
+    };
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records: [persistedVideoCard], nextCursor: null, hasMore: false } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({
+      data: { data: [persistedVideoCard] },
+    } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({
+      data: { data: { activeTurn: null } },
+    } as never);
+    vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: { data: [] },
+    } as never);
+    sessionStorage.clear();
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      streamError: null,
+    });
+
+    await useAgentStore.getState().sendMessage('生成视频');
+    await useAgentStore.getState().submitVideoPlan('generate_video');
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().waitingVideoPlan?.planToken).toBe(planToken);
+      const card = useAgentStore.getState().messages.find(
+        (message) => message.metadata?.hitl?.formToken === planToken,
+      );
+      expect(card?.metadata?.hitl?.pending).toBe(true);
+      expect(card?.metadata?.hitl?.selectedActionId).toBeUndefined();
+    });
+  });
+
+  it('does not restore a pending card for an already submitted form token', async () => {
+    const formToken = 'form-submitted';
+    const pending = {
+      turnId: 'turn-1',
+      formToken,
+      taskId: '',
+      formContent: '请选择',
+      actions: [{ id: 'option-0', title: '选项 A' }],
+      expirationTime: Date.now() / 1000 + 60,
+    };
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: pending } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'hitl-message',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '请选择',
+        createdAt: new Date().toISOString(),
+        metadata: {
+          kind: 'hitl',
+          hitl: {
+            formToken,
+            formContent: '请选择',
+            actions: [{ id: 'option-0', title: '选项 A' }],
+            pending: false,
+            selectedActionId: 'option-0',
+          },
+        },
+      }],
+      waitingHumanInput: pending,
+    });
+
+    await useAgentStore.getState().recoverPendingCheckpoint('conversation-1');
+
+    expect(useAgentStore.getState().waitingHumanInput).toBeNull();
+  });
+
+  it('does not duplicate a persisted submitted card while replaying turn_paused', () => {
+    const turnId = 'turn-replay-hitl';
+    const messageId = 'message-hitl-1';
+    const context = { conversationId: 'conversation-1', assistantId: 'restored-assistant' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: messageId,
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '执行方案待确认',
+        createdAt: new Date().toISOString(),
+        metadata: {
+          kind: 'hitl',
+          hitl: {
+            formToken: 'form-1',
+            formContent: '执行方案待确认',
+            actions: [{ id: 'approve', title: '按方案执行' }],
+            pending: false,
+            selectedActionId: 'approve',
+          },
+        },
+      }, {
+        id: 'restored-assistant',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': {
+          hint: '',
+          turnId,
+          assistantId: 'restored-assistant',
+          assistantContent: '',
+        },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_paused', {
+        messageId,
+        content: '执行方案待确认',
+        hitl: {
+          formToken: 'form-1',
+          formContent: '执行方案待确认',
+          actions: [{ id: 'approve', title: '按方案执行' }],
+        },
+      }, turnId),
+      context,
+    );
+
+    const state = useAgentStore.getState();
+    expect(state.messages.filter((message) => message.id === messageId)).toHaveLength(1);
+    expect(state.waitingHumanInput).toBeNull();
+  });
+
+  it('clears a replayed HITL wait when the same turn resumes', () => {
+    const turnId = 'turn-resume-clear';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      waitingHumanInput: {
+        turnId,
+        formToken: 'form-1',
+        taskId: '',
+        formContent: '请确认',
+        actions: [{ id: 'approve', title: '批准' }],
+        expirationTime: Date.now() + 60_000,
+      },
+      waitingVideoPlan: {
+        planToken: 'video-1',
+        message: '视频方案',
+        duration: 8,
+        picUrl: '',
+        actions: [],
+      },
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-1', assistantContent: '' },
+      },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1', resume: true }, turnId),
+      context,
+    );
+
+    expect(useAgentStore.getState().waitingHumanInput).toBeNull();
+    expect(useAgentStore.getState().waitingVideoPlan).toBeNull();
   });
 
   it('maps canvas bind pause to an exact canvas mode binding', () => {

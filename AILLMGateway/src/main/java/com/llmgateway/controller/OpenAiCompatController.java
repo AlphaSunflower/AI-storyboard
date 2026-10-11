@@ -45,7 +45,7 @@ public class OpenAiCompatController {
     public void chatCompletions(@RequestBody String body,
                                 @RequestHeader(value = "X-Call-Id", required = false) String callId,
                                 jakarta.servlet.http.HttpServletResponse response) throws Exception {
-        boolean stream = body != null && body.contains("\"stream\":true");
+        boolean stream = isStream(body);
         if (!stream) {
             RouteResult result = routingService.route("/chat/completions", body, callId);
             response.setStatus(result.status());

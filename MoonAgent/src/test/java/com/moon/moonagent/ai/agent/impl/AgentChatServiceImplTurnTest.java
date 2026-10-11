@@ -11,21 +11,28 @@ import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
 import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import com.moon.moonagent.ai.agent.recovery.ResumeCommand;
+import com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher;
+import com.moon.moonagent.ai.agent.sandbox.SandboxOutputReconciler;
 import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.client.StoryboardClient;
+import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.AgentTurnEntity;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
+import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.service.FileStorageService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -112,6 +119,25 @@ class AgentChatServiceImplTurnTest {
     }
 
     @Test
+    void interruptDelegatesToTheAgentScopeSessionInterrupt() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentChatServiceImpl service = service(
+                conversationMapper,
+                mock(AgentMessageMapper.class),
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class));
+        inject(service, "agentScopeMediaRuntime", runtime);
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
+
+        service.interrupt("user-1", "conversation-1");
+
+        verify(runtime).interruptTurn("user-1", "conversation-1");
+    }
+
+    @Test
     void hitlPauseKeepsFullAssistantContentOnThePersistedCard() {
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentChatServiceImpl service = service(
@@ -128,6 +154,149 @@ class AgentChatServiceImplTurnTest {
         verify(messageMapper).updateById(updated.capture());
         assertThat(updated.getValue().getId()).isEqualTo("message-1");
         assertThat(updated.getValue().getContent()).isEqualTo("## 方案 A\n\n## 方案 B");
+    }
+
+    @Test
+    void hitlPauseMergesReasoningAndTraceIntoThePersistedCard() {
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentMessage persisted = message("message-1", "assistant", "请确认");
+        persisted.setMetadata(Map.of(
+                "kind", "hitl",
+                "hitl", Map.of("formToken", "token-1", "pending", true)));
+        when(messageMapper.selectById("message-1")).thenReturn(persisted);
+        AgentChatServiceImpl service = service(
+                mock(AgentConversationMapper.class),
+                messageMapper,
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class));
+        com.moon.moonagent.ai.agent.AgentReasoningSnapshot reasoning =
+                new com.moon.moonagent.ai.agent.AgentReasoningSnapshot(
+                        "已完成推理。", "先确认用户意图。", 1200L, "agentscope");
+        com.moon.moonagent.ai.agent.AgentTraceEvent traceEvent =
+                new com.moon.moonagent.ai.agent.AgentTraceEvent(
+                        "trace-1", "model_reasoning", "moon", "agentscope",
+                        "node_completed", "模型推理", "推理完成", "", "",
+                        java.time.OffsetDateTime.now(), 1200L);
+
+        service.mergeHitlMessageThinking(
+                "message-1",
+                new AgentTurnResult(
+                        "请确认",
+                        Map.of("metrics", Map.of("durationMs", 1200)),
+                        List.of(traceEvent),
+                        reasoning,
+                        List.of(),
+                        true,
+                        "message-1"));
+
+        ArgumentCaptor<AgentMessage> updated = ArgumentCaptor.forClass(AgentMessage.class);
+        verify(messageMapper).updateById(updated.capture());
+        assertThat(updated.getValue().getId()).isEqualTo("message-1");
+        assertThat(updated.getValue().getMetadata().get("reasoning")).isEqualTo(reasoning);
+        assertThat(updated.getValue().getMetadata().get("agentTrace")).isEqualTo(List.of(traceEvent));
+        assertThat(updated.getValue().getMetadata().get("metrics"))
+                .isEqualTo(Map.of("durationMs", 1200));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> hitl = (Map<String, Object>) updated.getValue().getMetadata().get("hitl");
+        assertThat(hitl.get("formToken")).isEqualTo("token-1");
+        assertThat(hitl.get("pending")).isEqualTo(true);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "pending,false,false,true",
+            "claimed,true,false,false",
+            "claimed,false,true,false",
+            "claimed,false,false,true"
+    })
+    void pendingCheckpointRecoveryHonorsClaimsAndSubmittedCards(
+            String status,
+            boolean activeClaim,
+            boolean submitted,
+            boolean visible
+    ) throws Exception {
+        AgentCheckpointMapper checkpointMapper = mock(AgentCheckpointMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        CheckpointResumeService checkpoints = mock(CheckpointResumeService.class);
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setId("cp-1");
+        checkpoint.setConversationId("conversation-1");
+        checkpoint.setStatus(status);
+        checkpoint.setAction("agentscope-confirm");
+        checkpoint.setFormToken("token-1");
+        checkpoint.setExpirationTime(java.time.OffsetDateTime.now().plusMinutes(10));
+        checkpoint.setPlan("""
+                {
+                  "_hitlMessageId": "message-1",
+                  "_formContent": "请确认",
+                  "_actions": [{"id": "approve", "title": "批准"}]
+                }
+                """);
+        AgentMessage message = message("message-1", "assistant", "请确认");
+        message.setMetadata(Map.of(
+                "kind", "hitl",
+                "hitl", Map.of(
+                        "formToken", "token-1",
+                        "pending", !submitted)));
+        AgentTurnEntity waitingTurn = new AgentTurnEntity();
+        waitingTurn.setId("turn-1");
+        when(checkpointMapper.selectOne(any())).thenReturn(checkpoint);
+        when(checkpoints.hasActiveClaim(checkpoint)).thenReturn(activeClaim);
+        when(messageMapper.selectById("message-1")).thenReturn(message);
+        when(turnStore.findByCheckpoint("token-1")).thenReturn(waitingTurn);
+
+        AgentChatServiceImpl service = service(
+                mock(AgentConversationMapper.class),
+                messageMapper,
+                mock(AgentRuntimeSupport.class),
+                checkpoints,
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class));
+        inject(service, "checkpointMapper", checkpointMapper);
+        inject(service, "turnEventStore", turnStore);
+
+        Map<String, Object> pending = service.getPendingCheckpoint("conversation-1");
+
+        if (visible) {
+            assertThat(pending).isNotNull();
+            assertThat(pending.get("formToken")).isEqualTo("token-1");
+            assertThat(pending.get("turnId")).isEqualTo("turn-1");
+        } else {
+            assertThat(pending).isNull();
+        }
+    }
+
+    @Test
+    void messagePageSignsSandboxAttachmentUrls() {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentMessage persisted = message("assistant-1", "assistant", "已生成文档");
+        persisted.setMetadata(Map.of(
+                "sandboxAttachments", List.of(Map.of(
+                        "assetId", "asset-1",
+                        "url", "/api/files/files/doc.md",
+                        "kind", "file"))));
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
+        when(messageMapper.selectList(any())).thenReturn(List.of(persisted));
+
+        AgentChatServiceImpl service = service(
+                conversationMapper,
+                messageMapper,
+                mock(AgentRuntimeSupport.class),
+                mock(CheckpointResumeService.class),
+                mock(ConversationLock.class),
+                mock(PlatformTransactionManager.class),
+                new FileUrlSigner("test-signing-secret", 900));
+
+        MessagePageVO page = service.listMessagesPage("user-1", "conversation-1", null, 50);
+
+        List<?> attachments = (List<?>) page.records().getFirst().metadata().get("sandboxAttachments");
+        Map<?, ?> attachment = (Map<?, ?>) attachments.getFirst();
+        assertThat(attachment.get("url").toString())
+                .startsWith("/api/files/files/doc.md?token=");
     }
 
     @Test
@@ -387,6 +556,144 @@ class AgentChatServiceImplTurnTest {
                 .isEqualTo("为80㎡两居室生成4张室内设计效果图");
     }
 
+    @Test
+    void resumeKeepsTraceSinkActiveWhileTheRuntimeRuns() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        CheckpointResumeService checkpoints = mock(CheckpointResumeService.class);
+        AgentTurnEntity originalTurn = new AgentTurnEntity();
+        originalTurn.setId("turn-1");
+        originalTurn.setConversationId("conversation-1");
+        originalTurn.setStatus("waiting_user");
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setAction("agentscope-confirm");
+        checkpoint.setPlan("{\"items\":[{\"kind\":\"permission\"}]}");
+        CheckpointClaim claim = new CheckpointClaim(
+                checkpoint,
+                ResumeCommand.of("approve", "", Map.of(), List.of(), "", null),
+                "lease-1");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation());
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        when(lock.acquire("conversation-1")).thenReturn(lease);
+        when(runtime.enabled()).thenReturn(true);
+        when(support.isInterrupted("conversation-1")).thenReturn(false);
+        when(turnStore.find("turn-1")).thenReturn(originalTurn);
+        when(turnStore.resume("turn-1")).thenReturn(originalTurn);
+        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
+                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(turnStore.appendBatch(anyString(), any())).thenReturn(List.of());
+        when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
+                .thenReturn(claim);
+        AtomicInteger sinkChecks = new AtomicInteger();
+        when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    com.moon.moonagent.ai.agent.handler.OrchestrationRequest request =
+                            invocation.getArgument(2);
+                    if (request.getTrace() != null && request.getTrace().hasEventSink()) {
+                        sinkChecks.incrementAndGet();
+                    }
+                    return new AgentTurnResult("已完成", Map.of(), List.of(), null,
+                            List.of(), false, "");
+                });
+
+        AgentChatServiceImpl service = service(
+                conversationMapper, messageMapper, support, checkpoints, lock, transactionManager);
+        inject(service, "agentScopeMediaRuntime", runtime);
+        inject(service, "turnEventStore", turnStore);
+        inject(service, "agentScopeEventMapper", mock(AgentScopeEventMapper.class));
+
+        service.resumeAgentScopeTurn(
+                "user-1", "conversation-1", "turn-1", "token-1", "approve",
+                "", Map.of(), List.of(), null, mock(SseEmitter.class));
+
+        verify(runtime, timeout(2_000)).resumeTurn(
+                any(), any(), any(), any(), any(), any(), any());
+        assertThat(sinkChecks).hasValue(1);
+    }
+
+    @Test
+    void resumePublishesSandboxArtifactsToTheFinalAssistantMetadata() throws Exception {
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentAssetMapper assetMapper = mock(AgentAssetMapper.class);
+        ConversationLock lock = mock(ConversationLock.class);
+        ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        AgentTurnEventStore turnStore = mock(AgentTurnEventStore.class);
+        MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        CheckpointResumeService checkpoints = mock(CheckpointResumeService.class);
+        SandboxOutputReconciler reconciler = mock(SandboxOutputReconciler.class);
+        AgentConversation conversation = conversation();
+        AgentTurnEntity originalTurn = new AgentTurnEntity();
+        originalTurn.setId("turn-1");
+        originalTurn.setConversationId("conversation-1");
+        originalTurn.setStatus("waiting_user");
+        originalTurn.setInputText("生成一个 docx");
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setAction("agentscope-confirm");
+        checkpoint.setPlan("{\"items\":[{\"kind\":\"permission\"}]}");
+        CheckpointClaim claim = new CheckpointClaim(
+                checkpoint,
+                ResumeCommand.of("approve", "", Map.of(), List.of(), "", null),
+                "lease-1");
+        AgentAsset asset = new AgentAsset();
+        asset.setId("asset-1");
+        asset.setUrl("/api/files/files/report.docx");
+        asset.setOriginalName("report.docx");
+        asset.setMimeType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        when(lock.acquire("conversation-1")).thenReturn(lease);
+        when(runtime.enabled()).thenReturn(true);
+        when(support.isInterrupted("conversation-1")).thenReturn(false);
+        when(turnStore.find("turn-1")).thenReturn(originalTurn);
+        when(turnStore.resume("turn-1")).thenReturn(originalTurn);
+        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
+                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
+                .thenReturn(claim);
+        when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new AgentTurnResult("文档已生成", Map.of(), List.of(), null,
+                        List.of(), false, ""));
+        when(assetMapper.selectById("asset-1")).thenReturn(asset);
+        when(reconciler.reconcile(conversation, "turn-1")).thenReturn(
+                new SandboxArtifactPublisher.PublishedArtifacts(
+                        List.of("asset-1"), List.of("/api/files/files/report.docx")));
+
+        AgentChatServiceImpl service = service(
+                conversationMapper,
+                messageMapper,
+                assetMapper,
+                support,
+                checkpoints,
+                lock,
+                transactionManager);
+        inject(service, "agentScopeMediaRuntime", runtime);
+        inject(service, "turnEventStore", turnStore);
+        inject(service, "agentScopeEventMapper", mock(AgentScopeEventMapper.class));
+        inject(service, "sandboxOutputReconciler", reconciler);
+
+        service.resumeAgentScopeTurn(
+                "user-1", "conversation-1", "turn-1", "token-1", "approve",
+                "", Map.of(), List.of(), null, mock(SseEmitter.class));
+
+        ArgumentCaptor<AgentMessage> saved = ArgumentCaptor.forClass(AgentMessage.class);
+        verify(messageMapper, timeout(2_000)).insert(saved.capture());
+        List<?> attachments = (List<?>) saved.getValue().getMetadata().get("sandboxAttachments");
+        Map<?, ?> attachment = (Map<?, ?>) attachments.getFirst();
+        assertThat(attachment.get("assetId")).isEqualTo("asset-1");
+        assertThat(attachment.get("url")).isEqualTo("/api/files/files/report.docx");
+    }
+
     private static AgentChatServiceImpl service(
             AgentConversationMapper conversationMapper,
             AgentMessageMapper messageMapper,
@@ -394,6 +701,24 @@ class AgentChatServiceImplTurnTest {
             CheckpointResumeService checkpoints,
             ConversationLock lock,
             PlatformTransactionManager transactionManager) {
+        return service(
+                conversationMapper,
+                messageMapper,
+                support,
+                checkpoints,
+                lock,
+                transactionManager,
+                mock(FileUrlSigner.class));
+    }
+
+    private static AgentChatServiceImpl service(
+            AgentConversationMapper conversationMapper,
+            AgentMessageMapper messageMapper,
+            AgentRuntimeSupport support,
+            CheckpointResumeService checkpoints,
+            ConversationLock lock,
+            PlatformTransactionManager transactionManager,
+            FileUrlSigner fileUrlSigner) {
         return new AgentChatServiceImpl(
                 conversationMapper,
                 mock(AgentGenerationService.class),
@@ -402,7 +727,7 @@ class AgentChatServiceImplTurnTest {
                 mock(ConversationTitleService.class),
                 mock(StoryboardClient.class),
                 mock(FileStorageService.class),
-                mock(com.moon.moonagent.security.FileUrlSigner.class),
+                fileUrlSigner,
                 mock(AiConfigProperties.class),
                 support,
                 mock(AgentCheckpointMapper.class),

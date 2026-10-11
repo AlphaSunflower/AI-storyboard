@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  documentMimeType,
   documentPreviewKind,
   formatDocumentText,
   loadDocumentSource,
@@ -20,9 +21,25 @@ describe('documentPreview', () => {
     expect(documentPreviewKind({ name: '说明.md' })).toBe('markdown');
     expect(documentPreviewKind({ name: '运行环境.txt' })).toBe('text');
     expect(documentPreviewKind({ name: 'data.json' })).toBe('json');
-    expect(documentPreviewKind({ name: '原型.html' })).toBe('html');
+    expect(documentPreviewKind({ name: '原型.html' })).toBe('text');
     expect(documentPreviewKind({ name: '方案.pdf' })).toBe('pdf');
     expect(documentPreviewKind({ name: 'archive.zip' })).toBe('unsupported');
+  });
+
+  it('previews agent-written code and scripts as plain text', () => {
+    expect(documentPreviewKind({ name: 'main.py' })).toBe('text');
+    expect(documentPreviewKind({ name: 'index.ts', mimeType: 'application/octet-stream' }))
+      .toBe('text');
+    expect(documentPreviewKind({ name: 'deploy.sh' })).toBe('text');
+    expect(documentPreviewKind({ name: 'Dockerfile' })).toBe('unsupported');
+  });
+
+  it('only renders html as html when the MIME type says so', () => {
+    expect(documentPreviewKind({ name: 'report.html' })).toBe('text');
+    expect(documentPreviewKind({ name: 'report.html', mimeType: 'text/plain' })).toBe('text');
+    expect(documentPreviewKind({ name: 'report.html', mimeType: 'text/html' })).toBe('html');
+    expect(documentMimeType({ name: 'report.html' })).toBe('text/plain');
+    expect(documentMimeType({ name: 'report.html', mimeType: 'text/html' })).toBe('text/html');
   });
 
   it('detects document and image MIME types when the file name has no extension', () => {
