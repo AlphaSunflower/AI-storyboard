@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { useProjectStore } from '../../stores/projectStore';
+import { notify } from '../../stores/toastStore';
 import { SceneCard } from '../scene/SceneCard';
 import { LiveOrb } from '../ui/live-orb';
 import { DS } from '../agent/ChatComposer';
@@ -61,6 +62,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
     for (const sceneId of selectedIds) {
       await deleteScene(sceneId);
     }
+    notify({ title: `已删除 ${selectedIds.length} 个分镜` });
     exitSelection();
   };
 

@@ -21,6 +21,7 @@ import { getSceneImageUrls } from '../lib/sceneImages';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { Tooltip } from '../components/common/Tooltip';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import './StoryboardLibraryPage.css';
 
@@ -148,7 +149,7 @@ export function StoryboardLibraryPage() {
       <header className="sb-header">
         <div className="sb-header-inner">
           {!embedded && (
-            <button className="sb-back" onClick={() => navigate('/chat')} title="返回对话">
+            <button className="sb-back" onClick={() => navigate('/chat')}>
               <ArrowLeft size={18} strokeWidth={1.8} />
               <span>返回对话</span>
             </button>
@@ -161,9 +162,9 @@ export function StoryboardLibraryPage() {
             </div>
           </div>
           <div className="sb-header-actions">
+            <Tooltip side="bottom" label="刷新">
             <button
               className="sb-icon-button"
-              title="刷新"
               aria-label="刷新分镜"
               disabled={loading}
               onClick={() => {
@@ -176,6 +177,7 @@ export function StoryboardLibraryPage() {
             >
               <RefreshCw size={17} strokeWidth={1.8} className={loading ? 'sb-spin' : undefined} />
             </button>
+            </Tooltip>
             {!embedded && (
               <button
                 className="sb-primary"
@@ -217,9 +219,11 @@ export function StoryboardLibraryPage() {
                 placeholder="搜索项目、分镜内容或提示词"
               />
               {query && (
-                <button onClick={() => setQuery('')} title="清除搜索" aria-label="清除搜索">
+                <Tooltip label="清除搜索">
+                <button onClick={() => setQuery('')} aria-label="清除搜索">
                   <X size={14} strokeWidth={2} />
                 </button>
+                </Tooltip>
               )}
             </label>
 
@@ -425,9 +429,11 @@ function StoryboardDetail({
               <ExternalLink size={15} strokeWidth={1.9} />
               在编辑器中打开
             </button>
-            <button className="sb-icon-button" onClick={onClose} title="关闭" aria-label="关闭详情">
+            <Tooltip label="关闭">
+            <button className="sb-icon-button" onClick={onClose} aria-label="关闭详情">
               <X size={18} strokeWidth={1.9} />
             </button>
+            </Tooltip>
           </div>
         </header>
 

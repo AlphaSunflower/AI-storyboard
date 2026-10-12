@@ -3,6 +3,7 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { DS } from './ChatComposer';
 import { assetUrl } from '../../config';
+import { notify } from '../../stores/toastStore';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import {
   parseReferenceUrls,
@@ -254,7 +255,12 @@ function TextPreviewModal({
             {file.name}
           </span>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <a href={downloadUrl(file.url)} download={file.name} style={actionBtn(DS.textSecondary)}>
+            <a
+              href={downloadUrl(file.url)}
+              download={file.name}
+              onClick={() => notify({ title: '已开始下载', description: file.name, variant: 'info' })}
+              style={actionBtn(DS.textSecondary)}
+            >
               <Download size={13} strokeWidth={2} /> 下载
             </a>
             <button onClick={onClose} style={actionBtn(DS.textSecondary)} aria-label="关闭预览">关闭</button>
@@ -612,7 +618,10 @@ function RecordCard({
               href={downloadUrl(assetUrl(primary))}
               download={resultFileName(record, primary)}
               target="_blank" rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                notify({ title: '已开始下载', description: resultFileName(record, primary), variant: 'info' });
+              }}
               style={actionBtn(DS.textSecondary)}
             ><Download size={12} strokeWidth={2} /> 下载</a>
           )}
@@ -799,6 +808,7 @@ function FileStrip({
               href={downloadUrl(assetUrl(item.url))}
               download={item.name}
               target="_blank" rel="noreferrer"
+              onClick={() => notify({ title: '已开始下载', description: item.name, variant: 'info' })}
               style={actionBtn(DS.textSecondary)}
             ><Download size={12} strokeWidth={2} /> 下载</a>
           </div>

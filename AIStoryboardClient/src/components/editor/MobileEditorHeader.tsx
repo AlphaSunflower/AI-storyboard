@@ -1,5 +1,6 @@
 import { DS } from '../agent/ChatComposer';
 import { useProjectStore } from '../../stores/projectStore';
+import { Tooltip, TooltipGroup } from '../common/Tooltip';
 
 interface MobileEditorHeaderProps {
   onMenuClick: () => void;
@@ -13,6 +14,7 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
   const currentProject = useProjectStore((s) => s.currentProject);
 
   return (
+    <TooltipGroup>
     <div style={{
       height: 56, flexShrink: 0,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -22,9 +24,10 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
     }}>
       {/* 左：☰ 菜单（应用子窗内隐藏，保留等宽占位维持标题居中） */}
       {showMenu ? (
+        <Tooltip side="bottom" label="菜单">
         <button
           onClick={onMenuClick}
-          title="菜单"
+          aria-label="菜单"
           style={{
             width: 40, height: 40, border: 'none', background: 'transparent',
             borderRadius: 10, cursor: 'pointer', display: 'flex',
@@ -36,6 +39,7 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
             <path d="M10.9603 13.0634V14.5996H2.79724V13.0634H10.9603Z" fill="currentColor" />
           </svg>
         </button>
+        </Tooltip>
       ) : <span aria-hidden="true" style={{ width: 40, height: 40, flexShrink: 0 }} />}
 
       {/* 中：项目名 */}
@@ -49,9 +53,10 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
 
       {/* 右：剧本输入 */}
       {showScript ? (
+        <Tooltip side="bottom" label="剧本输入">
         <button
           onClick={onScript}
-          title="剧本输入"
+          aria-label="剧本输入"
           style={{
             width: 40, height: 40, border: 'none', background: 'transparent',
             borderRadius: 10, cursor: 'pointer', display: 'flex',
@@ -64,7 +69,9 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
             <path d="M14 2v6h6M12 18v-6M9 15h6" />
           </svg>
         </button>
+        </Tooltip>
       ) : <span aria-hidden="true" style={{ width: 40, height: 40, flexShrink: 0 }} />}
     </div>
+    </TooltipGroup>
   );
 }

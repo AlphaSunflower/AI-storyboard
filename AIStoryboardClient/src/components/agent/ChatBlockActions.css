@@ -1,0 +1,104 @@
+/* 内容块右上角的复制 / 下载操作条：默认隐藏，父级 hover / focus-within 时淡入，触屏常显。 */
+.chat-block-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.chat-block-actions--light {
+  background: color-mix(in srgb, var(--color-canvas) 92%, transparent);
+  border: 1px solid var(--color-hairline);
+  box-shadow: 0 2px 8px -4px rgba(20, 20, 19, 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.chat-block-actions--dark {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.chat-block-actions__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.chat-block-actions--light .chat-block-actions__button:hover {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary-active);
+}
+
+.chat-block-actions--dark .chat-block-actions__button {
+  color: #f4f2ec;
+}
+
+.chat-block-actions--dark .chat-block-actions__button:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.chat-block-actions__button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* 父级悬停 / 内部聚焦时露出操作条 */
+.chat-markdown-block:hover > .chat-block-actions,
+.chat-markdown-block:focus-within > .chat-block-actions,
+.chat-code-block:hover .chat-block-actions,
+.chat-code-block:focus-within .chat-block-actions,
+.chat-media-frame:hover > .chat-block-actions,
+.chat-media-frame:focus-within > .chat-block-actions {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* 代码块头部里的操作条不脱离文档流，随头部行内排布 */
+.chat-code-block__head .chat-block-actions {
+  position: static;
+  padding: 0;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* 触屏没有 hover：常显，避免操作不可达 */
+@media (hover: none) {
+  .chat-block-actions {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-block-actions,
+  .chat-block-actions__button {
+    transition: none;
+  }
+}

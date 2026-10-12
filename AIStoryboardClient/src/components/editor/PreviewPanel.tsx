@@ -5,7 +5,6 @@ import { useProjectStore } from '../../stores/projectStore';
 import { assetUrl, REFERENCE_LIMITS } from '../../config';
 import { getSceneImageUrls } from '../../lib/sceneImages';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
-import { ProjectOutputImagePickerModal } from './ProjectOutputImagePickerModal';
 import { ReferenceUploader } from './ReferenceUploader';
 import { RefineImageModal } from './RefineImageModal';
 import { ContextMenu } from '../common/ContextMenu';
@@ -20,8 +19,10 @@ import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import { Eye, Download, Sparkles, Library, LoaderCircle } from 'lucide-react';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 
-function downloadAsset(url: string, filename: string) {
+function downloadAsset(url: string, filename: string, options?: { silent?: boolean }) {
   fetch(url)
     .then(r => r.blob())
     .then(blob => {
@@ -31,6 +32,7 @@ function downloadAsset(url: string, filename: string) {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(u);
+      if (!options?.silent) notify({ title: '已开始下载', description: filename, variant: 'info' });
     })
     .catch(() => window.open(url, '_blank'));
 }
@@ -210,7 +212,6 @@ export function PreviewPanel() {
   const [refineTarget, setRefineTarget] = useState<string | null>(null); // 完善图片弹窗的源图 URL（null=关闭）
   const [sceneGroupBindings, setSceneGroupBindings] = useState<SceneAssetGroupBinding[]>([]);
   const [assetPickerPurpose, setAssetPickerPurpose] = useState<'image' | 'video' | null>(null); // 资产选择弹窗用途
-  const [projectOutputPicker, setProjectOutputPicker] = useState<{ type: 'image' | 'video' | 'audio'; purpose: 'image' | 'video' } | null>(null);
   const [projectLibraryPicker, setProjectLibraryPicker] = useState<{ type: 'image' | 'video' | 'audio'; purpose: 'image' | 'video'; remaining: number } | null>(null);
   const [libraryImportBusy, setLibraryImportBusy] = useState(false);
   const [libraryImportDone, setLibraryImportDone] = useState(false);
@@ -558,9 +559,14 @@ export function PreviewPanel() {
 
   const downloadSelected = () => {
     if (!selectedDownloads.size) return;
-    Array.from(selectedDownloads).forEach((url, i) => {
-      setTimeout(() => downloadAsset(assetUrl(url), `scene-${scene?.sceneNumber}-${i + 1}.png`), i * 150);
+    const urls = Array.from(selectedDownloads);
+    urls.forEach((url, i) => {
+      setTimeout(
+        () => downloadAsset(assetUrl(url), `scene-${scene?.sceneNumber}-${i + 1}.png`, { silent: true }),
+        i * 150,
+      );
     });
+    notify({ title: `已下载 ${urls.length} 张图片`, variant: 'info' });
   };
 
   const fieldStatusLabel = (field: EditableSceneField): string => {
@@ -751,6 +757,7 @@ export function PreviewPanel() {
                       <Download size={12} strokeWidth={2} /> 下载选中 ({selectedDownloads.size})
                     </button>
                   )}
+                  <Tooltip label={currentProject?.id ? '导入项目库' : '请先选择项目'}>
                   <button
                     onClick={() => void handleImportSceneMedia(
                       (selectedDownloads.size > 0
@@ -760,13 +767,13 @@ export function PreviewPanel() {
                     )}
                     disabled={!currentProject?.id || libraryImportBusy}
                     style={{ ...btnDownload, opacity: currentProject?.id ? 1 : 0.5 }}
-                    title={currentProject?.id ? '导入项目库' : '请先选择项目'}
                   >
                     {libraryImportBusy
                       ? <LoaderCircle size={12} className="is-spinning" />
                       : <Library size={12} strokeWidth={2} />}
                     {libraryImportDone ? '已导入' : libraryImportBusy ? '导入中...' : '导入项目库'}
                   </button>
+                  </Tooltip>
                 </div>
               </div>
             ) : (
@@ -842,7 +849,6 @@ export function PreviewPanel() {
                 <button
                   onClick={handleClearParams}
                   style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
-                  title="清空本分镜覆盖，跟随全局默认"
                 >
                   恢复全局默认
                 </button>
@@ -910,8 +916,6 @@ export function PreviewPanel() {
                   onPickProjectLibrary={() => setProjectLibraryPicker({
                     type: 'image', purpose: 'image', remaining: refImageRemaining,
                   })}
-                  onPickProjectOutput={() => setProjectOutputPicker({ type: 'image', purpose: 'image' })}
-                  projectOutputDisabled={refImageRemaining === 0}
                 />
               </div>
             )}
@@ -975,17 +979,18 @@ export function PreviewPanel() {
                 <button onClick={() => downloadAsset(assetUrl(scene.videoUrl), `scene-${scene.sceneNumber}.mp4`)} {...ghostHover} style={btnDownload}>
                   <Download size={12} strokeWidth={2} /> 下载视频
                 </button>
+                <Tooltip label={currentProject?.id ? '导入项目库' : '请先选择项目'}>
                 <button
                   onClick={() => void handleImportSceneMedia([{ url: scene.videoUrl!, type: 'VIDEO' }])}
                   disabled={!currentProject?.id || libraryImportBusy}
                   style={{ ...btnDownload, opacity: currentProject?.id ? 1 : 0.5 }}
-                  title={currentProject?.id ? '导入项目库' : '请先选择项目'}
                 >
                   {libraryImportBusy
                     ? <LoaderCircle size={12} className="is-spinning" />
                     : <Library size={12} strokeWidth={2} />}
                   {libraryImportDone ? '已导入' : libraryImportBusy ? '导入中...' : '导入项目库'}
                 </button>
+                </Tooltip>
                 </div>
                 </ContextMenu>
             ) : (
@@ -1001,14 +1006,15 @@ export function PreviewPanel() {
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                       <span>生成失败，点击下方重试</span>
                       {scene.videoTaskId && (
-                        <button
-                          onClick={() => void handleManualFetchVideo()}
-                          {...ghostHover}
-                          style={{ ...btnGhost, cursor: 'pointer' }}
-                          title="用已创建的视频任务重新拉取结果（若上游已完成则直接拿回视频）"
-                        >
-                          手动拉取视频
-                        </button>
+                        <Tooltip label="重新拉取视频结果">
+                          <button
+                            onClick={() => void handleManualFetchVideo()}
+                            {...ghostHover}
+                            style={{ ...btnGhost, cursor: 'pointer' }}
+                          >
+                            手动拉取视频
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   )
@@ -1064,7 +1070,6 @@ export function PreviewPanel() {
                 <button
                   onClick={handleClearParams}
                   style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--color-primary)', cursor: 'pointer', padding: 0 }}
-                  title="清空本分镜覆盖，跟随全局默认"
                 >
                   恢复全局默认
                 </button>
@@ -1126,8 +1131,6 @@ export function PreviewPanel() {
                   remaining: Math.max(0, (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount)
                     - refVImages.length),
                 })}
-                onPickProjectOutput={() => setProjectOutputPicker({ type: 'image', purpose: 'video' })}
-                projectOutputDisabled={refVImages.length >= (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount)}
                 disabled={useFirstFrame}
               />
               <ReferenceUploader
@@ -1143,8 +1146,6 @@ export function PreviewPanel() {
                   remaining: Math.max(0, (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount)
                     - refVideos.length),
                 })}
-                onPickProjectOutput={() => setProjectOutputPicker({ type: 'video', purpose: 'video' })}
-                projectOutputDisabled={refVideos.length >= (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount)}
                 disabled={useFirstFrame}
               />
               <ReferenceUploader
@@ -1160,8 +1161,6 @@ export function PreviewPanel() {
                   remaining: Math.max(0, (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount)
                     - refAudios.length),
                 })}
-                onPickProjectOutput={() => setProjectOutputPicker({ type: 'audio', purpose: 'video' })}
-                projectOutputDisabled={refAudios.length >= (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount)}
                 disabled={useFirstFrame}
               />
             </div>
@@ -1240,7 +1239,9 @@ export function PreviewPanel() {
                         style={{ border: 'none', background: 'transparent', color: 'var(--color-error)', cursor: 'pointer', fontSize: 10 }}
                       >已更新·刷新</button>
                     )}
-                    <button onClick={() => void removeSceneAsset(binding.groupId, 'image')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">×</button>
+                    <Tooltip label="取消关联">
+                      <button onClick={() => void removeSceneAsset(binding.groupId, 'image')} aria-label="取消关联" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
+                    </Tooltip>
                   </span>
                 ))}
               </div>
@@ -1268,7 +1269,9 @@ export function PreviewPanel() {
                         style={{ border: 'none', background: 'transparent', color: 'var(--color-error)', cursor: 'pointer', fontSize: 10 }}
                       >已更新·刷新</button>
                     )}
-                    <button onClick={() => void removeSceneAsset(binding.groupId, 'video')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }} title="取消关联">×</button>
+                    <Tooltip label="取消关联">
+                      <button onClick={() => void removeSceneAsset(binding.groupId, 'video')} aria-label="取消关联" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted-soft)', fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
+                    </Tooltip>
                   </span>
                 ))}
               </div>
@@ -1290,33 +1293,6 @@ export function PreviewPanel() {
           onClose={() => setAssetPickerPurpose(null)}
           onConfirm={(groupIds) => bindSceneAssetGroups(groupIds, assetPickerPurpose)}
         />
-      )}
-      {projectOutputPicker && (
-      <ProjectOutputImagePickerModal
-        open
-        mediaType={projectOutputPicker.type}
-        projectId={currentProject?.id}
-        existingUrls={
-          projectOutputPicker.type === 'image' && projectOutputPicker.purpose === 'image'
-            ? refImages.map((ref) => ref.url)
-            : projectOutputPicker.type === 'image'
-              ? refVImages.map((ref) => ref.url)
-              : projectOutputPicker.type === 'video'
-                ? refVideos.map((ref) => ref.url)
-                : refAudios.map((ref) => ref.url)
-        }
-        remaining={
-          projectOutputPicker.type === 'image' && projectOutputPicker.purpose === 'image'
-            ? refImageRemaining
-            : Math.max(0, projectOutputPicker.type === 'video'
-              ? (videoParams.refVideoMax ?? REFERENCE_LIMITS.video.maxCount) - refVideos.length
-              : projectOutputPicker.type === 'audio'
-                ? (videoParams.refAudioMax ?? REFERENCE_LIMITS.audio.maxCount) - refAudios.length
-                : (videoParams.refImageMax ?? REFERENCE_LIMITS.image.maxCount) - refVImages.length)
-        }
-        onClose={() => setProjectOutputPicker(null)}
-        onConfirm={(references) => linkSceneRefs(scene.id, references)}
-      />
       )}
       <ProjectLibraryPickerModal
         open={!!projectLibraryPicker}

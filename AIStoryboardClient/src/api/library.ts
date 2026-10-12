@@ -157,6 +157,16 @@ export interface AnalysisTaskStatus {
   updatedAt: string;
 }
 
+export interface AnalysisRequestItem {
+  assetId: string;
+  name: string;
+}
+
+export interface AnalysisRequestResult {
+  items: AnalysisRequestItem[];
+  skipped: number;
+}
+
 export interface LibraryFolderNode {
   id: string;
   parentId: string | null;
@@ -190,6 +200,10 @@ export const libraryApi = {
     tagIds?: string[];
     tagMode?: TagMode;
     deleted?: boolean;
+    /** 项目范围内同时纳入该账号的全局素材。 */
+    includeGlobal?: boolean;
+    /** 只返回系统生成回写的产出素材。 */
+    origin?: 'GENERATED';
     page?: number;
     size?: number;
   }) => client.get<ApiResponse<LibraryPage<LibraryAsset>>>('/library/assets', { params }),
@@ -392,4 +406,16 @@ export const libraryApi = {
     client.get<ApiResponse<AnalysisTaskStatus[]>>('/library/assets/analysis-tasks', {
       params: { assetIds: assetIds.join(',') },
     }),
+
+  /** 用户主动触发：为选中的图片素材排队 AI 元数据完善。 */
+  requestAnalysis: (assetIds: string[]) =>
+    client.post<ApiResponse<AnalysisRequestResult>>('/library/assets/analysis', { assetIds }),
+
+  /** 用户主动触发：为目录（含子目录）内的图片素材排队 AI 元数据完善。 */
+  requestFolderAnalysis: (folderId: string, params: { scope: AssetScope; projectId?: string }) =>
+    client.post<ApiResponse<AnalysisRequestResult>>(
+      `/library/folders/${encodeURIComponent(folderId)}/analysis`,
+      null,
+      { params },
+    ),
 };

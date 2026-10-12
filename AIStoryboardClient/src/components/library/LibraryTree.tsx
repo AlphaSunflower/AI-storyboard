@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import Tree, { type RawNodeDatum } from 'react-d3-tree';
+import { Tooltip } from '../common/Tooltip';
 import {
   Boxes,
   ChevronDown,
@@ -242,11 +243,11 @@ export function LibraryTree({
                 加载更多
               </button>
             ) : (
+              <Tooltip label="更多操作">
               <button
                 type="button"
                 className="library-tree-node__more"
                 aria-label="更多操作"
-                title="更多操作"
                 onClick={(event) => {
                   event.stopPropagation();
                   const rect = event.currentTarget.getBoundingClientRect();
@@ -255,6 +256,7 @@ export function LibraryTree({
               >
                 <MoreHorizontal size={15} />
               </button>
+              </Tooltip>
             )}
           </div>
         </foreignObject>

@@ -20,6 +20,8 @@ import {
   type ChatAnnotation,
 } from '../../stores/chatAnnotationStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 import { findQuoteRange, parseAnnotationContext, selectionOccurrence, type AnnotationQuote } from '../../lib/chatAnnotation';
 import { AnnotationListPopover } from './AnnotationChip';
 import {
@@ -34,8 +36,21 @@ import { StoryboardResultActions } from './StoryboardResultActions';
 import { CanvasRunCard } from './CanvasRunCard';
 import { ContextMenu } from '../common/ContextMenu';
 import { DeferredExternalImage } from '../common/DeferredExternalImage';
+import { ChatBlockActions } from './ChatBlockActions';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { isExternalImageSource } from '../../lib/externalImages';
+import {
+  blockOrdinal,
+  codeBlockLanguage,
+  codeBlockText,
+  copyImageToClipboard,
+  copyPlainText,
+  downloadTextFile,
+  extensionForLanguage,
+  tableToCsv,
+  tableToMarkdown,
+  tableToRows,
+} from '../../lib/chatBlockExport';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { remarkCjkStrong } from './remarkCjkStrong';
 import { remarkMark } from './remarkMark';
@@ -76,6 +91,24 @@ function fileNameFromUrl(url: string, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+/*
+ * 侧边窗口已经开着就只同步上下文，否则按源会话标题新开一个临时侧边对话。
+ * 选中文字与附件引用共用这条路径。
+ */
+function openSideChatWithSelections(sourceConversationId: string) {
+  const sideChatId = currentSideChatId();
+  if (sideChatId) {
+    postSideChatSelectionUpdate(
+      sideChatId,
+      useSideChatSelectionStore.getState().selections,
+    );
+    return;
+  }
+  const sourceTitle = useAgentStore.getState().conversations
+    .find((item) => item.id === sourceConversationId)?.title;
+  void useAgentStore.getState().openSideChat(sourceConversationId, sourceTitle);
 }
 
 function standaloneAttachmentContent(content: string): AgentAttachment | null {
@@ -179,12 +212,32 @@ function VideoAttachmentThumbnail({
   );
 }
 
+/** 消息附件卡片的下载：直接让浏览器接管，不经过应用路由。 */
+function downloadAttachment(attachment: AgentAttachment) {
+  const name = attachment.name || '附件';
+  const link = document.createElement('a');
+  link.href = assetUrl(attachment.url);
+  link.download = name;
+  link.rel = 'noreferrer';
+  link.target = '_blank';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  notify({ title: '已开始下载', description: name, variant: 'info' });
+}
+
 function MessageAttachmentStrip({
   attachments,
   onPreview,
+  onQuote,
+  onAskSideChat,
+  sideChatLabel = '在侧边提问',
 }: {
   attachments: AgentAttachment[];
   onPreview: (attachment: AgentAttachment) => void;
+  onQuote?: (attachment: AgentAttachment) => void;
+  onAskSideChat?: (attachment: AgentAttachment) => void;
+  sideChatLabel?: string;
 }) {
   if (attachments.length === 0) return null;
   return (
@@ -205,8 +258,30 @@ function MessageAttachmentStrip({
         const fileChip = attachment.kind === 'file';
         const Chip = fileChip ? 'button' : 'span';
         return (
-          <Chip
+          <ContextMenu
             key={`${attachment.url}-${index}`}
+            items={[
+              {
+                label: '下载',
+                icon: <Download size={13} strokeWidth={1.9} />,
+                onClick: () => downloadAttachment(attachment),
+              },
+              {
+                label: '引用',
+                icon: <MessageSquarePlus size={13} strokeWidth={1.9} />,
+                disabled: !onQuote,
+                onClick: () => onQuote?.(attachment),
+              },
+              {
+                label: sideChatLabel,
+                icon: <PanelRightOpen size={13} strokeWidth={1.9} />,
+                disabled: !onAskSideChat,
+                onClick: () => onAskSideChat?.(attachment),
+              },
+            ]}
+          >
+          <Tooltip label={`${label} · 右键查看更多操作`}>
+          <Chip
             title={label}
             type={fileChip ? 'button' : undefined}
             onClick={fileChip ? () => onPreview(attachment) : undefined}
@@ -242,6 +317,8 @@ function MessageAttachmentStrip({
             </span>
             <FileSize value={attachment.sizeBytes} />
           </Chip>
+          </Tooltip>
+          </ContextMenu>
         );
       })}
     </div>
@@ -351,28 +428,54 @@ async function downloadImage(url: string, alt?: string) {
   const filenameBase = (alt?.trim() || 'chat-image')
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, '-');
+  let filename = `${filenameBase || 'chat-image'}.${imageExtension(url, '')}`;
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = `${filenameBase || 'chat-image'}.${imageExtension(url, blob.type)}`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    filename = `${filenameBase || 'chat-image'}.${imageExtension(url, blob.type)}`;
+    triggerMediaDownload(objectUrl, filename);
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   } catch {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filenameBase || 'chat-image'}.${imageExtension(url, '')}`;
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    triggerMediaDownload(url, filename, true);
   }
+  notify({ title: '已开始下载', description: filename, variant: 'info' });
+}
+
+function triggerMediaDownload(href: string, filename: string, openInNewTab = false) {
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  link.rel = 'noreferrer';
+  if (openInNewTab) link.target = '_blank';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/** 图片悬浮操作：复制优先写 PNG 位图，剪贴板不支持时回退复制链接。 */
+function ImageBlockActions({ src, alt }: { src: string; alt?: string }) {
+  return (
+    <ChatBlockActions
+      kind="image"
+      label="图片"
+      onCopy={async () => (await copyImageToClipboard(src)) !== 'failed'}
+      onDownload={() => { void downloadImage(src, alt); }}
+    />
+  );
+}
+
+/** 视频悬浮操作：复制播放链接，下载沿用图片同一条下载链路。 */
+function VideoBlockActions({ src, source }: { src: string; source: string }) {
+  return (
+    <ChatBlockActions
+      kind="video"
+      label="视频"
+      onCopy={() => copyPlainText(source || src)}
+      onDownload={() => { void downloadImage(src, 'chat-video'); }}
+    />
+  );
 }
 
 /**
@@ -383,10 +486,11 @@ async function downloadImage(url: string, alt?: string) {
  */
 function ImgWithFallback({
   src, source, alt, style, onClick, onImport, importDisabled, importing, dragPayload, deferExternalLoad = false,
+  actions,
 }: {
   src: string; source?: string; alt?: string; style?: React.CSSProperties; onClick?: () => void;
   onImport?: () => void; importDisabled?: boolean; importing?: boolean; dragPayload?: ChatMediaDragPayload | null;
-  deferExternalLoad?: boolean;
+  deferExternalLoad?: boolean; actions?: React.ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
   const [loadRequested, setLoadRequested] = useState(() => !deferExternalLoad || !isExternalImageSource(source));
@@ -449,21 +553,24 @@ function ImgWithFallback({
         },
       ]}
     >
-      <img
-        src={src}
-        alt={alt ?? ''}
-        style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
-        onClick={onClick}
-        onError={() => setFailed(true)}
-        referrerPolicy="no-referrer"
-        loading="lazy"
-        draggable={Boolean(dragPayload)}
-        onDragStart={(event) => {
-          if (!dragPayload) return;
-          event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
-          event.dataTransfer.effectAllowed = 'copy';
-        }}
-      />
+      <span className="chat-media-frame">
+        <img
+          src={src}
+          alt={alt ?? ''}
+          style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
+          onClick={onClick}
+          onError={() => setFailed(true)}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          draggable={Boolean(dragPayload)}
+          onDragStart={(event) => {
+            if (!dragPayload) return;
+            event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
+            event.dataTransfer.effectAllowed = 'copy';
+          }}
+        />
+        {actions}
+      </span>
     </ContextMenu>
   );
 }
@@ -475,6 +582,7 @@ function VideoWithActions({
   importDisabled,
   importing,
   dragPayload,
+  actions,
 }: {
   src: string;
   source: string;
@@ -482,6 +590,7 @@ function VideoWithActions({
   importDisabled?: boolean;
   importing?: boolean;
   dragPayload?: ChatMediaDragPayload | null;
+  actions?: React.ReactNode;
 }) {
   return (
     <ContextMenu
@@ -499,18 +608,21 @@ function VideoWithActions({
         },
       ]}
     >
-      <video
-        src={src}
-        controls
-        style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
-        data-source={source}
-        draggable={Boolean(dragPayload)}
-        onDragStart={(event) => {
-          if (!dragPayload) return;
-          event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
-          event.dataTransfer.effectAllowed = 'copy';
-        }}
-      />
+      <span className="chat-media-frame">
+        <video
+          src={src}
+          controls
+          style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, margin: '4px 0', display: 'block' }}
+          data-source={source}
+          draggable={Boolean(dragPayload)}
+          onDragStart={(event) => {
+            if (!dragPayload) return;
+            event.dataTransfer.setData(CHAT_MEDIA_DRAG_MIME, serializeDragPayload(dragPayload));
+            event.dataTransfer.effectAllowed = 'copy';
+          }}
+        />
+        {actions}
+      </span>
     </ContextMenu>
   );
 }
@@ -550,6 +662,7 @@ function renderContent(
           } : null}
             style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
             deferExternalLoad
+            actions={<ImageBlockActions src={assetUrl(imgMatch[2])} alt={imgMatch[1]} />}
           />
       );
     }
@@ -571,6 +684,7 @@ function renderContent(
             url: videoMatch[0],
             name: '对话视频',
           } : null}
+          actions={<VideoBlockActions src={assetUrl(videoMatch[0])} source={videoMatch[0]} />}
         />
       );
     }
@@ -597,6 +711,7 @@ function renderContent(
           } : null}
             style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
             deferExternalLoad
+            actions={<ImageBlockActions src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)} />}
           />
       );
     }
@@ -612,7 +727,10 @@ function renderContent(
   });
 }
 
-/** Markdown 渲染（Moon 助手消息）：保留 `[链接](url)`、视频裸 URL、图片 markdown / 裸图片 URL 的原有处理。 */
+/**
+ * Markdown 渲染（Moon 助手消息）：保留 `[链接](url)`、视频裸 URL、图片 markdown / 裸图片 URL 的原有处理。
+ * 表格与代码块额外挂悬浮的复制 / 下载操作条（streaming 期间不渲染，避免打断逐字呈现）。
+ */
 function MarkdownContent({
   content,
   onImgClick,
@@ -620,6 +738,7 @@ function MarkdownContent({
   importDisabled,
   importing,
   dragProjectId,
+  streaming = false,
 }: {
   content: string;
   onImgClick: (url: string) => void;
@@ -627,10 +746,13 @@ function MarkdownContent({
   importDisabled?: boolean;
   importing?: boolean;
   dragProjectId?: string;
+  streaming?: boolean;
 }) {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
   const nodes: React.ReactNode[] = [];
+  // 无源码位置信息时的兜底序号；带 position 的块走 blockOrdinal 的起始行号
+  const fallbackIndex = { table: 0, code: 0 };
   let buf: string[] = [];
   const flush = (key: number) => {
     if (buf.length === 0) return;
@@ -644,30 +766,79 @@ function MarkdownContent({
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkCjkStrong, remarkMark, remarkBreaks]}
           components={{
-            table: ({ children }) => (
-              <div className="chat-markdown-table-wrap">
-                <table>{children}</table>
-              </div>
-            ),
-            img: ({ src, alt }) => (
-              <ImgWithFallback
-                src={assetUrl(src ?? '')}
-                source={src ?? ''}
-                alt={alt ?? ''}
-                onClick={() => onImgClick(src ?? '')}
-                onImport={() => onImportMedia?.({ url: src ?? '', type: 'IMAGE' })}
-                importDisabled={importDisabled}
-                importing={importing}
-                dragPayload={dragProjectId ? {
-                  projectId: dragProjectId,
-                  mediaType: 'IMAGE',
-                  url: src ?? '',
-                  name: alt || '对话图片',
-                } : null}
-                style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
-                deferExternalLoad
-              />
-            ),
+            table: ({ node, children }) => {
+              const rows = tableToRows(node);
+              const ordinal = blockOrdinal(node, fallbackIndex.table + 1);
+              fallbackIndex.table += 1;
+              return (
+                <div className="chat-markdown-block chat-markdown-block--table">
+                  <div className="chat-markdown-table-wrap">
+                    <table>{children}</table>
+                  </div>
+                  {!streaming && (
+                    <ChatBlockActions
+                      kind="table"
+                      label="表格"
+                      onCopy={() => copyPlainText(tableToMarkdown(rows))}
+                      onDownload={() => {
+                        const filename = `table-${ordinal}.csv`;
+                        downloadTextFile(filename, `\ufeff${tableToCsv(rows)}`, 'text/csv;charset=utf-8');
+                        notify({ title: '已开始下载', description: filename, variant: 'info' });
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            },
+            pre: ({ node, children }) => {
+              if (streaming) return <pre>{children}</pre>;
+              const language = codeBlockLanguage(node);
+              const code = codeBlockText(node);
+              const ordinal = blockOrdinal(node, fallbackIndex.code + 1);
+              fallbackIndex.code += 1;
+              return (
+                <div className="chat-code-block">
+                  <div className="chat-code-block__head" data-annotation-ui>
+                    <span className="chat-code-block__lang">{language || 'text'}</span>
+                    <ChatBlockActions
+                      kind="code"
+                      variant="dark"
+                      label="代码"
+                      onCopy={() => copyPlainText(code)}
+                      onDownload={() => {
+                        const filename = `snippet-${ordinal}.${extensionForLanguage(language)}`;
+                        downloadTextFile(filename, code, 'text/plain;charset=utf-8');
+                        notify({ title: '已开始下载', description: filename, variant: 'info' });
+                      }}
+                    />
+                  </div>
+                  <pre>{children}</pre>
+                </div>
+              );
+            },
+            img: ({ src, alt }) => {
+              const raw = src ?? '';
+              return (
+                <ImgWithFallback
+                  src={assetUrl(raw)}
+                  source={raw}
+                  alt={alt ?? ''}
+                  onClick={() => onImgClick(raw)}
+                  onImport={() => onImportMedia?.({ url: raw, type: 'IMAGE' })}
+                  importDisabled={importDisabled}
+                  importing={importing}
+                  dragPayload={dragProjectId ? {
+                    projectId: dragProjectId,
+                    mediaType: 'IMAGE',
+                    url: raw,
+                    name: alt || '对话图片',
+                  } : null}
+                  style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
+                  deferExternalLoad
+                  actions={streaming ? undefined : <ImageBlockActions src={assetUrl(raw)} alt={alt ?? ''} />}
+                />
+              );
+            },
             a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
           }}
         >{md}</ReactMarkdown>
@@ -681,7 +852,7 @@ function MarkdownContent({
       flush(i);
       nodes.push(
         <VideoWithActions
-          key={i}
+          key={`video-${i}`}
           src={assetUrl(videoMatch[0])}
           source={videoMatch[0]}
           onImport={() => onImportMedia?.({ url: videoMatch[0], type: 'VIDEO' })}
@@ -693,6 +864,7 @@ function MarkdownContent({
             url: videoMatch[0],
             name: '对话视频',
           } : null}
+          actions={streaming ? undefined : <VideoBlockActions src={assetUrl(videoMatch[0])} source={videoMatch[0]} />}
         />
       );
     } else {
@@ -815,12 +987,10 @@ function SelectionActionToolbar({
       if (cardRef.current?.contains(event.target as Node)) return;
       onDismiss();
     };
-    const onScroll = () => onDismiss();
+    // 滚动不收起：父级 effect 会跟随原文重锚定，保证高亮与弹框始终一起出现
     document.addEventListener('mousedown', onDown);
-    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('scroll', onScroll, true);
     };
   }, [onDismiss]);
 
@@ -1118,6 +1288,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   );
   const [draftAnchor, setDraftAnchor] = useState<{ quote: string; occurrence?: number; rect: AnchorRect } | null>(null);
   const [selectionAction, setSelectionAction] = useState<{ quote: string; occurrence?: number; rect: AnchorRect } | null>(null);
+  // 操作条与选中高亮共用 selectionAction 这一份状态，保证「高亮 + 弹框」同生共死
+  const selectionQuote = selectionAction?.quote;
+  const selectionQuoteOccurrence = selectionAction?.occurrence;
+  const selectionHighlightName = useMemo(
+    () => `chat-selection-${(messageId ?? 'draft').replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [messageId],
+  );
   const [listAnchor, setListAnchor] = useState<AnchorRect | null>(null);
   // 每条注释在原文里的高亮位置（视口坐标），供徽标定位与「编辑框贴着原文」使用
   const [annotationAnchors, setAnnotationAnchors] = useState<Record<string, AnchorRect>>({});
@@ -1171,19 +1348,32 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     setSelectionAction(null);
     window.getSelection()?.removeAllRanges();
 
-    const sideChatId = currentSideChatId();
-    if (sideChatId) {
-      postSideChatSelectionUpdate(
-        sideChatId,
-        useSideChatSelectionStore.getState().selections,
-      );
-      return;
-    }
-
-    const sourceTitle = useAgentStore.getState().conversations
-      .find((item) => item.id === conversationId)?.title;
-    void useAgentStore.getState().openSideChat(conversationId, sourceTitle);
+    openSideChatWithSelections(conversationId);
   }, [conversationId, messageId, selectionAction]);
+
+  /** 附件被「在侧边提问」时进入同一份侧边上下文，只是片段内容换成文件条目。 */
+  const handleAttachmentAskSideChat = useCallback((attachment: AgentAttachment) => {
+    if (!conversationId) return;
+    const name = attachment.name || '附件';
+    useSideChatSelectionStore.getState().addSelection({
+      text: `文件「${name}」：${attachment.url}`,
+      messageId,
+    });
+    openSideChatWithSelections(conversationId);
+  }, [conversationId, messageId]);
+
+  /** 「引用」把消息里的现有附件放回输入卡的待发送附件，下一条消息直接带上。 */
+  const handleQuoteAttachment = useCallback((attachment: AgentAttachment) => {
+    const name = attachment.name || '附件';
+    useAgentStore.getState().addPendingAttachments([{ ...attachment, name }]);
+    notify({ title: '已引用到输入框', description: name, variant: 'info' });
+  }, []);
+
+  const attachmentStripProps = {
+    onQuote: handleQuoteAttachment,
+    onAskSideChat: handleAttachmentAskSideChat,
+    sideChatLabel: insideSideChat ? '添加到提问' : '在侧边提问',
+  };
 
   const handleCreateAnnotation = useCallback((comment: string) => {
     if (!draftAnchor || !messageId || !conversationId) return;
@@ -1313,6 +1503,50 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     };
   }, [annotationsVisible, annotationCount, messageAnnotations, displayContent, highlightName, clearHighlight]);
 
+  // 选中高亮与操作条绑定：弹框开着就持续高亮被选原文（原生选区被流式渲染/焦点变化清掉也不丢）；
+  // 滚动时跟随原文重锚定弹框而不是收起，原文找不到或滚出视口才把高亮和弹框一起收掉
+  useEffect(() => {
+    if (!annotationEditable || !selectionQuote) return;
+    const root = contentRef.current;
+    if (!root) return;
+    const support = getHighlightSupport();
+    const occurrence = selectionQuoteOccurrence ?? 0;
+    const dismiss = () => {
+      window.getSelection()?.removeAllRanges();
+      setSelectionAction(null);
+    };
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      const range = findQuoteRange(root, selectionQuote, occurrence);
+      if (!range) { dismiss(); return; }
+      if (support) support.registry.set(selectionHighlightName, new support.HighlightCtor(range));
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
+      if (rect.bottom < 0 || rect.top > window.innerHeight) { dismiss(); return; }
+      setSelectionAction((previous) => {
+        if (!previous) return null;
+        const unchanged = Math.abs(previous.rect.top - rect.top) < 0.5
+          && Math.abs(previous.rect.left - rect.left) < 0.5;
+        return unchanged ? previous : { ...previous, rect: toAnchorRect(rect) };
+      });
+    };
+    const schedule = () => {
+      if (typeof window.requestAnimationFrame !== 'function') { apply(); return; }
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(apply);
+    };
+    schedule();
+    window.addEventListener('scroll', schedule, true);
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, true);
+      window.removeEventListener('resize', schedule);
+      support?.registry.delete(selectionHighlightName);
+    };
+  }, [annotationEditable, selectionQuote, selectionQuoteOccurrence, selectionHighlightName, displayContent]);
+
   // 点击空白处关闭注释列表；点列表本身不关
   useEffect(() => {
     if (!listAnchor) return;
@@ -1367,6 +1601,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
             onImgClick={(url) => openPreview(url, 'image')}
             onImportMedia={(media) => void handleImportMedia([media])}
             importDisabled={importDisabled}
+            streaming={streaming}
           />
         </div>
       )
@@ -1622,6 +1857,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                       importDisabled={importDisabled}
                       importing={projectImportState === 'importing'}
                       dragProjectId={currentProject?.id}
+                      streaming={streaming}
                     />
                   )}
                   {imageBatch && (
@@ -1634,6 +1870,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                   <MessageAttachmentStrip
                     attachments={sandboxAttachments}
                     onPreview={openAttachmentPreview}
+                    {...attachmentStripProps}
                   />
                 </>
               )
@@ -1654,6 +1891,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                   <MessageAttachmentStrip
                     attachments={userAttachments}
                     onPreview={openAttachmentPreview}
+                    {...attachmentStripProps}
                   />
                   {userTextContent && renderContent(
                     userTextContent,
@@ -1684,6 +1922,9 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         {annotationsVisible && (
           <style>{`::highlight(${highlightName}) { background-color: rgba(65, 118, 230, 0.16); }`}</style>
         )}
+        {annotationEditable && selectionAction && (
+          <style>{`::highlight(${selectionHighlightName}) { background-color: rgba(65, 118, 230, 0.32); }`}</style>
+        )}
       </div>
       {!isUser && metadata?.taskCards?.map((task) => (
         <AgentTaskCard key={task.taskId} taskId={task.taskId} />
@@ -1707,21 +1948,22 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
             {formatTime(createdAt)}
           </span>
-          <button
-            onClick={handleCopy}
-            title="复制内容"
-            onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(0,0,0,0.05)'; el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'; }}
-            onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'transparent'; el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)'; }}
-            style={{
-              border: 'none', background: 'transparent', cursor: 'pointer',
-              fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
-              color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
-            }}
-          >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+          <Tooltip label="复制内容">
+            <button
+              onClick={handleCopy}
+              onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(0,0,0,0.05)'; el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'; }}
+              onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'transparent'; el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)'; }}
+              style={{
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
+                color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
+              }}
+            >{copied ? '✓ 已复制' : '⧉ 复制'}</button>
+          </Tooltip>
           {isUser && editable && (onEdit || onEditMessage) && (
+            <Tooltip label="编辑消息">
             <button
               onClick={beginEdit}
-              title="编辑消息"
               onMouseEnter={(e) => {
                 const el = e.currentTarget;
                 el.style.background = 'rgba(0,0,0,0.05)';
@@ -1742,12 +1984,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               <Pencil size={12} strokeWidth={1.8} />
               编辑
             </button>
+            </Tooltip>
           )}
           {!isUser && messageMedia.length > 0 && (
+            <Tooltip label={currentProject?.id ? '导入素材库' : '请先选择项目'}>
             <button
               onClick={() => void handleImportMedia(messageMedia)}
               disabled={importDisabled || projectImportState === 'importing'}
-              title={currentProject?.id ? '导入素材库' : '请先选择项目'}
               onMouseEnter={(e) => {
                 if (importDisabled || projectImportState === 'importing') return;
                 const el = e.currentTarget;
@@ -1774,6 +2017,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                 ? '已导入素材库'
                 : projectImportState === 'error' ? '重试导入素材库' : '导入素材库'}
             </button>
+            </Tooltip>
           )}
           {metrics && (
             <span
@@ -1833,7 +2077,11 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         onQuote={handleStartAnnotation}
         onAskSideChat={handleAskSideChat}
         sideChatLabel={insideSideChat ? '添加到提问' : '侧边提问'}
-        onDismiss={() => setSelectionAction(null)}
+        onDismiss={() => {
+          // 收起弹框时同步清掉原生选区，避免只剩高亮没有弹框的“半截状态”
+          window.getSelection()?.removeAllRanges();
+          setSelectionAction(null);
+        }}
       />
     )}
     {annotationEditable && draftAnchor && (

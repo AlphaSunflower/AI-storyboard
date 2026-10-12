@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { notify } from '../../stores/toastStore';
 import { Save, Pencil, Trash2, ChevronDown } from 'lucide-react';
 import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 import { ProjectDropdown } from './ProjectDropdown';
@@ -28,6 +29,32 @@ export function AppHeader() {
   // Ctrl/Cmd+S 保存当前项目（与「保存」按钮同逻辑）
   const handleSave = () => {
     if (currentProject) updateProject(currentProject.id, { status: 'active' });
+  };
+
+  /** 重命名当前项目：成功后右下角确认，失败回显错误 */
+  const submitProjectRename = async () => {
+    const name = renameProjectName.trim();
+    if (!currentProject || !name) return;
+    setRenameProjectOpen(false);
+    try {
+      await updateProject(currentProject.id, { name });
+      notify({ title: '已重命名项目', description: `「${name}」` });
+    } catch (err) {
+      notify({ title: '重命名失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
+    }
+  };
+
+  /** 删除当前项目：先确认，成功/失败都给一次性提示 */
+  const removeCurrentProject = async () => {
+    if (!currentProject) return;
+    const name = currentProject.name;
+    if (!confirm(`确定要删除项目「${name}」吗？`)) return;
+    try {
+      await deleteProject(currentProject.id);
+      notify({ title: '已删除项目', description: `「${name}」` });
+    } catch (err) {
+      notify({ title: '删除项目失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
+    }
   };
 
   useEffect(() => {
@@ -122,9 +149,7 @@ export function AppHeader() {
                   icon: <Trash2 size={13} strokeWidth={1.8} />,
                   danger: true,
                   disabled: !currentProject,
-                  onClick: () => {
-                    if (currentProject && confirm(`确定要删除项目「${currentProject.name}」吗？`)) deleteProject(currentProject.id);
-                  },
+                  onClick: () => { void removeCurrentProject(); },
                 },
               ]}
             >
@@ -195,8 +220,7 @@ export function AppHeader() {
               onChange={(e) => setRenameProjectName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && renameProjectName.trim()) {
-                  updateProject(currentProject.id, { name: renameProjectName.trim() });
-                  setRenameProjectOpen(false);
+                  void submitProjectRename();
                 }
               }}
               style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
@@ -208,10 +232,7 @@ export function AppHeader() {
               </button>
               <button
                 disabled={!renameProjectName.trim()}
-                onClick={() => {
-                  updateProject(currentProject.id, { name: renameProjectName.trim() });
-                  setRenameProjectOpen(false);
-                }}
+                onClick={() => { void submitProjectRename(); }}
                 style={{
                   padding: '6px 16px',
                   border: 'none',

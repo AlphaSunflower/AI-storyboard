@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Brain, ChevronDown, ChevronRight, Clock } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentReasoning, AgentTraceEvent } from '../../api/agent';
 import { AgentTraceTimeline } from './AgentTraceTimeline';
 import { usePresence } from '../../hooks/usePresence';
+import LatticeLoader from '../ui/LatticeLoader';
 
 /** 用时格式化：ms →  X.X 秒 / X 分 Y 秒 */
 function formatDuration(ms?: number): string {
@@ -14,7 +15,7 @@ function formatDuration(ms?: number): string {
 }
 
 /**
- * 推理过程面板：实时阶段显示「正在思考…」，message_end 后默认折叠显示「已思考（用时 X 秒）」。
+ * 推理过程面板：实时阶段格纹动画 + 「思考中」+ 计时，message_end 后冻结为「已思考」+ 用时。
  * 展开后分段展示 reasoning 摘要/详情 与 agentTrace 交接轨迹（不嵌套卡片）。
  */
 export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
@@ -23,30 +24,23 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const panelPresence = usePresence(expanded, 220);
   const hasContent = !!reasoning || (agentTrace && agentTrace.length > 0);
   useEffect(() => {
     setExpanded(!!streaming);
   }, [streaming]);
-  useEffect(() => {
-    if (!streaming) return;
-    const startedAt = Date.now();
-    setElapsedSeconds(0);
-    const timer = window.setInterval(() => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [streaming]);
   if (!hasContent && !streaming) return null;
   const live = !!streaming;
-  const duration = reasoning?.durationMs != null ? formatDuration(reasoning.durationMs) : '';
-  const liveClock = elapsedSeconds >= 60
-    ? `${Math.floor(elapsedSeconds / 60)}分${elapsedSeconds % 60}秒`
-    : `${elapsedSeconds}秒`;
-  const title = live
-    ? `正在思考 ${liveClock}…`
-    : `已思考${duration ? `（用时 ${duration}）` : ''}`;
+  // 结束后只有拿到后端耗时才显示计时；否则保持「已思考」不带时间，避免出现 0.0s。
+  const durationMs = live ? undefined : reasoning?.durationMs;
+  const hasDuration = durationMs != null;
+  const duration = formatDuration(durationMs);
+  const inkColor = live ? 'var(--color-primary)' : 'var(--color-muted)';
+  const announce = live
+    ? '思考中'
+    : hasDuration
+      ? `已思考，用时 ${duration}`
+      : '已思考';
   const showToggle = hasContent;
 
   return (
@@ -56,34 +50,38 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           border: 'none', background: 'transparent', cursor: showToggle ? 'pointer' : 'default',
-          padding: 0, color: live ? 'var(--color-primary)' : 'var(--color-muted)',
+          padding: 0, color: inkColor,
           fontSize: 12, lineHeight: 1.4, textAlign: 'left',
         }}
       >
-        <Brain size={14} strokeWidth={1.8} style={{ flexShrink: 0, color: live ? 'var(--color-primary)' : 'var(--color-muted)' }} />
-        <span
-          key={live ? 'thinking' : 'thought'}
-          className="reasoning-title-swap"
-          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'min(70vw, 520px)' }}
-        >
-          {title}
+        {/* 格纹动画只是状态指示，无障碍名称由下面的 sr-only 文案提供 */}
+        <span aria-hidden="true" style={{ display: 'inline-flex', flexShrink: 0 }}>
+          <LatticeLoader
+            status={live ? 'working' : 'done'}
+            label="思考中"
+            doneLabel="已思考"
+            pattern="orbit"
+            grid={3}
+            shape="round"
+            color={inkColor}
+            doneColor="var(--color-success)"
+            cellSize={5}
+            gap={2}
+            fontSize={12}
+            step={90}
+            idleOpacity={0.15}
+            glow={false}
+            showTimer={live || hasDuration}
+            elapsed={hasDuration ? durationMs / 1000 : undefined}
+          />
         </span>
-        {live && (
-          <span style={{ display: 'inline-flex', gap: 2 }}>
-            {[0, 1].map((i) => (
-              <span key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--color-primary)', animation: 'reasoningDot 1.2s ease-in-out infinite', animationDelay: `${i * 0.18}s` }} />
-            ))}
-          </span>
-        )}
+        <span className="sr-only">{announce}</span>
         {showToggle && (
           <span className={`reasoning-chevron${expanded ? ' is-open' : ''}`}>
             {expanded ? <ChevronDown size={13} strokeWidth={1.8} /> : <ChevronRight size={13} strokeWidth={1.8} />}
           </span>
         )}
-        {live && <Clock size={12} strokeWidth={1.8} style={{ color: 'var(--color-primary)' }} />}
-        {!live && duration && <Clock size={12} strokeWidth={1.8} style={{ color: 'var(--color-muted-soft)' }} />}
       </button>
-      <style>{`@keyframes reasoningDot { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
 
       {panelPresence.mounted && (
         <div

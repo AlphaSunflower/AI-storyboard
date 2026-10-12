@@ -1,6 +1,7 @@
 import { MessageSquareText, X } from 'lucide-react';
 import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import { currentSideChatId, postSideChatSelectionUpdate } from '../../lib/sideChatSelectionSync';
+import { Tooltip } from '../common/Tooltip';
 import './SideChatContextChip.css';
 
 export function SideChatContextChip() {
@@ -35,14 +36,15 @@ export function SideChatContextChip() {
             <article key={selection.id} className="side-chat-context__item">
               <span>{index + 1}</span>
               <p>{selection.text}</p>
+              <Tooltip label="移除该文本片段">
               <button
                 type="button"
                 onClick={() => remove(selection.id)}
-                title="移除该文本片段"
                 aria-label={`移除文本片段 ${index + 1}`}
               >
                 <X size={13} strokeWidth={2} />
               </button>
+              </Tooltip>
             </article>
           ))}
         </div>

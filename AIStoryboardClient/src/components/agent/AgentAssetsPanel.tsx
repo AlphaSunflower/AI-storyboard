@@ -6,6 +6,8 @@ import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { assetUrl } from '../../config';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 import { getSceneImageUrls } from '../../lib/sceneImages';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { Download, FileText, Film, Folder, Image as ImageIcon, Images, LayoutList, Play, Sparkles, X } from 'lucide-react';
@@ -201,25 +203,28 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
                 const attachment = documentAttachmentForAsset(asset, url);
                 return (
                   <div className="agent-asset-document" key={`${asset.id}-${url}`}>
+                    <Tooltip label="打开文档">
                     <button
                       type="button"
                       onClick={() => useDocumentPreviewStore.getState().openDocument(attachment)}
                       aria-label={`打开 ${attachment.name}`}
-                      title={`打开 ${attachment.name}`}
                     >
                       <FileText size={16} strokeWidth={1.8} />
                       <span>{attachment.name}</span>
                     </button>
+                    </Tooltip>
+                    <Tooltip label="下载文件">
                     <a
                       href={assetUrl(url)}
                       download={attachment.name}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={() => notify({ title: '已开始下载', description: attachment.name, variant: 'info' })}
                       aria-label={`下载 ${attachment.name}`}
-                      title={`下载 ${attachment.name}`}
                     >
                       <Download size={14} strokeWidth={1.8} />
                     </a>
+                    </Tooltip>
                   </div>
                 );
               }))}

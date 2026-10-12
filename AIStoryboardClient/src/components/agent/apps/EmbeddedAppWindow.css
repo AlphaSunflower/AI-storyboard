@@ -201,6 +201,11 @@
   min-width: 0;
 }
 
+/* 右下角浮着下载按钮，正文底部留出它不会压住的一片空白 */
+.embedded-app-window .embedded-app-window__document .document-preview__viewport {
+  padding-bottom: 74px;
+}
+
 .embedded-app-window__loading {
   position: absolute;
   inset: 0;
@@ -231,6 +236,39 @@
   cursor: nesw-resize;
   touch-action: none;
   box-shadow: 0 2px 8px rgba(15, 17, 21, 0.12);
+}
+
+/* 文档只有一个只读产物，下载入口固定在窗口右下角，跟着窗口一起全屏/缩放。 */
+.embedded-app-window__download {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 550;
+  text-decoration: none;
+  box-shadow: 0 6px 20px rgba(15, 17, 21, 0.16);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.embedded-app-window__download:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-hairline));
+  background: #fff;
+  color: var(--color-primary);
+}
+
+.embedded-app-window__download:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-primary) 24%, transparent);
+  outline-offset: 2px;
 }
 
 @keyframes embedded-app-in {

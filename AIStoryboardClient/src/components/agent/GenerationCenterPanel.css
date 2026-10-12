@@ -411,6 +411,12 @@
   cursor: pointer;
 }
 
+/* 取消按钮包进 tooltip 触发器后，让它继续作为行尾的 flex 项 */
+.generation-center__row > .warm-tooltip__trigger {
+  flex-shrink: 0;
+  display: flex;
+}
+
 .generation-center__locked {
   flex-shrink: 0;
   color: var(--color-muted-soft);

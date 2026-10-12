@@ -480,6 +480,33 @@
   font-size: 12px;
 }
 
+.library-folder-browser__load-more {
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 24px;
+}
+
+.library-folder-browser__load-more button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 9px;
+  background: white;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.library-folder-browser__load-more button:hover:not(:disabled) {
+  border-color: rgba(200, 121, 88, 0.55);
+  color: var(--workspace-accent);
+}
+
+.library-folder-browser__load-more button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .library-folder-grid {
   position: relative;
   flex: 1;
@@ -1306,13 +1333,73 @@
   color: var(--workspace-accent);
 }
 
-.library-inspector__preview .document-preview__viewport {
-  max-height: 320px;
+.library-inspector__document-card {
+  width: 100%;
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 22px 16px;
+  border: 0;
+  background: linear-gradient(160deg, #2b2f36, #1f2227);
+  color: #ffd9c8;
+  cursor: zoom-in;
+}
+
+.library-inspector__document-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-inspector__document-card span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+}
+
+.library-inspector__document-card em {
+  margin-top: 4px;
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.library-inspector__document-card:hover:not(:disabled) {
+  background: linear-gradient(160deg, #343941, #24282e);
+}
+
+.library-inspector__document-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .library-inspector__actions button.is-danger,
 .library-action-menu button.is-danger {
   color: #bd3b3b;
+}
+
+.library-inspector__actions button.is-ai {
+  border-color: rgba(200, 121, 88, 0.5);
+  background: rgba(200, 121, 88, 0.1);
+  color: #9d5a41;
+  font-weight: 600;
+}
+
+.library-inspector__actions button.is-ai:hover:not(:disabled) {
+  border-color: var(--workspace-accent);
+  background: rgba(200, 121, 88, 0.17);
+  color: #874832;
+}
+
+.library-inspector__actions button.is-ai:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .library-inspector__selected-list {

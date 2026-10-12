@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
@@ -22,10 +22,21 @@ import {
   resolveChatDockMode,
   resolveChatSidebarCollapseWidth,
   resolveChatSplitMaxWidth,
+  resolveChatColumnWidth,
+  resolveViewportSidebarAction,
   shouldRestoreAutoCollapsedSidebar,
+  shouldShowChatMessageRail,
   type ChatDockMode,
 } from '../components/agent/chatDockLayout';
+import { ChatMessageRail } from '../components/agent/ChatMessageRail';
+import {
+  buildChatRailItems,
+  pickActiveRailId,
+  type ChatRailItem,
+  type RailAnchor,
+} from '../lib/chatMessageRail';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
+import { Tooltip, TooltipGroup } from '../components/common/Tooltip';
 import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
@@ -147,6 +158,8 @@ export function ChatPage() {
   const [dockPresentation, setDockPresentation] = useState<ChatDockPresentation>('pill');
   const [dockRequested, setDockRequested] = useState(false);
   const autoCollapsedSidebarRef = useRef(false);
+  /** 用户手动展开过侧栏：在窗口回到宽屏前不再被自动收起打断 */
+  const manualSidebarExpandRef = useRef(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false); // 手机端 overlay 侧栏
   const [embed, setEmbed] = useState(() =>
     new URLSearchParams(window.location.search).get('embed') === '1'); // iframe 紧凑模式（画布执行服务小窗）
@@ -161,6 +174,13 @@ export function ChatPage() {
   const activeScrollEl = () => (isMobile && !embed ? mobileScrollRef : desktopScrollRef).current;
   const chatMainRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
+  /** 消息导航行边栏：锚点按消息 id 存，点刻度时用于滚动定位 */
+  const railAnchorRefs = useRef(new Map<string, HTMLDivElement>());
+  const railSyncFrameRef = useRef<number | null>(null);
+  /** 上一帧是否渲染了行边栏窄列，用于把实测宽度换算回"不含行边栏"的宽度 */
+  const railColumnMountedRef = useRef(false);
+  const [chatMainWidth, setChatMainWidth] = useState(0);
+  const [activeRailId, setActiveRailId] = useState<string | null>(null);
   const loadedRef = useRef(false);
   const railProjectBtnRef = useRef<HTMLButtonElement>(null);
   const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
@@ -204,6 +224,7 @@ export function ChatPage() {
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     nearBottomRef.current = distanceToBottom < 80;
     if (distanceToBottom < 220) setShowScrollDown(false);
+    syncActiveRail();
   };
 
   const appWindowOpen = !embed && chatApps.windowOpen;
@@ -523,6 +544,70 @@ export function ChatPage() {
   const showMobile = isMobile && !embed;
   const sideChatCommandEnabled = !showMobile && !embed && !sideChatMode
     && canvasPhase === 'natural';
+
+  /** 行边栏数据：每条用户消息一项，第二行取该轮回复最后一段 */
+  const railItems = useMemo(() => buildChatRailItems(messages), [messages]);
+  // 行边栏自己占掉 44px，判定必须换算成"不含行边栏"的宽度：
+  // 否则显隐会互相改变测量值，卡在阈值上就无限重渲染。
+  const chatColumnWidth = resolveChatColumnWidth({
+    chatMainWidth,
+    railMounted: railColumnMountedRef.current,
+  });
+  const railVisible = !isEmpty && shouldShowChatMessageRail({
+    chatColumnWidth,
+    rounds: railItems.length,
+    mobile: showMobile,
+    embedded: embed,
+    docked: dockMode === 'docked',
+    currentlyVisible: railColumnMountedRef.current,
+  });
+  railColumnMountedRef.current = railVisible;
+
+  /** 按滚动位置高亮当前轮次（阈值线在可视区 35% 高度处） */
+  const syncActiveRail = useCallback(() => {
+    if (railSyncFrameRef.current != null) cancelAnimationFrame(railSyncFrameRef.current);
+    railSyncFrameRef.current = requestAnimationFrame(() => {
+      railSyncFrameRef.current = null;
+      const scrollEl = activeScrollEl();
+      if (!scrollEl || railItems.length === 0) {
+        setActiveRailId(null);
+        return;
+      }
+      const anchors: RailAnchor[] = [];
+      railItems.forEach((item) => {
+        const node = railAnchorRefs.current.get(item.anchorId);
+        if (node) anchors.push({ id: item.id, top: node.getBoundingClientRect().top });
+      });
+      anchors.sort((a, b) => a.top - b.top);
+      setActiveRailId(pickActiveRailId(anchors, scrollEl.getBoundingClientRect().top, scrollEl.clientHeight));
+    });
+  }, [railItems]);
+
+  useLayoutEffect(() => {
+    if (!railVisible) {
+      setActiveRailId(null);
+      return;
+    }
+    syncActiveRail();
+  }, [railVisible, activeConversationId, syncActiveRail]);
+
+  useEffect(() => () => {
+    if (railSyncFrameRef.current != null) cancelAnimationFrame(railSyncFrameRef.current);
+    railSyncFrameRef.current = null;
+  }, []);
+
+  /** 点刻度：该条用户消息滚到消息区顶部，留 16px 边距 */
+  const handleRailSelect = useCallback((item: ChatRailItem) => {
+    const scrollEl = activeScrollEl();
+    const anchor = railAnchorRefs.current.get(item.anchorId);
+    if (!scrollEl || !anchor) return;
+    const offset = anchor.getBoundingClientRect().top
+      - scrollEl.getBoundingClientRect().top
+      + scrollEl.scrollTop
+      - 16;
+    scrollEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+  }, []);
+
   const referenceSidebarWidth = collapsed ? 48 : convWidth;
   const nextDockMode = resolveChatDockMode({
     previousMode: dockMode,
@@ -563,11 +648,13 @@ export function ChatPage() {
 
   const handleManualExpandSidebar = useCallback(() => {
     autoCollapsedSidebarRef.current = false;
+    manualSidebarExpandRef.current = true;
     setCollapsed(false);
   }, []);
 
   const handleManualCollapseSidebar = useCallback(() => {
     autoCollapsedSidebarRef.current = false;
+    manualSidebarExpandRef.current = false;
     setCollapsed(true);
   }, []);
 
@@ -596,6 +683,46 @@ export function ChatPage() {
     autoCollapsedSidebarRef.current = false;
     setCollapsed(false);
   }, [restoreAutoCollapsedSidebar]);
+
+  // 聊天区实测宽度：行边栏显隐与"窗口变窄先收会话栏"都用它判定
+  useLayoutEffect(() => {
+    const el = chatMainRef.current;
+    if (!el) return;
+    const measure = () => setChatMainWidth(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 没有子窗口吃宽度时（无子窗口 / 已最小化），窗口收窄也先自动收起会话栏，
+  // 保证"左侧栏先隐藏、行边栏后隐藏"的顺序；有子窗口时一律交给上面的旧规则，
+  // 避免两套规则同时写 collapsed 互相打架。
+  useLayoutEffect(() => {
+    if (showMobile || embed || !chatMainWidth) return;
+    if (chatApps.hasTabs && !chatApps.layout.minimized) return;
+    const action = resolveViewportSidebarAction({
+      chatMainWidth: chatColumnWidth,
+      collapsed,
+      sidebarWidth: convWidth,
+    });
+    if (action === 'collapse' && !manualSidebarExpandRef.current) {
+      autoCollapsedSidebarRef.current = true;
+      setCollapsed(true);
+      return;
+    }
+    if (action === 'restore') {
+      manualSidebarExpandRef.current = false;
+      if (autoCollapsedSidebarRef.current) {
+        autoCollapsedSidebarRef.current = false;
+        setCollapsed(false);
+      }
+    }
+  }, [chatColumnWidth, chatMainWidth, collapsed, convWidth, chatApps.hasTabs, dockMode, showMobile, embed]);
 
   useLayoutEffect(() => {
     if (nextDockMode === dockMode) return;
@@ -866,49 +993,61 @@ export function ChatPage() {
               aria-hidden={!collapsed}
               inert={!collapsed}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                <button
-                  onClick={handleManualExpandSidebar}
-                  title="展开侧边栏"
-                  style={railIconBtn}
-                  className="chat-icon-button"
-                  {...railHover}
-                ><Moon size={18} strokeWidth={1.8} /></button>
-                <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
-                  <button
-                    ref={railProjectBtnRef}
-                    onClick={() => { if (canvasPhase === 'natural') setProjectOpen((value) => !value); }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    title={canvasPhase === 'natural' ? (currentProject?.name ?? '选择项目') : '请先离开画布编辑模式'}
-                    style={{ ...railIconBtn, opacity: canvasPhase === 'natural' ? 1 : 0.45, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed' }}
-                    className="chat-icon-button"
-                    {...railHover}
-                  ><FolderKanban size={18} strokeWidth={1.8} /></button>
+              <TooltipGroup>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                  <Tooltip side="right" label="展开侧边栏">
+                    <button
+                      onClick={handleManualExpandSidebar}
+                      aria-label="展开侧边栏"
+                      style={railIconBtn}
+                      className="chat-icon-button"
+                      {...railHover}
+                    ><Moon size={18} strokeWidth={1.8} /></button>
+                  </Tooltip>
+                  <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+                    <Tooltip side="right" label={canvasPhase === 'natural' ? (currentProject?.name ?? '选择项目') : '请先离开画布编辑模式'}>
+                      <button
+                        ref={railProjectBtnRef}
+                        onClick={() => { if (canvasPhase === 'natural') setProjectOpen((value) => !value); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label={canvasPhase === 'natural' ? '切换项目' : '请先离开画布编辑模式'}
+                        style={{ ...railIconBtn, opacity: canvasPhase === 'natural' ? 1 : 0.45, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed' }}
+                        className="chat-icon-button"
+                        {...railHover}
+                      ><FolderKanban size={18} strokeWidth={1.8} /></button>
+                    </Tooltip>
+                  </div>
+                  <Tooltip side="right" label="项目库">
+                    <button
+                      onClick={() => chatApps.open('library')}
+                      aria-label="项目库"
+                      style={railIconBtn}
+                      className="chat-icon-button"
+                      {...railHover}
+                    ><Library size={18} strokeWidth={1.8} /></button>
+                  </Tooltip>
                 </div>
-                <button
-                  onClick={() => chatApps.open('library')}
-                  title="项目库"
-                  style={railIconBtn}
-                  className="chat-icon-button"
-                  {...railHover}
-                ><Library size={18} strokeWidth={1.8} /></button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <button
-                  onClick={() => setProfileOpen(true)}
-                  title="个人信息"
-                  style={railIconBtn}
-                  className="chat-icon-button"
-                  {...railHover}
-                ><User size={18} strokeWidth={1.8} /></button>
-                <button
-                  onClick={logout}
-                  title="退出登录"
-                  style={railIconBtn}
-                  className="chat-icon-button"
-                  {...railHover}
-                ><LogOut size={18} strokeWidth={1.8} /></button>
-              </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <Tooltip side="right" label="个人信息">
+                    <button
+                      onClick={() => setProfileOpen(true)}
+                      aria-label="个人信息"
+                      style={railIconBtn}
+                      className="chat-icon-button"
+                      {...railHover}
+                    ><User size={18} strokeWidth={1.8} /></button>
+                  </Tooltip>
+                  <Tooltip side="right" label="退出登录">
+                    <button
+                      onClick={logout}
+                      aria-label="退出登录"
+                      style={railIconBtn}
+                      className="chat-icon-button"
+                      {...railHover}
+                    ><LogOut size={18} strokeWidth={1.8} /></button>
+                  </Tooltip>
+                </div>
+              </TooltipGroup>
             </div>
 
             <div
@@ -925,10 +1064,12 @@ export function ChatPage() {
                     void useAgentStore.getState().selectConversation(id);
                   }}
                   headerRight={
+                    <TooltipGroup>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <Tooltip side="bottom" label={searchOpen ? '关闭搜索' : '搜索对话'}>
                       <button
                         onClick={() => setSearchOpen((value) => !value)}
-                        title={searchOpen ? '关闭搜索' : '搜索对话（全文+标题）'}
+                        aria-label={searchOpen ? '关闭搜索' : '搜索对话'}
                         aria-expanded={searchOpen}
                         className="chat-icon-button"
                         style={{
@@ -944,9 +1085,11 @@ export function ChatPage() {
                           <X className="chat-search-close" size={15} strokeWidth={1.8} />
                         </span>
                       </button>
+                      </Tooltip>
+                      <Tooltip side="bottom" label="收起侧边栏">
                       <button
                         onClick={handleManualCollapseSidebar}
-                        title="收起侧边栏"
+                        aria-label="收起侧边栏"
                         aria-expanded={!collapsed}
                         className="chat-icon-button"
                         style={{
@@ -961,16 +1104,19 @@ export function ChatPage() {
                           <PanelLeftClose size={15} strokeWidth={1.8} />
                         </span>
                       </button>
+                      </Tooltip>
                     </div>
+                    </TooltipGroup>
                   }
                   toolbar={
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px 12px' }}>
                       <div style={{ position: 'relative', width: '100%' }}>
+                        <Tooltip side="bottom" className="tooltip-fill" label={canvasPhase === 'natural' ? '切换项目' : '请先离开画布编辑模式'}>
                         <button
                           ref={desktopProjectBtnRef}
                           onClick={() => { if (canvasPhase === 'natural') setProjectOpen((value) => !value); }}
                           onMouseDown={(e) => e.stopPropagation()}
-                          title={canvasPhase === 'natural' ? '项目选择' : '请先离开画布编辑模式'}
+                          aria-label={canvasPhase === 'natural' ? '切换项目' : '请先离开画布编辑模式'}
                           style={{
                             width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                             border: 'none', borderRadius: 10, background: 'transparent',
@@ -987,6 +1133,7 @@ export function ChatPage() {
                           </span>
                           <span style={{ fontSize: 10, color: DS.textCaption }}><ChevronDown size={10} strokeWidth={2.5} /></span>
                         </button>
+                        </Tooltip>
                       </div>
                     </div>
                   }
@@ -994,10 +1141,12 @@ export function ChatPage() {
               </div>
 
               <div style={{ padding: '6px 10px', borderTop: '1px solid var(--color-hairline)' }}>
+                <TooltipGroup>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Tooltip className="tooltip-grow" label="个人信息">
                   <button
                     onClick={() => setProfileOpen(true)}
-                    title="个人信息"
+                    aria-label="个人信息"
                     style={{
                       flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
                       border: 'none', background: 'transparent', borderRadius: 10,
@@ -1009,9 +1158,11 @@ export function ChatPage() {
                     <User size={18} strokeWidth={1.8} />
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
                   </button>
+                  </Tooltip>
+                  <Tooltip label="退出登录">
                   <button
                     onClick={logout}
-                    title="退出登录"
+                    aria-label="退出登录"
                     style={{
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
@@ -1021,7 +1172,9 @@ export function ChatPage() {
                   >
                     <LogOut size={18} strokeWidth={1.8} />
                   </button>
+                  </Tooltip>
                 </div>
+                </TooltipGroup>
               </div>
             </div>
           </div>
@@ -1070,7 +1223,6 @@ export function ChatPage() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 12px 0' }}>
                       <button
                         onClick={() => setEmbedConvOpen(false)}
-                        title="收起"
                         style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: 'var(--color-muted)', padding: '4px 8px', borderRadius: 8 }}
                       ><PanelLeftClose size={14} strokeWidth={2} /> 收起</button>
                     </div>
@@ -1083,6 +1235,15 @@ export function ChatPage() {
                 />
               </div>
             </div>
+      )}
+
+      {/* ── 消息导航行边栏（桌面正常窗口 + ≥2 轮时才出现）── */}
+      {railVisible && (
+        <ChatMessageRail
+          items={railItems}
+          activeId={activeRailId}
+          onSelect={handleRailSelect}
+        />
       )}
 
       {/* ── 主对话区 ── */}
@@ -1120,7 +1281,6 @@ export function ChatPage() {
             {embed && (
               <button
                 onClick={() => setEmbedConvOpen(true)}
-                title="会话"
                 style={{ position: 'absolute', top: 8, left: 8, border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3 }}
               ><Moon size={12} strokeWidth={1.8} /> 会话</button>
             )}
@@ -1178,7 +1338,6 @@ export function ChatPage() {
                 {embed && !sideChatMode && (
                   <button
                     onClick={() => setEmbedConvOpen(true)}
-                    title="会话"
                     style={{ border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}
                   ><Moon size={12} strokeWidth={1.8} /> 会话</button>
                 )}
@@ -1199,9 +1358,10 @@ export function ChatPage() {
                     }}
                   />
                 ) : (
+                  <Tooltip side="bottom" label="重命名对话">
                   <button
                     onClick={startTitleEdit}
-                    title="点击重命名"
+                    aria-label="重命名对话"
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
                       maxWidth: '100%', border: 'none', background: 'transparent',
@@ -1215,6 +1375,7 @@ export function ChatPage() {
                       {currentTitle}
                     </span>
                   </button>
+                  </Tooltip>
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1266,7 +1427,15 @@ export function ChatPage() {
                   </button>
                 )}
                 {messages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
-                  <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
+                  <div
+                    key={m.id}
+                    data-message-id={m.id}
+                    ref={(node) => {
+                      if (node) railAnchorRefs.current.set(m.id, node);
+                      else railAnchorRefs.current.delete(m.id);
+                    }}
+                    style={{ animation: 'chat-msg-in 0.35s ease-out' }}
+                  >
                     <MessageBubble
                       messageId={m.id}
                       conversationId={m.conversationId}
@@ -1422,7 +1591,6 @@ function CanvasModeExitButton() {
       className="chat-canvas-exit-button"
       onClick={leaveCanvasEditMode}
       disabled={canvasExitPending}
-      title={canvasExitPending ? '本轮结束后离开' : '离开画布编辑模式'}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
         border: '1px solid rgba(65,118,230,0.25)', background: 'rgba(65,118,230,0.08)',

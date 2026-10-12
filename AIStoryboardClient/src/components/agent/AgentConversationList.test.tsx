@@ -1,7 +1,9 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentConversationList } from './AgentConversationList';
 import { useAgentStore } from '../../stores/agentStore';
+import { useToastStore } from '../../stores/toastStore';
+import { agentApi } from '../../api/agent';
 
 function conversation(id: string, title: string) {
   return {
@@ -48,5 +50,109 @@ describe('AgentConversationList generation markers', () => {
     render(<AgentConversationList />);
 
     expect(screen.getByLabelText('有新回复')).toBeTruthy();
+  });
+});
+
+describe('AgentConversationList 操作通知', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      conversations: [conversation('c1', '对话一'), conversation('c2', '对话二')],
+      activeConversationId: 'c1',
+      generating: {},
+      replyUnread: {},
+      taskUnread: {},
+    });
+    useToastStore.setState({ toasts: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useToastStore.setState({ toasts: [] });
+    useAgentStore.setState({ conversations: [], generating: {}, replyUnread: {}, taskUnread: {} });
+  });
+
+  /** 底部确认弹窗与底部多选栏都叫「删除」，取最后一个（后渲染的弹窗） */
+  const clickLastDeleteButton = () => {
+    const buttons = screen.getAllByRole('button')
+      .filter((button) => button.textContent?.trim() === '删除');
+    fireEvent.click(buttons[buttons.length - 1]);
+  };
+
+  it('confirms a conversation rename', async () => {
+    vi.spyOn(agentApi, 'updateConversation')
+      .mockResolvedValue({ data: { data: conversation('c2', '新标题') } } as never);
+    render(<AgentConversationList />);
+
+    fireEvent.click(screen.getAllByLabelText('更多操作')[1]);
+    fireEvent.click(screen.getByText('重命名'));
+    const input = screen.getByDisplayValue('对话二');
+    fireEvent.change(input, { target: { value: '新标题' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0].title).toBe('已重命名');
+    expect(useToastStore.getState().toasts[0].description).toBe('「新标题」');
+  });
+
+  it('confirms archiving a conversation', async () => {
+    vi.spyOn(agentApi, 'updateConversation')
+      .mockResolvedValue({
+        data: {
+          data: {
+            id: 'c2',
+            title: '对话二',
+            status: 'archived',
+            createdAt: '2026-10-09T10:00:00.000Z',
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      } as never);
+    render(<AgentConversationList />);
+
+    fireEvent.click(screen.getAllByLabelText('更多操作')[1]);
+    fireEvent.click(screen.getByText('归档'));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0].title).toBe('已归档');
+    expect(useToastStore.getState().toasts[0].description).toBe('「对话二」');
+  });
+
+  it('reports archive failures through the same store action', async () => {
+    vi.spyOn(agentApi, 'updateConversation').mockRejectedValue(new Error('网络异常'));
+
+    await expect(useAgentStore.getState().setConversationStatus('c2', 'archived')).rejects.toThrow('网络异常');
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      title: '归档失败',
+      description: '网络异常',
+      variant: 'error',
+    });
+  });
+
+  it('confirms deleting a single conversation', async () => {
+    vi.spyOn(agentApi, 'deleteConversation').mockResolvedValue({} as never);
+    render(<AgentConversationList />);
+
+    fireEvent.click(screen.getAllByLabelText('更多操作')[1]);
+    fireEvent.click(screen.getByText('删除'));
+    clickLastDeleteButton();
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0].title).toBe('已删除对话');
+    expect(useToastStore.getState().toasts[0].description).toBe('「对话二」');
+  });
+
+  it('summarises a batch delete as one notice', async () => {
+    const remove = vi.spyOn(agentApi, 'deleteConversation').mockResolvedValue({} as never);
+    render(<AgentConversationList />);
+
+    fireEvent.click(screen.getByLabelText('多选删除'));
+    fireEvent.click(screen.getByText('对话一'));
+    fireEvent.click(screen.getByText('对话二'));
+    clickLastDeleteButton();
+
+    await waitFor(() => expect(remove).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0].title).toBe('已删除 2 个对话');
   });
 });

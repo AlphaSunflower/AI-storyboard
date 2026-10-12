@@ -7,6 +7,7 @@ import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.AiAssetKind;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
+import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.TagMode;
@@ -17,6 +18,8 @@ import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.domain.AssetStatePolicy;
 import com.storyboard.asset.domain.AssetSearchText;
 import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
+import com.storyboard.asset.dto.ImportContracts.AnalysisRequestItem;
+import com.storyboard.asset.dto.ImportContracts.AnalysisRequestResult;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.FileAccessUrlSigner;
 import com.storyboard.asset.security.MediaUrlSigner;
@@ -65,19 +68,20 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
             String userId, AssetScope scope, String projectId, String query, AssetType type,
             Collection<String> tagIds, TagMode tagMode, boolean deleted, int page, int size
     ) {
-        return list(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted, page, size);
+        return list(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted, false, null, page, size);
     }
 
     @Override
     public PageResponse<AssetSummary> list(
             String userId, AssetScope scope, String projectId, String folderId, String query, AssetType type,
-            Collection<String> tagIds, TagMode tagMode, boolean deleted, int page, int size
+            Collection<String> tagIds, TagMode tagMode, boolean deleted, boolean includeGlobal,
+            LibraryOrigin origin, int page, int size
     ) {
         if (scope == AssetScope.PROJECT && projectId != null && !projectId.isBlank()) {
             projectAccess.requireOwned(userId, projectId);
         }
         PageResponse<AssetSummary> result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
-                tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, page, size);
+                tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, includeGlobal, origin, page, size);
         return new PageResponse<>(
                 result.records().stream().map(this::withSignedCover).toList(),
                 result.total(), result.page(), result.size());
@@ -290,10 +294,6 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         String url = "/api/files/" + registration.objectKey();
         repository.updateCover(assetId, url);
         if (registration.scope() == AssetScope.PROJECT) repository.linkProject(userId, assetId, registration.projectId());
-        if (registration.scope() == AssetScope.PROJECT
-                && registration.mediaType() == com.storyboard.asset.client.AssetContracts.MediaType.IMAGE) {
-            repository.createAnalysisTask(assetId);
-        }
         repository.createIdempotencyKey(userId, "media-register", idempotencyKey, assetId);
         return requireAsset(userId, assetId);
     }
@@ -316,6 +316,46 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
     @Override
     public List<AnalysisTaskStatus> listAnalysisTaskStatuses(String userId, Collection<String> assetIds) {
         return repository.listAnalysisTaskStatuses(userId, assetIds);
+    }
+
+    @Override
+    @Transactional
+    public AnalysisRequestResult requestAnalysis(String userId, Collection<String> assetIds) {
+        List<String> normalized = assetIds == null ? List.of() : assetIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().limit(MAX_BULK_ASSETS).toList();
+        List<AnalysisRequestItem> queued = new java.util.ArrayList<>(normalized.size());
+        int skipped = 0;
+        for (String assetId : normalized) {
+            AssetSummary asset = repository.findAsset(userId, assetId).orElse(null);
+            if (asset == null || asset.status() != AssetStatus.ACTIVE || asset.type() != AssetType.IMAGE) {
+                skipped++;
+                continue;
+            }
+            repository.requestAnalysisTask(assetId);
+            queued.add(new AnalysisRequestItem(asset.id(), asset.name()));
+        }
+        return new AnalysisRequestResult(List.copyOf(queued), skipped);
+    }
+
+    @Override
+    @Transactional
+    public AnalysisRequestResult requestFolderAnalysis(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId
+    ) {
+        AssetScope safeScope = scope == null ? AssetScope.PROJECT : scope;
+        if (safeScope == AssetScope.PROJECT) projectAccess.requireOwned(userId, projectId);
+        String targetFolderId = "UNFILED".equalsIgnoreCase(folderId) ? null : folderId;
+        List<LibraryRepository.FolderScanAsset> candidates = repository.listFolderAnalysisCandidates(
+                userId, safeScope, projectId, targetFolderId, MAX_BULK_ASSETS);
+        List<AnalysisRequestItem> queued = new java.util.ArrayList<>(candidates.size());
+        for (LibraryRepository.FolderScanAsset candidate : candidates) {
+            repository.requestAnalysisTask(candidate.id());
+            queued.add(new AnalysisRequestItem(candidate.id(), candidate.name()));
+        }
+        return new AnalysisRequestResult(List.copyOf(queued), 0);
     }
 
     private void validateCreate(String userId, CreateAssetRequest request) {

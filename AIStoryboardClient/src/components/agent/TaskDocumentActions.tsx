@@ -1,6 +1,8 @@
 import { Download, FileText } from 'lucide-react';
 import type { AgentAsset, AgentAttachment, AgentPage, AgentTaskView } from '../../api/agent';
 import { assetUrl } from '../../config';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 import { documentMimeType, documentPreviewKind } from '../../lib/documentPreview';
 import { useAgentStore } from '../../stores/agentStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
@@ -83,26 +85,29 @@ export function TaskDocumentActions({
     <div className={`task-document-actions${compact ? ' is-compact' : ''}`} aria-label="任务文档产出">
       {documents.map((document) => (
         <div className="task-document-actions__item" key={document.url}>
+          <Tooltip label="打开文档">
           <button
             type="button"
             onClick={() => useDocumentPreviewStore.getState().openDocument(document)}
             aria-label={`打开 ${document.name}`}
-            title={`打开 ${document.name}`}
           >
             <FileText size={13} strokeWidth={1.9} />
             <span>{document.name}</span>
           </button>
+          </Tooltip>
+          <Tooltip label="下载文件">
           <a
             href={assetUrl(document.url)}
             download={document.name}
             target="_blank"
             rel="noreferrer"
+            onClick={() => notify({ title: '已开始下载', description: document.name, variant: 'info' })}
             aria-label={`下载 ${document.name}`}
-            title={`下载 ${document.name}`}
           >
             <Download size={13} strokeWidth={1.9} />
             <span>下载</span>
           </a>
+          </Tooltip>
         </div>
       ))}
     </div>

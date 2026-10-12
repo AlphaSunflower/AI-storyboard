@@ -155,11 +155,6 @@
   text-rendering: optimizeLegibility;
 }
 
-.reasoning-title-swap {
-  display: inline-block;
-  animation: chat-fade-in 180ms ease;
-}
-
 .reasoning-chevron {
   display: inline-flex;
   animation: chat-fade-in 160ms ease;

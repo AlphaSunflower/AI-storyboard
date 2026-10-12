@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Boxes, ChevronLeft, Folder, Globe2, Image as ImageIcon, LoaderCircle } from 'lucide-react';
+import { Boxes, ChevronLeft, FileText, Folder, Globe2, Image as ImageIcon, LoaderCircle } from 'lucide-react';
 import {
   libraryFolderChildren,
   loadCanvasProjectLibrary,
@@ -138,10 +138,13 @@ function FolderCard({ folder, onOpen }: { folder: CanvasLibraryFolder; onOpen: (
 
 function AssetCard({ asset }: { asset: CanvasLibraryAsset }) {
   const [failed, setFailed] = useState(false);
+  const isDocument = asset.type === 'DOCUMENT' || asset.type === 'OTHER';
   return (
     <article style={assetCard}>
       <div style={assetThumb}>
-        {asset.coverUrl && !failed
+        {isDocument
+          ? <FileText size={24} style={{ opacity: 0.55 }} />
+          : asset.coverUrl && !failed
           ? <img src={asset.coverUrl} alt="" onError={() => setFailed(true)} style={thumbImage} />
           : <ImageIcon size={24} style={{ opacity: 0.4 }} />}
         {asset.scope === 'GLOBAL' && <span style={scopeBadge}><Globe2 size={10} /></span>}

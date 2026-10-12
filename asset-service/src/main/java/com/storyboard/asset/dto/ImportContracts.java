@@ -67,4 +67,10 @@ public final class ImportContracts {
             OffsetDateTime updatedAt
     ) {
     }
+
+    public record AnalysisRequestItem(String assetId, String name) {
+    }
+
+    public record AnalysisRequestResult(List<AnalysisRequestItem> items, int skipped) {
+    }
 }

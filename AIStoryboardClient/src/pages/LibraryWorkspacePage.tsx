@@ -22,6 +22,7 @@ import {
   Folder,
   FolderMinus,
   FolderPlus,
+  Globe2,
   Images,
   LayoutGrid,
   ListChecks,
@@ -39,6 +40,7 @@ import {
 } from 'lucide-react';
 import {
   libraryApi,
+  type AnalysisRequestItem,
   type AssetGroupSnapshot,
   type AssetScope,
   type AssetType,
@@ -52,6 +54,8 @@ import {
 } from '../api/library';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useLibraryTaskStore } from '../stores/libraryTaskStore';
+import { notify } from '../stores/toastStore';
+import { Tooltip } from '../components/common/Tooltip';
 import {
   LibraryActionMenu,
   type LibraryActionItem,
@@ -65,6 +69,10 @@ import {
   AuthenticatedPreviewImage,
   LibraryInspector,
 } from '../components/library/LibraryInspector';
+import {
+  DocumentPreviewModal,
+  type DocumentPreviewTarget,
+} from '../components/library/DocumentPreviewModal';
 import {
   buildFolderTree,
   canMergeIntoGroup,
@@ -89,9 +97,11 @@ import { assetUrl } from '../config';
 import './LibraryWorkspacePage.css';
 
 const PAGE_SIZE = 100;
+/** 目录内素材超过该数量时，AI 完善前先确认，避免一次误触触发大量模型调用。 */
+const AI_ENRICH_CONFIRM_THRESHOLD = 10;
 const INTERNAL_LIBRARY_DRAG_TYPE = 'application/x-moon-library-assets';
 const INTERNAL_FOLDER_DRAG_TYPE = 'application/x-moon-library-folder';
-type ScopeView = 'ALL' | 'GLOBAL' | 'TRASH';
+type ScopeView = 'PROJECT' | 'GLOBAL' | 'OUTPUT' | 'TRASH';
 type LibraryViewMode = 'folders' | 'tree';
 const METADATA_LABEL: Record<MetadataState, string> = {
   NONE: '未分析',
@@ -121,6 +131,18 @@ type PromptState =
   }
   | { kind: 'create-group'; title: string; value: string }
   | { kind: 'merge-group'; title: string; value: string; assetIds: string[] };
+
+/** 弹窗提交成功后的通知标题：按操作类型给一句中文确认 */
+function promptSuccessTitle(kind: PromptState['kind']): string {
+  switch (kind) {
+    case 'folder': return '已新建目录';
+    case 'rename-folder': return '已重命名目录';
+    case 'create-group':
+    case 'merge-group': return '已新建资产组';
+    case 'rename-asset': return '已重命名素材';
+    default: return '已保存素材信息';
+  }
+}
 
 interface MenuState {
   open: boolean;
@@ -158,7 +180,7 @@ export function LibraryWorkspacePage() {
   const loadProject = useProjectStore((state) => state.loadProject);
   const [scopeView, setScopeView] = useState<ScopeView>(() => {
     const initial = scopeFromQuery(searchParams.get('scope'));
-    return initial === 'PROJECT' || initial === 'GLOBAL' ? 'ALL' : initial;
+    return initial === 'ALL' ? 'PROJECT' : initial;
   });
   const [viewMode, setViewMode] = useState<LibraryViewMode>('folders');
   const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('projectId') || '');
@@ -192,6 +214,10 @@ export function LibraryWorkspacePage() {
   const [moveOpen, setMoveOpen] = useState(false);
   const [addToGroupAsset, setAddToGroupAsset] = useState<LibraryAsset | null>(null);
   const [trashAssets, setTrashAssets] = useState<LibraryAsset[]>([]);
+  const [outputAssets, setOutputAssets] = useState<LibraryAsset[]>([]);
+  const [outputTotal, setOutputTotal] = useState(0);
+  const [outputLoading, setOutputLoading] = useState(false);
+  const [globalTotal, setGlobalTotal] = useState(0);
   const [clipboardIds, setClipboardIds] = useState<string[]>([]);
   const [clipboardFolderIds, setClipboardFolderIds] = useState<string[]>([]);
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut'>('copy');
@@ -206,6 +232,7 @@ export function LibraryWorkspacePage() {
   const [internalDragActive, setInternalDragActive] = useState(false);
   const [pendingExternalDrop, setPendingExternalDrop] = useState<PendingExternalDrop | null>(null);
   const [confirmation, setConfirmation] = useState<LibraryConfirmation | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<DocumentPreviewTarget | null>(null);
   const [inspectorDismissed, setInspectorDismissed] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -255,15 +282,37 @@ export function LibraryWorkspacePage() {
 
   const effectiveProjectId = selectedProjectId || currentProject?.id || '';
   const isTrash = scopeView === 'TRASH';
-  const queryScope: AssetScope | undefined = scopeView === 'GLOBAL' ? 'GLOBAL' : undefined;
-  const projectForTree = queryScope === 'GLOBAL' || isTrash ? undefined : effectiveProjectId;
+  const isGlobal = scopeView === 'GLOBAL';
+  const isOutput = scopeView === 'OUTPUT';
+  const queryScope: AssetScope | undefined = isTrash ? undefined : isGlobal ? 'GLOBAL' : 'PROJECT';
+  const includeGlobal = scopeView === 'PROJECT';
+  const origin: 'GENERATED' | undefined = isOutput ? 'GENERATED' : undefined;
+  const projectForTree = isGlobal || isTrash ? undefined : effectiveProjectId;
   const effectiveType = type || undefined;
+  const showFolders = viewMode === 'folders' || isOutput;
 
   const reloadTree = useCallback(async () => {
     if (isTrash) {
       const response = await libraryApi.listAssets({ deleted: true, page: 1, size: PAGE_SIZE });
       setTrashAssets(response.data.data.records || []);
       setLoading(false);
+      return;
+    }
+    if (isOutput) {
+      setLoading(false);
+      setError('');
+      try {
+        const tagResponse = await libraryApi.listTags();
+        setTags(tagResponse.data.data || []);
+        setTagsExpanded(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载标签失败');
+      }
+      setFolderTree([]);
+      setUnfiledCount(0);
+      setGroups([]);
+      setAssetsByFolder({});
+      setLoadedFolders(new Set());
       return;
     }
     setLoading(true);
@@ -279,6 +328,7 @@ export function LibraryWorkspacePage() {
           scope: queryScope,
           projectId: projectForTree,
           type: 'GROUP',
+          includeGlobal,
           page: 1,
           size: PAGE_SIZE,
         }),
@@ -295,7 +345,7 @@ export function LibraryWorkspacePage() {
     } finally {
       setLoading(false);
     }
-  }, [isTrash, projectForTree, queryScope]);
+  }, [includeGlobal, isOutput, isTrash, projectForTree, queryScope]);
 
   useEffect(() => {
     void reloadTree();
@@ -310,10 +360,22 @@ export function LibraryWorkspacePage() {
       query,
       tagIds: selectedTagIds,
       tagMode: 'ALL',
+      includeGlobal,
+      origin,
     });
     if (isEmbedded) params.set('embedded', '1');
     setSearchParams(params, { replace: true });
-  }, [effectiveProjectId, isEmbedded, query, scopeView, selectedTagIds, setSearchParams, type]);
+  }, [
+    effectiveProjectId,
+    includeGlobal,
+    isEmbedded,
+    origin,
+    query,
+    scopeView,
+    selectedTagIds,
+    setSearchParams,
+    type,
+  ]);
 
   useEffect(() => {
     setSelectedIds([]);
@@ -327,6 +389,7 @@ export function LibraryWorkspacePage() {
     groupItemsRequest.current.clear();
     setSelectedGroupMediaId(null);
     setInspectorDismissed(false);
+    setDocumentPreview(null);
   }, [effectiveProjectId, query, scopeView, selectedTagIds, type]);
 
   const filteredMode = Boolean(query.trim() || type || selectedTagIds.length);
@@ -335,14 +398,16 @@ export function LibraryWorkspacePage() {
   const loadFolder = useCallback(async (folderId: string, page = 1, force = false) => {
     if (!force && page === 1 && loadedFolders.has(folderId) && !filteredMode) return;
     setError('');
+    const globalBucket = folderId === 'GLOBAL';
     const response = await libraryApi.listAssets({
-      scope: queryScope || 'PROJECT',
-      projectId: projectForTree,
-      folderId,
+      scope: globalBucket ? 'GLOBAL' : (queryScope || 'PROJECT'),
+      projectId: globalBucket ? undefined : projectForTree,
+      folderId: globalBucket ? undefined : folderId,
       q: query.trim() || undefined,
       type: effectiveType,
       tagIds: selectedTagIds.length ? selectedTagIds : undefined,
       tagMode: 'ALL',
+      includeGlobal: globalBucket ? undefined : includeGlobal,
       page,
       size: PAGE_SIZE,
     });
@@ -355,6 +420,7 @@ export function LibraryWorkspacePage() {
   }, [
     effectiveType,
     filteredMode,
+    includeGlobal,
     loadedFolders,
     projectForTree,
     query,
@@ -371,12 +437,13 @@ export function LibraryWorkspacePage() {
       type: effectiveType,
       tagIds: selectedTagIds.length ? selectedTagIds : undefined,
       tagMode: 'ALL',
+      includeGlobal,
       page: 1,
       size: PAGE_SIZE,
     });
     const grouped: Record<string, LibraryAsset[]> = {};
     (response.data.data.records || []).forEach((asset) => {
-      const key = asset.folderId || 'UNFILED';
+      const key = asset.scope === 'GLOBAL' ? 'GLOBAL' : (asset.folderId || 'UNFILED');
       grouped[key] = [...(grouped[key] || []), asset];
     });
     setAssetsByFolder(grouped);
@@ -397,6 +464,7 @@ export function LibraryWorkspacePage() {
     effectiveType,
     filteredMode,
     folderTree,
+    includeGlobal,
     isTrash,
     projectForTree,
     query,
@@ -408,12 +476,58 @@ export function LibraryWorkspacePage() {
     if (filteredMode) void loadFilteredAssets();
   }, [filteredMode, loadFilteredAssets]);
 
+  const loadOutputAssets = useCallback(async (page = 1, append = false) => {
+    if (!effectiveProjectId) {
+      setOutputAssets([]);
+      setOutputTotal(0);
+      return;
+    }
+    setOutputLoading(true);
+    setError('');
+    try {
+      const response = await libraryApi.listAssets({
+        scope: 'PROJECT',
+        projectId: effectiveProjectId,
+        origin: 'GENERATED',
+        q: query.trim() || undefined,
+        type: effectiveType,
+        tagIds: selectedTagIds.length ? selectedTagIds : undefined,
+        tagMode: 'ALL',
+        page,
+        size: PAGE_SIZE,
+      });
+      const records = response.data.data.records || [];
+      setOutputAssets((current) => (append ? dedupeAssets([...current, ...records]) : records));
+      setOutputTotal(response.data.data.total || 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载产出素材失败');
+    } finally {
+      setOutputLoading(false);
+    }
+  }, [effectiveProjectId, effectiveType, query, selectedTagIds]);
+
+  useEffect(() => {
+    if (!isOutput) return;
+    void loadOutputAssets(1, false);
+  }, [isOutput, loadOutputAssets]);
+
+  useEffect(() => {
+    if (!includeGlobal) {
+      setGlobalTotal(0);
+      return;
+    }
+    void libraryApi.listAssets({ scope: 'GLOBAL', page: 1, size: 1 })
+      .then((response) => setGlobalTotal(response.data.data.total || 0))
+      .catch(() => setGlobalTotal(0));
+  }, [includeGlobal]);
+
   const allKnownAssets = useMemo(() => {
     const map = new Map<string, LibraryAsset>();
     Object.values(assetsByFolder).flat().forEach((asset) => map.set(asset.id, asset));
+    outputAssets.forEach((asset) => map.set(asset.id, asset));
     groups.forEach((group) => map.set(group.id, group));
     return map;
-  }, [assetsByFolder, groups]);
+  }, [assetsByFolder, groups, outputAssets]);
 
   const selectedAssets = useMemo(() => {
     if (isTrash) {
@@ -438,16 +552,18 @@ export function LibraryWorkspacePage() {
   const treeData = useMemo<LibraryTreeNodeDatum>(() => ({
     id: 'root',
     kind: 'project',
-    name: '项目库',
-    meta: '项目素材与共享素材',
+    name: isGlobal ? '全局库' : '项目库',
+    meta: isGlobal ? '可跨项目复用的全局素材' : '项目素材与全局素材',
     expanded: expanded.has('root'),
     hasChildren: true,
     children: expanded.has('root') ? [
       {
         id: 'folders',
         kind: 'system',
-        name: '项目目录',
-        meta: `${currentProject?.name || '选择项目'} · ${folderTree.length} 个目录`,
+        name: isGlobal ? '全局目录' : '项目目录',
+        meta: isGlobal
+          ? `${folderTree.length} 个目录`
+          : `${currentProject?.name || '选择项目'} · ${folderTree.length} 个目录`,
         expanded: expanded.has('folders'),
         hasChildren: true,
         children: expanded.has('folders') ? [
@@ -504,6 +620,22 @@ export function LibraryWorkspacePage() {
           };
         }) : undefined,
       },
+      ...(includeGlobal ? [{
+        id: 'global',
+        kind: 'system' as const,
+        name: '全局素材',
+        meta: `${globalTotal} 项`,
+        expanded: expanded.has('global'),
+        hasChildren: globalTotal > 0,
+        children: expanded.has('global')
+          ? folderAssetChildren(
+              'GLOBAL',
+              assetsByFolder,
+              loadedFolders,
+              (assetsByFolder.GLOBAL?.length || 0) < globalTotal,
+            )
+          : undefined,
+      }] : []),
     ] : undefined,
   }), [
     assetsByFolder,
@@ -511,8 +643,11 @@ export function LibraryWorkspacePage() {
     expanded,
     folderNodes,
     folderTree.length,
+    globalTotal,
     groupItemsByGroup,
     groups,
+    includeGlobal,
+    isGlobal,
     loadingGroupIds,
     loadedFolders,
     scopeView,
@@ -545,13 +680,14 @@ export function LibraryWorkspacePage() {
     }
     const folderId = nodeId.startsWith('folder:')
       ? nodeId.slice('folder:'.length)
-      : nodeId === 'unfiled' ? 'UNFILED' : nodeId;
+      : nodeId === 'unfiled' ? 'UNFILED' : nodeId === 'global' ? 'GLOBAL' : nodeId;
     const next = new Set(expanded);
     if (next.has(nodeId)) {
       next.delete(nodeId);
     } else {
       next.add(nodeId);
-      if (folderId === 'UNFILED' || folderTree.some((folder) => folder.id === folderId)) {
+      if (folderId === 'UNFILED' || folderId === 'GLOBAL'
+        || folderTree.some((folder) => folder.id === folderId)) {
         void loadFolder(folderId).catch((err) => {
           setError(err instanceof Error ? err.message : '加载目录失败');
         });
@@ -658,7 +794,7 @@ export function LibraryWorkspacePage() {
   const currentFolderId = activeFolderId || 'UNFILED';
 
   useEffect(() => {
-    if (viewMode !== 'folders' || isTrash || loading || filteredMode) return;
+    if (viewMode !== 'folders' || isTrash || isOutput || loading || filteredMode) return;
     if (!effectiveProjectId && queryScope !== 'GLOBAL') return;
     if (loadedFolders.has(currentFolderId)) return;
     void loadFolder(currentFolderId).catch((err) => {
@@ -668,6 +804,7 @@ export function LibraryWorkspacePage() {
     currentFolderId,
     effectiveProjectId,
     filteredMode,
+    isOutput,
     isTrash,
     loadFolder,
     loadedFolders,
@@ -682,12 +819,13 @@ export function LibraryWorkspacePage() {
       : folderTree.filter((folder) => folder.parentId === (activeFolderId === 'UNFILED' ? null : activeFolderId)),
     [activeFolderId, filteredMode, folderTree],
   );
-  const visibleGroups = activeFolderId || filteredMode ? [] : groups;
+  const visibleGroups = activeFolderId || filteredMode || isOutput ? [] : groups;
 
   const currentFolderAssets = useMemo(() => {
+    if (isOutput) return outputAssets;
     if (filteredMode) return Object.values(assetsByFolder).flat();
     return (assetsByFolder[currentFolderId] || []).filter((asset) => asset.type !== 'GROUP');
-  }, [assetsByFolder, currentFolderId, filteredMode]);
+  }, [assetsByFolder, currentFolderId, filteredMode, isOutput, outputAssets]);
 
   const visibleSelectableIds = useMemo(
     () => isTrash
@@ -707,8 +845,10 @@ export function LibraryWorkspacePage() {
     [activeFolderId, folderTree],
   );
 
-  const currentFolderExpectedCount = activeFolder?.directAssetCount ?? unfiledCount;
-  const currentFolderLoaded = filteredMode || loadedFolders.has(currentFolderId);
+  const currentFolderExpectedCount = activeFolderId === 'GLOBAL'
+    ? globalTotal
+    : activeFolder?.directAssetCount ?? unfiledCount;
+  const currentFolderLoaded = isOutput || filteredMode || loadedFolders.has(currentFolderId);
 
   const enterFolder = (folder: LibraryFolderNode) => {
     setInspectorDismissed(true);
@@ -740,6 +880,23 @@ export function LibraryWorkspacePage() {
       meta: asset.type,
       asset,
     });
+  };
+
+  /** 文档类素材双击卡片直接放大预览：先取详情拿到可鉴权的 contentUrl。 */
+  const openDocumentPreview = async (asset: LibraryAsset) => {
+    try {
+      const response = await libraryApi.getAsset(asset.id);
+      const media = response.data.data.media || [];
+      const primary = media.find((item) => item.primary) || media[0];
+      if (!primary) return;
+      setDocumentPreview({
+        url: primary.contentUrl,
+        name: primary.fileName || asset.name,
+        mimeType: primary.mimeType,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '打开文档预览失败');
+    }
   };
 
   const applyClipboardSelection = (mode: 'copy' | 'cut') => {
@@ -979,6 +1136,7 @@ export function LibraryWorkspacePage() {
     setError('');
     setNotice('');
     let editedAssetId: string | null = null;
+    let skipToast = false;
     try {
       if (prompt.kind === 'folder') {
         const requestedName = prompt.value.trim();
@@ -990,6 +1148,7 @@ export function LibraryWorkspacePage() {
         });
         if (response.data.data.name !== requestedName) {
           setNotice(`已有同名目录，已创建为「${response.data.data.name}」`);
+          skipToast = true;
         }
       } else if (prompt.kind === 'rename-folder') {
         await libraryApi.renameFolder(prompt.folder.id, {
@@ -1037,6 +1196,9 @@ export function LibraryWorkspacePage() {
         setSelectedIds([]);
         setSelectedFolderIds([]);
       }
+      if (!skipToast) {
+        notify({ title: promptSuccessTitle(prompt.kind), description: `「${prompt.value.trim()}」` });
+      }
       setPrompt(null);
       await reloadTree();
       if (editedAssetId) {
@@ -1056,8 +1218,11 @@ export function LibraryWorkspacePage() {
       await libraryApi.deleteFolder(folder.id, folder.version);
       if (activeFolderId === folder.id) setActiveFolderId(null);
       await reloadTree();
+      notify({ title: '已删除目录', description: `「${folder.name}」` });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '目录删除失败');
+      const message = err instanceof Error ? err.message : '目录删除失败';
+      setError(message);
+      notify({ title: '删除目录失败', description: message, variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -1087,8 +1252,14 @@ export function LibraryWorkspacePage() {
       setDetail(null);
       setActiveGroup(null);
       await reloadTree();
+      notify({
+        title: selected.length === 1 ? '已移入回收站' : `已将 ${selected.length} 项移入回收站`,
+        description: selected.length === 1 ? `「${asset.name}」` : undefined,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '移入回收站失败');
+      const message = err instanceof Error ? err.message : '移入回收站失败';
+      setError(message);
+      notify({ title: '移入回收站失败', description: message, variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -1214,8 +1385,15 @@ export function LibraryWorkspacePage() {
       setSelectedIds([]);
       setSelectedFolderIds([]);
       await reloadTree();
+      notify({
+        title: folderId === 'UNFILED'
+          ? `已将 ${assetIds.length} 项移出归档`
+          : `已移动 ${assetIds.length} 项素材`,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '移动素材失败');
+      const message = err instanceof Error ? err.message : '移动素材失败';
+      setError(message);
+      notify({ title: '移动素材失败', description: message, variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -1244,6 +1422,7 @@ export function LibraryWorkspacePage() {
         expectedVersion: folder.version,
       });
     }
+    if (topLevel.length > 0) notify({ title: `已移动 ${topLevel.length} 个目录` });
   };
 
   const pasteClipboard = async () => {
@@ -1572,7 +1751,7 @@ export function LibraryWorkspacePage() {
       const withCommand = event.ctrlKey || event.metaKey;
       if (!withCommand && event.key !== 'Delete') return;
 
-      if (withCommand && key === 'a' && (viewMode === 'folders' || isTrash)) {
+      if (withCommand && key === 'a' && (showFolders || isTrash)) {
         event.preventDefault();
         setSelectedIds(visibleSelectableIds);
         setSelectedFolderIds(visibleSelectableFolderIds);
@@ -1668,13 +1847,6 @@ export function LibraryWorkspacePage() {
             assetIds: [response.data.data.id],
           });
         }
-        if (response.data.data.type === 'IMAGE') {
-          addAnalysisTask(
-            response.data.data.id,
-            response.data.data.name,
-            response.data.data.metadataState || 'AI_GENERATING',
-          );
-        }
         updateTask(taskId, { status: 'completed', progress: 100, assetId: response.data.data.id });
         if (response.data.data.type === 'IMAGE' || response.data.data.type === 'VIDEO'
           || response.data.data.type === 'AUDIO') {
@@ -1731,13 +1903,6 @@ export function LibraryWorkspacePage() {
             file,
             (progress) => updateTask(taskId, { status: 'uploading', progress }),
           );
-          if (response.data.data.asset?.type === 'IMAGE') {
-            addAnalysisTask(
-              response.data.data.asset.id,
-              response.data.data.asset.name,
-              response.data.data.asset.metadataState || 'AI_GENERATING',
-            );
-          }
           updateTask(taskId, { status: 'completed', progress: 100, assetId: response.data.data.asset?.id });
         } catch (err) {
           updateTask(taskId, { status: 'failed', error: err instanceof Error ? err.message : '导入失败' });
@@ -1883,8 +2048,15 @@ export function LibraryWorkspacePage() {
   };
 
   const restoreAsset = async (asset: LibraryAsset) => {
-    await libraryApi.restore(asset.id);
-    await reloadTree();
+    try {
+      await libraryApi.restore(asset.id);
+      await reloadTree();
+      notify({ title: '已从回收站恢复', description: `「${asset.name}」` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '恢复失败';
+      setError(message);
+      notify({ title: '恢复素材失败', description: message, variant: 'error' });
+    }
   };
 
   const executePurgeAssets = async (assets: LibraryAsset[]) => {
@@ -1896,9 +2068,20 @@ export function LibraryWorkspacePage() {
       const failed = results.filter((result) => result.status === 'rejected').length;
       setSelectedIds([]);
       await reloadTree();
-      if (failed > 0) setError(`${failed} 项删除失败，可能存在项目或资产组引用`);
+      if (failed > 0) {
+        setError(`${failed} 项删除失败，可能存在项目或资产组引用`);
+        notify({
+          title: `已彻底删除 ${assets.length - failed} 项，${failed} 项失败`,
+          description: '失败项可能被项目或资产组引用',
+          variant: 'error',
+        });
+      } else {
+        notify({ title: `已彻底删除 ${assets.length} 项素材` });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '彻底删除失败');
+      const message = err instanceof Error ? err.message : '彻底删除失败';
+      setError(message);
+      notify({ title: '彻底删除失败', description: message, variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -1983,6 +2166,69 @@ export function LibraryWorkspacePage() {
     };
   }, [activeFolderId, analysisAssetKey, analysisAssetIds, loadFolder, reloadTree, updateTask]);
 
+  /** 手动触发 AI 完善后，任务面板、卡片与详情同步进入「AI 生成中」。 */
+  const markAnalysisQueued = (items: AnalysisRequestItem[]) => {
+    items.forEach((item) => addAnalysisTask(item.assetId, item.name, 'AI_GENERATING'));
+    const queued = new Set(items.map((item) => item.assetId));
+    setAssetsByFolder((current) => Object.fromEntries(
+      Object.entries(current).map(([folderId, assets]) => [
+        folderId,
+        assets.map((asset) => queued.has(asset.id)
+          ? { ...asset, metadataState: 'AI_GENERATING' as MetadataState }
+          : asset),
+      ]),
+    ));
+    setDetail((current) => current && queued.has(current.asset.id)
+      ? { ...current, asset: { ...current.asset, metadataState: 'AI_GENERATING' as MetadataState } }
+      : current);
+  };
+
+  const requestAssetAiEnrichment = async (asset: LibraryAsset) => {
+    setError('');
+    try {
+      const response = await libraryApi.requestAnalysis([asset.id]);
+      const result = response.data.data;
+      if (!result.items.length) {
+        setError('该素材暂时不支持 AI 完善（目前仅支持图片）');
+        return;
+      }
+      markAnalysisQueued(result.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '触发 AI 完善失败');
+    }
+  };
+
+  const runFolderAiEnrichment = async (folder: LibraryFolderNode) => {
+    setError('');
+    try {
+      const response = await libraryApi.requestFolderAnalysis(folder.id, {
+        scope: queryScope === 'GLOBAL' ? 'GLOBAL' : 'PROJECT',
+        projectId: projectForTree,
+      });
+      const result = response.data.data;
+      if (!result.items.length) {
+        setError('该目录下没有可完善的图片素材');
+        return;
+      }
+      markAnalysisQueued(result.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '触发 AI 完善失败');
+    }
+  };
+
+  const requestFolderAiEnrichment = (folder: LibraryFolderNode) => {
+    if (folder.descendantAssetCount <= AI_ENRICH_CONFIRM_THRESHOLD) {
+      void runFolderAiEnrichment(folder);
+      return;
+    }
+    setConfirmation({
+      title: 'AI 完善目录信息',
+      message: `「${folder.name}」及子目录共有 ${folder.descendantAssetCount} 项素材，将对其中所有图片逐张调用视觉模型生成描述与标签。`,
+      confirmLabel: '开始完善',
+      onConfirm: () => runFolderAiEnrichment(folder),
+    });
+  };
+
   const inspectorMode = activeGroup && selectedGroupMedia
     ? 'group-media'
     : selectedAssets.length > 1
@@ -2041,7 +2287,7 @@ export function LibraryWorkspacePage() {
         <header className="library-workspace__header">
           <div>
             <span>MOON ASSET LIBRARY</span>
-            <h1>{isTrash ? '回收站' : '项目库'}</h1>
+            <h1>{isTrash ? '回收站' : isOutput ? '产出素材' : isGlobal ? '全局库' : '项目库'}</h1>
           </div>
           <div className="library-workspace__actions">
             <button onClick={() => setPanelOpen(!panelOpen)}>
@@ -2050,12 +2296,12 @@ export function LibraryWorkspacePage() {
                 ? ` ${tasks.filter((task) => task.status !== 'completed' && task.status !== 'failed').length}`
                 : ''}
             </button>
-            {!isTrash && activeGroup && (
+            {!isTrash && !isOutput && activeGroup && (
               <button className="is-primary" onClick={() => fileInput.current?.click()}>
                 <Upload size={15} /> 上传文件
               </button>
             )}
-            {!isTrash && !activeGroup && (
+            {!isTrash && !isOutput && !activeGroup && (
               <>
                 <button onClick={() => folderInput.current?.click()}><FolderPlus size={15} /> 上传文件夹</button>
                 <button onClick={() => setPrompt({ kind: 'folder', title: '新建目录', value: '', parentId: null })}>
@@ -2098,28 +2344,32 @@ export function LibraryWorkspacePage() {
               <option value="OTHER">其他</option>
               <option value="GROUP">资产组</option>
             </select>
-            <div className="library-workspace__view-toggle" role="group" aria-label="显示方式">
-              <button
-                type="button"
-                className={viewMode === 'folders' ? 'is-active' : ''}
-                aria-pressed={viewMode === 'folders'}
-                aria-label="文件夹视图"
-                title="文件夹视图"
-                onClick={() => setViewMode('folders')}
-              >
-                <LayoutGrid size={16} />
-              </button>
-              <button
-                type="button"
-                className={viewMode === 'tree' ? 'is-active' : ''}
-                aria-pressed={viewMode === 'tree'}
-                aria-label="树形视图"
-                title="树形视图"
-                onClick={() => setViewMode('tree')}
-              >
-                <ListTree size={16} />
-              </button>
-            </div>
+            {!isOutput && (
+              <div className="library-workspace__view-toggle" role="group" aria-label="显示方式">
+                <Tooltip side="bottom" label="文件夹视图">
+                <button
+                  type="button"
+                  className={viewMode === 'folders' ? 'is-active' : ''}
+                  aria-pressed={viewMode === 'folders'}
+                  aria-label="文件夹视图"
+                  onClick={() => setViewMode('folders')}
+                >
+                  <LayoutGrid size={16} />
+                </button>
+                </Tooltip>
+                <Tooltip side="bottom" label="树形视图">
+                <button
+                  type="button"
+                  className={viewMode === 'tree' ? 'is-active' : ''}
+                  aria-pressed={viewMode === 'tree'}
+                  aria-label="树形视图"
+                  onClick={() => setViewMode('tree')}
+                >
+                  <ListTree size={16} />
+                </button>
+                </Tooltip>
+              </div>
+            )}
           </section>
         )}
 
@@ -2138,14 +2388,15 @@ export function LibraryWorkspacePage() {
               </button>
             ))}
             {tags.length > 10 && (
+              <Tooltip side="bottom" label={tagsExpanded ? '收起标签' : '显示全部标签'}>
               <button
                 type="button"
                 aria-label={tagsExpanded ? '收起更多标签' : '展开更多标签'}
-                title={tagsExpanded ? '收起标签' : '显示全部标签'}
                 onClick={() => setTagsExpanded((current) => !current)}
               >
                 …
               </button>
+              </Tooltip>
             )}
           </section>
         )}
@@ -2243,8 +2494,8 @@ export function LibraryWorkspacePage() {
           <div className="library-workspace__empty"><Package size={24} /> 暂无项目，请先在 Moon 中创建项目</div>
         ) : (
           <section className={`library-workspace__content${showInspector ? '' : ' is-inspector-empty'}${detailViewOpen ? ' is-detail-view' : ''}`}>
-            <div className={`library-workspace__tree${viewMode === 'folders' ? ' is-folders' : ''}`}>
-              {viewMode === 'folders' ? (
+            <div className={`library-workspace__tree${showFolders ? ' is-folders' : ''}`}>
+              {showFolders ? (
                 <div
                   className="library-folder-browser"
                   onContextMenu={(event) => {
@@ -2359,7 +2610,7 @@ export function LibraryWorkspacePage() {
                         </button>
                         <div className="library-folder-browser__breadcrumb">
                           <button type="button" onClick={() => goToFolder(null)}>
-                            项目库
+                            {isGlobal ? '全局库' : isOutput ? '产出素材' : '项目库'}
                           </button>
                           {currentFolderTrail.map((folder) => (
                             <span key={folder.id}>
@@ -2369,9 +2620,17 @@ export function LibraryWorkspacePage() {
                               </button>
                             </span>
                           ))}
+                          {activeFolderId === 'GLOBAL' && (
+                            <span>
+                              <ChevronRight size={12} />
+                              <strong>全局素材</strong>
+                            </span>
+                          )}
                         </div>
                         <small>
-                          {visibleFolders.length} 个文件夹 · {visibleGroups.length} 个资产组 · {currentFolderAssets.length} 项素材
+                          {activeFolderId === 'GLOBAL' || isOutput
+                            ? `${currentFolderAssets.length} 项素材`
+                            : `${visibleFolders.length} 个文件夹 · ${visibleGroups.length} 个资产组 · ${currentFolderAssets.length} 项素材`}
                         </small>
                       </div>
 
@@ -2444,6 +2703,18 @@ export function LibraryWorkspacePage() {
                               <small>{folder.directAssetCount} 项</small>
                             </button>
                           ))}
+                          {includeGlobal && !activeFolderId && !filteredMode && (
+                            <button
+                              type="button"
+                              className="library-folder-grid__item is-folder"
+                              title="查看全局素材"
+                              onClick={() => goToFolder('GLOBAL')}
+                            >
+                              <span className="library-folder-grid__folder-icon"><Globe2 size={48} /></span>
+                              <strong>全局素材</strong>
+                              <small>{globalTotal} 项</small>
+                            </button>
+                          )}
                           {visibleGroups.map((group) => (
                             <button
                               key={group.id}
@@ -2523,6 +2794,9 @@ export function LibraryWorkspacePage() {
                                 if (event.shiftKey || event.ctrlKey || event.metaKey) return;
                                 openAssetCard(asset);
                               }}
+                              onDoubleClick={() => {
+                                if (asset.type === 'DOCUMENT') void openDocumentPreview(asset);
+                              }}
                               onMouseDown={(event) => handleSelectableMouseDown(event, asset.id)}
                               onContextMenu={(event) => {
                                 event.preventDefault();
@@ -2554,8 +2828,12 @@ export function LibraryWorkspacePage() {
                           ))}
                           {visibleFolders.length === 0 && visibleGroups.length === 0 && currentFolderAssets.length === 0 && (
                             <div className="library-folder-grid__empty">
-                              <Folder size={24} />
-                              <span>{filteredMode ? '没有符合条件的素材' : '这个文件夹还是空的'}</span>
+                              {isOutput ? <Sparkles size={24} /> : <Folder size={24} />}
+                              <span>
+                                {isOutput
+                                  ? (outputLoading ? '正在读取产出素材…' : '当前项目还没有生成产出，去 Moon 里生成试试')
+                                  : filteredMode ? '没有符合条件的素材' : '这个文件夹还是空的'}
+                              </span>
                             </div>
                           )}
                           {selectionBox && (
@@ -2570,6 +2848,20 @@ export function LibraryWorkspacePage() {
                             />
                           )}
                         </section>
+                      )}
+                      {isOutput && outputAssets.length > 0 && outputAssets.length < outputTotal && (
+                        <div className="library-folder-browser__load-more">
+                          <button
+                            type="button"
+                            disabled={outputLoading}
+                            onClick={() => void loadOutputAssets(
+                              Math.floor(outputAssets.length / PAGE_SIZE) + 1,
+                              true,
+                            )}
+                          >
+                            {outputLoading ? '加载中…' : `加载更多（${outputAssets.length}/${outputTotal}）`}
+                          </button>
+                        </div>
                       )}
                     </>
                   )}
@@ -2627,6 +2919,7 @@ export function LibraryWorkspacePage() {
               onPromote={(asset) => void promoteSelection(asset)}
               onAddToGroup={setAddToGroupAsset}
               onUseForVideo={(asset) => void createVideoSnapshot(asset)}
+              onPreviewDocument={setDocumentPreview}
               onOpenGroup={(asset) => void openNode({
                 id: `group:${asset.id}`,
                 kind: 'group',
@@ -2683,6 +2976,8 @@ export function LibraryWorkspacePage() {
                   setError('只能将同一项目中的图片、视频或音频合为资产组');
                 }
               }}
+              onRequestAiEnrichment={(asset) => void requestAssetAiEnrichment(asset)}
+              onRequestFolderAiEnrichment={requestFolderAiEnrichment}
             />}
           </section>
         )}
@@ -2815,12 +3110,19 @@ export function LibraryWorkspacePage() {
         </Modal>
       )}
 
+      <DocumentPreviewModal
+        target={documentPreview}
+        onClose={() => setDocumentPreview(null)}
+      />
+
     </div>
   );
 }
 
 const NAV_ITEMS: Array<{ id: ScopeView; label: string; icon: ReactNode }> = [
-  { id: 'ALL', label: '项目库', icon: <Boxes size={16} /> },
+  { id: 'PROJECT', label: '项目库', icon: <Boxes size={16} /> },
+  { id: 'GLOBAL', label: '全局库', icon: <Globe2 size={16} /> },
+  { id: 'OUTPUT', label: '产出素材', icon: <Sparkles size={16} /> },
   { id: 'TRASH', label: '回收站', icon: <Trash2 size={16} /> },
 ];
 

@@ -2,6 +2,7 @@ import { useRef, useState, type CSSProperties } from 'react';
 import { FolderOpen } from 'lucide-react';
 import type { SceneReferenceAsset } from '../../api/projects';
 import { assetUrl, REFERENCE_LIMITS } from '../../config';
+import { Tooltip } from '../common/Tooltip';
 
 /**
  * 分镜参考素材上传组件（图片/视频/音频通用）：
@@ -17,9 +18,7 @@ interface Props {
   maxSizeMB?: number;
   onUpload: (file: File) => void;
   onDelete: (id: string) => void;
-  onPickProjectOutput?: () => void;
   onPickProjectLibrary?: () => void;
-  projectOutputDisabled?: boolean;
   disabled?: boolean;
 }
 
@@ -43,9 +42,7 @@ export function ReferenceUploader({
   maxSizeMB,
   onUpload,
   onDelete,
-  onPickProjectOutput,
   onPickProjectLibrary,
-  projectOutputDisabled,
   disabled,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -110,10 +107,12 @@ export function ReferenceUploader({
           </span>
         </div>
         {onPickProjectLibrary && (
+          <Tooltip label="从项目库文件夹选择素材">
           <button
             type="button"
             onClick={() => { if (!disabled) onPickProjectLibrary(); }}
             disabled={disabled}
+            aria-label="从项目库文件夹选择素材"
             style={{
               ...boxStyle,
               flex: '0 0 auto',
@@ -122,30 +121,11 @@ export function ReferenceUploader({
               color: 'var(--color-primary)',
               fontWeight: 600,
             }}
-            title="从项目库文件夹选择素材"
           >
             <FolderOpen size={14} />
             项目库素材
           </button>
-        )}
-        {onPickProjectOutput && (
-          <button
-            type="button"
-            onClick={() => { if (!disabled && !projectOutputDisabled) onPickProjectOutput(); }}
-            disabled={disabled || projectOutputDisabled}
-            style={{
-              ...boxStyle,
-              flex: '0 0 auto',
-              borderStyle: 'solid',
-              background: 'var(--color-surface-card)',
-              color: 'var(--color-primary)',
-              fontWeight: 600,
-            }}
-            title={projectOutputDisabled ? '数量已达上限' : `从项目产出素材选择${TYPE_LABEL[type]}`}
-          >
-            <FolderOpen size={14} />
-            项目产出素材
-          </button>
+          </Tooltip>
         )}
       </div>
       <input ref={inputRef} type="file" accept={ACCEPT[type]} hidden multiple onChange={handleFile} disabled={disabled} />

@@ -1,0 +1,52 @@
+/* 皮肤：深墨底 + 暖阴影。组件 portal 到 body，所以选择器按全局写。 */
+.warm-tooltip {
+  /* 高于库页弹窗(10000)、低于右下角 Toast(11000) */
+  z-index: 10500;
+}
+
+.warm-tooltip__box {
+  box-shadow:
+    0 1px 2px rgba(20, 20, 19, 0.16),
+    0 6px 18px -6px rgba(20, 20, 19, 0.42);
+}
+
+.warm-tooltip__text {
+  letter-spacing: 0;
+}
+
+/* 触发器需要撑满容器（块级满宽 / grid 项）时套在包裹层上 */
+.tooltip-fill {
+  display: block;
+  width: 100%;
+}
+
+.tooltip-fill > * {
+  width: 100%;
+}
+
+/* 触发器原本是 flex:1 的行内项时，让包裹层接替这个角色 */
+.tooltip-grow {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tooltip-grow > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 触发器原本靠 flex-shrink:0 保持尺寸时用 */
+.tooltip-fixed {
+  flex: none;
+}
+
+/* 禁用控件不派发指针事件：交给包裹层接收 hover，
+   否则「为什么禁用」的提示永远不出来 */
+.warm-tooltip__trigger:has(> :disabled) {
+  cursor: not-allowed;
+}
+
+.warm-tooltip__trigger > :disabled {
+  pointer-events: none;
+}

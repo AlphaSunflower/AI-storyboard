@@ -218,7 +218,6 @@ export function LeftSidebar() {
           cursor: 'pointer',
           userSelect: 'none',
         }}
-        title="展开菜单"
       >
         <span
           style={{
@@ -262,7 +261,6 @@ export function LeftSidebar() {
         </h2>
           <button
             onClick={() => setCollapsed(true)}
-            title="折叠面板"
             style={{
             background: 'none',
             border: 'none',

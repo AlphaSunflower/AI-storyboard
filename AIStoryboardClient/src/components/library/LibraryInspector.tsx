@@ -7,6 +7,7 @@ import {
   FolderMinus,
   FolderOpen,
   FolderPlus,
+  FileText,
   Images,
   Pencil,
   Sparkles,
@@ -22,9 +23,11 @@ import type {
 } from '../../api/library';
 import { assetUrl } from '../../config';
 import { authorizedFetch } from '../../lib/authSession';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
-import { DocumentPreviewSurface } from '../agent/DocumentPreviewSurface';
 import { AssetIcon } from './LibraryTree';
+import type { DocumentPreviewTarget } from './DocumentPreviewModal';
 
 const METADATA_STATE_LABEL: Record<MetadataState, string> = {
   NONE: '未分析',
@@ -60,6 +63,9 @@ export interface LibraryInspectorProps {
   onBulkPromote: () => void;
   onBulkMove: () => void;
   onBulkMerge: () => void;
+  onRequestAiEnrichment: (asset: LibraryAsset) => void;
+  onRequestFolderAiEnrichment: (folder: LibraryFolderNode) => void;
+  onPreviewDocument?: (target: DocumentPreviewTarget) => void;
 }
 
 export function LibraryInspector(props: LibraryInspectorProps) {
@@ -80,10 +86,12 @@ export function LibraryInspector(props: LibraryInspectorProps) {
 
 function FolderInspector({
   folder,
+  busy,
   onCreateSubfolder,
   onRenameFolder,
   onDeleteFolder,
   onOpenFolder,
+  onRequestFolderAiEnrichment,
 }: LibraryInspectorProps & { folder: LibraryFolderNode }) {
   return (
     <aside className="library-inspector">
@@ -97,16 +105,25 @@ function FolderInspector({
         <span><strong>{folder.descendantAssetCount}</strong><small>全部素材</small></span>
       </div>
       <div className="library-inspector__actions">
+        <button
+          className="is-ai"
+          onClick={() => onRequestFolderAiEnrichment(folder)}
+          disabled={busy}
+        >
+          <Sparkles size={15} /> AI 完善文件夹信息
+        </button>
         <button onClick={() => onOpenFolder(folder)}><FolderOpen size={15} /> 打开文件夹</button>
         <button onClick={() => onCreateSubfolder(folder)}><FolderPlus size={15} /> 新建子目录</button>
         <button onClick={() => onRenameFolder(folder)}><FolderPen size={15} /> 重命名</button>
-        <button
-          className="is-danger"
-          title="递归删除文件夹"
-          onClick={() => onDeleteFolder(folder)}
-        >
-          <Trash2 size={15} /> 删除文件夹
-        </button>
+        <Tooltip label="连同子目录一起删除">
+          <button
+            className="is-danger"
+            aria-label="递归删除文件夹"
+            onClick={() => onDeleteFolder(folder)}
+          >
+            <Trash2 size={15} /> 删除文件夹
+          </button>
+        </Tooltip>
       </div>
     </aside>
   );
@@ -124,27 +141,30 @@ function AssetInspector({
   onUseForVideo,
   onOpenGroup,
   onToggleTag,
+  onRequestAiEnrichment,
+  onPreviewDocument,
 }: LibraryInspectorProps & { detail: LibraryAssetDetail }) {
   const { asset, media } = detail;
   const [tagEditing, setTagEditing] = useState(false);
+  const aiGenerating = asset.metadataState === 'AI_GENERATING';
+  const canEnrich = asset.type === 'IMAGE' && asset.status === 'ACTIVE';
   const primary = media.find((item) => item.primary) || media[0];
   const primaryUrl = primary ? assetUrl(primary.contentUrl) : '';
   const isMedia = asset.type === 'IMAGE' || asset.type === 'VIDEO' || asset.type === 'AUDIO';
   const isAttachment = asset.type === 'DOCUMENT' || asset.type === 'OTHER';
   const isDocument = asset.type === 'DOCUMENT';
-  const documentAttachment = primary && isDocument
+  const documentTarget: DocumentPreviewTarget | null = primary && isDocument
     ? {
         url: primary.contentUrl,
         name: primary.fileName || asset.name,
         mimeType: primary.mimeType,
-        kind: 'file' as const,
       }
     : null;
   const description = (asset.metadataState === 'EDITED'
     ? asset.description || asset.aiDescription
     : asset.aiDescription || asset.description)
-    || (asset.metadataState === 'AI_GENERATING' && asset.type === 'IMAGE'
-      ? 'AI 正在分析图片，完成后会自动填入描述与标签。'
+    || (aiGenerating && canEnrich
+      ? 'AI 正在完善这张素材的描述与标签。'
       : '暂无描述');
 
   useEffect(() => {
@@ -159,8 +179,18 @@ function AssetInspector({
         <div><h2>{asset.name}</h2><p>{projectName || '项目库'}</p></div>
       </div>
       <div className="library-inspector__preview">
-        {documentAttachment ? (
-          <DocumentPreviewSurface attachment={documentAttachment} />
+        {isDocument ? (
+          <button
+            type="button"
+            className="library-inspector__document-card"
+            disabled={!documentTarget}
+            onClick={() => documentTarget && onPreviewDocument?.(documentTarget)}
+          >
+            <FileText size={34} strokeWidth={1.6} />
+            <strong title={primary?.fileName || asset.name}>{primary?.fileName || asset.name}</strong>
+            <span>{primary?.mimeType || '文档'}</span>
+            <em>点击放大预览</em>
+          </button>
         ) : primary?.type === 'VIDEO' ? (
           <video src={primaryUrl} controls preload="metadata" draggable={false} />
         ) : primary?.type === 'AUDIO' ? (
@@ -204,28 +234,45 @@ function AssetInspector({
           {tags.map((tag) => {
             const active = asset.tags.some((item) => item.id === tag.id);
             return (
+              <Tooltip key={tag.id} label={tagEditing ? '点按添加或移除该标签' : '开启「编辑标签」后可调整'}>
               <button
-                key={tag.id}
                 className={active ? 'is-active' : ''}
                 disabled={busy || !tagEditing}
                 aria-disabled={busy || !tagEditing}
-                title={!tagEditing ? '开启“编辑标签”后可调整' : undefined}
+                aria-label={tag.name}
                 onClick={() => onToggleTag(asset, tag)}
               >
                 {active && <Sparkles size={11} />} {tag.name}
               </button>
+              </Tooltip>
             );
           })}
           {tags.length === 0 && <small>暂无标签</small>}
         </div>
       </section>
       <div className="library-inspector__actions">
+        {canEnrich && (
+          <Tooltip label={aiGenerating ? 'AI 正在完善这张素材' : 'AI 完善描述与标签'}>
+          <button
+            className="is-ai"
+            onClick={() => onRequestAiEnrichment(asset)}
+            disabled={busy || aiGenerating}
+          >
+            <Sparkles size={15} /> {aiGenerating ? 'AI 完善中…' : 'AI 文件完善信息'}
+          </button>
+          </Tooltip>
+        )}
         <button onClick={() => onEdit(asset)} disabled={busy}><Pencil size={15} /> 编辑信息</button>
         {isAttachment && primaryUrl && (
           <a
             className="library-inspector__action-download"
             href={primaryUrl}
             download={primary?.fileName || asset.name}
+            onClick={() => notify({
+              title: '已开始下载',
+              description: primary?.fileName || asset.name,
+              variant: 'info',
+            })}
           >
             <Download size={15} /> 下载文件
           </a>
@@ -300,11 +347,14 @@ export function AuthenticatedPreviewImage({
   if (!objectUrl) return <span className="is-loading">正在加载预览</span>;
   return (
     <>
+      <Tooltip
+        className="tooltip-fill"
+        label={title || (onActivate ? '单击查看详情，双击放大' : '点击放大')}
+      >
       <button
         type="button"
         className={className}
         aria-label={onActivate ? '查看素材信息' : '放大查看图片'}
-        title={title || (onActivate ? '单击查看详情，双击放大' : '点击放大')}
         onClick={() => {
           if (onActivate) onActivate();
           else setExpanded(true);
@@ -316,6 +366,7 @@ export function AuthenticatedPreviewImage({
       >
         <img src={objectUrl} alt={alt} draggable={false} />
       </button>
+      </Tooltip>
       {expanded && (
         <ImagePreviewModal
           url={objectUrl}

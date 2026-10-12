@@ -9,7 +9,6 @@ vi.mock('../components/editor/LeftSidebar', () => ({ LeftSidebar: () => null }))
 vi.mock('../components/editor/SceneListPanel', () => ({ SceneListPanel: () => null }));
 vi.mock('../components/editor/PreviewPanel', () => ({ PreviewPanel: () => null }));
 vi.mock('../components/common/DraftRecoverBanner', () => ({ DraftRecoverBanner: () => null }));
-vi.mock('../components/common/Toast', () => ({ ToastContainer: () => null }));
 vi.mock('../components/editor/MobileEditorHeader', () => ({ MobileEditorHeader: () => null }));
 vi.mock('../components/editor/MobileSceneList', () => ({ MobileSceneList: () => null }));
 vi.mock('../components/editor/MobileScenePreview', () => ({ MobileScenePreview: () => null }));

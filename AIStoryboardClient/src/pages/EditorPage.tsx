@@ -5,7 +5,6 @@ import { LeftSidebar } from '../components/editor/LeftSidebar';
 import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
-import { ToastContainer } from '../components/common/Toast';
 import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
@@ -186,7 +185,6 @@ export function EditorPage() {
 
         {scriptOpen && <ScriptInputDrawer onClose={() => setScriptOpen(false)} />}
         {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
-        <ToastContainer />
         <GenerationProgress />
       </div>
     );
@@ -208,9 +206,6 @@ export function EditorPage() {
       <AmbientGlow />
       {/* Top bar */}
       <AppHeader />
-
-      {/* Toast notifications */}
-      <ToastContainer />
 
       {/* Generation progress indicator */}
       <GenerationProgress />

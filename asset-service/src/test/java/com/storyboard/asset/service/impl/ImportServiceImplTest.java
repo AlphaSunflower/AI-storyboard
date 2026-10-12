@@ -25,10 +25,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -79,7 +81,7 @@ class ImportServiceImplTest {
     }
 
     @Test
-    void duplicateImportRepairsMissingObjectCoverAndAnalysis() throws Exception {
+    void duplicateImportRepairsMissingObjectAndCoverWithoutQueuingAnalysis() throws Exception {
         byte[] bytes = pngBytes();
         when(repository.findImportJob("u1", "job-1")).thenReturn(Optional.of(importJob()));
         when(repository.findImportItem("job-1", "item-1")).thenReturn(importItem());
@@ -104,7 +106,7 @@ class ImportServiceImplTest {
                 eq("image/png")
         );
         verify(repository).updateCover("a1", "/api/files/images/original.png");
-        verify(repository).requeueAnalysisTask("a1");
+        verify(repository, never()).requestAnalysisTask(anyString());
         verify(repository).finishImportItem(
                 "item-db-1", "DUPLICATE_LINKED", "a1", LibraryRepository.sha256Hex(bytes), null);
     }

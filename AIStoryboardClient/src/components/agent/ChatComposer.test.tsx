@@ -152,13 +152,25 @@ describe('ChatComposer project library drops', () => {
     expect(screen.getByRole('button', { name: '审批模式：方案批准' })).toBeTruthy();
   });
 
+  it('lists the three upload sources directly in the plus menu', () => {
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByLabelText('上传'));
+
+    expect(screen.getByText('上传文件')).toBeTruthy();
+    expect(screen.getByText('上传项目库素材')).toBeTruthy();
+    expect(screen.getByText('上传分镜')).toBeTruthy();
+    // 旧的两级弹窗入口已移除
+    expect(screen.queryByText('上传素材')).toBeNull();
+    expect(screen.queryByText('上传项目产出素材')).toBeNull();
+  });
+
   it('opens the unified project library picker without a standalone asset group modal', async () => {
     mockChatLibrary();
     render(<ChatComposer />);
 
-    fireEvent.click(screen.getByTitle('上传'));
-    fireEvent.click(screen.getByText('上传素材'));
-    fireEvent.click(screen.getByText('项目库素材'));
+    fireEvent.click(screen.getByLabelText('上传'));
+    fireEvent.click(screen.getByText('上传项目库素材'));
 
     expect(await screen.findByRole('tab', { name: '素材' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: '资产组' })).toBeTruthy();
@@ -170,9 +182,8 @@ describe('ChatComposer project library drops', () => {
     mockChatLibrary();
     render(<ChatComposer />);
 
-    fireEvent.click(screen.getByTitle('上传'));
-    fireEvent.click(screen.getByText('上传素材'));
-    fireEvent.click(screen.getByText('项目库素材'));
+    fireEvent.click(screen.getByLabelText('上传'));
+    fireEvent.click(screen.getByText('上传项目库素材'));
 
     fireEvent.click(await screen.findByText('a.png'));
     fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
@@ -192,9 +203,8 @@ describe('ChatComposer project library drops', () => {
     mockChatLibrary();
     render(<ChatComposer />);
 
-    fireEvent.click(screen.getByTitle('上传'));
-    fireEvent.click(screen.getByText('上传素材'));
-    fireEvent.click(screen.getByText('项目库素材'));
+    fireEvent.click(screen.getByLabelText('上传'));
+    fireEvent.click(screen.getByText('上传项目库素材'));
 
     fireEvent.click(await screen.findByRole('tab', { name: '资产组' }));
     fireEvent.click(await screen.findByText('全局场景'));

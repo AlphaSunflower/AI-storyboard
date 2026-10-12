@@ -10,6 +10,7 @@ import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.LinkProjectRequest;
+import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.PromoteRequest;
 import com.storyboard.asset.client.AssetContracts.TagMode;
@@ -18,6 +19,7 @@ import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.TagService;
 import com.storyboard.asset.service.MediaUploadService;
 import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
+import com.storyboard.asset.dto.ImportContracts.AnalysisRequestResult;
 import com.storyboard.common.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
@@ -63,11 +65,14 @@ public class LibraryAssetController {
             @RequestParam(required = false) List<String> tagIds,
             @RequestParam(required = false, defaultValue = "ALL") TagMode tagMode,
             @RequestParam(defaultValue = "false") boolean deleted,
+            @RequestParam(defaultValue = "false") boolean includeGlobal,
+            @RequestParam(required = false) LibraryOrigin origin,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "40") int size
     ) {
         return ApiResponse.ok(catalogService.list(
-                auth.getName(), scope, projectId, folderId, q, type, tagIds, tagMode, deleted, page, size));
+                auth.getName(), scope, projectId, folderId, q, type, tagIds, tagMode, deleted,
+                includeGlobal, origin, page, size));
     }
 
     @GetMapping("/{id}")
@@ -81,6 +86,15 @@ public class LibraryAssetController {
             @RequestParam(required = false) List<String> assetIds
     ) {
         return ApiResponse.ok(catalogService.listAnalysisTaskStatuses(auth.getName(), assetIds));
+    }
+
+    /** 手动触发 AI 元数据完善：只对用户选中的图片素材入队，上传不再自动分析。 */
+    @PostMapping("/analysis")
+    public ApiResponse<AnalysisRequestResult> requestAnalysis(
+            Authentication auth,
+            @RequestBody BulkAssetIdsRequest request
+    ) {
+        return ApiResponse.ok(catalogService.requestAnalysis(auth.getName(), request.assetIds()));
     }
 
     @PostMapping

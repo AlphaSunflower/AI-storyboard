@@ -3,6 +3,7 @@ import { useAgentStore, type HumanInputInfo } from "../../stores/agentStore";
 import { AgentParamSelector } from "./AgentParamSelector";
 import { assetUrl } from "../../config";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { Tooltip } from "../common/Tooltip";
 
 /**
  * 人工确认卡片（human_input 事件）：渲染 actions 选项按钮；
@@ -108,6 +109,7 @@ export function HumanInputCard({
         </div>
         <button
           onClick={onToggleCollapse}
+          aria-label="展开"
           style={{
             border: "none",
             background: "transparent",
@@ -117,7 +119,6 @@ export function HumanInputCard({
             alignItems: "center",
             color: "var(--color-muted)",
           }}
-          title="展开"
         >
           <ChevronUp size={16} />
         </button>
@@ -144,8 +145,10 @@ export function HumanInputCard({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontSize: 13, color: "var(--color-muted)", letterSpacing: 1 }}>需要您确认</div>
         {onToggleCollapse && (
+          <Tooltip label="折叠">
           <button
             onClick={onToggleCollapse}
+            aria-label="折叠"
             style={{
               border: "none",
               background: "transparent",
@@ -155,10 +158,10 @@ export function HumanInputCard({
               alignItems: "center",
               color: "var(--color-muted)",
             }}
-            title="折叠"
           >
             <ChevronDown size={16} />
           </button>
+          </Tooltip>
         )}
       </div>
       

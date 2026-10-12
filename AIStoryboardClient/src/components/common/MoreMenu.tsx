@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Tooltip } from './Tooltip';
 
 export interface MoreMenuItem {
   label: string;
@@ -44,11 +45,12 @@ export function MoreMenu({ items, size = 28 }: { items: MoreMenuItem[]; size?: n
 
   return (
     <>
+      <Tooltip label="更多操作">
       <button
         ref={btnRef}
         onClick={(e) => { stop(e); setOpen(!open); }}
         onMouseDown={stop}
-        title="更多操作"
+        aria-label="更多操作"
         style={{
           width: size,
           height: size,
@@ -69,6 +71,7 @@ export function MoreMenu({ items, size = 28 }: { items: MoreMenuItem[]; size?: n
       >
         ⋯
       </button>
+      </Tooltip>
       {open && rect && createPortal(
         <div
           ref={menuRef}

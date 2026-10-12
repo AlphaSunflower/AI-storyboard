@@ -7,15 +7,7 @@ import type { SceneMaterialReferenceInput } from '../api/assets';
 import { DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_PRESET, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_QUALITY, DEFAULT_UNDERSTANDING_MODEL, IMAGE_MODELS, VIDEO_MODELS, UNDERSTANDING_MODELS, type ModelOption, VIDEO_POLL_INTERVAL, IMAGE_POLL_INTERVAL } from '../config';
 import { resolveVideoPreset } from '../components/common/VideoPresetSelector';
 import { resolveSelectedSceneId } from '../lib/sceneImages';
-
-// 生成完成后的 toast 通知
-export interface ToastMessage {
-  id: string;
-  sceneId: string;
-  sceneNumber: number;
-  type: 'success' | 'error';
-  kind: 'image' | 'video';
-}
+import { notify } from './toastStore';
 
 // 持久化「最近进入」的项目 id（刷新/重登后恢复，而不是每次回到 projects[0]）。
 // 仅作记忆：真实归属校验在加载前按当前用户的项目列表过滤（存过的 id 不在列表内则回退 projects[0]）。
@@ -66,11 +58,6 @@ interface ProjectState {
   // 理解模型（vision 类型）：剧本输入上传参考图时先看图生成描述
   understandingModel: string;
   understandingModelOptions: ModelOption[];
-
-  // toast 通知
-  toasts: ToastMessage[];
-  addToast: (toast: Omit<ToastMessage, 'id'>) => void;
-  dismissToast: (id: string) => void;
 
   // 未读提示（新生成完成的分镜）
   unreadScenes: Set<string>;
@@ -124,9 +111,24 @@ interface ProjectState {
   updateSceneInStore: (sceneId: string, data: Record<string, unknown>) => void;
 }
 
-let toastIdCounter = 0;
 // 图片生成恢复轮询定时器（模块级，保证全局仅一个，避免重复启动）
 let imageResumeTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 生成终态统一出口：标记分镜未读（列表高亮）+ 右下角通知 */
+function notifyGenerationResult(
+  sceneId: string,
+  sceneNumber: number,
+  kind: 'image' | 'video',
+  type: 'success' | 'error',
+  detail?: string,
+) {
+  useProjectStore.setState((s) => ({ unreadScenes: new Set([...s.unreadScenes, sceneId]) }));
+  notify({
+    title: `分镜 ${sceneNumber} ${kind === 'image' ? '生图' : '生视频'}${type === 'success' ? '成功' : '失败'}`,
+    description: detail,
+    variant: type === 'success' ? 'success' : 'error',
+  });
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
@@ -151,21 +153,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   understandingModel: DEFAULT_UNDERSTANDING_MODEL,
   understandingModelOptions: UNDERSTANDING_MODELS.map((m) => ({ value: m.value, label: m.label })),
   sceneRefs: {},
-  toasts: [],
   unreadScenes: new Set<string>(),
-
-  addToast: (toast) => {
-    const id = `toast-${++toastIdCounter}-${Date.now()}`;
-    set((s) => ({
-      toasts: [...s.toasts, { ...toast, id }],
-      unreadScenes: new Set([...s.unreadScenes, toast.sceneId]),
-    }));
-    // 3秒后自动消失
-    setTimeout(() => get().dismissToast(id), 3000);
-  },
-
-  dismissToast: (id) =>
-    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   markSceneRead: (sceneId) =>
     set((s) => {
@@ -185,6 +173,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const res = await projectApi.create({ name, creationType, aspectRatio, status: 'draft' });
     const project = res.data.data;
     set((s) => ({ projects: [project, ...s.projects] }));
+    notify({ title: '已新建项目', description: `「${project.name}」` });
     return project;
   },
 
@@ -260,6 +249,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         scriptGenerationStatus: 'done',
         scriptGenerationMessage: '分镜生成完成',
       });
+      notify({ title: '已写入分镜列表', description: `${get().scenes.length} 个分镜` });
       get().markDirty();
       // 完成提示展示几秒后自动消失（否则顶部「✓ 分镜生成完成」常驻；复位前校验状态，
       // 避免覆盖用户 4 秒内发起的新一轮生成）
@@ -276,6 +266,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         scriptGenerationStatus: 'error',
         scriptGenerationMessage: message,
       });
+      notify({ title: '剧本生成失败', description: message, variant: 'error' });
     }
   },
 
@@ -297,14 +288,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         await get().loadProject(get().currentProject!.id);
       }
       get().markDirty();
-      // 生成成功 → toast + 未读
+      // 生成成功 → 通知 + 未读
       const scene = get().scenes.find(s => s.id === sceneId);
-      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'image' });
+      notifyGenerationResult(sceneId, scene?.sceneNumber ?? 0, 'image', 'success');
       return res.data.data.imageUrl;
     } catch (err: unknown) {
-      // 生成失败 → toast + 未读
+      // 生成失败 → 通知 + 未读
       const scene = get().scenes.find(s => s.id === sceneId);
-      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'image' });
+      notifyGenerationResult(sceneId, scene?.sceneNumber ?? 0, 'image', 'error',
+        err instanceof Error ? err.message : undefined);
       throw err;
     } finally {
       set((s) => ({ generatingImage: { ...s.generatingImage, [sceneId]: false } }));
@@ -330,7 +322,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return taskId;
     } catch (err: unknown) {
       const scene = get().scenes.find(s => s.id === sceneId);
-      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+      notifyGenerationResult(sceneId, scene?.sceneNumber ?? 0, 'video', 'error',
+        err instanceof Error ? err.message : undefined);
       throw err;
     } finally {
       set((s) => ({ 
@@ -371,10 +364,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 终态 → toast + 未读（超时未完成不发成功，避免假成功）
     const scene = get().scenes.find(s => s.id === sceneId);
     if (videoFailed) {
-      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+      notifyGenerationResult(sceneId, scene?.sceneNumber ?? 0, 'video', 'error', videoError || undefined);
       throw new Error(videoError || '视频生成失败');
     } else if (videoDone) {
-      get().addToast({ sceneId, sceneNumber: scene?.sceneNumber ?? 0, type: 'success', kind: 'video' });
+      notifyGenerationResult(sceneId, scene?.sceneNumber ?? 0, 'video', 'success');
     }
   },
 
@@ -387,7 +380,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         get().pollVideoTask(scene.id, scene.videoTaskId)
           .catch(() => {
             const sc = get().scenes.find(s => s.id === scene.id);
-            get().addToast({ sceneId: scene.id, sceneNumber: sc?.sceneNumber ?? 0, type: 'error', kind: 'video' });
+            notifyGenerationResult(scene.id, sc?.sceneNumber ?? 0, 'video', 'error');
           })
           .finally(() => {
             set((s) => ({ generatingVideo: { ...s.generatingVideo, [scene.id]: false } }));

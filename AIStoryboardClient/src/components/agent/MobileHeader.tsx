@@ -1,4 +1,5 @@
 import { DS } from './ChatComposer';
+import { Tooltip, TooltipGroup } from '../common/Tooltip';
 
 interface MobileHeaderProps {
   title: string;
@@ -12,6 +13,7 @@ interface MobileHeaderProps {
  */
 export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHeaderProps) {
   return (
+    <TooltipGroup>
     <div style={{
       height: 56, flexShrink: 0,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -20,9 +22,10 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
       background: 'white',
     }}>
       {/* 左：汉堡菜单 */}
+      <Tooltip side="bottom" label="菜单">
       <button
         onClick={onMenuClick}
-        title="菜单"
+        aria-label="菜单"
         style={{
           width: 40, height: 40, border: 'none', background: 'transparent',
           borderRadius: 10, cursor: 'pointer', display: 'flex',
@@ -34,6 +37,7 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
           <path d="M10.9603 13.0634V14.5996H2.79724V13.0634H10.9603Z" fill="currentColor" />
         </svg>
       </button>
+      </Tooltip>
 
       {/* 中：会话标题 */}
       <span style={{
@@ -46,9 +50,10 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
 
       {/* 右：新建对话 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <Tooltip side="bottom" label="新建对话">
         <button
           onClick={onNewConversation}
-          title="新建对话"
+          aria-label="新建对话"
           style={{
             width: 40, height: 40, border: 'none', background: 'transparent',
             borderRadius: 10, cursor: 'pointer', display: 'flex',
@@ -59,7 +64,9 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
+        </Tooltip>
       </div>
     </div>
+    </TooltipGroup>
   );
 }

@@ -35,6 +35,8 @@ function renderInspector(
   onToggleTag = vi.fn(),
   assetOverrides: Partial<LibraryAsset> = {},
   media: LibraryMedia[] = [],
+  onPreviewDocument = vi.fn(),
+  onRequestAiEnrichment = vi.fn(),
 ) {
   const currentAsset = { ...asset, ...assetOverrides };
   const detail: LibraryAssetDetail = { asset: currentAsset, media, linkedProjects: [] };
@@ -50,6 +52,7 @@ function renderInspector(
       onAddToGroup={vi.fn()}
       onUseForVideo={vi.fn()}
       onToggleTag={onToggleTag}
+      onPreviewDocument={onPreviewDocument}
       onCreateSubfolder={vi.fn()}
       onRenameFolder={vi.fn()}
       onDeleteFolder={vi.fn()}
@@ -58,14 +61,16 @@ function renderInspector(
       onBulkPromote={vi.fn()}
       onBulkMove={vi.fn()}
       onBulkMerge={vi.fn()}
+      onRequestAiEnrichment={onRequestAiEnrichment}
+      onRequestFolderAiEnrichment={vi.fn()}
     />,
   );
-  return onToggleTag;
+  return { onToggleTag, onPreviewDocument, onRequestAiEnrichment };
 }
 
 describe('LibraryInspector tags', () => {
   it('keeps tags read-only until edit mode is enabled', () => {
-    const onToggleTag = renderInspector();
+    const { onToggleTag } = renderInspector();
     const tagButton = screen.getByRole('button', { name: '3D建模' });
 
     expect((tagButton as HTMLButtonElement).disabled).toBe(true);
@@ -87,13 +92,34 @@ describe('LibraryInspector tags', () => {
     });
 
     expect(screen.getByText('AI 生成中')).toBeTruthy();
-    expect(screen.getByText('AI 正在分析图片，完成后会自动填入描述与标签。')).toBeTruthy();
+    expect(screen.getByText('AI 正在完善这张素材的描述与标签。')).toBeTruthy();
   });
 
   it('marks manually edited metadata as edited', () => {
     renderInspector(vi.fn(), { metadataState: 'EDITED' });
 
     expect(screen.getByText('已编辑')).toBeTruthy();
+  });
+
+  it('only queues AI enrichment on demand for images', () => {
+    const { onRequestAiEnrichment } = renderInspector(vi.fn(), { metadataState: 'NONE' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 文件完善信息' }));
+
+    expect(onRequestAiEnrichment).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1' }));
+  });
+
+  it('disables the AI enrichment action while the asset is being processed', () => {
+    renderInspector(vi.fn(), { metadataState: 'AI_GENERATING' });
+
+    const button = screen.getByRole('button', { name: 'AI 完善中…' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it('hides the AI enrichment action for non-image assets', () => {
+    renderInspector(vi.fn(), { type: 'DOCUMENT', metadataState: 'NONE' });
+
+    expect(screen.queryByRole('button', { name: 'AI 文件完善信息' })).toBeNull();
   });
 
   it('shows the AI description instead of the generation placeholder', () => {
@@ -119,7 +145,7 @@ describe('LibraryInspector tags', () => {
   });
 
   it('offers download and hides group actions for documents', () => {
-    renderInspector(
+    const { onPreviewDocument } = renderInspector(
       vi.fn(),
       { type: 'DOCUMENT', metadataState: 'NONE', description: null, aiDescription: null },
       [{
@@ -146,5 +172,14 @@ describe('LibraryInspector tags', () => {
     expect(screen.queryByRole('button', { name: '加入资产组' })).toBeNull();
     expect(screen.getByRole('link', { name: '下载文件' })).toBeTruthy();
     expect(screen.getByText('暂无描述')).toBeTruthy();
+
+    // 文档不再内嵌预览，改为点击后放大。
+    expect(screen.queryByText('正在浏览器中解析文档…')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /点击放大预览/ }));
+    expect(onPreviewDocument).toHaveBeenCalledWith(expect.objectContaining({
+      url: '/api/library/media/m1/content?token=t',
+      name: '说明.md',
+      mimeType: 'text/markdown',
+    }));
   });
 });

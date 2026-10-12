@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { useMicVolume } from '../../hooks/useMicVolume';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { Tooltip } from '../common/Tooltip';
 
 const DS_BLUE = 'rgb(65, 118, 230)';
 
@@ -123,10 +124,10 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
       />
 
       {/* 麦克风按钮 */}
+      <Tooltip label={isActive ? '停止录音' : '开始录音'}>
       <button
         onClick={handleClick}
         disabled={disabled}
-        title={isActive ? '停止录音' : '开始录音'}
         aria-label={isActive ? '停止录音' : '开始录音'}
         onMouseEnter={(e) => { if (!disabled && !isActive) e.currentTarget.style.background = 'rgba(65,118,230,0.08)'; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? DS_BLUE : 'transparent'; }}
@@ -163,6 +164,7 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
           <line x1="12" y1="19" x2="12" y2="22" />
         </svg>
       </button>
+      </Tooltip>
     </div>
   );
 }

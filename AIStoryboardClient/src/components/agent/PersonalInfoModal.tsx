@@ -3,6 +3,8 @@ import { X } from 'lucide-react';
 import CountUp from '../CountUp';
 import { userApi, type UserStats } from '../../api/user';
 import { usePresence } from '../../hooks/usePresence';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 
 const overlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.4)',
@@ -54,8 +56,11 @@ export function PersonalInfoModal({ open, onClose }: { open: boolean; onClose: (
     try {
       await userApi.updateProfile({ displayName: name, email });
       setMsg({ text: '基本信息已保存', ok: true });
+      notify({ title: '基本信息已保存' });
     } catch (e) {
-      setMsg({ text: errMsg(e), ok: false });
+      const message = errMsg(e);
+      setMsg({ text: message, ok: false });
+      notify({ title: '保存失败', description: message, variant: 'error' });
     }
   };
 
@@ -64,9 +69,12 @@ export function PersonalInfoModal({ open, onClose }: { open: boolean; onClose: (
     try {
       await userApi.changePassword({ oldPassword: oldPwd, newPassword: newPwd });
       setMsg({ text: '密码已修改', ok: true });
+      notify({ title: '密码已修改' });
       setOldPwd(''); setNewPwd(''); setConfirmPwd('');
     } catch (e) {
-      setMsg({ text: errMsg(e), ok: false });
+      const message = errMsg(e);
+      setMsg({ text: message, ok: false });
+      notify({ title: '修改密码失败', description: message, variant: 'error' });
     }
   };
 
@@ -90,12 +98,13 @@ export function PersonalInfoModal({ open, onClose }: { open: boolean; onClose: (
       >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
           <h2 style={{ margin: 0, font: 'var(--text-title-md)', color: 'var(--color-ink)', flex: 1 }}>个人信息</h2>
+          <Tooltip label="关闭">
           <button
             style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--color-muted)', display: 'inline-flex' }}
             onClick={onClose}
-            title="关闭"
             aria-label="关闭"
           ><X size={16} strokeWidth={1.8} /></button>
+          </Tooltip>
         </div>
 
         {/* 统计 */}

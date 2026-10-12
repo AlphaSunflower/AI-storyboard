@@ -1,4 +1,5 @@
-export type LibraryScopeView = 'PROJECT' | 'ALL' | 'GLOBAL' | 'TRASH';
+/** `ALL` 保留为历史值（旧版工作台/URL），新代码使用 `PROJECT`。 */
+export type LibraryScopeView = 'PROJECT' | 'ALL' | 'GLOBAL' | 'OUTPUT' | 'TRASH';
 
 export function libraryAssetScope(
   scopeView: LibraryScopeView,
@@ -13,6 +14,7 @@ export function scopeFromQuery(value: string | null): LibraryScopeView {
   switch (value?.toUpperCase()) {
     case 'ALL': return 'ALL';
     case 'GLOBAL': return 'GLOBAL';
+    case 'OUTPUT': return 'OUTPUT';
     case 'GROUPS': return 'PROJECT';
     case 'TAGS': return 'ALL';
     case 'TRASH': return 'TRASH';
@@ -28,10 +30,14 @@ export function buildLibraryQuery(input: {
   view?: 'cards' | 'table';
   tagIds?: string[];
   tagMode?: 'ALL' | 'ANY';
+  includeGlobal?: boolean;
+  origin?: 'GENERATED';
 }) {
   const params = new URLSearchParams();
   if (input.scopeView !== 'PROJECT') params.set('scope', input.scopeView.toLowerCase());
   if (input.projectId) params.set('projectId', input.projectId);
+  if (input.includeGlobal) params.set('includeGlobal', '1');
+  if (input.origin) params.set('origin', input.origin);
   if (input.type) params.set('type', input.type);
   if (input.query?.trim()) params.set('q', input.query.trim());
   if (input.view && input.view !== 'cards') params.set('view', input.view);

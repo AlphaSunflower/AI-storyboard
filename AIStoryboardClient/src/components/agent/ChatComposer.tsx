@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
+import { notify } from '../../stores/toastStore';
+import { Tooltip } from '../common/Tooltip';
 import { useChatAnnotationStore, type ChatAnnotation } from '../../stores/chatAnnotationStore';
 import { AnnotationChip } from './AnnotationChip';
 import { SceneSelectorModal } from './SceneSelectorModal';
 import { MicButton } from './MicButton';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
-import { UploadMaterialPickerModal } from './UploadMaterialPickerModal';
 import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
-import { ProjectOutputImagePickerModal } from '../editor/ProjectOutputImagePickerModal';
 import {
   DEFAULT_AGENT_APPROVAL_MODE,
   agentApi,
@@ -201,8 +201,6 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
   // "+" 菜单状态
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
-  const [outputOpen, setOutputOpen] = useState(false);
-  const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const menuPresence = usePresence(menuOpen && !!menuPos, 180);
   // ├─「上传资产」从已有资产库选择参考图状态（assetApi.list 拉取，选中资产图片作为参考图）
@@ -329,11 +327,20 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
     try {
       const res = await agentApi.compactContext(conversationId);
       const data = res.data.data;
-      setCompressNotice(data.compacted
-        ? `上下文已压缩：${data.messagesBefore} 条 → ${data.messagesAfter} 条`
-        : data.status === 'UNAVAILABLE' ? '当前会话暂不支持压缩' : '当前上下文不足，无需压缩');
+      if (data.compacted) {
+        const detail = `${data.messagesBefore} 条 → ${data.messagesAfter} 条`;
+        setCompressNotice(`上下文已压缩：${detail}`);
+        notify({ title: '上下文已压缩', description: detail });
+      } else if (data.status === 'UNAVAILABLE') {
+        setCompressNotice('当前会话暂不支持压缩');
+        notify({ title: '当前会话暂不支持压缩', variant: 'info' });
+      } else {
+        setCompressNotice('当前上下文不足，无需压缩');
+        notify({ title: '上下文无需压缩', variant: 'info' });
+      }
     } catch {
       setCompressNotice('压缩失败，请稍后重试');
+      notify({ title: '压缩失败', description: '请稍后重试', variant: 'error' });
     } finally {
       setCompressing(false);
     }
@@ -748,15 +755,16 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
                 </div>
               ))}
               {remainingReferenceCount > 0 && (
+                <Tooltip label={`还有 ${remainingReferenceCount} 张参考图`}>
                 <button
                   type="button"
                   className="chat-reference-preview__overflow"
                   onClick={() => setRemoveModalOpen(true)}
                   aria-label={`查看其余 ${remainingReferenceCount} 张参考图`}
-                  title={`还有 ${remainingReferenceCount} 张参考图`}
                 >
                   <span>+{remainingReferenceCount}</span>
                 </button>
+                </Tooltip>
               )}
             </div>
           )}
@@ -770,15 +778,16 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
                 <Package size={14} strokeWidth={2} style={{ color: DS.brand }} />
                 资产 {pickedAssetIds.length} 个
               </button>
-              <button
-                onClick={() => clearPickedAssetIds()}
-                title="移除已选资产"
-                aria-label="移除已选资产"
-                style={{
-                  border: 'none', background: 'white', color: DS.textSecondary,
-                  cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '5px 6px', borderRadius: 8,
-                }}
-              >×</button>
+              <Tooltip label="移除已选资产">
+                <button
+                  onClick={() => clearPickedAssetIds()}
+                  aria-label="移除已选资产"
+                  style={{
+                    border: 'none', background: 'white', color: DS.textSecondary,
+                    cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '5px 6px', borderRadius: 8,
+                  }}
+                >×</button>
+              </Tooltip>
             </span>
           )}
           {pendingGroup && (
@@ -855,17 +864,18 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
                     textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>{label}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => removePendingAttachment(attachment.url)}
-                  title={`移除 ${label}`}
-                  aria-label={`移除文件 ${label}`}
-                  style={{
-                    width: 22, height: 22, display: 'grid', placeItems: 'center',
-                    border: 'none', borderRadius: 6, background: 'transparent',
-                    color: DS.textCaption, cursor: 'pointer', flexShrink: 0,
-                  }}
-                ><X size={12} strokeWidth={2} /></button>
+                <Tooltip className="tooltip-fixed" label="移除文件">
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(attachment.url)}
+                    aria-label={`移除文件 ${label}`}
+                    style={{
+                      width: 22, height: 22, display: 'grid', placeItems: 'center',
+                      border: 'none', borderRadius: 6, background: 'transparent',
+                      color: DS.textCaption, cursor: 'pointer', flexShrink: 0,
+                    }}
+                  ><X size={12} strokeWidth={2} /></button>
+                </Tooltip>
               </span>
             );
           })}
@@ -971,11 +981,12 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
             onChange={(mode, options) => { void setApprovalMode(mode, options); }}
           />
           <div style={{ position: 'relative' }}>
+            <Tooltip label="上传素材">
             <button
               ref={menuBtnRef}
               onClick={attachLocked ? undefined : openMenu}
               disabled={attachLocked}
-              title="上传"
+              aria-label="上传"
               className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
               onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
@@ -986,6 +997,7 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
                 opacity: attachLocked ? 0.45 : 1,
               }}
             >{/** DeepSeek 风格上传图标：圆圈+加号 */}<PlusCircle size={20} strokeWidth={1.5} /></button>
+            </Tooltip>
             <input ref={fileRef} type="file" multiple hidden disabled={attachLocked} onChange={handleFile} />
             {/* 下拉菜单：portal 到 body */}
             {menuPresence.mounted && menuPos && createPortal(
@@ -998,7 +1010,8 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
                 <UploadMaterialMenu
                   onClose={() => setMenuOpen(false)}
                   onLocalFile={() => fileRef.current?.click()}
-                  onMaterialPicker={() => setMaterialPickerOpen(true)}
+                  onProjectLibrary={() => setProjectLibraryOpen(true)}
+                  onScene={() => setSceneModalOpen(true)}
                 />
               </div>,
               document.body,
@@ -1025,7 +1038,6 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
           {streaming && !agentVideoTask && !canSend ? (
             <button
               onClick={stopGeneration}
-              title="停止生成"
               style={{
                 height: 38, padding: '0 16px', borderRadius: 12, border: 'none',
                 background: 'rgba(217, 45, 32, 0.9)', color: 'white', fontSize: 14, fontWeight: 500,
@@ -1060,18 +1072,11 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
         onConfirm={handleSceneConfirm}
       />
 
-      <UploadMaterialPickerModal
-        open={materialPickerOpen}
-        onClose={() => setMaterialPickerOpen(false)}
-        onProjectLibrary={() => setProjectLibraryOpen(true)}
-        onProjectOutput={() => setOutputOpen(true)}
-        onScene={() => setSceneModalOpen(true)}
-      />
       <ProjectLibraryPickerModal
         open={projectLibraryOpen}
         projectId={projectId}
         type="image"
-        allowedTypes={['image', 'video', 'audio']}
+        allowedTypes={['image', 'video', 'audio', 'document']}
         purpose="image"
         assetGroups={{
           selectedIds: boundGroups.map((binding) => binding.groupId),
@@ -1084,27 +1089,12 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
             name: reference.fileName || `${reference.type} 素材`,
             mimeType: reference.mimeType || `${reference.type}/*`,
             sizeBytes: reference.sizeBytes,
-            kind: reference.type,
+            kind: reference.type === 'document' ? 'file' : reference.type,
             source: 'library' as const,
             assetId: reference.sourceType === 'library_asset' ? reference.sourceId : undefined,
             mediaId: reference.mediaId,
           })));
         }}
-      />
-
-      <ProjectOutputImagePickerModal
-        open={outputOpen}
-        projectId={projectId}
-        existingUrls={refImageUrls}
-        remaining={Math.max(0, 10 - refImageUrls.length)}
-        onClose={() => setOutputOpen(false)}
-        onConfirm={async (references) => addPendingAttachments(references.map((reference, index) => ({
-          url: reference.url,
-          name: reference.fileName || `项目图片 ${index + 1}`,
-          mimeType: reference.type === 'video' ? 'video/*' : 'image/*',
-          kind: reference.type,
-          source: 'library' as const,
-        })))}
       />
 
       {/* 参考图列表弹窗：指定移除单张（2026-08-28 用户反馈：不再一键清空，改为逐张指定移除） */}

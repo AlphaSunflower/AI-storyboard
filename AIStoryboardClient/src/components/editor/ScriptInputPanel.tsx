@@ -136,7 +136,6 @@ export function ScriptInputPanel() {
           cursor: 'pointer',
           userSelect: 'none',
         }}
-        title="展开剧本输入面板"
       >
         <span
           style={{
@@ -179,7 +178,6 @@ export function ScriptInputPanel() {
         </h2>
         <button
           onClick={() => setCollapsed(true)}
-          title="折叠面板"
           style={{
             background: 'none',
             border: 'none',

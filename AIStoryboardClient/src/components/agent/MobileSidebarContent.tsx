@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AgentConversationList } from './AgentConversationList';
 import { DS } from './ChatComposer';
 import { ProjectDropdown } from '../layout/ProjectDropdown';
+import { Tooltip, TooltipGroup } from '../common/Tooltip';
 import { Moon, User, LogOut } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -65,11 +66,15 @@ export function MobileSidebarContent({
         )}
 
         <div style={{ position: 'relative', width: '100%' }}>
+          <Tooltip
+            className="tooltip-fill"
+            label={canvasLocked ? '请先离开画布编辑模式' : '切换项目'}
+          >
           <button
             onClick={() => { if (!canvasLocked) setProjectOpen(!projectOpen); }}
             onMouseDown={(e) => e.stopPropagation()}
             disabled={canvasLocked}
-            title={canvasLocked ? '请先离开画布编辑模式' : undefined}
+            aria-label="切换项目"
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 6,
               border: 'none', borderRadius: 10, background: 'transparent',
@@ -84,6 +89,7 @@ export function MobileSidebarContent({
             </span>
             <span style={{ fontSize: 10, color: DS.textCaption }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
           </button>
+          </Tooltip>
           <ProjectDropdown open={projectOpen} onClose={() => setProjectOpen(false)} />
         </div>
       </div>
@@ -99,13 +105,15 @@ export function MobileSidebarContent({
       </div>
 
       {/* 底部：用户资料 + 退出登录（替代原设置菜单） */}
+      <TooltipGroup>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 4,
         padding: '8px 12px', borderTop: '1px solid var(--color-hairline)',
       }}>
+        <Tooltip className="tooltip-grow" label="个人信息">
         <button
           onClick={onOpenSettings}
-          title="个人信息"
+          aria-label="个人信息"
           style={{
             flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
             border: 'none', background: 'transparent', borderRadius: 10,
@@ -117,9 +125,11 @@ export function MobileSidebarContent({
           <User size={18} strokeWidth={1.8} />
           <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
         </button>
+        </Tooltip>
+        <Tooltip label="退出登录">
         <button
           onClick={logout}
-          title="退出登录"
+          aria-label="退出登录"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
@@ -129,7 +139,9 @@ export function MobileSidebarContent({
         >
           <LogOut size={18} strokeWidth={1.8} />
         </button>
+        </Tooltip>
       </div>
+      </TooltipGroup>
     </div>
   );
 }

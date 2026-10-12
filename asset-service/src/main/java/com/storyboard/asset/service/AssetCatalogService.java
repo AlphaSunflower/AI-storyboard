@@ -6,6 +6,7 @@ import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
+import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
@@ -14,6 +15,7 @@ import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
 import com.storyboard.asset.dto.ImportContracts.AnalysisTaskStatus;
+import com.storyboard.asset.dto.ImportContracts.AnalysisRequestResult;
 
 import java.util.Collection;
 import java.util.List;
@@ -44,6 +46,8 @@ public interface AssetCatalogService {
             Collection<String> tagIds,
             TagMode tagMode,
             boolean deleted,
+            boolean includeGlobal,
+            LibraryOrigin origin,
             int page,
             int size
     );
@@ -77,6 +81,16 @@ public interface AssetCatalogService {
     AssetSummary registerMedia(String userId, MediaRegistration registration, String idempotencyKey);
 
     List<AnalysisTaskStatus> listAnalysisTaskStatuses(String userId, Collection<String> assetIds);
+
+    /** 用户主动触发：为指定图片素材排队 AI 元数据完善。 */
+    AnalysisRequestResult requestAnalysis(String userId, Collection<String> assetIds);
+
+    /** 用户主动触发：为目录（含子目录）内的图片素材排队 AI 元数据完善。 */
+    AnalysisRequestResult requestFolderAnalysis(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId);
 
     record MediaRegistration(
             String projectId,

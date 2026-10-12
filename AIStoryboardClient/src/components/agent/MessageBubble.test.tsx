@@ -8,6 +8,7 @@ import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { CHAT_MEDIA_DRAG_MIME } from '../../lib/projectLibraryDrag';
 import { rememberDocumentSource } from '../../lib/documentPreview';
+import { assetUrl } from '../../config';
 import { MessageBubble } from './MessageBubble';
 
 describe('MessageBubble project library import', () => {
@@ -308,8 +309,8 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
-    const copy = screen.getByTitle('复制内容');
-    const edit = screen.getByTitle('编辑消息');
+    const copy = screen.getByRole('button', { name: /复制/ });
+    const edit = screen.getByRole('button', { name: '编辑' });
     expect(copy.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(edit);
@@ -328,7 +329,7 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle('编辑消息'));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const editor = screen.getByLabelText('编辑消息内容');
     fireEvent.change(editor, { target: { value: '修改后的内容' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
@@ -402,6 +403,79 @@ describe('MessageBubble project library import', () => {
       name: 'project-brief.md',
       kind: 'file',
     });
+  });
+
+  const renderFileAttachmentBubble = () => render(
+    <MessageBubble
+      messageId="m-file"
+      conversationId="c1"
+      role="assistant"
+      content="文档已经写好"
+      metadata={{
+        sandboxAttachments: [{
+          url: '/api/files/files/mood.md',
+          name: '此刻的心情.md',
+          mimeType: 'text/markdown',
+          kind: 'file',
+          source: 'upload',
+        }],
+      }}
+    />,
+  );
+
+  it('hints that a message file chip has a context menu', async () => {
+    renderFileAttachmentBubble();
+
+    const chip = screen.getByRole('button', { name: '打开文档 此刻的心情.md' });
+    fireEvent.pointerEnter(chip.closest('.warm-tooltip__trigger')!, {
+      pointerType: 'mouse',
+      buttons: 0,
+    });
+
+    expect((await screen.findByRole('tooltip')).textContent).toContain('右键查看更多操作');
+  });
+
+  it('downloads a message file from the right-click menu', () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    renderFileAttachmentBubble();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '打开文档 此刻的心情.md' }));
+    fireEvent.click(screen.getByRole('button', { name: '下载' }));
+
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
+
+  it('quotes a message file back into the composer attachments', () => {
+    useAgentStore.setState({ pendingAttachments: [] });
+    renderFileAttachmentBubble();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '打开文档 此刻的心情.md' }));
+    fireEvent.click(screen.getByRole('button', { name: '引用' }));
+
+    expect(useAgentStore.getState().pendingAttachments).toMatchObject([{
+      url: '/api/files/files/mood.md',
+      name: '此刻的心情.md',
+      kind: 'file',
+    }]);
+  });
+
+  it('asks about a message file in the side chat', () => {
+    const openSideChat = vi.spyOn(useAgentStore.getState(), 'openSideChat')
+      .mockResolvedValue(undefined);
+    useSideChatSelectionStore.getState().clear();
+    renderFileAttachmentBubble();
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '打开文档 此刻的心情.md' }));
+    fireEvent.click(screen.getByRole('button', { name: '在侧边提问' }));
+
+    expect(useSideChatSelectionStore.getState().selections).toMatchObject([{
+      text: '文件「此刻的心情.md」：/api/files/files/mood.md',
+      messageId: 'm-file',
+    }]);
+    expect(openSideChat).toHaveBeenCalledWith('c1', undefined);
+
+    openSideChat.mockRestore();
   });
 });
 
@@ -588,5 +662,177 @@ describe('MessageBubble annotations', () => {
     openSideChat.mockRestore();
     restore();
     window.getSelection()?.removeAllRanges();
+  });
+
+  it('keeps the toolbar on scroll instead of splitting it from the highlight', async () => {
+    // 回归：旧实现滚动即收起弹框、但原生选区还留着 → 只剩高亮没有弹框的“半截状态”。
+    // 现在弹框与高亮绑定同一状态：滚动只重锚定，两者同生共死。
+    const restore = stubRangeRect();
+    renderAssistant();
+
+    const paragraph = screen.getByText('明白，我停下,等你说完。');
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild as Text, 0);
+    range.setEnd(paragraph.firstChild as Text, 4);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    fireEvent.mouseUp(document.querySelector('.chat-live-text')!);
+    expect(screen.getByRole('button', { name: '引用这段内容' })).toBeTruthy();
+
+    fireEvent.scroll(window);
+    await waitForHighlightPass();
+    expect(screen.getByRole('button', { name: '引用这段内容' })).toBeTruthy();
+
+    restore();
+    window.getSelection()?.removeAllRanges();
+  });
+});
+
+describe('MessageBubble block actions', () => {
+  const writeText = vi.fn(async () => undefined);
+  const write = vi.fn(async () => undefined);
+  const createObjectURL = vi.fn(() => 'blob:mock');
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText, write },
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+    writeText.mockClear();
+    write.mockClear();
+    createObjectURL.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: undefined });
+  });
+
+  /** 拦截 anchor.click，返回最近一次下载的文件名与所在链接。 */
+  const captureDownload = () => {
+    const appendChild = vi.spyOn(document.body, 'appendChild');
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    // 右键菜单、Tooltip 也会 portal 到 body，只认最近一次插入的下载锚点
+    return () => [...appendChild.mock.calls]
+      .reverse()
+      .map((call) => call[0])
+      .find((node): node is HTMLAnchorElement => node instanceof HTMLAnchorElement)!;
+  };
+
+  it('copies and downloads markdown tables from the block toolbar', async () => {
+    const lastLink = captureDownload();
+    render(
+      <MessageBubble
+        role="assistant"
+        content={'| 项目 | 设计 |\n| --- | --- |\n| 风格 | 现代轻奢 |'}
+      />,
+    );
+
+    expect(screen.getByRole('table').closest('.chat-markdown-block--table')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '复制表格' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('| 项目 | 设计 |\n| --- | --- |\n| 风格 | 现代轻奢 |');
+    });
+    await screen.findByRole('button', { name: '已复制' });
+
+    fireEvent.click(screen.getByRole('button', { name: '下载表格' }));
+    expect(lastLink().download).toBe('table-1.csv');
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels code blocks with their fence language and exports the matching extension', async () => {
+    const lastLink = captureDownload();
+    render(<MessageBubble role="assistant" content={'```ts\nconst a = 1;\n```'} />);
+
+    const label = screen.getByText('ts');
+    // 语言标签必须落在 data-annotation-ui 里，否则会污染注释引用的文本映射
+    expect(label.closest('[data-annotation-ui]')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '复制代码' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('const a = 1;'));
+
+    fireEvent.click(screen.getByRole('button', { name: '下载代码' }));
+    expect(lastLink().download).toBe('snippet-1.ts');
+  });
+
+  it('falls back to .txt for fenced blocks without a known language', () => {
+    const lastLink = captureDownload();
+    render(<MessageBubble role="assistant" content={'```\n纯文本片段\n```'} />);
+
+    expect(screen.getByText('text')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '下载代码' }));
+    expect(lastLink().download).toBe('snippet-1.txt');
+  });
+
+  it('keeps the message meta row free of a whole-message download', () => {
+    render(<MessageBubble role="assistant" content="正文内容" createdAt="2026-10-12T15:30:00" />);
+
+    expect(screen.getByRole('button', { name: /复制/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载消息' })).toBeNull();
+  });
+
+  it('falls back to copying the image url when bitmaps are unsupported', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    render(<MessageBubble role="assistant" content="![封面](/api/files/images/cover.png)" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制图片' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(assetUrl('/api/files/images/cover.png'));
+    });
+    expect(screen.getByRole('button', { name: '下载图片' })).toBeTruthy();
+  });
+
+  it('keeps image and video right-click menus alongside the new toolbar', async () => {
+    const lastLink = captureDownload();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    render(
+      <MessageBubble
+        role="assistant"
+        content={'![封面](/api/files/images/cover.png)\n\nhttps://cdn.example.com/clip.mp4'}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole('img'));
+    fireEvent.click(screen.getByRole('button', { name: '下载' }));
+    await waitFor(() => expect(lastLink()?.download).toBe('封面.png'));
+
+    expect(screen.getByRole('button', { name: '复制视频' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下载视频' })).toBeTruthy();
+  });
+
+  it('hides block actions while the message is still streaming', async () => {
+    // 让流式逐字补间一次性走完，测试只关心操作条在 streaming 期间不渲染
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(Number.MAX_SAFE_INTEGER);
+      return 0;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    render(
+      <MessageBubble
+        role="assistant"
+        streaming
+        content={'| 项目 | 设计 |\n| --- | --- |\n| 风格 | 现代轻奢 |'}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('table')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: '复制表格' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下载表格' })).toBeNull();
   });
 });

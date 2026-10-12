@@ -123,14 +123,13 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
             className="is-primary"
             disabled={approvingPlot}
             onClick={() => void approvePlot()}
-            title="确认剧情并继续生成分镜"
           >
             {approvingPlot ? <LoaderCircle size={13} className="is-spinning" /> : <CheckCircle2 size={13} />}
             {approvingPlot ? '提交中' : '确认剧情'}
           </button>
         )}
         {task.canCancel && (
-          <button type="button" onClick={() => void cancelTask(task.taskId)} title="取消任务">
+          <button type="button" onClick={() => void cancelTask(task.taskId)}>
             <CircleStop size={13} />
             取消
           </button>
@@ -140,14 +139,13 @@ export function AgentTaskCard({ taskId }: { taskId: string }) {
             type="button"
             disabled={retrying}
             onClick={() => void doRetry()}
-            title="重试任务"
           >
             <RotateCcw size={13} className={retrying ? 'is-spinning' : undefined} />
             {retrying ? '提交中' : task.status === 'partial' ? '重试失败项' : '重试'}
           </button>
         )}
         {task.canFollowUp && (
-          <button type="button" onClick={() => setFollowUpOpen((value) => !value)} title="补充要求">
+          <button type="button" onClick={() => setFollowUpOpen((value) => !value)}>
             <MessageSquarePlus size={13} />
             补充要求
           </button>

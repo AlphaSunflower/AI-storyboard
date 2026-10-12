@@ -5,6 +5,7 @@ import { agentApi, type AgentConversation } from '../../api/agent';
 import { useProjectStore } from '../../stores/projectStore';
 import { DS } from './ChatComposer';
 import { usePresence } from '../../hooks/usePresence';
+import { Tooltip } from '../common/Tooltip';
 
 interface SearchHit {
   conv: AgentConversation;
@@ -179,19 +180,21 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
             }}
           />
           {query && (
+            <Tooltip label="清空搜索">
             <button
               onClick={() => setQuery('')}
-              title="清空"
+              aria-label="清空搜索"
               style={{
                 border: 'none', background: 'var(--color-surface-soft)', color: 'var(--color-muted)',
                 width: 26, height: 26, borderRadius: '50%', cursor: 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}
             ><X size={14} strokeWidth={2} /></button>
+            </Tooltip>
           )}
+          <Tooltip side="bottom" label="关闭搜索">
           <button
             onClick={onClose}
-            title="关闭搜索"
             aria-label="关闭搜索"
             style={{
               border: 'none', background: 'transparent', color: 'var(--color-muted)',
@@ -199,6 +202,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             }}
           ><X size={16} strokeWidth={1.8} /></button>
+          </Tooltip>
         </div>
 
         {/* 结果区 */}

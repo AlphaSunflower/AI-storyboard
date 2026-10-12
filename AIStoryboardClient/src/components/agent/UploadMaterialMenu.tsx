@@ -1,14 +1,17 @@
-import { FileUp, Paperclip } from 'lucide-react';
+import { Clapperboard, FileUp, Library } from 'lucide-react';
 
 interface Props {
   onLocalFile: () => void;
-  onMaterialPicker: () => void;
+  onProjectLibrary: () => void;
+  onScene: () => void;
   onClose: () => void;
 }
 
+/** 「+」按钮的下拉列表：直接列出三类来源，不再经过「上传素材」弹窗。 */
 export function UploadMaterialMenu({
   onLocalFile,
-  onMaterialPicker,
+  onProjectLibrary,
+  onScene,
   onClose,
 }: Props) {
   const choose = (action: () => void) => {
@@ -18,29 +21,41 @@ export function UploadMaterialMenu({
 
   return (
     <div>
-      <button
-        type="button"
-        className="chat-plus-menu__item"
-        onClick={() => choose(onMaterialPicker)}
-        style={{ ...menuItem, '--item-index': 0 } as React.CSSProperties}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-      >
-        <Paperclip size={16} strokeWidth={2} />
-        <span>上传素材</span>
-      </button>
-      <button
-        type="button"
-        className="chat-plus-menu__item"
-        onClick={() => choose(onLocalFile)}
-        style={{ ...menuItem, '--item-index': 1 } as React.CSSProperties}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-      >
-        <FileUp size={16} strokeWidth={2} />
-        <span>上传文件</span>
-      </button>
+      <MenuItem icon={<FileUp size={16} strokeWidth={2} />} label="上传文件" index={0} onClick={() => choose(onLocalFile)} />
+      <MenuItem
+        icon={<Library size={16} strokeWidth={2} />}
+        label="上传项目库素材"
+        index={1}
+        onClick={() => choose(onProjectLibrary)}
+      />
+      <MenuItem
+        icon={<Clapperboard size={16} strokeWidth={2} />}
+        label="上传分镜"
+        index={2}
+        onClick={() => choose(onScene)}
+      />
     </div>
+  );
+}
+
+function MenuItem({ icon, label, index, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  index: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="chat-plus-menu__item"
+      onClick={onClick}
+      style={{ ...menuItem, '--item-index': index } as React.CSSProperties}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
 

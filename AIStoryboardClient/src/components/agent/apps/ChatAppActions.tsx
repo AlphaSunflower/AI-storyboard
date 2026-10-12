@@ -43,7 +43,6 @@ export function ChatAppActions({
           type="button"
           disabled={item.disabled}
           onClick={() => item.onClick ? item.onClick() : onOpen(item.key)}
-          title={item.label}
           style={appButtonStyle(compact, item.disabled)}
           onMouseEnter={(event) => {
             event.currentTarget.style.background = 'var(--color-surface-soft)';

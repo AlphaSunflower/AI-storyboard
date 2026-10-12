@@ -11,6 +11,7 @@ import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.client.AssetContracts.MetadataState;
 import com.storyboard.asset.client.AssetContracts.LibraryFolderNode;
+import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.ProjectLinkRef;
 import com.storyboard.asset.client.AssetContracts.SnapshotItem;
@@ -110,6 +111,8 @@ public class LibraryRepository {
             Collection<String> tagIds,
             TagMode tagMode,
             boolean deleted,
+            boolean includeGlobal,
+            LibraryOrigin origin,
             int page,
             int size
     ) {
@@ -126,11 +129,21 @@ public class LibraryRepository {
             if (projectId == null || projectId.isBlank()) {
                 where.append(" AND 1 = 0 ");
             } else {
-                where.append(" AND (a.owner_project_id = :projectId OR EXISTS (")
+                where.append(" AND ((a.owner_project_id = :projectId OR EXISTS (")
                         .append(" SELECT 1 FROM asset.library_project_links l WHERE l.asset_id = a.id AND l.project_id = :projectId")
-                        .append(")) ");
+                        .append("))");
+                // 仅在没有指定目录时并入全局素材；目录浏览依赖各自的目录映射，
+                // 否则「未归档」会把全局素材一并吞进来。
+                if (includeGlobal && (folderId == null || folderId.isBlank())) {
+                    where.append(" OR a.scope = 'GLOBAL'");
+                }
+                where.append(") ");
                 params.addValue("projectId", projectId);
             }
+        }
+        if (origin != null) {
+            where.append(" AND a.source_type IN (:originSources) ");
+            params.addValue("originSources", origin.sourceTypes());
         }
         if (type != null) {
             where.append(" AND a.asset_type = :type ");
@@ -199,7 +212,8 @@ public class LibraryRepository {
             int page,
             int size
     ) {
-        return searchAssets(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted, page, size);
+        return searchAssets(userId, scope, projectId, null, query, type, tagIds, tagMode, deleted,
+                false, null, page, size);
     }
 
     public String insertAsset(
@@ -924,20 +938,11 @@ public class LibraryRepository {
         addAiTags(assetId, tags);
     }
 
-    public void createAnalysisTask(String assetId) {
-        client.sql("""
-                        INSERT INTO asset.library_analysis_tasks(asset_id)
-                        SELECT :assetId
-                        WHERE EXISTS (
-                            SELECT 1 FROM asset.library_assets
-                            WHERE id = :assetId AND scope = 'PROJECT' AND status = 'ACTIVE'
-                        )
-                        ON CONFLICT (asset_id) DO NOTHING
-                        """)
-                .param("assetId", assetId).update();
-    }
-
-    public void requeueAnalysisTask(String assetId) {
+    /**
+     * 手动触发 AI 元数据完善：把素材排入分析队列。
+     * 上传与导入不再自动入队，只有用户在素材库侧边栏主动触发时才调用。
+     */
+    public void requestAnalysisTask(String assetId) {
         client.sql("""
                         INSERT INTO asset.library_analysis_tasks(
                             asset_id, status, attempt_count, next_retry_at
@@ -945,7 +950,7 @@ public class LibraryRepository {
                         SELECT :assetId, 'PENDING', 0, now()
                         WHERE EXISTS (
                             SELECT 1 FROM asset.library_assets
-                            WHERE id = :assetId AND scope = 'PROJECT' AND status = 'ACTIVE'
+                            WHERE id = :assetId AND status = 'ACTIVE'
                         )
                         ON CONFLICT (asset_id) DO UPDATE SET
                             status = 'PENDING',
@@ -956,9 +961,51 @@ public class LibraryRepository {
                             error_code = NULL,
                             error_message = NULL,
                             updated_at = now()
-                        WHERE asset.library_analysis_tasks.status <> 'SUCCEEDED'
                         """)
                 .param("assetId", assetId).update();
+    }
+
+    /** 目录（含子目录）下可以走视觉分析流程的图片素材。 */
+    public List<FolderScanAsset> listFolderAnalysisCandidates(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            int limit
+    ) {
+        if (folderId == null || folderId.isBlank()) return List.of();
+        return client.sql("""
+                        WITH RECURSIVE descendants AS (
+                            SELECT f.id
+                            FROM asset.library_folders f
+                            WHERE f.owner_user_id = :userId
+                              AND f.scope = :scope
+                              AND f.owner_project_id IS NOT DISTINCT FROM :projectId
+                              AND f.id = :folderId
+                            UNION ALL
+                            SELECT child.id
+                            FROM descendants d
+                            JOIN asset.library_folders child ON child.parent_id = d.id
+                        )
+                        SELECT DISTINCT a.id, a.name
+                        FROM asset.library_assets a
+                        JOIN asset.library_asset_folders af
+                          ON af.asset_id = a.id
+                         AND af.owner_user_id = :userId
+                         AND af.scope = :scope
+                         AND af.owner_project_id IS NOT DISTINCT FROM :projectId
+                        JOIN descendants d ON d.id = af.folder_id
+                        WHERE a.status = 'ACTIVE' AND a.type = 'IMAGE'
+                        ORDER BY a.name, a.id
+                        LIMIT :limit
+                        """)
+                .param("userId", userId)
+                .param("scope", scope.name())
+                .param("projectId", scope == AssetScope.PROJECT ? projectId : null)
+                .param("folderId", folderId)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new FolderScanAsset(rs.getString("id"), rs.getString("name")))
+                .list();
     }
 
     public List<AnalysisTask> claimAnalysisTasks(String workerId, int limit) {
@@ -969,7 +1016,7 @@ public class LibraryRepository {
                               AND EXISTS (
                                   SELECT 1 FROM asset.library_assets a
                                   WHERE a.id = t.asset_id
-                                    AND a.scope = 'PROJECT' AND a.status = 'ACTIVE'
+                                    AND a.status = 'ACTIVE'
                               )
                             ORDER BY t.created_at
                             FOR UPDATE SKIP LOCKED
@@ -2050,6 +2097,9 @@ public class LibraryRepository {
     }
 
     public record AnalysisTask(String id, String assetId, int attemptCount) {
+    }
+
+    public record FolderScanAsset(String id, String name) {
     }
 
     public record FolderRow(

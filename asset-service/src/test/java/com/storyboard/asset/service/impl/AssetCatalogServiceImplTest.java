@@ -8,6 +8,9 @@ import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
+import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
+import com.storyboard.asset.client.AssetContracts.PageResponse;
+import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.security.FileAccessUrlSigner;
@@ -66,6 +69,41 @@ class AssetCatalogServiceImplTest {
     }
 
     @Test
+    void listPassesIncludeGlobalAndOriginToRepository() {
+        when(repository.searchAssets(
+                anyString(), any(), nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(AssetType.class), any(), any(), eq(false), eq(true), eq(LibraryOrigin.GENERATED),
+                eq(1), eq(40)))
+                .thenReturn(new PageResponse<>(List.of(), 0, 1, 40));
+
+        service.list("u1", AssetScope.PROJECT, "p1", null, null, null, null, TagMode.ALL, false,
+                true, LibraryOrigin.GENERATED, 1, 40);
+
+        verify(projectAccess).requireOwned("u1", "p1");
+        verify(repository).searchAssets(
+                eq("u1"), eq(AssetScope.PROJECT), eq("p1"), nullable(String.class), nullable(String.class),
+                nullable(AssetType.class), any(), eq(TagMode.ALL), eq(false), eq(true),
+                eq(LibraryOrigin.GENERATED), eq(1), eq(40));
+    }
+
+    @Test
+    void listDefaultsToNoGlobalAndNoOriginFilter() {
+        when(repository.searchAssets(
+                anyString(), any(), nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(AssetType.class), any(), any(), eq(false), eq(false), nullable(LibraryOrigin.class),
+                eq(1), eq(40)))
+                .thenReturn(new PageResponse<>(List.of(), 0, 1, 40));
+
+        service.list("u1", AssetScope.PROJECT, "p1", null, null, null, null, TagMode.ALL, false,
+                false, null, 1, 40);
+
+        verify(repository).searchAssets(
+                eq("u1"), eq(AssetScope.PROJECT), eq("p1"), nullable(String.class), nullable(String.class),
+                nullable(AssetType.class), any(), eq(TagMode.ALL), eq(false), eq(false),
+                nullable(LibraryOrigin.class), eq(1), eq(40));
+    }
+
+    @Test
     void globalAssetSkipsProjectOwnershipValidation() {
         when(repository.insertAsset(
                 anyString(), any(), nullable(String.class), any(), nullable(com.storyboard.asset.client.AssetContracts.AiAssetKind.class),
@@ -80,7 +118,7 @@ class AssetCatalogServiceImplTest {
     }
 
     @Test
-    void imageMediaRegistrationQueuesAnalysis() {
+    void mediaRegistrationNoLongerQueuesAnalysis() {
         when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
         when(repository.upsertBlob(anyString(), anyString(), anyString(), anyLong(), any(), any(), any(), any()))
                 .thenReturn("b1");
@@ -96,27 +134,39 @@ class AssetCatalogServiceImplTest {
                 "images/a.png", "a".repeat(64), "image/png", 10, 1, 1, null,
                 MediaType.IMAGE, MediaRole.REFERENCE, true, null, 0), "idem");
 
-        verify(repository).createAnalysisTask("a1");
+        verify(repository, never()).requestAnalysisTask(anyString());
     }
 
     @Test
-    void globalImageMediaRegistrationDoesNotQueueAnalysis() {
+    void requestAnalysisQueuesImagesAndSkipsNonImages() {
         when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
-        when(repository.upsertBlob(anyString(), anyString(), anyString(), anyLong(), any(), any(), any(), any()))
-                .thenReturn("b1");
-        when(repository.upsertMedia(anyString(), anyString(), anyInt(), any(), any(Boolean.class), any()))
-                .thenReturn("m1");
-        when(repository.insertAsset(
-                anyString(), any(), nullable(String.class), any(), nullable(com.storyboard.asset.client.AssetContracts.AiAssetKind.class),
-                anyString(), nullable(String.class), nullable(String.class), nullable(String.class)))
-                .thenReturn("a1");
+        when(repository.findAsset("u1", "doc-1")).thenReturn(Optional.of(asset("doc-1", AssetType.DOCUMENT)));
 
-        service.registerMedia("u1", new AssetCatalogService.MediaRegistration(
-                null, AssetScope.GLOBAL, AssetType.IMAGE, "image", null, "upload", null,
-                "images/a.png", "a".repeat(64), "image/png", 10, 1, 1, null,
-                MediaType.IMAGE, MediaRole.REFERENCE, true, null, 0), "idem-global");
+        var result = service.requestAnalysis("u1", List.of("a1", "doc-1", "missing"));
 
-        verify(repository, never()).createAnalysisTask(anyString());
+        assertThat(result.items().stream()
+                .map(com.storyboard.asset.dto.ImportContracts.AnalysisRequestItem::assetId).toList())
+                .containsExactly("a1");
+        assertThat(result.skipped()).isEqualTo(2);
+        verify(repository).requestAnalysisTask("a1");
+        verify(repository, never()).requestAnalysisTask("doc-1");
+    }
+
+    @Test
+    void requestFolderAnalysisQueuesEveryCandidateImage() {
+        when(repository.listFolderAnalysisCandidates("u1", AssetScope.PROJECT, "p1", "f1", 500))
+                .thenReturn(List.of(
+                        new LibraryRepository.FolderScanAsset("a1", "视角 1"),
+                        new LibraryRepository.FolderScanAsset("a2", "视角 2")));
+
+        var result = service.requestFolderAnalysis("u1", AssetScope.PROJECT, "p1", "f1");
+
+        assertThat(result.items().stream()
+                .map(com.storyboard.asset.dto.ImportContracts.AnalysisRequestItem::assetId).toList())
+                .containsExactly("a1", "a2");
+        verify(projectAccess).requireOwned("u1", "p1");
+        verify(repository).requestAnalysisTask("a1");
+        verify(repository).requestAnalysisTask("a2");
     }
 
     @Test
@@ -208,6 +258,16 @@ class AssetCatalogServiceImplTest {
 
     private static AssetSummary asset(String id) {
         return asset(id, com.storyboard.asset.client.AssetContracts.AssetStatus.ACTIVE);
+    }
+
+    private static AssetSummary asset(String id, AssetType type) {
+        return new AssetSummary(
+                id, "u1", AssetScope.PROJECT, "p1", type, null,
+                "demo", null, null, false,
+                com.storyboard.asset.client.AssetContracts.MetadataState.NONE,
+                com.storyboard.asset.client.AssetContracts.AssetStatus.ACTIVE,
+                null, 1, List.of(), List.of(), "upload", null,
+                OffsetDateTime.now(), OffsetDateTime.now());
     }
 
     private static AssetSummary asset(

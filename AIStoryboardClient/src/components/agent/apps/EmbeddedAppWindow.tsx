@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, Minus, PanelRight, PenLine, RefreshCw, X } from 'lucide-react';
+import { Download, ExternalLink, FileText, Frame, Grip, Library, LoaderCircle, Maximize2, Minimize2, Minus, PanelRight, PenLine, RefreshCw, X } from 'lucide-react';
 import {
   CANVAS_AUTH_MESSAGE,
   isEmbeddedAppReadyMessage,
 } from '../../../lib/embeddedAppMessages';
 import { getAccessToken } from '../../../lib/authSession';
+import { assetUrl } from '../../../config';
+import { notify } from '../../../stores/toastStore';
 import type { AgentAttachment } from '../../../api/agent';
 import { DocumentPreviewSurface } from '../DocumentPreviewSurface';
 import { CHAT_DOCK_MIN_APP_WIDTH } from '../chatDockLayout';
+import { Tooltip, TooltipGroup } from '../../common/Tooltip';
 import './EmbeddedAppWindow.css';
 
 export interface EmbeddedAppDescriptor {
@@ -94,6 +97,9 @@ export function EmbeddedAppWindow({
   const closeTimerRef = useRef<number | null>(null);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const canvasLocked = tabs.some((tab) => tab.key === 'canvas' && tab.canvasMode);
+  const activeDocument = activeKey === 'document'
+    ? tabs.find((tab) => tab.key === 'document')?.documentAttachment
+    : undefined;
 
   const postCanvasAuth = (tab: EmbeddedAppDescriptor | undefined, source: Window | null) => {
     if (!tab || tab.key !== 'canvas' || !source) return;
@@ -293,55 +299,62 @@ export function EmbeddedAppWindow({
           })}
         </div>
 
+        <TooltipGroup>
         <div className="embedded-app-window__actions">
           {activeKey !== 'document' && (
             <>
+              <Tooltip side="bottom" label="刷新当前页面">
               <button
                 type="button"
                 onClick={refreshActivePage}
-                title="刷新当前页面"
                 aria-label="刷新当前页面"
               >
                 <RefreshCw size={16} strokeWidth={1.9} />
               </button>
+              </Tooltip>
               {activeKey !== 'side-chat' && (
+                <Tooltip side="bottom" label="跳转到网页">
                 <button
                   type="button"
                   onClick={openActiveInBrowser}
-                  title="跳转到网页"
                   aria-label="跳转到网页"
                 >
                   <ExternalLink size={16} strokeWidth={1.9} />
                 </button>
+                </Tooltip>
               )}
             </>
           )}
+          <Tooltip side="bottom" label="最小化为图标">
           <button
             type="button"
             onClick={onMinimize}
-            title="最小化为图标"
             aria-label="最小化为图标"
           >
             <Minus size={17} strokeWidth={2} />
           </button>
+          </Tooltip>
+          <Tooltip side="bottom" label={fullscreen ? '退出全屏' : '全屏'}>
           <button
             type="button"
             onClick={() => setFullscreen((value) => !value)}
-            title={fullscreen ? '退出全屏' : '全屏'}
             aria-label={fullscreen ? '退出全屏' : '全屏'}
           >
             {fullscreen ? <Minimize2 size={16} strokeWidth={1.9} /> : <Maximize2 size={16} strokeWidth={1.9} />}
           </button>
+          </Tooltip>
+          <Tooltip side="bottom" label={canvasLocked ? '请先离开画布编辑模式' : '关闭全部窗口'}>
           <button
             type="button"
             disabled={canvasLocked}
             onClick={closeWindowWithParticles}
-            title={canvasLocked ? '请先离开画布编辑模式' : '关闭全部窗口'}
             aria-label={canvasLocked ? '先离开画布编辑模式' : '关闭全部窗口'}
           >
             <X size={17} strokeWidth={2} />
           </button>
+          </Tooltip>
         </div>
+        </TooltipGroup>
       </header>
 
       <div className="embedded-app-window__body">
@@ -394,6 +407,26 @@ export function EmbeddedAppWindow({
         >
           <Grip size={15} strokeWidth={1.8} />
         </button>
+      )}
+
+      {activeDocument && (
+        <a
+          className="embedded-app-window__download"
+          href={assetUrl(activeDocument.url)}
+          download={activeDocument.name || '文档'}
+          target="_blank"
+          rel="noreferrer"
+          title="下载文件"
+          aria-label={`下载 ${activeDocument.name || '文档'}`}
+          onClick={() => notify({
+            title: '已开始下载',
+            description: activeDocument.name,
+            variant: 'info',
+          })}
+        >
+          <Download size={15} strokeWidth={1.9} />
+          <span>下载</span>
+        </a>
       )}
 
     </section>

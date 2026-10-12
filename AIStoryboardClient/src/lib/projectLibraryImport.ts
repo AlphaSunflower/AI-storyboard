@@ -42,13 +42,6 @@ export async function importMediaToProjectLibrary(
       progress: 100,
       assetId: asset.id,
     });
-    if (asset.type === 'IMAGE') {
-      taskStore.addAnalysisTask(
-        asset.id,
-        asset.name,
-        asset.metadataState || 'AI_GENERATING',
-      );
-    }
     return asset;
   } catch (error) {
     taskStore.updateTask(taskId, {

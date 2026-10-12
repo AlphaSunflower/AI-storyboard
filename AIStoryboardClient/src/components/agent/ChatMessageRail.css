@@ -1,0 +1,151 @@
+/* 消息导航行边栏：只有刻度线，鼠标靠近变长变色，悬浮出双行卡片。
+   基础形态改造自 React Bits <LineSidebar/>（reactbits.dev）。 */
+
+.chat-message-rail {
+  --rail-width: 44px;
+  --rail-tick: rgba(15, 17, 21, 0.18);
+  --rail-accent: rgb(65, 118, 230);
+  --rail-marker-length: 22px;
+  --item-gap: 12px;
+
+  position: relative;
+  z-index: 5;
+  flex: 0 0 var(--rail-width);
+  width: var(--rail-width);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 0 148px;
+  background: #fff;
+  overflow: visible;
+}
+
+.chat-message-rail__nav {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.chat-message-rail__list {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.chat-message-rail__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* 命中区：整行宽度 + 上下各 3px，刻度间隙很小时也不会漏点 */
+.chat-message-rail__button {
+  position: absolute;
+  inset: -3px 0;
+  display: flex;
+  align-items: center;
+  border: 0;
+  padding: 0 0 0 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-message-rail__button:focus-visible {
+  outline: 2px solid var(--rail-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* --effect (0..1) 由 rAF 逐项写入，长度与颜色因此同步变化，无需 CSS 过渡 */
+.chat-message-rail__marker {
+  display: block;
+  width: var(--rail-marker-length);
+  height: 1px;
+  transform-origin: left center;
+  transform: scaleX(calc(0.7 + var(--effect, 0) * 0.5));
+  background-color: color-mix(in srgb, var(--rail-accent) calc(var(--effect, 0) * 100%), var(--rail-tick));
+}
+
+/* 项间补一条半长刻度，形成节奏感 */
+.chat-message-rail__item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: calc(50% + var(--item-gap, 12px) / 2);
+  width: calc(var(--rail-marker-length) * 0.5);
+  height: 1px;
+  background-color: var(--rail-tick);
+  opacity: 0.55;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* 标签只服务无障碍，视觉上让位给刻度线 */
+.chat-message-rail__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.chat-message-rail__card {
+  position: absolute;
+  left: calc(100% + 8px);
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 17, 21, 0.1);
+  pointer-events: none;
+  z-index: 40;
+  animation: chat-message-rail-card-in 120ms ease-out both;
+}
+
+.chat-message-rail__card-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-message-rail__card-preview {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes chat-message-rail-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message-rail__card {
+    animation: chat-fade-in 120ms ease both;
+  }
+}

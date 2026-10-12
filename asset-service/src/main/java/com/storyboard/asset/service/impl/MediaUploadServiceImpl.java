@@ -124,7 +124,6 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         String mediaId = repository.upsertMedia(
                 assetId, blobId, sortOrder, MediaRole.REFERENCE, sortOrder == 0, constraintText);
         if (sortOrder == 0) repository.updateCover(assetId, "/api/files/" + effectiveObjectKey);
-        if ("IMAGE".equals(mediaType)) repository.createAnalysisTask(assetId);
         return assetCatalogService.getMedia(userId, mediaId);
     }
 

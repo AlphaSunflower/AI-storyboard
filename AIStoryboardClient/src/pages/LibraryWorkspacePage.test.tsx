@@ -9,6 +9,7 @@ import {
 } from '../lib/projectLibraryDrag';
 import { useLibraryTaskStore } from '../stores/libraryTaskStore';
 import { useProjectStore } from '../stores/projectStore';
+import { useToastStore } from '../stores/toastStore';
 import { LibraryWorkspacePage } from './LibraryWorkspacePage';
 
 vi.mock('react-d3-tree', () => ({
@@ -44,6 +45,7 @@ class ResizeObserverMock {
 
 beforeEach(() => {
   useLibraryTaskStore.setState({ tasks: [], panelOpen: false });
+  useToastStore.setState({ toasts: [] });
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   useProjectStore.setState({
     projects: [
@@ -85,9 +87,46 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  useToastStore.setState({ toasts: [] });
 });
 
 describe('LibraryWorkspacePage', () => {
+  it('confirms creating a folder and an asset group', async () => {
+    vi.spyOn(libraryApi, 'createFolder').mockResolvedValue({
+      data: { code: 0, message: '', data: { id: 'folder-2', name: '场景' } },
+    } as never);
+    vi.spyOn(libraryApi, 'createGroup').mockResolvedValue({
+      data: { code: 0, message: '', data: { id: 'group-1', name: '主角组' } },
+    } as never);
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(libraryApi.getFolderTree).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /新建目录/ }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '场景' } });
+    fireEvent.click(screen.getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      title: '已新建目录',
+      description: '「场景」',
+      variant: 'success',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /新建资产组/ }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '主角组' } });
+    fireEvent.click(screen.getByRole('button', { name: '确定' }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(2));
+    expect(useToastStore.getState().toasts[1]).toMatchObject({
+      title: '已新建资产组',
+      description: '「主角组」',
+    });
+  });
+
   it('opens all projects by default while retaining the selected project context', async () => {
     render(
       <MemoryRouter initialEntries={['/library?projectId=p1']}>
@@ -98,9 +137,10 @@ describe('LibraryWorkspacePage', () => {
     await waitFor(() => {
       expect(libraryApi.getFolderTree).toHaveBeenCalledWith({ scope: 'PROJECT', projectId: 'p1' });
       expect(libraryApi.listAssets).toHaveBeenCalledWith(expect.objectContaining({
-        scope: undefined,
+        scope: 'PROJECT',
         projectId: 'p1',
         type: 'GROUP',
+        includeGlobal: true,
       }));
     });
     expect(screen.getByRole('heading', { name: '项目库' })).toBeTruthy();
@@ -113,6 +153,108 @@ describe('LibraryWorkspacePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '树形视图' }));
     expect(screen.getByTestId('library-tree')).toBeTruthy();
+  });
+
+  it('renders the four library menus and loads generated output only', async () => {
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1&scope=output']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(libraryApi.listAssets).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'PROJECT',
+      projectId: 'p1',
+      origin: 'GENERATED',
+    })));
+
+    expect(screen.getByRole('heading', { name: '产出素材' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '项目库' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '全局库' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '产出素材' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '回收站' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '文件夹视图' })).toBeNull();
+    expect(screen.queryByTestId('library-tree')).toBeNull();
+    expect(screen.queryByRole('button', { name: '上传素材' })).toBeNull();
+  });
+
+  it('shows the global materials node in the project tree', async () => {
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(libraryApi.getFolderTree).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: '树形视图' }));
+
+    expect(screen.getByTestId('library-tree')).toBeTruthy();
+    expect(screen.getByText('全局素材')).toBeTruthy();
+  });
+
+  it('opens the enlarged preview when double-clicking a document card', async () => {
+    const documentAsset = {
+      id: 'doc-1',
+      ownerUserId: 'user-1',
+      scope: 'PROJECT' as const,
+      ownerProjectId: 'p1',
+      type: 'DOCUMENT' as const,
+      aiKind: null,
+      name: '交付说明',
+      description: null,
+      aiDescription: null,
+      manualOverride: false,
+      metadataState: 'NONE' as const,
+      status: 'ACTIVE' as const,
+      coverUrl: '/api/files/files/report.md',
+      version: 1,
+      tags: [],
+      projects: [],
+      folderId: null,
+      folderPath: [],
+      sourceType: 'generation',
+      sourceId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    vi.mocked(libraryApi.listAssets).mockImplementation(async (params) => ({
+      data: {
+        code: 0,
+        message: '',
+        data: params.folderId === 'UNFILED'
+          ? { records: [documentAsset], total: 1, page: 1, size: 100 }
+          : { records: [], total: 0, page: 1, size: 100 },
+      },
+    } as never));
+    vi.spyOn(libraryApi, 'getAsset').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: {
+          asset: documentAsset,
+          media: [{
+            id: 'media-1',
+            contentUrl: '/api/library/media/media-1/content?token=t',
+            fileName: 'report.md',
+            mimeType: 'text/markdown',
+            primary: true,
+            type: 'DOCUMENT',
+          }],
+          linkedProjects: [],
+        },
+      },
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    const card = await screen.findByRole('button', { name: /交付说明/ });
+    fireEvent.doubleClick(card);
+
+    expect(await screen.findByRole('dialog', { name: '预览 report.md' })).toBeTruthy();
   });
 
   it('stays in embedded window mode after synchronizing query parameters', async () => {
@@ -398,6 +540,131 @@ describe('LibraryWorkspacePage', () => {
     await waitFor(() => {
       expect(getAnalysisTasks).toHaveBeenCalledWith(['asset-1']);
       expect(useLibraryTaskStore.getState().tasks[0]?.status).toBe('completed');
+    });
+  });
+
+  it('queues AI metadata enrichment only after the inspector action is clicked', async () => {
+    const asset = {
+      id: 'asset-enrich-1',
+      ownerUserId: 'user-1',
+      scope: 'PROJECT' as const,
+      ownerProjectId: 'p1',
+      type: 'IMAGE' as const,
+      aiKind: null,
+      name: '待完善图片',
+      description: null,
+      aiDescription: null,
+      manualOverride: false,
+      metadataState: 'NONE' as const,
+      status: 'ACTIVE' as const,
+      coverUrl: '/api/files/images/enrich.png',
+      version: 1,
+      tags: [],
+      projects: [],
+      folderId: null,
+      folderPath: [],
+      sourceType: 'upload',
+      sourceId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    vi.mocked(libraryApi.listAssets).mockImplementation(async (params) => ({
+      data: {
+        code: 0,
+        message: '',
+        data: params.type === 'GROUP'
+          ? { records: [], total: 0, page: 1, size: 100 }
+          : { records: [asset], total: 1, page: 1, size: 100 },
+      },
+    } as never));
+    vi.spyOn(libraryApi, 'getAsset').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: { asset, media: [], linkedProjects: [] },
+      },
+    } as never);
+    const requestAnalysis = vi.spyOn(libraryApi, 'requestAnalysis').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: { items: [{ assetId: asset.id, name: asset.name }], skipped: 0 },
+      },
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    const title = (await screen.findAllByText('待完善图片'))[0];
+    fireEvent.click(title.closest('button')!);
+    await waitFor(() => expect(libraryApi.getAsset).toHaveBeenCalledWith('asset-enrich-1'));
+    expect(useLibraryTaskStore.getState().tasks.some((task) => task.kind === 'analysis')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 文件完善信息' }));
+
+    await waitFor(() => {
+      expect(requestAnalysis).toHaveBeenCalledWith(['asset-enrich-1']);
+      expect(useLibraryTaskStore.getState().tasks.some((task) => (
+        task.kind === 'analysis' && task.assetId === 'asset-enrich-1' && task.status === 'processing'
+      ))).toBe(true);
+    });
+  });
+
+  it('confirms before enriching a folder with many assets and then queues it', async () => {
+    vi.mocked(libraryApi.getFolderTree).mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: {
+          scope: 'PROJECT',
+          ownerProjectId: 'p1',
+          unfiledAssetCount: 0,
+          folders: [{
+            id: 'folder-1',
+            parentId: null,
+            name: '角色',
+            scope: 'PROJECT',
+            ownerProjectId: 'p1',
+            directAssetCount: 12,
+            descendantAssetCount: 12,
+            version: 1,
+          }],
+        },
+      },
+    } as never);
+    const requestFolderAnalysis = vi.spyOn(libraryApi, 'requestFolderAnalysis').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: { items: [{ assetId: 'folder-image-1', name: '角色图' }], skipped: 0 },
+      },
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    const folderCard = await screen.findByRole('button', { name: /角色/ });
+    fireEvent.mouseDown(folderCard);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'AI 完善文件夹信息' }));
+    expect(requestFolderAnalysis).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始完善' }));
+
+    await waitFor(() => {
+      expect(requestFolderAnalysis).toHaveBeenCalledWith('folder-1', {
+        scope: 'PROJECT',
+        projectId: 'p1',
+      });
+      expect(useLibraryTaskStore.getState().tasks.some((task) => (
+        task.kind === 'analysis' && task.assetId === 'folder-image-1' && task.status === 'processing'
+      ))).toBe(true);
     });
   });
 

@@ -13,12 +13,71 @@ const tabs = [{
   url: '/docs?embedded=1',
 }];
 
+const documentTab = {
+  key: 'document' as const,
+  title: '项目计划书.docx',
+  url: '',
+  documentAttachment: {
+    url: '/api/files/files/plan.docx',
+    name: '项目计划书.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    kind: 'file' as const,
+    source: 'upload' as const,
+  },
+};
+
 afterEach(() => {
   cleanup();
   clearAuthSession();
 });
 
 describe('EmbeddedAppWindow chat dock resizing', () => {
+  it('offers a download action at the bottom right of a document window', () => {
+    render(
+      <EmbeddedAppWindow
+        tabs={[documentTab]}
+        activeKey="document"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked={false}
+        splitMaxWidth={800}
+        expandedSplitMaxWidth={900}
+        sidebarCollapsed
+        sidebarCollapseWidth={450}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    const download = screen.getByRole('link', { name: '下载 项目计划书.docx' });
+    expect(download.getAttribute('href')?.endsWith('/api/files/files/plan.docx')).toBe(true);
+    expect(download.getAttribute('download')).toBe('项目计划书.docx');
+  });
+
+  it('keeps the download action out of iframe app windows', () => {
+    render(
+      <EmbeddedAppWindow
+        tabs={tabs}
+        activeKey="docs"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked={false}
+        splitMaxWidth={800}
+        expandedSplitMaxWidth={900}
+        sidebarCollapsed
+        sidebarCollapseWidth={450}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: /下载/ })).toBeNull();
+  });
+
   it('renders local document content like an app window without an iframe', () => {
     render(
       <EmbeddedAppWindow

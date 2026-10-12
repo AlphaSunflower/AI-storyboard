@@ -33,7 +33,7 @@ export type SceneMaterialSource = 'output' | 'scene_image' | 'group_snapshot' | 
 
 /** 分镜素材选择器提交的产出素材或当前分镜图片引用。 */
 export interface SceneMaterialReferenceInput {
-  type: 'image' | 'video' | 'audio';
+  type: 'image' | 'video' | 'audio' | 'document';
   purpose: 'image' | 'video';
   url: string;
   role: 'REFERENCE';

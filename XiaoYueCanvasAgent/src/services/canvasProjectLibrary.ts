@@ -25,7 +25,7 @@ export interface CanvasLibraryAsset {
   id: string;
   scope: 'PROJECT' | 'GLOBAL';
   ownerProjectId: string | null;
-  type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'AI_ASSET' | 'GROUP';
+  type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'OTHER' | 'AI_ASSET' | 'GROUP';
   aiKind?: 'CHARACTER' | 'PROP' | 'SCENE' | null;
   name: string;
   description: string | null;

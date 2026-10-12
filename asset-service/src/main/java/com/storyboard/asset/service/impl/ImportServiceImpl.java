@@ -143,7 +143,7 @@ public class ImportServiceImpl implements ImportService {
             if (existingBlob.isPresent()) {
                 String existingAsset = repository.findAssetIdByBlobAndOwner(userId, existingBlob.get().id()).orElse(null);
                 if (existingAsset != null) {
-                    repairExistingMedia(existingBlob.get(), existingAsset, bytes, item.mimeType(), mediaType);
+                    repairExistingMedia(existingBlob.get(), existingAsset, bytes, item.mimeType());
                     linkImportedAsset(job, item, existingAsset);
                     repository.finishImportItem(item.id(), "DUPLICATE_LINKED", existingAsset, sha256, null);
                     return new ItemResult("DUPLICATE_LINKED", catalogService.get(userId, existingAsset).asset(), "已关联相同文件");
@@ -188,8 +188,7 @@ public class ImportServiceImpl implements ImportService {
             LibraryRepository.BlobRow blob,
             String assetId,
             byte[] bytes,
-            String mimeType,
-            String mediaType
+            String mimeType
     ) {
         if (!storage.exists(blob.objectKey())) {
             storage.put(
@@ -200,7 +199,6 @@ public class ImportServiceImpl implements ImportService {
             );
         }
         repository.updateCover(assetId, "/api/files/" + blob.objectKey());
-        if ("IMAGE".equals(mediaType)) repository.requeueAnalysisTask(assetId);
     }
 
     private void linkImportedAsset(

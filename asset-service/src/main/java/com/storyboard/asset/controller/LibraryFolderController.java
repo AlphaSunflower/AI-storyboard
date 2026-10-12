@@ -8,6 +8,8 @@ import com.storyboard.asset.client.AssetContracts.LibraryFolderNode;
 import com.storyboard.asset.client.AssetContracts.MoveAssetsToFolderRequest;
 import com.storyboard.asset.client.AssetContracts.MoveFolderRequest;
 import com.storyboard.asset.client.AssetContracts.UpdateFolderRequest;
+import com.storyboard.asset.dto.ImportContracts.AnalysisRequestResult;
+import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.LibraryFolderService;
 import com.storyboard.common.ApiResponse;
 import org.springframework.security.core.Authentication;
@@ -26,9 +28,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class LibraryFolderController {
 
     private final LibraryFolderService folderService;
+    private final AssetCatalogService catalogService;
 
-    public LibraryFolderController(LibraryFolderService folderService) {
+    public LibraryFolderController(LibraryFolderService folderService, AssetCatalogService catalogService) {
         this.folderService = folderService;
+        this.catalogService = catalogService;
     }
 
     @GetMapping("/tree")
@@ -99,5 +103,16 @@ public class LibraryFolderController {
             @RequestBody CopyFoldersRequest request
     ) {
         return ApiResponse.ok(folderService.copyFolders(auth.getName(), request));
+    }
+
+    /** 手动触发：为目录（含子目录）内的图片素材排队 AI 元数据完善。 */
+    @PostMapping("/{id}/analysis")
+    public ApiResponse<AnalysisRequestResult> requestAnalysis(
+            Authentication auth,
+            @PathVariable String id,
+            @RequestParam(required = false) AssetScope scope,
+            @RequestParam(required = false) String projectId
+    ) {
+        return ApiResponse.ok(catalogService.requestFolderAnalysis(auth.getName(), scope, projectId, id));
     }
 }

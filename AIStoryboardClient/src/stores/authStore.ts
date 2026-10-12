@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { authApi } from '../api/auth';
 import type { LoginRequest, RegisterRequest } from '../api/auth';
+import { notify } from './toastStore';
 import {
   clearAuthSession,
   persistUser,
@@ -38,6 +39,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       setAccessToken(accessToken);
       persistUser({ userId, displayName });
       set({ user: { userId, displayName }, isAuthenticated: true, isLoading: false });
+      notify({ title: '登录成功', description: displayName ? `欢迎回来，${displayName}` : undefined });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       set({ error: err.response?.data?.message || '登录失败', isLoading: false });
@@ -52,6 +54,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       setAccessToken(accessToken);
       persistUser({ userId, displayName });
       set({ user: { userId, displayName }, isAuthenticated: true, isLoading: false });
+      notify({ title: '注册成功', description: displayName ? `欢迎加入，${displayName}` : undefined });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       set({ error: err.response?.data?.message || '注册失败', isLoading: false });
@@ -62,7 +65,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     void authApi.logout().catch(() => undefined);
     clearAuthSession();
     set({ user: null, isAuthenticated: false });
-    window.location.href = '/login';
+    notify({ title: '已退出登录', variant: 'info', duration: 1800 });
+    // 让退出确认先露一下再整页回到登录页（整页跳转用于清空全部内存态）
+    setTimeout(() => { window.location.href = '/login'; }, 350);
   },
 
   checkAuth: async () => {

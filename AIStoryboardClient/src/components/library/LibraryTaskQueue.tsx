@@ -1,5 +1,6 @@
 import { CheckCircle2, CircleAlert, LoaderCircle, Sparkles, Upload, X } from 'lucide-react';
 import { useLibraryTaskStore, type LibraryTaskStatus } from '../../stores/libraryTaskStore';
+import { Tooltip } from '../common/Tooltip';
 import './LibraryTaskQueue.css';
 
 const STATUS_LABEL: Record<LibraryTaskStatus, string> = {
@@ -30,9 +31,11 @@ export function LibraryTaskQueue() {
           <button type="button" onClick={clearFinished} disabled={!tasks.some((task) => task.status === 'completed')}>
             清理已完成
           </button>
-          <button type="button" onClick={() => setPanelOpen(false)} aria-label="关闭任务队列" title="关闭">
+          <Tooltip label="关闭">
+          <button type="button" onClick={() => setPanelOpen(false)} aria-label="关闭任务队列">
             <X size={15} />
           </button>
+          </Tooltip>
         </div>
       </header>
       <div className="library-task-queue__list">

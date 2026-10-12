@@ -143,7 +143,6 @@ export function AgentToolAuditPanel({
           type="button"
           onClick={() => setRefreshKey((value) => value + 1)}
           disabled={loading}
-          title="刷新工具调用记录"
         >
           <RefreshCw size={14} className={loading ? 'is-spinning' : undefined} />
           刷新

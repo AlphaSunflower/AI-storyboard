@@ -1,11 +1,67 @@
 .chat-markdown-table-wrap {
-  margin: 14px 0;
+  margin: 0;
   overflow-x: auto;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
   background: white;
   white-space: normal;
   scrollbar-width: thin;
+}
+
+/* 块级容器：承载悬浮操作条，也是表格 / 代码块的外层留白 */
+.chat-markdown-block {
+  position: relative;
+}
+
+.chat-markdown-block--table {
+  margin: 14px 0;
+}
+
+/* 代码块：墨底 + 圆角移到外层，头部行常显语言标签 */
+.chat-code-block {
+  position: relative;
+  margin: 10px 0;
+  background: var(--color-ink);
+  border-radius: var(--rounded-lg);
+  overflow: hidden;
+}
+
+.chat-code-block > pre {
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-code-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 6px 3px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.chat-code-block__lang {
+  font-family: var(--font-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-on-dark-soft);
+  user-select: none;
+}
+
+/* 图片 / 视频外框：撑住右上角操作条的定位 */
+.chat-media-frame {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.chat-media-frame > img,
+.chat-media-frame > video {
+  max-width: 100%;
 }
 
 .chat-live-text table {

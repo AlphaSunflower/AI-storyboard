@@ -17,6 +17,7 @@ import {
   DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
+import { notify } from './toastStore';
 import { rememberDocumentSource } from '../lib/documentPreview';
 import { useDocumentPreviewStore } from './documentPreviewStore';
 import { useSideChatSelectionStore } from './sideChatSelectionStore';
@@ -43,6 +44,11 @@ import {
 let conversationLoadEpoch = 0;
 let conversationListEpoch = 0;
 let sideChatRequestSeq = 0;
+
+/** 通知里回显的错误摘要：优先用接口/异常消息，兜底给一句中文 */
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 /** Newlines separate stage snapshots; token deltas concatenate directly. */
 function appendReasoningDetails(
@@ -374,6 +380,8 @@ function storeAssistantContent(conversationId: string, assistantId: string, cont
 
 /** message_end 收到完整正文后立即结束对话中状态，不再等待持久化和 SSE EOF。 */
 function finishAssistantReply(conversationId: string, assistantId: string) {
+  const pending = useAgentStore.getState().generating[conversationId];
+  const applied = !!pending && pending.assistantId === assistantId;
   useAgentStore.setState((state) => {
     const current = state.generating[conversationId];
     if (!current || current.assistantId !== assistantId) return {};
@@ -400,6 +408,12 @@ function finishAssistantReply(conversationId: string, assistantId: string) {
       ...(state.pendingAssistantId === assistantId ? { pendingAssistantId: null } : {}),
     };
   });
+  if (!applied) return;
+  // 只提示「没在看的会话」：正在看的对话不打扰（与侧边栏「新」标记同一条件）
+  const after = useAgentStore.getState();
+  if (after.activeConversationId === conversationId) return;
+  const title = after.conversations.find((c) => c.id === conversationId)?.title ?? '';
+  notify({ title: '回复已完成', description: title ? `「${title}」` : undefined });
 }
 
 /** 视频任务已受理：正文即使已结束，也保持生成状态直到轮询到 completed/failed。 */
@@ -546,7 +560,7 @@ interface AgentState {
   ) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   setConversationStatus: (id: string, status: 'active' | 'archived') => Promise<void>;
-  deleteConversation: (id: string) => Promise<void>;
+  deleteConversation: (id: string, options?: { silent?: boolean }) => Promise<void>;
   // 清空当前会话聊天记录（删消息 + 重置 AI 上下文；会话与资产保留，其他会话不受影响）
   clearMessages: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
@@ -2660,23 +2674,49 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   renameConversation: async (id, title) => {
-    const res = await agentApi.updateConversation(id, { title });
-    const updated = res.data.data;
-    set((s) => ({
-      conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
-    }));
+    try {
+      const res = await agentApi.updateConversation(id, { title });
+      const updated = res.data.data;
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
+      }));
+      notify({ title: '已重命名', description: `「${title}」` });
+    } catch (error) {
+      notify({ title: '重命名失败', description: errorText(error, '请稍后重试'), variant: 'error' });
+      throw error;
+    }
   },
 
   setConversationStatus: async (id, status) => {
-    const res = await agentApi.updateConversation(id, { status });
-    const updated = res.data.data;
-    set((s) => ({
-      conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
-    }));
+    try {
+      const res = await agentApi.updateConversation(id, { status });
+      const updated = res.data.data;
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? updated : c)),
+      }));
+      notify({
+        title: status === 'archived' ? '已归档' : '已恢复',
+        description: `「${updated.title}」`,
+      });
+    } catch (error) {
+      notify({
+        title: status === 'archived' ? '归档失败' : '恢复失败',
+        description: errorText(error, '请稍后重试'),
+        variant: 'error',
+      });
+      throw error;
+    }
   },
 
-  deleteConversation: async (id) => {
-    await agentApi.deleteConversation(id);
+  deleteConversation: async (id, options) => {
+    const title = get().conversations.find((c) => c.id === id)?.title ?? '';
+    try {
+      await agentApi.deleteConversation(id);
+    } catch (error) {
+      notify({ title: '删除失败', description: errorText(error, '请稍后重试'), variant: 'error' });
+      throw error;
+    }
+    if (!options?.silent) notify({ title: '已删除对话', description: title ? `「${title}」` : undefined });
     cancelConversationTitleRefresh(id);
     set((s) => {
       const g = { ...s.generating };

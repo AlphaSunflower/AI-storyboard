@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { useAgentStore } from '../../stores/agentStore';
+import { notify } from '../../stores/toastStore';
 import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
 import { Archive, ChevronLeft, Pencil, Trash2 } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
 import { ContextMenu } from '../common/ContextMenu';
+import { Tooltip, TooltipGroup } from '../common/Tooltip';
 import MoonLogo from './MoonLogo';
 
 /** DeepSeek 风格时间分组：今天 / 昨天 / 7天内 / yyyy-MM（updatedAt 倒序前提下连续归组） */
@@ -93,9 +95,12 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
     const ids = [...selectedIds];
     setSelectedIds(new Set());
     // ponytail: 串行删除（API 无批量端点），性能天花板低，升级时加后端批量接口
+    let deleted = 0;
     for (const id of ids) {
-      await deleteConversation(id);
+      await deleteConversation(id, { silent: true });
+      deleted += 1;
     }
+    if (deleted > 0) notify({ title: `已删除 ${deleted} 个对话` });
     setMultiSelect(false);
   };
 
@@ -146,10 +151,12 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       `}</style>
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
       {!hideHeader && (
+        <TooltipGroup>
         <div style={{ padding: '16px 16px 12px', borderBottom: `1px solid ${DS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Tooltip side="bottom" label="新建对话">
           <button
             onClick={() => newConversation()}
-            title="新建对话"
+            aria-label="新建对话"
             style={{
               display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent',
               padding: '4px 8px', marginLeft: -8, borderRadius: 10, cursor: 'pointer', transition: 'background 0.15s',
@@ -159,8 +166,10 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           >
             <MoonLogo size={26} showText />
           </button>
+          </Tooltip>
           {headerRight}
         </div>
+        </TooltipGroup>
       )}
       {/* toolbar 插槽 */}
       {toolbar}
@@ -183,10 +192,13 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       </div>
 
       {/* 操作区：归档筛选 + 多选 */}
+      <TooltipGroup>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 14px 8px' }}>
+        <Tooltip side="bottom" label={showArchived ? '返回进行中的对话' : '查看已归档对话'}>
         <button
           className="chat-archive-toggle"
           onClick={() => setShowArchived(!showArchived)}
+          aria-label={showArchived ? '返回进行中的对话' : '查看已归档对话'}
           style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textCaption; }}
@@ -203,15 +215,17 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             </span>
           )}
         </button>
+        </Tooltip>
         {visible.length > 0 && (
+          <Tooltip side="bottom" label={multiSelect ? '取消多选' : '多选删除'}>
           <button
             onClick={() => { setMultiSelect(!multiSelect); setSelectedIds(new Set()); }}
+            aria-label={multiSelect ? '取消多选' : '多选删除'}
             style={{
               padding: '6px 8px', marginRight: -8, border: 'none', background: 'none',
               color: multiSelect ? '#cc785c' : DS.textCaption,
               fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s',
             }}
-            title={multiSelect ? '取消多选' : '多选删除'}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
@@ -222,8 +236,10 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             </svg>
             {multiSelect ? '取消' : '多选'}
           </button>
+          </Tooltip>
         )}
       </div>
+      </TooltipGroup>
 
       {/* 会话列表（仅此区域滚动，头部/工具栏/操作区固定） */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
@@ -254,7 +270,6 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                   }}
                   onMouseEnter={(e) => { setHoverId(c.id); if (c.id !== activeConversationId && !isSelected) e.currentTarget.style.background = 'rgba(0,0,0,0.035)'; }}
                   onMouseLeave={(e) => { setHoverId(null); e.currentTarget.style.background = c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent'; }}
-                  title={undefined}
                   style={{
                     margin: '2px 10px',
                     padding: '10px 12px',
@@ -301,9 +316,9 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                       </div>
                       {/* 正在生成：生成中胶囊（切走别的会话也能看到这个会话在跑） */}
                       {generating[c.id] && !generating[c.id].finished ? (
+                        <Tooltip className="tooltip-fixed" label="正在生成回答">
                         <span
                           className="conversation-generating"
-                          title="正在生成"
                           aria-label="正在生成"
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
@@ -315,9 +330,10 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                           <span className="conversation-generating__dot" />
                           生成中
                         </span>
+                        </Tooltip>
                       ) : replyUnread[c.id] ? (
+                        <Tooltip className="tooltip-fixed" label="有新回复">
                         <span
-                          title="有新回复"
                           aria-label="有新回复"
                           style={{
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -328,10 +344,12 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                         >
                           新
                         </span>
+                        </Tooltip>
                       ) : null}
                       {!!taskUnread[c.id] && (
+                        <Tooltip className="tooltip-fixed" label="后台任务已完成">
                         <span
-                          title="后台任务已完成"
+                          aria-label="后台任务已完成"
                           style={{
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                             minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
@@ -340,6 +358,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                         >
                           {taskUnread[c.id]}
                         </span>
+                        </Tooltip>
                       )}
                       {!multiSelect && (
                         <span style={{

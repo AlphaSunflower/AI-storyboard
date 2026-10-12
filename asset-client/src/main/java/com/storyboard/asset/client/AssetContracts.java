@@ -20,6 +20,22 @@ public final class AssetContracts {
 
     public enum AssetStatus { ACTIVE, TRASHED, PURGE_PENDING, PURGE_BLOCKED, PURGED }
 
+    /** 项目库素材来源语义：把系统生成的产出与手动上传区分开。 */
+    public enum LibraryOrigin {
+        /** 系统生成并回写的产出（Agent 回写、画布生成）。 */
+        GENERATED(List.of("generation", "canvas-generation"));
+
+        private final List<String> sourceTypes;
+
+        LibraryOrigin(List<String> sourceTypes) {
+            this.sourceTypes = sourceTypes;
+        }
+
+        public List<String> sourceTypes() {
+            return sourceTypes;
+        }
+    }
+
     public enum MetadataState { NONE, AI_GENERATING, AI_GENERATED, AI_FAILED, EDITED }
 
     public enum TagMode { ALL, ANY }

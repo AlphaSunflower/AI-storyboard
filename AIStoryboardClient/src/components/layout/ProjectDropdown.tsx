@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useProjectStore } from '../../stores/projectStore';
+import { notify } from '../../stores/toastStore';
 import type { ProjectResponse } from '../../api/projects';
 import { MoreMenu } from '../common/MoreMenu';
 import { usePresence } from '../../hooks/usePresence';
@@ -65,6 +66,8 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
 
   const handleSelectProject = (id: string) => {
     loadProject(id);
+    const name = projects.find((p) => p.id === id)?.name;
+    notify({ title: name ? `已切换到「${name}」` : '已切换项目', variant: 'info' });
     onClose();
   };
 
@@ -72,8 +75,8 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     try {
       const p = await createProject('未命名项目', 'movie', '16:9');
       loadProject(p.id);
-    } catch {
-      // silently fail
+    } catch (err) {
+      notify({ title: '新建项目失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
     }
     onClose();
   };
@@ -83,8 +86,9 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     try {
       await updateProject(renameTarget.id, { name: renameName.trim() });
       await loadProjects();
-    } catch {
-      // silently fail
+      notify({ title: '已重命名项目', description: `「${renameName.trim()}」` });
+    } catch (err) {
+      notify({ title: '重命名失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
     }
     setRenameTarget(null);
     setRenameName('');
@@ -95,8 +99,9 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     try {
       await deleteProject(deleteTarget.id);
       await loadProjects();
-    } catch {
-      // silently fail
+      notify({ title: '已删除项目', description: `「${deleteTarget.name}」` });
+    } catch (err) {
+      notify({ title: '删除项目失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
     }
     setDeleteTarget(null);
     onClose();

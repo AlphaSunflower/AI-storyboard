@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronLeft, Folder, Globe2, LoaderCircle, Upload, X } from 'lucide-react';
+import { Check, ChevronLeft, FileText, Folder, Globe2, LoaderCircle, Upload, X } from 'lucide-react';
 import {
   libraryApi,
   type AssetScope,
@@ -25,7 +25,8 @@ interface FolderLocation {
   parentId: string | null;
 }
 
-type TypeFilter = 'all' | 'image' | 'video' | 'audio';
+type PickableMediaType = 'image' | 'video' | 'audio' | 'document';
+type TypeFilter = 'all' | PickableMediaType;
 type PickerTab = 'material' | 'groups';
 
 export interface ProjectLibraryAssetGroupsConfig {
@@ -36,8 +37,8 @@ export interface ProjectLibraryAssetGroupsConfig {
 interface Props {
   open: boolean;
   projectId?: string;
-  type: 'image' | 'video' | 'audio';
-  allowedTypes?: Array<'image' | 'video' | 'audio'>;
+  type: PickableMediaType;
+  allowedTypes?: PickableMediaType[];
   purpose?: 'image' | 'video';
   selected?: SceneMaterialReferenceInput[];
   maxSelectable?: number;
@@ -67,6 +68,7 @@ export function ProjectLibraryPickerModal({
 }: Props) {
   const [activeTab, setActiveTab] = useState<PickerTab>('material');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [outputOnly, setOutputOnly] = useState(false);
   const [projectFolders, setProjectFolders] = useState<LibraryFolderNode[]>([]);
   const [globalFolders, setGlobalFolders] = useState<LibraryFolderNode[]>([]);
   const [path, setPath] = useState<FolderLocation[]>([]);
@@ -94,6 +96,7 @@ export function ProjectLibraryPickerModal({
   useEffect(() => {
     if (!open) return;
     setTypeFilter('all');
+    setOutputOnly(false);
     setPath([]);
     setSelection(new Map(
       selected
@@ -147,6 +150,7 @@ export function ProjectLibraryPickerModal({
         projectId: projectForQuery,
         folderId,
         type: activeType ? activeType.toUpperCase() as MediaType : undefined,
+        origin: outputOnly ? 'GENERATED' as const : undefined,
         page: 1,
         size: 80,
       }) as Promise<{ data: { data: { records: LibraryAsset[] } } }>,
@@ -180,7 +184,7 @@ export function ProjectLibraryPickerModal({
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [open, projectId, currentFolder?.id, currentFolder?.scope, activeType]);
+  }, [open, projectId, currentFolder?.id, currentFolder?.scope, activeType, outputOnly]);
 
   const childFolders = useMemo(() => {
     if (!currentFolder) {
@@ -322,29 +326,38 @@ export function ProjectLibraryPickerModal({
         </header>
 
         {assetGroups && (
-          <div role="tablist" aria-label="项目库来源" style={tabStrip}>
-            <button
-              type="button"
-              role="tab"
-              id="project-library-tab-material"
-              aria-selected={activeTab === 'material'}
-              aria-controls="project-library-tabpanel"
-              onClick={() => setActiveTab('material')}
-              style={tabButton(activeTab === 'material')}
-            >
-              素材
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="project-library-tab-groups"
-              aria-selected={activeTab === 'groups'}
-              aria-controls="project-library-tabpanel"
-              onClick={() => setActiveTab('groups')}
-              style={tabButton(activeTab === 'groups')}
-            >
-              资产组
-            </button>
+          <div style={tabStrip}>
+            <div role="tablist" aria-label="项目库来源" style={tabButtons}>
+              <button
+                type="button"
+                role="tab"
+                id="project-library-tab-material"
+                aria-selected={activeTab === 'material'}
+                aria-controls="project-library-tabpanel"
+                onClick={() => setActiveTab('material')}
+                style={tabButton(activeTab === 'material')}
+              >
+                素材
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="project-library-tab-groups"
+                aria-selected={activeTab === 'groups'}
+                aria-controls="project-library-tabpanel"
+                onClick={() => setActiveTab('groups')}
+                style={tabButton(activeTab === 'groups')}
+              >
+                资产组
+              </button>
+            </div>
+            {projectId && activeTab === 'material' && (
+              <FilterButton
+                active={outputOnly}
+                label="项目产出"
+                onClick={() => setOutputOnly((current) => !current)}
+              />
+            )}
           </div>
         )}
 
@@ -374,6 +387,16 @@ export function ProjectLibraryPickerModal({
                 )}
                 {effectiveTypes.includes('audio') && (
                   <FilterButton active={typeFilter === 'audio'} label="音频" onClick={() => setTypeFilter('audio')} />
+                )}
+                {effectiveTypes.includes('document') && (
+                  <FilterButton active={typeFilter === 'document'} label="文档" onClick={() => setTypeFilter('document')} />
+                )}
+                {projectId && !assetGroups && (
+                  <FilterButton
+                    active={outputOnly}
+                    label="项目产出"
+                    onClick={() => setOutputOnly((current) => !current)}
+                  />
                 )}
                 <label style={{ ...uploadButton, marginLeft: 'auto', opacity: uploading ? 0.65 : 1 }}>
                   {uploading ? <LoaderCircle size={14} className="is-spinning" /> : <Upload size={14} />}
@@ -454,6 +477,13 @@ export function ProjectLibraryPickerModal({
                                     ? <video src={assetUrl(candidate.media.contentUrl || candidate.media.url)} muted style={mediaStyle} />
                                     : candidate.media.type === 'AUDIO'
                                       ? <audio src={assetUrl(candidate.media.contentUrl || candidate.media.url)} controls style={mediaStyle} />
+                                      : candidate.media.type === 'DOCUMENT' || candidate.media.type === 'OTHER'
+                                        ? (
+                                          <span style={documentBox}>
+                                            <FileText size={26} strokeWidth={1.6} />
+                                            <span style={ellipsis}>{candidate.media.mimeType || '文件'}</span>
+                                          </span>
+                                        )
                                       : <img src={assetUrl(preview ?? '')} alt="" style={mediaStyle} />}
                                 </div>
                                 <div style={{ padding: '7px 8px', minWidth: 0 }}>
@@ -499,10 +529,11 @@ export function ProjectLibraryPickerModal({
 }
 
 function toReference(candidate: Candidate, purpose?: 'image' | 'video'): SceneMaterialReferenceInput {
-  const mediaType = candidate.media.type.toLowerCase() as 'image' | 'video' | 'audio';
+  const mediaType = candidate.media.type.toLowerCase() as 'image' | 'video' | 'audio' | 'document' | 'other';
+  const referenceType = mediaType === 'other' ? 'document' : mediaType;
   return {
-    type: mediaType,
-    purpose: purpose ?? (mediaType === 'image' ? 'image' : 'video'),
+    type: referenceType,
+    purpose: purpose ?? (mediaType === 'video' || mediaType === 'audio' ? 'video' : 'image'),
     url: candidate.media.contentUrl || candidate.media.url,
     role: 'REFERENCE',
     sourceType: 'library_asset',
@@ -518,12 +549,14 @@ function FilterButton({ active, label, onClick }: { active: boolean; label: stri
   return <button type="button" onClick={onClick} style={scopeButton(active)}>{label}</button>;
 }
 
-const TYPE_LABEL = { image: '图片', video: '视频', audio: '音频' } as const;
+const TYPE_LABEL = { image: '图片', video: '视频', audio: '音频', document: '文档' } as const;
 const ACCEPT = {
-  all: 'image/*,video/mp4,video/quicktime,audio/wav,audio/mpeg,audio/mp4',
+  all: 'image/*,video/mp4,video/quicktime,audio/wav,audio/mpeg,audio/mp4,'
+    + '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.md,.markdown,.txt,.csv,.json,.yaml,.yml,.xml,.html',
   image: 'image/*',
   video: 'video/mp4,video/quicktime',
   audio: 'audio/wav,audio/mpeg,audio/mp4',
+  document: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.md,.markdown,.txt,.csv,.json,.yaml,.yml,.xml,.html',
 } as const;
 
 const overlay: React.CSSProperties = {
@@ -541,7 +574,11 @@ const header: React.CSSProperties = {
   borderBottom: '1px solid var(--color-hairline)',
 };
 const tabStrip: React.CSSProperties = {
-  display: 'flex', gap: 4, padding: '10px 18px 0',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  gap: 8, padding: '10px 18px 0',
+};
+const tabButtons: React.CSSProperties = {
+  display: 'flex', gap: 4,
 };
 const tabPanel: React.CSSProperties = {
   flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
@@ -569,6 +606,11 @@ const folderCard: React.CSSProperties = {
 };
 const mediaBox: React.CSSProperties = { width: '100%', aspectRatio: '1', overflow: 'hidden', background: 'var(--color-surface-soft)' };
 const mediaStyle: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', display: 'block' };
+const documentBox: React.CSSProperties = {
+  width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+  alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8,
+  color: 'var(--color-muted)',
+};
 const empty: React.CSSProperties = {
   minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center',
   gap: 8, color: 'var(--color-muted)', fontSize: 13,

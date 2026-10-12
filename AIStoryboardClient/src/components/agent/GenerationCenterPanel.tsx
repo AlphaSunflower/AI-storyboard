@@ -7,6 +7,7 @@ import { isActiveTask, taskStatusLabel, useAgentStore } from '../../stores/agent
 import { useProjectStore } from '../../stores/projectStore';
 import { agentApi, type GenerationRecord } from '../../api/agent';
 import { useDragSnap } from '../../hooks/useDragSnap';
+import { Tooltip } from '../common/Tooltip';
 import {
   AgentAssetBrowser,
 } from './AgentAssetsPanel';
@@ -228,7 +229,6 @@ export function GenerationCenterPanel({
           drag.onMouseDown(event);
         }}
         className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}${drag.dragging ? ' is-dragging' : ''}${drag.returning ? ' is-returning' : ''}`}
-        title={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
         aria-label={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
         style={{ transform: drag.transform, transition: drag.transition }}
       >
@@ -248,7 +248,6 @@ export function GenerationCenterPanel({
               type="button"
               className="generation-center__records"
               onClick={onOpenRecords}
-              title="生成记录"
             >
               <History size={13} strokeWidth={1.9} />
               生成记录
@@ -441,9 +440,11 @@ function renderRow(
         {task.error && <small className="generation-center__error">{task.error}</small>}
       </div>
       {task.status === 'queued' && onCancel && (
-        <button type="button" title="取消生成" onClick={() => void onCancel(task.id)}>
+        <Tooltip label="取消生成">
+        <button type="button" aria-label="取消生成" onClick={() => void onCancel(task.id)}>
           <CircleStop size={14} />
         </button>
+        </Tooltip>
       )}
       {task.status === 'running' && <span className="generation-center__locked">无法取消</span>}
     </div>

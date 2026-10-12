@@ -104,6 +104,72 @@ describe('ProjectLibraryPickerModal', () => {
     ]));
   });
 
+  it('lists documents and exposes the project output filter', async () => {
+    const documentAsset: LibraryAsset = {
+      ...asset,
+      id: 'd1',
+      type: 'DOCUMENT',
+      name: '交付说明',
+      coverUrl: '/api/files/files/report.md',
+      sourceType: 'generation',
+    };
+    const documentDetail: LibraryAssetDetail = {
+      asset: documentAsset,
+      media: [{
+        ...detail.media[0],
+        id: 'md1',
+        type: 'DOCUMENT',
+        objectKey: 'files/report.md',
+        fileName: 'report.md',
+        mimeType: 'text/markdown',
+        contentUrl: '/api/library/media/md1/content',
+      }],
+      linkedProjects: [],
+    };
+    vi.spyOn(libraryApi, 'getFolderTree').mockResolvedValue({
+      data: {
+        code: 0,
+        message: 'ok',
+        data: { scope: 'PROJECT', ownerProjectId: 'p1', folders: [], unfiledAssetCount: 0 },
+      },
+    } as never);
+    const list = vi.spyOn(libraryApi, 'listAssets').mockImplementation(async (query) => {
+      const records = query.scope === 'GLOBAL'
+        ? []
+        : query.type === 'DOCUMENT' ? [documentAsset] : [asset, documentAsset];
+      return {
+        data: { code: 0, message: 'ok', data: { records, total: records.length, page: 1, size: 80 } },
+      } as never;
+    });
+    vi.spyOn(libraryApi, 'getAsset').mockImplementation(async (id) => ({
+      data: { code: 0, message: 'ok', data: id === 'd1' ? documentDetail : detail },
+    } as never));
+    const confirm = vi.fn();
+
+    render(
+      <ProjectLibraryPickerModal
+        open
+        projectId="p1"
+        type="image"
+        allowedTypes={['image', 'video', 'audio', 'document']}
+        assetGroups={{ selectedIds: [], onConfirm: vi.fn() }}
+        onClose={() => undefined}
+        onConfirm={confirm}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: '文档' })).toBeTruthy();
+    fireEvent.click(await screen.findByText('report.md'));
+
+    fireEvent.click(screen.getByRole('button', { name: '项目产出' }));
+    await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ origin: 'GENERATED' })));
+
+    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith([
+      expect.objectContaining({ type: 'document', mediaId: 'md1' }),
+    ]));
+  });
+
   it('opens on the material tab and switches to the asset group panel on demand', async () => {
     mockLibrary();
     render(

@@ -19,12 +19,12 @@ describe('MobileEditorHeader', () => {
       <MobileEditorHeader onMenuClick={vi.fn()} onScript={vi.fn()} showMenu={false} showScript={false} />,
     );
 
-    expect(screen.queryByTitle('剧本输入')).toBeNull();
+    expect(screen.queryByLabelText('剧本输入')).toBeNull();
 
     rerender(
       <MobileEditorHeader onMenuClick={vi.fn()} onScript={vi.fn()} showMenu={false} showScript />,
     );
 
-    expect(screen.getByTitle('剧本输入')).toBeTruthy();
+    expect(screen.getByLabelText('剧本输入')).toBeTruthy();
   });
 });

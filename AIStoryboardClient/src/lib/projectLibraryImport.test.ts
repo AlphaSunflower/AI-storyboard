@@ -59,11 +59,7 @@ describe('importMediaToProjectLibrary', () => {
     expect(useLibraryTaskStore.getState().panelOpen).toBe(true);
     expect(useLibraryTaskStore.getState().tasks).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: 'completed', assetId: 'asset-1' }),
-      expect.objectContaining({
-        id: 'analysis:asset-1',
-        kind: 'analysis',
-        status: 'processing',
-      }),
     ]));
+    expect(useLibraryTaskStore.getState().tasks.some((task) => task.kind === 'analysis')).toBe(false);
   });
 });

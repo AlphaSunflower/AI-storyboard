@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Boxes, ChevronLeft, Folder, Globe2, Image as ImageIcon, Layers, LoaderCircle, X } from 'lucide-react';
+import { Boxes, ChevronLeft, FileText, Folder, Globe2, Image as ImageIcon, Layers, LoaderCircle, X } from 'lucide-react';
 import {
   libraryFolderChildren,
   loadCanvasProjectLibrary,
@@ -193,6 +193,7 @@ export function AssetDrawer({ projectId, canvasId, onClose }: AssetDrawerProps) 
 function LibraryAssetCard({ asset }: { asset: CanvasLibraryAsset }) {
   const [failed, setFailed] = useState(false);
   const canDrag = asset.type === 'IMAGE' || asset.type === 'VIDEO';
+  const isDocument = asset.type === 'DOCUMENT' || asset.type === 'OTHER';
   return (
     <div
       draggable={canDrag}
@@ -209,7 +210,9 @@ function LibraryAssetCard({ asset }: { asset: CanvasLibraryAsset }) {
       title={canDrag ? '拖到画布上导入' : asset.name}
     >
       <div style={thumb}>
-        {asset.coverUrl && !failed ? (
+        {isDocument ? (
+          <FileText size={19} style={{ opacity: 0.55 }} />
+        ) : asset.coverUrl && !failed ? (
           asset.type === 'VIDEO'
             ? <video
                 src={`${asset.coverUrl}#t=0.1`}

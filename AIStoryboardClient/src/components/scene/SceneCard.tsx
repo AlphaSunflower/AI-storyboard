@@ -5,6 +5,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { sceneApi } from '../../api/scenes';
 import { useProjectStore } from '../../stores/projectStore';
+import { notify } from '../../stores/toastStore';
 import { MoreMenu } from '../common/MoreMenu';
 import { ContextMenu } from '../common/ContextMenu';
 
@@ -119,6 +120,16 @@ export function SceneCard({
     }
   }, { dependencies: [isUnread], scope: cardRef });
 
+  /** 真正删除分镜并给出一次性提示（失败回显原因） */
+  const removeScene = async () => {
+    try {
+      await deleteScene(scene.id);
+      notify({ title: '已删除分镜', description: `分镜 ${scene.sceneNumber}` });
+    } catch (err) {
+      notify({ title: '删除分镜失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
+    }
+  };
+
   const handleDelete = async () => {
     const el = cardRef.current;
     if (el) {
@@ -133,11 +144,11 @@ export function SceneCard({
         duration: 0.28,
         ease: 'power2.in',
         onComplete: () => {
-          deleteScene(scene.id);
+          void removeScene();
         },
       });
     } else {
-      await deleteScene(scene.id);
+      await removeScene();
     }
   };
 
@@ -162,8 +173,13 @@ export function SceneCard({
   const handleSaveRename = async () => {
     const trimmed = sceneLabel.trim();
     if (trimmed) {
-      await sceneApi.update(scene.id, { soundDesign: trimmed });
-      updateSceneInStore(scene.id, { soundDesign: trimmed });
+      try {
+        await sceneApi.update(scene.id, { soundDesign: trimmed });
+        updateSceneInStore(scene.id, { soundDesign: trimmed });
+        notify({ title: '已重命名分镜', description: `「${trimmed}」` });
+      } catch (err) {
+        notify({ title: '重命名分镜失败', description: err instanceof Error ? err.message : undefined, variant: 'error' });
+      }
     }
     setIsRenaming(false);
   };
