@@ -65,7 +65,7 @@ import {
   type CanvasModeReadyMessage,
   type CanvasModeStatusMessage,
 } from '../lib/embeddedAppMessages';
-import { canvasIdFromUrl } from '../components/agent/apps/chatAppDefinitions';
+import { canvasIdFromUrl, openChatAppEntry, type ChatAppKey } from '../components/agent/apps/chatAppDefinitions';
 import { requestSideChatSelectionContext } from '../lib/sideChatSelectionSync';
 import { shouldHidePendingCardMessage } from '../lib/pendingCardMessage';
 import MoonLogo from '../components/agent/MoonLogo';
@@ -274,6 +274,10 @@ export function ChatPage() {
     cancelCanvasBinding();
     releaseCanvasMode();
   }, [cancelCanvasBinding, releaseCanvasMode]);
+  // 顶栏「画布」直接打开画布网站，编辑器/项目库仍是内嵌小窗
+  const handleChatAppOpen = useCallback((key: ChatAppKey) => {
+    openChatAppEntry(openChatApp, key, currentProject);
+  }, [currentProject, openChatApp]);
 
   useEffect(() => {
     if (!canvasSession) openedCanvasSessionRef.current = null;
@@ -1382,7 +1386,7 @@ export function ChatPage() {
                 {embed && canvasEditContext && <CanvasModeExitButton />}
                 {!embed && dockMode !== 'docked' && (
                   <ChatAppActions
-                    onOpen={chatApps.open}
+                    onOpen={handleChatAppOpen}
                     canvasPhase={canvasPhase}
                     onExitCanvas={leaveCanvasEditMode}
                     onCancelCanvas={handleCancelCanvasBinding}

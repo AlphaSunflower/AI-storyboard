@@ -30,6 +30,55 @@ export function canvasIdFromUrl(url: string): string | undefined {
   }
 }
 
+/**
+ * 画布网站地址：开发环境由 VITE_CANVAS_URL 指向画布前端（XiaoYueCanvasAgent），
+ * 未配置时退回同源 /canvas。
+ */
+export function canvasSiteBase(): string {
+  const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
+    || '/canvas';
+  return `${base}/`;
+}
+
+export interface CanvasSiteLocation {
+  projectId?: string;
+  canvasId?: string;
+}
+
+/** 画布网站自身的地址：不带 embedded / canvasMode，只保留项目与画布定位。 */
+export function buildCanvasSiteUrl({ projectId, canvasId }: CanvasSiteLocation = {}): string {
+  const hash = projectId
+    ? `#project=${encodeURIComponent(projectId)}${canvasId ? `&canvas=${encodeURIComponent(canvasId)}` : ''}`
+    : '';
+  return `${canvasSiteBase()}${hash}`;
+}
+
+/**
+ * 直接打开画布网站，不进 /chat 的内嵌小窗。
+ * 新窗口被浏览器拦截时退化为当前页跳转，保证点了一定能到画布。
+ */
+export function openCanvasSite(location: CanvasSiteLocation = {}): void {
+  const target = new URL(buildCanvasSiteUrl(location), window.location.origin).toString();
+  if (window.open(target, '_blank', 'noopener,noreferrer')) return;
+  window.location.assign(target);
+}
+
+/**
+ * 顶栏应用入口的跳转规则：画布直接打开画布网站本身，
+ * 编辑器/项目库/文档/侧边对话仍进 /chat 的内嵌小窗。
+ */
+export function openChatAppEntry(
+  openEmbedded: (key: ChatAppKey, options?: ChatAppOpenOptions) => void,
+  key: ChatAppKey,
+  currentProject: ChatAppProject | null,
+): void {
+  if (key === 'canvas') {
+    openCanvasSite({ projectId: currentProject?.id });
+    return;
+  }
+  openEmbedded(key);
+}
+
 export function buildChatAppDescriptor(
   key: ChatAppKey,
   currentProject: ChatAppProject | null,
@@ -83,9 +132,7 @@ export function buildChatAppDescriptor(
     };
   }
 
-  const base = (import.meta.env.VITE_CANVAS_URL as string | undefined)?.trim().replace(/\/$/, '')
-    || '/canvas';
-  const normalizedBase = `${base}/`;
+  const normalizedBase = canvasSiteBase();
   const params = new URLSearchParams({ embedded: '1' });
   const canvasMode = options.canvasMode;
   const projectId = canvasMode?.projectId ?? currentProject?.id;

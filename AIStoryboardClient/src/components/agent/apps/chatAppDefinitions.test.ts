@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { buildChatAppDescriptor, canvasIdFromUrl } from './chatAppDefinitions';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildCanvasSiteUrl,
+  buildChatAppDescriptor,
+  canvasIdFromUrl,
+  openCanvasSite,
+  openChatAppEntry,
+} from './chatAppDefinitions';
 
 describe('chat app definitions', () => {
   beforeEach(() => {
@@ -123,5 +129,46 @@ describe('chat app definitions', () => {
   it('recovers the active canvas id from an existing child window url', () => {
     expect(canvasIdFromUrl('http://localhost:3000/#project=project-1&canvas=canvas-1')).toBe('canvas-1');
     expect(canvasIdFromUrl('http://localhost:3000/#project=project-1')).toBeUndefined();
+  });
+
+  it('builds the canvas site url without embedding parameters', () => {
+    expect(buildCanvasSiteUrl()).toBe('/canvas/');
+    expect(buildCanvasSiteUrl({ projectId: 'project-1' })).toBe('/canvas/#project=project-1');
+    expect(buildCanvasSiteUrl({ projectId: 'project-1', canvasId: 'canvas-1' }))
+      .toBe('/canvas/#project=project-1&canvas=canvas-1');
+  });
+
+  it('opens the canvas site in its own window rather than an embedded frame', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+
+    openCanvasSite({ projectId: 'project-1', canvasId: 'canvas-1' });
+
+    expect(open).toHaveBeenCalledWith(
+      new URL('/canvas/#project=project-1&canvas=canvas-1', window.location.origin).toString(),
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
+  it('sends the canvas action to the site and keeps other apps embedded', () => {
+    const openEmbedded = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+    const project = { id: 'project-1', name: '测试项目' };
+
+    openChatAppEntry(openEmbedded, 'canvas', project);
+
+    expect(open).toHaveBeenCalledWith(
+      new URL('/canvas/#project=project-1', window.location.origin).toString(),
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(openEmbedded).not.toHaveBeenCalled();
+
+    openChatAppEntry(openEmbedded, 'editor', project);
+
+    expect(openEmbedded).toHaveBeenCalledWith('editor');
+    expect(open).toHaveBeenCalledTimes(1);
+    open.mockRestore();
   });
 });
