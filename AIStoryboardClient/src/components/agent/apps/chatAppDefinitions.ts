@@ -55,12 +55,13 @@ export function buildCanvasSiteUrl({ projectId, canvasId }: CanvasSiteLocation =
 
 /**
  * 直接打开画布网站，不进 /chat 的内嵌小窗。
- * 新窗口被浏览器拦截时退化为当前页跳转，保证点了一定能到画布。
+ *
+ * 只走新标签页，不按 window.open 的返回值回退到当前页跳转：带 noopener 时
+ * 浏览器按规范返回 null，那不是"弹窗被拦截"，据此回退会把 /chat 一起跳走。
  */
 export function openCanvasSite(location: CanvasSiteLocation = {}): void {
   const target = new URL(buildCanvasSiteUrl(location), window.location.origin).toString();
-  if (window.open(target, '_blank', 'noopener,noreferrer')) return;
-  window.location.assign(target);
+  window.open(target, '_blank', 'noopener,noreferrer');
 }
 
 /**

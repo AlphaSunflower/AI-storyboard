@@ -151,6 +151,22 @@ describe('chat app definitions', () => {
     open.mockRestore();
   });
 
+  it('does not navigate the chat page when the new tab reports no handle', () => {
+    // 带 noopener 时 window.open 按规范返回 null，这不是弹窗被拦截，
+    // 不能据此回退到当前页跳转，否则新标签页和 /chat 会一起跳。
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    openCanvasSite({ projectId: 'project-1' });
+
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith(
+      new URL('/canvas/#project=project-1', window.location.origin).toString(),
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
   it('sends the canvas action to the site and keeps other apps embedded', () => {
     const openEmbedded = vi.fn();
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
