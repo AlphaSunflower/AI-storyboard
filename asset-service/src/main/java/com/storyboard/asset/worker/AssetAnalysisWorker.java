@@ -72,6 +72,8 @@ public class AssetAnalysisWorker {
             case IMAGE -> "图片";
             case VIDEO -> "视频";
             case AUDIO -> "音频";
+            case DOCUMENT -> "文档";
+            case OTHER -> "其他";
             case AI_ASSET -> "AI资产";
             case GROUP -> "资产组";
         };

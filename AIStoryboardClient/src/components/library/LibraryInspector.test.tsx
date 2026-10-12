@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { LibraryAsset, LibraryAssetDetail, LibraryTag } from '../../api/library';
+import type { LibraryAsset, LibraryAssetDetail, LibraryMedia, LibraryTag } from '../../api/library';
 import { LibraryInspector } from './LibraryInspector';
 
 const asset: LibraryAsset = {
@@ -34,9 +34,10 @@ afterEach(cleanup);
 function renderInspector(
   onToggleTag = vi.fn(),
   assetOverrides: Partial<LibraryAsset> = {},
+  media: LibraryMedia[] = [],
 ) {
   const currentAsset = { ...asset, ...assetOverrides };
-  const detail: LibraryAssetDetail = { asset: currentAsset, media: [], linkedProjects: [] };
+  const detail: LibraryAssetDetail = { asset: currentAsset, media, linkedProjects: [] };
   render(
     <LibraryInspector
       mode="asset"
@@ -115,5 +116,35 @@ describe('LibraryInspector tags', () => {
 
     expect(screen.getByText('手动修正后的描述')).toBeTruthy();
     expect(screen.queryByText('旧的 AI 描述')).toBeNull();
+  });
+
+  it('offers download and hides group actions for documents', () => {
+    renderInspector(
+      vi.fn(),
+      { type: 'DOCUMENT', metadataState: 'NONE', description: null, aiDescription: null },
+      [{
+        id: 'm1',
+        blobId: 'b1',
+        type: 'DOCUMENT',
+        url: '/api/files/documents/a.md',
+        contentUrl: '/api/library/media/m1/content?token=t',
+        objectKey: 'documents/a.md',
+        fileName: '说明.md',
+        relativePath: null,
+        mimeType: 'text/markdown',
+        sizeBytes: 12,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        sortOrder: 0,
+        role: 'REFERENCE',
+        primary: true,
+        constraintText: null,
+      }],
+    );
+
+    expect(screen.queryByRole('button', { name: '加入资产组' })).toBeNull();
+    expect(screen.getByRole('link', { name: '下载文件' })).toBeTruthy();
+    expect(screen.getByText('暂无描述')).toBeTruthy();
   });
 });

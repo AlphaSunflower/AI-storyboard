@@ -47,10 +47,12 @@ public class MediaContentController {
                 object.stream().transferTo(output);
             }
         };
+        String contentType = object.contentType() == null || object.contentType().isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM_VALUE
+                : object.contentType();
         ResponseEntity.BodyBuilder response = ResponseEntity.status(object.contentRange() == null ? 200 : 206)
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-                .contentType(MediaType.parseMediaType(
-                        object.contentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : object.contentType()))
+                .contentType(MediaType.parseMediaType(contentType))
                 .contentLength(object.contentLength());
         if (object.contentRange() != null) response.header(HttpHeaders.CONTENT_RANGE, object.contentRange());
         return response.body(body);

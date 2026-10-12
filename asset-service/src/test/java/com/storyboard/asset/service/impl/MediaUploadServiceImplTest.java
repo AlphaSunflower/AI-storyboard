@@ -1,5 +1,6 @@
 package com.storyboard.asset.service.impl;
 
+import com.storyboard.asset.client.AssetContracts.AssetType;
 import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.config.StorageProperties;
@@ -83,6 +84,45 @@ class MediaUploadServiceImplTest {
                 eq((long) bytes.length),
                 eq("image/png")
         );
+    }
+
+    @Test
+    void directUploadStoresDocumentWithoutAnalysisTask() throws Exception {
+        byte[] bytes = "# 说明".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(storage.objectKey("DOCUMENT", "md")).thenReturn("documents/new.md");
+        when(repository.findBlobBySha(anyString())).thenReturn(Optional.empty());
+
+        service.uploadDirect(
+                "u1", null, AssetScope.GLOBAL, "说明", null, null,
+                new MockMultipartFile("file", "说明.md", "text/markdown", bytes), "idem-doc"
+        );
+
+        ArgumentCaptor<AssetCatalogService.MediaRegistration> registration =
+                ArgumentCaptor.forClass(AssetCatalogService.MediaRegistration.class);
+        verify(catalogService).registerMedia(eq("u1"), registration.capture(), eq("idem-doc"));
+        assertThat(registration.getValue().assetType()).isEqualTo(AssetType.DOCUMENT);
+        assertThat(registration.getValue().mediaType()).isEqualTo(MediaType.DOCUMENT);
+        assertThat(registration.getValue().objectKey()).isEqualTo("documents/new.md");
+        assertThat(registration.getValue().mimeType()).isEqualTo("text/markdown");
+    }
+
+    @Test
+    void directUploadStoresUnknownFileAsOther() throws Exception {
+        byte[] bytes = "PK\u0003\u0004zip".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        when(storage.objectKey("OTHER", "zip")).thenReturn("files/new.zip");
+        when(repository.findBlobBySha(anyString())).thenReturn(Optional.empty());
+
+        service.uploadDirect(
+                "u1", null, AssetScope.GLOBAL, "bundle", null, null,
+                new MockMultipartFile("file", "bundle.zip", "application/zip", bytes), "idem-zip"
+        );
+
+        ArgumentCaptor<AssetCatalogService.MediaRegistration> registration =
+                ArgumentCaptor.forClass(AssetCatalogService.MediaRegistration.class);
+        verify(catalogService).registerMedia(eq("u1"), registration.capture(), eq("idem-zip"));
+        assertThat(registration.getValue().assetType()).isEqualTo(AssetType.OTHER);
+        assertThat(registration.getValue().mediaType()).isEqualTo(MediaType.OTHER);
+        assertThat(registration.getValue().objectKey()).isEqualTo("files/new.zip");
     }
 
     private static LibraryRepository.BlobRow blobRow(String objectKey) {

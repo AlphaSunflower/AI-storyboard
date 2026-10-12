@@ -32,7 +32,7 @@ public final class ImportContracts {
     public record ScanResponse(
             String jobId,
             String confirmationToken,
-            int imageCount,
+            int fileCount,
             long totalBytes,
             int ignoredCount,
             String groupId,

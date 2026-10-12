@@ -2,11 +2,11 @@ import client from './client';
 import type { ApiResponse } from './auth';
 
 export type AssetScope = 'PROJECT' | 'GLOBAL';
-export type AssetType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'AI_ASSET' | 'GROUP';
+export type AssetType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'OTHER' | 'AI_ASSET' | 'GROUP';
 export type AssetStatus = 'ACTIVE' | 'TRASHED' | 'PURGE_PENDING' | 'PURGE_BLOCKED' | 'PURGED';
 export type MetadataState = 'NONE' | 'AI_GENERATING' | 'AI_GENERATED' | 'AI_FAILED' | 'EDITED';
 export type TagMode = 'ALL' | 'ANY';
-export type MediaType = 'IMAGE' | 'VIDEO' | 'AUDIO';
+export type MediaType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'OTHER';
 export type ImportMode = 'ASSETS' | 'GROUP' | 'TREE';
 
 export interface LibraryTag {
@@ -127,7 +127,7 @@ export interface ImportEntry {
 export interface ImportScanResult {
   jobId: string;
   confirmationToken: string;
-  imageCount: number;
+  fileCount: number;
   totalBytes: number;
   ignoredCount: number;
   groupId: string | null;
@@ -319,7 +319,7 @@ export const libraryApi = {
     groupId?: string | null;
     resultAssetId?: string | null;
     resultUrl: string;
-    mediaType: 'IMAGE' | 'VIDEO' | 'AUDIO';
+    mediaType: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'OTHER';
     prompt?: string | null;
     model?: string | null;
     metadata?: Record<string, unknown>;

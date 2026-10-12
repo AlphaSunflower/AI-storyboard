@@ -60,4 +60,13 @@ class MinioObjectStorageTest {
         assertThat(page.objects()).hasSize(1);
         assertThat(page.nextContinuationToken()).isNull();
     }
+
+    @Test
+    void mapsDocumentAndOtherObjectKeyFolders() {
+        MinioObjectStorage storage = new MinioObjectStorage(properties(), mock(S3Client.class));
+
+        assertThat(storage.objectKey("IMAGE", "png")).startsWith("images/").endsWith(".png");
+        assertThat(storage.objectKey("DOCUMENT", "md")).startsWith("documents/").endsWith(".md");
+        assertThat(storage.objectKey("OTHER", "zip")).startsWith("files/").endsWith(".zip");
+    }
 }

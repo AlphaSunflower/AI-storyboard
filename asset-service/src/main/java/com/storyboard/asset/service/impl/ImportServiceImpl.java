@@ -78,11 +78,15 @@ public class ImportServiceImpl implements ImportService {
         }
         AssetScope scope = AssetScope.PROJECT;
         if (scope == AssetScope.PROJECT) projectAccess.requireOwned(userId, request.projectId());
-        List<Entry> images = request.entries().stream().filter(this::isImage).toList();
-        long totalBytes = images.stream().mapToLong(Entry::sizeBytes).sum();
+        // 资产组仍只收图片；ASSETS/TREE 模式收录任意类型文件。
+        boolean imagesOnly = mode == ImportMode.GROUP;
+        List<Entry> importable = imagesOnly
+                ? request.entries().stream().filter(this::isImage).toList()
+                : request.entries();
+        long totalBytes = importable.stream().mapToLong(Entry::sizeBytes).sum();
         if (totalBytes > MAX_TOTAL_BYTES) throw new BusinessException(40001, "目录总大小超过 20GB");
-        for (Entry entry : images) {
-            MediaValidation.validateSize("IMAGE", entry.sizeBytes());
+        for (Entry entry : importable) {
+            MediaValidation.validateSize(entryType(entry), entry.sizeBytes());
             MediaValidation.cleanRelativePath(entry.relativePath());
         }
         String canonical = request.entries().stream()
@@ -103,16 +107,16 @@ public class ImportServiceImpl implements ImportService {
         }
         String jobId = repository.createImportJob(
                 userId, request.projectId(), scope, mode, groupId, manifestHash, confirmationToken,
-                expiresAt, images.size(), totalBytes, request.entries().size() - images.size());
-        for (int index = 0; index < images.size(); index += 1) {
-            Entry entry = images.get(index);
+                expiresAt, importable.size(), totalBytes, request.entries().size() - importable.size());
+        for (int index = 0; index < importable.size(); index += 1) {
+            Entry entry = importable.get(index);
             repository.insertImportItem(
                     jobId, entry.itemKey(), MediaValidation.cleanRelativePath(entry.relativePath()),
                     entry.fileName(), entry.sizeBytes(), entry.mimeType(), index);
         }
         return new ScanResponse(
-                jobId, confirmationToken, images.size(), totalBytes,
-                request.entries().size() - images.size(), groupId, expiresAt);
+                jobId, confirmationToken, importable.size(), totalBytes,
+                request.entries().size() - importable.size(), groupId, expiresAt);
     }
 
     @Override
@@ -131,13 +135,15 @@ public class ImportServiceImpl implements ImportService {
         }
         try {
             byte[] bytes = file.getBytes();
-            MediaValidation.validateMagic("IMAGE", bytes);
+            String mediaType = entryType(item.mimeType(), item.fileName());
+            MediaValidation.validateSize(mediaType, bytes.length);
+            MediaValidation.validateMagic(mediaType, bytes);
             String sha256 = LibraryRepository.sha256Hex(bytes);
             var existingBlob = repository.findBlobBySha(sha256);
             if (existingBlob.isPresent()) {
                 String existingAsset = repository.findAssetIdByBlobAndOwner(userId, existingBlob.get().id()).orElse(null);
                 if (existingAsset != null) {
-                    repairExistingMedia(existingBlob.get(), existingAsset, bytes, item.mimeType());
+                    repairExistingMedia(existingBlob.get(), existingAsset, bytes, item.mimeType(), mediaType);
                     linkImportedAsset(job, item, existingAsset);
                     repository.finishImportItem(item.id(), "DUPLICATE_LINKED", existingAsset, sha256, null);
                     return new ItemResult("DUPLICATE_LINKED", catalogService.get(userId, existingAsset).asset(), "已关联相同文件");
@@ -170,11 +176,20 @@ public class ImportServiceImpl implements ImportService {
         return entry != null && entry.mimeType() != null && entry.mimeType().startsWith("image/");
     }
 
+    private static String entryType(Entry entry) {
+        return entry == null ? "OTHER" : entryType(entry.mimeType(), entry.fileName());
+    }
+
+    private static String entryType(String mimeType, String fileName) {
+        return MediaValidation.mediaType(mimeType, fileName);
+    }
+
     private void repairExistingMedia(
             LibraryRepository.BlobRow blob,
             String assetId,
             byte[] bytes,
-            String mimeType
+            String mimeType,
+            String mediaType
     ) {
         if (!storage.exists(blob.objectKey())) {
             storage.put(
@@ -185,7 +200,7 @@ public class ImportServiceImpl implements ImportService {
             );
         }
         repository.updateCover(assetId, "/api/files/" + blob.objectKey());
-        repository.requeueAnalysisTask(assetId);
+        if ("IMAGE".equals(mediaType)) repository.requeueAnalysisTask(assetId);
     }
 
     private void linkImportedAsset(

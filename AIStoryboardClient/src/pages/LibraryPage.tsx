@@ -77,6 +77,8 @@ const TYPE_LABEL: Record<AssetType, string> = {
   IMAGE: '图片',
   VIDEO: '视频',
   AUDIO: '音频',
+  DOCUMENT: '文档',
+  OTHER: '其他',
   AI_ASSET: 'AI资产',
   GROUP: '资产组',
 };

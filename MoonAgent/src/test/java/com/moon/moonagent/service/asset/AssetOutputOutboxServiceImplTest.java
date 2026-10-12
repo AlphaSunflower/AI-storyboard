@@ -46,6 +46,40 @@ class AssetOutputOutboxServiceImplTest {
         verify(mapper, times(0)).insertIgnore(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void classifiesDocumentArtifactsByMimeAndExtension() {
+        assertThat(payload(documentAsset("text/markdown", "说明.md")))
+                .contains("\"mediaType\":\"DOCUMENT\"");
+        assertThat(payload(documentAsset("audio/mpeg", "voice.mp3")))
+                .contains("\"mediaType\":\"AUDIO\"");
+        assertThat(payload(documentAsset("", "bundle.zip")))
+                .contains("\"mediaType\":\"OTHER\"");
+    }
+
+    private static String payload(AgentAsset asset) {
+        AssetOutboxMapper mapper = mock(AssetOutboxMapper.class);
+        new AssetOutputOutboxServiceImpl(mapper).enqueue(asset);
+        ArgumentCaptor<AssetOutboxEvent> captor = ArgumentCaptor.forClass(AssetOutboxEvent.class);
+        verify(mapper).insertIgnore(captor.capture());
+        return captor.getValue().getPayloadJson();
+    }
+
+    private static AgentAsset documentAsset(String mimeType, String originalName) {
+        AgentAsset asset = new AgentAsset();
+        asset.setId("record-doc");
+        asset.setUserId("u1");
+        asset.setProjectId("p1");
+        asset.setConversationId("c1");
+        asset.setType("document");
+        asset.setMimeType(mimeType);
+        asset.setOriginalName(originalName);
+        asset.setPrompt("沙箱产物");
+        asset.setStatus("completed");
+        asset.setUrl("/api/files/files/artifact");
+        asset.setResultUrls("[\"/api/files/files/artifact\"]");
+        return asset;
+    }
+
     private static AgentAsset completedAsset() {
         AgentAsset asset = new AgentAsset();
         asset.setId("record-1");

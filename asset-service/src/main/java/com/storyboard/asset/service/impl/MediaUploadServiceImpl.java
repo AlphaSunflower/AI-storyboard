@@ -58,9 +58,11 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         if (file == null || file.isEmpty()) throw new BusinessException(40001, "上传文件为空");
         AssetScope safeScope = scope == null ? (projectId == null ? AssetScope.GLOBAL : AssetScope.PROJECT) : scope;
         if (safeScope == AssetScope.PROJECT) projectAccess.requireOwned(userId, projectId);
-        String mediaType = MediaValidation.mediaType(file.getContentType());
+        String mediaType = MediaValidation.mediaType(file.getContentType(), file.getOriginalFilename());
         MediaValidation.validateSize(mediaType, file.getSize());
-        String extension = MediaValidation.extension(file.getContentType(), file.getOriginalFilename());
+        String contentType = MediaValidation.normalizeContentType(
+                file.getContentType(), mediaType, file.getOriginalFilename());
+        String extension = MediaValidation.extension(contentType, file.getOriginalFilename());
         String candidateObjectKey = storage.objectKey(mediaType, extension);
         byte[] bytes;
         try {
@@ -73,12 +75,12 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         var existingBlob = repository.findBlobBySha(sha256);
         String objectKey = existingBlob.map(LibraryRepository.BlobRow::objectKey).orElse(candidateObjectKey);
         if (existingBlob.isEmpty() || !storage.exists(objectKey)) {
-            storage.put(objectKey, new ByteArrayInputStream(bytes), bytes.length, file.getContentType());
+            storage.put(objectKey, new ByteArrayInputStream(bytes), bytes.length, contentType);
         }
         String assetName = name == null || name.isBlank() ? file.getOriginalFilename() : name;
         return assetCatalogService.registerMedia(userId, new AssetCatalogService.MediaRegistration(
                 projectId, safeScope, AssetType.valueOf(mediaType), assetName,
-                description, "upload", null, objectKey, sha256, file.getContentType(),
+                description, "upload", null, objectKey, sha256, contentType,
                 bytes.length, null, null, null, MediaType.valueOf(mediaType),
                 MediaRole.REFERENCE, true, null, 0
         ), idempotencyKey);
@@ -91,9 +93,11 @@ public class MediaUploadServiceImpl implements MediaUploadService {
     ) {
         var assetDetail = assetCatalogService.get(userId, assetId);
         if (file == null || file.isEmpty()) throw new BusinessException(40001, "上传文件为空");
-        String mediaType = MediaValidation.mediaType(file.getContentType());
+        String mediaType = MediaValidation.mediaType(file.getContentType(), file.getOriginalFilename());
         MediaValidation.validateSize(mediaType, file.getSize());
-        String extension = MediaValidation.extension(file.getContentType(), file.getOriginalFilename());
+        String contentType = MediaValidation.normalizeContentType(
+                file.getContentType(), mediaType, file.getOriginalFilename());
+        String extension = MediaValidation.extension(contentType, file.getOriginalFilename());
         String objectKey = storage.objectKey(mediaType, extension);
         byte[] bytes;
         try {
@@ -110,9 +114,9 @@ public class MediaUploadServiceImpl implements MediaUploadService {
             blobId = existingBlob.get().id();
             effectiveObjectKey = existingBlob.get().objectKey();
         } else {
-            storage.put(objectKey, new ByteArrayInputStream(bytes), bytes.length, file.getContentType());
+            storage.put(objectKey, new ByteArrayInputStream(bytes), bytes.length, contentType);
             blobId = repository.upsertBlob(
-                    objectKey, sha256, file.getContentType(), bytes.length, null, null, null,
+                    objectKey, sha256, contentType, bytes.length, null, null, null,
                     MediaType.valueOf(mediaType));
             effectiveObjectKey = objectKey;
         }
@@ -144,20 +148,21 @@ public class MediaUploadServiceImpl implements MediaUploadService {
     ) {
         AssetScope safeScope = scope == null ? (projectId == null ? AssetScope.GLOBAL : AssetScope.PROJECT) : scope;
         if (safeScope == AssetScope.PROJECT) projectAccess.requireOwned(userId, projectId);
-        String mediaType = MediaValidation.mediaType(mimeType);
+        String mediaType = MediaValidation.mediaType(mimeType, fileName);
         MediaValidation.validateSize(mediaType, sizeBytes);
         if (sha256 == null || !sha256.matches("[0-9a-fA-F]{64}")) {
             throw new BusinessException(40001, "SHA-256 不合法");
         }
-        String extension = MediaValidation.extension(mimeType, fileName);
+        String contentType = MediaValidation.normalizeContentType(mimeType, mediaType, fileName);
+        String extension = MediaValidation.extension(contentType, fileName);
         String objectKey = storage.objectKey(mediaType, extension);
-        ObjectStorage.MultipartUpload upload = storage.createMultipart(objectKey, mimeType);
+        ObjectStorage.MultipartUpload upload = storage.createMultipart(objectKey, contentType);
         int partCount = (int) Math.ceil((double) sizeBytes / storageProperties.uploadPartSizeBytes());
         if (partCount <= 0 || partCount > MAX_PARTS) throw new BusinessException(40001, "文件分块数量不合法");
         OffsetDateTime expiresAt = OffsetDateTime.now().plusHours(storageProperties.uploadSessionTtlHours());
         String sessionId = repository.createUploadSession(
                 userId, projectId, fileName, MediaValidation.cleanRelativePath(relativePath),
-                mimeType, sizeBytes, sha256.toLowerCase(), objectKey, upload.uploadId(),
+                contentType, sizeBytes, sha256.toLowerCase(), objectKey, upload.uploadId(),
                 storageProperties.uploadPartSizeBytes(), expiresAt);
         return new MultipartSession(
                 sessionId, objectKey, storageProperties.uploadPartSizeBytes(), partCount, expiresAt);
@@ -182,13 +187,16 @@ public class MediaUploadServiceImpl implements MediaUploadService {
         storage.completeMultipart(session.objectKey(), session.uploadId(), parts);
         long actual = storage.contentLength(session.objectKey());
         if (actual != session.sizeBytes()) throw new BusinessException(40001, "上传对象大小与清单不一致");
+        String sessionMediaType = MediaValidation.mediaType(session.mimeType(), session.fileName());
+        String sessionContentType = MediaValidation.normalizeContentType(
+                session.mimeType(), sessionMediaType, session.fileName());
         AssetSummary asset = assetCatalogService.registerMedia(userId, new AssetCatalogService.MediaRegistration(
                 session.projectId(),
                 session.projectId() == null ? AssetScope.GLOBAL : AssetScope.PROJECT,
-                AssetType.valueOf(MediaValidation.mediaType(session.mimeType())),
+                AssetType.valueOf(sessionMediaType),
                 session.fileName(), null, "upload", null, session.objectKey(), session.sha256(),
-                session.mimeType(), session.sizeBytes(), null, null, null,
-                MediaType.valueOf(MediaValidation.mediaType(session.mimeType())),
+                sessionContentType, session.sizeBytes(), null, null, null,
+                MediaType.valueOf(sessionMediaType),
                 MediaRole.REFERENCE, true, null, 0
         ), "multipart:" + sessionId);
         repository.markUploadComplete(userId, sessionId);

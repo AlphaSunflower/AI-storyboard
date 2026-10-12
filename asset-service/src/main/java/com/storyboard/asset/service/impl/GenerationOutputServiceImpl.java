@@ -46,7 +46,7 @@ public class GenerationOutputServiceImpl implements GenerationOutputService {
         String mediaType = event.mediaType() == null || event.mediaType().isBlank()
                 ? MediaValidation.mediaTypeFromObjectKey(objectKey)
                 : event.mediaType().toUpperCase();
-        String mimeType = mimeType(mediaType, objectKey);
+        String mimeType = MediaValidation.defaultMimeType(mediaType, objectKey);
         long size;
         try {
             size = storage.contentLength(objectKey);
@@ -102,29 +102,11 @@ public class GenerationOutputServiceImpl implements GenerationOutputService {
         String marker = "/api/files/";
         int index = clean.indexOf(marker);
         if (index >= 0) return clean.substring(index + marker.length());
-        if (clean.startsWith("images/") || clean.startsWith("videos/") || clean.startsWith("audios/")) return clean;
+        if (clean.startsWith("images/") || clean.startsWith("videos/") || clean.startsWith("audios/")
+                || clean.startsWith("documents/") || clean.startsWith("files/")) {
+            return clean;
+        }
         throw new BusinessException(40001, "生成结果 URL 不属于资产对象存储");
-    }
-
-    private static String mimeType(String mediaType, String objectKey) {
-        String extension = objectKey.substring(objectKey.lastIndexOf('.') + 1).toLowerCase();
-        return switch (extension) {
-            case "png" -> "image/png";
-            case "jpg", "jpeg" -> "image/jpeg";
-            case "webp" -> "image/webp";
-            case "gif" -> "image/gif";
-            case "mp4" -> "video/mp4";
-            case "mov" -> "video/quicktime";
-            case "mp3" -> "audio/mpeg";
-            case "wav" -> "audio/wav";
-            case "m4a" -> "audio/mp4";
-            default -> switch (mediaType) {
-                case "IMAGE" -> "image/png";
-                case "VIDEO" -> "video/mp4";
-                case "AUDIO" -> "audio/mpeg";
-                default -> "application/octet-stream";
-            };
-        };
     }
 
     private static String fileName(String objectKey) {

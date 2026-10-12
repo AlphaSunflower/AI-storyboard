@@ -4,7 +4,9 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.service.asset.AssetOutputOutboxService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -18,6 +20,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SandboxArtifactPublisherTest {
+
+    private static SandboxArtifactPublisher publisher(
+            MoonSandboxClient client,
+            FileStorageService storage,
+            AgentAssetMapper mapper
+    ) {
+        return new SandboxArtifactPublisher(client, storage, mapper, mock(AssetOutputOutboxService.class));
+    }
 
     @Test
     void publishesDocumentAndChartArtifacts() {
@@ -34,7 +44,7 @@ class SandboxArtifactPublisherTest {
             asset.setId(asset.getType() + "-id");
             return 1;
         }).when(mapper).insert(any(AgentAsset.class));
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(client, storage, mapper);
+        SandboxArtifactPublisher publisher = publisher(client, storage, mapper);
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");
         conversation.setUserId("u1");
@@ -59,7 +69,7 @@ class SandboxArtifactPublisherTest {
         existing.setUrl("/api/files/files/report.md?token=x");
         AgentAssetMapper mapper = mock(AgentAssetMapper.class);
         when(mapper.selectOne(any())).thenReturn(existing);
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(
+        SandboxArtifactPublisher publisher = publisher(
                 mock(MoonSandboxClient.class), mock(FileStorageService.class), mapper);
 
         var outcome = publisher.deliver(conversation(), "task-1", "output/report.md",
@@ -75,7 +85,7 @@ class SandboxArtifactPublisherTest {
         AgentAssetMapper mapper = mock(AgentAssetMapper.class);
         when(mapper.selectOne(any())).thenReturn(null);
         when(mapper.selectCount(any())).thenReturn(1L);
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(
+        SandboxArtifactPublisher publisher = publisher(
                 mock(MoonSandboxClient.class), mock(FileStorageService.class), mapper);
 
         var outcome = publisher.deliver(conversation(), "task-1", "output/report.md",
@@ -99,7 +109,7 @@ class SandboxArtifactPublisherTest {
             asset.setId(asset.getType() + "-" + asset.getOriginalName());
             return 1;
         }).when(mapper).insert(any(AgentAsset.class));
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(client, storage, mapper);
+        SandboxArtifactPublisher publisher = publisher(client, storage, mapper);
 
         var result = publisher.publish(conversation(), "task-1", new SandboxExecutionResult(
                 0, "ok", "", false, false, false, 5,
@@ -121,7 +131,7 @@ class SandboxArtifactPublisherTest {
     @Test
     void skipsArtifactsLargerThanThePublishLimit() {
         MoonSandboxClient client = mock(MoonSandboxClient.class);
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(
+        SandboxArtifactPublisher publisher = publisher(
                 client, mock(FileStorageService.class), mock(AgentAssetMapper.class));
 
         var result = publisher.publishPath(conversation(), "task-1", "output/big.iso",
@@ -142,7 +152,7 @@ class SandboxArtifactPublisherTest {
             asset.setId(asset.getType() + "-" + asset.getOriginalName());
             return 1;
         }).when(mapper).insert(any(AgentAsset.class));
-        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(
+        SandboxArtifactPublisher publisher = publisher(
                 mock(MoonSandboxClient.class), storage, mapper);
 
         var outcome = publisher.deliver(conversation(), "task-1", "output/deploy.sh",
@@ -159,5 +169,29 @@ class SandboxArtifactPublisherTest {
         conversation.setUserId("u1");
         conversation.setProjectId("p1");
         return conversation;
+    }
+
+    @Test
+    void enqueuesPublishedArtifactsForLibrarySync() {
+        MoonSandboxClient client = mock(MoonSandboxClient.class);
+        FileStorageService storage = mock(FileStorageService.class);
+        AgentAssetMapper mapper = mock(AgentAssetMapper.class);
+        AssetOutputOutboxService outbox = mock(AssetOutputOutboxService.class);
+        when(client.download(eq("c1"), any())).thenReturn(new byte[]{1, 2, 3});
+        when(storage.saveGeneratedFile(any(), eq("report.md"), eq("text/markdown")))
+                .thenReturn("/api/files/files/report.md");
+        doAnswer(invocation -> {
+            AgentAsset asset = invocation.getArgument(0);
+            asset.setId("document-id");
+            return 1;
+        }).when(mapper).insert(any(AgentAsset.class));
+        SandboxArtifactPublisher publisher = new SandboxArtifactPublisher(client, storage, mapper, outbox);
+
+        publisher.publishPath(conversation(), "task-1", "output/report.md", 3, "text/markdown");
+
+        ArgumentCaptor<AgentAsset> captor = ArgumentCaptor.forClass(AgentAsset.class);
+        verify(outbox).enqueue(captor.capture());
+        assertThat(captor.getValue().getType()).isEqualTo("document");
+        assertThat(captor.getValue().getMimeType()).isEqualTo("text/markdown");
     }
 }

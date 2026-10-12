@@ -126,6 +126,52 @@ describe('LibraryWorkspacePage', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /返回 Moon/ })).toBeNull());
   });
 
+  it('offers document and other type filters', async () => {
+    render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(libraryApi.getFolderTree).toHaveBeenCalled());
+    expect(screen.getByRole('option', { name: '文档' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '其他' })).toBeTruthy();
+
+    fireEvent.change(screen.getByDisplayValue('全部类型'), { target: { value: 'DOCUMENT' } });
+
+    await waitFor(() => expect(libraryApi.listAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'DOCUMENT' }),
+    ));
+  });
+
+  it('accepts any file type for direct upload and skips analysis for documents', async () => {
+    const uploadDirect = vi.spyOn(libraryApi, 'uploadDirect').mockResolvedValue({
+      data: {
+        code: 0,
+        message: '',
+        data: { id: 'doc-1', name: '说明', type: 'DOCUMENT', metadataState: 'NONE' },
+      },
+    } as never);
+    const { container } = render(
+      <MemoryRouter initialEntries={['/library?projectId=p1']}>
+        <LibraryWorkspacePage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(libraryApi.getFolderTree).toHaveBeenCalled());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.getAttribute('accept')).toBeNull();
+
+    fireEvent.change(input, {
+      target: { files: [new File(['# 说明'], '说明.md', { type: 'text/markdown' })] },
+    });
+
+    await waitFor(() => expect(uploadDirect).toHaveBeenCalled());
+    await waitFor(() => expect(
+      useLibraryTaskStore.getState().tasks.some((task) => task.kind === 'analysis'),
+    ).toBe(false));
+  });
+
   it('lists the assets inside an expanded asset group in the tree', async () => {
     const group = {
       id: 'group-1',

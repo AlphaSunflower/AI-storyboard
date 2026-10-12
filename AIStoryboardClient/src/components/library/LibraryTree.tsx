@@ -14,6 +14,8 @@ import {
   ChevronRight,
   FileAudio,
   FileImage,
+  FileText,
+  File as FileIcon,
   FileVideo,
   Folder,
   FolderOpen,
@@ -315,21 +317,28 @@ function nodeIcon(
   if (kind === 'folder' || kind === 'system') return expanded ? <FolderOpen size={17} /> : <Folder size={17} />;
   if (kind === 'group') return <Boxes size={17} />;
   if (kind === 'more') return <MoreHorizontal size={16} />;
-  if (asset?.coverUrl) return <AssetThumbnail asset={asset} />;
+  if (asset?.coverUrl && hasRenderableCover(asset)) return <AssetThumbnail asset={asset} />;
   return <AssetIcon type={asset?.type || 'IMAGE'} />;
 }
 
 export function AssetIcon({ type }: { type: AssetType }) {
   if (type === 'VIDEO') return <FileVideo size={17} />;
   if (type === 'AUDIO') return <FileAudio size={17} />;
+  if (type === 'DOCUMENT') return <FileText size={17} />;
+  if (type === 'OTHER') return <FileIcon size={17} />;
   if (type === 'GROUP') return <Boxes size={17} />;
   if (type === 'AI_ASSET') return <Sparkles size={17} />;
   return <FileImage size={17} />;
 }
 
+/** 文档与其他类型的 cover 指向原文件而非图片，不能当作缩略图渲染。 */
+function hasRenderableCover(asset: LibraryAsset): boolean {
+  return asset.type !== 'DOCUMENT' && asset.type !== 'OTHER';
+}
+
 function AssetThumbnail({ asset }: { asset: LibraryAsset }) {
   const [failed, setFailed] = useState(false);
-  if (failed || !asset.coverUrl) return <AssetIcon type={asset.type} />;
+  if (failed || !asset.coverUrl || !hasRenderableCover(asset)) return <AssetIcon type={asset.type} />;
   if (asset.type === 'VIDEO') {
     return (
       <video

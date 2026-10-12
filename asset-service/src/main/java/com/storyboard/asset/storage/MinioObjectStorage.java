@@ -112,6 +112,8 @@ public class MinioObjectStorage implements ObjectStorage {
         String folder = switch (mediaType == null ? "IMAGE" : mediaType.toUpperCase()) {
             case "VIDEO" -> "videos";
             case "AUDIO" -> "audios";
+            case "DOCUMENT" -> "documents";
+            case "OTHER" -> "files";
             default -> "images";
         };
         String normalizedExtension = extension == null || extension.isBlank() ? "bin" : extension.replace(".", "").toLowerCase();

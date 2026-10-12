@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Boxes,
+  Download,
   Film,
   FolderPen,
   FolderMinus,
@@ -22,6 +23,7 @@ import type {
 import { assetUrl } from '../../config';
 import { authorizedFetch } from '../../lib/authSession';
 import { ImagePreviewModal } from '../agent/ImagePreviewModal';
+import { DocumentPreviewSurface } from '../agent/DocumentPreviewSurface';
 import { AssetIcon } from './LibraryTree';
 
 const METADATA_STATE_LABEL: Record<MetadataState, string> = {
@@ -127,10 +129,21 @@ function AssetInspector({
   const [tagEditing, setTagEditing] = useState(false);
   const primary = media.find((item) => item.primary) || media[0];
   const primaryUrl = primary ? assetUrl(primary.contentUrl) : '';
+  const isMedia = asset.type === 'IMAGE' || asset.type === 'VIDEO' || asset.type === 'AUDIO';
+  const isAttachment = asset.type === 'DOCUMENT' || asset.type === 'OTHER';
+  const isDocument = asset.type === 'DOCUMENT';
+  const documentAttachment = primary && isDocument
+    ? {
+        url: primary.contentUrl,
+        name: primary.fileName || asset.name,
+        mimeType: primary.mimeType,
+        kind: 'file' as const,
+      }
+    : null;
   const description = (asset.metadataState === 'EDITED'
     ? asset.description || asset.aiDescription
     : asset.aiDescription || asset.description)
-    || (asset.metadataState === 'AI_GENERATING'
+    || (asset.metadataState === 'AI_GENERATING' && asset.type === 'IMAGE'
       ? 'AI 正在分析图片，完成后会自动填入描述与标签。'
       : '暂无描述');
 
@@ -146,10 +159,14 @@ function AssetInspector({
         <div><h2>{asset.name}</h2><p>{projectName || '项目库'}</p></div>
       </div>
       <div className="library-inspector__preview">
-        {primary?.type === 'VIDEO' ? (
+        {documentAttachment ? (
+          <DocumentPreviewSurface attachment={documentAttachment} />
+        ) : primary?.type === 'VIDEO' ? (
           <video src={primaryUrl} controls preload="metadata" draggable={false} />
         ) : primary?.type === 'AUDIO' ? (
           <audio src={primaryUrl} controls preload="metadata" />
+        ) : asset.type === 'OTHER' ? (
+          <span><AssetIcon type={asset.type} /></span>
         ) : primary ? (
           <AuthenticatedPreviewImage src={primaryUrl} alt={asset.name} />
         ) : (
@@ -204,14 +221,23 @@ function AssetInspector({
       </section>
       <div className="library-inspector__actions">
         <button onClick={() => onEdit(asset)} disabled={busy}><Pencil size={15} /> 编辑信息</button>
+        {isAttachment && primaryUrl && (
+          <a
+            className="library-inspector__action-download"
+            href={primaryUrl}
+            download={primary?.fileName || asset.name}
+          >
+            <Download size={15} /> 下载文件
+          </a>
+        )}
         {asset.type === 'GROUP' ? (
           <>
             <button onClick={() => onOpenGroup?.(asset)} disabled={busy}><FolderOpen size={15} /> 打开资产组</button>
             <button onClick={() => onUseForVideo(asset)} disabled={busy}><Film size={15} /> 用此组生视频</button>
           </>
-        ) : (
+        ) : isMedia ? (
           <button onClick={() => onAddToGroup(asset)} disabled={busy}><Boxes size={15} /> 加入资产组</button>
-        )}
+        ) : null}
         {asset.scope === 'PROJECT' && (
           <button onClick={() => onPromote(asset)} disabled={busy}><Sparkles size={15} /> 提升到全局</button>
         )}

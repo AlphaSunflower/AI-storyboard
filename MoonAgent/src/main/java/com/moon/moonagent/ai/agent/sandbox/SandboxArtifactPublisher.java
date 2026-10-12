@@ -6,6 +6,7 @@ import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.service.FileStorageService;
+import com.moon.moonagent.service.asset.AssetOutputOutboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -32,13 +33,16 @@ public class SandboxArtifactPublisher {
     private final MoonSandboxClient client;
     private final FileStorageService storage;
     private final AgentAssetMapper assetMapper;
+    private final AssetOutputOutboxService outboxService;
 
     public SandboxArtifactPublisher(MoonSandboxClient client,
                                     FileStorageService storage,
-                                    AgentAssetMapper assetMapper) {
+                                    AgentAssetMapper assetMapper,
+                                    AssetOutputOutboxService outboxService) {
         this.client = client;
         this.storage = storage;
         this.assetMapper = assetMapper;
+        this.outboxService = outboxService;
     }
 
     public PublishedArtifacts publish(AgentConversation conversation,
@@ -106,6 +110,7 @@ public class SandboxArtifactPublisher {
                     "sizeBytes", bytes.length)));
             asset.setResultUrls(json(List.of(url)));
             assetMapper.insert(asset);
+            outboxService.enqueue(asset);
             return new PublishedArtifacts(List.of(asset.getId()), List.of(url));
         } catch (RuntimeException error) {
             log.warn("Unable to publish sandbox artifact {}: {}", path, error.getMessage());
@@ -173,6 +178,7 @@ public class SandboxArtifactPublisher {
                     "sizeBytes", bytes.length)));
             asset.setResultUrls(json(List.of(url)));
             assetMapper.insert(asset);
+            outboxService.enqueue(asset);
             return DeliveryOutcome.of(
                     new PublishedArtifacts(List.of(asset.getId()), List.of(url)));
         } catch (RuntimeException error) {

@@ -79,6 +79,11 @@ describe('libraryFilters', () => {
     expect(params.get('tagMode')).toBe('ANY');
   });
 
+  it('serializes document and other type filters', () => {
+    expect(buildLibraryQuery({ scopeView: 'PROJECT', type: 'DOCUMENT' }).get('type')).toBe('DOCUMENT');
+    expect(buildLibraryQuery({ scopeView: 'PROJECT', type: 'OTHER' }).get('type')).toBe('OTHER');
+  });
+
   it('formats byte sizes for import confirmation', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2.0 KB');

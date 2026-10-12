@@ -14,7 +14,7 @@ public final class AssetContracts {
 
     public enum AssetScope { PROJECT, GLOBAL }
 
-    public enum AssetType { IMAGE, VIDEO, AUDIO, AI_ASSET, GROUP }
+    public enum AssetType { IMAGE, VIDEO, AUDIO, DOCUMENT, OTHER, AI_ASSET, GROUP }
 
     public enum AiAssetKind { CHARACTER, PROP, SCENE }
 
@@ -26,7 +26,7 @@ public final class AssetContracts {
 
     public enum MediaRole { REFERENCE, FIRST_FRAME, LAST_FRAME }
 
-    public enum MediaType { IMAGE, VIDEO, AUDIO }
+    public enum MediaType { IMAGE, VIDEO, AUDIO, DOCUMENT, OTHER }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ApiEnvelope<T>(int code, String message, T data) {

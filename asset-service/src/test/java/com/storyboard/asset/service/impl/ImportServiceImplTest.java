@@ -26,6 +26,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -133,6 +134,41 @@ class ImportServiceImplTest {
         verify(folderService).ensurePath("u1", AssetScope.PROJECT, "p1", List.of("角色", "正面"));
         verify(repository).assignAssetsToFolder(
                 "u1", AssetScope.PROJECT, "p1", "folder-1", List.of("a-tree"));
+    }
+
+    @Test
+    void treeScanAcceptsDocumentsAndUnknownFiles() {
+        ImportContracts.ScanResponse response = service.scan("u1", new ImportContracts.ScanRequest(
+                "p1",
+                AssetScope.PROJECT,
+                ImportContracts.ImportMode.TREE,
+                null,
+                List.of(
+                        new ImportContracts.Entry("i1", "角色/01.png", "01.png", 12, "image/png"),
+                        new ImportContracts.Entry("i2", "资料/说明.md", "说明.md", 2048, "text/markdown"),
+                        new ImportContracts.Entry("i3", "资料/打包.zip", "打包.zip", 4096, "application/zip")
+                )
+        ));
+
+        assertThat(response.fileCount()).isEqualTo(3);
+        assertThat(response.ignoredCount()).isZero();
+    }
+
+    @Test
+    void groupScanKeepsImagesOnly() {
+        ImportContracts.ScanResponse response = service.scan("u1", new ImportContracts.ScanRequest(
+                "p1",
+                AssetScope.PROJECT,
+                ImportContracts.ImportMode.GROUP,
+                "角色集",
+                List.of(
+                        new ImportContracts.Entry("i1", "角色/01.png", "01.png", 12, "image/png"),
+                        new ImportContracts.Entry("i2", "资料/说明.md", "说明.md", 2048, "text/markdown")
+                )
+        ));
+
+        assertThat(response.fileCount()).isEqualTo(1);
+        assertThat(response.ignoredCount()).isEqualTo(1);
     }
 
     private static LibraryRepository.ImportJob importJob() {

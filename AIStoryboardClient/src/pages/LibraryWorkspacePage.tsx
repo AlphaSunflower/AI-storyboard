@@ -57,6 +57,7 @@ import {
   type LibraryActionItem,
 } from '../components/library/LibraryActionMenu';
 import {
+  AssetIcon,
   LibraryTree,
   type LibraryTreeNodeDatum,
 } from '../components/library/LibraryTree';
@@ -1667,13 +1668,18 @@ export function LibraryWorkspacePage() {
             assetIds: [response.data.data.id],
           });
         }
-        addAnalysisTask(
-          response.data.data.id,
-          response.data.data.name,
-          response.data.data.metadataState || 'AI_GENERATING',
-        );
+        if (response.data.data.type === 'IMAGE') {
+          addAnalysisTask(
+            response.data.data.id,
+            response.data.data.name,
+            response.data.data.metadataState || 'AI_GENERATING',
+          );
+        }
         updateTask(taskId, { status: 'completed', progress: 100, assetId: response.data.data.id });
-        uploadedIds.push(response.data.data.id);
+        if (response.data.data.type === 'IMAGE' || response.data.data.type === 'VIDEO'
+          || response.data.data.type === 'AUDIO') {
+          uploadedIds.push(response.data.data.id);
+        }
       } catch (err) {
         updateTask(taskId, { status: 'failed', error: err instanceof Error ? err.message : '上传失败' });
       }
@@ -1697,9 +1703,9 @@ export function LibraryWorkspacePage() {
       fileName: file.name,
       sizeBytes: file.size,
       mimeType: file.type || mimeFromName(file.name),
-    })).filter((entry) => entry.mimeType.startsWith('image/'));
+    }));
     if (!entries.length) {
-      setError('目录中没有可导入的图片文件');
+      setError('目录中没有可导入的文件');
       return;
     }
     setBusy(true);
@@ -1725,7 +1731,7 @@ export function LibraryWorkspacePage() {
             file,
             (progress) => updateTask(taskId, { status: 'uploading', progress }),
           );
-          if (response.data.data.asset) {
+          if (response.data.data.asset?.type === 'IMAGE') {
             addAnalysisTask(
               response.data.data.asset.id,
               response.data.data.asset.name,
@@ -2088,6 +2094,8 @@ export function LibraryWorkspacePage() {
               <option value="IMAGE">图片</option>
               <option value="VIDEO">视频</option>
               <option value="AUDIO">音频</option>
+              <option value="DOCUMENT">文档</option>
+              <option value="OTHER">其他</option>
               <option value="GROUP">资产组</option>
             </select>
             <div className="library-workspace__view-toggle" role="group" aria-label="显示方式">
@@ -2685,7 +2693,6 @@ export function LibraryWorkspacePage() {
         hidden
         type="file"
         multiple
-        accept="image/*,video/*,audio/*"
         onChange={(event) => void handleDirectUpload(event.target.files)}
       />
       <input
@@ -2889,7 +2896,9 @@ function assetMenuItems(asset: LibraryAsset, selectedIds: string[]): LibraryActi
     { id: 'cut', label: '剪切', icon: <Scissors size={14} /> },
     ...(!multiple ? [{ id: 'edit', label: '编辑信息', icon: <Pencil size={14} /> }] : []),
     { id: 'move', label: '移动到目录', icon: <FolderPlus size={14} /> },
-    { id: 'merge', label: '合为资产组', icon: <Boxes size={14} /> },
+    ...(asset.type === 'IMAGE' || asset.type === 'VIDEO' || asset.type === 'AUDIO'
+      ? [{ id: 'merge', label: '合为资产组', icon: <Boxes size={14} /> }]
+      : []),
     {
       id: 'promote',
       label: '提升到全局',
@@ -2933,6 +2942,9 @@ function AssetPreview({ asset }: { asset: LibraryAsset }) {
   if (asset.coverUrl && asset.type === 'VIDEO') {
     return <video src={assetUrl(asset.coverUrl)} muted preload="metadata" draggable={false} />;
   }
+  if (asset.type === 'DOCUMENT' || asset.type === 'OTHER') {
+    return <span><AssetIcon type={asset.type} /></span>;
+  }
   if (asset.coverUrl) {
     return <img src={assetUrl(asset.coverUrl)} alt="" loading="lazy" draggable={false} />;
   }
@@ -2942,6 +2954,7 @@ function AssetPreview({ asset }: { asset: LibraryAsset }) {
 function parseAssetType(value: string | null): AssetType | '' {
   if (value === 'AI_ASSET') return 'GROUP';
   return value === 'IMAGE' || value === 'VIDEO' || value === 'AUDIO'
+    || value === 'DOCUMENT' || value === 'OTHER'
     || value === 'GROUP'
     ? value
     : '';
@@ -3118,5 +3131,24 @@ function mimeFromName(name: string): string {
   if (extension === 'png') return 'image/png';
   if (extension === 'webp') return 'image/webp';
   if (extension === 'gif') return 'image/gif';
+  if (extension === 'mp4') return 'video/mp4';
+  if (extension === 'mov') return 'video/quicktime';
+  if (extension === 'mp3') return 'audio/mpeg';
+  if (extension === 'wav') return 'audio/wav';
+  if (extension === 'm4a') return 'audio/mp4';
+  if (extension === 'pdf') return 'application/pdf';
+  if (extension === 'doc') return 'application/msword';
+  if (extension === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (extension === 'xls') return 'application/vnd.ms-excel';
+  if (extension === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (extension === 'ppt') return 'application/vnd.ms-powerpoint';
+  if (extension === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (extension === 'csv') return 'text/csv';
+  if (extension === 'md' || extension === 'markdown') return 'text/markdown';
+  if (extension === 'json') return 'application/json';
+  if (extension === 'html' || extension === 'htm') return 'text/html';
+  if (extension === 'xml') return 'application/xml';
+  if (extension === 'yaml' || extension === 'yml') return 'application/yaml';
+  if (extension === 'txt' || extension === 'log') return 'text/plain';
   return '';
 }
