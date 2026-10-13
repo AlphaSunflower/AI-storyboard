@@ -1736,8 +1736,10 @@ export function ChatPage() {
                   canvasModeCommand={canvasModeCommand}
                   compact={compactComposer}
                   onCollapsedChange={setComposerCollapsed}
-                  docked
-                  onViewConversation={() => setDockPresentation('history')}
+                  docked={dockMode === 'docked'}
+                  onViewConversation={dockMode === 'docked'
+                    ? () => setDockPresentation('history')
+                    : undefined}
                 />
               </div>
             </div>

@@ -286,6 +286,34 @@ describe('ChatComposer project library drops', () => {
     expect(screen.getByText('0 轮 3 步')).toBeTruthy();
   });
 
+  it('hides the counter and adds the conversation entry only in the floating-dock state', () => {
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '完成',
+        createdAt: new Date().toISOString(),
+        metadata: {
+          metrics: {
+            inputTokens: 64_000, outputTokens: 1_000, cachedInputTokens: 60_000,
+            totalTokens: 65_000, durationMs: 4_000, modelCalls: 3, complete: true,
+          },
+        },
+      }] as never,
+      generating: {},
+    });
+
+    const docked = render(<ChatComposer docked onViewConversation={() => {}} />);
+    expect(docked.container.querySelector('.chat-status-bar')).toBeNull();
+    expect(screen.getByRole('button', { name: '查看当前对话' })).toBeTruthy();
+    cleanup();
+
+    const split = render(<ChatComposer />);
+    expect(split.container.querySelector('.chat-status-bar')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '查看当前对话' })).toBeNull();
+  });
+
   it('keeps legacy conversations read-only', () => {
     useAgentStore.setState({ conversations: [conversation('LEGACY')] });
 
