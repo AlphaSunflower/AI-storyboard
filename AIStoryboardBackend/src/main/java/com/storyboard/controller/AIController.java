@@ -6,6 +6,7 @@ import com.storyboard.dto.request.GenerateVideoRequest;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.dto.response.TaskStatusResponse;
 import com.moon.moonagent.ai.GatewayModelService;
+import com.moon.moonagent.ai.GenerationPreferenceCapabilities;
 import com.moon.moonagent.ai.ImageGenerationService;
 import com.storyboard.ai.ScriptGenerationService;
 import com.moon.moonagent.ai.VideoGenerationService;
@@ -88,8 +89,11 @@ public class AIController {
     @GetMapping("/models")
     public ApiResponse<Map<String, Object>> aiModels() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("imageModels", gatewayModelService.fetchModels("image"));
-        result.put("videoModels", gatewayModelService.fetchModels("video"));
+        // 生成偏好：后端统一把模型能力映射成前端可直接渲染的比例 / 清晰度结构
+        result.put("imageModels",
+                GenerationPreferenceCapabilities.decorate(gatewayModelService.fetchModels("image"), "image"));
+        result.put("videoModels",
+                GenerationPreferenceCapabilities.decorate(gatewayModelService.fetchModels("video"), "video"));
         result.put("understandingModels", gatewayModelService.fetchModels("vision"));
         return ApiResponse.ok(result);
     }

@@ -51,6 +51,9 @@ export interface ImageModelParams {
   qualityDefault?: string;
   styles?: string[];
   styleDefault?: string;
+  /** 可选比例（网关 model_params.aspect_ratios；未配置时前端只提供「智能」） */
+  aspectRatios?: string[];
+  aspectRatioDefault?: string;
 }
 
 /** 视频模型参数能力（videos 契约） */
@@ -81,6 +84,12 @@ export interface ModelOption {
   /** 网关下发的是否为默认模型（is_default → "true"；布尔兼容）。 */
   default?: string | boolean;
   params?: ImageModelParams | VideoModelParams | TextModelParams | UnderstandingModelParams | null;
+  /** 后端 /ai/models 归一化的生成偏好能力（比例选项 + 清晰度标签/取值键）；缺失时前端本地推导 */
+  preferences?: {
+    ratioOptions?: string[];
+    ratioDefault?: string;
+    clarity?: { label?: string; param?: string; options?: string[]; default?: string } | null;
+  } | null;
 }
 
 export const IMAGE_MODELS = [

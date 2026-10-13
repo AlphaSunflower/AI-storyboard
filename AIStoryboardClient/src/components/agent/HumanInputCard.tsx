@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAgentStore, type HumanInputInfo } from "../../stores/agentStore";
 import { AgentParamSelector } from "./AgentParamSelector";
+import { planCardPrefill } from "../../lib/generationPreferences";
 import { assetUrl } from "../../config";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Tooltip } from "../common/Tooltip";
@@ -40,6 +41,16 @@ export function HumanInputCard({
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
   const streaming = useAgentStore((s) => s.streaming);
+  // 生成偏好（自动时不预选，自定义时按偏好预选；见 计划卡预选）
+  const generationPreferences = useAgentStore((s) => s.generationPreferences);
+  const imagePrefill = useMemo(
+    () => planCardPrefill(generationPreferences, 'image', info.imageModels),
+    [generationPreferences, info.imageModels],
+  );
+  const videoPrefill = useMemo(
+    () => planCardPrefill(generationPreferences, 'video', info.videoModels),
+    [generationPreferences, info.videoModels],
+  );
   const expired = info.expirationTime > 0 && Date.now() / 1000 > info.expirationTime;
   // 自定义输入展开态：点「自定义输入」按钮展开内联输入框，确认后 submitHumanInput("custom", text)
   const [customOpen, setCustomOpen] = useState(false);
@@ -230,6 +241,7 @@ export function HumanInputCard({
               models={info.imageModels}
               recommended={info.recommended}
               reasons={info.reasons}
+              initialValue={imagePrefill}
               onParamsChange={mergeParams}
             />
           )}
@@ -239,6 +251,7 @@ export function HumanInputCard({
               models={info.videoModels}
               recommended={info.recommended}
               reasons={info.reasons}
+              initialValue={videoPrefill}
               onParamsChange={mergeParams}
             />
           )}

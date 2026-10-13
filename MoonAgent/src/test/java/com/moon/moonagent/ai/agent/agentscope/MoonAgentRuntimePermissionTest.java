@@ -19,6 +19,36 @@ class MoonAgentRuntimePermissionTest {
     }
 
     @Test
+    void ignoreGenerationPlanExemptsMediaToolsFromAskRules() {
+        for (AgentApprovalMode mode : new AgentApprovalMode[]{
+                AgentApprovalMode.PLAN_APPROVAL,
+                AgentApprovalMode.REQUEST_APPROVAL}) {
+            var context = MoonAgentRuntime.permissionContext(mode, Set.of(), Set.of(), true);
+            assertThat(context.getAllowRules()).containsKeys(
+                    "generate_image",
+                    "generate_image_batch",
+                    "generate_video",
+                    "generate_storyboard_image",
+                    "generate_storyboard_images",
+                    "generate_storyboard_video",
+                    "generate_storyboard_videos");
+            assertThat(context.getAskRules()).doesNotContainKeys(
+                    "generate_image", "generate_video", "generate_storyboard_videos");
+            // 只豁免媒体生成：其他高风险工具照旧需要确认
+            assertThat(context.getAskRules()).containsKeys(
+                    "write_file", "clear_project_storyboard", "canvas_delete_nodes");
+        }
+    }
+
+    @Test
+    void withoutTheToggleMediaToolsStayBehindAskRules() {
+        var context = MoonAgentRuntime.permissionContext(AgentApprovalMode.PLAN_APPROVAL,
+                Set.of(), Set.of(), false);
+        assertThat(context.getAskRules()).containsKeys("generate_image", "generate_video");
+        assertThat(context.getAllowRules()).doesNotContainKey("generate_image");
+    }
+
+    @Test
     void approvalModesKeepHighRiskToolsBehindAskRules() {
         for (AgentApprovalMode mode : new AgentApprovalMode[]{
                 AgentApprovalMode.PLAN_APPROVAL,

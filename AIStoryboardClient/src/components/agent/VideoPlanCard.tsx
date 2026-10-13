@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAgentStore, type VideoPlanInfo } from '../../stores/agentStore';
 import { assetUrl } from '../../config';
 import { AgentParamSelector } from './AgentParamSelector';
+import { planCardPrefill } from '../../lib/generationPreferences';
 import { Video } from 'lucide-react';
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
@@ -21,6 +22,12 @@ export function VideoPlanCard({
   const submitVideoPlan = useAgentStore((s) => s.submitVideoPlan);
   const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
   const streaming = useAgentStore((s) => s.streaming);
+  // 生成偏好：自定义模式下按偏好预选视频参数（键无前缀，与该卡的 AgentParamSelector 对齐）
+  const generationPreferences = useAgentStore((s) => s.generationPreferences);
+  const videoPrefill = useMemo(
+    () => planCardPrefill(generationPreferences, 'video', info.models, ''),
+    [generationPreferences, info.models],
+  );
   // 卡片参数选择器的当前选择（模型/分辨率/时长/画幅；无选择器时为 {}）
   const [selectedParams, setSelectedParams] = useState<Record<string, string>>({});
   // 自定义输入展开态：点「✍ 自定义输入」按钮展开内联输入框
@@ -77,6 +84,7 @@ export function VideoPlanCard({
             models={info.models}
             recommended={info.recommended}
             reasons={info.reasons}
+            initialValue={videoPrefill}
             onParamsChange={setSelectedParams}
           />
         )}

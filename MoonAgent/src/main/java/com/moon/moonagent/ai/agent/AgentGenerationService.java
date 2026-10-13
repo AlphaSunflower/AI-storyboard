@@ -51,6 +51,15 @@ public interface AgentGenerationService {
                                       String mode, List<String> referenceImages, String generatedImageUrl);
 
     /**
+     * 生图（带画幅）：aspectRatio 非空时透传到网关（模型支持则生效，不支持则忽略）。
+     * 其余语义与上一个重载一致。
+     */
+    Map<String, Object> generateImage(AgentConversation conversation, String sceneId,
+                                      String prompt, String model, String size, String quality,
+                                      String aspectRatio, Integer n,
+                                      String mode, List<String> referenceImages, String generatedImageUrl);
+
+    /**
      * 创建视频任务并落库（queued）。
      * duration 为字符串（快照 plan 中可能为 String），解析失败用默认值。
      */

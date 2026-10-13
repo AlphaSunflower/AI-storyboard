@@ -117,6 +117,7 @@ public class AgentScopeToolPipeline {
     private final ToolInvocationLedger ledger;
     private final ToolExecutionTemplate executionTemplate;
     private final MediaToolPreflightService preflight;
+    private final GenerationPreferenceDefaults generationPreferenceDefaults;
     private final AgentWorkflowService workflows;
 
     public AgentScopeTool wrap(AgentScopeTool tool) {
@@ -133,22 +134,25 @@ public class AgentScopeToolPipeline {
                                    ToolCallParam param) {
         Map<String, Object> rejected = canvasModeRejection(tool.getName(), param);
         if (rejected != null) return rejected;
-        ToolInvocationContext context = context(tool, input, param);
-        AgentToolInvocation record = ledger.start(context, input);
+        // 生成偏好作为缺省值补齐（只补空值，不覆盖模型/用户已给的值；自动模式原样返回）
+        Map<String, Object> effectiveInput = generationPreferenceDefaults.applyDefaults(
+                tool.getName(), input, preferencesOf(param));
+        ToolInvocationContext context = context(tool, effectiveInput, param);
+        AgentToolInvocation record = ledger.start(context, effectiveInput);
         long started = System.nanoTime();
         try (ToolInvocationScopeHolder.Scope ignored =
                      ToolInvocationScopeHolder.open(new ToolInvocationScope(
                              record, context, OffsetDateTime.now()))) {
-            workflows.beforeTool(context.getConversationId(), tool.getName(), input, tool.isReadOnly());
-            Supplier<Map<String, Object>> invocation = () -> asMap(tool.invoke(input, param));
+            workflows.beforeTool(context.getConversationId(), tool.getName(), effectiveInput, tool.isReadOnly());
+            Supplier<Map<String, Object>> invocation = () -> asMap(tool.invoke(effectiveInput, param));
             Supplier<Map<String, Object>> guarded = preflightFor(tool).contains("preflight")
-                    ? () -> preflight.guard(tool.getName(), input, param,
+                    ? () -> preflight.guard(tool.getName(), effectiveInput, param,
                     effective -> externalAction(tool, context, effective, param, invocation))
-                    : () -> externalAction(tool, context, input, param, invocation);
+                    : () -> externalAction(tool, context, effectiveInput, param, invocation);
             Map<String, Object> output = guarded.get();
             workflows.afterTool(context.getConversationId(), tool.getName(), output, null,
                     context(param) == null ? null : context(param).turnState());
-            finish(record, context, input, output, null, started);
+            finish(record, context, effectiveInput, output, null, started);
             return output;
         } catch (RuntimeException e) {
             workflows.afterTool(context.getConversationId(), tool.getName(), null, e,
@@ -281,6 +285,14 @@ public class AgentScopeToolPipeline {
     static AgentScopeRunContext context(ToolCallParam param) {
         return param == null || param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    /** 本轮生成偏好（无会话上下文时为空偏好 → 不做任何补齐）。 */
+    private static com.moon.moonagent.ai.agent.AgentGenerationPreferences preferencesOf(ToolCallParam param) {
+        AgentScopeRunContext runContext = context(param);
+        return runContext == null || runContext.request() == null
+                ? com.moon.moonagent.ai.agent.AgentGenerationPreferences.none()
+                : runContext.request().getGenerationPreferences();
     }
 
     /** 画布编辑回合内的分镜工具调用：返回结构化拒绝，不执行、不落审计记录。 */

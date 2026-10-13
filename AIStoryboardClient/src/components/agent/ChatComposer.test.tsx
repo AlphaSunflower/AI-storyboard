@@ -150,6 +150,8 @@ describe('ChatComposer project library drops', () => {
 
     expect(screen.getByPlaceholderText('发消息或创建任务… / 使用技能 @ 添加资料')).toBeTruthy();
     expect(screen.getByRole('button', { name: '审批模式：方案批准' })).toBeTruthy();
+    // 生成偏好入口：默认自动，可展开面板
+    expect(screen.getByRole('button', { name: '生成偏好：自动' })).toBeTruthy();
   });
 
   it('lists the three upload sources directly in the plus menu', () => {

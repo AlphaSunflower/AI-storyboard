@@ -25,6 +25,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.GenerationRecordService;
@@ -284,14 +285,31 @@ public class AgentConversationController {
             chatService.streamAgentScopeTurn(
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
-                    media.audioUrls(), request.clientRequestId(), request.attachments(), emitter);
+                    media.audioUrls(), request.clientRequestId(), request.attachments(),
+                    generationPreferences(request), emitter);
         } else {
             chatService.streamAgentScopeTurn(
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
-                    media.audioUrls(), request.clientRequestId(), emitter);
+                    media.audioUrls(), request.clientRequestId(), List.of(),
+                    generationPreferences(request), emitter);
         }
         return emitter;
+    }
+
+    /**
+     * 客户端生成偏好 → 领域对象。自动（缺省）且不忽略方案时等价于不带该字段，
+     * 行为与本轮改造前完全一致。
+     */
+    private static AgentGenerationPreferences generationPreferences(AgentSendMessageRequest request) {
+        com.moon.moonagent.dto.request.AgentGenerationPreferencesRequest preferences =
+                request.generationPreferences();
+        if (preferences == null) return AgentGenerationPreferences.none();
+        return AgentGenerationPreferences.of(
+                preferences.auto() == null || preferences.auto(),
+                Boolean.TRUE.equals(preferences.ignoreGenerationPlan()),
+                preferences.image(),
+                preferences.video());
     }
 
     /** Resume an AgentScope HITL checkpoint using the sequenced event protocol. */

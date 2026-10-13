@@ -21,6 +21,7 @@ import com.moon.moonagent.ai.agent.AgentChatService;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
@@ -1034,7 +1035,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                null, attachments, true, emitter);
+                null, attachments, null, true, emitter);
     }
 
     @Override
@@ -1059,9 +1060,24 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      String clientRequestId,
                                      List<AgentAttachmentRequest> attachments,
                                      SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                clientRequestId, attachments, null, emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     String clientRequestId,
+                                     List<AgentAttachmentRequest> attachments,
+                                     AgentGenerationPreferences generationPreferences,
+                                     SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                clientRequestId, attachments, true, emitter);
+                clientRequestId, attachments, generationPreferences, true, emitter);
     }
 
     private void streamAgentScopeTurnInternal(String userId, String conversationId, String content,
@@ -1071,6 +1087,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                               List<String> referenceVideos, List<String> referenceAudios,
                                               String clientRequestId,
                                               List<AgentAttachmentRequest> attachments,
+                                              AgentGenerationPreferences generationPreferences,
                                               boolean persistUser, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         requireWritable(conversation);
@@ -1147,6 +1164,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 request.setReferenceVideos(effectiveReferenceVideos);
                 request.setReferenceAudios(effectiveReferenceAudios);
                 request.setAttachments(effectiveAttachments);
+                request.setGenerationPreferences(generationPreferences);
                 ConstraintLedger ledger = conversation.getProjectId() == null
                         || conversation.getProjectId().isBlank()
                         ? null

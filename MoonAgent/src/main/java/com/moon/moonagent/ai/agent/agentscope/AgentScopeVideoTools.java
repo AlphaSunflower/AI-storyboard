@@ -30,6 +30,7 @@ public class AgentScopeVideoTools {
                                 "items", Map.of("type", "string")),
                         "reference_urls", Map.of("type", "array",
                                 "items", Map.of("type", "string")),
+                        "model", Map.of("type", "string"),
                         "resolution", Map.of("type", "string"),
                         "aspect_ratio", Map.of("type", "string"),
                         "duration", Map.of("type", "string")), List.of("prompt")),
@@ -38,6 +39,7 @@ public class AgentScopeVideoTools {
                         string(input.get("prompt")),
                         stringList(input.get("reference_asset_ids")),
                         stringList(input.get("reference_urls")),
+                        string(input.get("model")),
                         string(input.get("resolution")),
                         string(input.get("aspect_ratio")),
                         string(input.get("duration")),
@@ -52,7 +54,20 @@ public class AgentScopeVideoTools {
             String aspectRatio,
             String duration,
             AgentScopeRunContext context) {
-        return generateVideo(prompt, referenceAssetIds, referenceUrls, resolution,
+        return generateVideo(prompt, referenceAssetIds, referenceUrls, null, resolution,
+                aspectRatio, duration, context, false);
+    }
+
+    public Map<String, Object> generateVideo(
+            String prompt,
+            List<String> referenceAssetIds,
+            List<String> referenceUrls,
+            String model,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            AgentScopeRunContext context) {
+        return generateVideo(prompt, referenceAssetIds, referenceUrls, model, resolution,
                 aspectRatio, duration, context, false);
     }
 
@@ -64,7 +79,7 @@ public class AgentScopeVideoTools {
             String aspectRatio,
             String duration,
             AgentScopeRunContext context) {
-        return generateVideo(prompt, referenceAssetIds, referenceUrls, resolution,
+        return generateVideo(prompt, referenceAssetIds, referenceUrls, null, resolution,
                 aspectRatio, duration, context, true);
     }
 
@@ -87,7 +102,20 @@ public class AgentScopeVideoTools {
             String duration,
             String sceneId,
             AgentScopeRunContext context) {
-        return startVideo(prompt, List.of(), referenceImages, resolution,
+        return generateVideoForStoryboard(prompt, referenceImages, null, resolution,
+                aspectRatio, duration, sceneId, context);
+    }
+
+    Map<String, Object> generateVideoForStoryboard(
+            String prompt,
+            List<ReferenceImage> referenceImages,
+            String model,
+            String resolution,
+            String aspectRatio,
+            String duration,
+            String sceneId,
+            AgentScopeRunContext context) {
+        return startVideo(prompt, List.of(), referenceImages, model, resolution,
                 aspectRatio, duration, sceneId, context, true);
     }
 
@@ -95,6 +123,7 @@ public class AgentScopeVideoTools {
             String prompt,
             List<String> referenceAssetIds,
             List<String> referenceUrls,
+            String model,
             String resolution,
             String aspectRatio,
             String duration,
@@ -112,13 +141,14 @@ public class AgentScopeVideoTools {
         }
         return startVideo(prompt, referenceAssetIds,
                 references.stream().map(ReferenceImage::ofReference).toList(),
-                resolution, aspectRatio, duration, null, context, storyboardScoped);
+                model, resolution, aspectRatio, duration, null, context, storyboardScoped);
     }
 
     private Map<String, Object> startVideo(
             String prompt,
             List<String> referenceAssetIds,
             List<ReferenceImage> referenceImages,
+            String model,
             String resolution,
             String aspectRatio,
             String duration,
@@ -146,6 +176,7 @@ public class AgentScopeVideoTools {
                     "本轮已经创建过视频任务，请直接使用已有 taskId 回复，不要重复调用。");
         }
         Map<String, String> params = new java.util.LinkedHashMap<>();
+        if (model != null && !model.isBlank()) params.put("model", model);
         if (resolution != null && !resolution.isBlank()) params.put("resolution", resolution);
         List<ReferenceImage> roleImages = referenceImages == null
                 ? List.of() : List.copyOf(referenceImages);

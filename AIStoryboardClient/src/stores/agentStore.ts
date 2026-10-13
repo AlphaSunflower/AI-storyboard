@@ -40,6 +40,12 @@ import {
   type CanvasBinding,
   type CanvasEditContext,
 } from '../lib/canvasEditMode';
+import {
+  loadGenerationPreferences,
+  saveGenerationPreferences,
+  toGenerationPreferencesPayload,
+  type GenerationPreferences,
+} from '../lib/generationPreferences';
 
 let conversationLoadEpoch = 0;
 let conversationListEpoch = 0;
@@ -548,6 +554,12 @@ interface AgentState {
   activeConversationId: string | null;
   /** 新会话草稿模式；已有会话以 AgentConversation.approvalMode 为准。 */
   pendingApprovalMode: AgentApprovalMode;
+  /** 生成偏好（即梦式）：自动 / 自定义 + 图片、视频比例清晰度模型 + 忽略生成方案；存浏览器本地 */
+  generationPreferences: GenerationPreferences;
+  /** 更新生成偏好并写入本地存储（两个开关都记住，下次进入沿用） */
+  updateGenerationPreferences: (
+    updater: (previous: GenerationPreferences) => GenerationPreferences,
+  ) => void;
   loadingConversations: boolean;
   loadConversations: () => Promise<void>;
   /** 新建对话：仅重置本地为空白草稿（不落库、不进列表）。真正建会话在首次发送消息时由 sendMessage 自动完成。 */
@@ -2591,6 +2603,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   conversations: [],
   activeConversationId: null,
   pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
+  generationPreferences: loadGenerationPreferences(),
+  updateGenerationPreferences: (updater) => {
+    set((state) => {
+      const next = updater(state.generationPreferences);
+      saveGenerationPreferences(next);
+      return { generationPreferences: next };
+    });
+  },
   loadingConversations: false,
   loadConversations: async () => {
     const projectId = useProjectStore.getState().currentProject?.id;
@@ -3532,6 +3552,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         referenceVideos: requestReferenceVideos,
         referenceAudios: requestReferenceAudios,
         attachments: requestAttachments,
+        // 生成偏好：自动且不忽略方案时返回 undefined → 请求体不带该字段（零回归）
+        generationPreferences: toGenerationPreferencesPayload(get().generationPreferences),
       });
     } catch (err) {
       // M3：跨会话守卫——已切换会话则忽略旧流错误；用户主动停止不视为错误（不弹错误条）

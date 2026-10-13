@@ -665,6 +665,7 @@ public class AgentScopeStoryboardTools {
                         Map.entry("reference_asset_ids", array("string")),
                         Map.entry("reference_urls", array("string")),
                         Map.entry("prompt", Map.of("type", "string")),
+                        Map.entry("model", Map.of("type", "string")),
                         Map.entry("resolution", Map.of("type", "string")),
                         Map.entry("aspect_ratio", Map.of("type", "string")),
                         Map.entry("duration", Map.of("type", "string"))), List.of()),
@@ -711,7 +712,7 @@ public class AgentScopeStoryboardTools {
                             referenceMode, availableUrls);
                     Map<String, Object> result = videoTools.generateVideoForStoryboard(
                             nonBlank(string(input.get("prompt")), target.defaultPrompt()),
-                            roleImages, string(input.get("resolution")),
+                            roleImages, string(input.get("model")), string(input.get("resolution")),
                             string(input.get("aspect_ratio")), string(input.get("duration")),
                             target.sceneId(), context);
                     Map<String, Object> out = new LinkedHashMap<>(result);

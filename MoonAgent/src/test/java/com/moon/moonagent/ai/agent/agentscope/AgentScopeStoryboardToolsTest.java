@@ -281,7 +281,7 @@ class AgentScopeStoryboardToolsTest {
         ArgumentCaptor<List<ReferenceImage>> references =
                 ArgumentCaptor.forClass(List.class);
         verify(videoTools).generateVideoForStoryboard(
-                eq("镜头运动"), references.capture(), eq("720p"), eq("16:9"), eq("6"),
+                eq("镜头运动"), references.capture(), eq(""), eq("720p"), eq("16:9"), eq("6"),
                 eq("scene-3"), any());
         assertThat(references.getValue()).hasSize(2);
         assertThat(references.getValue())

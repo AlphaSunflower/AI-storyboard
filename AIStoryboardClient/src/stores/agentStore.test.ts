@@ -14,6 +14,7 @@ import {
 } from './agentStore';
 import { useProjectStore } from './projectStore';
 import { setAccessToken } from '../lib/authSession';
+import { defaultGenerationPreferences } from '../lib/generationPreferences';
 
 beforeEach(() => {
   setAccessToken('test-token');
@@ -2595,3 +2596,79 @@ describe('AgentScope turn envelope reduction', () => {
     expect(useAgentStore.getState().generating['conversation-1']).toBeUndefined();
   });
 });
+
+describe('agentStore 生成偏好下发', () => {
+  const customPreferences = {
+    auto: false,
+    ignoreGenerationPlan: false,
+    image: { model: 'doubao-seedream-4-0-250828', aspectRatio: '16:9', clarity: '2K', clarityParam: 'size' as const },
+    video: { model: '', aspectRatio: '', clarity: '', clarityParam: '' as const },
+  };
+
+  const prepare = () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '收到' }),
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      messages: [],
+      streaming: false,
+      generating: {},
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      agentVideoTask: null,
+      canvasBinding: null,
+      canvasExitPending: false,
+      streamError: null,
+    });
+    return fetchMock;
+  };
+
+  const requestBody = (fetchMock: ReturnType<typeof vi.fn>) =>
+    JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({ generationPreferences: defaultGenerationPreferences() });
+  });
+
+  it('自定义模式随请求下发比例与清晰度', async () => {
+    const fetchMock = prepare();
+    useAgentStore.setState({ generationPreferences: customPreferences });
+
+    await useAgentStore.getState().sendMessage('来张图');
+
+    expect(requestBody(fetchMock).generationPreferences).toEqual({
+      auto: false,
+      ignoreGenerationPlan: false,
+      image: { model: 'doubao-seedream-4-0-250828', aspectRatio: '16:9', size: '2K' },
+      video: {},
+    });
+  });
+
+  it('自动且不忽略方案时不带该字段，忽略方案时只带开关', async () => {
+    const autoFetch = prepare();
+    useAgentStore.setState({ generationPreferences: defaultGenerationPreferences() });
+    await useAgentStore.getState().sendMessage('来张图');
+    expect(requestBody(autoFetch).generationPreferences).toBeUndefined();
+
+    const ignoreFetch = prepare();
+    useAgentStore.setState({
+      generationPreferences: { ...defaultGenerationPreferences(), ignoreGenerationPlan: true },
+    });
+    await useAgentStore.getState().sendMessage('来张图');
+    expect(requestBody(ignoreFetch).generationPreferences).toEqual({
+      auto: true,
+      ignoreGenerationPlan: true,
+      image: {},
+      video: {},
+    });
+  });
+});
+

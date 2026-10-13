@@ -1132,6 +1132,8 @@ export async function streamChat(
     clientRequestId?: string;
     canvasContext?: CanvasEditContext;
     attachments?: AgentAttachment[];
+    /** 生成偏好载荷（自动且不忽略方案时不带）；形状见 lib/generationPreferences */
+    generationPreferences?: Record<string, unknown>;
   },
 ): Promise<void> {
   const res = await authorizedFetch(`${BACKEND_URL}/api/agent/conversations/${conversationId}/turns/stream`, {
@@ -1151,6 +1153,7 @@ export async function streamChat(
       cancelActiveTasks: opts?.cancelActiveTasks,
       editMessageId: opts?.editMessageId,
       canvasContext: opts?.canvasContext,
+      generationPreferences: opts?.generationPreferences,
     }),
     signal,
   });

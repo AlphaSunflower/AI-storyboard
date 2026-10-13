@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.handler;
 
 import com.moon.moonagent.ai.agent.AgentReasoningSnapshot;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.entity.AgentConversation;
@@ -136,6 +137,16 @@ public class OrchestrationRequest {
         this.hitlMessageId = hitlMessageId == null ? "" : hitlMessageId;
     }
 
+    /** 本轮生成偏好（自动 / 自定义参数 / 忽略对话中的生成方案）；缺省 = 自动且不忽略，行为与改造前一致。 */
+    public AgentGenerationPreferences getGenerationPreferences() {
+        return generationPreferences == null ? AgentGenerationPreferences.none() : generationPreferences;
+    }
+
+    public void setGenerationPreferences(AgentGenerationPreferences generationPreferences) {
+        this.generationPreferences = generationPreferences == null
+                ? AgentGenerationPreferences.none() : generationPreferences;
+    }
+
     /**
      * 合并上游链移交的文件和会话状态。动态任务和人工确认都可能跨节点继续执行，
      * 因此图片、资产和参数只能追加或覆盖，不能因切换链路被清空。
@@ -214,6 +225,9 @@ public class OrchestrationRequest {
 
     /** 画布编辑模式上下文；非空时本轮只能进入画布技能。 */
     private CanvasSessionContext canvasContext;
+
+    /** 生成偏好（可空 → 自动且不忽略方案）。 */
+    private AgentGenerationPreferences generationPreferences;
 
     /** 新 AgentScope 传输只发送带序号的 envelope，不再混发旧 SSE 事件。 */
     private boolean nativeEventsOnly;

@@ -162,11 +162,21 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
     public Map<String, Object> generateImage(AgentConversation conversation, String sceneId,
                                              String prompt, String model, String size, String quality, Integer n,
                                              String mode, List<String> referenceImages, String generatedImageUrl) {
+        return generateImage(conversation, sceneId, prompt, model, size, quality, null, n,
+                mode, referenceImages, generatedImageUrl);
+    }
+
+    @Override
+    public Map<String, Object> generateImage(AgentConversation conversation, String sceneId,
+                                             String prompt, String model, String size, String quality,
+                                             String aspectRatio, Integer n,
+                                             String mode, List<String> referenceImages, String generatedImageUrl) {
         String effectiveSceneId = (sceneId != null && !sceneId.isBlank()) ? sceneId : null;
         String cleanPrompt = sanitize(prompt);
         String cleanModel = sanitize(model);
         String cleanSize = sanitize(size);
         String cleanQuality = sanitize(quality);
+        String cleanAspectRatio = sanitize(aspectRatio);
         String cleanSource = sanitize(generatedImageUrl);
         int count = (n != null && n > 0) ? n : 1;
         String genType = classifyImageGenType(mode, referenceImages, cleanSource, count);
@@ -176,7 +186,7 @@ public class AgentGenerationServiceImpl implements AgentGenerationService {
         long startMs = System.currentTimeMillis();
         try {
             List<String> urls = imageService.generateImages(
-                effectiveSceneId, cleanPrompt, cleanModel, cleanSize, cleanQuality, null,
+                effectiveSceneId, cleanPrompt, cleanModel, cleanSize, cleanQuality, cleanAspectRatio,
                 referenceImages, mode, cleanSource, count);
             updateRecord(recordId, "completed", urls.isEmpty() ? null : urls.getFirst(), urls, null, startMs);
             Map<String, Object> out = new HashMap<>();

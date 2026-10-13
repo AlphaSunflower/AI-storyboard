@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.moon.moonagent.ai.agent.document.AgentDocumentService;
 import com.moon.moonagent.ai.agent.document.DocumentSummaryView;
 import com.moon.moonagent.ai.agent.canvas.CanvasContextPromptBuilder;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
@@ -99,6 +100,7 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (request.getAssetIds() != null && !request.getAssetIds().isEmpty()) {
             lines.add("Current turn selected asset IDs: " + request.getAssetIds());
         }
+        appendGenerationPreferenceContext(lines, request);
         if (request.getReferenceVideos() != null && !request.getReferenceVideos().isEmpty()) {
             lines.add("Current turn reference video URLs: " + request.getReferenceVideos());
         }
@@ -139,6 +141,34 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (lines.isEmpty()) return Mono.just(prompt);
         return Mono.just((prompt == null ? "" : prompt)
                 + "\n\n<turn-context>\n" + String.join("\n", lines) + "\n</turn-context>");
+    }
+
+    /**
+     * 生成偏好（用户既定选择）：自定义时声明比例 / 清晰度 / 模型，忽略方案时声明媒体生成无需再次确认。
+     * 自动模式不注入任何内容（由智能体自行决定），保持既有行为。
+     */
+    private static void appendGenerationPreferenceContext(List<String> lines,
+                                                          OrchestrationRequest request) {
+        AgentGenerationPreferences preferences = request.getGenerationPreferences();
+        if (!preferences.hasPromptHints()) return;
+        String image = preferences.describe(preferences.image());
+        String video = preferences.describe(preferences.video());
+        if (!image.isBlank() || !video.isBlank()) {
+            lines.add("<generation-preferences>");
+            lines.add("The user has fixed these media generation settings. Use them as-is for "
+                    + "generate_image / generate_image_batch / generate_video and the storyboard "
+                    + "image or video tools; do not ask the user to reconfirm them.");
+            if (!image.isBlank()) lines.add("Image: " + image);
+            if (!video.isBlank()) lines.add("Video: " + video);
+            lines.add("Omit any parameter the user left on automatic and decide it yourself.");
+            lines.add("</generation-preferences>");
+        }
+        if (preferences.ignoreGenerationPlan()) {
+            lines.add("The user asked to skip generation plans for media: call the media "
+                    + "generation tool right away instead of proposing a plan or options. "
+                    + "This exemption covers media generation tools only; every other "
+                    + "high-risk tool still needs the usual confirmation.");
+        }
     }
 
     private void appendDocumentContext(List<String> lines, OrchestrationRequest request,

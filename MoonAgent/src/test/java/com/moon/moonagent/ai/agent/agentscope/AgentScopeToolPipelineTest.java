@@ -4,6 +4,7 @@ import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationLedger;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentToolInvocation;
@@ -36,7 +37,8 @@ class AgentScopeToolPipelineTest {
         ToolExecutionTemplate template = mock(ToolExecutionTemplate.class);
         MediaToolPreflightService preflight = mock(MediaToolPreflightService.class);
         AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
-                ledger, template, preflight, mock(AgentWorkflowService.class));
+                ledger, template, preflight, new GenerationPreferenceDefaults(),
+                mock(AgentWorkflowService.class));
         AgentScopeTool tool = new AgentScopeTool(
                 "read_test", "test", AgentScopeTool.schema(Map.of(), List.of()),
                 true, true, false,
@@ -57,7 +59,8 @@ class AgentScopeToolPipelineTest {
         ToolInvocationLedger ledger = mock(ToolInvocationLedger.class);
         AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
                 ledger, mock(ToolExecutionTemplate.class),
-                mock(MediaToolPreflightService.class), mock(AgentWorkflowService.class));
+                mock(MediaToolPreflightService.class), new GenerationPreferenceDefaults(),
+                mock(AgentWorkflowService.class));
         AgentScopeTool tool = new AgentScopeTool(
                 AgentScopeStoryboardTools.START_STORYBOARD, "test",
                 AgentScopeTool.schema(Map.of(), List.of()),
@@ -79,7 +82,8 @@ class AgentScopeToolPipelineTest {
         when(ledger.start(any(), any())).thenReturn(record);
         AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
                 ledger, mock(ToolExecutionTemplate.class),
-                mock(MediaToolPreflightService.class), mock(AgentWorkflowService.class));
+                mock(MediaToolPreflightService.class), new GenerationPreferenceDefaults(),
+                mock(AgentWorkflowService.class));
         AgentScopeTool tool = new AgentScopeTool(
                 AgentScopeStoryboardTools.START_STORYBOARD, "test",
                 AgentScopeTool.schema(Map.of(), List.of()),
@@ -91,6 +95,85 @@ class AgentScopeToolPipelineTest {
 
         assertThat(text(response)).contains("\"ok\":true");
         verify(ledger, times(1)).start(any(), any());
+    }
+
+    @Test
+    void fillsGenerationPreferencesIntoMediaToolInput() {
+        ToolInvocationLedger ledger = mock(ToolInvocationLedger.class);
+        AgentToolInvocation record = new AgentToolInvocation();
+        record.setId("inv-3");
+        when(ledger.start(any(), any())).thenReturn(record);
+        AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
+                ledger, mock(ToolExecutionTemplate.class),
+                mock(MediaToolPreflightService.class), new GenerationPreferenceDefaults(),
+                mock(AgentWorkflowService.class));
+        List<Map<String, Object>> seen = new java.util.ArrayList<>();
+        AgentScopeTool tool = new AgentScopeTool(
+                AgentScopeImageTools.GENERATE_IMAGE, "test",
+                AgentScopeTool.schema(Map.of(), List.of()),
+                false, false, false,
+                (input, call) -> {
+                    seen.add(input);
+                    return Map.of("ok", true);
+                });
+
+        pipeline.wrap(tool).callAsync(toolCall(
+                AgentScopeImageTools.GENERATE_IMAGE, Map.of("prompt", "一只猫"),
+                runtimeWithPreferences(AgentGenerationPreferences.of(false, false,
+                        Map.of("size", "2K", "aspectRatio", "16:9"), Map.of())))).block();
+
+        assertThat(seen).hasSize(1);
+        assertThat(seen.getFirst()).containsEntry("size", "2K")
+                .containsEntry("aspect_ratio", "16:9")
+                .containsEntry("prompt", "一只猫");
+    }
+
+    @Test
+    void keepsModelProvidedMediaParamsOverPreferences() {
+        ToolInvocationLedger ledger = mock(ToolInvocationLedger.class);
+        AgentToolInvocation record = new AgentToolInvocation();
+        record.setId("inv-4");
+        when(ledger.start(any(), any())).thenReturn(record);
+        AgentScopeToolPipeline pipeline = new AgentScopeToolPipeline(
+                ledger, mock(ToolExecutionTemplate.class),
+                mock(MediaToolPreflightService.class), new GenerationPreferenceDefaults(),
+                mock(AgentWorkflowService.class));
+        List<Map<String, Object>> seen = new java.util.ArrayList<>();
+        AgentScopeTool tool = new AgentScopeTool(
+                AgentScopeImageTools.GENERATE_IMAGE, "test",
+                AgentScopeTool.schema(Map.of(), List.of()),
+                false, false, false,
+                (input, call) -> {
+                    seen.add(input);
+                    return Map.of("ok", true);
+                });
+
+        pipeline.wrap(tool).callAsync(toolCall(
+                AgentScopeImageTools.GENERATE_IMAGE,
+                Map.of("prompt", "一只猫", "size", "4K"),
+                runtimeWithPreferences(AgentGenerationPreferences.of(false, false,
+                        Map.of("size", "2K"), Map.of())))).block();
+
+        assertThat(seen.getFirst()).containsEntry("size", "4K");
+    }
+
+    private static ToolCallParam toolCall(String toolName, Map<String, Object> input,
+                                          RuntimeContext runtimeContext) {
+        return ToolCallParam.builder()
+                .toolUseBlock(new ToolUseBlock("call-media", toolName, Map.of(), "{}", Map.of(), null))
+                .input(input)
+                .runtimeContext(runtimeContext)
+                .build();
+    }
+
+    private static RuntimeContext runtimeWithPreferences(AgentGenerationPreferences preferences) {
+        AgentConversation conversation = mock(AgentConversation.class);
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "来张图", List.of(), null);
+        request.setGenerationPreferences(preferences);
+        return RuntimeContext.builder()
+                .put(AgentScopeRunContext.class,
+                        new AgentScopeRunContext(conversation, request, null, new AgentScopeTurnState()))
+                .build();
     }
 
     private static ToolCallParam param(String toolName, RuntimeContext runtimeContext) {

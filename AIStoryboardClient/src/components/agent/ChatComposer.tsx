@@ -36,6 +36,7 @@ import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { isComposerCollapsed } from '../../lib/chatScrollState';
 import './ChatComposer.css';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
+import { ChatGenerationPreferences } from './ChatGenerationPreferences';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { SideChatContextChip } from './SideChatContextChip';
 import { ChatStatusBar } from './ChatStatusBar';
@@ -1098,6 +1099,8 @@ export function ChatComposer({
               || !!canvasBinding || canvasExitPending}
             onChange={(mode, options) => { void setApprovalMode(mode, options); }}
           />
+          {/* 生成偏好：自动 / 自定义 + 忽略对话中的生成方案（本地记住，随每轮请求下发） */}
+          <ChatGenerationPreferences disabled={readOnly} />
           <div style={{ position: 'relative' }}>
             <Tooltip label="上传素材">
             <button

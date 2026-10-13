@@ -38,18 +38,24 @@ public class AgentScopeImageTools {
                                 "items", Map.of("type", "string")),
                         "source_urls", Map.of("type", "array",
                                 "items", Map.of("type", "string")),
+                        "model", Map.of("type", "string"),
                         "size", Map.of("type", "string"),
                         "quality", Map.of("type", "string"),
+                        "aspect_ratio", Map.of("type", "string"),
                         "n", Map.of("type", "string")), List.of("prompt")),
                 false, false, false,
                 (input, param) -> generateImage(
                         string(input.get("prompt")),
                         stringList(input.get("source_asset_ids")),
                         stringList(input.get("source_urls")),
+                        string(input.get("model")),
                         string(input.get("size")),
                         string(input.get("quality")),
+                        string(input.get("aspect_ratio")),
                         string(input.get("n")),
-                        context(param)));
+                        null,
+                        context(param),
+                        false));
     }
 
     public AgentScopeTool batchTool() {
@@ -112,7 +118,7 @@ public class AgentScopeImageTools {
             String n,
             String sceneId,
             AgentScopeRunContext context) {
-        return generateImage(prompt, sourceAssetIds, sourceUrls, size, quality, n,
+        return generateImage(prompt, sourceAssetIds, sourceUrls, null, size, quality, null, n,
                 sceneId, context, true);
     }
 
@@ -125,7 +131,7 @@ public class AgentScopeImageTools {
             String n,
             AgentScopeRunContext context,
             boolean storyboardScoped) {
-        return generateImage(prompt, sourceAssetIds, sourceUrls, size, quality, n,
+        return generateImage(prompt, sourceAssetIds, sourceUrls, null, size, quality, null, n,
                 null, context, storyboardScoped);
     }
 
@@ -133,8 +139,10 @@ public class AgentScopeImageTools {
             String prompt,
             List<String> sourceAssetIds,
             List<String> sourceUrls,
+            String model,
             String size,
             String quality,
+            String aspectRatio,
             String n,
             String sceneId,
             AgentScopeRunContext context,
@@ -159,10 +167,17 @@ public class AgentScopeImageTools {
         }
         Map<String, Object> result;
         try {
-            result = generationService.generateImage(
-                    conversation, sceneId, prompt, null, size, quality,
-                    1,
-                    sources.isEmpty() ? null : "edit", sources, null);
+            String mode = sources.isEmpty() ? null : "edit";
+            // 无模型/画幅偏好时走原重载：调用链与既有桩全保持一致（零回归）
+            boolean plain = (model == null || model.isBlank())
+                    && (aspectRatio == null || aspectRatio.isBlank());
+            result = plain
+                    ? generationService.generateImage(
+                            conversation, sceneId, prompt, model, size, quality,
+                            1, mode, sources, null)
+                    : generationService.generateImage(
+                            conversation, sceneId, prompt, model, size, quality, aspectRatio,
+                            1, mode, sources, null);
         } catch (RuntimeException error) {
             if (context.turnState() != null) context.turnState().rollbackMediaAttempt("image");
             throw error;

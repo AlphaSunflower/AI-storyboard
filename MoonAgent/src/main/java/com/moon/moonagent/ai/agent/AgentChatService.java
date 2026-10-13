@@ -169,6 +169,20 @@ public interface AgentChatService {
                               List<AgentAttachmentRequest> attachments,
                               SseEmitter emitter);
 
+    /**
+     * Same as above with per-turn generation preferences（生成偏好：自动 / 自定义比例清晰度模型 /
+     * 忽略对话中的生成方案）。{@code null} = 自动且不忽略方案，行为与不带该字段时一致。
+     */
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              String clientRequestId,
+                              List<AgentAttachmentRequest> attachments,
+                              AgentGenerationPreferences generationPreferences,
+                              SseEmitter emitter);
+
     void streamAgentScopeTurn(String userId, String conversationId, String content,
                               List<String> picUrls, List<String> assetIds,
                               String routingHint, String editMessageId,

@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.AgentConcurrencyGuard;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
@@ -657,7 +658,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                    AgentTraceAccumulator trace, List<Msg> messages,
                                    String checkpointId, Consumer<AgentEvent> observer,
                                    Set<String> preApprovedTools) {
-        applyPermissionContext(conversation, preApprovedTools);
+        boolean ignoreGenerationPlan = request != null
+                && request.getGenerationPreferences().ignoreGenerationPlan();
+        applyPermissionContext(conversation, preApprovedTools, ignoreGenerationPlan);
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
@@ -1012,12 +1015,22 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     }
 
     void applyPermissionContext(AgentConversation conversation, Set<String> preApprovedTools) {
+        applyPermissionContext(conversation, preApprovedTools, false);
+    }
+
+    /**
+     * @param autoApproveMediaGeneration 用户在本轮打开「忽略对话中的生成方案」：
+     *                                   媒体生成类工具直接放行，其他高风险工具照旧确认。
+     */
+    void applyPermissionContext(AgentConversation conversation, Set<String> preApprovedTools,
+                                boolean autoApproveMediaGeneration) {
         if (agent == null || conversation == null) return;
         AgentApprovalMode mode = AgentApprovalMode.from(conversation.getApprovalMode());
         agent.getDelegate().replacePermissionContext(
                 conversation.getUserId(), conversation.getId(),
                 permissionContext(mode, preApprovedTools,
-                        readOnlyToolNames(toolkitFactory.activeToolkit())));
+                        readOnlyToolNames(toolkitFactory.activeToolkit()),
+                        autoApproveMediaGeneration));
     }
 
     static PermissionContextState permissionContext(AgentApprovalMode mode) {
@@ -1032,6 +1045,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     static PermissionContextState permissionContext(AgentApprovalMode mode,
                                                     Set<String> preApprovedTools,
                                                     Set<String> readOnlyTools) {
+        return permissionContext(mode, preApprovedTools, readOnlyTools, false);
+    }
+
+    static PermissionContextState permissionContext(AgentApprovalMode mode,
+                                                    Set<String> preApprovedTools,
+                                                    Set<String> readOnlyTools,
+                                                    boolean autoApproveMediaGeneration) {
         AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
         Set<String> approved = preApprovedTools == null ? Set.of() : preApprovedTools;
         PermissionContextState.Builder permissions = PermissionContextState.builder()
@@ -1152,9 +1172,15 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "task_cancel")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
+            // 「忽略对话中的生成方案」：媒体生成类工具直接放行（仅覆盖生图/生视频/生镜）
+            boolean mediaExempt = autoApproveMediaGeneration
+                    && AgentGenerationPreferences.isMediaGenerationTool(tool);
             if (autoApproved) {
                 permissions.addAllowRule(tool, new PermissionRule(
                         tool, null, PermissionBehavior.ALLOW, "MoonAgentApprovedPlanPolicy"));
+            } else if (mediaExempt) {
+                permissions.addAllowRule(tool, new PermissionRule(
+                        tool, null, PermissionBehavior.ALLOW, "MoonAgentIgnoreGenerationPlanPolicy"));
             } else {
                 permissions.addAskRule(tool, new PermissionRule(
                         tool, null, PermissionBehavior.ASK, "MoonAgentHighRiskPolicy"));
